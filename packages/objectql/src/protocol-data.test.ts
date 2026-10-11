@@ -654,9 +654,12 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
             // [#15703] The insert options carry the context AND the
             // `onFieldsDropped` listener `createData` wires — the clone reports
             // the engine's readonly-strip verdict on its 201 body since #15703.
+            // [#22726] And the `onValidationAdvisory` listener: a clone is a
+            // create, so it answers its advisory rule hits as `warnings`.
             expect(insert).toHaveBeenCalledWith('account', expect.anything(), {
                 context: ctx,
                 onFieldsDropped: expect.any(Function),
+                onValidationAdvisory: expect.any(Function),
             });
         });
 

@@ -63,6 +63,7 @@ export * from './share-link-service.js';
 // Reports are `report` metadata (`ReportSchema`); an ad-hoc object query is a
 // ListView.
 export * from './approval-service.js';
+export * from './webhook-service.js';
 export * from './package-service.js';
 export * from './knowledge-service.js';
 export * from './knowledge-adapter.js';

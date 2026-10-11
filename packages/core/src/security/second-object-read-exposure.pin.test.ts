@@ -141,16 +141,20 @@ const CALLERS: Record<string, Classification> = {
       'provenance row for the door and touches a filter position; carried by a follow-up of #22661',
   },
   'packages/plugins/plugin-approvals/src/approval-service.ts': {
-    kind: 'open',
+    kind: 'decided',
     read: "the approvals inbox's `payload_display` (`ApprovalService.enrichRows` reads referenced records' titles under a system context)",
-    measured: "an unexposed target's title is served on the inbox list, to an administrator and a member",
-    carrier: 'outside the card that took the census (another package and lane); carried by a follow-up of #22661',
+    operation: 'get',
+    decision: { file: 'packages/plugins/plugin-approvals/src/approval-service.ts', fn: 'servesPayloadDisplayTarget' },
+    wiring: { file: 'packages/plugins/plugin-approvals/src/approval-service.ts', call: 'this.servesPayloadDisplayTarget(' },
+    pin: 'packages/plugins/plugin-approvals/src/payload-display-target-exposure.test.ts',
   },
   'packages/plugins/plugin-audit/src/audit-writers.ts': {
-    kind: 'open',
-    read: "the activity timeline's tracked-change summary (`resolveLookupTitles` writes referenced records' titles at write time)",
-    measured: "an unexposed target's title is served in the summary on the activity read, to an administrator and a member",
-    carrier: 'outside the card that took the census (another package and lane); carried by a follow-up of #22661',
+    kind: 'decided',
+    read: "the activity timeline's tracked-change and milestone summaries (`resolveLookupTitles` writes referenced records' titles at write time)",
+    operation: 'get',
+    decision: { file: 'packages/plugins/plugin-audit/src/audit-writers.ts', fn: 'servesSummaryTitleTarget' },
+    wiring: { file: 'packages/plugins/plugin-audit/src/audit-writers.ts', call: 'servesSummaryTitleTarget(objectName' },
+    pin: 'packages/plugins/plugin-audit/src/audit-lookup-summary.test.ts',
   },
   'packages/lint/src/object-graph.ts': {
     kind: 'not-a-served-read',
@@ -280,7 +284,12 @@ describe('[#22661] every read that reaches a second object asks that object its 
       const decided = Object.values(CALLERS).filter(
         (c): c is Extract<Classification, { kind: 'decided' }> => c.kind === 'decided',
       );
-      expect(decided.map((d) => d.decision.fn).sort()).toEqual(['servesExpansionTarget', 'servesLabelTarget']);
+      expect(decided.map((d) => d.decision.fn).sort()).toEqual([
+        'servesExpansionTarget',
+        'servesLabelTarget',
+        'servesPayloadDisplayTarget',
+        'servesSummaryTitleTarget',
+      ]);
 
       for (const d of decided) {
         const body = functionBody(d.decision.file, d.decision.fn);
