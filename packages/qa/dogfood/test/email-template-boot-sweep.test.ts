@@ -31,7 +31,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { SysEmailTemplate } from '@objectstack/platform-objects/audit';
 import { EmailServicePlugin } from '@objectstack/plugin-email';
 
 const SYS = { isSystem: true, positions: [], permissions: [] };
@@ -43,33 +42,21 @@ afterEach(async () => {
   while (engines.length) await engines.pop()?.destroy();
 });
 
-/** A fresh engine on its own `:memory:` database, every statement it sends recorded. */
-async function bootEngine(): Promise<{ engine: ObjectQL; statements: string[] }> {
+/**
+ * A fresh engine on its own `:memory:` database with `EmailServicePlugin`'s
+ * `init()` run against it — the plugin's manifest (its two objects and the
+ * built-in templates) registered through the engine's own `registerApp`, the
+ * schema synced — and every statement the engine sends from then on recorded.
+ * `start()` takes the plugin through `kernel:ready` and hands back the `email`
+ * service it installs; sends are captured off the wire.
+ */
+async function boot() {
   const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
   const engine = new ObjectQL();
   engine.registerDriver(driver, true);
   await engine.init();
-  engine.registerApp({
-    id: 'com.objectstack.dogfood.email-template-boot-sweep',
-    name: 'Email template boot sweep',
-    version: '1.0.0',
-    type: 'plugin',
-    scope: 'system',
-    objects: [SysEmailTemplate],
-  } as never);
-  await engine.syncSchemas();
   engines.push(engine);
-  const statements: string[] = [];
-  driver.getKnex().on('query', (q: { sql: string }) => statements.push(q.sql));
-  return { engine, statements };
-}
 
-/**
- * Boot `EmailServicePlugin` to `kernel:ready` over `engine`, its manifest
- * registered through the engine's own `registerApp`, and hand back the
- * `email` service it installs. Sends are captured off the wire.
- */
-async function bootEmail(engine: ObjectQL) {
   const sent: Array<{ subject?: string }> = [];
   const services: Record<string, unknown> = {
     manifest: { register: (m: unknown) => engine.registerApp(m as never) },
@@ -91,10 +78,17 @@ async function bootEmail(engine: ObjectQL) {
     defaultFrom: { address: 'no-reply@example.test' },
   });
   await plugin.init(ctx as never);
-  await plugin.start(ctx as never);
-  for (const fn of hooks['kernel:ready'] ?? []) await fn();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return { email: services.email as any, sent, plugin };
+  await engine.syncSchemas();
+
+  const statements: string[] = [];
+  driver.getKnex().on('query', (q: { sql: string }) => statements.push(q.sql));
+  const start = async () => {
+    await plugin.start(ctx as never);
+    for (const fn of hooks['kernel:ready'] ?? []) await fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return services.email as any;
+  };
+  return { engine, statements, sent, start };
 }
 
 /** Statements that name the template table. */
@@ -130,10 +124,10 @@ const RESET_DATA = { appName: 'Acme', resetUrl: 'https://example.test/r', user: 
 
 describe('the email plugin on the real engine and SQL driver: no statement reaches sys_email_template', () => {
   it('a boot and a send of a built-in template send no statement to the table', async () => {
-    const { engine, statements } = await bootEngine();
+    const { engine, statements, sent, start } = await boot();
     statements.length = 0;
 
-    const { email, sent } = await bootEmail(engine);
+    const email = await start();
     await email.sendTemplate({ template: 'auth.password_reset', to: 'ada@example.test', data: RESET_DATA });
 
     expect(sent.map((m) => m.subject)).toEqual(['Reset your Acme password']);
@@ -142,12 +136,12 @@ describe('the email plugin on the real engine and SQL driver: no statement reach
   });
 
   it('rows several organizations hold for one slot keep their bytes and are never what a send renders', async () => {
-    const { engine, statements } = await bootEngine();
+    const { engine, statements, sent, start } = await boot();
     await seedSharedSlot(engine);
     const before = await subjects(engine);
     statements.length = 0;
 
-    const { email, sent } = await bootEmail(engine);
+    const email = await start();
     await email.sendTemplate({ template: 'auth.password_reset', to: 'ada@example.test', data: RESET_DATA });
     await email.sendTemplate({ template: 'auth.password_reset', to: 'ada@example.test', locale: 'zh-CN', data: RESET_DATA });
 
