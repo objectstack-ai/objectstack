@@ -862,7 +862,10 @@ const SCREEN_RECORD_ID_REFUSAL =
  *    `null` included, rather than serving an `edit` form with no record to
  *    open (`service-automation`'s `screen-nodes.ts`);
  *  - anything else is refused ({@link SCREEN_RECORD_ID_REFUSAL}); a malformed
- *    envelope leads with {@link VALUE_ENVELOPE_REFUSAL}, as in every value slot.
+ *    envelope leads with {@link VALUE_ENVELOPE_REFUSAL}, as in every value
+ *    slot, at both build doors (their envelope pass). This union's own parse
+ *    leads with it too, except for an envelope the envelope arm parses and then
+ *    refuses (a blank `source`): the union reports that arm's own sentence.
  *
  * A union rather than {@link FlowValueSlotSchema}'s open `unknown`: the
  * literal arm is narrower here (an id is a string, as it always was), and the
