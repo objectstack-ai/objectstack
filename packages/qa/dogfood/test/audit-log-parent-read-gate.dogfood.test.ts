@@ -153,7 +153,14 @@ describe('[#21175] sys_audit_log: a ledger reader reads the rows about records i
       if (!opened.has(key)) opened.set(key, (await stack.apiAs(readerTok, 'GET', `/data/${key}`)).status);
       expect(opened.get(key), `ledger row ${r.id} is about ${key}`).toBe(200);
     }
-  });
+    // [#22301] One request per record the readable rows name, and the rows are
+    // every write the boot ledgered (the header). `bootStack` mounts the
+    // always-on slate `objectstack serve` mounts, and the email service it
+    // brings seeds its built-in templates at boot, so this case outgrew
+    // vitest's 5000 ms default: measured 5025 ms (timed out) alone, against
+    // 3032 ms with the slate ablated, on one shared box. The bound is the
+    // work, not a stall — the same bound `activity-parent-read-gate` carries.
+  }, 30_000);
 
   it('list: the total is narrowed exactly like the rows', async () => {
     const body = (await (await stack.apiAs(readerTok, 'GET', `/data/${LEDGER}?limit=1000`)).json()) as any;

@@ -31,6 +31,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resetPlatformAdminEmailMemo } from '@objectstack/core';
 import { SysUser, SysAccount, SysMember, SysOrganization } from '@objectstack/platform-objects/identity';
+import { SysMetadataActivation } from '@objectstack/platform-objects/system';
 
 import { SecurityPlugin } from './security-plugin.js';
 import { bootstrapPlatformAdmin, findExistingPlatformAdmin } from './bootstrap-platform-admin.js';
@@ -48,6 +49,7 @@ import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.j
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 
 const SYS = { isSystem: true } as const;
+const CATALOG_SETS: Array<{ name: string; label?: string }> = [...defaultPermissionSets, { name: 'legacy_reports', label: 'Legacy' }];
 const ORG = 'org_un';
 const orgCtx = { isSystem: true, tenantId: ORG };
 
@@ -77,6 +79,8 @@ async function boot(): Promise<ObjectQL> {
     objects: [
       SysUser, SysAccount, SysMember, SysOrganization,
       SysPosition, SysUserPosition, SysPermissionSet, SysPositionPermissionSet, SysUserPermissionSet,
+      // The activation ledger the explainer reads deactivation from (ADR-0131 D3).
+      SysMetadataActivation,
     ],
   } as any);
   await engine.syncSchemas();
@@ -84,9 +88,12 @@ async function boot(): Promise<ObjectQL> {
   const services: Record<string, unknown> = {
     manifest: { register: vi.fn() },
     objectql: engine,
+    // [ADR-0131 D3/D4] The security catalog: the platform's sets plus the
+    // environment-authored `legacy_reports` the explain case grants.
     metadata: {
-      get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
-      list: async () => [...defaultPermissionSets],
+      get: async (type: string, name: string) =>
+        (type === 'permission' ? CATALOG_SETS.find((p) => p.name === name) : engine.getSchema(name)) ?? null,
+      list: async () => [...CATALOG_SETS],
     },
   };
   const ctx: any = {
@@ -137,7 +144,11 @@ describe('[ADR-0131 D4] a grant that names nothing — explain', () => {
     const engine = await boot();
     await bootstrapPlatformAdmin(engine, defaultPermissionSets);
     await user(engine, 'usr_member', '2025-03-01T00:00:00.000Z');
-    await engine.insert('sys_permission_set', { id: 'ps_off', name: 'legacy_reports', label: 'Legacy', active: false }, { context: SYS } as any);
+    await engine.insert('sys_permission_set', { id: 'ps_off', name: 'legacy_reports', label: 'Legacy' }, { context: SYS } as any);
+    // Switched off where the resolver and the explainer read it: the ledger.
+    await engine.insert('sys_metadata_activation', {
+      metadata_type: 'permission', name: 'legacy_reports', package_id: 'com.objectstack.qa.grant-readers-unnamed', active: false,
+    }, { context: SYS } as any);
     await engine.insert('sys_user_permission_set', [
       { id: 'g_off', user_id: 'usr_member', permission_set_id: 'ps_off', organization_id: ORG },
       {

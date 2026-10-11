@@ -3,6 +3,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { DelegatedAdminGate } from './delegated-admin-gate';
+import { bindCatalogFromTables, bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 /**
  * Fixture topology
@@ -83,6 +84,9 @@ function makeHarness() {
       return rows[0] ?? null;
     },
   } as any;
+  // [ADR-0131 D3/D4] The gate reads positions, their bindings and the set
+  // bodies from the security catalog: the one these rows convert to.
+  bindCatalogFromTables(ql, tables);
 
   // Resolved permission sets per principal — mirrors what
   // resolvePermissionSetsForContext would return for each context.
@@ -376,9 +380,9 @@ describe('DelegatedAdminGate — direct grants (sys_user_permission_set)', () =>
       await expect(remove()).rejects.toThrow(/names no permission set/);
     });
 
-    it('a grant naming a set no catalog row carries is refused', async () => {
+    it('a grant naming a set the security catalog does not hold is refused', async () => {
       storedGrant({ permission_set_id: 'ps_sales', permission_set: 'sales_user_retired' });
-      await expect(remove()).rejects.toThrow(/has no catalog row/);
+      await expect(remove()).rejects.toThrow(/is not in the security catalog/);
     });
 
     it('an update keeping the set is judged by the stored name; one re-pointing the id by the new id', async () => {
@@ -502,6 +506,7 @@ function makeDelegationHarness(nowMs = T0) {
       return (tables[object] ?? []).filter((r) => matches(r, opts?.where))[0] ?? null;
     },
   } as any;
+  bindCatalogFromTables(ql, tables);
   const gate = new DelegatedAdminGate({
     ql,
     resolveSets: async () => [{ name: 'member_default', objects: {} }],
@@ -653,6 +658,7 @@ function makeAnchoredDelegationHarness(nowMs = T0) {
       return (tables[object] ?? []).filter((r) => matches(r, opts?.where))[0] ?? null;
     },
   } as any;
+  bindCatalogFromTables(ql, tables);
   const gate = new DelegatedAdminGate({
     ql,
     resolveSets: async () => [{ name: 'member_default', objects: {} }],
@@ -925,16 +931,14 @@ describe('DelegatedAdminGate — the anchor is picked by organization, not by ar
   });
 });
 
-// ── A position NAME is resolved to the caller's own organization's row ─────
-// The companion of `delegated-admin-gate-position-organization.test.ts` (a
-// real engine), on the same context-ignoring double as the block above: every
-// organization's `sys_position` rows — and an organization-less residue row —
-// are handed to the gate, listed in id order, so the row-level selection is
-// the only thing standing between another organization's row and the two
-// position-keyed authority decisions (delegatable; bound sets).
-describe('DelegatedAdminGate — a position is picked by organization, not by arrival order', () => {
+// ── A position is the security catalog's definition, not an organization's row ─
+// [ADR-0131 D3/D4] The two position-keyed authority decisions (delegatable;
+// bound sets) read the position's DEFINITION from the environment catalog by
+// name. Every organization's `sys_position` rows and junction rows are handed
+// to the gate on a context-ignoring double, and none of them is what decides:
+// the catalog is one per deployment, and a row is not a position.
+describe('DelegatedAdminGate — a position is the catalog definition, not an organization row', () => {
   const ORG_A = 'org_a_acme';
-  /** Sorts first, and is listed first — the row an unscoped `limit: 1` read answered with. */
   const ORG_B = 'org_0_globex';
   const FUTURE = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
@@ -954,24 +958,23 @@ describe('DelegatedAdminGate — a position is picked by organization, not by ar
       sys_business_unit: [
         { id: 'bu_a_sales', name: 'sales', parent_business_unit_id: null, organization_id: ORG_A },
       ],
+      // Rows that SAY otherwise: org B's `closer` is delegatable and bound to
+      // the allowlisted set, and `night_shift` exists only as a row.
       sys_position: [
-        // An organization-less residue row: invalid state under a walled
-        // posture, so it answers for no organization's caller.
         { id: 'pos_', name: 'night_shift', delegatable: true, organization_id: null },
         { id: 'pos_0_closer', name: 'closer', delegatable: true, organization_id: ORG_B },
-        { id: 'pos_a_closer', name: 'closer', delegatable: false, organization_id: ORG_A },
+        { id: 'pos_0_greeter', name: 'greeter', delegatable: false, organization_id: ORG_B },
       ],
       sys_permission_set: [
         { id: 'ps_0_sales_user', name: 'sales_user', organization_id: ORG_B },
-        { id: 'ps_a_finance_user', name: 'finance_user', organization_id: ORG_A },
       ],
       sys_position_permission_set: [
         { id: 'bind_0', position_id: 'pos_0_closer', permission_set_id: 'ps_0_sales_user', organization_id: ORG_B },
-        { id: 'bind_a', position_id: 'pos_a_closer', permission_set_id: 'ps_a_finance_user', organization_id: ORG_A },
       ],
       sys_user_position: [
         { id: 'up_1', user_id: 'usr_holder', position: 'closer', organization_id: ORG_A },
         { id: 'up_2', user_id: 'usr_holder', position: 'night_shift', organization_id: ORG_A },
+        { id: 'up_3', user_id: 'usr_holder', position: 'greeter', organization_id: ORG_A },
       ],
       sys_business_unit_member: [],
       sys_user: [],
@@ -984,7 +987,7 @@ describe('DelegatedAdminGate — a position is picked by organization, not by ar
         }
         return row[k] === v;
       });
-    return {
+    const ql = {
       async find(object: string, opts: any) {
         const rows = (tables[object] ?? []).filter((r) => matches(r, opts?.where));
         return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
@@ -993,6 +996,15 @@ describe('DelegatedAdminGate — a position is picked by organization, not by ar
         return (tables[object] ?? []).filter((r) => matches(r, opts?.where))[0] ?? null;
       },
     } as any;
+    // The catalog: `closer` is NOT delegatable and distributes `finance_user`;
+    // `greeter` IS delegatable and distributes `sales_user`; no `night_shift`.
+    return bindTestSecurityCatalog(ql, {
+      positions: [
+        { name: 'closer', permissionSets: ['finance_user'] },
+        { name: 'greeter', delegatable: true, permissionSets: ['sales_user'] },
+      ],
+      permissions: [{ name: 'sales_user' }, { name: 'finance_user' }],
+    });
   }
 
   const makeGate = () =>
@@ -1008,15 +1020,19 @@ describe('DelegatedAdminGate — a position is picked by organization, not by ar
       context: { principal: 'holder', userId: 'usr_holder', tenantId: ORG_A },
     });
 
-  it("refuses a self-delegation org A never opted in to, whatever org B's first row says", async () => {
+  it('refuses a self-delegation the definition never opted in to, whatever a row says', async () => {
     await expect(selfDelegate('closer')).rejects.toThrow(/position 'closer' is not delegatable/);
   });
 
-  it('an organization-less residue row does not make a position delegatable for a walled caller', async () => {
+  it('a position that exists only as a row is not delegatable', async () => {
     await expect(selfDelegate('night_shift')).rejects.toThrow(/position 'night_shift' is not delegatable/);
   });
 
-  it("judges a delegated assignment by org A's own bindings, not org B's first row", async () => {
+  it('CONTROL: the definition opts in, a row saying otherwise does not refuse it', async () => {
+    await expect(selfDelegate('greeter')).resolves.toBeUndefined();
+  });
+
+  it("judges a delegated assignment by the definition's permissionSets, not a junction row", async () => {
     await expect(makeGate().assert({
       object: 'sys_user_position',
       operation: 'insert',

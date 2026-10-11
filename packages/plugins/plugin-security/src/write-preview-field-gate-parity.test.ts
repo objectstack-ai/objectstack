@@ -321,6 +321,9 @@ async function boot(sets: PermissionSet[], opts: { orgScoping?: boolean } = {}) 
   engine.registry.registerObject(ENG_LOG_AMENDABLE as any, 'test-package');
   engine.registry.registerObject(USER_POSITION as any, 'test-package');
   engine.registry.registerObject(ORG_TASK as any, 'test-package');
+  // [ADR-0131 D3/D4] The position the assignment rows name, declared in the
+  // security catalog the assignment refusal reads.
+  engine.registry.registerItem('position', { name: 'sales', label: 'Sales' } as any, 'name' as any, 'test-package');
   d.storeFor('crm_account').set('acc_p', { id: 'acc_p', name: 'P', type: 'partner' });
   d.storeFor('crm_account').set('acc_d', { id: 'acc_d', name: 'D', type: 'direct' });
 

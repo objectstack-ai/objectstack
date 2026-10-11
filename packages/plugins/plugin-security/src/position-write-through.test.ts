@@ -43,6 +43,7 @@ import {
   SysMetadataAuditObject,
 } from '@objectstack/metadata-core';
 import { createSecurityCatalogReader, resetPlatformAdminEmailMemo } from '@objectstack/core';
+import { mapDataError } from '@objectstack/types';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { DATA_MIGRATION_FLAG_OBJECT } from '@objectstack/spec/system';
 import { SysUser, SysAccount, SysMember, SysOrganization } from '@objectstack/platform-objects/identity';
@@ -619,6 +620,80 @@ describe('[C2 stage S10, ADR-0048 addendum N.2/N.3] one namespace — a create o
     await writeThrough(opCtx, next);
     expect(next).toHaveBeenCalledTimes(1);
     expect(door.saveMetaItem).not.toHaveBeenCalled();
+  });
+});
+
+describe('[ruling Q (a)] one holder per position name per deployment — a create or a rename into a name the environment catalog holds is refused', () => {
+  /**
+   * The wire envelope the REST door answers (`mapDataError`) — the one a
+   * second row of a name in ONE organization already answers, pinned as the
+   * control below.
+   */
+  const DUPLICATE = { code: 'UNIQUE_VIOLATION', status: 409 };
+  const httpEnvelope = (e: unknown) => {
+    const r = mapDataError(e, 'sys_position');
+    return { code: (r.body as { code?: unknown }).code, status: r.status };
+  };
+  const OTHER_ORG = 'org_pw_other';
+  /** An administrator of a SECOND organization of the same `single` deployment. */
+  const otherAdmin = (b: Booted) => ({ ...b.admin, tenantId: OTHER_ORG, accessible_org_ids: [OTHER_ORG] });
+  const bootTwo = async () => {
+    const b = await boot();
+    await b.engine.insert('sys_organization', { id: OTHER_ORG, name: 'PW Other', slug: 'pw-other' }, { context: SYS } as any);
+    return b;
+  };
+
+  it("a second organization's create of a name the first organization's position holds is refused 409; the first definition is untouched", async () => {
+    const b = await bootTwo();
+    await create(b, { name: 'shift_lead', label: 'Shift lead', description: 'First holder' });
+    const refusal = await refusalOf(b.engine.insert('sys_position', { name: 'shift_lead', label: 'Theirs' }, { context: otherAdmin(b) } as any));
+    expect(httpEnvelope(refusal)).toEqual(DUPLICATE);
+    // One dialect: a second holder in the SAME organization answers the same.
+    expect(httpEnvelope(await refusalOf(create(b, { name: 'shift_lead', label: 'Again' })))).toEqual(DUPLICATE);
+    expect((await b.rows('shift_lead')).map((r) => r.label)).toEqual(['Shift lead']);
+    expect((await b.envRows('shift_lead')).map((r) => r.body)).toEqual([
+      { name: 'shift_lead', label: 'Shift lead', description: 'First holder', delegatable: false },
+    ]);
+  });
+
+  it("a create of a name saved only through the metadata door is refused 409; the definition keeps its permissionSets", async () => {
+    const b = await boot();
+    await b.protocol.saveMetaItem({
+      type: 'position', name: 'door_lead', item: { name: 'door_lead', label: 'Door lead', permissionSets: ['viewer_readonly'] },
+    });
+    const refusal = await refusalOf(create(b, { name: 'door_lead', label: 'Setup copy' }));
+    expect(httpEnvelope(refusal)).toEqual(DUPLICATE);
+    expect(await b.rows('door_lead')).toEqual([]);
+    expect((await b.envRows('door_lead')).map((r) => r.body)).toEqual([
+      { name: 'door_lead', label: 'Door lead', permissionSets: ['viewer_readonly'] },
+    ]);
+  });
+
+  it('a rename into a name the environment catalog holds is refused 409; the row keeps its old name', async () => {
+    const b = await bootTwo();
+    await create(b, { name: 'dock_chief', label: 'Dock chief' });
+    const mine: any = await b.engine.insert('sys_position', { name: 'yard_chief', label: 'Yard chief' }, { context: otherAdmin(b) } as any);
+    const refusal = await refusalOf(b.engine.update('sys_position', { id: mine.id, name: 'dock_chief' }, { context: otherAdmin(b) } as any));
+    expect(httpEnvelope(refusal)).toEqual(DUPLICATE);
+    expect((await b.rows('yard_chief')).map((r) => r.id)).toEqual([mine.id]);
+    expect((await b.envRows('dock_chief')).map((r) => r.body.label)).toEqual(['Dock chief']);
+  });
+
+  it('control: a name no definition holds is created, and an edit that keeps a held name is no second holder', async () => {
+    const b = await boot();
+    const created: any = await create(b, { name: 'free_lead', label: 'Free lead' });
+    await patch(b, created.id, { label: 'Free lead (relabelled)' });
+    expect((await b.envRows('free_lead')).map((r) => r.body.label)).toEqual(['Free lead (relabelled)']);
+  });
+
+  it('a catalog that cannot be read refuses the create — accepting would merge blind', async () => {
+    const b = await boot();
+    const unreadable = Object.assign(new Error('catalog unreadable'), { code: 'AUTHZ_STORE_UNAVAILABLE', status: 503 });
+    vi.spyOn((b.engine as any).registry, 'getItem').mockImplementation(() => { throw unreadable; });
+    const refusal: any = await refusalOf(create(b, { name: 'blind_lead', label: 'Blind lead' }));
+    expect(refusal).not.toBeNull();
+    vi.restoreAllMocks();
+    expect(await b.rows('blind_lead')).toEqual([]);
   });
 });
 

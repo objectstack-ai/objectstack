@@ -9,8 +9,9 @@
  *
  * `resolvePermissionSetsForContextUnmemoized` requests
  * `[...positions, ...permissions]` as permission-set NAMES, and anything not
- * declared in metadata or bootstrap is read from `sys_permission_set` by name
- * through `dbLoaderFor(callerOrganizationId(context))`. With no active
+ * declared in metadata or bootstrap was read from `sys_permission_set` by name
+ * (the loader reads the security catalog instead since ADR-0131 D3/D4, so no
+ * row reaches it at all; the pins below hold either way). With no active
  * organization, `resolveUserAuthzGrants` still lists every current
  * membership's role (`org_member`, …) and the `everyone` anchor in
  * `positions`, and the by-name read carried no tenant — so it returned every
@@ -311,10 +312,17 @@ describe('[#20555] what the rule keeps', () => {
     expect(home.setNames).not.toContain('org_member');
   }, 120_000);
 
-  it('CONTROL · the authoring organization\'s own member, with it active, does resolve its set — the set is resolvable at all', async () => {
+  // [ADR-0131 D3/D4, #15196 Q3 = A] REVERSED: the plugin no longer reads
+  // `sys_permission_set` rows at all, so a set an organization authored as a
+  // row with no catalog definition resolves for nobody — its own members,
+  // with it active, included. That is the walled-row loss the ruling accepts
+  // (loud at boot, promoted to the environment catalog by its operator); the
+  // global sets above resolve because the catalog declares them.
+  it('a set only an organization ROW carries resolves for nobody, its own active members included', async () => {
     const r = await rig();
     const other = await resolve(r, USER_OTHER, ORG_OTHER);
-    expect(other.byName.get('org_member')?.systemPermissions).toEqual(['manage_metadata', 'probe.other_org_member']);
-    expect(other.ledger).toMatchObject({ viewAllRecords: true, modifyAllRecords: true });
+    expect(other.byName.get('org_member')).toBeUndefined();
+    expect(other.ledger).toBeNull();
+    expect(other.loaderRows).toEqual([]);
   }, 120_000);
 });

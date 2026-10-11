@@ -13,9 +13,10 @@
  * resolve (D10). Until then the grant carries both, and this module is what
  * keeps them saying the same thing. Rows written before the column existed are
  * rewritten by the backfill stage, never here. The grant readers of
- * `plugin-security` and `plugin-auth` key on the name ({@link grantSetNameOf},
- * {@link readGrantSetRows}); the authorization resolver in `@objectstack/core`
- * still reads the id until its own stage switches it.
+ * `plugin-security` and `plugin-auth`, and the authorization resolver in
+ * `@objectstack/core`, key on the name ({@link grantSetNameOf}) and take the
+ * set itself from the security catalog (ADR-0131 D3), never from a
+ * `sys_permission_set` row.
  *
  * ## The invariant: the two columns never disagree
  *
@@ -255,86 +256,6 @@ export function grantOrganizationOf(row: unknown): string | null {
   const value = r.organization_id ?? r.organizationId;
   if (value === null || value === undefined || value === '') return null;
   return String(value);
-}
-
-/** The engine surface {@link readGrantSetRows} reads through. */
-export interface GrantSetRowEngine {
-  find(object: string, options: Record<string, unknown>): Promise<unknown>;
-}
-
-/**
- * [ADR-0131 D4] The `sys_permission_set` row each of `grants` reads its set
- * from, BY NAME — for a reader that needs the row's own columns (the ADR-0049
- * `active` flag, a delegated-administration scope), not only the name.
- *
- * The catalog is still materialized per organization, so one name can carry
- * several rows. A grant reads the row of its OWN organization, else the
- * organization-less one — the same two rows its id may point at (a set row
- * applies to a grant of its own organization, an organization-less row to
- * every grant). An organization's rows are read with that organization
- * threaded into the context, so the driver's tenant scope decides what is
- * visible; an organization-less grant reads organization-less rows only.
- *
- * A grant that names nothing ({@link grantSetNameOf}) resolves to no row, and
- * so does a name no applicable row carries. A read that fails throws: the
- * caller decides what a failed read means for its own answer.
- */
-export async function readGrantSetRows(
-  engine: GrantSetRowEngine,
-  grants: readonly unknown[],
-): Promise<(grant: unknown) => Record<string, unknown> | undefined> {
-  const namesByOrganization = new Map<string, Set<string>>();
-  const allNames = new Set<string>();
-  for (const grant of grants) {
-    const name = grantSetNameOf(grant);
-    if (!name) continue;
-    allNames.add(name);
-    const organizationId = grantOrganizationOf(grant);
-    if (organizationId === null) continue;
-    let names = namesByOrganization.get(organizationId);
-    if (!names) {
-      names = new Set<string>();
-      namesByOrganization.set(organizationId, names);
-    }
-    names.add(name);
-  }
-  const rowsOf = (result: unknown): Array<Record<string, unknown> & { name: string }> =>
-    (Array.isArray(result) ? result : []).filter(
-      (r): r is Record<string, unknown> & { name: string } =>
-        !!r && typeof r === 'object' && typeof (r as Record<string, unknown>).name === 'string',
-    );
-  const organizationLess = new Map<string, Record<string, unknown>>();
-  if (allNames.size > 0) {
-    const names = [...allNames];
-    const rows = rowsOf(await engine.find(PERMISSION_SET_CATALOG_OBJECT, {
-      where: { name: { $in: names }, organization_id: null },
-      limit: names.length * 2 + 1,
-      context: { isSystem: true },
-    }));
-    for (const row of rows) {
-      if (grantOrganizationOf(row) === null && !organizationLess.has(row.name)) organizationLess.set(row.name, row);
-    }
-  }
-  const own = new Map<string, Map<string, Record<string, unknown>>>();
-  for (const [organizationId, nameSet] of namesByOrganization) {
-    const names = [...nameSet];
-    const rows = rowsOf(await engine.find(PERMISSION_SET_CATALOG_OBJECT, {
-      where: { name: { $in: names } },
-      limit: names.length * 2 + 1,
-      context: { isSystem: true, tenantId: organizationId },
-    }));
-    const byName = new Map<string, Record<string, unknown>>();
-    for (const row of rows) {
-      if (grantOrganizationOf(row) === organizationId && !byName.has(row.name)) byName.set(row.name, row);
-    }
-    own.set(organizationId, byName);
-  }
-  return (grant: unknown) => {
-    const name = grantSetNameOf(grant);
-    if (!name) return undefined;
-    const organizationId = grantOrganizationOf(grant);
-    return (organizationId !== null ? own.get(organizationId)?.get(name) : undefined) ?? organizationLess.get(name);
-  };
 }
 
 /** The set row an id points at, as far as a grant's name is concerned. */
