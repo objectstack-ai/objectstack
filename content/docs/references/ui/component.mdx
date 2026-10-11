@@ -606,7 +606,7 @@ Sort field and direction pair
 | **minLength** | `integer` | optional | Minimum character count — the native control's `minlength` |
 | **maxLength** | `integer` | optional | Maximum character count — the control's ceiling (a textarea also draws its counter) |
 | **pattern** | `string` | optional | Regular expression the value must match, as a string — the native control's `pattern`, enforced by the browser at submit |
-| **returnType** | `Enum<'number' \| 'text' \| 'boolean' \| 'date'>` | optional | The value type a formula field displays (number / text / boolean / date) |
+| **returnType** | `Enum<'number' \| 'text' \| 'boolean' \| 'date' \| 'currency'>` | optional | The value type a formula field displays (number / text / boolean / date / currency) |
 | **summaryOperations** | `{ object: string; field: string; function: Enum<'count' \| 'sum' \| 'min' \| 'max' \| 'avg'>; relationshipField?: string; … }` | optional | The roll-up a summary field displays — the object field's own `{ object, field, function, … }` |
 | **columns** | `{ name: string; label?: string; type?: Enum<'text' \| 'number' \| 'currency' \| 'date' \| 'datetime' \| 'time' \| 'select' \| 'lookup' \| 'file'>; width?: number; … }[]` | optional | The columns of a `grid` field — the strict, name-keyed inline grid column a relationship field's `inlineColumns` takes |
 | **minRows** | `number` | optional | A `grid` field's minimum row count: its Remove action is disabled at this many rows (no minimum when unset). Read only by the `grid` widget |

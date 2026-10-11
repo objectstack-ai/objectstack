@@ -10,7 +10,7 @@
 // `objectstack dev`/`serve`/`start` actually take: the app declares the default
 // profile in METADATA, the CLI computes its name with `appDefaultPermissionSetName`
 // and passes only that NAME as `fallbackPermissionSet`, and the SecurityPlugin
-// resolves the full set (incl. `readScope`) from `sys_permission_set` at request
+// resolves the full set (incl. `readScope`) from the security catalog at request
 // time. The bug this guards: the artifact-serve path used to drop `permissions[]`
 // from the stack config, so `appDefaultPermissionSetName` saw nothing, the fallback
 // silently degraded to the built-in owner-only `member_default`, and a grant-less
@@ -47,19 +47,19 @@ interface World { stack: VerifyStack; tokens: Record<Who, string>; }
 
 // Same BU world as the reference test: bu_parent ⊃ bu_child (sibling bu_other).
 // alice+carol ∈ bu_parent, bob ∈ bu_child, dave ∈ bu_other. Each owns one note.
-// The scope profile is NOT passed as a bootstrap permission set — it is seeded
-// into `sys_permission_set` (the runtime home of an app-declared `permission`)
-// and reached only by NAME via `fallbackPermissionSet`.
+// The scope profile is NOT passed as a bootstrap permission set — it is saved
+// through the metadata door into the security catalog (ADR-0131 D3, the one
+// home of a permission set) and reached only by NAME via `fallbackPermissionSet`.
 async function bootFallbackWorld(withResolver = true): Promise<World> {
   const stack = await bootShowcase({
     // Mirror the CLI exactly: the app's isDefault profile name, computed off the
     // declared `permissions[]`, handed to SecurityPlugin as the fallback. No
-    // `defaultPermissionSets` carry the scope profile — it must resolve from DB.
+    // `defaultPermissionSets` carry the scope profile — it must resolve from the catalog.
     security: new SecurityPlugin({
       fallbackPermissionSet: appDefaultPermissionSetName([DEFAULT_PROFILE_METADATA]),
     }),
   });
-  await stack.signIn();
+  const adminToken = await stack.signIn();
   const tokens = {} as Record<Who, string>;
   for (const who of WHO) tokens[who] = await stack.signUp(`fb-${who}@verify.test`);
 
@@ -91,16 +91,16 @@ async function bootFallbackWorld(withResolver = true): Promise<World> {
   };
   if (withResolver) (stack.kernel as any).registerService('hierarchy-scope-resolver', refResolver);
 
-  // Seed the app-declared profile into `sys_permission_set` — this is what an
-  // app `permission` metadata becomes at runtime, and what the named fallback
-  // resolves through the SecurityPlugin dbLoader. `readScope` rides inside
-  // object_permissions JSON.
-  await sys('sys_permission_set', {
+  // Save the app-declared profile through the metadata door — the security
+  // catalog the named fallback resolves through (the SecurityPlugin's catalog
+  // loader, ADR-0131 D3/D4; a `sys_permission_set` row is not read).
+  // `readScope` rides inside `objects`.
+  const saved = await stack.apiAs(adminToken, 'PUT', `/meta/permission/${PROFILE_NAME}`, {
     name: PROFILE_NAME,
     label: DEFAULT_PROFILE_METADATA.label,
-    active: true,
-    object_permissions: JSON.stringify(DEFAULT_PROFILE_METADATA.objects),
+    objects: DEFAULT_PROFILE_METADATA.objects,
   });
+  expect(saved.status, await saved.clone().text().catch(() => '')).toBe(200);
 
   const uid = async (who: Who) =>
     (await ql.findOne('sys_user', { where: { email: `fb-${who}@verify.test` }, context: { isSystem: true } }))?.id;

@@ -169,8 +169,8 @@ const BUILTIN_METADATA_TYPE_SCHEMAS: Partial<Record<MetadataType, z.ZodType>> = 
   // authorization capabilities (ADR-0066 D1). The kind was produced and read
   // back long before it resolved a schema: `PLURAL_TO_SINGULAR` maps
   // `capabilities` → `capability` (#5870), `AppPlugin` registers stack-declared
-  // ones under that name, and `bootstrapDeclaredCapabilities` reads them back to
-  // seed `sys_capability`. Yet `getMetadataTypeSchema('capability')` answered
+  // ones under that name, and the declared-capability seeder (since retired,
+  // ADR-0131 D3) read them back to seed `sys_capability`. Yet `getMetadataTypeSchema('capability')` answered
   // `undefined`, so `saveMetaItem` took its documented "unregistered type →
   // store without validation" branch and `PUT /meta/capability/:name` accepted
   // ANY JSON — on an AUTHORIZATION surface, where `systemPermissions` /

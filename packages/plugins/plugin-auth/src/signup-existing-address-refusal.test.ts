@@ -68,6 +68,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { AuthManager } from './auth-manager.js';
 import { authIdentityObjects } from './manifest.js';
 import { SELF_REGISTRATION_CLOSED } from './audience-posture.js';
+import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;
@@ -154,7 +155,9 @@ async function bootEngine(): Promise<ObjectQL> {
   engine.registry.registerObject(sysPermissionSet as never, '@objectstack/plugin-security');
   engine.registry.registerObject(sysUserPermissionSet as never, '@objectstack/plugin-security');
   await engine.syncSchemas();
-  return engine;
+  // [ADR-0131 D3/D4] The declared self-registration set is a catalog definition
+  // — what the admission asks before it admits.
+  return bindTestSecurityCatalog(engine, { permissions: [{ name: 'member_default' }] });
 }
 
 const SYSTEM = { context: { isSystem: true } } as never;

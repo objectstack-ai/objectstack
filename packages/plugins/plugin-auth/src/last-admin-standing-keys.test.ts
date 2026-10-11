@@ -128,7 +128,7 @@ describe('[#8734] standing-key lists correspond to what resolveAuthzContext read
     expect(STANDING_KEYS_BY_TABLE.sys_member).toBe(MEMBER_STANDING_KEYS);
     expect(STANDING_KEYS_BY_TABLE.sys_user_permission_set).toBe(GRANT_STANDING_KEYS);
     // [ADR-0131 D3] The resolver reads deactivation from the activation ledger,
-    // no longer from the `sys_permission_set` row (whose hooks stay registered).
+    // no longer from the `sys_permission_set` row, which the guard no longer judges.
     expect(STANDING_KEYS_BY_TABLE.sys_metadata_activation).toBe(ACTIVATION_LEDGER_STANDING_KEYS);
   });
 });

@@ -314,14 +314,13 @@ export function validateTranslatableSections(stack: AnyRec): TranslatableSection
         rule: TRANSLATION_SECTION_NAME_MISSING,
         where: joinWhere(`object "${objectName}"`, site.surface, `section "${heading}"`),
         path: `${site.path}[${i}]`,
+        // [#22161] One verdict sentence; why no gate sees the hole, and why
+        // the fix is a written name and never a derived key, are
+        // `os explain translation-section-name-missing`.
         message:
-          `Section "${heading}" declares a label but no \`name\`. Headings resolve through ` +
-          `\`objects.${objectName}._sections.<name>.label\`, so a section with no name has no key ` +
-          `a bundle can carry — this heading can never be translated and renders in the source ` +
-          `locale in EVERY locale. Object "${objectName}" IS translated, which is what makes the ` +
-          `hole invisible: every neighbouring label resolves and only the heading stays behind. ` +
-          `The i18n coverage report cannot see it either — it walks \`sections[].name\`, and a ` +
-          `nameless section contributes nothing to walk.`,
+          `Section "${heading}" declares a label but no \`name\`, so no ` +
+          `\`objects.${objectName}._sections.<name>.label\` key can address it and its heading ` +
+          `stays in the source locale in every locale`,
         hint:
           `Give the section a stable \`name\` (snake_case)` +
           (slug ? `, e.g. \`name: '${slug}'\`` : '') +

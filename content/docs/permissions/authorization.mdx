@@ -195,20 +195,19 @@ export default defineStack({
 });
 ```
 
-At boot `bootstrapDeclaredCapabilities`
-(`packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts`) seeds
-each declaration into `sys_capability` with **`managed_by: 'package'` + `package_id`**
-provenance — idempotent, re-seeded on upgrade, and it **never clobbers**
-admin-authored rows, refuses to hijack a curated platform capability, and refuses
-to write into another package's capability.
+At boot each declaration becomes a registry item owned by its package — the
+capability's one home (ADR-0131 D3). No `sys_capability` row is written for it.
+The registry's one-holder rule refuses a second holder of a name at boot with a
+`422`, so a package can neither take a curated platform capability nor take
+over another package's.
 
 This **replaces the implicit back-door** where a capability existed only as an
 untitled placeholder derived from whatever a permission set happened to reference
-in `systemPermissions[]`. That derivation still runs for back-compat (a
-reference with no declaration keeps resolving as a `managed_by:'platform'`
-placeholder), but an explicit `defineCapability` takes precedence and — for a
-pre-existing derived placeholder — **claims** it, upgrading the row to package
-provenance with the authored label/description/scope. This is the ADR-0066 D1
+in `systemPermissions[]`. That derivation is retired: a reference with no
+declaration still matches by name at runtime but gets no `sys_capability` row.
+An explicit `defineCapability` is the attributable form: its label,
+description, scope and owning package live on the registry item, and it gets
+no row either. This is the ADR-0066 D1
 direction: retire the implicit `managed_by`-guessing back-doors in favour of
 explicit, attributable declarations.
 
@@ -430,32 +429,38 @@ an expiry: deactivation is an incident-response control, installation-wide,
 and there is no date on the user's own grant row to notice — without the
 state, the admin diagnosing "why did access disappear" would get the same
 answer as for a user who never held the grant, with no pointer to the
-catalogue row somebody switched off. Reported for the grant rows explain
+`sys_metadata_activation` row somebody switched off — the explainer reads the
+same ledger the resolver does, so explain and enforce agree. Reported for the grant rows explain
 already walks: `sys_user_position` rows and direct `sys_user_permission_set`
 grants (a deactivated set reached only through an active position's linkage is
 not re-derived — that would replicate the resolver's aggregation).
 
 **Absent is ACTIVE.** Only a ledger row whose `active` reads false takes a
 grant away; a permission set or position with no ledger row is in effect. The
-last-administrator guard's enumeration still reads the catalogue row's
-`active`, so it counts a row-deactivated `admin_full_access` as off and refuses
-more than it must, never less.
+last-administrator guard reads the same two places the resolver does: whether
+the catalogue holds `admin_full_access`, and whether the ledger switches it
+off. It reads no catalogue row, so a row's `active` changes nothing it counts.
 
-**Switching the break-glass set off is refused.** A ledger row switching
-`admin_full_access` off would un-make every platform admin who holds it
-*through a grant row*, in one write — and switching it back on needs the
-permission just lost. The last-administrator guard refuses such a ledger
-write outright, whatever the administrator population (ADR-0135 D5.2), and
-refuses one whose target row it cannot read. Switching it back on is never
-refused.
+**Switching the break-glass set off is refused while it would leave no
+administrator.** A ledger row switching `admin_full_access` off un-makes every
+platform admin who holds it *through a grant row*, in one write — and
+switching it back on needs the permission just lost. The last-administrator
+guard judges such a ledger write like every other write that can take
+standing away (ADR-0135 D5.2): it is refused only when nobody who can sign in
+would still administer the environment. A configured administrator or an
+organization owner or admin still standing permits it. A ledger read that
+fails refuses the write. Switching it back on is never refused.
 
 Deactivation is an incident-response control, so what it does **not** touch is
 deliberate. Administration surfaces keep listing and editing a deactivated
 position — an admin must still be able to unbind and clean up what they just
 switched off — and the write gates that judge audience-anchor bindings and a
-delegated administrator's blast radius keep reading every row, deactivated
-included: dropping rows there would make a refused binding *permitted* and a
-delegate's boundary *narrower*, which is the opposite of switching access off.
+delegated administrator's blast radius do not consult the activation ledger:
+they judge every binding and assignment in front of them — including the
+permission sets a position's definition names — whether or not the ledger
+switched it off, because skipping a switched-off one would make a refused
+binding *permitted* and a delegate's boundary *narrower*, which is the
+opposite of switching access off.
 
 ## Governance: how "declared = enforced" is kept true
 
@@ -543,15 +548,17 @@ The complete, prioritized gap map lives in issue **#2561** (the production
 
 - **Deny/muting layer** (ADR-0066 ⑦⑧) — union-only grants can't take access
   away; needed for large-org governance and packaged-set adjustment.
-- **Capability registry** (ADR-0066 D1) — **landed**: capabilities are seeded
-  as first-class `sys_capability` records from the canonical list in
+- **Capability registry** (ADR-0066 D1, ADR-0131 D3) — **landed**: the
+  platform's curated capabilities, from the canonical list in
   `@objectstack/spec` (`security/capabilities.ts` → `PLATFORM_CAPABILITIES`),
-  seeded by `packages/plugins/plugin-security/src/bootstrap-system-capabilities.ts`.
+  are declared `capability` metadata served by the registry
+  (`registerBuiltinCapabilities`, `GET /api/v1/meta/capability`), with no
+  `sys_capability` row.
   A **package** now DEFINES its own capabilities explicitly via
   [`defineCapability` / `stack.capabilities`](#package-capability-declaration-adr-0066-d1),
-  seeded with `managed_by:'package'` + `package_id` provenance by
-  `bootstrap-declared-capabilities.ts` — replacing the implicit
-  derive-from-`systemPermissions` back-door (which stays for back-compat).
+  served by the registry with owning-package provenance (no row is written for
+  it) — replacing the implicit
+  derive-from-`systemPermissions` back-door (now retired).
   The authoring lint (ADR-0066 ⑨) is also **landed**: `validateCapabilityReferences`
   (`@objectstack/lint`) warns at author time (`os validate` / `os lint`) when a
   `requiredPermissions` names a capability registered nowhere — no built-in, no

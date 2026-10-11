@@ -45,16 +45,18 @@
 // `main()` shells out to `pnpm -r list` and `pnpm pack`; it opens no path this
 // file names, and it runs only from `scripts/publish-smoke.sh` during a release.
 // The family CI schedules on a pull request is `check:publish-smoke-pin`, which
-// is this file's `--self-test`: pure fixtures, no workspace, no network, no
-// tracked file. There is no path population for a card to implicate, so the
+// is this file's `--self-test`: pure fixtures plus one fake `pnpm` it writes to
+// a temp dir -- no workspace, no network, no tracked file, no real pnpm. There
+// is no path population for a card to implicate, so the
 // marker is the honest declaration -- and `packages/**` would be the costly
 // error, naming this family on thousands of cards for reads it never performs.
 //
-// dispatch-gates: no-path-population -- check:publish-smoke-pin runs this packer's --self-test against in-memory fixtures; the workspace enumeration and the pack itself belong to the release smoke, which no pull request schedules
+// dispatch-gates: no-path-population -- check:publish-smoke-pin runs this packer's --self-test against in-memory fixtures and a temp-dir fake pnpm; the workspace enumeration and the pack itself belong to the release smoke, which no pull request schedules
 
 import { execFile } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { delimiter, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import { isEntrypoint } from './invoked-as.mjs';
@@ -118,22 +120,47 @@ async function listPublicPackages(repoRoot) {
   return selectPublishable(JSON.parse(stdout));
 }
 
+/**
+ * The pack result is the LAST JSON document on `pnpm pack --json` stdout, never
+ * the whole stdout. pnpm (10.31.0, measured) runs `prepack` and `prepare` before
+ * the tarball and `postpack` after it, all with inherited stdio, and writes its
+ * document only once the command returns, so every lifecycle banner and line of
+ * script output lands ABOVE the document (`@objectstack/spec`'s `prepare` does,
+ * on every pack). The scan is per brace, not per line, because a script whose
+ * last write has no newline glues to the document's opening brace. Output AFTER
+ * the document leaves no suffix that parses, so it reddens below with stdout
+ * attached rather than being skipped: absence stays loud.
+ *
+ * @param {string} stdout everything `pnpm pack --json` printed on stdout
+ * @param {string} name the package being packed, for the diagnostic
+ * @returns {{name: string, filename: string}}
+ */
+export function parsePackStdout(stdout, name) {
+  let parsed;
+  for (let at = stdout.lastIndexOf('{'); at !== -1; at = at === 0 ? -1 : stdout.lastIndexOf('{', at - 1)) {
+    try {
+      parsed = JSON.parse(stdout.slice(at));
+      break;
+    } catch {
+      // Not a document that runs to the end of stdout; try the brace before it.
+    }
+  }
+  if (parsed === undefined) {
+    throw new Error(`pnpm pack --json printed no JSON document ending its stdout for ${name}:\n${stdout}`);
+  }
+  if (!parsed.filename) {
+    throw new Error(`pnpm pack reported no tarball filename for ${name}`);
+  }
+  return { name, filename: parsed.filename };
+}
+
 async function packOne(pkg, destDir) {
   const { stdout } = await execFileP(
     'pnpm',
     ['pack', '--json', '--pack-destination', destDir],
     { cwd: pkg.path, maxBuffer: 64 * 1024 * 1024 },
   );
-  let parsed;
-  try {
-    parsed = JSON.parse(stdout);
-  } catch {
-    throw new Error(`pnpm pack --json returned non-JSON for ${pkg.name}:\n${stdout}`);
-  }
-  if (!parsed.filename) {
-    throw new Error(`pnpm pack reported no tarball filename for ${pkg.name}`);
-  }
-  return { name: pkg.name, filename: parsed.filename };
+  return parsePackStdout(stdout, pkg.name);
 }
 
 async function main() {
@@ -180,8 +207,11 @@ async function main() {
 }
 
 /**
- * Self-test — runs without pnpm, a workspace, or a network. It pins the two
- * properties the release smoke depends on, and both are ABLATION-CHECKED
+ * Self-test — runs without the real pnpm, a workspace, or a network. Cases 5-10
+ * pin that the pack result is read from the LAST JSON document on stdout, the
+ * last of them through `packOne` itself against a fake `pnpm` on PATH that
+ * prints a lifecycle banner first; parsing stdout whole turns 5, 7 and 10 red.
+ * The first four pin the two properties below, both ABLATION-CHECKED
  * (2026-08-23): restoring `EXCLUDE = new Set(['create-objectstack'])` and
  * filtering it out of `selectPublishable` turns case 1 red by name; deleting
  * the `missing`/`surplus` branch of `assertPinSetTotal` turns cases 2/3 red.
@@ -215,7 +245,7 @@ async function main() {
 // not red. A battery BELOW its floor means cases stopped running; the remedy is
 // to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'publish-smoke-pack self-test': 4,
+  'publish-smoke-pack self-test': 10,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -233,7 +263,7 @@ const UNATTRIBUTED_BATTERY = '(no battery open)';
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'publish-smoke-pack self-test reached its verdict';
 
-function selfTest() {
+async function selfTest() {
   // The battery ledger this self-test's floor is evaluated against (#13489).
   // `battery()` opens a battery; every assertion below is attributed to the one
   // most recently opened, so a section that stops running stops registering and
@@ -249,10 +279,10 @@ function selfTest() {
   };
   battery('publish-smoke-pack self-test');
   const cases = [];
-  const check = (name, fn) => {
+  const check = async (name, fn) => {
     registerCase();
     try {
-      fn();
+      await fn();
       cases.push(`  ok — ${name}`);
     } catch (err) {
       cases.push(`  FAIL — ${name}\n      ${(err.message ?? String(err)).split('\n').join('\n      ')}`);
@@ -263,7 +293,7 @@ function selfTest() {
     if (!cond) throw new Error(msg);
   };
 
-  check('an unscoped public package is in the derived set', () => {
+  await check('an unscoped public package is in the derived set', () => {
     const picked = selectPublishable([
       { name: '@objectstack/cli', private: false },
       { name: 'create-objectstack' }, // no `private` key at all — the real manifest
@@ -281,11 +311,11 @@ function selfTest() {
     assert(picked.length === 2, `expected 2 publishable, got ${picked.length}`);
   });
 
-  check('set == publishable set is accepted', () => {
+  await check('set == publishable set is accepted', () => {
     assertPinSetTotal(['create-objectstack', '@objectstack/cli'], ['@objectstack/cli', 'create-objectstack']);
   });
 
-  check('a MISSING member reddens, by name', () => {
+  await check('a MISSING member reddens, by name', () => {
     let msg = '';
     try {
       assertPinSetTotal(['@objectstack/cli'], ['@objectstack/cli', 'create-objectstack']);
@@ -299,7 +329,7 @@ function selfTest() {
     );
   });
 
-  check('a SURPLUS member reddens, by name', () => {
+  await check('a SURPLUS member reddens, by name', () => {
     let msg = '';
     try {
       assertPinSetTotal(['@objectstack/cli', '@objectstack/gone'], ['@objectstack/cli']);
@@ -308,6 +338,70 @@ function selfTest() {
     }
     assert(msg !== '', 'a pin set with a non-publishable member was accepted');
     assert(msg.includes('@objectstack/gone'), `the diagnostic does not name the surplus package: ${msg}`);
+  });
+
+  // pnpm 10.31.0's stdout head when packing `@objectstack/spec`, verbatim except the path.
+  const BANNER = [
+    '', '> @objectstack/spec@17.7.0 prepare /repo/packages/spec', '> pnpm gen:migration-registry', '', '',
+    '> @objectstack/spec@17.7.0 gen:migration-registry /repo/packages/spec',
+    '> tsx scripts/build-migration-registry.ts', '', 'build-migration-registry --self-test: ok',
+    '✓ src/migrations/registry.ts is current (420 semantic, 258 retired-key, 222 retired-def)', '',
+  ].join('\n');
+  const doc = (filename) =>
+    `${JSON.stringify({ name: 'p', version: '1.0.0', filename, files: [{ path: 'package.json' }] }, null, 2)}\n`;
+  const refusal = (stdout) => {
+    try {
+      parsePackStdout(stdout, '@objectstack/probe');
+    } catch (err) {
+      return err.message;
+    }
+    return '';
+  };
+
+  await check('a lifecycle banner above the document is skipped', () => {
+    const got = parsePackStdout(BANNER + doc('/d/p.tgz'), 'p').filename;
+    assert(got === '/d/p.tgz', `banner + document read as filename ${JSON.stringify(got)}`);
+  });
+
+  await check('the document alone still parses', () => {
+    assert(parsePackStdout(doc('/d/p.tgz'), 'p').filename === '/d/p.tgz', 'a bare document was not read');
+  });
+
+  await check('script output glued to the opening brace is skipped', () => {
+    // Measured: a `postpack` of `printf "{ not json"` leaves stdout reading `{ not json{` then the document.
+    const got = parsePackStdout(`${BANNER}{ not json${doc('/d/p.tgz')}`, 'p').filename;
+    assert(got === '/d/p.tgz', `glued output read as filename ${JSON.stringify(got)}`);
+  });
+
+  await check('output AFTER the document reddens, by name, with stdout attached', () => {
+    const msg = refusal(`${doc('/d/p.tgz')}trailing line\n`);
+    assert(msg !== '', 'output after the document was skipped silently');
+    assert(msg.includes('@objectstack/probe') && msg.includes('trailing line'), `diagnostic: ${msg}`);
+  });
+
+  await check('stdout with no JSON document reddens, by name, with stdout attached', () => {
+    const msg = refusal(`${BANNER}{ not json\n`);
+    assert(msg !== '', 'stdout with no document was accepted');
+    assert(msg.includes('@objectstack/probe') && msg.includes('gen:migration-registry'), `diagnostic: ${msg}`);
+  });
+
+  await check('packOne reads the document past a fake pnpm that prints a banner first', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'publish-smoke-pack-'));
+    const savedPath = process.env.PATH;
+    try {
+      writeFileSync(join(dir, 'banner.txt'), BANNER);
+      const fake = ['#!/bin/sh', 'cat "$(dirname "$0")/banner.txt"', 'printf \'{\\n  "filename": "%s/p.tgz"\\n}\\n\' "$4"'];
+      writeFileSync(join(dir, 'pnpm'), `${fake.join('\n')}\n`, { mode: 0o755 });
+      process.env.PATH = `${dir}${delimiter}${savedPath ?? ''}`;
+      const dest = join(dir, 'dest');
+      const got = await packOne({ name: 'p', path: dir }, dest);
+      // `$4` is --pack-destination's value: the filename proves the FAKE answered, with packOne's argv.
+      assert(got.filename === `${dest}/p.tgz`, `packOne read filename ${JSON.stringify(got.filename)}`);
+    } finally {
+      if (savedPath === undefined) delete process.env.PATH;
+      else process.env.PATH = savedPath;
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
@@ -369,7 +463,7 @@ function selfTest() {
 
 if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
-    if (selfTest() !== SELF_TEST_VERDICT) {
+    if ((await selfTest()) !== SELF_TEST_VERDICT) {
       console.error(
         '\n✗ publish-smoke-pack self-test: selfTest() returned without reaching its verdict,\n'
           + 'so no success line was printed. Exiting 0 here would report a self-test\n'
