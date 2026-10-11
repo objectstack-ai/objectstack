@@ -4,7 +4,7 @@
 
 fix(cli)!: `objectstack build` rebinds a hook handler's parameter to the sandbox's `ctx` instead of dropping it, and refuses the parameter lists it cannot rebind (#22837)
 
-Clause-②: no (narrowing)
+Clause-②: yes (narrowing)
 
 The lowering ships a hook handler's statements as `body.source`, and the runtime runs a body as `(async (ctx) => { SOURCE })`, so `ctx` is the only name a body is given. The handler's parameter list was dropped. A handler written `async (hookCtx) => { hookCtx.input.note = … }`, or `async ({ input }) => { input.note = … }`, lowered at exit 0 with no warning, and its body threw `ReferenceError: 'hookCtx' is not defined` on every run. Measured through `bootStack`'s artifact door: REST answered `500 INTERNAL_ERROR` and stored nothing, while the same handler in-process answered `201`.
 
