@@ -7,14 +7,16 @@ import { F, P } from '@objectstack/spec';
  * sys_user_permission_set — User ↔ PermissionSet assignment.
  *
  * Salesforce-style additive permission grant: a user may be assigned any
- * number of `sys_permission_set` rows, optionally scoped to a specific
- * organization. The runtime resolver (`resolveExecutionContext` in
- * `@objectstack/runtime`) reads this table when building the per-request
- * `ExecutionContext.permissions[]`.
+ * number of permission sets, optionally scoped to a specific organization.
+ * [ADR-0131 D4] A grant names its set BY NAME (`permission_set`), and the set
+ * itself is the security catalog's definition of that name (ADR-0131 D3) —
+ * never a `sys_permission_set` row. The authorization resolver reads this
+ * table when building the per-request `ExecutionContext.permissions[]`.
  *
- * Uniqueness is `(user_id, permission_set_id, organization_id)` so the
- * same permission set can be granted independently in each org context
- * the user belongs to.
+ * The same permission set can be granted independently in each org context
+ * the user belongs to. The declared unique index still names
+ * `permission_set_id`, the column ADR-0131 D10 drops with its data (C7b); a
+ * grant written by name carries NULL there, which SQL keys apart.
  *
  * @namespace sys
  */
@@ -39,8 +41,8 @@ export const SysUserPermissionSet = ObjectSchema.create({
   // `sys-security-assignment-display-title.test.ts` holds the two to the same text.
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{user_id} → {permission_set_id}',
-  highlightFields: ['user_id', 'permission_set_id', 'organization_id'],
+  titleFormat: '{user_id} → {permission_set}',
+  highlightFields: ['user_id', 'permission_set', 'organization_id'],
 
   fields: {
     id: Field.text({
@@ -54,12 +56,14 @@ export const SysUserPermissionSet = ObjectSchema.create({
     // read and has no stored column. It reads only this row's own columns —
     // the two foreign keys, never a field of the looked-up records — and
     // neither is hidden, permission-guarded or masked on this object, so the
-    // title carries nothing the declared read path withholds. Both are
-    // required, so the expression needs no null guard.
+    // title carries nothing the declared read path withholds. `user_id` is
+    // required; `permission_set` is required on every write since grants name
+    // their set (ADR-0131 D4), and a legacy grant the backfill has not named
+    // yet shows its user alone.
     display_title: Field.formula({
       label: 'Title',
       returnType: 'text',
-      expression: F`record.user_id + ' → ' + record.permission_set_id`,
+      expression: F`record.permission_set != null ? record.user_id + ' → ' + record.permission_set : record.user_id`,
       description: 'Record title: the user and the permission set assigned to them (computed on read)',
     }),
 
@@ -69,33 +73,36 @@ export const SysUserPermissionSet = ObjectSchema.create({
       description: 'Foreign key to sys_user.',
     }),
 
+    // [ADR-0131 D10] The grant's former id reference to a catalog row. No
+    // writer fills it and no reader confers anything through it: a grant names
+    // its set by `permission_set` below. Optional, and kept only until D10
+    // drops the column with its data (C7b); the one-time name backfill reads
+    // it on grants written before the name column existed.
     permission_set_id: Field.lookup('sys_permission_set', {
-      label: 'Permission Set',
-      required: true,
-      description: 'Foreign key to sys_permission_set.',
+      label: 'Permission Set (legacy id)',
+      required: false,
+      description:
+        '[ADR-0131 D10] Legacy id reference to a sys_permission_set row, dropped with its data by a later stage. ' +
+        'Not written and not read to grant anything: the grant names its set by permission_set.',
     }),
 
-    // [ADR-0131 D4] The permission set this grant holds, BY NAME — the
-    // reference the grant keeps once the id column above is dropped (D10).
-    // System-written: `grant-permission-set-name.ts` derives it from
-    // `permission_set_id` on every write that carries the id, for every caller,
-    // and refuses a supplied value that names any other set (400
-    // VALIDATION_FAILED, `invalid_value` here). Same width and shape as the
-    // sibling assignment's `sys_user_position.position` (a `sys_*.name`, 100).
-    // Not required: a grant written before this column existed carries NULL
-    // until the backfill stage rewrites it. The grant readers of
-    // plugin-security and plugin-auth read this column, and a grant with no
-    // name grants nothing through them (`grantSetNameOf`); the resolver in
-    // @objectstack/core still reads the id until its own stage switches it.
+    // [ADR-0131 D4] The permission set this grant holds, BY NAME — the grant's
+    // one reference to its set. The set is the security catalog's definition
+    // of that name (ADR-0131 D3), so no `sys_permission_set` row is needed to
+    // grant it. A non-system write naming a set the catalog does not hold is
+    // refused (400 VALIDATION_FAILED, `reference_not_found` here;
+    // `grant-permission-set-name.ts`), as `sys_user_position.position` is.
+    // Same width and shape as that sibling (a machine name, 100). Required on
+    // every write; a grant written before this column existed carries NULL
+    // until the one-time backfill names it, and an update that leaves the
+    // column alone does not have to name it.
     permission_set: Field.text({
-      label: 'Permission Set Name',
-      required: false,
-      readonly: true,
+      label: 'Permission Set',
+      required: true,
       maxLength: 100,
       description:
-        '[ADR-0131 D4] Machine name of the permission set this grant holds (sys_permission_set.name). ' +
-        'Written by the platform from permission_set_id on every write that carries it; a supplied value ' +
-        'must equal that name or the write is refused. NULL on a grant written before the column existed.',
+        '[ADR-0131 D4] Machine name of the permission set this grant holds, as the security catalog names it. ' +
+        'A name the catalog does not hold is refused. NULL only on a grant written before the column existed.',
     }),
 
     organization_id: Field.lookup('sys_organization', {

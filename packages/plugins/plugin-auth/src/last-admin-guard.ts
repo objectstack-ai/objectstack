@@ -326,7 +326,7 @@ import {
 } from '@objectstack/core';
 
 import { isOrgAdminGrade } from './invitation-role-cap.js';
-import { GRANT_SET_ID_FIELD, GRANT_SET_NAME_FIELD, grantSetNameOf } from './grant-set-name.js';
+import { GRANT_SET_NAME_FIELD, grantSetNameOf } from './grant-set-name.js';
 
 /** `sys_user_permission_set` has no `SystemObjectName` member; it is spelled once, here. */
 const USER_PERMISSION_SET = 'sys_user_permission_set';
@@ -622,32 +622,6 @@ function applyPending(
   return { ...row, ...pending.patch };
 }
 
-/**
- * [ADR-0131 D4] The permission set a grant row names once `pending` lands, as
- * the enumeration reads it — or `undefined` when it names none, or when this
- * guard cannot know what it will name.
- *
- * `simulated` is `applyPending(raw, …)`. The one case it gets wrong is a
- * write that RE-POINTS the grant's id without carrying its name: the
- * platform derives the new name from the new id in an engine hook that runs
- * after this guard, so the simulated row still shows the old name. Such a row
- * is read as naming nothing — standing taken away, the one direction this
- * simulation is allowed to round in. An id echoed unchanged keeps its name.
- */
-function simulatedGrantSetName(
-  raw: Record<string, unknown>,
-  simulated: Record<string, unknown>,
-  pending: PendingStandingWrite | undefined,
-): string | undefined {
-  const patch = pending?.table === USER_PERMISSION_SET && pending.patch ? pending.patch : undefined;
-  const id = toId(raw.id);
-  if (patch && id && pending!.ids.has(id) && !(GRANT_SET_NAME_FIELD in patch)) {
-    for (const key of [GRANT_SET_ID_FIELD, 'permissionSetId']) {
-      if (key in patch && toId(patch[key]) !== toId(raw[GRANT_SET_ID_FIELD] ?? raw.permissionSetId)) return undefined;
-    }
-  }
-  return grantSetNameOf(simulated);
-}
 
 /**
  * Which keys of a `sys_member` payload can move the administrator enumeration.
@@ -667,15 +641,11 @@ export const MEMBER_STANDING_KEYS = ['role', 'user_id', 'userId'] as const;
  * snake_case and camelCase spellings the readers already tolerate.
  *
  * [ADR-0131 D4] The enumeration reads WHICH set by the grant's name,
- * `permission_set`, so a write touching that column alone moves it. The id
- * spellings stay: a write that re-points the id carries the name the platform
- * will derive from it only after this guard has run, so the guard reads such
- * a write as taking the standing away (`simulatedGrantSetName`).
+ * `permission_set`, and only by it: `permission_set_id` moves nothing, so a
+ * write touching it alone is skipped like any other non-standing column.
  */
 export const GRANT_STANDING_KEYS = [
   'permission_set',
-  'permission_set_id',
-  'permissionSetId',
   'user_id',
   'userId',
   'organization_id',
@@ -1005,12 +975,12 @@ export function registerLastAdminGuard(
         const link = applyPending(raw, pending, USER_PERMISSION_SET);
         // Revoked outright by the pending write.
         if (!link) continue;
-        // Re-pointed away from `admin_full_access` — the row survives, the
+        // Re-named away from `admin_full_access` — the row survives, the
         // standing does not. Re-tested rather than assumed, because the scan's
-        // own `where` only proved what the grant named BEFORE the write; a
-        // re-pointed id whose name this guard cannot know yet reads as naming
-        // nothing (`simulatedGrantSetName`).
-        if (simulatedGrantSetName(raw, link, pending) !== ADMIN_FULL_ACCESS) continue;
+        // own `where` only proved what the grant named BEFORE the write.
+        // [ADR-0131 D4] The name is the grant's one reference to its set, and
+        // nothing derives it after this guard.
+        if (grantSetNameOf(link) !== ADMIN_FULL_ACCESS) continue;
         // An org-SCOPED grant makes a tenant admin, not the environment's
         // break-glass admin — the same distinction `resolveAuthzContext` draws
         // when it derives `platform_admin` from the unscoped grant only. This

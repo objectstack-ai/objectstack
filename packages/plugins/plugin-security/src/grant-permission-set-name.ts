@@ -2,149 +2,99 @@
 
 /**
  * `sys_user_permission_set.permission_set` — the grant's permission set BY
- * NAME, written by the platform beside `permission_set_id` ([ADR-0131] D4).
+ * NAME ([ADR-0131] D4), and the write-path refusal for a grant naming a set
+ * the security catalog does not hold.
  *
- * ## Why a second column
+ * ## The grant names its set; nothing derives the name
  *
  * ADR-0131 D4 makes every reference to a catalog item a NAME: a permission set
  * has no row id once the catalog lives only in the registry (D3), so a grant
- * must say which set it holds by the set's machine name. The id column is
- * dropped later, after every grant names its set and the names are verified to
- * resolve (D10). Until then the grant carries both, and this module is what
- * keeps them saying the same thing. Rows written before the column existed are
- * rewritten by the backfill stage, never here. The grant readers of
- * `plugin-security` and `plugin-auth`, and the authorization resolver in
- * `@objectstack/core`, key on the name ({@link grantSetNameOf}) and take the
- * set itself from the security catalog (ADR-0131 D3), never from a
- * `sys_permission_set` row.
+ * says which set it holds by the set's machine name, and the set itself is the
+ * security catalog's definition of that name. Every grant writer in this
+ * repository writes the name and nothing else (the organization-admin
+ * reconcile, the platform-admin promotion, self-registration, the verify RLS
+ * persona, Setup's grant picker). D10 orders the id column's removal after
+ * every grant names its set; this is that first step, so `permission_set_id`
+ * is optional, no writer fills it, and no write derives the name from it. The
+ * column and its data go with D10's later stage. Rows written before the name
+ * column existed are named by the one-time backfill
+ * (`grant-permission-set-name-backfill.ts`), never here.
  *
- * ## The invariant: the two columns never disagree
+ * ## What is refused — exactly "the catalog holds no set by this name"
  *
- * The name is DERIVED, never authored: it is the `name` of the
- * `sys_permission_set` row that `permission_set_id` points at. So:
+ * A non-system write that would STORE a `permission_set` value naming no
+ * permission set in the security catalog — read through the reader the
+ * security plugin binds to its engine (`securityCatalogReaderOf`), the one
+ * source the authorization resolver grants a held set through:
  *
- * - **INSERT**, every row: the set row is read by the row's
- *   `permission_set_id` and its `name` is stamped into `permission_set`. A
- *   supplied value equal to that name is kept; any other value refuses the
- *   write.
- * - **UPDATE carrying `permission_set_id`**: the same, against the NEW id — the
- *   name follows the id it is written with. On a predicate (`multi`) update the
- *   name is a function of the payload alone, so every matched row receives the
- *   same key and the same value (the engine's per-row key-set rule holds).
- * - **UPDATE carrying `permission_set` but not `permission_set_id`**: each
- *   matched row's STORED id decides. The value must equal the name the stored
- *   id resolves to, on every matched row, or the write is refused. A cleared
- *   value (`null`, `''`) is not a clear: the derived name is written back, so a
- *   grant can never be left naming nothing while its id resolves.
- * - **UPDATE writing neither column** leaves the name alone. No backfill rides
- *   an unrelated edit — except that a move to another organization clears a
- *   name whose set does not belong to it (below).
+ * - an INSERT, every row (`beforeInsert` dispatches once per row);
+ * - an UPDATE whose payload carries `permission_set` with a value other than
+ *   the one the matched row already stores (an echo is not a new name).
  *
- * The stamp is assigned IN PLACE on the hook payload, so the engine records it
- * as a hook write (`hookWrittenKeys`). That is what lets it survive the
- * engine's update-side static `readonly` strip, which drops a non-system
- * caller's value for this column — including a value the caller echoed and
- * the platform wrote back identically. A middleware stamp would not be
- * recorded, and an echoed id change would then land without its new name.
+ * The predicate is the one `position-catalog-refusal.ts` applies to
+ * `sys_user_position.position`: a DEACTIVATED set is still a set, so a grant
+ * naming it is accepted and stops granting through the activation ledger.
  *
- * ## Who it judges — every writer, system context included
+ * It stands down, deliberately, on:
  *
- * The platform's own grant writers (the organization-admin reconcile, the
- * platform-admin promotion, self-registration, the verify RLS persona) write
- * both columns themselves; this hook re-derives the name for them too and
- * refuses a disagreement, so a writer that names the wrong set fails at its
- * first write instead of landing a grant whose two halves disagree. A writer
- * that omits the name — the data door, a seed dataset, any caller outside this
- * repository — gets it stamped.
- *
- * ## A name never crosses organizations
- *
- * The set row the id points at must be one the grant may name: a row of the
- * grant's OWN organization, or an organization-less row — the grant rule the
- * authorization resolver applies to every stored grant row, asked of the set
- * row, and the rule the backfill applies (so an organization-less grant names
- * only an organization-less set). The grant's organization is the one it is
- * stored with: on an insert, the row's own value, else the organization the
- * driver stamps it with (`organizationTheInsertStores`); on an update, the
- * payload's value when it carries one, else the stored row's.
- *
- * A row the writer can read that the grant may not name — another
- * organization's set, read by a writer whose read is not walled (a tenant-less
- * system writer) — is never named after: a supplied name is refused, from
- * every caller, system included, and no name is stamped, so the grant is
- * stored unnamed and confers nothing through a by-name reader. An update that
- * re-points the grant there, or moves the grant to an organization its set
- * does not belong to, clears the name it held.
- *
- * The one place the two contexts part is an id the catalog read cannot
- * resolve (no row, a row outside the writer's organization, a value that is
- * not an id, or no `sys_permission_set` object in this composition):
- *
- * - a **non-system** write that supplies a name is refused — the name cannot
- *   be shown to agree, and the answer is the same refusal whether the id names
- *   nothing or names a set outside the writer's organization. Supplying no name
- *   leaves the row to the engine's own reference check, which refuses a
- *   dangling lookup from a non-system caller (`reference_not_found`);
- * - a **system** write is left as written: seed replay and boot provisioning
- *   may write a grant before the set row it names exists — the ordering the
- *   engine's reference check also stands down for — and the backfill stage
- *   names what such a write left unnamed.
- *
- * ## The catalog read
- *
- * Through `ctx.api.sudo()`: the writer's own context with `isSystem` set — the
- * `sudo()`-shaped elevation the engine's lookup probe uses — never a bare
- * `{ isSystem: true }`. The elevation is about visibility (RBAC, RLS and FLS
- * do not decide which set an id names); the writer's organization still walls
- * the read, so a set in another organization resolves nothing here for a
- * writer that has one, and the read joins the writer's transaction. A writer
- * with NO organization reads unwalled — which is why the set row's own
- * organization is judged against the grant's (above), and not left to the
- * wall. A read that THROWS is not "no such
- * set": it propagates and the write is refused, because a grant landing
- * without its name is the silent half of a dual write. The refusal never
- * echoes the derived name, so it tells a caller nothing about a set it could
- * not otherwise read.
+ * - every `isSystem` write — seed replay and boot provisioning may write a
+ *   grant before the definition it names is registered, the ordering the
+ *   engine's own lookup refusal stands down for; the platform's own writers
+ *   name built-in sets;
+ * - a value the engine answers itself: `null` or a blank string (`required`),
+ *   and a value longer than the column (`max_length`);
+ * - a composition with no catalog bound to this engine, and a catalog read
+ *   that throws (reported at `warn`): an integrity check that cannot run must
+ *   not invent a rejection — the stance the sibling refusal and the engine's
+ *   lookup probe take. A grant naming nothing the catalog holds confers
+ *   nothing either way.
  *
  * ## The envelope
  *
  * `400 VALIDATION_FAILED` (built by `validationFailure`, the constructor both
  * HTTP doors map) with one `fields[]` entry at `field: 'permission_set'`,
- * `code: 'invalid_value'` — a member of the closed ADR-0114 field catalog, so
- * no new error code.
+ * `code: 'reference_not_found'` — the envelope the sibling assignment's
+ * `position` and every lookup column answer with, so an author meets one
+ * dialect for "this reference names nothing". No new error code (ADR-0112,
+ * ADR-0114).
  *
- * ADR anchors: ADR-0131 D4 (references by name), D10 (the id column is
- * dropped after a verified rewrite).
+ * ## Hooks, not a middleware
+ *
+ * Registered as engine `beforeInsert` / `beforeUpdate` hooks at priority 30:
+ * after the guards that refuse on authority or standing (the identity write
+ * guard at 10, the last-administrator guard at 20), so a write they refuse
+ * costs no catalog read; before default-priority hooks.
+ *
+ * ADR anchors: ADR-0131 D3 (the catalog's one home), D4 (references by name),
+ * D10 (names first, then the id column goes).
  */
 
+import { securityCatalogReaderOf } from '@objectstack/core';
 import type { FieldErrorCode } from '@objectstack/spec/api';
-import { classifyFilterToken, isPlainRecord } from '@objectstack/spec/data';
+import { isPlainRecord } from '@objectstack/spec/data';
 import { validationFailure } from '@objectstack/types';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
-import { organizationTheInsertStores } from './grant-holder-membership-refusal.js';
 
-/** The grant object this module keeps consistent. */
+/** The grant object this module judges. */
 export const GRANT_OBJECT = 'sys_user_permission_set';
-/** The grant's id reference to the catalog row (dropped by ADR-0131 D10). */
+/** The grant's legacy id reference to a catalog row (dropped by ADR-0131 D10; read only by the backfill and the D10 report). */
 export const GRANT_SET_ID_FIELD = 'permission_set_id';
 /** The grant's NAME reference to the permission set (ADR-0131 D4). */
 export const GRANT_SET_NAME_FIELD = 'permission_set';
-/** The catalog the name is derived from. */
+/** The legacy row table the backfill reads an id's name from. */
 export const PERMISSION_SET_CATALOG_OBJECT = 'sys_permission_set';
+/** The security catalog type a `permission_set` value must name an item of. */
+const PERMISSION_SET_CATALOG_TYPE = 'permission';
 /** The `packageId` both hooks register under, so they bind and unbind as one. */
 export const GRANT_SET_NAME_HOOK_PACKAGE = 'plugin-security:grant-permission-set-name';
 
-/**
- * After the guards that refuse a write on authority or standing (the identity
- * write guard at 10, the last-administrator guard at 20), so a write they
- * refuse costs no catalog read; before default-priority hooks (100), so every
- * later hook sees the settled name.
- */
 const HOOK_PRIORITY = 30;
 
 const nameDef = (SysUserPermissionSet as any).fields?.[GRANT_SET_NAME_FIELD] ?? {};
 /** The column's declared label — what the refusal names it by. */
-const NAME_LABEL: string = typeof nameDef.label === 'string' ? nameDef.label : 'Permission Set Name';
+const NAME_LABEL: string = typeof nameDef.label === 'string' ? nameDef.label : 'Permission Set';
+/** The column's declared bound; a longer value is the engine's `max_length` to answer. */
+const NAME_MAX_LENGTH: number = typeof nameDef.maxLength === 'number' ? nameDef.maxLength : 100;
 
 /** One `fields[]` entry of the refusal, typed to the closed ADR-0114 catalog. */
 interface GrantNameFieldError {
@@ -152,74 +102,55 @@ interface GrantNameFieldError {
   code: FieldErrorCode;
   message: string;
   label: string;
-  value: unknown;
-  constraint: { target: string; targetField: string; derivedFrom: string };
+  value: string;
+  constraint: { target: string; targetField: string };
 }
 
 /** The sentence an author reads: the value, the column's contract, the fix. */
-export function grantSetNameMismatchMessage(value: unknown): string {
-  const shown = typeof value === 'string' ? value : safeJson(value);
+export function grantSetNotInCatalogMessage(value: string): string {
   return (
-    `${NAME_LABEL}: '${shown}' is not the name of the permission set ${GRANT_SET_ID_FIELD} points at. ` +
-    `${GRANT_OBJECT}.${GRANT_SET_NAME_FIELD} is written by the platform from ${GRANT_SET_ID_FIELD} — ` +
-    `omit it, or send exactly the name of that permission set.`
+    `${NAME_LABEL}: no permission set is named '${value}'. ${GRANT_OBJECT}.${GRANT_SET_NAME_FIELD} takes the ` +
+    `machine name of a permission set in the security catalog (a package's set, a built-in, or one saved ` +
+    `through the metadata door), never a record id: write the name of an existing permission set, or ` +
+    `declare the set first.`
   );
 }
 
-/** The refusal: `VALIDATION_FAILED` (400 at both HTTP doors), `invalid_value` at `permission_set`. */
-export function grantSetNameMismatchError(value: unknown): Error {
-  const message = grantSetNameMismatchMessage(value);
+/** The refusal: `VALIDATION_FAILED` (400 at both HTTP doors), `reference_not_found` at `permission_set`. */
+export function grantSetNotInCatalogError(value: string): Error {
+  const message = grantSetNotInCatalogMessage(value);
   const entry: GrantNameFieldError = {
     field: GRANT_SET_NAME_FIELD,
-    code: 'invalid_value',
+    code: 'reference_not_found',
     message,
     label: NAME_LABEL,
     value,
-    constraint: {
-      target: PERMISSION_SET_CATALOG_OBJECT,
-      targetField: 'name',
-      derivedFrom: GRANT_SET_ID_FIELD,
-    },
+    constraint: { target: PERMISSION_SET_CATALOG_TYPE, targetField: 'name' },
   };
   return validationFailure(message, [entry]);
 }
 
-function safeJson(value: unknown): string {
-  try {
-    const json = JSON.stringify(value);
-    if (typeof json === 'string') return json;
-  } catch {
-    // fall through to String()
-  }
-  try {
-    return String(value);
-  } catch {
-    return '(unprintable)';
-  }
-}
-
 const hasOwn = (o: object, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k);
 
-/** `null`, `undefined` and a blank string carry no name: they are not a supplied value. */
-function carriesName(value: unknown): boolean {
-  if (value === null || value === undefined) return false;
-  if (typeof value === 'string' && value.trim() === '') return false;
-  return true;
-}
-
 /**
- * The id a `permission_set_id` value reads by, or `undefined` for a value that
- * is not one: only a non-blank string or a finite number names a row, and a
- * placeholder-shaped string (`{…}`) is never an id — in `where` it would be
- * resolved as a filter token rather than compared.
+ * The name a `permission_set` value is judged by, or `undefined` for a value
+ * the engine answers itself (`required`, `max_length`). A non-string is judged
+ * by its string form — the engine's `text` leniency would store it, and it
+ * names no set.
  */
-function idKey(value: unknown): string | undefined {
-  let key: string | undefined;
-  if (typeof value === 'string') key = value;
-  else if (typeof value === 'number' && Number.isFinite(value)) key = String(value);
-  if (key === undefined || key.trim() === '') return undefined;
-  if (classifyFilterToken(key) !== null) return undefined;
-  return key;
+function judgedName(value: unknown): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  let form: string;
+  if (typeof value === 'string') form = value;
+  else {
+    try {
+      form = typeof value === 'object' ? (JSON.stringify(value) ?? String(value)) : String(value);
+    } catch {
+      return undefined;
+    }
+  }
+  if (form.trim() === '' || form.length > NAME_MAX_LENGTH) return undefined;
+  return form;
 }
 
 /**
@@ -232,9 +163,9 @@ function idKey(value: unknown): string | undefined {
  * A grant that names nothing grants nothing through a by-name reader: it is
  * never matched to a set, never shown as held, never counted. A reader whose
  * job is to RESTRICT — a revocation, a refused promotion, a duplicate it must
- * not insert — may still reach such a grant through its id until ADR-0131 C8
- * counts the unnamed grants and drops that column; no reader reaches it
- * through the id to confer anything.
+ * not insert — may still reach such a legacy grant through its id until
+ * ADR-0131 D10 counts the unnamed grants and drops that column; no reader
+ * reaches it through the id to confer anything.
  */
 export function grantSetNameOf(row: unknown): string | undefined {
   if (!row || typeof row !== 'object') return undefined;
@@ -258,15 +189,6 @@ export function grantOrganizationOf(row: unknown): string | null {
   return String(value);
 }
 
-/** The set row an id points at, as far as a grant's name is concerned. */
-interface CatalogRow {
-  name: string;
-  organizationId: string | null;
-}
-
-/** Per-write memo, keyed by the dispatch scope every hook dispatch of one caller write shares. */
-const memoByWrite = new WeakMap<object, Map<string, CatalogRow | undefined>>();
-
 interface GrantNameEngine {
   registerHook?: (
     event: string,
@@ -274,180 +196,68 @@ interface GrantNameEngine {
     options?: { object?: string | string[]; priority?: number; packageId?: string },
   ) => void;
   unregisterHooksByPackage?: (packageId: string) => number;
-  getSchema?: (name: string) => unknown;
 }
 
-/**
- * The `sys_permission_set` row `id` points at — its name and organization — as
- * the WRITER's catalog read sees it, or `undefined` when nothing resolves.
- * Throws when the read itself fails — see the module note.
- */
-async function catalogRowFor(engine: GrantNameEngine, ctx: any, id: unknown): Promise<CatalogRow | undefined> {
-  const key = idKey(id);
-  if (key === undefined) return undefined;
-  // A composition without the catalog object has nothing to derive from — the
-  // stand-down the engine's own lookup probe and the position refusal take.
-  if (typeof engine.getSchema === 'function' && !engine.getSchema(PERMISSION_SET_CATALOG_OBJECT)) return undefined;
+type GrantNameLogger = { warn?: (msg: string, meta?: any) => void } | undefined;
 
-  const scope = ctx?.dispatch?.scope;
-  let memo: Map<string, CatalogRow | undefined> | undefined;
-  if (scope && typeof scope === 'object') {
-    memo = memoByWrite.get(scope);
-    if (!memo) {
-      memo = new Map();
-      memoByWrite.set(scope, memo);
-    }
-    if (memo.has(key)) return memo.get(key);
-  }
-
-  const api = ctx?.api;
-  if (!api || typeof api.sudo !== 'function') {
-    throw new Error(
-      `[security] ${GRANT_OBJECT}.${GRANT_SET_NAME_FIELD} cannot be derived: this hook dispatch carries no ` +
-        `elevatable data api to read ${PERMISSION_SET_CATALOG_OBJECT} with, so the write is refused rather ` +
-        `than landed with a name nobody checked.`,
+/** Refuse `name` when the bound catalog holds no permission set by it (module note). */
+async function assertNameInCatalog(engine: GrantNameEngine, name: string, logger: GrantNameLogger): Promise<void> {
+  const catalog = securityCatalogReaderOf(engine);
+  if (!catalog) return;
+  let held: boolean;
+  try {
+    held = (await catalog.resolve(PERMISSION_SET_CATALOG_TYPE, name)) !== undefined;
+  } catch (e) {
+    logger?.warn?.(
+      `[security] the security catalog could not be read, so a ${GRANT_OBJECT} write was NOT checked for a ` +
+        'permission-set name that resolves to no set — it proceeds unchecked',
+      { object: GRANT_OBJECT, error: (e as Error)?.message ?? String(e) },
     );
-  }
-  const rows = await api
-    .sudo()
-    .object(PERMISSION_SET_CATALOG_OBJECT)
-    .find({ where: { id: key }, fields: ['id', 'name', 'organization_id'], limit: 1 });
-  const row = Array.isArray(rows) ? rows[0] : undefined;
-  const found: CatalogRow | undefined =
-    row && typeof row.name === 'string' && row.name !== ''
-      ? { name: row.name, organizationId: grantOrganizationOf(row) }
-      : undefined;
-  memo?.set(key, found);
-  return found;
-}
-
-/**
- * The grant rule, asked of the set row a grant would name: an
- * organization-less row applies to every grant, a row of an organization only
- * to a grant of that same organization.
- */
-function setRowAppliesToGrant(setOrganizationId: string | null, grantOrganizationId: string | null): boolean {
-  return setOrganizationId === null || setOrganizationId === grantOrganizationId;
-}
-
-/** A stored or written organization value, normalized the way {@link grantOrganizationOf} reads it. */
-function organizationValue(value: unknown): string | null {
-  if (value === null || value === undefined || value === '') return null;
-  return String(value);
-}
-
-/** What the caller supplied for the name column, or `undefined` when it supplied nothing. */
-type Supplied = { value: unknown } | undefined;
-
-/**
- * Settle `permission_set` on one payload: `decidingId` is the id the name must
- * agree with (the payload's own, or the matched row's stored one), `supplied`
- * the caller's own value for the column, `grantOrganizationId` the
- * organization the grant is stored with once the write lands.
- */
-async function settle(
-  engine: GrantNameEngine,
-  ctx: any,
-  data: Record<string, unknown>,
-  decidingId: unknown,
-  supplied: Supplied,
-  grantOrganizationId: string | null,
-): Promise<void> {
-  const suppliedName = supplied !== undefined && carriesName(supplied.value);
-  const row = await catalogRowFor(engine, ctx, decidingId);
-  if (row !== undefined && setRowAppliesToGrant(row.organizationId, grantOrganizationId)) {
-    if (suppliedName && supplied!.value !== row.name) throw grantSetNameMismatchError(supplied!.value);
-    data[GRANT_SET_NAME_FIELD] = row.name;
     return;
   }
-  if (row !== undefined) {
-    // Another organization's set: its name is never carried across. Refused
-    // from every caller when supplied; otherwise the grant is left unnamed.
-    if (suppliedName) throw grantSetNameMismatchError(supplied!.value);
-    data[GRANT_SET_NAME_FIELD] = null;
-    return;
-  }
-  // Unresolvable: a non-system caller's name cannot be shown to agree.
-  if (suppliedName && ctx?.session?.isSystem !== true) throw grantSetNameMismatchError(supplied!.value);
+  if (!held) throw grantSetNotInCatalogError(name);
 }
 
 /** `beforeInsert`: one dispatch per row, handed the caller's row as sent. */
-async function onInsert(engine: GrantNameEngine, ctx: any): Promise<void> {
-  if (ctx?.object !== GRANT_OBJECT) return;
+async function onInsert(engine: GrantNameEngine, ctx: any, logger: GrantNameLogger): Promise<void> {
+  if (ctx?.object !== GRANT_OBJECT || ctx?.session?.isSystem === true) return;
   const data = ctx?.input?.data;
   if (!isPlainRecord(data)) return;
-  const supplied: Supplied = hasOwn(data, GRANT_SET_NAME_FIELD) ? { value: data[GRANT_SET_NAME_FIELD] } : undefined;
-  const schema = typeof engine.getSchema === 'function' ? engine.getSchema(GRANT_OBJECT) : undefined;
-  const organizationId = organizationValue(
-    organizationTheInsertStores(schema ?? SysUserPermissionSet, data, ctx?.input?.options, ctx?.session?.organizationId),
-  );
-  await settle(engine, ctx, data, data[GRANT_SET_ID_FIELD], supplied, organizationId);
+  const name = judgedName(data[GRANT_SET_NAME_FIELD]);
+  if (name !== undefined) await assertNameInCatalog(engine, name, logger);
 }
 
 /**
  * `beforeUpdate`: one dispatch per matched row, `previous` bound on both
- * dispatch paths.
- *
- * The caller's value for this `readonly` column is read from `ctx.submitted`
- * (the submission as sent), never from the payload alone: on a non-system
- * update the engine HIDES a caller's read-only value from the hooks and hands
- * it back after them for its own static strip, which would drop it silently.
- * Judging the submission is what turns that silent drop into this refusal —
- * and a stamp written here is a hook write, so the hand-back leaves it
- * standing.
+ * dispatch paths. A value equal to the stored one is an echo, not a new name;
+ * with no stored row the engine answers (not found).
  */
-async function onUpdate(engine: GrantNameEngine, ctx: any): Promise<void> {
-  if (ctx?.object !== GRANT_OBJECT) return;
+async function onUpdate(engine: GrantNameEngine, ctx: any, logger: GrantNameLogger): Promise<void> {
+  if (ctx?.object !== GRANT_OBJECT || ctx?.session?.isSystem === true) return;
   const data = ctx?.input?.data;
-  if (!isPlainRecord(data)) return;
-  const submitted = isPlainRecord(ctx?.submitted) ? ctx.submitted : undefined;
-  const supplied: Supplied =
-    submitted && hasOwn(submitted, GRANT_SET_NAME_FIELD)
-      ? { value: submitted[GRANT_SET_NAME_FIELD] }
-      : hasOwn(data, GRANT_SET_NAME_FIELD)
-        ? { value: data[GRANT_SET_NAME_FIELD] }
-        : undefined;
+  if (!isPlainRecord(data) || !hasOwn(data, GRANT_SET_NAME_FIELD)) return;
+  const name = judgedName(data[GRANT_SET_NAME_FIELD]);
+  if (name === undefined) return;
   const previous = isPlainRecord(ctx?.previous) ? ctx.previous : undefined;
-  const movesOrganization = hasOwn(data, 'organization_id') || hasOwn(data, 'organizationId');
-  const organizationId = movesOrganization
-    ? organizationValue(hasOwn(data, 'organization_id') ? data.organization_id : data.organizationId)
-    : grantOrganizationOf(previous);
-  if (hasOwn(data, GRANT_SET_ID_FIELD)) {
-    await settle(engine, ctx, data, data[GRANT_SET_ID_FIELD], supplied, organizationId);
-    return;
-  }
-  // No stored row is the engine's to answer (not found), never a name verdict.
-  if (!previous) return;
-  if (supplied !== undefined) {
-    // Judged against the stored id on every matched row, an echo included: the
-    // stamp is then the same key on every row a predicate write matches, which
-    // is what the engine's per-row key-set rule asks of a batch rewrite.
-    await settle(engine, ctx, data, previous[GRANT_SET_ID_FIELD], supplied, organizationId);
-    return;
-  }
-  // A move to another organization keeps the name only while the set it names
-  // still belongs to the grant's organization, or to none. No backfill rides
-  // the move: an unnamed grant stays unnamed, and a name that still applies is
-  // left as stored.
-  if (!movesOrganization || grantSetNameOf(previous) === undefined) return;
-  const row = await catalogRowFor(engine, ctx, previous[GRANT_SET_ID_FIELD]);
-  if (row !== undefined && !setRowAppliesToGrant(row.organizationId, organizationId)) {
-    data[GRANT_SET_NAME_FIELD] = null;
-  }
+  if (previous && judgedName(previous[GRANT_SET_NAME_FIELD]) === name) return;
+  await assertNameInCatalog(engine, name, logger);
 }
 
 /**
  * Bind both hooks on the engine. Returns `false` when the engine exposes no
  * hook registry (a test double), so the caller can say so.
  */
-export function registerGrantPermissionSetNameHooks(engine: GrantNameEngine | null | undefined): boolean {
+export function registerGrantPermissionSetNameHooks(
+  engine: GrantNameEngine | null | undefined,
+  logger?: GrantNameLogger,
+): boolean {
   if (!engine || typeof engine.registerHook !== 'function') return false;
-  engine.registerHook('beforeInsert', (ctx: any) => onInsert(engine, ctx), {
+  engine.registerHook('beforeInsert', (ctx: any) => onInsert(engine, ctx, logger), {
     object: GRANT_OBJECT,
     priority: HOOK_PRIORITY,
     packageId: GRANT_SET_NAME_HOOK_PACKAGE,
   });
-  engine.registerHook('beforeUpdate', (ctx: any) => onUpdate(engine, ctx), {
+  engine.registerHook('beforeUpdate', (ctx: any) => onUpdate(engine, ctx, logger), {
     object: GRANT_OBJECT,
     priority: HOOK_PRIORITY,
     packageId: GRANT_SET_NAME_HOOK_PACKAGE,

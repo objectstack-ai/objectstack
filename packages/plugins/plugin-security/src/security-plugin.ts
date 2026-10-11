@@ -4340,16 +4340,16 @@ export class SecurityPlugin implements Plugin {
     // A user-bound grant scoped to an organization names a member of it: `grant-holder-membership-refusal.ts`.
     registerGrantHolderMembershipRefusal(ql, ctx.logger);
 
-    // [ADR-0131 D4] `sys_user_permission_set.permission_set` names the grant's
-    // set beside `permission_set_id`, and the two never disagree: engine
-    // HOOKS (not a middleware) derive the name from the id on every write, for
-    // every caller, and refuse a supplied name that names another set. A hook
-    // write is what survives the engine's update-side `readonly` strip; see
+    // [ADR-0131 D4] `sys_user_permission_set.permission_set` is the grant's one
+    // reference to its set, by name: a non-system write naming a set the
+    // security catalog does not hold is refused (`400 VALIDATION_FAILED`,
+    // `reference_not_found` at `permission_set`), the sibling of the
+    // `sys_user_position.position` refusal above. Engine hooks; see
     // `grant-permission-set-name.ts`.
-    if (!registerGrantPermissionSetNameHooks(ql)) {
+    if (!registerGrantPermissionSetNameHooks(ql, ctx.logger)) {
       ctx.logger.warn(
-        '[security] the ObjectQL engine exposes no hook registry — sys_user_permission_set.permission_set ' +
-          'is NOT derived from permission_set_id on grant writes that omit it, and a supplied name is not checked',
+        '[security] the ObjectQL engine exposes no hook registry — a sys_user_permission_set write naming a ' +
+          'permission set the security catalog does not hold is NOT refused',
       );
     }
 
