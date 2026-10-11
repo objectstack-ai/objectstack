@@ -15,7 +15,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { runImport, type ImportProtocolLike } from './import-runner';
-import type { ExportFieldMeta } from './import-field-meta.js';
+import { buildFieldMetaMap, type ExportFieldMeta } from './import-field-meta.js';
 
 type FindArgs = Parameters<ImportProtocolLike['findData']>[0];
 
@@ -87,5 +87,36 @@ describe('[#22739] import reference resolution asks the target its declared expo
     expect(summary.results.map(verdict)).toEqual([NOT_FOUND, NOT_FOUND, NOT_FOUND]);
     expect(findData).not.toHaveBeenCalled();
     expect(getMetaItem).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * CONTROL — which fields the import treats as references is unchanged: a field
+ * declaring a `reference` string. A `user` field written without one is NOT
+ * resolved (its raw cell reaches the write, as on `main`), although the spec's
+ * arbiter gives it `sys_user`; adopting that target widens the accept set and
+ * is not this change. A non-reference type declaring `reference` names no target.
+ */
+describe('[#22739] the reference field set stays the declared-reference set', () => {
+  it('a user field without reference passes its cell through unresolved; one declaring it is resolved', async () => {
+    const meta = buildFieldMetaMap({ fields: {
+      owner: { type: 'user', label: 'Owner' },
+      assignee: { type: 'user', label: 'Assignee', reference: 'sys_user' },
+      amount: { type: 'number', label: 'Amount', reference: 'rx_target' },
+    } });
+    expect([meta.get('owner')!.reference, meta.get('assignee')!.reference, meta.get('amount')!.reference]).toEqual([undefined, 'sys_user', undefined]);
+
+    const findData = vi.fn(async (args: FindArgs) => (args.object === 'sys_user' && Object.values(args.query!.where!)[0] === 'Ann' ? [{ id: 'u_ann' }] : []));
+    const getMetaItem = vi.fn(async ({ name }: { type: string; name: string }) => ({ type: 'object', name, item: { name } }));
+    const createData = vi.fn(async (a: { data: Record<string, unknown> }) => ({ id: 'new', ...a.data }));
+    const p: ImportProtocolLike = { findData, getMetaItem, createData, updateData: vi.fn() };
+    const summary = await runImport({
+      p, objectName: 'rx_source', metaMap: meta, writeMode: 'insert', matchFields: [], dryRun: false,
+      runAutomations: false, trimWhitespace: true, createMissingOptions: false, skipBlankMatchKey: false,
+      rows: [{ owner: 'Ann', assignee: 'Ann' }],
+    });
+    expect(summary.results.map(verdict)).toEqual([{ ok: true, code: undefined, field: undefined }]);
+    expect(createData.mock.calls[0]![0].data).toMatchObject({ owner: 'Ann', assignee: 'u_ann' });
+    expect(getMetaItem.mock.calls.map(([r]) => r.name)).toEqual(['sys_user']);
   });
 });
