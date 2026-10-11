@@ -68,6 +68,10 @@ function makeDriver() {
   return driver;
 }
 
+/** Each create the driver saw, as `[object, ran outside any unit]`. */
+const unenrolled = (driver: { creates: Array<{ object: string; transaction: unknown }> }) =>
+  driver.creates.map((c) => [c.object, c.transaction === undefined]);
+
 const obj = (name: string) => ({
   name, label: name, fields: { id: { name: 'id', type: 'text', primaryKey: true }, name: { name: 'name', type: 'text' } },
 });
@@ -125,21 +129,21 @@ describe('#22855 — un-awaited work does not keep a finished unit\'s handle', (
     const { driver, api, lateOutcome } = await makeEngine();
     await api.transaction(async () => { await api.object('rec').insert({ name: 'r1' }); });
     expect(await lateOutcome()).toBe('stored');
-    expect(driver.creates.map((c) => [c.object, c.transaction === undefined])).toEqual([['rec', false], ['note', true]]);
+    expect(unenrolled(driver)).toEqual([['rec', false], ['note', true]]);
   });
 
   it('a caller-opened engine transaction() whose handle the write carries explicitly: the late write is stored', async () => {
     const { engine, driver, lateOutcome } = await makeEngine();
     await engine.transaction(async (trx: any) => { await engine.insert('rec', { name: 'r1' }, { context: { ...trx, isSystem: true } }); });
     expect(await lateOutcome()).toBe('stored');
-    expect(driver.creates.map((c) => [c.object, c.transaction === undefined])).toEqual([['rec', false], ['note', true]]);
+    expect(unenrolled(driver)).toEqual([['rec', false], ['note', true]]);
   });
 
   it('CONTROL no transaction: the late write is stored, unchanged', async () => {
     const { driver, api, lateOutcome } = await makeEngine();
     await api.object('rec').insert({ name: 'r1' });
     expect(await lateOutcome()).toBe('stored');
-    expect(driver.creates.map((c) => [c.object, c.transaction === undefined])).toEqual([['rec', true], ['note', true]]);
+    expect(unenrolled(driver)).toEqual([['rec', true], ['note', true]]);
   });
 
   it('a JOINED unit\'s handle stays live until the OUTER callback settles', async () => {
