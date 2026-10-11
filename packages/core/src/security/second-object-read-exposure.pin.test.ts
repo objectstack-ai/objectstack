@@ -10,10 +10,11 @@
  *
  * The data routes judge the ADDRESSED object. A read that follows a lookup
  * reaches an object nobody addressed: the data door's `$expand` served the row
- * fields of a target every data route refuses, and the dataset door's label
- * passes rendered its display names. Both now ask the target, as does the data
- * door's nested-relation filter condition (#22737; each behaviour-pinned
- * in their own packages and on a real stack in `@objectstack/dogfood`). This
+ * fields of a target every data route refuses, the dataset door's label
+ * passes rendered its display names, the import door matched cells against
+ * it (#22739), and the data door's nested-relation filter condition evaluated
+ * a predicate on it (#22737). Each read classified `decided` below now asks the
+ * target (behaviour-pinned in its own package). This
  * file is the ENUMERATION: it names the census of such reads, holds each
  * decided one to the decision, and goes red when a new one appears without
  * being classified here.
@@ -37,15 +38,10 @@
  * `origin/main` at eae3368a, those are the analytics relationship hop
  * (`service-analytics/src/hop-object.ts` — its target comes from the host's
  * relationship resolver; the analytics door already judges every hop's object
- * for `aggregate` over `queryObjects`); the import door's reference resolution
- * (`core/src/utils/import-runner.ts` `resolveRef`, whose target
- * `import-field-meta.ts` reads off the raw `reference` carrier — measured: a
- * cell's display text is matched against an unexposed target and the matched
- * id is stored, a miss is reported per row; open, carried by a follow-up of
- * #22661); and the reads whose target is a FIXED platform object rather than
- * an authored one (a file field's `sys_file` hydration, the `sys_user` display
- * names the approvals and audit surfaces resolve). They are named here, not
- * held.
+ * for `aggregate` over `queryObjects`); and the reads whose target is a FIXED
+ * platform object rather than an authored one (a file field's `sys_file`
+ * hydration, the `sys_user` display names the approvals and audit surfaces
+ * resolve). They are named here, not held.
  *
  * The scan surface and its prefilter follow `row-serving-door-exposure.pin.test.ts`
  * in this directory: git's authored-file list, never a directory crawl, and `.ts`
@@ -132,6 +128,14 @@ const CALLERS: Record<string, Classification> = {
     decision: { file: 'packages/services/service-analytics/src/api-exposure-door.ts', fn: 'servesLabelTarget' },
     wiring: { file: 'packages/services/service-analytics/src/analytics-service.ts', call: 'servesLabelTarget(' },
     pin: 'packages/services/service-analytics/src/__tests__/dimension-label-exposure.test.ts',
+  },
+  'packages/core/src/utils/import-field-meta.ts': {
+    kind: 'decided',
+    read: "the import door's reference resolution (`resolveRef` matches a cell against the target; the export and template doors read the same map, the export's expansion decided in protocol.ts)",
+    operation: 'list',
+    decision: { file: 'packages/core/src/utils/import-runner.ts', fn: 'servesReferenceTarget' },
+    wiring: { file: 'packages/core/src/utils/import-runner.ts', call: 'servesReferenceTarget(p, referenceObject' },
+    pin: 'packages/core/src/utils/import-runner-reference-exposure.test.ts',
   },
   'packages/objectql/src/relation-filter-lowering.ts': {
     kind: 'decided',
@@ -290,6 +294,7 @@ describe('[#22661] every read that reaches a second object asks that object its 
         'servesExpansionTarget',
         'servesLabelTarget',
         'servesPayloadDisplayTarget',
+        'servesReferenceTarget',
         'servesSummaryTitleTarget',
       ]);
 

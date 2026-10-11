@@ -166,7 +166,7 @@ The one-time table above rots. Make it a **living ledger**: extend the ADR-0054 
 
 - **Not** a permission-model rewrite — the Salesforce-shaped model stays; this is landing verification.
 - **Not** designing the compliance/encryption/masking subsystems (D8 only triages their *status*).
-- **Not** adding RLS-compiler subquery support (ADR-0055 constraint stands; widening uses pre-resolved `rlsMembership`).
+- **Not** adding RLS-compiler subquery support (ADR-0055 constraint stands; widening uses pre-resolved `rlsMembership`). · **Revisited in part** (2026-10-10, [ADR-0139](./0139-engine-internal-semi-join-leaf-readable-parent-ids.md), Proposed): the compiler gains no subquery form; ONE engine-internal, non-authorable leaf is composed by the engine from the compiler's output.
 - **Not** ServiceNow-style per-row ACL scripts, nor client-side enforcement (server is the boundary).
 
 ## Alternatives considered
