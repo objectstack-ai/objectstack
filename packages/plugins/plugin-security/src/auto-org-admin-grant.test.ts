@@ -785,7 +785,7 @@ describe('[ADR-0131 D4] by-name grants; the legacy id reach restricts only', () 
     expect(stub.tables.sys_user_permission_set).toHaveLength(0);
   });
 
-  it('a legacy unnamed grant held by someone who still qualifies is left as it is, and is never read as already holding the set', async () => {
+  it('a legacy unnamed grant the backfill will name stands for the pair: no duplicate is written', async () => {
     const stub = makeStub({
       sys_permission_set: catalogFor('o1'),
       sys_member: [{ id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'owner' }],
@@ -793,11 +793,22 @@ describe('[ADR-0131 D4] by-name grants; the legacy id reach restricts only', () 
         { id: 'ups_pre', user_id: 'u1', organization_id: 'o1', permission_set_id: 'ps_org_admin' },
       ],
     });
-    const res = await reconcileOrgAdminGrant(stub, 'u1', 'o1', WALLED);
-    expect(res.action).toBe('granted');
+    expect(await reconcileOrgAdminGrant(stub, 'u1', 'o1', WALLED)).toEqual({ action: 'noop' });
+    expect(stub.tables.sys_user_permission_set.map((r) => r.id)).toEqual(['ups_pre']);
+  });
+
+  it('a legacy unnamed grant on ANOTHER organization’s copy confers nothing and does not stand for the pair: it is left, and the pair is granted by name', async () => {
+    const stub = makeStub({
+      sys_permission_set: catalogFor('o1', 'o2'),
+      sys_member: [{ id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'owner' }],
+      sys_user_permission_set: [
+        { id: 'ups_cross', user_id: 'u1', organization_id: 'o1', permission_set_id: 'ps_org_admin_o2' },
+      ],
+    });
+    expect((await reconcileOrgAdminGrant(stub, 'u1', 'o1', WALLED)).action).toBe('granted');
     const rows = stub.tables.sys_user_permission_set;
-    expect(rows.find((r) => r.id === 'ups_pre')).toEqual({
-      id: 'ups_pre', user_id: 'u1', organization_id: 'o1', permission_set_id: 'ps_org_admin',
+    expect(rows.find((r) => r.id === 'ups_cross')).toEqual({
+      id: 'ups_cross', user_id: 'u1', organization_id: 'o1', permission_set_id: 'ps_org_admin_o2',
     });
     expect(rows.filter((r) => r.permission_set === 'organization_admin')).toHaveLength(1);
   });
@@ -842,7 +853,7 @@ describe('[ADR-0131 D4] by-name grants; the legacy id reach restricts only', () 
     }
   });
 
-  it('the read ORDER of a grant: no catalog row is read to write it', async () => {
+  it('the read ORDER of a grant: catalog rows are read only for the legacy reach, never to write it', async () => {
     const stub = makeStub({
       sys_permission_set: catalogFor('o1'),
       sys_member: [{ id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'owner' }],
@@ -853,12 +864,15 @@ describe('[ADR-0131 D4] by-name grants; the legacy id reach restricts only', () 
       'sys_permission_set', // superseded-variant legacy ids (revoke reach)
       'sys_user_permission_set', // superseded grants for the pair, by name
       'sys_user_permission_set', // …and the pair's unnamed legacy ones, by every copy's id
+      'sys_permission_set', // legacy ids a grant of this organization may name (duplicate check)
       'sys_user_permission_set', // does the grant already exist, by name
+      'sys_user_permission_set', // …or as a legacy unnamed grant the backfill will name
     ]);
     const grantReads = stub.findCalls.filter((c) => c.object === 'sys_user_permission_set');
     expect(grantReads.map((c) => c.where?.permission_set ?? null)).toEqual([
-      'organization_admin', null, 'organization_admin_no_bypass',
+      'organization_admin', null, 'organization_admin_no_bypass', null,
     ]);
     expect(grantReads[1].where.permission_set_id).toEqual({ $in: ['ps_org_admin', 'ps_org_admin_o1'] });
+    expect(grantReads[3].where.permission_set_id).toEqual({ $in: ['ps_org_admin_nb', 'ps_org_admin_nb_o1'] });
   });
 });

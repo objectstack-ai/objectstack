@@ -54,16 +54,16 @@ export const SysUserPermissionSet = ObjectSchema.create({
 
     // [ADR-0079] The record title (`nameField` above). A formula is computed on
     // read and has no stored column. It reads only this row's own columns —
-    // the two foreign keys, never a field of the looked-up records — and
+    // the user and the set's name, never a field of a looked-up record — and
     // neither is hidden, permission-guarded or masked on this object, so the
-    // title carries nothing the declared read path withholds. `user_id` is
-    // required; `permission_set` is required on every write since grants name
-    // their set (ADR-0131 D4), and a legacy grant the backfill has not named
-    // yet shows its user alone.
+    // title carries nothing the declared read path withholds. Both are
+    // required (the set by name, ADR-0131 D4), so the expression needs no null
+    // guard; a legacy grant the one-time backfill names at boot is the only
+    // row that ever stored the name NULL.
     display_title: Field.formula({
       label: 'Title',
       returnType: 'text',
-      expression: F`record.permission_set != null ? record.user_id + ' → ' + record.permission_set : record.user_id`,
+      expression: F`record.user_id + ' → ' + record.permission_set`,
       description: 'Record title: the user and the permission set assigned to them (computed on read)',
     }),
 

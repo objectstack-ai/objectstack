@@ -344,6 +344,12 @@ async function resolvePermissionSetIdsForName(
   ql: any,
   name: string,
   logger?: MaybeLogger,
+  /**
+   * Keep only the rows a grant of this organization may name — organization-
+   * less, or this organization's own — the rule the one-time backfill names a
+   * legacy grant by. Absent: every copy (the revoke reach).
+   */
+  appliesToOrganization?: string,
 ): Promise<string[]> {
   const limit = ORG_ADMIN_SET_COPY_SCAN_LIMIT;
   const rows = await tryFind(ql, 'sys_permission_set', { name }, limit, logger);
@@ -356,6 +362,7 @@ async function resolvePermissionSetIdsForName(
   }
   const ids: string[] = [];
   for (const row of rows) {
+    if (appliesToOrganization !== undefined && row?.organization_id && row.organization_id !== appliesToOrganization) continue;
     const id = row?.id;
     if (typeof id === 'string' && id.length > 0 && !ids.includes(id)) ids.push(id);
   }
@@ -584,6 +591,10 @@ export async function reconcileOrgAdminGrant(
   // `sys_permission_set` row is read to write it, and none needs to exist.
   // Revoking asks "does the pair hold ANY grant of that name", by name plus the
   // legacy id reach of {@link grantsHoldingName}, which only ever restricts.
+  // The existence check reaches a legacy unnamed grant too — a duplicate it
+  // must not insert — but only one the backfill will name (its set row is
+  // organization-less or this organization's own): a grant it cannot name
+  // confers nothing, and must not stand in for the one written here.
   if (shouldGrant) {
     const missing = await orgAdminSetMissingFromCatalog(ql, grantSetName, logger);
     if (missing) return { action: 'skipped', reason: missing };
@@ -591,7 +602,7 @@ export async function reconcileOrgAdminGrant(
       ql,
       { user_id: userId, organization_id: orgId },
       grantSetName,
-      [],
+      await resolvePermissionSetIdsForName(ql, grantSetName, logger, orgId),
       5,
       logger,
     );
