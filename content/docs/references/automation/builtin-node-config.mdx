@@ -208,8 +208,8 @@ A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expr
 | :--- | :--- | :--- | :--- |
 | **collection** | `string \| any[]` | ✅ | Template/variable resolving to the array to process (an inline array is accepted) |
 | **flowName** | `string` | ✅ | Subflow run for each item — it may pause (e.g. an approval) |
-| **iteratorVariable** | `string` | optional (default: `"item"`) | Variable holding the current item |
-| **indexVariable** | `string` | optional | Optional variable holding the current index |
+| **iteratorVariable** | `string` | optional (default: `"item"`) | Variable holding the current item — a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}` |
+| **indexVariable** | `string` | optional | Optional variable holding the current index — a name without a leading `$` (the `$` names are the flow engine's own) |
 | **itemObject** | `string` | optional | When items are records, the object they belong to (exposes each item as the child's record) |
 | **input** | `Record<string, any>` | optional | Params passed to each item's subflow, keyed by its input variables: each value a CEL value envelope `{ dialect: 'cel', source }` evaluated per item (the item variable is in scope), or a literal written as it is — a `{…}` template token is refused |
 | **outputVariable** | `string` | optional | Each item's subflow output, collected in order — bound to a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}` |
@@ -228,7 +228,7 @@ A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expr
 | **fields** | `{ name: string; label?: string; type?: string; required?: boolean; … }[]` | optional | Input fields collected on this screen |
 | **waitForInput** | `boolean` | optional | Pause to show the screen even with no fields; false forces a server pass-through |
 | **objectName** | `string` | optional | Render this object's full create/edit form instead of a flat field list |
-| **idVariable** | `string` | optional | Object form only: variable bound to the saved record's id |
+| **idVariable** | `string` | optional | Object form only: variable bound to the saved record's id — a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}` |
 | **mode** | `Enum<'create' \| 'edit'>` | optional (default: `"create"`) | Object form only: create (default) or edit; 'edit' needs a recordId to name its target |
 | **recordId** | `string` | optional | Object form only: id of the record to edit (required for mode: 'edit' to be useful) |
 | **defaults** | `Record<string, any>` | optional | Object form only: prefilled values |
@@ -237,7 +237,7 @@ A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expr
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Field name (the flow variable the value binds to) |
+| **name** | `string` | ✅ | Field name (the flow variable the value binds to) — a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}` |
 | **label** | `string` | optional | Display label |
 | **type** | `string` | optional | Input type |
 | **required** | `boolean` | optional | Whether a value is required to submit |
@@ -259,7 +259,7 @@ A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expr
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Field name (the flow variable the value binds to) |
+| **name** | `string` | ✅ | Field name (the flow variable the value binds to) — a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}` |
 | **label** | `string` | optional | Display label |
 | **type** | `string` | optional | Input type |
 | **required** | `boolean` | optional | Whether a value is required to submit |
