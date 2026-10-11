@@ -1951,7 +1951,7 @@ export function renderLevel(result) {
       stdout.push(
         'ℹ️ LEVEL AXIS: NOT MEASURED, and it could not have changed this verdict — no clause-② declaration was ' +
           'readable for this PR, AND there is nothing here a `yes` would have refused: either no changeset grades ' +
-          '`patch` a package whose `packages/**/src/**` this PR moves, or one of the packages it moves is already ' +
+          '`patch` a package whose published source (`src/**`, a packed `bin` target, or a repo file its build copies in) this PR moves, or one of the packages it moves is already ' +
           'graded `minor` or above and carries the level for the PR (#16361). ' +
           '`yes` and `no` reach the same answer on this diff, so this exit 0 is a decided one rather than an unread one (#16776).',
         ...readings,
@@ -1961,7 +1961,7 @@ export function renderLevel(result) {
 
     case 'not-measured-material':
       stderr.push('⛔ LEVEL AXIS: NOT MEASURED, and it is the one reading this PR needed.\n');
-      stderr.push('   The packages this PR moves `packages/**/src/**` of, and the level each is graded:');
+      stderr.push('   The packages whose published source (`src/**`, a packed `bin` target, or a repo file its build copies in) this PR moves, and the level each is graded:');
       stderr.push(...patchLines(result.offenders));
       stderr.push('   ⇒ none of them is graded `minor` or above, so a `yes` here would REFUSE (#16361).\n');
       stderr.push(
@@ -1973,7 +1973,7 @@ export function renderLevel(result) {
           'conclusion for a reading that passed and a reading that never happened, on every surface that reads\n' +
           'conclusions rather than step logs (#16776, and #4690: a reading that cannot fail is indistinguishable from\n' +
           'one that passed). Where the declaration could not have mattered this gate still exits 0 and says so — it is\n' +
-          'refusing HERE because every package this diff moves under `packages/**/src/**` is graded `patch`, which is\n' +
+          'refusing HERE because every package whose published source (`src/**`, a packed `bin` target, or a repo file its build copies in) this diff moves is graded `patch`, which is\n' +
           'exactly the shape a `yes` refuses (#16361).\n' +
           '\n' +
           'DECLARE IT. One line, at the START of a line in the PR BODY (a `- `, `> ` or `**` prefix is read too):\n' +
@@ -1998,7 +1998,7 @@ export function renderLevel(result) {
         errorAnnotation({
           title: 'Check Changeset (level axis): no readable `Clause-②:` declaration, and it is the reading this PR needed',
           message:
-            `Every package this diff moves under \`packages/**/src/**\` is graded \`patch\` (${offenderList(result.offenders)}), ` +
+            `Every package whose published source (\`src/**\`, a packed \`bin\` target, or a repo file its build copies in) this diff moves is graded \`patch\` (${offenderList(result.offenders)}), ` +
             'which is exactly the shape a `yes` refuses (#16361) — so the declaration that was not readable is what ' +
             `decides this verdict.\n${readingsBlock}\n` +
             'DECLARE IT: one line in the PR BODY, bare and at the START of a line of its own — `Clause-②: no` (this PR ' +
@@ -2016,7 +2016,7 @@ export function renderLevel(result) {
 
     case 'clean':
       stdout.push(
-        `✓ LEVEL AXIS: this PR declares clause-② ${declaredValue}, and no package whose \`packages/**/src/**\` it moves is graded \`patch\`.`,
+        `✓ LEVEL AXIS: this PR declares clause-② ${declaredValue}, and no package whose published source (\`src/**\`, a packed \`bin\` target, or a repo file its build copies in) it moves is graded \`patch\`.`,
         ...readings,
         ...unreadableNote,
       );
@@ -2029,7 +2029,7 @@ export function renderLevel(result) {
     // mode the filing card is about, one layer along.
     case 'discharged':
       stdout.push(
-        `✓ LEVEL AXIS: this PR declares clause-② ${declaredValue}, and it grades a package whose \`packages/**/src/**\` ` +
+        `✓ LEVEL AXIS: this PR declares clause-② ${declaredValue}, and it grades a package whose published source (\`src/**\`, a packed \`bin\` target, or a repo file its build copies in) ` +
           `it moves at \`minor\` or above — the declared ${declaredAct} is accounted for:`,
         ...raisedLines(result.raised),
         '',
@@ -2048,10 +2048,10 @@ export function renderLevel(result) {
 
     case 'enforce':
       stderr.push(
-        `⛔ This PR declares clause-② ${declaredValue}, and it grades NO package whose \`packages/**/src/**\` it moves\n` +
+        `⛔ This PR declares clause-② ${declaredValue}, and it grades NO package whose published source (\`src/**\`, a packed \`bin\` target, or a repo file its build copies in) it moves\n` +
           '   at `minor` or above.\n',
       );
-      stderr.push('   The packages this PR moves `packages/**/src/**` of, and the level each is graded:');
+      stderr.push('   The packages whose published source (`src/**`, a packed `bin` target, or a repo file its build copies in) this PR moves, and the level each is graded:');
       stderr.push(...patchLines(result.offenders));
       stderr.push('   ⇒ none of them is graded `minor` or above.\n');
       stderr.push(
