@@ -10,12 +10,12 @@
  * teaching the enumeration the config anchor (#11663 L2) re-priced the
  * refusals mechanically. Two directions, both load-bearing:
  *
- *  - **OBSOLETE where the config anchor stands.** Deleting, renaming or
- *    deactivating the `admin_full_access` `sys_permission_set` row — write
- *    shape (4), which used to un-make every platform admin in one write — no
- *    longer empties a population that contains a config-anchored
- *    administrator, so those writes are PERMITTED there. Same for deleting
- *    the legacy grant row itself.
+ *  - **OBSOLETE where the config anchor stands.** Switching `admin_full_access`
+ *    off in the activation ledger — write shape (4), which un-makes every
+ *    grant-anchored platform admin in one write (ADR-0131 D3) — no longer
+ *    empties a population that contains a config-anchored administrator, so
+ *    those writes are PERMITTED there. Same for deleting the legacy grant row
+ *    itself.
  *  - **KEPT where the grant anchor is load-bearing.** With no declared
  *    administrators (`single` posture under Choice 4A, and P5's honoured
  *    legacy window) the identical writes still take the last administrator
@@ -39,6 +39,20 @@ import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
 import { resetPlatformAdminEmailMemo } from '@objectstack/core';
 
 import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-guard.js';
+import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
+
+/** [ADR-0131 D3, ADR-0126 §4] The activation ledger a permission set is switched off in. */
+const sysMetadataActivation = {
+  name: 'sys_metadata_activation',
+  label: 'Metadata Activation',
+  fields: {
+    id: { name: 'id', type: 'text' as const, primaryKey: true },
+    metadata_type: { name: 'metadata_type', type: 'text' as const },
+    name: { name: 'name', type: 'text' as const },
+    package_id: { name: 'package_id', type: 'text' as const },
+    active: { name: 'active', type: 'boolean' as const },
+  },
+};
 
 const ENV = 'OS_PLATFORM_OWNER_EMAIL';
 const SYSTEM = { context: { isSystem: true } } as const;
@@ -154,17 +168,19 @@ async function boot(): Promise<ObjectQL> {
     true,
   );
   await engine.init();
-  for (const o of [sysUser, sysMember, sysPermissionSet, sysUserPermissionSet]) {
+  for (const o of [sysUser, sysMember, sysPermissionSet, sysUserPermissionSet, sysMetadataActivation]) {
     engine.registry.registerObject(o as never);
   }
   await engine.syncSchemas();
+  // [ADR-0131 D3/D4] The set a grant names is the catalog's definition.
+  bindTestSecurityCatalog(engine, { permissions: [{ name: ADMIN_FULL_ACCESS }] });
   registerLastAdminGuard(engine as unknown as LastAdminGuardEngine, { packageId: 'test.last-admin-guard-re-pricing' });
   return engine;
 }
 
 /**
- * A grant-anchored administrator: verified user + active `admin_full_access`
- * row + an unscoped in-window grant. The pre-re-anchor shape of "the last
+ * A grant-anchored administrator: verified user + the catalog's
+ * `admin_full_access` (bound in `boot`) + an unscoped in-window grant. The pre-re-anchor shape of "the last
  * platform admin".
  */
 async function seedGrantAdmin(engine: ObjectQL, userId = 'usr_grant'): Promise<void> {
@@ -194,39 +210,40 @@ async function findOne(engine: ObjectQL, object: string, id: string): Promise<un
   return engine.findOne(object, { where: { id } }, SYSTEM);
 }
 
+/** The ledger row switching `admin_full_access` off — an insert. */
+const switchOff = (engine: ObjectQL) => engine.insert(
+  'sys_metadata_activation',
+  { id: 'act_admin', metadata_type: 'permission', name: ADMIN_FULL_ACCESS, package_id: 'pkg', active: false },
+  SYSTEM,
+);
+
+/** A ledger row that leaves the set on, for the update spellings to move. */
+const seedLedgerRow = (engine: ObjectQL, id: string, name: string) => engine.insert(
+  'sys_metadata_activation',
+  { id, metadata_type: 'permission', name, package_id: 'pkg', active: true },
+  SYSTEM,
+);
+
 describe('[#11973] OBSOLETE refusals — shape-(4) writes are permitted while a config-anchored administrator stands', () => {
-  it('DELETING the admin_full_access row is permitted, and lands', async () => {
+  it('SWITCHING admin_full_access OFF (a ledger insert) is permitted, and lands', async () => {
     declare(OWNER);
     const engine = await boot();
     await seedConfigAdmin(engine);
-    await seedGrantAdmin(engine); // the row also carries a live grant — still not the last anchor
+    await seedGrantAdmin(engine); // the set also carries a live grant — still not the last anchor
 
-    await expect(
-      engine.delete('sys_permission_set', { where: { id: 'ps_admin' }, ...SYSTEM }),
-    ).resolves.toBeDefined();
-    expect(await findOne(engine, 'sys_permission_set', 'ps_admin')).toBeFalsy();
+    await expect(switchOff(engine)).resolves.toBeDefined();
+    expect(((await findOne(engine, 'sys_metadata_activation', 'act_admin')) as { active?: unknown })?.active).toBeFalsy();
   });
 
-  it('DEACTIVATING it (ADR-0049 spelling) is permitted, and lands', async () => {
+  it('switching its existing row off (a ledger update) is permitted, and lands', async () => {
     declare(OWNER);
     const engine = await boot();
     await seedConfigAdmin(engine);
     await seedGrantAdmin(engine);
+    await seedLedgerRow(engine, 'act_admin', ADMIN_FULL_ACCESS);
 
-    await engine.update('sys_permission_set', { id: 'ps_admin', active: false }, SYSTEM);
-    const row = (await findOne(engine, 'sys_permission_set', 'ps_admin')) as { active?: unknown };
-    expect(row?.active).toBeFalsy();
-  });
-
-  it('RENAMING it is permitted, and lands', async () => {
-    declare(OWNER);
-    const engine = await boot();
-    await seedConfigAdmin(engine);
-    await seedGrantAdmin(engine);
-
-    await engine.update('sys_permission_set', { id: 'ps_admin', name: 'renamed_away' }, SYSTEM);
-    const row = (await findOne(engine, 'sys_permission_set', 'ps_admin')) as { name?: unknown };
-    expect(row?.name).toBe('renamed_away');
+    await engine.update('sys_metadata_activation', { id: 'act_admin', active: false }, SYSTEM);
+    expect(((await findOne(engine, 'sys_metadata_activation', 'act_admin')) as { active?: unknown })?.active).toBeFalsy();
   });
 
   it('deleting the LAST legacy grant row is permitted, and lands', async () => {
@@ -243,36 +260,36 @@ describe('[#11973] OBSOLETE refusals — shape-(4) writes are permitted while a 
 });
 
 describe('[#11973] KEPT refusals — the same writes still refuse where the grant anchor is load-bearing (Choice 4A / P5)', () => {
-  it('with NO declared administrators, deleting the admin_full_access row is still refused', async () => {
+  it('with NO declared administrators, switching admin_full_access off is still refused', async () => {
     const engine = await boot(); // ENV cleared in beforeEach — the `single` shape
     await seedGrantAdmin(engine);
 
-    await expect(
-      engine.delete('sys_permission_set', { where: { id: 'ps_admin' }, ...SYSTEM }),
-    ).rejects.toThrow(/administrator/i);
-    expect(await findOne(engine, 'sys_permission_set', 'ps_admin')).toBeTruthy();
+    await expect(switchOff(engine)).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(await findOne(engine, 'sys_metadata_activation', 'act_admin')).toBeFalsy();
   });
 
-  it('…deactivating it is still refused', async () => {
+  it('…switching its existing row off is still refused', async () => {
     const engine = await boot();
     await seedGrantAdmin(engine);
+    await seedLedgerRow(engine, 'act_admin', ADMIN_FULL_ACCESS);
 
     await expect(
-      engine.update('sys_permission_set', { id: 'ps_admin', active: false }, SYSTEM),
-    ).rejects.toThrow(/administrator/i);
-    const row = (await findOne(engine, 'sys_permission_set', 'ps_admin')) as { active?: unknown };
-    expect(row?.active).toBeTruthy();
+      engine.update('sys_metadata_activation', { id: 'act_admin', active: false }, SYSTEM),
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403, object: 'sys_metadata_activation' });
+    expect(((await findOne(engine, 'sys_metadata_activation', 'act_admin')) as { active?: unknown })?.active).toBeTruthy();
   });
 
-  it('…renaming it is still refused', async () => {
+  it('…moving another ledger row ONTO admin_full_access, switched off, is still refused', async () => {
+    // The row the write addresses names another set before the write; the
+    // simulation re-tests it as it would read after.
     const engine = await boot();
     await seedGrantAdmin(engine);
+    await seedLedgerRow(engine, 'act_other', 'crm_full');
 
     await expect(
-      engine.update('sys_permission_set', { id: 'ps_admin', name: 'renamed_away' }, SYSTEM),
-    ).rejects.toThrow(/administrator/i);
-    const row = (await findOne(engine, 'sys_permission_set', 'ps_admin')) as { name?: unknown };
-    expect(row?.name).toBe(ADMIN_FULL_ACCESS);
+      engine.update('sys_metadata_activation', { id: 'act_other', name: ADMIN_FULL_ACCESS, active: false }, SYSTEM),
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(((await findOne(engine, 'sys_metadata_activation', 'act_other')) as { name?: unknown })?.name).toBe('crm_full');
   });
 
   it('…deleting the last grant row is still refused', async () => {
@@ -297,8 +314,26 @@ describe('[#11973] KEPT refusals — the same writes still refuse where the gran
     );
     await seedGrantAdmin(engine);
 
+    await expect(switchOff(engine)).rejects.toThrow(/administrator/i);
+  });
+});
+
+describe('[ADR-0131 D3] the sys_permission_set ROW is no standing input — writing it is not judged', () => {
+  it('with the grant anchor load-bearing, deleting, renaming or deactivating the row still lands', async () => {
+    // The resolver reads the set from the catalog and its switch from the
+    // ledger, never the row; so no row write moves an administrator.
+    const engine = await boot();
+    await seedGrantAdmin(engine);
+
+    await engine.update('sys_permission_set', { id: 'ps_admin', active: false }, SYSTEM);
+    await engine.update('sys_permission_set', { id: 'ps_admin', name: 'renamed_away' }, SYSTEM);
     await expect(
       engine.delete('sys_permission_set', { where: { id: 'ps_admin' }, ...SYSTEM }),
+    ).resolves.toBeDefined();
+    expect(await findOne(engine, 'sys_permission_set', 'ps_admin')).toBeFalsy();
+    // …and the administrator it never anchored is still protected.
+    await expect(
+      engine.delete('sys_user_permission_set', { where: { id: 'ups_admin' }, ...SYSTEM }),
     ).rejects.toThrow(/administrator/i);
   });
 });

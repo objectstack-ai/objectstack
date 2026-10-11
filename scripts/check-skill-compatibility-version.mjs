@@ -1,10 +1,13 @@
 #!/usr/bin/env node
-// check-skill-compatibility-version — reconciles the `compatibility:` line of every
-// published SKILL.md against the workspace's real package versions (#5331).
+// check-skill-compatibility-version — reconciles the `compatibility:` line and the
+// `metadata.version` stamp of every published SKILL.md against the workspace's real
+// package versions (#5331), and `--fix` writes both from those versions.
 //
 // WHY THIS EXISTS. `compatibility` is a skill's only self-declared applicability
-// range, and it ships to third parties verbatim via `npx skills add
-// objectstack-ai/objectstack/skills`. Nothing compared it to reality, so it drifted
+// range, and it ships to third parties verbatim: inside the `@objectstack/skills`
+// package (the catalog, published in the changeset `fixed` group at the version of
+// everything it teaches) and, as the `next` channel, from the repository's `main`
+// via `npx skills add objectstack-ai/objectstack/skills`. Nothing compared it to reality, so it drifted
 // a whole major: while the repo was on `@objectstack/spec@17.0.0-rc.2` — a major
 // whose headline is REMOVAL (seven `App` keys, 31 `DriverCapabilities` bits,
 // `restServer.openApi31`, the plugin-runtime family, all tombstones or TS2305) —
@@ -49,6 +52,23 @@
 // exempt files' pins, if they ever grow any, are reconciled like everyone else's.
 // This is the difference between "we thought about this file" and a silent hole.
 //
+// DERIVED, NOT HAND-KEPT. The catalog is bound to the version line it ships in,
+// so the two version-shaped lines of a SKILL.md frontmatter are no longer typed by
+// an author: `--fix` rewrites every `@objectstack/<pkg> <major>.x` pin to that
+// package's workspace major and `metadata.version` to CATALOG_VERSION_PACKAGE's
+// workspace version, and the root `version` script runs it right after
+// `changeset version`, the way `sync-protocol-version.mjs` and
+// `sync-template-versions.mjs` keep their stamps current — so a Version Packages
+// PR carries the restamped frontmatters and `main` never sits red here between a
+// bump and a hand edit. The default mode stays a pure CHECK: it reads, compares,
+// and never writes; the `--fix` leg is the only writer, and it is spelled in every
+// prescription below instead of "edit the line".
+//
+// Why `@objectstack/spec` is the version read and not `@objectstack/skills`: every
+// published skill's `compatibility:` cites the spec, and the fixed group holds the
+// two at one version, so reading the anchor that is always in the checkout says the
+// same thing and keeps this gate green in a tree that predates the catalog package.
+//
 // LAYERING — why a root script and not `pnpm --filter @objectstack/spec`: same
 // reason as its neighbour check:skill-frame-sync. The spec package's skill gates are
 // GENERATORS whose source is packages/spec/src and whose output is in its
@@ -58,7 +78,9 @@
 // gates over prose live in root scripts/ (check:role-word, check:doc-authoring,
 // check:nul-bytes all scan skills/ from here).
 //
-//   node scripts/check-skill-compatibility-version.mjs [--self-test]
+//   node scripts/check-skill-compatibility-version.mjs              # check
+//   node scripts/check-skill-compatibility-version.mjs --fix        # derive both lines, then check
+//   node scripts/check-skill-compatibility-version.mjs --self-test
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -145,6 +167,19 @@ const PIN_RE = /@objectstack\/([a-z0-9][a-z0-9-]*)\s+(\d+)\.x/g;
 const MENTION_RE = /@objectstack\/([a-z0-9][a-z0-9-]*)/g;
 
 /**
+ * The workspace package whose version every `metadata.version` stamp is derived
+ * from: the fixed group's anchor, cited by every published skill's
+ * `compatibility:` line. `@objectstack/skills`, the package the catalog ships
+ * in, carries the identical version by the changeset `fixed` group
+ * (`scripts/check-changeset-fixed.mjs` holds the membership), so the stamp IS the
+ * catalog package's version — read off the one manifest every checkout has.
+ */
+const CATALOG_VERSION_PACKAGE = '@objectstack/spec';
+
+/** The one writer of the derived lines, spelled once for every prescription. */
+const FIX_COMMAND = 'node scripts/check-skill-compatibility-version.mjs --fix';
+
+/**
  * Files allowed to declare no pinned major.
  *
  * `rationale` is not decoration — it is re-matched against the live `compatibility:`
@@ -215,6 +250,101 @@ export function extractCompatibility(text) {
   return { ok: true, value: inline };
 }
 
+/**
+ * Extract `metadata.version` from YAML frontmatter: the `version:` scalar nested
+ * under the `metadata:` map, quoted or bare. Same contract as above — a miss is
+ * reported as a miss, never as an empty value.
+ */
+export function extractMetadataVersion(text) {
+  const lines = text.split('\n');
+  if (lines[0]?.trim() !== '---') {
+    return { ok: false, reason: 'no YAML frontmatter (file does not start with `---`)' };
+  }
+  const end = lines.findIndex((l, i) => i > 0 && l.trim() === '---');
+  if (end === -1) {
+    return { ok: false, reason: 'frontmatter is not terminated by a closing `---`' };
+  }
+  const body = lines.slice(1, end);
+  const metaIdx = body.findIndex((l) => /^metadata:\s*$/.test(l));
+  if (metaIdx === -1) {
+    return { ok: false, reason: 'frontmatter has no `metadata:` map' };
+  }
+  for (let i = metaIdx + 1; i < body.length; i += 1) {
+    const line = body[i];
+    if (line.trim() === '') continue;
+    if (!/^\s/.test(line)) break; // dedented to column 0 → next top-level key
+    const m = /^\s+version:\s*(.*)$/.exec(line);
+    if (!m) continue;
+    const value = m[1].trim().replace(/^(['"])(.*)\1$/, '$2');
+    if (value === '') return { ok: false, reason: '`metadata.version` is present but empty' };
+    return { ok: true, value };
+  }
+  return { ok: false, reason: 'frontmatter `metadata:` map has no `version:` key' };
+}
+
+/**
+ * The `--fix` derivation, pure: rewrite the frontmatter's version-shaped lines
+ * from the workspace manifests and leave every other byte alone.
+ *
+ *   - every `@objectstack/<pkg> <major>.x` pin in `compatibility:` (inline or
+ *     block scalar) becomes that package's CURRENT workspace major; a pin naming
+ *     a package the workspace does not have is left for the check to refuse;
+ *   - `metadata.version` becomes CATALOG_VERSION_PACKAGE's workspace version,
+ *     double-quoted (the catalog's own spelling).
+ *
+ * Structure is never invented: a file with no `metadata.version` or no
+ * `compatibility:` line comes back unchanged, and the check names it.
+ *
+ * @returns {{ text: string, changes: string[] }}
+ */
+export function deriveFrontmatter(text, pkgs) {
+  const lines = text.split('\n');
+  const changes = [];
+  if (lines[0]?.trim() !== '---') return { text, changes };
+  const end = lines.findIndex((l, i) => i > 0 && l.trim() === '---');
+  if (end === -1) return { text, changes };
+
+  const repin = (line) =>
+    line.replace(PIN_RE, (whole, pkg, major) => {
+      const actual = pkgs.get(`@objectstack/${pkg}`);
+      const actualMajor = actual ? majorOf(actual.version) : null;
+      if (actualMajor === null || actualMajor === Number(major)) return whole;
+      changes.push(`@objectstack/${pkg} ${major}.x → ${actualMajor}.x`);
+      return `@objectstack/${pkg} ${actualMajor}.x`;
+    });
+
+  const compatIdx = lines.findIndex((l, i) => i > 0 && i < end && /^compatibility:/.test(l));
+  if (compatIdx !== -1) {
+    lines[compatIdx] = repin(lines[compatIdx]);
+    if (/^compatibility:\s*[>|][+-]?\s*$/.test(lines[compatIdx])) {
+      for (let i = compatIdx + 1; i < end; i += 1) {
+        if (lines[i].trim() === '') continue;
+        if (!/^\s/.test(lines[i])) break;
+        lines[i] = repin(lines[i]);
+      }
+    }
+  }
+
+  const anchor = pkgs.get(CATALOG_VERSION_PACKAGE);
+  const metaIdx = lines.findIndex((l, i) => i > 0 && i < end && /^metadata:\s*$/.test(l));
+  if (anchor && metaIdx !== -1) {
+    for (let i = metaIdx + 1; i < end; i += 1) {
+      if (lines[i].trim() === '') continue;
+      if (!/^\s/.test(lines[i])) break;
+      const m = /^(\s+version:\s*)(.*)$/.exec(lines[i]);
+      if (!m) continue;
+      const current = m[2].trim().replace(/^(['"])(.*)\1$/, '$2');
+      const next = `${m[1]}"${anchor.version}"`;
+      if (lines[i] !== next) {
+        changes.push(`metadata.version ${JSON.stringify(current)} → ${JSON.stringify(anchor.version)}`);
+        lines[i] = next;
+      }
+      break;
+    }
+  }
+  return { text: lines.join('\n'), changes };
+}
+
 // ---------------------------------------------------------------------------
 // Checks (pure — the self-test drives these with in-memory inputs)
 // ---------------------------------------------------------------------------
@@ -252,6 +382,16 @@ export function runAllChecks(files, pkgs, exempt = EXEMPT) {
     return { problems, results, pinCount };
   }
 
+  const anchor = pkgs.get(CATALOG_VERSION_PACKAGE);
+  if (!anchor) {
+    problems.push(
+      `no workspace package is named ${CATALOG_VERSION_PACKAGE}.\n` +
+      `    Every skill's \`metadata.version\` is derived from its version (the fixed group's), so ` +
+      `without it there is\n    nothing to derive from and nothing to reconcile against (#4690).`,
+    );
+    return { problems, results, pinCount };
+  }
+
   const exemptByFile = new Map(exempt.map((e) => [e.file, e]));
 
   // ---- stale-exemption sweep: an exemption for a file that is not scanned is ----
@@ -269,6 +409,28 @@ export function runAllChecks(files, pkgs, exempt = EXEMPT) {
   }
 
   for (const { file, text } of files) {
+    // ---- the derived stamp: metadata.version IS the catalog version. Checked
+    // first and independently of the compatibility line, so a file failing one
+    // still reports the other.
+    const stamp = extractMetadataVersion(text);
+    if (!stamp.ok) {
+      problems.push(
+        `${file}\n` +
+        `    cannot read \`metadata.version\`: ${stamp.reason}\n` +
+        `    Every published skill carries the catalog's version there — it is derived from ` +
+        `${CATALOG_VERSION_PACKAGE}'s\n    workspace version (the fixed group's), never typed.\n` +
+        `    fix: add a \`version:\` line under \`metadata:\`, then run \`${FIX_COMMAND}\` to stamp it.`,
+      );
+    } else if (stamp.value !== anchor.version) {
+      problems.push(
+        `${file}\n` +
+        `    declared: metadata.version "${stamp.value}"\n` +
+        `    actual:   ${CATALOG_VERSION_PACKAGE} ${anchor.version}   (${anchor.file})\n` +
+        `    fix: run \`${FIX_COMMAND}\` — the stamp is derived from the workspace version, never hand-edited ` +
+        `(the root\n         \`version\` script re-stamps it after every \`changeset version\`).`,
+      );
+    }
+
     const got = extractCompatibility(text);
     if (!got.ok) {
       problems.push(
@@ -314,7 +476,8 @@ export function runAllChecks(files, pkgs, exempt = EXEMPT) {
           `${file}\n` +
           `    declared: ${pin.pkg} ${pin.major}.x   (frontmatter \`compatibility:\`)\n` +
           `    actual:   ${pin.pkg} ${actual.version}  → major ${actualMajor}   (${actual.file})\n` +
-          `    fix: edit the \`compatibility:\` line to read "${pin.pkg} ${actualMajor}.x".\n` +
+          `    fix: run \`${FIX_COMMAND}\` — it rewrites the pin to "${pin.pkg} ${actualMajor}.x"; ` +
+          `the line is derived\n         from the workspace version, never hand-edited.\n` +
           `    This is the drift #5245 found by hand: skills taught ${actualMajor} while ` +
           `declaring ${pin.major}.`,
         );
@@ -462,8 +625,9 @@ function report(problems) {
     `\n✗ check-skill-compatibility-version: ${problems.length} problem(s).\n\n` +
     problems.map((p) => `  • ${p}`).join('\n\n') +
     `\n\n  The \`compatibility:\` line is a skill's only self-declared applicability range, ` +
-    `and it ships\n  verbatim to third parties via \`npx skills add ` +
-    `objectstack-ai/objectstack/skills\`. See #5331 / #5245.\n`,
+    `and it ships\n  verbatim to third parties inside \`@objectstack/skills\` (and from \`main\` as the ` +
+    `\`next\` channel). Both it and\n  \`metadata.version\` are derived: \`${FIX_COMMAND}\` writes them. ` +
+    `See #5331 / #5245.\n`,
   );
 }
 
@@ -525,6 +689,15 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'multi-package line, both pinned correctly → GREEN': 1,
   'wording reflowed around a correct pin → stays GREEN': 1,
   'a prerelease major still reconciles by major (17.0.0-rc.5 ↔ 17.x) → GREEN': 1,
+  'R9 — a stale metadata.version (17.0.0-rc.4 beside spec 17.0.0-rc.5) → RED naming file/declared/actual/fix': 1,
+  'R10 — no metadata.version at all → RED (the stamp is required, never skipped)': 1,
+  'R11 — the exempt file is stamped too: an unpinned skill with a stale metadata.version → RED': 1,
+  'R12 — the catalog version package absent from the workspace → RED, never a silent "nothing to derive"': 1,
+  '--fix derives both lines: a stale pin and a stale stamp rewritten, every other byte kept': 1,
+  '--fix on a derived file is a no-op (byte-identical, zero changes)': 1,
+  '--fix rewrites a pin inside a folded `compatibility: >` block too': 1,
+  '--fix invents no structure: a file with no metadata.version comes back unchanged, and the check names it': 1,
+  '--fix leaves a pin naming a package the workspace lacks alone, for the check to refuse': 1,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -533,7 +706,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // the literal above, so the roster falls below this number; the table
 // cross-check in the floor block is the other half, and names WHICH label
 // collided.
-const SELF_TEST_BATTERY_FLOOR = 18;
+const SELF_TEST_BATTERY_FLOOR = 27;
 
 function selfTest() {
   console.log('check-skill-compatibility-version self-test\n');
@@ -544,7 +717,8 @@ function selfTest() {
     ['@objectstack/formula', { version: '17.0.0-rc.5', file: 'packages/formula/package.json' }],
   ]);
 
-  const fm = (compat) => `---\nname: x\nlicense: Apache-2.0\n${compat}\nmetadata:\n  author: objectstack-ai\n---\n\n# body\n`;
+  const fm = (compat, version = '17.0.0-rc.5') =>
+    `---\nname: x\nlicense: Apache-2.0\n${compat}\nmetadata:\n  author: objectstack-ai\n  version: "${version}"\n---\n\n# body\n`;
   const ok = (n = 'skills/objectstack-ai/SKILL.md') => ({
     file: n, text: fm('compatibility: Requires @objectstack/spec 17.x (Zod v4 schemas)'),
   });
@@ -567,7 +741,7 @@ function selfTest() {
         /skills\/objectstack-ai\/SKILL\.md/,
         /declared: @objectstack\/spec 16\.x/,
         /actual:\s+@objectstack\/spec 17\.0\.0-rc\.5/,
-        /fix: edit the `compatibility:` line to read "@objectstack\/spec 17\.x"/,
+        /fix: run `node scripts\/check-skill-compatibility-version\.mjs --fix` — it rewrites the pin to "@objectstack\/spec 17\.x"/,
       ],
     },
     {
@@ -691,6 +865,45 @@ function selfTest() {
       files: [ok(), exemptUpgrade],
       expect: 'green',
     },
+    {
+      label: 'R9 — a stale metadata.version (17.0.0-rc.4 beside spec 17.0.0-rc.5) → RED naming file/declared/actual/fix',
+      files: [
+        { file: 'skills/objectstack-ai/SKILL.md', text: fm('compatibility: Requires @objectstack/spec 17.x (Zod v4 schemas)', '17.0.0-rc.4') },
+        exemptUpgrade,
+      ],
+      expect: 'red',
+      wants: [
+        /skills\/objectstack-ai\/SKILL\.md/,
+        /declared: metadata\.version "17\.0\.0-rc\.4"/,
+        /actual:\s+@objectstack\/spec 17\.0\.0-rc\.5/,
+        /fix: run `node scripts\/check-skill-compatibility-version\.mjs --fix`/,
+      ],
+    },
+    {
+      label: 'R10 — no metadata.version at all → RED (the stamp is required, never skipped)',
+      files: [
+        { file: 'skills/objectstack-ai/SKILL.md', text: '---\nname: x\ncompatibility: Requires @objectstack/spec 17.x (Zod v4 schemas)\nmetadata:\n  author: objectstack-ai\n---\n\n# body\n' },
+        exemptUpgrade,
+      ],
+      expect: 'red',
+      wants: [/cannot read `metadata\.version`: frontmatter `metadata:` map has no `version:` key/],
+    },
+    {
+      label: 'R11 — the exempt file is stamped too: an unpinned skill with a stale metadata.version → RED',
+      files: [
+        ok(),
+        { file: 'skills/objectstack-upgrade/SKILL.md', text: fm('compatibility: >\n  Needs `@objectstack/spec` and `@objectstack/cli` at the TARGET major\n  (protocol 10 at the time of writing).', '16.0.0') },
+      ],
+      expect: 'red',
+      wants: [/skills\/objectstack-upgrade\/SKILL\.md\n    declared: metadata\.version "16\.0\.0"/],
+    },
+    {
+      label: 'R12 — the catalog version package absent from the workspace → RED, never a silent "nothing to derive"',
+      files: [ok(), exemptUpgrade],
+      pkgs: new Map([['@objectstack/core', { version: '17.0.0-rc.5', file: 'packages/core/package.json' }]]),
+      expect: 'red',
+      wants: [/no workspace package is named @objectstack\/spec/],
+    },
   ];
 
   // The ledger this self-test's floor is evaluated against (#13489).
@@ -730,6 +943,70 @@ function selfTest() {
       continue;
     }
     console.log(`  ✓ ${c.label}`);
+  }
+
+  // ── The --fix derivation, pure (#5331 → ruling A on the catalog's binding) ──
+  //
+  // Driven through `deriveFrontmatter` with the same fixture packages; each row
+  // registers before it asserts, like the table above.
+  const derivationCases = [
+    {
+      label: '--fix derives both lines: a stale pin and a stale stamp rewritten, every other byte kept',
+      run: () => {
+        const before = fm('compatibility: Requires @objectstack/spec 16.x and @objectstack/core 16.x (Zod v4 schemas), Node 22+', '16.2.0');
+        const { text, changes } = deriveFrontmatter(before, PKGS);
+        const expected = fm('compatibility: Requires @objectstack/spec 17.x and @objectstack/core 17.x (Zod v4 schemas), Node 22+');
+        if (text !== expected) throw new Error(`derived text differs:\n${text}`);
+        if (changes.length !== 3) throw new Error(`expected 3 changes, got ${JSON.stringify(changes)}`);
+        if (runAllChecks([{ file: 'skills/objectstack-ai/SKILL.md', text }, exemptUpgrade], PKGS, EXEMPT).problems.length !== 0) {
+          throw new Error('the derived file does not pass the check it was derived for');
+        }
+      },
+    },
+    {
+      label: '--fix on a derived file is a no-op (byte-identical, zero changes)',
+      run: () => {
+        const { text, changes } = deriveFrontmatter(ok().text, PKGS);
+        if (text !== ok().text || changes.length !== 0) throw new Error(`moved: ${JSON.stringify(changes)}`);
+      },
+    },
+    {
+      label: '--fix rewrites a pin inside a folded `compatibility: >` block too',
+      run: () => {
+        const before = fm('compatibility: >\n  Requires @objectstack/spec 16.x\n  (Zod v4 schemas)');
+        const { text, changes } = deriveFrontmatter(before, PKGS);
+        if (!text.includes('  Requires @objectstack/spec 17.x\n')) throw new Error(`block pin not rewritten:\n${text}`);
+        if (changes.length !== 1) throw new Error(`expected 1 change, got ${JSON.stringify(changes)}`);
+      },
+    },
+    {
+      label: '--fix invents no structure: a file with no metadata.version comes back unchanged, and the check names it',
+      run: () => {
+        const before = '---\nname: x\ncompatibility: Requires @objectstack/spec 17.x (Zod v4 schemas)\nmetadata:\n  author: objectstack-ai\n---\n\n# body\n';
+        const { text, changes } = deriveFrontmatter(before, PKGS);
+        if (text !== before || changes.length !== 0) throw new Error('structure was invented');
+        const { problems } = runAllChecks([{ file: 'skills/objectstack-ai/SKILL.md', text }, exemptUpgrade], PKGS, EXEMPT);
+        if (!problems.some((p) => /has no `version:` key/.test(p))) throw new Error('the check did not name the missing stamp');
+      },
+    },
+    {
+      label: '--fix leaves a pin naming a package the workspace lacks alone, for the check to refuse',
+      run: () => {
+        const before = fm('compatibility: Requires @objectstack/nonesuch 16.x');
+        const { text, changes } = deriveFrontmatter(before, PKGS);
+        if (text !== before || changes.length !== 0) throw new Error('an unknown package was rewritten');
+      },
+    },
+  ];
+  for (const c of derivationCases) {
+    registerCase(c.label);
+    try {
+      c.run();
+      console.log(`  ✓ ${c.label}`);
+    } catch (err) {
+      failed += 1;
+      console.error(`  ✗ ${c.label}\n      ${err.message}`);
+    }
   }
 
   // Discovery-level assertions. These cannot be driven through runAllChecks (they
@@ -832,7 +1109,7 @@ function selfTest() {
         `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
     );
   }
-  const rowLabels = cases.map((c) => c.label);
+  const rowLabels = [...cases, ...derivationCases].map((c) => c.label);
   const duplicated = [...new Set(rowLabels.filter((name, i) => rowLabels.indexOf(name) !== i))];
   if (duplicated.length > 0) {
     floorBreached = true;
@@ -873,7 +1150,7 @@ function selfTest() {
     console.error(`\n✗ check-skill-compatibility-version self-test: ${failed} failure(s) (cases and floor).`);
     process.exit(1);
   }
-  console.log(`\n✓ check-skill-compatibility-version self-test: ${cases.length} cases pass, plus ${declCases} dispatch-gates declaration cases.`);
+  console.log(`\n✓ check-skill-compatibility-version self-test: ${cases.length} check cases and ${derivationCases.length} --fix derivation cases pass, plus ${declCases} dispatch-gates declaration cases.`);
   selfTestReachedVerdict = true;
 }
 
@@ -893,8 +1170,28 @@ function main() {
       return selfTestCode;
   }
 
-  const { files, problems: layout } = readSkillFiles();
+  const { files: scanned, problems: layout } = readSkillFiles();
   const pkgs = readWorkspacePackages();
+
+  // --fix: derive the two version-shaped lines from the workspace manifests,
+  // write only the files that moved, then CHECK the result like any other run —
+  // a derivation that leaves a file red (no stamp to rewrite, a pin naming no
+  // package) is reported, never papered over.
+  const files = process.argv.includes('--fix')
+    ? scanned.map(({ file, text }) => {
+        const { text: next, changes } = deriveFrontmatter(text, pkgs);
+        if (next !== text) {
+          writeFileSync(join(REPO_ROOT, file), next);
+          console.log(`✎ ${file}: ${changes.join('; ')}`);
+        }
+        return { file, text: next };
+      })
+    : scanned;
+  if (process.argv.includes('--fix')) {
+    const moved = files.filter((f, i) => f.text !== scanned[i].text).length;
+    console.log(`check-skill-compatibility-version --fix: ${moved} of ${files.length} SKILL.md file(s) rewritten.\n`);
+  }
+
   const { problems, results, pinCount } = runAllChecks(files, pkgs, EXEMPT);
 
   const all = [...layout, ...problems];
@@ -904,11 +1201,13 @@ function main() {
   }
 
   const exemptCount = results.filter((r) => r.exempt).length;
-  const specMajor = majorOf(pkgs.get('@objectstack/spec')?.version);
+  const anchor = pkgs.get(CATALOG_VERSION_PACKAGE);
   console.log(
     `✓ check-skill-compatibility-version: ${results.length} SKILL.md file(s) reconciled against ` +
     `${pkgs.size} workspace packages\n` +
-    `  ${pinCount} pinned major(s) all match the workspace (@objectstack/spec is ${specMajor}.x)\n` +
+    `  ${pinCount} pinned major(s) all match the workspace (${CATALOG_VERSION_PACKAGE} is ${majorOf(anchor.version)}.x)\n` +
+    `  ${files.length} metadata.version stamp(s) all equal ${CATALOG_VERSION_PACKAGE} ${anchor.version} ` +
+    `(derived; \`${FIX_COMMAND}\` writes them)\n` +
     `  ${exemptCount} justified exemption(s), each with its stated reason still true of the file.`,
   );
 }
