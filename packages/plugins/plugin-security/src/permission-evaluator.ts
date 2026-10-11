@@ -481,8 +481,8 @@ export class PermissionEvaluator {
     bootstrapPermissionSets: PermissionSet[] = [],
     /**
      * Optional async loader for permission set names that aren't found in
-     * metadata or bootstrap. Lets callers query user-defined permission
-     * sets persisted in `sys_permission_set`. Failures are swallowed
+     * metadata or bootstrap — the security plugin passes its catalog loader
+     * (the security catalog's definitions, ADR-0131 D3/D4). Failures are swallowed
      * (fail-closed: unresolvable sets grant nothing) but SURFACED via
      * `options.logger` — see #2565: without the warn, a transient DB error
      * makes custom permission sets silently vanish and the resulting 403s
@@ -533,10 +533,10 @@ export class PermissionEvaluator {
       }
     }
 
-    // Last-resort: query user-defined permission sets from the database.
-    // Without this, custom permission sets (created via the admin UI as
-    // `sys_permission_set` rows) would be silently ignored both for CRUD
-    // enforcement and for field-level masking.
+    // Last source: the loader the caller supplies — the security plugin's
+    // catalog loader, which answers environment-authored and package sets the
+    // metadata list does not (ADR-0131 D3/D4). Without it those sets would be
+    // silently ignored both for CRUD enforcement and for field-level masking.
     if (dbLoader) {
       const unresolved = identifiers.filter((n) => !seen.has(n));
       if (unresolved.length > 0) {
@@ -555,7 +555,7 @@ export class PermissionEvaluator {
           // DB error silently drops custom permission sets and the
           // resulting 403s point nowhere near the cause (#2565).
           options.logger?.warn?.(
-            '[security] sys_permission_set db lookup failed — unresolved sets grant nothing this request',
+            '[security] permission-set catalog lookup failed — unresolved sets grant nothing this request',
             { unresolved, error: (e as Error)?.message },
           );
         }

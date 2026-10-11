@@ -430,7 +430,8 @@ an expiry: deactivation is an incident-response control, installation-wide,
 and there is no date on the user's own grant row to notice — without the
 state, the admin diagnosing "why did access disappear" would get the same
 answer as for a user who never held the grant, with no pointer to the
-catalogue row somebody switched off. Reported for the grant rows explain
+`sys_metadata_activation` row somebody switched off — the explainer reads the
+same ledger the resolver does, so explain and enforce agree. Reported for the grant rows explain
 already walks: `sys_user_position` rows and direct `sys_user_permission_set`
 grants (a deactivated set reached only through an active position's linkage is
 not re-derived — that would replicate the resolver's aggregation).
@@ -455,9 +456,12 @@ Deactivation is an incident-response control, so what it does **not** touch is
 deliberate. Administration surfaces keep listing and editing a deactivated
 position — an admin must still be able to unbind and clean up what they just
 switched off — and the write gates that judge audience-anchor bindings and a
-delegated administrator's blast radius keep reading every row, deactivated
-included: dropping rows there would make a refused binding *permitted* and a
-delegate's boundary *narrower*, which is the opposite of switching access off.
+delegated administrator's blast radius do not consult the activation ledger:
+they judge every binding and assignment in front of them — including the
+permission sets a position's definition names — whether or not the ledger
+switched it off, because skipping a switched-off one would make a refused
+binding *permitted* and a delegate's boundary *narrower*, which is the
+opposite of switching access off.
 
 ## Governance: how "declared = enforced" is kept true
 

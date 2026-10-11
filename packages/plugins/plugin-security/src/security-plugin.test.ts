@@ -2950,7 +2950,7 @@ describe('PermissionEvaluator', () => {
     expect(result).toEqual([psAdmin]);
     // ...but the swallow is surfaced, naming the unresolved sets
     expect(warns.length).toBe(1);
-    expect(warns[0].msg).toContain('db lookup failed');
+    expect(warns[0].msg).toContain('catalog lookup failed');
     expect(warns[0].meta?.unresolved).toEqual(['custom_sales']);
     expect(warns[0].meta?.error).toBe('db down');
   });
