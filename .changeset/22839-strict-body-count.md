@@ -8,7 +8,7 @@ Clause-②: no (narrowing)
 
 `--strict-body` printed "N callable(s) lack a metadata body" with N one higher than the callables it listed: one refused handler read 2, four read 5. The list was the extractor's refusals plus one extra row whenever any callable was not lowered, with `origin: '<aggregate>'` and the reason "N callable(s) lowered to handler ref but produced no body". The header counted that extra row as a callable, and `--json` published it in `issues` beside the real ones.
 
-The list is now one row per callable that was not lowered into a metadata body, each callable once. It is the same population the extra row counted, itemized. The header's N is the number of rows.
+The list is now one row per callable that was not lowered into a metadata body, each callable once. It is the population the extra row's number was meant to count, itemized: in the two shapes below that number undercounted it. The header's N is the number of rows.
 
 **BREAKING — what moves for consumers.**
 
