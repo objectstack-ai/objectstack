@@ -74,8 +74,9 @@
  * The `create_record` / `update_record` `fields` map carries the same value
  * contract since #19938 (`FlowValueSlotSchema`, the "value slots" section):
  * a field value is a CEL value envelope or a literal — a `{token}` template is
- * refused there since #19939 — and the three maps are the expression ledger's
- * `value`-role slots.
+ * refused there since #19939 — and those maps are the expression ledger's
+ * `value`-role slots, as are, since #19939, the three maps a node hands to a
+ * callee and a `screen`'s `defaults.*`, field `defaultValue` and `recordId`.
  *
  * Deliberately absent:
  *  - `decision` / `script` / `subflow` / `wait` / `connector_action` — the
@@ -257,7 +258,8 @@ const CRUD_BULK_INTENT_GUIDANCE = {
  * every way an envelope can be malformed AND for every `value`-role slot the
  * expression ledger declares (`assignment.assignments.*`,
  * `create_record.fields.*`, `update_record.fields.*`, and since #19939
- * `subflow.input.*`, `map.input.*`, `script.inputs.*`), so an author (or an
+ * `subflow.input.*`, `map.input.*`, `script.inputs.*` and a `screen`'s
+ * `defaults.*`, `fields[].defaultValue` and `recordId`), so an author (or an
  * agent reading the issue) learns the rule before the detail.
  *
  * Slot-neutral on purpose (#19938): the refusal's LOCATION names the slot
@@ -413,7 +415,9 @@ function celValueSlotSchema(description: string) {
  * (`CreateRecordConfigSchema` / `UpdateRecordConfigSchema`, #19938), so do
  * the three maps a node hands to a callee since #19939 (`MapConfigSchema`'s
  * `input`; `SubflowConfigSchema`'s `input` and `ScriptConfigSchema`'s
- * `inputs` in `schemaless-node-config.zod.ts`), and it is
+ * `inputs` in `schemaless-node-config.zod.ts`), and so do a `screen`'s
+ * `defaults` map and each field's `defaultValue` (`ScreenConfigSchema`; its
+ * `recordId` takes the same rule with a string literal), and it is
  * what a consumer judging ANY value-role slot applies (`AutomationEngine`'s
  * `valueEnvelopeRefusals`, the lint's `checkDeclaredValue`). The `assignment`
  * map's {@link AssignmentValueSchema} is the same rule under a
@@ -725,8 +729,18 @@ export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
     value: z.unknown().describe('Stored value; it also addresses the option as text (its label translation key), so it must stay distinct from its siblings as text'),
     label: z.string().describe('Display label'),
   })).optional().describe('Choices for a select-style field; option values must stay distinct when read as text'),
-  /** Prefilled value; interpolates `{token}` templates at suspend time. */
-  defaultValue: z.unknown().optional().describe('Prefilled value (interpolates {token} templates)'),
+  /**
+   * Prefilled value — a `value` slot (#19939): a CEL value envelope the
+   * executor evaluates when the screen is served, so the client receives the
+   * value it computes, never the envelope; or a literal, served as written. A
+   * `{token}` template is refused ({@link FlowValueSlotSchema}).
+   */
+  defaultValue: FlowValueSlotSchema.optional()
+    .describe(
+      'Prefilled value: a CEL value envelope `{ dialect: \'cel\', source }` evaluated when the screen is served '
+      + '(the client receives the value, never the envelope), or a literal written as it is — a `{…}` template '
+      + 'token is refused',
+    ),
   /** Input placeholder text. */
   placeholder: z.string().optional().describe('Input placeholder text'),
   /** Bare-CEL predicate the client re-evaluates as values change (#3528). */
@@ -824,6 +838,65 @@ export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
 export type ScreenFieldConfig = z.input<typeof ScreenFieldConfigSchema>;
 
 /**
+ * What an object-form screen's `recordId` that is neither a string nor a CEL
+ * value envelope is told (#19939). It names the slot's job before the remedy:
+ * the id names the record an `edit` form opens.
+ */
+const SCREEN_RECORD_ID_REFUSAL =
+  '`recordId` names the record an `edit` form opens: write the record\'s id as a string, or compute it with a CEL '
+  + 'value envelope that evaluates to one, `{ dialect: \'cel\', source: \'record.id\' }`.';
+
+/**
+ * `screen.recordId` — a `value` slot whose value NAMES a record (#19939, the C
+ * half of #11182 ruling D; ADR-0032 Decision 2, a computed value is whole-field
+ * CEL). Until #19939 it was `z.string()` read through the `{token}`
+ * interpolator, and an envelope there was refused; it gains the envelope arm,
+ * and the single-brace dialect leaves it:
+ *
+ *  - a **string** is the id itself, served as written — a `{…}` token in it is
+ *    refused by the one judge ({@link valueSlotTemplateRefusals}), naming the
+ *    token's CEL spelling;
+ *  - a **CEL value envelope** ({@link AssignmentExpressionValueSchema}) is
+ *    evaluated by the executor when the screen is served, and must evaluate to
+ *    a non-blank string — the executor refuses anything else at the screen,
+ *    `null` included, rather than serving an `edit` form with no record to
+ *    open (`service-automation`'s `screen-nodes.ts`);
+ *  - anything else is refused ({@link SCREEN_RECORD_ID_REFUSAL}); a malformed
+ *    envelope leads with {@link VALUE_ENVELOPE_REFUSAL}, as in every value slot.
+ *
+ * A union rather than {@link FlowValueSlotSchema}'s open `unknown`: the
+ * literal arm is narrower here (an id is a string, as it always was), and the
+ * union keeps that in the published JSON Schema and the inferred type. Built
+ * eagerly, like {@link celValueSlotSchema}: `.meta()` registers by identity, and
+ * the `xExpression: 'value'` marker is what the expression ledger's
+ * reconciliation ratchet reads.
+ */
+const ScreenRecordIdSlotSchema = z.union([z.string(), AssignmentExpressionValueSchema], {
+  error: (issue) => {
+    const input = (issue as { input?: unknown }).input;
+    if (!isExpressionEnvelopeShaped(input)) return SCREEN_RECORD_ID_REFUSAL;
+    const result = AssignmentExpressionValueSchema.safeParse(input);
+    const details = result.success
+      ? []
+      : result.error.issues.map((i) => `${i.path.length > 0 ? `\`${i.path.map(String).join('.')}\`: ` : ''}${i.message}`);
+    return [VALUE_ENVELOPE_REFUSAL, ...details].join(' ');
+  },
+})
+  .superRefine((value, ctx) => {
+    if (typeof value !== 'string') return;
+    for (const refusal of valueSlotTemplateRefusals(value)) {
+      ctx.addIssue({ code: 'custom', path: [...refusal.path], message: refusal.message });
+    }
+  })
+  .meta({
+    description:
+      'Object form only: the id of the record an edit form opens — a string, or a CEL value envelope '
+      + '`{ dialect: \'cel\', source }` evaluated when the screen is served to the id (a non-blank string); a `{…}` '
+      + 'template token is refused',
+    xExpression: 'value',
+  });
+
+/**
  * `screen` node config — what the executor reads.
  *
  * Two mutually exclusive shapes share the key set: a FLAT screen (`fields`,
@@ -837,8 +910,19 @@ export type ScreenFieldConfig = z.input<typeof ScreenFieldConfigSchema>;
  * holes over the flow's variables (`{{ record.name }}`), and a single-brace
  * `{token}` left from the 17.x dialect is refused by the `superRefine` below —
  * the one text-slot judge (`flow-text-slot-template.ts`) `registerFlow` and
- * `objectstack validate` share. `recordId` and `defaults` keep the flow's
- * single-brace `{token}` dialect: each hands its resolved value over, not text.
+ * `objectstack validate` share.
+ *
+ * `defaults.*`, each field's `defaultValue` and `recordId` are VALUE slots
+ * (#19939, the C half of #11182 ruling D; ADR-0032 Decision 2): each hands a
+ * value over, not text. Each takes a CEL value envelope, which the executor
+ * evaluates in the run's scope before the screen goes on the wire — the client
+ * receives the value it computes (a record stays a map, a list a list), never
+ * the envelope — or a literal, served as written. The single-brace `{token}`
+ * dialect they used to read is refused at all three, by the one value-slot
+ * judge (`flow-value-slot-template.ts`) the expression ledger's `value` entries
+ * route `registerFlow` and `objectstack validate` through, and by this
+ * contract at the executor's parse. `recordId`'s literal is narrower than the
+ * other two: a string, the id itself ({@link ScreenRecordIdSlotSchema}).
  */
 export const ScreenConfigSchema = lazySchema(() => strictObject({
   surface: 'this screen node config',
@@ -895,12 +979,28 @@ export const ScreenConfigSchema = lazySchema(() => strictObject({
    */
   mode: z.enum(['create', 'edit']).default('create')
     .describe("Object form only: create (default) or edit; 'edit' needs a recordId to name its target"),
-  /** Object form only: id of the record `mode: 'edit'` edits. Interpolates `{token}`. */
-  recordId: z.string().optional()
-    .describe("Object form only: id of the record to edit (required for mode: 'edit' to be useful)"),
-  /** Object form only: prefilled values; interpolates `{token}` templates. */
-  defaults: z.record(z.string(), z.unknown()).optional()
-    .describe('Object form only: prefilled values'),
+  /**
+   * Object form only: id of the record `mode: 'edit'` edits — a `value` slot
+   * (#19939) whose literal is a string ({@link ScreenRecordIdSlotSchema}).
+   */
+  recordId: ScreenRecordIdSlotSchema.optional()
+    .describe(
+      "Object form only: id of the record to edit (required for mode: 'edit' to be useful) — a string, or a CEL "
+      + 'value envelope `{ dialect: \'cel\', source }` evaluated when the screen is served to the id, a non-blank '
+      + 'string (anything else, null included, fails the run at the screen); a `{…}` template token is refused',
+    ),
+  /**
+   * Object form only: prefilled values, keyed by the object's field names — a
+   * `value` slot per key (#19939): a CEL value envelope evaluated when the
+   * screen is served, or a literal; a `{token}` template is refused
+   * ({@link FlowValueSlotSchema}).
+   */
+  defaults: z.record(z.string(), FlowValueSlotSchema).optional()
+    .describe(
+      "Object form only: prefilled values keyed by the object's field names — each a CEL value envelope "
+      + '`{ dialect: \'cel\', source }` evaluated when the screen is served (the client receives the value, never '
+      + 'the envelope), or a literal written as it is; a `{…}` template token is refused',
+    ),
 }).superRefine((config, ctx) => {
   // [#22110] The two text slots render `{{ }}` holes; a single-brace token is
   // no placeholder any more and would show as literal text.
