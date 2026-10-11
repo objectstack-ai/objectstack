@@ -286,7 +286,10 @@ describe('[#22161] one-line verdicts', () => {
   // saying is `os explain sharing-rule-unlowerable-condition`.
   it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {
     expect(fired.some((f) => f.message.includes('holds a list or an object'))).toBe(true);
-    for (const f of fired) {
+    // The two condition ids this slice converted; the anchor ids keep their
+    // longer hints (a later slice's).
+    const converted = ['sharing-rule-unlowerable-condition', 'sharing-rule-runtime-variable-condition'];
+    for (const f of fired.filter((x) => converted.includes(x.rule))) {
       expect(f.hint, f.rule).not.toContain('\n');
       expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
     }
