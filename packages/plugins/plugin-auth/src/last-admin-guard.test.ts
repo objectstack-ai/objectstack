@@ -3,9 +3,9 @@
 /**
  * [#5892 + #5941 + #5978 + #6084 / cloud ADR-0024 D5.2] The break-glass guard —
  * every half of ONE invariant: a `banned = true` write, a `sys_user` row DELETE,
- * a standing revocation on `sys_member` / `sys_user_permission_set`, and a
- * delete-or-rename of the `admin_full_access` `sys_permission_set` row may each
- * only proceed while an administrator who can sign in is left behind.
+ * a standing revocation on `sys_member` / `sys_user_permission_set`, and an
+ * activation-ledger write switching `admin_full_access` off (ADR-0131 D3) may
+ * each only proceed while an administrator who can sign in is left behind.
  *
  * #6084 adds one thing the earlier three did not need: the guard must still be
  * ON afterwards. Its write shape empties the administrator population, and the
@@ -62,6 +62,7 @@ import { registerIdentityWriteGuard, registerManagedUpdateWhitelist } from './id
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { createObjectQLAdapterFactory } from './objectql-adapter.js';
 import { buildAdminPluginSchema, buildOrganizationPluginSchema } from './auth-schema-config.js';
+import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 import { admin } from 'better-auth/plugins/admin';
 import { organization } from 'better-auth/plugins/organization';
 
@@ -133,6 +134,23 @@ const sysAccount = {
   },
 };
 
+/**
+ * [ADR-0131 D3, ADR-0126 §4] The activation ledger — where the resolver reads
+ * whether `admin_full_access` is switched off. `active` is `boolean`, so on
+ * this real sqlite database it stores as 0/1.
+ */
+const sysMetadataActivation = {
+  name: 'sys_metadata_activation',
+  label: 'Metadata Activation',
+  fields: {
+    id: { name: 'id', type: 'text' as const, primaryKey: true },
+    metadata_type: { name: 'metadata_type', type: 'text' as const },
+    name: { name: 'name', type: 'text' as const },
+    package_id: { name: 'package_id', type: 'text' as const },
+    active: { name: 'active', type: 'boolean' as const },
+  },
+};
+
 const sysUserPermissionSet = {
   name: 'sys_user_permission_set',
   label: 'User Permission Set',
@@ -196,6 +214,13 @@ interface BootOptions {
 let engines: ObjectQL[] = [];
 
 /**
+ * [ADR-0131 D3/D4] Each engine's security catalog — the permission names it
+ * holds, read afresh per lookup, so a case can declare or remove a set.
+ */
+const catalogs = new WeakMap<ObjectQL, Set<string>>();
+const catalogOf = (engine: ObjectQL): Set<string> => catalogs.get(engine)!;
+
+/**
  * [#11663 L5] The tenancy posture is PINNED to `single` for this whole file, and
  * it is pinned rather than inherited because the answer now depends on it: the
  * guard's grant-anchored grade is posture-keyed, so a suite that leaves
@@ -242,17 +267,23 @@ async function boot(opts: BootOptions = {}): Promise<ObjectQL> {
     true,
   );
   await engine.init();
-  for (const o of [sysUser, sysMember, sysPermissionSet, sysUserPermissionSet, sysAccount]) {
+  for (const o of [sysUser, sysMember, sysPermissionSet, sysUserPermissionSet, sysAccount, sysMetadataActivation]) {
     engine.registry.registerObject(o as never);
   }
   await engine.syncSchemas();
+  const names = new Set<string>();
+  catalogs.set(engine, names);
+  const catalog = () => ({ permissions: [...names].map((name) => ({ name })) });
+  bindTestSecurityCatalog(engine, catalog);
 
   if (opts.withIdentityWriteGuard) {
     registerManagedUpdateWhitelist('sys_user', SYS_USER_PROFILE_EDIT_FIELDS);
     registerIdentityWriteGuard(engine, { packageId: 'test.identity-write-guard' });
   }
   if (!opts.unguarded) {
-    registerLastAdminGuard(opts.readThrough?.(engine) ?? (engine as unknown as LastAdminGuardEngine), {
+    const guardEngine = opts.readThrough?.(engine) ?? (engine as unknown as LastAdminGuardEngine);
+    bindTestSecurityCatalog(guardEngine, catalog);
+    registerLastAdminGuard(guardEngine, {
       packageId: 'test.last-admin-guard',
       ...(opts.maxScan !== undefined ? { maxScan: opts.maxScan } : {}),
     });
@@ -299,7 +330,13 @@ async function seedUser(
   }
 }
 
+/**
+ * [ADR-0131 D3/D4] Declare the two sets in the catalog — what a grant's name
+ * resolves to. The rows are written too, as the platform still writes them;
+ * the guard reads none of them.
+ */
 async function seedAdminPermissionSet(engine: ObjectQL): Promise<void> {
+  catalogOf(engine).add(ADMIN_FULL_ACCESS).add('member_default');
   await engine.insert('sys_permission_set', { id: PS_ADMIN, name: ADMIN_FULL_ACCESS }, SYSTEM);
   await engine.insert('sys_permission_set', { id: 'ps_member', name: 'member_default' }, SYSTEM);
 }
@@ -1640,31 +1677,39 @@ describe('[#5978] reverse verification: without the guard, the third path locks 
 });
 
 // ---------------------------------------------------------------------------
-// [#6084] The FOURTH write shape — the one table that is not an identity table
+// [#6084, ADR-0131 D3] The FOURTH write shape — switching the set off
 //
-// "Who is a platform admin" is resolved BY NAME: `resolveAdminUserIds` looks
-// the permission set up as `where: { name: 'admin_full_access' }` and only then
-// reads the grants pointing at its id. So the row named `admin_full_access` is
-// itself part of the GRANT-anchored administrator evidence, and deleting it —
-// or calling it something else — un-makes every grant-anchored platform admin
-// in one write while `sys_user`, `sys_member` and `sys_user_permission_set` all
-// stay exactly as they were.
+// "Who is a platform admin" is resolved BY NAME: a grant names
+// `admin_full_access`, the set is the security catalog's definition of that
+// name, and whether it is in effect is the activation ledger's answer. So ONE
+// ledger write switching it off un-makes every grant-anchored platform admin
+// while `sys_user`, `sys_member` and `sys_user_permission_set` all stay exactly
+// as they were.
 //
-// ⚠️ Not "every platform admin": since the #11663 re-anchor (L2) standing has a
-// SECOND anchor this write cannot reach — a config-anchored administrator (a
-// declared `OS_PLATFORM_OWNER_EMAIL` address on a VERIFIED `sys_user` row) is
-// derived at `resolve-authz-context.ts` §6b-config without reading this row at
-// all, and `resolveAdminUserIds` counts it through the resolver's own
-// predicate. Where one stands these refusals are re-priced away and the write
-// is PERMITTED (pinned in `last-admin-guard.re-pricing.test.ts`). This file
-// declares no owner emails, so the grant anchor is the whole population here
-// and the refusals below are the live price.
+// ⚠️ Not "every platform admin": a config-anchored administrator (#11663 L2)
+// survives it, and where one stands the write is PERMITTED (pinned in
+// `last-admin-guard.re-pricing.test.ts`). This file declares no owner emails,
+// so the grant anchor is the whole population here and the refusals below are
+// the live price.
 //
 // The block pins the same five things each earlier path did, plus the one this
 // path adds: the guard must NOT go quiet on every other path afterwards.
 // ---------------------------------------------------------------------------
 
-describe('[#6084] path 4 — deleting or renaming the admin_full_access permission-set row', () => {
+/** A ledger row, as the ADR-0126 doors write it. */
+const ledgerRow = (id: string, name: string, active: unknown, metadataType = 'permission') =>
+  ({ id, metadata_type: metadataType, name, package_id: 'com.objectstack.plugin-security', active });
+
+/** What a disable door writes for a set with no row yet: an insert switched off. */
+const switchOff = (engine: ObjectQL, name: string = ADMIN_FULL_ACCESS) =>
+  engine.insert('sys_metadata_activation', ledgerRow(`act_${name}`, name, false), SYSTEM);
+
+async function ledgerActive(engine: ObjectQL, id: string): Promise<unknown> {
+  const row = await engine.findOne('sys_metadata_activation', { where: { id } }, SYSTEM);
+  return row ? row.active : undefined;
+}
+
+describe('[#6084, ADR-0131 D3] path 4 — switching admin_full_access off in the activation ledger', () => {
   let engine: ObjectQL;
 
   beforeEach(async () => {
@@ -1672,45 +1717,31 @@ describe('[#6084] path 4 — deleting or renaming the admin_full_access permissi
     await seedAdminPermissionSet(engine);
   });
 
-  /** What a metadata delete (`retirePermissionSetRecord`) ultimately writes. */
-  const deleteSet = (id: string) =>
-    engine.delete('sys_permission_set', { where: { id }, ...SYSTEM });
-  const renameSet = (id: string, name: string) =>
-    engine.update('sys_permission_set', { id, name }, SYSTEM);
-
-  const setName = async (id: string): Promise<unknown> => {
-    const row = await engine.findOne('sys_permission_set', { where: { id } }, SYSTEM);
-    return row?.name;
-  };
-
-  it('THE REPRODUCTION from the issue: deleting the row is refused and the row survives', async () => {
+  it('THE REPRODUCTION: switching it off is refused and nothing lands', async () => {
     await seedUser(engine, 'usr_platform', { platformAdmin: true });
 
-    await expect(deleteSet(PS_ADMIN)).rejects.toMatchObject({
+    await expect(switchOff(engine)).rejects.toMatchObject({
       code: 'PERMISSION_DENIED',
       status: 403,
-      object: 'sys_permission_set',
+      object: 'sys_metadata_activation',
     });
-    expect(await rowExists(engine, 'sys_permission_set', PS_ADMIN)).toBe(true);
+    expect(await ledgerActive(engine, `act_${ADMIN_FULL_ACCESS}`)).toBeUndefined();
   });
 
-  it('RENAMING it is refused too — the row would survive, the standing would not', async () => {
+  it('switching its EXISTING row off is refused too, and the row stays on', async () => {
     await seedUser(engine, 'usr_platform', { platformAdmin: true });
+    await engine.insert('sys_metadata_activation', ledgerRow('act_admin', ADMIN_FULL_ACCESS, true), SYSTEM);
 
-    await expect(renameSet(PS_ADMIN, 'admin_full_access_old')).rejects.toThrow(
-      /last administrator/i,
-    );
-    // Nothing was written: the enumeration still finds the row by its name.
-    expect(await setName(PS_ADMIN)).toBe(ADMIN_FULL_ACCESS);
+    await expect(
+      engine.update('sys_metadata_activation', { id: 'act_admin', active: false }, SYSTEM),
+    ).rejects.toThrow(/last administrator/i);
+    expect(await ledgerActive(engine, 'act_admin')).toBeTruthy();
   });
 
   it('THE PATH ITSELF: no identity table is touched, which is why the first three halves miss it', async () => {
     await seedUser(engine, 'usr_platform', { platformAdmin: true, accountProvider: 'oidc' });
 
-    await expect(deleteSet(PS_ADMIN)).rejects.toThrow(/ADR-0135 D5\.2/);
-    // The user row is present and unbanned (#5892 / #5941 see nothing), and the
-    // grant row is untouched as well (#5978 sees nothing) — the write lands on
-    // a fourth table entirely, and is still refused.
+    await expect(switchOff(engine)).rejects.toThrow(/ADR-0135 D5\.2/);
     await expectUserRowUntouched(engine, 'usr_platform');
     expect(await rowExists(engine, 'sys_user_permission_set', 'ups_usr_platform')).toBe(true);
   });
@@ -1718,123 +1749,114 @@ describe('[#6084] path 4 — deleting or renaming the admin_full_access permissi
   it('the refusal explains itself: who loses standing, which table, why, and the fix', async () => {
     await seedUser(engine, 'usr_platform', { platformAdmin: true });
 
-    await expect(deleteSet(PS_ADMIN)).rejects.toThrow(/Refusing this permission-set removal/);
-    // The USER about to be locked out is named, not the permission-set row id.
-    await expect(deleteSet(PS_ADMIN)).rejects.toThrow(/'usr_platform'/);
-    await expect(deleteSet(PS_ADMIN)).rejects.toThrow(/last administrator/i);
-    await expect(deleteSet(PS_ADMIN)).rejects.toThrow(/sys_permission_set/);
-    await expect(deleteSet(PS_ADMIN)).rejects.toThrow(/ADR-0135 D5\.2/);
-    await expect(deleteSet(PS_ADMIN)).rejects.toThrow(new RegExp(ADMIN_FULL_ACCESS));
-    // …and the closing advice names the doors that actually write this table.
-    await expect(deleteSet(PS_ADMIN)).rejects.toThrow(/package uninstall/);
-
-    // NOT the SCIM sentence the other standing halves end with: nothing in an
-    // IdP writes `sys_permission_set`, so pointing this operator at a group
-    // mapping would send them into a system they may not even run.
     let message = '';
     try {
-      await deleteSet(PS_ADMIN);
+      await switchOff(engine);
     } catch (e) {
       message = (e as Error).message;
     }
+    expect(message).toMatch(/Refusing this activation-ledger write/);
+    // The USER about to be locked out is named, not the ledger row id.
+    expect(message).toMatch(/'usr_platform'/);
+    expect(message).toMatch(/last administrator/i);
+    expect(message).toMatch(/sys_metadata_activation/);
+    expect(message).toMatch(/ADR-0135 D5\.2/);
+    expect(message).toMatch(new RegExp(ADMIN_FULL_ACCESS));
+    // …and the closing advice names the doors that actually write this table,
+    // NOT the SCIM sentence: nothing in an IdP writes the ledger.
+    expect(message).toMatch(/disable action/);
     expect(message).not.toMatch(/SCIM group mapping/);
   });
 
-  it('a rename to a DIFFERENT name is what is refused — the payload is simulated, not pattern-matched', async () => {
+  it('the payload is simulated, not pattern-matched: switching the row ON proceeds, OFF is refused', async () => {
     await seedUser(engine, 'usr_platform', { platformAdmin: true });
+    await engine.insert('sys_metadata_activation', ledgerRow('act_admin', ADMIN_FULL_ACCESS, true), SYSTEM);
 
-    // Re-writing the same name changes nothing the enumeration reads, so the
-    // simulation finds the administrator still there and the write proceeds.
-    await expect(renameSet(PS_ADMIN, ADMIN_FULL_ACCESS)).resolves.toBeTruthy();
-    await expect(renameSet(PS_ADMIN, 'something_else')).rejects.toThrow(/last administrator/i);
+    await expect(engine.update('sys_metadata_activation', { id: 'act_admin', active: true }, SYSTEM)).resolves.toBeTruthy();
+    await expect(engine.update('sys_metadata_activation', { id: 'act_admin', active: false }, SYSTEM))
+      .rejects.toThrow(/last administrator/i);
+  });
+
+  it('moving ANOTHER row onto admin_full_access, switched off, is refused — the target is re-read', async () => {
+    await seedUser(engine, 'usr_platform', { platformAdmin: true });
+    await engine.insert('sys_metadata_activation', ledgerRow('act_member', 'member_default', true), SYSTEM);
+
+    await expect(
+      engine.update('sys_metadata_activation', { id: 'act_member', name: ADMIN_FULL_ACCESS, active: false }, SYSTEM),
+    ).rejects.toThrow(/last administrator/i);
   });
 
   // ── not over-tightened ────────────────────────────────────────────────────
 
-  it('an org admin elsewhere keeps the removal legal — the invariant is the ENVIRONMENT\'s', async () => {
+  it('an org admin elsewhere keeps the switch-off legal — the invariant is the ENVIRONMENT\'s', async () => {
     await seedUser(engine, 'usr_platform', { platformAdmin: true });
     await seedUser(engine, 'usr_owner', { role: 'owner' });
 
-    // The platform-admin half of the enumeration goes empty and the guard has
-    // no opinion, because the environment still has an administrator. A rule
-    // that protected the platform-admin POPULATION rather than the environment
-    // would have refused this.
-    await expect(deleteSet(PS_ADMIN)).resolves.toBeDefined();
-    expect(await rowExists(engine, 'sys_permission_set', PS_ADMIN)).toBe(false);
+    await expect(switchOff(engine)).resolves.toBeDefined();
+    expect(await ledgerActive(engine, `act_${ADMIN_FULL_ACCESS}`)).toBeFalsy();
   });
 
-  it('a payload that does not touch `name` costs no reads at all', async () => {
+  it('a payload touching no standing key costs no reads at all', async () => {
     const quiet = await boot({
       readThrough: (real) => ({
         registerHook: (event, handler, options) => real.registerHook(event, handler, options),
         find: async () => {
-          throw new Error('the guard must not read anything for a non-name payload');
+          throw new Error('the guard must not read anything for a non-standing payload');
         },
       }),
     });
     await seedAdminPermissionSet(quiet);
     await seedUser(quiet, 'usr_platform', { platformAdmin: true });
+    // An inserted row switched ON can take nothing away, so it is not read for either.
+    await quiet.insert('sys_metadata_activation', ledgerRow('act_admin', ADMIN_FULL_ACCESS, true), SYSTEM);
 
-    // Every read this guard makes runs inside the fail-CLOSED envelope, so a
-    // payload that provoked ANY read here would come back as a refusal. It
-    // resolving is the proof that PERMISSION_SET_STANDING_KEYS skipped it
-    // statically — which is the shape of every projection pass, every
-    // `os meta resync` and every Setup edit of a permission set.
+    // Every read runs inside the fail-CLOSED envelope, so a payload that
+    // provoked ANY read would come back as a refusal.
     await expect(
-      quiet.update('sys_permission_set', { id: PS_ADMIN, label: 'Full Access (edited)' }, SYSTEM),
+      quiet.update('sys_metadata_activation', { id: 'act_admin', package_id: 'com.example.other' }, SYSTEM),
     ).resolves.toBeTruthy();
   });
 
-  it('deleting or renaming ANOTHER permission set is unaffected', async () => {
+  it('switching ANOTHER set off — or a position of the same name — is unaffected', async () => {
     await seedUser(engine, 'usr_platform', { platformAdmin: true });
 
-    await expect(renameSet('ps_member', 'member_default_v2')).resolves.toBeTruthy();
-    await expect(deleteSet('ps_member')).resolves.toBeDefined();
-    expect(await rowExists(engine, 'sys_permission_set', PS_ADMIN)).toBe(true);
+    await expect(switchOff(engine, 'member_default')).resolves.toBeDefined();
+    await expect(
+      engine.insert('sys_metadata_activation', ledgerRow('act_pos', ADMIN_FULL_ACCESS, false, 'position'), SYSTEM),
+    ).resolves.toBeDefined();
   });
 
   it('an ALREADY-banned platform admin is not protected — nothing is being taken away', async () => {
     await seedUser(engine, 'usr_platform', { platformAdmin: true, banned: true });
 
-    await expect(deleteSet(PS_ADMIN)).resolves.toBeDefined();
+    await expect(switchOff(engine)).resolves.toBeDefined();
   });
 
-  it('an ORG-SCOPED grant holder never was a break-glass admin, so the row stays removable', async () => {
+  it('an ORG-SCOPED grant holder never was a break-glass admin, so the set can be switched off', async () => {
     await seedUser(engine, 'usr_scoped', { grant: { organization_id: ORG } });
 
-    await expect(deleteSet(PS_ADMIN)).resolves.toBeDefined();
+    await expect(switchOff(engine)).resolves.toBeDefined();
   });
 
   // ── predicate / bulk, and fail-closed ─────────────────────────────────────
 
-  it('an unpredicated `multi` delete — the one that empties the table — is refused', async () => {
+  it('a predicate write that switches every row off at once is refused', async () => {
     await seedUser(engine, 'usr_platform', { platformAdmin: true });
-
-    await expect(engine.delete('sys_permission_set', { multi: true, ...SYSTEM })).rejects.toThrow(
-      /last administrator/i,
-    );
-    expect(await rowExists(engine, 'sys_permission_set', PS_ADMIN)).toBe(true);
-  });
-
-  it('a predicate rename that sweeps every permission set at once is refused', async () => {
-    await seedUser(engine, 'usr_platform', { platformAdmin: true });
+    await engine.insert('sys_metadata_activation', ledgerRow('act_admin', ADMIN_FULL_ACCESS, true), SYSTEM);
+    await engine.insert('sys_metadata_activation', ledgerRow('act_member', 'member_default', true), SYSTEM);
 
     await expect(
-      engine.update(
-        'sys_permission_set',
-        { name: 'retired' },
-        { multi: true, where: { id: { $in: [PS_ADMIN, 'ps_member'] } }, ...SYSTEM },
-      ),
+      engine.update('sys_metadata_activation', { active: false }, { multi: true, where: { metadata_type: 'permission' }, ...SYSTEM }),
     ).rejects.toThrow(/last administrator/i);
-    expect(await setName(PS_ADMIN)).toBe(ADMIN_FULL_ACCESS);
+    expect(await ledgerActive(engine, 'act_admin')).toBeTruthy();
   });
 
-  it('fails CLOSED: an unreadable table refuses a removal that would have been legal', async () => {
+  it('fails CLOSED: an unreadable ledger refuses a switch-off that would have been legal', async () => {
     const broken = await boot({
       readThrough: (real) => ({
         registerHook: (event, handler, options) => real.registerHook(event, handler, options),
         find: async () => {
-          throw new Error('sys_permission_set is unreadable');
+          throw new Error('sys_metadata_activation is unreadable');
         },
       }),
     });
@@ -1842,14 +1864,10 @@ describe('[#6084] path 4 — deleting or renaming the admin_full_access permissi
     await seedUser(broken, 'usr_platform', { platformAdmin: true });
     await seedUser(broken, 'usr_owner', { role: 'owner' });
 
-    // Two administrators exist — this removal WOULD be legal. Refused anyway.
-    await expect(
-      broken.delete('sys_permission_set', { where: { id: PS_ADMIN }, ...SYSTEM }),
-    ).rejects.toThrow(/Refusing this permission-set removal/);
-    await expect(
-      broken.delete('sys_permission_set', { where: { id: PS_ADMIN }, ...SYSTEM }),
-    ).rejects.toThrow(/sys_permission_set is unreadable/);
-    expect(await rowExists(broken, 'sys_permission_set', PS_ADMIN)).toBe(true);
+    // Two administrators exist — this switch-off WOULD be legal. Refused anyway.
+    await expect(switchOff(broken)).rejects.toThrow(/Refusing this activation-ledger write/);
+    await expect(switchOff(broken)).rejects.toThrow(/sys_metadata_activation is unreadable/);
+    expect(await ledgerActive(broken, `act_${ADMIN_FULL_ACCESS}`)).toBeUndefined();
   });
 
   it('a population larger than the guard can enumerate refuses, in the op\'s own words', async () => {
@@ -1858,10 +1876,33 @@ describe('[#6084] path 4 — deleting or renaming the admin_full_access permissi
     await seedUser(tiny, 'usr_p1', { platformAdmin: true });
     await seedUser(tiny, 'usr_p2', { platformAdmin: true });
 
-    await expect(
-      tiny.delete('sys_permission_set', { where: { id: PS_ADMIN }, ...SYSTEM }),
-    ).rejects.toThrow(/Remove a narrower set of permission sets/);
-    expect(await rowExists(tiny, 'sys_permission_set', PS_ADMIN)).toBe(true);
+    await expect(switchOff(tiny)).rejects.toThrow(/Switch off a narrower set of catalog items/);
+    expect(await ledgerActive(tiny, `act_${ADMIN_FULL_ACCESS}`)).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [ADR-0131 D3/D4] The `sys_permission_set` ROW is no standing input
+//
+// The resolver reads the set from the catalog and its switch from the ledger,
+// and no `sys_permission_set` row at all — so deleting, renaming, deactivating
+// or re-scoping the row moves no administrator, and the guard judges none of
+// those writes (they used to be shape (4)'s spellings).
+// ---------------------------------------------------------------------------
+
+describe('[ADR-0131 D3/D4] the sys_permission_set row is no standing input', () => {
+  it('the last administrator\'s set ROW can be deactivated, renamed, re-scoped and deleted — and the admin is still protected', async () => {
+    const engine = await boot();
+    await seedAdminPermissionSet(engine);
+    await seedUser(engine, 'usr_platform', { platformAdmin: true });
+
+    await expect(engine.update('sys_permission_set', { id: PS_ADMIN, active: false }, SYSTEM)).resolves.toBeTruthy();
+    await expect(engine.update('sys_permission_set', { id: PS_ADMIN, name: 'renamed_away' }, SYSTEM)).resolves.toBeTruthy();
+    await expect(engine.delete('sys_permission_set', { multi: true, ...SYSTEM })).resolves.toBeDefined();
+    expect(await rowExists(engine, 'sys_permission_set', PS_ADMIN)).toBe(false);
+
+    // The standing never rode on the row: the ban is still the last-admin refusal.
+    await expect(ban(engine, 'usr_platform')).rejects.toThrow(/last administrator/i);
   });
 });
 
@@ -1869,34 +1910,25 @@ describe('[#6084] path 4 — deleting or renaming the admin_full_access permissi
 // [#6084] The AMPLIFICATION — the half that matters more than the fourth hook
 //
 // Both verdicts open with "no administrator here, nothing to protect, proceed".
-// An environment whose `admin_full_access` row is gone reads exactly that way,
-// so before this change ONE write did not merely lock the environment out — it
-// switched the guard off for #5892, #5941 and #5978 as well.
+// An environment whose `admin_full_access` definition went away (an
+// uninstalled package, a removed environment definition — not a write this
+// guard can see) reads exactly that way, so ONE such change would not merely
+// lock the environment out — it would switch the guard off for #5892, #5941
+// and #5978 as well.
 //
-// So "zero administrators" is now split into the two states it was conflating:
-// a genuinely fresh environment (permitted, unchanged) and one that was emptied
-// (refused). The evidence is a DANGLING unscoped in-window grant, which no
-// producer can write — every one of them inserts the permission set first and
-// reads its id back — so the bootstrap window's behaviour is unchanged by
-// construction, and the tests below measure that in both directions.
+// So "zero administrators" is split into the two states it was conflating: a
+// genuinely fresh environment (permitted, unchanged) and one that was emptied
+// (refused). The evidence is a DANGLING unscoped in-window grant — one naming
+// a set the catalog does not hold.
 // ---------------------------------------------------------------------------
 
 describe('[#6084] a zero-administrator reading is no longer automatically the bootstrap window', () => {
-  /**
-   * The environment the fourth path leaves behind, built the only way it can
-   * still be reached now that the write itself is guarded: the delete lands
-   * while the guard is NOT registered — a pre-#6084 deployment, a migration, a
-   * restore, a direct database edit — and the platform then boots with the
-   * guard on, which is when `registerLastAdminGuard` runs for real.
-   */
+  /** The environment a removed `admin_full_access` definition leaves behind. */
   async function wipedEnvironment(): Promise<ObjectQL> {
-    const engine = await boot({ unguarded: true });
+    const engine = await boot();
     await seedAdminPermissionSet(engine);
     await seedUser(engine, 'usr_platform', { platformAdmin: true, accountProvider: 'oidc' });
-    await engine.delete('sys_permission_set', { where: { id: PS_ADMIN }, ...SYSTEM });
-    registerLastAdminGuard(engine as unknown as LastAdminGuardEngine, {
-      packageId: 'test.last-admin-guard',
-    });
+    catalogOf(engine).delete(ADMIN_FULL_ACCESS);
     return engine;
   }
 
@@ -1913,10 +1945,10 @@ describe('[#6084] a zero-administrator reading is no longer automatically the bo
   it('…and the user delete and the grant revoke with it — all three halves stay on', async () => {
     const engine = await wipedEnvironment();
 
-    await expect(removeUser(engine, 'usr_platform')).rejects.toThrow(/state a DELETED 'admin_full_access' permission-set row leaves behind/);
+    await expect(removeUser(engine, 'usr_platform')).rejects.toThrow(/state a REMOVED 'admin_full_access' permission-set definition leaves behind/);
     await expect(
       engine.delete('sys_user_permission_set', { where: { id: 'ups_usr_platform' }, ...SYSTEM }),
-    ).rejects.toThrow(/state a DELETED 'admin_full_access' permission-set row leaves behind/);
+    ).rejects.toThrow(/state a REMOVED 'admin_full_access' permission-set definition leaves behind/);
     expect(await userExists(engine, 'usr_platform')).toBe(true);
     expect(await rowExists(engine, 'sys_user_permission_set', 'ups_usr_platform')).toBe(true);
   });
@@ -1926,10 +1958,9 @@ describe('[#6084] a zero-administrator reading is no longer automatically the bo
 
     await expect(ban(engine, 'usr_platform')).rejects.toThrow(/recognises NO administrator/);
     await expect(ban(engine, 'usr_platform')).rejects.toThrow(/not the bootstrap window/i);
-    // Holder and target are both quoted, so an operator can go find the row.
     // [ADR-0131 D4] The target is the set the grant NAMES — its reference.
-    await expect(ban(engine, 'usr_platform')).rejects.toThrow(/'usr_platform'/);
     await expect(ban(engine, 'usr_platform')).rejects.toThrow(`'usr_platform' → '${ADMIN_FULL_ACCESS}'`);
+    await expect(ban(engine, 'usr_platform')).rejects.toThrow(/security catalog does not hold/);
     await expect(ban(engine, 'usr_platform')).rejects.toThrow(/ADR-0135 D5\.2/);
   });
 
@@ -1938,14 +1969,10 @@ describe('[#6084] a zero-administrator reading is no longer automatically the bo
     await seedAdminPermissionSet(engine);
     await seedUser(engine, 'usr_platform', { platformAdmin: true });
 
-    // The write that would have disabled everything is refused…
-    await expect(
-      engine.delete('sys_permission_set', { where: { id: PS_ADMIN }, ...SYSTEM }),
-    ).rejects.toThrow(/last administrator/i);
+    await expect(switchOff(engine)).rejects.toThrow(/last administrator/i);
     // …and in the SAME environment the three earlier paths still refuse with
     // the ordinary last-administrator verdict rather than the bootstrap
-    // exemption — which is what "the fourth write does not disarm the other
-    // three" means, measured instead of argued.
+    // exemption.
     await expect(ban(engine, 'usr_platform')).rejects.toThrow(/last administrator/i);
     await expect(removeUser(engine, 'usr_platform')).rejects.toThrow(/last administrator/i);
     await expect(
@@ -1960,28 +1987,19 @@ describe('[#6084] a zero-administrator reading is no longer automatically the bo
     await seedAdminPermissionSet(engine);
     await seedUser(engine, 'usr_first', { role: 'member' });
 
-    // No administrator, and no evidence there ever was one: this IS the
-    // bootstrap window, and it behaves exactly as it did before #6084.
     await expect(
       engine.delete('sys_member', { where: { id: 'mem_usr_first' }, ...SYSTEM }),
     ).resolves.toBeDefined();
     await expect(ban(engine, 'usr_first')).resolves.toBeTruthy();
     await expect(removeUser(engine, 'usr_first')).resolves.toBeDefined();
-    // …including writes to the fourth table: an environment with no
-    // administrator to lose can still rename and retire the set row.
-    await expect(
-      engine.update('sys_permission_set', { id: PS_ADMIN, name: 'admin_full_access_v2' }, SYSTEM),
-    ).resolves.toBeTruthy();
-    await expect(
-      engine.delete('sys_permission_set', { where: { id: PS_ADMIN }, ...SYSTEM }),
-    ).resolves.toBeDefined();
+    // …including the fourth path: with no administrator to lose, the set can
+    // be switched off.
+    await expect(switchOff(engine)).resolves.toBeDefined();
   });
 
-  it('an unscoped grant whose permission set still EXISTS is not evidence of a wipe', async () => {
+  it('an unscoped grant whose permission set the catalog still HOLDS is not evidence of a wipe', async () => {
     const engine = await boot();
     await seedAdminPermissionSet(engine);
-    // An ordinary pre-first-admin state: somebody holds `member_default`
-    // unscoped, and nobody is an administrator yet.
     await seedUser(engine, 'usr_a', { grant: { permission_set_id: 'ps_member' } });
 
     await expect(ban(engine, 'usr_a')).resolves.toBeTruthy();
@@ -2010,337 +2028,99 @@ describe('[#6084] a zero-administrator reading is no longer automatically the bo
 });
 
 // ---------------------------------------------------------------------------
-// [#6084] Reverse verification — the same fixtures with the guard NOT registered
+// [#8613 / ADR-0049, ADR-0131 D3] A SWITCHED-OFF break-glass set is an emptied
+// environment, not a fresh one
 //
-// Direction, decided before running: RED, the usual one. Without
-// `registerLastAdminGuard` the fourth write succeeds and takes the whole
-// platform-admin population with it, and the ban that follows succeeds too —
-// the amplification, on the engine as it behaved before this change.
-//
-// The second half of that pair is the `wipedEnvironment()` block above: same
-// wipe, guard registered afterwards, and the ban is refused. Together the two
-// isolate what the bootstrap predicate contributes, which neither can do alone.
+// Switching the set off leaves no dangling grant to read: the definition is
+// still there, still named, and grants nothing. Read naively, the bootstrap
+// exemption would fire on that emptiness and wave every later write through.
+// The environment is built the only way it is still reachable now that the
+// write itself is guarded: the switch-off landed while the guard was NOT
+// registered, and the platform then boots with the guard on.
 // ---------------------------------------------------------------------------
 
-describe('[#6084] reverse verification: one unguarded write takes the admins AND the guard', () => {
-  it('the unguarded engine deletes the admin_full_access row and every platform admin evaporates', async () => {
+describe('[#8613] a SWITCHED-OFF break-glass set is an emptied environment, not a fresh one', () => {
+  async function switchedOffEnvironment(): Promise<ObjectQL> {
     const engine = await boot({ unguarded: true });
     await seedAdminPermissionSet(engine);
     await seedUser(engine, 'usr_platform', { platformAdmin: true, accountProvider: 'oidc' });
-
-    await expect(
-      engine.delete('sys_permission_set', { where: { id: PS_ADMIN }, ...SYSTEM }),
-    ).resolves.toBeDefined();
-    // The issue's end state: the user row, its account and its grant are all
-    // exactly as they were — which is precisely why the first three shapes see
-    // nothing wrong — and no `admin_full_access` row is left to resolve.
-    expect(await userExists(engine, 'usr_platform')).toBe(true);
-    expect(await bannedFlag(engine, 'usr_platform')).toBeFalsy();
-    expect(await rowExists(engine, 'sys_user_permission_set', 'ups_usr_platform')).toBe(true);
-    expect(await rowExists(engine, 'sys_permission_set', PS_ADMIN)).toBe(false);
-  });
-
-  it('THE AMPLIFICATION: on that same engine the ban of the last administrator then succeeds', async () => {
-    const engine = await boot({ unguarded: true });
-    await seedAdminPermissionSet(engine);
-    await seedUser(engine, 'usr_platform', { platformAdmin: true });
-
-    await engine.delete('sys_permission_set', { where: { id: PS_ADMIN }, ...SYSTEM });
-    await expect(ban(engine, 'usr_platform')).resolves.toBeTruthy();
-    expect(await bannedFlag(engine, 'usr_platform')).toBeTruthy();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// [#8613 / ADR-0049] Write shape (4), third spelling: DEACTIVATING the row
-//
-// `sys_permission_set.active` used to be inert — a badge in Setup and nothing
-// else — so the #6084 standing-key list could exclude it in writing, and did.
-// Enforcing the flag at the resolution seam makes `active: false` on
-// `admin_full_access` un-make every platform admin at once, by a payload that
-// touches neither `name` nor any identity table, through a row action that
-// carries no visibility or condition guard. Unguarded, that is one click and an
-// installation-wide lockout with no path back: the seeders deliberately never
-// reconcile `active`, and re-activating needs the permission just lost.
-//
-// Deactivation also leaves NO dangling grant, so the #6084 bootstrap predicate
-// cannot see it — the set row is still there, still correctly named. Hence the
-// second half of this block: the same emptiness, its own evidence, its own
-// remedy, and an exemption for the write that IS the remedy.
-// ---------------------------------------------------------------------------
-
-describe('[#8613] path 4, third spelling — deactivating the admin_full_access permission set', () => {
-  let engine: ObjectQL;
-
-  beforeEach(async () => {
-    engine = await boot();
-    await seedAdminPermissionSet(engine);
-  });
-
-  /** Exactly what the `deactivate_permission_set` row action PATCHes. */
-  const deactivate = (id: string) =>
-    engine.update('sys_permission_set', { id, active: false }, SYSTEM);
-
-  /**
-   * Whether the STORED row reads as deactivated, in whichever shape sqlite
-   * hands back — `0`, `false`, or the NULL a never-written column keeps. The
-   * predicate under test treats absent as ACTIVE, so this asserts the write did
-   * not land rather than asserting one particular spelling of "off".
-   */
-  const isDeactivated = async (id: string): Promise<boolean> => {
-    const row = await engine.findOne('sys_permission_set', { where: { id } }, SYSTEM);
-    const flag = row?.active as unknown;
-    return flag === 0 || flag === false || flag === '0';
-  };
-
-  it('THE ONE-CLICK LOCKOUT: deactivating it is refused and the row stays active', async () => {
-    await seedUser(engine, 'usr_platform', { platformAdmin: true });
-
-    await expect(deactivate(PS_ADMIN)).rejects.toMatchObject({
-      code: 'PERMISSION_DENIED',
-      status: 403,
-      object: 'sys_permission_set',
-    });
-    // Nothing was written — the row is still there and still grants.
-    expect(await isDeactivated(PS_ADMIN)).toBe(false);
-    expect(await rowExists(engine, 'sys_permission_set', PS_ADMIN)).toBe(true);
-  });
-
-  it('no identity table is touched, exactly as in the delete and rename spellings', async () => {
-    await seedUser(engine, 'usr_platform', { platformAdmin: true, accountProvider: 'oidc' });
-
-    await expect(deactivate(PS_ADMIN)).rejects.toThrow(/ADR-0135 D5\.2/);
-    await expectUserRowUntouched(engine, 'usr_platform');
-    expect(await rowExists(engine, 'sys_user_permission_set', 'ups_usr_platform')).toBe(true);
-  });
-
-  it('the refusal names the user who would lose standing', async () => {
-    await seedUser(engine, 'usr_platform', { platformAdmin: true });
-
-    await expect(deactivate(PS_ADMIN)).rejects.toThrow(/'usr_platform'/);
-    await expect(deactivate(PS_ADMIN)).rejects.toThrow(/last administrator/i);
-  });
-
-  it('RE-activating is never refused — the payload is simulated, not pattern-matched', async () => {
-    await seedUser(engine, 'usr_platform', { platformAdmin: true });
-
-    // Same column, same standing-key hit, opposite direction: the simulation
-    // finds the administrator still there afterwards, so it proceeds.
-    await expect(
-      engine.update('sys_permission_set', { id: PS_ADMIN, active: true }, SYSTEM),
-    ).resolves.toBeTruthy();
-  });
-
-  it('an org admin elsewhere keeps the deactivation legal — the invariant is the ENVIRONMENT\'s', async () => {
-    await seedUser(engine, 'usr_platform', { platformAdmin: true });
-    await seedUser(engine, 'usr_owner', { role: 'owner' });
-
-    await expect(deactivate(PS_ADMIN)).resolves.toBeTruthy();
-  });
-
-  it('deactivating ANOTHER permission set is unaffected', async () => {
-    await seedUser(engine, 'usr_platform', { platformAdmin: true });
-
-    await expect(deactivate('ps_member')).resolves.toBeTruthy();
-    expect(await isDeactivated('ps_member')).toBe(true);
-    expect(await isDeactivated(PS_ADMIN)).toBe(false);
-  });
-
-  it('a predicate write that sweeps every set at once is refused', async () => {
-    await seedUser(engine, 'usr_platform', { platformAdmin: true });
-
-    await expect(
-      engine.update(
-        'sys_permission_set',
-        { active: false },
-        { multi: true, where: { id: { $in: [PS_ADMIN, 'ps_member'] } }, ...SYSTEM },
-      ),
-    ).rejects.toThrow(/last administrator/i);
-  });
-
-  it('a payload that touches NEITHER `name` nor `active` still costs no reads at all', async () => {
-    const quiet = await boot({
-      readThrough: (real) => ({
-        registerHook: (event, handler, options) => real.registerHook(event, handler, options),
-        find: async () => {
-          throw new Error('the guard must not read anything for a row-state-free payload');
-        },
-      }),
-    });
-    await seedAdminPermissionSet(quiet);
-    await seedUser(quiet, 'usr_platform', { platformAdmin: true });
-
-    // Adding `active` to the standing keys must not walk back the #6084
-    // read-freeness: the projection is facets-only and never re-flips the
-    // switch, so every projection pass and `os meta resync` still skips this
-    // guard statically. Any read would surface as a refusal.
-    await expect(
-      quiet.update('sys_permission_set', { id: PS_ADMIN, label: 'Full Access (edited)' }, SYSTEM),
-    ).resolves.toBeTruthy();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// [ADR-0131 D4] Write shape (4), fourth spelling: MOVING the row into an
-// organization
-//
-// The resolver finds an unscoped grant's `admin_full_access` by name on the
-// ORGANIZATION-LESS row only. Stamping that row with an organization leaves it
-// named and active, and still un-makes every grant-anchored platform admin —
-// by a payload that touches neither `name` nor `active`.
-// ---------------------------------------------------------------------------
-
-describe('[ADR-0131 D4] path 4, fourth spelling — moving the admin_full_access permission set into an organization', () => {
-  let engine: ObjectQL;
-
-  beforeEach(async () => {
-    engine = await boot();
-    await seedAdminPermissionSet(engine);
-  });
-
-  const move = (id: string, organizationId: string | null) =>
-    engine.update('sys_permission_set', { id, organization_id: organizationId }, SYSTEM);
-
-  const organizationOf = async (id: string): Promise<unknown> =>
-    ((await engine.findOne('sys_permission_set', { where: { id } }, SYSTEM)) as any)?.organization_id ?? null;
-
-  it('moving it is refused and the row stays organization-less', async () => {
-    await seedUser(engine, 'usr_platform', { platformAdmin: true });
-
-    await expect(move(PS_ADMIN, 'org_elsewhere')).rejects.toMatchObject({
-      code: 'PERMISSION_DENIED',
-      status: 403,
-      object: 'sys_permission_set',
-    });
-    expect(await organizationOf(PS_ADMIN)).toBeNull();
-  });
-
-  it('an org admin elsewhere keeps the move legal — the invariant is the ENVIRONMENT\'s', async () => {
-    await seedUser(engine, 'usr_platform', { platformAdmin: true });
-    await seedUser(engine, 'usr_owner', { role: 'owner' });
-
-    await expect(move(PS_ADMIN, 'org_elsewhere')).resolves.toBeTruthy();
-  });
-
-  it('moving ANOTHER permission set, or repeating the row’s own organization-less value, is unaffected', async () => {
-    await seedUser(engine, 'usr_platform', { platformAdmin: true });
-
-    await expect(move('ps_member', 'org_elsewhere')).resolves.toBeTruthy();
-    await expect(move(PS_ADMIN, null)).resolves.toBeTruthy();
-    expect(await organizationOf(PS_ADMIN)).toBeNull();
-  });
-});
-
-describe('[#8613] a DEACTIVATED break-glass set is an emptied environment, not a fresh one', () => {
-  /**
-   * The state the third spelling leaves behind, reachable the same way #6084's
-   * is: the deactivation lands while the guard is not registered (a pre-#8613
-   * deployment that clicked Deactivate while the flag was inert, a migration, a
-   * direct database edit), and the platform then boots with the guard on.
-   *
-   * This is the population the behaviour flip lands hardest on, which is why it
-   * is pinned rather than reasoned about: on those installations `active:false`
-   * was a no-op until this change, so the row can already be off on upgrade.
-   */
-  async function deactivatedEnvironment(): Promise<ObjectQL> {
-    const engine = await boot({ unguarded: true });
-    await seedAdminPermissionSet(engine);
-    await seedUser(engine, 'usr_platform', { platformAdmin: true, accountProvider: 'oidc' });
-    await engine.update('sys_permission_set', { id: PS_ADMIN, active: false }, SYSTEM);
-    registerLastAdminGuard(engine as unknown as LastAdminGuardEngine, {
-      packageId: 'test.last-admin-guard',
-    });
+    await engine.insert('sys_metadata_activation', ledgerRow('act_admin', ADMIN_FULL_ACCESS, false), SYSTEM);
+    registerLastAdminGuard(engine as unknown as LastAdminGuardEngine, { packageId: 'test.last-admin-guard' });
     return engine;
   }
 
-  it('THE AMPLIFIER PIN: the ban the bootstrap exemption would have waved through is refused', async () => {
-    const engine = await deactivatedEnvironment();
+  it('THE REGRESSION PIN: the ban the exemption would wave through is refused', async () => {
+    const engine = await switchedOffEnvironment();
 
-    await expect(ban(engine, 'usr_platform')).rejects.toMatchObject({
-      code: 'PERMISSION_DENIED',
-      status: 403,
-    });
+    await expect(ban(engine, 'usr_platform')).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
     expect(await bannedFlag(engine, 'usr_platform')).toBeFalsy();
   });
 
   it('…and the user delete and the grant revoke with it — all three halves stay on', async () => {
-    const engine = await deactivatedEnvironment();
+    const engine = await switchedOffEnvironment();
 
-    await expect(removeUser(engine, 'usr_platform')).rejects.toThrow(/DEACTIVATED/);
+    await expect(removeUser(engine, 'usr_platform')).rejects.toThrow(/switched OFF/);
     await expect(
       engine.delete('sys_user_permission_set', { where: { id: 'ups_usr_platform' }, ...SYSTEM }),
-    ).rejects.toThrow(/DEACTIVATED/);
+    ).rejects.toThrow(/switched OFF/);
     expect(await userExists(engine, 'usr_platform')).toBe(true);
   });
 
   it('the refusal names the evidence, the cause and the way back', async () => {
-    const engine = await deactivatedEnvironment();
+    const engine = await switchedOffEnvironment();
 
-    await expect(ban(engine, 'usr_platform')).rejects.toThrow(/recognises NO administrator/);
-    await expect(ban(engine, 'usr_platform')).rejects.toThrow(/DEACTIVATED/);
-    // The remedy is the one that actually works here — re-activate, NOT the
-    // "restore the deleted row" sentence the #6084 wipe prescribes.
-    await expect(ban(engine, 'usr_platform')).rejects.toThrow(/Re-activate/);
-    await expect(ban(engine, 'usr_platform')).rejects.toThrow(new RegExp(ADMIN_FULL_ACCESS));
-    await expect(ban(engine, 'usr_platform')).rejects.toThrow(/ADR-0135 D5\.2/);
+    let message = '';
+    try {
+      await ban(engine, 'usr_platform');
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).toMatch(/recognises NO administrator/);
+    expect(message).toMatch(/switched OFF in 'sys_metadata_activation'/);
+    expect(message).toMatch(/Switch the 'admin_full_access' permission set back on/);
+    expect(message).toMatch(/ADR-0135 D5\.2/);
   });
 
-  it('THE WAY BACK IS OPEN: re-activating the set is permitted from inside that environment', async () => {
-    const engine = await deactivatedEnvironment();
+  it('THE WAY BACK IS OPEN: switching the set back on is permitted from inside that environment', async () => {
+    const engine = await switchedOffEnvironment();
 
-    // Every other guarded write is refused above. If the remedy the refusal
-    // prescribes were refused too, the guard itself would be the lockout.
-    await expect(
-      engine.update('sys_permission_set', { id: PS_ADMIN, active: true }, SYSTEM),
-    ).resolves.toBeTruthy();
-    // …and the environment is whole again: the ordinary verdict is back.
+    await expect(engine.update('sys_metadata_activation', { id: 'act_admin', active: true }, SYSTEM)).resolves.toBeTruthy();
+    expect(await ledgerActive(engine, 'act_admin')).toBeTruthy();
+    // …and the administrator it restores is protected again by the ordinary verdict.
     await expect(ban(engine, 'usr_platform')).rejects.toThrow(/last administrator/i);
   });
 
-  it('a deactivated set nobody holds an unscoped grant to is NOT evidence', async () => {
-    const engine = await boot();
-    await seedAdminPermissionSet(engine);
-    await seedUser(engine, 'usr_a', { grant: { permission_set_id: 'ps_member' } });
-    // No unscoped grant points at `admin_full_access`, so switching it off
-    // strands nobody — this is an ordinary pre-first-admin environment.
-    await engine.update('sys_permission_set', { id: PS_ADMIN, active: false }, SYSTEM);
-
-    await expect(ban(engine, 'usr_a')).resolves.toBeTruthy();
-  });
-
-  it('a genuinely fresh environment is untouched — no set is deactivated at all', async () => {
-    const engine = await boot();
+  it('a switched-off set nobody holds an unscoped grant to is NOT evidence', async () => {
+    const engine = await boot({ unguarded: true });
     await seedAdminPermissionSet(engine);
     await seedUser(engine, 'usr_first', { role: 'member' });
+    await engine.insert('sys_metadata_activation', ledgerRow('act_admin', ADMIN_FULL_ACCESS, false), SYSTEM);
+    registerLastAdminGuard(engine as unknown as LastAdminGuardEngine, { packageId: 'test.last-admin-guard' });
 
     await expect(ban(engine, 'usr_first')).resolves.toBeTruthy();
   });
 });
 
 // ---------------------------------------------------------------------------
-// [#8613] Reverse verification — the same fixtures with the guard NOT registered
+// [#6084] Reverse verification — the same fixtures with the guard NOT registered
 //
 // Direction, decided before running: RED, the usual one. Without
-// `registerLastAdminGuard` the deactivation succeeds, every platform admin
-// evaporates while every row survives untouched, and the ban that follows
-// succeeds too. The guarded halves above are measured against exactly this.
+// `registerLastAdminGuard` the fourth write succeeds and takes the whole
+// grant-anchored population with it, and the ban that follows succeeds too —
+// the amplification, on the engine as it behaves without this guard.
 // ---------------------------------------------------------------------------
 
-describe('[#8613] reverse verification: unguarded, one click takes the admins AND the guard', () => {
-  it('the unguarded engine deactivates the row and leaves every other row intact', async () => {
+describe('[#6084] reverse verification: one unguarded write takes the admins AND the guard', () => {
+  it('the unguarded engine switches admin_full_access off and every platform admin evaporates', async () => {
     const engine = await boot({ unguarded: true });
     await seedAdminPermissionSet(engine);
     await seedUser(engine, 'usr_platform', { platformAdmin: true, accountProvider: 'oidc' });
 
-    await expect(
-      engine.update('sys_permission_set', { id: PS_ADMIN, active: false }, SYSTEM),
-    ).resolves.toBeTruthy();
+    await expect(switchOff(engine)).resolves.toBeDefined();
     expect(await userExists(engine, 'usr_platform')).toBe(true);
     expect(await bannedFlag(engine, 'usr_platform')).toBeFalsy();
     expect(await rowExists(engine, 'sys_user_permission_set', 'ups_usr_platform')).toBe(true);
-    // The row is STILL THERE and still correctly named — which is exactly why
-    // the #6084 dangling-grant predicate cannot see this state.
-    expect(await rowExists(engine, 'sys_permission_set', PS_ADMIN)).toBe(true);
+    expect(await ledgerActive(engine, `act_${ADMIN_FULL_ACCESS}`)).toBeFalsy();
   });
 
   it('THE AMPLIFICATION: on that same engine the ban of the last administrator then succeeds', async () => {
@@ -2348,7 +2128,7 @@ describe('[#8613] reverse verification: unguarded, one click takes the admins AN
     await seedAdminPermissionSet(engine);
     await seedUser(engine, 'usr_platform', { platformAdmin: true });
 
-    await engine.update('sys_permission_set', { id: PS_ADMIN, active: false }, SYSTEM);
+    await switchOff(engine);
     await expect(ban(engine, 'usr_platform')).resolves.toBeTruthy();
     expect(await bannedFlag(engine, 'usr_platform')).toBeTruthy();
   });

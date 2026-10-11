@@ -80,9 +80,11 @@
  */
 
 import { matchesConfiguredPlatformAdmin, resolvePlatformAdminEmails } from '@objectstack/core';
+import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { resolveTenancyPosture } from '@objectstack/types';
 import { GRANT_SET_NAME_FIELD } from './grant-set-name.js';
+import { permissionSetInEffect } from './catalog-set-in-effect.js';
 
 interface BootstrapLogger {
   info: (message: string, meta?: Record<string, any>) => void;
@@ -462,8 +464,21 @@ export async function ensureDefaultOrganization(
   //    then — the window is a WAIT, not a silent mis-binding.
   const legacyGrantAnchorRetired = postureEnforcesWall(resolveTenancyPosture());
   if (!adminUserId && !legacyGrantAnchorRetired) {
-    const adminPs = await tryFind(ql, 'sys_permission_set', { name: 'admin_full_access' }, 1);
-    if (adminPs.length === 0 || !adminPs[0].id) {
+    // [ADR-0131 D3/D4] The set confers platform standing only while the
+    // security catalog holds it and the activation ledger leaves it on — the
+    // derivation's own reading, never a `sys_permission_set` row. A read that
+    // fails decides nothing, as `tryFind` does: `no_admin`.
+    let adminSetInEffect = false;
+    try {
+      adminSetInEffect = await permissionSetInEffect(
+        ql,
+        (object, query) => ql.find(object, query, { context: SYSTEM_CTX }),
+        ADMIN_FULL_ACCESS,
+      );
+    } catch {
+      adminSetInEffect = false;
+    }
+    if (!adminSetInEffect) {
       return { defaultOrgCreated: false, memberCreated: false, reason: 'no_admin' };
     }
     // [ADR-0131 D4] The grants NAMING the set (`permission_set`), not the
