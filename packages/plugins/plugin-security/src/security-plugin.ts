@@ -5206,8 +5206,8 @@ export class SecurityPlugin implements Plugin {
    * [D12] — hold a delegated `adminScope` whose BU subtree covers the target
    * user (an access report is itself sensitive data, but an admin who can
    * already rewire a user's grants may read why they resolve as they do).
-   * The evaluation delegates to {@link explainAccessForAsker} with the SAME
-   * internals the middleware uses.
+   * The evaluation delegates to the explain engine with the SAME internals
+   * the middleware uses.
    *
    * [#22792] ...and with the CALLER as the asker. Whether the explanation may
    * say a record exists is decided by the caller's read of it, never by the

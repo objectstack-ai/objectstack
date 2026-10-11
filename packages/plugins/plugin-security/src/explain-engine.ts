@@ -428,8 +428,8 @@ export interface ExplainEngineDeps {
    *
    * [#22792] Asked first of the ASKER, for every record-grained explanation:
    * whether the explanation may say the record exists is decided by the read
-   * access of whoever asked for it, not by the explained principal's
-   * ({@link explainAccessForAsker}). One question, one notion of "can read":
+   * access of whoever asked for it, not by the explained principal's (the
+   * asker gate in the engine's record pass). One question, one notion of "can read":
    * the same caller-context by-id read, asked with the asker's context.
    */
   recordAbsentToCaller?: (object: string, recordId: string, context: any) => Promise<boolean>;
@@ -1862,8 +1862,8 @@ async function applyRecordAttribution(
 
 /**
  * Explain `input.context`'s access, asked by that same principal: a
- * self-explanation. The asker's read ({@link explainAccessForAsker}) is the
- * explained principal's own.
+ * self-explanation. Whether the explanation may say a record exists is decided
+ * by the asker's read, and here the asker is the explained principal itself.
  */
 export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput): Promise<ExplainDecision> {
   return explainAccessForAsker(deps, input, undefined);

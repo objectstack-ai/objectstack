@@ -41,7 +41,7 @@ import type {
   ControlledByParentWriteUnresolvedReason,
 } from '@objectstack/spec/contracts';
 import { PermissionEvaluator } from './permission-evaluator.js';
-import { explainAccess, type ExplainEngineDeps } from './explain-engine.js';
+import { explainAccess, explainAccessForAsker, type ExplainEngineDeps } from './explain-engine.js';
 
 const OBJECT = 'cbx_contract';
 const CBP_SCHEMA = { name: OBJECT, sharingModel: 'controlled_by_parent' };
@@ -288,28 +288,48 @@ describe('[ADR-0055] which verbs ask the check, and for whom', () => {
 
 const READ_DOOR_ASKED = (Object.keys(VERB_CLASS) as ExplainOperation[]).filter((v) => VERB_CLASS[v] === 'read_door_asked');
 
-/** The read door's answer: `true` withholds the record from the explained principal, `false` returns it. */
-const readDoorAnswering = (absent: boolean): ReadDoor => vi.fn(async () => absent);
+/**
+ * [#22792] The asker the read block explains to: an administrator the read
+ * door returns the record to. Whether an explanation may say a record exists
+ * is the ASKER's read, so the principal's read verdict, decider included, is
+ * what an asker who reads the record is told; a principal explaining itself a
+ * record the door withholds is told what an id no row carries gets (the
+ * self-explanation cells below).
+ */
+const ASKER = { userId: 'u_admin', tenantId: 'org1', positions: [], permissions: [] };
+
+/** The read door: `true` withholds the record from the EXPLAINED principal, `false` returns it; the asker always reads it. */
+const readDoorAnswering = (absent: boolean): ReadDoor =>
+  vi.fn(async (_object: string, _recordId: string, context: unknown) => (context === EXPLAINED ? absent : false));
+/** Who the read door was asked about, in order. */
+const askedOf = (readDoor: ReadDoor) => (readDoor as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[2]);
+
+/** `null` asks the object-level question (no `recordId`). */
+const explainToAsker = (d: ExplainEngineDeps, operation: ExplainOperation, recordId: string | null = 'r1') =>
+  explainAccessForAsker(d, { object: OBJECT, operation, context: EXPLAINED, ...(recordId !== null ? { recordId } : {}) }, ASKER);
 
 describe('[ADR-0055] a read of a controlled_by_parent record takes the read door\'s answer on the master leg', () => {
   for (const verb of READ_DOOR_ASKED) {
     it(`${verb}: a record the read door withholds is not visible, decided by the sharing layer`, async () => {
-      const d = await explainAs(deps({ readDoor: readDoorAnswering(true) }), verb);
+      const d = await explainToAsker(deps({ readDoor: readDoorAnswering(true) }), verb);
       expect(d.record).toEqual({ recordId: 'r1', visible: false, decidedBy: 'sharing' });
       expect(sharingRecordOf(d)?.outcome).toBe('excluded');
     });
 
     it(`${verb}: a record the read door returns: byte-identical to the report without the question`, async () => {
-      const without = await explainAs(deps(), verb);
-      const withDoor = await explainAs(deps({ readDoor: readDoorAnswering(false) }), verb);
+      const without = await explainToAsker(deps(), verb);
+      const withDoor = await explainToAsker(deps({ readDoor: readDoorAnswering(false) }), verb);
       expect(withDoor).toEqual(without);
       expect(withDoor.record).toMatchObject({ recordId: 'r1', visible: true });
     });
 
     it(`${verb}: a rejection fails the find, so it is reported fail-closed with no predicate`, async () => {
       const fault = Object.assign(new Error('datasource unavailable'), { code: 'ERR_DATASOURCE_UNAVAILABLE', status: 503 });
-      const readDoor: ReadDoor = vi.fn(async () => { throw fault; });
-      const d = await explainAs(deps({ readDoor }), verb);
+      const readDoor: ReadDoor = vi.fn(async (_o: string, _r: string, context: unknown) => {
+        if (context === EXPLAINED) throw fault;
+        return false;
+      });
+      const d = await explainToAsker(deps({ readDoor }), verb);
       expect(d.record).toEqual({ recordId: 'r1', visible: false, decidedBy: 'sharing' });
       const sharing = sharingRecordOf(d);
       expect(sharing?.outcome).toBe('not_evaluated');
@@ -317,51 +337,69 @@ describe('[ADR-0055] a read of a controlled_by_parent record takes the read door
       expect(sharing?.matchesRecord).toBeUndefined();
     });
 
-    it(`${verb}: asked once, for that record, with the EXPLAINED context, and the write check is not asked`, async () => {
+    it(`${verb}: asked once for the asker and once, for that record, with the EXPLAINED context, and the write check is not asked`, async () => {
       const readDoor = readDoorAnswering(false);
       const master = answering({ outcome: 'deny', leg: 'object_permission' });
-      await explainAs(deps({ readDoor, master }), verb);
-      expect(readDoor).toHaveBeenCalledTimes(1);
+      await explainToAsker(deps({ readDoor, master }), verb);
+      expect(readDoor).toHaveBeenCalledTimes(2);
       expect(readDoor).toHaveBeenCalledWith(OBJECT, 'r1', EXPLAINED);
-      expect((readDoor as ReturnType<typeof vi.fn>).mock.calls[0][2]).toBe(EXPLAINED);
+      expect(askedOf(readDoor)).toEqual([ASKER, EXPLAINED]);
       expect(master).not.toHaveBeenCalled();
     });
 
-    it(`${verb}: a leg this report models that withholds the record decides, and the read door is not asked`, async () => {
+    it(`${verb}: a leg this report models that withholds the record decides, and the read door is not asked of the principal`, async () => {
       const readDoor = readDoorAnswering(true);
-      const byRls = await explainAs(deps({ readDoor, layer1: { id: 'not_this_record' } }), verb);
+      const byRls = await explainToAsker(deps({ readDoor, layer1: { id: 'not_this_record' } }), verb);
       expect(byRls.record).toEqual({ recordId: 'r1', visible: false, decidedBy: 'rls' });
-      const byTenant = await explainAs(deps({ readDoor, record: { ...RECORD, organization_id: 'org2' } }), verb);
+      const byTenant = await explainToAsker(deps({ readDoor, record: { ...RECORD, organization_id: 'org2' } }), verb);
       expect(byTenant.record).toEqual({ recordId: 'r1', visible: false, decidedBy: 'tenant_isolation' });
-      expect(readDoor).not.toHaveBeenCalled();
+      expect(askedOf(readDoor)).not.toContain(EXPLAINED);
     });
 
     for (const [label, schema] of [
       ['public_read_write', { name: OBJECT, sharingModel: 'public_read_write' }],
       ['private', { name: OBJECT, sharingModel: 'private' }],
     ] as const) {
-      it(`${verb}: not asked on a ${label} object, which derives nothing from a master: the report is unchanged`, async () => {
+      it(`${verb}: not asked of the principal on a ${label} object, which derives nothing from a master: the report is unchanged`, async () => {
         const readDoor = readDoorAnswering(true);
-        const without = await explainAs(deps({ schema }), verb);
-        const withDoor = await explainAs(deps({ schema, readDoor }), verb);
+        const without = await explainToAsker(deps({ schema }), verb);
+        const withDoor = await explainToAsker(deps({ schema, readDoor }), verb);
         expect(withDoor).toEqual(without);
-        expect(readDoor).not.toHaveBeenCalled();
+        expect(askedOf(readDoor)).toEqual([ASKER]);
       });
     }
 
-    it(`${verb}: an object-level request, and a record that does not exist, are not asked about`, async () => {
+    it(`${verb}: an object-level request is not asked about, and a record that does not exist is not asked of the principal`, async () => {
       const readDoor = readDoorAnswering(true);
-      const objectLevel = await explainAs(deps({ readDoor }), verb, null);
+      const objectLevel = await explainToAsker(deps({ readDoor }), verb, null);
       expect(objectLevel.record).toBeUndefined();
-      const missing = await explainAs(deps({ readDoor, record: null }), verb, 'r_missing');
-      expect(missing.record).toEqual({ recordId: 'r_missing', visible: false });
       expect(readDoor).not.toHaveBeenCalled();
+      const missing = await explainToAsker(deps({ readDoor, record: null }), verb, 'r_missing');
+      expect(missing.record).toEqual({ recordId: 'r_missing', visible: false });
+      expect(askedOf(readDoor)).not.toContain(EXPLAINED);
+    });
+
+    it(`${verb}: explained to itself, a record the read door withholds is answered as the id no row carries, layers included`, async () => {
+      const readDoor = readDoorAnswering(true);
+      const withheld = await explainAs(deps({ readDoor }), verb);
+      const missing = await explainAs(deps({ readDoor, record: null }), verb);
+      expect(withheld.record).toEqual({ recordId: 'r1', visible: false });
+      expect(withheld).toEqual(missing);
+      expect(sharingRecordOf(withheld)?.outcome).toBe('not_evaluated');
+    });
+
+    it(`${verb}: explained to itself, a record the read door returns is the report without the question, asked once`, async () => {
+      const readDoor = readDoorAnswering(false);
+      const without = await explainAs(deps(), verb);
+      const withDoor = await explainAs(deps({ readDoor }), verb);
+      expect(withDoor).toEqual(without);
+      expect(askedOf(readDoor)).toEqual([EXPLAINED]);
     });
   }
 
-  it('a create, which addresses no stored record, is not asked about', async () => {
+  it('a create, which addresses no stored record, is not asked of the principal', async () => {
     const readDoor = readDoorAnswering(true);
-    await explainAs(deps({ readDoor }), 'create');
-    expect(readDoor).not.toHaveBeenCalled();
+    await explainToAsker(deps({ readDoor }), 'create');
+    expect(askedOf(readDoor)).not.toContain(EXPLAINED);
   });
 });
