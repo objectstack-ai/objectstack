@@ -29,10 +29,14 @@ import {
 import { readEnvWithDeprecation, resolveTenancyPosture, resolveAllowDegradedTenancy, isMcpServerEnabled, stampSearchPinyinEnabled, isModuleNotFoundError } from '@objectstack/types';
 import { PLATFORM_CAPABILITY_TOKENS, PLATFORM_ALWAYS_ON_CAPABILITIES, RETIRED_PLATFORM_CAPABILITY_GUIDANCE } from '@objectstack/spec/kernel';
 // [#22301] The `requires` token → provider table and its exact identity match,
-// shared with `@objectstack/verify`'s `bootStack` — see `Serve.CAPABILITY_PROVIDERS`.
+// shared with `@objectstack/verify`'s `bootStack` — see `Serve.CAPABILITY_PROVIDERS`
+// — and, beside it, which tokens a served boot mounts (`requires` plus the
+// always-on slate) and what it constructs each provider with.
 import {
   CAPABILITY_PROVIDERS,
   providesCapability,
+  resolveServedCapabilities,
+  resolveCapabilityArgument,
   materializeStackPlugin,
   STACK_TIER_PRESETS,
   CAPABILITY_TO_TIER as SHARED_CAPABILITY_TO_TIER,
@@ -61,24 +65,16 @@ import {
   type SeedSuppressionReason,
 } from '@objectstack/spec/contracts';
 import { missingProviderMessage } from '../utils/capability-preflight.js';
-// The mail provider vocabulary, read from the package that materialises the
-// transports rather than restated here (#5132) — `resolveEmailCapabilityArg`
-// has to refuse exactly the configurations `makeTransport` cannot build, and
-// two literal lists for one vocabulary is the drift #5094 was filed for. Values
-// only (no plugin class): the capability loop loads `EmailServicePlugin` itself
-// with a bare `import()`, resolved against THIS CLI's own realpath — its
-// bundled copy always wins, never the host app's. Contrast `importConfigPlugin`
-// below, which IS host-anchored: an app-declared package wins there (per commit 5a90c56d1).
-import { isEmailTransportProvider, emailProviderRequiresApiKey, unsupportedProviderFix } from '@objectstack/plugin-email';
-// The SMS provider vocabulary, read from the package that materialises the
-// transports, for the same reason and by the same rule as the mail one above
-// (#5713). `resolveSmsCapabilityArg` has to refuse exactly the tags
-// `makeSmsTransport` cannot build — restating `log`/`aliyun`/`twilio` here would
-// be the second literal #5094 was filed for. Values only (no plugin class): the
-// capability loop dynamic-imports `SmsServicePlugin` itself the same way — a
-// bare `import()` resolved against this CLI's own realpath, so its bundled
-// copy wins, never the host's (measured in commit 5a90c56d1).
-import { isSmsTransportProvider, SMS_TRANSPORT_PROVIDERS } from '@objectstack/service-sms';
+// The deployment's product name, for `AuthPlugin` — the same resolver the email
+// capability's template context reads (`resolveEmailCapabilityArg`), so the two
+// cannot disagree. Both moved to `@objectstack/plugin-email` beside the mail
+// provider vocabulary they read (#22301; see the re-exports at the foot of this
+// file). The capability loop still loads `EmailServicePlugin` itself with a bare
+// `import()`, resolved against THIS CLI's own realpath — its bundled copy always
+// wins, never the host app's — and reads the email and SMS readers off that
+// module. Contrast `importConfigPlugin` below, which IS host-anchored: an
+// app-declared package wins there (per commit 5a90c56d1).
+import { resolveDeploymentAppName } from '@objectstack/plugin-email';
 import { createHash } from 'node:crypto';
 import { resolveObjectStackHome } from '@objectstack/runtime';
 import { LOG_LEVELS, resolveLogLevel, readLogLevelEnv } from '../utils/log-level.js';
@@ -2704,78 +2700,46 @@ export default class Serve extends Command {
       // and shadow any capability resolution (i.e. an explicit
       // instance wins over the auto-loader).
       const presetName = flags.preset ?? (isDev ? 'default' : 'default');
-      // Dedupe `requires` (Set keeps first-seen order). The deprecated
-      // `aiStudio`/`aiSeat` alias canonicalization was removed in framework#3308
-      // — legacy spellings are now unknown tokens (warned below, rejected at
-      // authoring by defineStack).
+      // [#22301] WHICH tokens a served boot mounts providers for is ONE rule,
+      // `resolveServedCapabilities` (`@objectstack/core`), read by this command,
+      // by `@objectstack/verify`'s `bootStack` and by `os migrate plan`'s
+      // declaration boot, so an app's tests mount the services its users'
+      // server mounts. In its order: the tokens the stack declares, as
+      // `stackDeclaredCapabilities` reads them (the top-level list, otherwise
+      // each package body's, #22288), deduplicated; `email` when `auth` is
+      // declared; the host defaults below; the always-on slate
+      // (`Serve.ALWAYS_ON_CAPABILITIES`) unless `--preset minimal`; and `job`
+      // and `queue` moved ahead of the tokens that schedule background work.
+      // Its `declared` set carries the "required" INTENT (#1597): a declared
+      // capability whose provider cannot be provided is a hard boot error,
+      // whereas a token the platform appended stays best-effort (warn +
+      // continue) — that half is this command's own, in the resolver below.
       //
-      // [#22288] Read by `resolveStackCollection`'s rule: the top-level list
-      // when the config carries one, otherwise each package body's. A
-      // multi-package `preserve` config carries `requires` only in the body of
-      // the package that declared it, so a top-level read mounted none of its
-      // providers on a config boot with no compiled artifact. (An artifact boot
-      // already answered here: `createStandaloneStack` resolves the artifact's
-      // packages and `mergeBootConfig` lays its `requires` over the top level.)
-      const rawRequires: string[] = stackDeclaredCapabilities(config);
-      const requires: string[] = [...new Set(rawRequires)];
-      // Snapshot the app's EXPLICIT capability declarations BEFORE the platform
-      // appends its own convenience defaults (auth→email, mcp, pinyin-search,
-      // ALWAYS_ON_CAPABILITIES, queue/job). Only these explicit declarations carry
-      // "required" INTENT (#1597): a declared capability whose provider package is
-      // absent is a hard boot error, whereas an auto-injected default that happens
-      // to be absent stays best-effort (warn + continue).
-      const declaredRequires = new Set<string>(requires);
-      // Auth callbacks (password-reset, email-verification, magic-link,
-      // invitation) depend on the email service. Auto-pull `email` when
-      // `auth` is required so transactional mail works out of the box
-      // (LogTransport fallback when no provider is configured).
-      if (requires.includes('auth') && !requires.includes('email')) {
-        requires.push('email');
-      }
-      // MCP is a default-on core capability: serve `/api/v1/mcp` unless
-      // `OS_MCP_SERVER_ENABLED=false` opts out. The dispatcher gates the route
-      // on the SAME decision point (`isMcpServerEnabled`), so serving the
-      // route without also loading the MCP plugin would 501 every request
-      // (#2698: the default must yield a connectable MCP endpoint). Explicit
-      // `requires: ['mcp']` in config works regardless of the env var.
-      if (isMcpServerEnabled() && !requires.includes('mcp')) {
-        requires.push('mcp');
-      }
-      // Pinyin search recall (#2486): locale-gated platform capability. When
-      // `OS_SEARCH_PINYIN_ENABLED` is unset, the default derives from the
-      // stack's configured locales (any `zh-*` → on), and the resolved
-      // decision is stamped back into the env var — every later consumer
-      // (each engine's SchemaRegistry provisioning the `__search` companion
-      // column, the plugin's own gate) reads the same answer via the no-arg
-      // `resolveSearchPinyinEnabled()`. The shared `stampSearchPinyinEnabled`
-      // helper is also what `createStandaloneStack` stamps from the compiled
-      // artifact, so serve/dev and `os migrate plan`/`apply` cannot compute
-      // different schema views of the same source tree (#3955).
-      if (stampSearchPinyinEnabled((config as any).i18n)) {
-        if (!requires.includes('pinyin-search')) requires.push('pinyin-search');
-      }
-      // Default capability slate — every preset except `minimal` gets the
-      // foundational services (queue + job + cache + settings + email +
-      // storage). Opt out with `objectstack serve --preset minimal`.
-      // Keeping `auth → email` above as a defensive rule for users who
-      // explicitly opt into `minimal` but still enable auth.
-      const ALWAYS_CAPS = Serve.ALWAYS_ON_CAPABILITIES;
-      if (presetName !== 'minimal') {
-        for (const cap of ALWAYS_CAPS) {
-          if (!requires.includes(cap)) requires.push(cap);
-        }
-      }
-      // The email + approvals services schedule background work
-      // (durable retries, SLA escalation). Auto-pull
-      // 'job' and 'queue' so plugins can opt into durable scheduling.
-      // IMPORTANT: prepend, so their plugins load (and their kernel:ready
-      // hooks fire) BEFORE consumers like email/approvals that subscribe
-      // to queues during their own kernel:ready phase.
-      const NEEDS_JOB_OR_QUEUE = ['email', 'approvals', 'auth'];
-      if (NEEDS_JOB_OR_QUEUE.some((c) => requires.includes(c))) {
-        if (!requires.includes('queue')) requires.unshift('queue');
-        if (!requires.includes('job')) requires.unshift('job');
-      }
+      // The two host defaults are this process's own decisions, read from its
+      // environment, so they are handed to the rule rather than made by it:
+      //
+      //  - MCP is a default-on core capability: serve `/api/v1/mcp` unless
+      //    `OS_MCP_SERVER_ENABLED=false` opts out. The dispatcher gates the route
+      //    on the SAME decision point (`isMcpServerEnabled`), so serving the
+      //    route without also loading the MCP plugin would 501 every request
+      //    (#2698: the default must yield a connectable MCP endpoint). Explicit
+      //    `requires: ['mcp']` in config works regardless of the env var.
+      //  - Pinyin search recall (#2486): locale-gated platform capability. When
+      //    `OS_SEARCH_PINYIN_ENABLED` is unset, the default derives from the
+      //    stack's configured locales (any `zh-*` → on), and the resolved
+      //    decision is stamped back into the env var — every later consumer
+      //    (each engine's SchemaRegistry provisioning the `__search` companion
+      //    column, the plugin's own gate) reads the same answer via the no-arg
+      //    `resolveSearchPinyinEnabled()`. The shared `stampSearchPinyinEnabled`
+      //    helper is also what `createStandaloneStack` stamps from the compiled
+      //    artifact, so serve/dev and `os migrate plan`/`apply` cannot compute
+      //    different schema views of the same source tree (#3955).
+      const hostDefaults: string[] = [];
+      if (isMcpServerEnabled()) hostDefaults.push('mcp');
+      if (stampSearchPinyinEnabled((config as any).i18n)) hostDefaults.push('pinyin-search');
+      const served = resolveServedCapabilities(stackDeclaredCapabilities(config), { preset: presetName, hostDefaults });
+      const requires: string[] = [...served.tokens];
+      const declaredRequires: ReadonlySet<string> = served.declared;
       // Capability → tier: any capability that is gated by a tier
       // (Serve.CAPABILITY_TO_TIER) automatically opens that tier when listed
       // in `requires`. Capabilities NOT in that map (e.g. `automation`,
@@ -4661,63 +4625,37 @@ export default class Serve extends Command {
             console.warn(chalk.yellow(`  ⚠ Capability "${cap}": ${spec.pkg} did not export ${spec.export}`));
             continue;
           }
-          // analytics needs cubes from config, others take no args
-          let arg: any;
-          if (cap === 'automation') {
-            // #3016 — anchor declarative connector file refs (e.g. the openapi
-            // provider's `providerConfig.spec: './billing-openapi.json'`) to the
-            // project folder (next to objectstack.config.ts), mirroring how the
-            // standalone sqlite default is anchored above. Reads are confined to
-            // this root by the automation service's package file loader.
-            arg = { packageRoot: path.dirname(absolutePath) };
-          } else if (spec.configKey === 'analyticsCubes') {
-            // [#22288] The top level first, as before (its own array, then the
-            // legacy `cubes` spelling), and only then the package bodies: a
-            // multi-package config carries a package's `analyticsCubes` in that
-            // body alone, and `analytics` is always on, so its cubes were
-            // dropped on every boot of such an app (`os dev` included).
-            const cubes = (config as any).analyticsCubes ?? (config as any).cubes
-              ?? resolveStackCollection(config, 'analyticsCubes');
-            arg = { cubes };
-          } else if (cap === 'email') {
-            // Throws on a mail configuration that cannot deliver (#5087,
-            // #5132) — the catch below turns that into the boot failure /
-            // loud error it should be, never a LogTransport substituted
-            // behind the operator's back.
-            arg = resolveEmailCapabilityArg(
-              (config as any).email ?? {},
-              process.env,
-              (config as any).appName,
-            ).options;
-          } else if (cap === 'sms') {
-            // Compose SmsServicePlugin options from config.sms + OS_SMS_* env
-            // (#2780). Same precedence as email: env beats config. Provider
-            // credentials normally live in the `sms` settings namespace
-            // (bound at kernel:ready); constructor opts cover pre-settings
-            // boot and hosts without the settings service.
-            //
-            // Throws on a provider tag no transport can deliver (#5713) — the
-            // catch below turns that into the boot failure / loud error it
-            // should be, never a LogSmsTransport substituted behind the
-            // operator's back. Same shape as the `email` arm above.
-            arg = resolveSmsCapabilityArg((config as any).sms ?? {}, process.env).options;
-          } else if (cap === 'storage') {
-            // Storage is now in the default capability slate. If the host
-            // hasn't configured a backend explicitly we fall back to the
-            // local-disk driver under `.objectstack/data/uploads/` so
-            // avatars / attachments / report files work out of the box.
-            // In production mode we emit a single loud warning so the
-            // operator knows to point storage at S3 / GCS / Azure before
-            // shipping (data on a single pod is volatile / non-replicated).
-            const storageArg = resolveStorageCapabilityArg(resolveStorageLocalRootEnv());
-            arg = storageArg.options;
-            if (storageArg.localRoot && !isDev) {
-              // Names only the channels that actually work — `config.storage`
-              // was in this sentence and was never read (framework#4167).
-              console.warn(chalk.yellow(
-                `  ⚠ StorageServicePlugin using local driver (${storageArg.localRoot}) — switch to S3/GCS/Azure for production (set OS_STORAGE_* or configure storage in Setup → Settings).`,
-              ));
-            }
+          // [#22301] WHAT the provider is constructed with is ONE rule,
+          // `resolveCapabilityArgument` (`@objectstack/core`), which
+          // `@objectstack/verify`'s `bootStack` reads too: `automation` gets the
+          // app's root (#3016 — declarative connector file refs resolve from
+          // the project folder, next to objectstack.config.ts, never from the
+          // working directory); `analytics` the stack's cubes, the top level
+          // first and then the package bodies (#22288); `email` and `sms` the
+          // deployment's mail and SMS configuration, read by the readers their
+          // own packages export off `mod` (env beats config); `storage` its
+          // local root. The mail and SMS readers THROW on a configuration no
+          // transport can deliver through (#5087, #5132, #5713) — the catch
+          // below turns that into the boot failure / loud error it should be,
+          // never a log transport substituted behind the operator's back.
+          const resolved = resolveCapabilityArgument(cap, {
+            stack: config,
+            packageRoot: path.dirname(absolutePath),
+            providerModule: mod,
+            env: process.env,
+          });
+          const arg: any = resolved.argument;
+          if (resolved.localStorageRoot && !isDev) {
+            // Storage is in the default capability slate, and a host that
+            // configured no backend gets the local-disk driver. In production
+            // mode say so once, loudly, so the operator points storage at
+            // S3 / GCS / Azure before shipping (data on a single pod is
+            // volatile / non-replicated). Names only the channels that
+            // actually work — `config.storage` was in this sentence and was
+            // never read (framework#4167).
+            console.warn(chalk.yellow(
+              `  ⚠ StorageServicePlugin using local driver (${resolved.localStorageRoot}) — switch to S3/GCS/Azure for production (set OS_STORAGE_* or configure storage in Setup → Settings).`,
+            ));
           }
           const provider = arg !== undefined ? new Ctor(arg) : new Ctor();
           await kernel.use(provider);
@@ -6202,406 +6140,27 @@ export function formatUnusableAuthBaseUrlDiagnostic(
     + '    OS_BASE_URL / http://localhost:<port>.';
 }
 
-/**
- * Constructor options for `StorageServicePlugin`, plus the local root to name in
- * the production warning (absent when the host configured a backend itself).
- */
-export interface StorageCapabilityArg {
-  options: Record<string, unknown>;
-  localRoot?: string;
-}
-
-/**
- * Resolve what `StorageServicePlugin` is constructed with (#4096).
- *
- * Storage is in the default capability slate, so a host that configures nothing
- * still gets local disk under `.objectstack/data/uploads/` and avatars /
- * attachments / report files work out of the box.
- *
- * The fallback used to be `{ driver: 'local', root }` — neither of which
- * `StorageServicePluginOptions` declares. Both were dropped on the floor, so the
- * plugin applied its OWN default (`./storage`), the storage-root env var changed
- * nothing, and uploads landed somewhere the operator never named. The `storage`
- * settings namespace then corrected the root on its first read (its manifest
- * default IS `./.objectstack/data/uploads`), which swapped the adapter and
- * warned about stranded files — on every boot of a healthy server.
- *
- * #4096 fixed the option SHAPE; the value still could not reach the settings
- * side, because the CLI and the settings service spelled the env var
- * differently. {@link resolveStorageLocalRootEnv} is the channel that closes
- * that gap (#4968) — read the root through it, never off `process.env`
- * directly.
- *
- * `config.storage` is deliberately NOT read (framework#4167). It was never a
- * stack key: `ObjectStackDefinitionSchema` does not declare it, and the schema
- * is not `.strict()`, so `defineStack` — which every documented authoring path
- * and every compiled artifact goes through — strips it before `serve` could
- * ever see it. It arrived here only from a bare-object config on the
- * config-boot path, i.e. one unreachable-in-practice combination, where it then
- * ALSO carried the `driver`/`root` spelling the plugin does not read. Honouring
- * it on that one path meant the same authoring key worked in one place and
- * vanished in every other, which is worse than not having it.
- *
- * The storage backend is a deployment concern with two real channels: the
- * `OS_STORAGE_*` env vars (below) and the `storage` settings namespace, which
- * is also the one with proper credential handling. Authors who write `storage:`
- * anyway now get told so — `lintUnknownStackKeys` reports undeclared top-level
- * keys, and `STACK_KEY_GUIDANCE` names both channels.
- */
-export function resolveStorageCapabilityArg(envRoot?: string): StorageCapabilityArg {
-  const rootDir = envRoot?.trim() || '.objectstack/data/uploads';
-  return { options: { adapter: 'local', local: { rootDir } }, localRoot: rootDir };
-}
-
-/**
- * The ONE env channel for the local storage root (#4968).
- *
- * The CLI used to invent its own name, `OS_STORAGE_ROOT`, while the settings
- * service derives the env name for the same value from the namespace it owns:
- * `envKeyOf('storage', 'local_root')` = `OS_STORAGE_LOCAL_ROOT`. Nothing in the
- * repo ever set that name, so the two channels never met — the CLI constructed
- * an adapter at the root the operator asked for, and `StorageServicePlugin`
- * then re-resolved from settings at `kernel:ready`, found nothing but the
- * manifest's schema DEFAULT, and swapped the adapter to
- * `./.objectstack/data/uploads`.
- *
- * The consequences were not log noise:
- *
- *  - `OS_STORAGE_ROOT` took effect for exactly one value — the one that happens
- *    to equal the manifest default. Every other value (`/srv/uploads`, a
- *    `--fresh` tempdir) was constructed and then discarded, so an operator
- *    following `backup-restore.mdx` backed up an empty directory.
- *  - `dev --fresh` promised the tempdir "owns ALL persistent state for this
- *    run"; uploads actually landed under the project cwd and survived exit.
- *  - The "adapter swapped … may be unreachable" warning on every clean boot was
- *    ACCURATE — the swap really happened. It is not touched here, and it stops
- *    firing because the swap stops happening.
- *
- * So the fix is at the producer, not in a tolerant consumer: write the name the
- * settings service already declares. The legacy name is read for one more
- * release via {@link readEnvWithDeprecation} and, when it is the one that
- * supplied the value, STAMPED onto the canonical name — the settings service
- * reads `process.env` live through its own `env` reference and only ever looks
- * up `OS_STORAGE_LOCAL_ROOT`, so without the stamp a legacy deployment would
- * keep the exact bug this fixes. With it, settings resolves
- * `source: 'env'`/`locked: true` at the value the adapter was built with,
- * `needsStorageSwap` answers false, and the two channels agree by construction.
- *
- * Side-effecting on purpose, and idempotent: `readEnvWithDeprecation`
- * deduplicates its warning process-wide, and once stamped the canonical branch
- * wins on every later call.
- *
- * @returns The resolved root, or `undefined` when neither name is set (the
- *          caller then falls through to `resolveStorageCapabilityArg`'s
- *          built-in default, which matches the manifest default).
- */
-export function resolveStorageLocalRootEnv(): string | undefined {
-  const value = readEnvWithDeprecation('OS_STORAGE_LOCAL_ROOT', 'OS_STORAGE_ROOT');
-  if (value === undefined) return undefined;
-  // Bridge the legacy spelling onto the canonical one the settings service
-  // reads. Guarded so we never rewrite a canonical value with itself.
-  if (typeof process !== 'undefined' && process.env
-    && process.env.OS_STORAGE_LOCAL_ROOT === undefined) {
-    process.env.OS_STORAGE_LOCAL_ROOT = value;
-  }
-  return value;
-}
-
-/**
- * Constructor options for `EmailServicePlugin`.
- *
- * There is no `warning` channel here any more (#5132). It carried exactly one
- * message — "provider=resend but no apiKey, falling back to LogTransport" —
- * and that fallback is now a throw, because a mail configuration that cannot
- * deliver has no "degraded but still fine" reading: it is a server that
- * accepts every send and delivers nothing.
- */
-export interface EmailCapabilityArg {
-  options: Record<string, unknown>;
-}
-
-/**
- * The ONE truth table this file reads its `OS_EMAIL_*_ENABLED` booleans with
- * (#5447).
- *
- * Extracted rather than restated: `OS_EMAIL_QUEUE_ENABLED` carried this list
- * inline, and a second boolean flag written a second way is how one env var
- * ends up accepting `on` while its neighbour does not — the operator-visible
- * half of the "two literals describing one vocabulary" trap that split the
- * settings dropdown from the transports (#5094).
- *
- * Tri-state on purpose: `undefined` means the variable is unset and the caller
- * must fall through to config, which is what keeps an absent flag from
- * silently reading as `false` and overriding a config that said `true`.
- * An empty string is a SET variable and resolves to `false`, matching the
- * behaviour `OS_EMAIL_QUEUE_ENABLED` already had.
- */
-function envBooleanFlag(raw: string | undefined): boolean | undefined {
-  if (raw == null) return undefined;
-  return ['1', 'true', 'yes', 'on'].includes(String(raw).trim().toLowerCase());
-}
-
-/**
- * The deployment's product name: `OS_APP_NAME` > `config.email.appName` >
- * `config.email.defaultTemplateContext.appName` > top-level `config.appName` >
- * `'ObjectStack'` (the chain {@link resolveEmailCapabilityArg} documents).
- *
- * ONE resolver for every boot-time consumer of the name, so they cannot
- * disagree: the email capability's template context, and the `appName`
- * AuthPlugin receives (the auth emails' `{{appName}}` and the TOTP issuer an
- * authenticator app lists the account under). AuthPlugin used to be built
- * without it, so `OS_APP_NAME` never reached auth: its emails, whose own
- * `appName` outranks the template context, said 'ObjectStack'.
- */
-export function resolveDeploymentAppName(
-  cfgEmail: Record<string, any> = {},
-  env: NodeJS.ProcessEnv = process.env,
-  configAppName?: string,
-): string {
-  return env.OS_APP_NAME || cfgEmail.appName || cfgEmail.defaultTemplateContext?.appName
-    || configAppName || 'ObjectStack';
-}
-
-/**
- * Resolve what `EmailServicePlugin` is constructed with, from `config.email`
- * plus `OS_EMAIL_*` env (env wins, so an operator can override per environment).
- *
- * SMTP (#5087, ADR-0012) is configured through `OS_EMAIL_SMTP_HOST` / `_PORT` /
- * `_SECURE` / `_USER` / `_PASSWORD` — the `OS_{DOMAIN}_{FEATURE}_{QUALIFIER}`
- * shape of Prime Directive #9, grouped with the email vars rather than the bare
- * third-party `SMTP_*` names — layered over `config.email.options`.
- *
- * **Every provider that cannot deliver throws** — `smtp` with no host, and
- * (since #5132) `resend`/`postmark` with no API key, or a provider tag outside
- * `EMAIL_TRANSPORT_PROVIDERS` altogether. The capability loop turns that into a
- * loud failure — a hard boot error when the app declared `requires: ['email']`,
- * otherwise a `console.error` and no email service — which is the point: the
- * alternative (quietly substituting the LogTransport, as this function's
- * `resend`/`postmark` arm used to do for a missing API key) hands the operator a
- * server that accepts every send, records it in `sys_email` as sent, and
- * delivers nothing — the exact declared-but-not-delivered gap #5087 closed
- * inside the plugin, left behind one layer up.
- *
- * Refusing is only defensible because "this environment does not send mail" has
- * a way to say itself: `OS_EMAIL_PROVIDER=log` (the default). An operator who
- * names a delivery provider has declared an intent, and the honest answer to an
- * intent we cannot honour is a failure, not a substitute transport.
- *
- * The provider vocabulary and the "needs an API key" question are both read
- * from `@objectstack/plugin-email` — the package that has to materialise the
- * transport — rather than restated here. Two literals describing one vocabulary
- * is how the settings dropdown and the transports drifted apart (#5094).
- *
- * `OS_EMAIL_QUEUE_ENABLED=true` (or `config.email.queueDelivery`) switches
- * delivery from inline to the durable `sys_job_queue` path (#5160). It reuses
- * `OS_EMAIL_RETRIES` as its attempt budget rather than adding a second retry
- * knob — see `EmailServicePlugin.makeQueueDelivery`.
- *
- * `OS_EMAIL_PERSIST_ENABLED=false` (or `config.email.persist: false`) stops
- * every delivery attempt being written to `sys_email` (#5447). The plugin
- * option has been live since the plugin had one — it builds no
- * `EmailPersistence` when `persist === false` — but nothing carried the
- * declared `config.email.persist` here, so a PII-sensitive deployment that
- * switched persistence off in `objectstack.config.ts` type-checked, parsed,
- * read "Persist to sys_email (default true)" in the generated reference, and
- * went on writing every message body to the database. Resolution order is this
- * function's own, per setting: env > `config.email.persist` > the plugin
- * default (persist ON) — so a config and an env that say nothing leave the
- * option absent and the plugin's default untouched.
- *
- * The template context's `appName` follows the same env-wins rule as every
- * other setting here (#5448): `OS_APP_NAME` > `config.email.appName` >
- * `config.email.defaultTemplateContext.appName` > top-level `config.appName` >
- * `'ObjectStack'`. It used to be the file's one exception — the whole
- * `defaultTemplateContext` was spread OVER the resolved value, so a config that
- * spelled `defaultTemplateContext: { appName: … }` made `OS_APP_NAME` inert and
- * the per-environment override an operator has for a repo-pinned config did
- * nothing, silently, in the mail body AND in the `no-reply@<slug>.local`
- * fallback sender derived from it. Every OTHER key of `defaultTemplateContext`
- * is unchanged: it has no env or dedicated-config carrier, so the author's
- * context is still spread through wholesale.
- */
-export function resolveEmailCapabilityArg(
-  cfgEmail: Record<string, any> = {},
-  env: NodeJS.ProcessEnv = process.env,
-  configAppName?: string,
-): EmailCapabilityArg {
-  const provider = String(env.OS_EMAIL_PROVIDER || cfgEmail.provider || 'log').toLowerCase();
-  const apiKey = env.OS_EMAIL_API_KEY || cfgEmail.apiKey;
-
-  // OS_EMAIL_FROM supports either "addr@x" or "Name <addr@x>".
-  let defaultFrom = cfgEmail.defaultFrom;
-  if (env.OS_EMAIL_FROM) {
-    const m = env.OS_EMAIL_FROM.match(/^\s*(?:"?([^"<]*?)"?\s*<\s*([^>]+)\s*>|(\S+))\s*$/);
-    if (m) {
-      const name = (m[1] ?? '').trim();
-      const address = (m[2] ?? m[3] ?? '').trim();
-      if (address) defaultFrom = name ? { name, address } : { address };
-    }
-  }
-  const retries = env.OS_EMAIL_RETRIES ? Number(env.OS_EMAIL_RETRIES) : cfgEmail.retries;
-  // `OS_EMAIL_QUEUE_ENABLED` — a boolean feature flag, so `_ENABLED` and
-  // default-off (Prime Directive #9; a bare `OS_EMAIL_QUEUE` would read as a
-  // config value, e.g. a queue name). Whether the declaration can be HONOURED
-  // is not knowable here — no kernel exists yet — so the plugin asserts it on
-  // `kernel:ready`, where the service registry has settled, and fails the boot
-  // there if no durable queue showed up.
-  const queueDelivery = envBooleanFlag(env.OS_EMAIL_QUEUE_ENABLED) ?? cfgEmail.queueDelivery;
-  // `OS_EMAIL_PERSIST_ENABLED` — the carrier `config.email.persist` never had
-  // (#5447). `_ENABLED` is Prime Directive #9's boolean-flag shape; unlike the
-  // queue flag it is default-ON rather than default-off, because it does not
-  // enable a new capability — it is the off switch for one that has always
-  // been on, and a deployment that says nothing must keep its `sys_email`
-  // audit trail. Absent from BOTH sources means the key is left out of the
-  // constructor options entirely, so the plugin's own default decides.
-  const persist = envBooleanFlag(env.OS_EMAIL_PERSIST_ENABLED) ?? cfgEmail.persist;
-  // `appName` is resolved AFTER the context spread, not before it (#5448).
-  // The other keys of `defaultTemplateContext` are still spread wholesale and
-  // are the only source for themselves; `appName` alone has dedicated carriers
-  // above it, and this file's stated contract — "env overrides per setting" —
-  // has to hold for it like it does for apiKey / defaultFrom / retries /
-  // queueDelivery / persist / SMTP. Spreading the context over the resolved
-  // value inverted exactly that one key: an author who wrote
-  // `defaultTemplateContext: { appName: 'Acme Dev' }` made `OS_APP_NAME`
-  // silently inert, so the one lever an operator has for a repo-pinned config
-  // deployed to several environments did nothing — and since the fallback
-  // sender is slugged from this value, the wrong name reached the envelope as
-  // well as the body.
-  //
-  // `defaultTemplateContext.appName` stays IN the chain rather than losing to
-  // the two dedicated sources and vanishing: dropping it would demote every
-  // config that spells only the context form straight to 'ObjectStack',
-  // trading one silently wrong value for a worse one. Order: env >
-  // `config.email.appName` > `config.email.defaultTemplateContext.appName` >
-  // top-level `config.appName` > 'ObjectStack'.
-  const cfgTemplateContext = cfgEmail.defaultTemplateContext || {};
-  const defaultTemplateContext = {
-    ...cfgTemplateContext,
-    appName: resolveDeploymentAppName(cfgEmail, env, configAppName),
-  };
-  // Provide a sensible fallback `from` so templates can render even before
-  // operators configure SMTP/SaaS. The log transport simply prints to stdout;
-  // the address never leaves the box.
-  if (!defaultFrom) {
-    const slug = String(defaultTemplateContext.appName || 'objectstack')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'objectstack';
-    defaultFrom = { name: defaultTemplateContext.appName, address: `no-reply@${slug}.local` };
-  }
-
-  const smtpEnv: Record<string, unknown> = {};
-  const smtpHost = env.OS_EMAIL_SMTP_HOST?.trim();
-  if (smtpHost) smtpEnv.host = smtpHost;
-  if (env.OS_EMAIL_SMTP_PORT) smtpEnv.port = Number(env.OS_EMAIL_SMTP_PORT);
-  if (env.OS_EMAIL_SMTP_SECURE != null) {
-    const raw = String(env.OS_EMAIL_SMTP_SECURE).trim().toLowerCase();
-    smtpEnv.secure = raw !== 'false' && raw !== '0';
-  }
-  if (env.OS_EMAIL_SMTP_USER) smtpEnv.user = env.OS_EMAIL_SMTP_USER;
-  if (env.OS_EMAIL_SMTP_PASSWORD) smtpEnv.password = env.OS_EMAIL_SMTP_PASSWORD;
-  const providerOptions = { ...(cfgEmail.options ?? {}), ...smtpEnv };
-
-  const options: Record<string, unknown> = {
-    provider,
-    ...(apiKey ? { apiKey } : {}),
-    ...(Object.keys(providerOptions).length > 0 ? { providerOptions } : {}),
-    defaultFrom,
-    ...(retries != null && !Number.isNaN(retries) ? { retries } : {}),
-    ...(queueDelivery != null ? { queueDelivery: !!queueDelivery } : {}),
-    ...(persist != null ? { persist: !!persist } : {}),
-    defaultTemplateContext,
-  };
-
-  if (!isEmailTransportProvider(provider)) {
-    throw new Error(
-      `provider='${provider}' is not a transport this server can deliver through, so no mail would go out — `
-      + `${unsupportedProviderFix(provider)} `
-      + 'On this boot path the provider is OS_EMAIL_PROVIDER or config.email.provider; set '
-      + 'OS_EMAIL_PROVIDER=log if this environment is not meant to send mail.',
-    );
-  }
-  if (provider === 'smtp' && !providerOptions.host) {
-    throw new Error(
-      "provider='smtp' selects SMTP delivery but no SMTP host is configured — set OS_EMAIL_SMTP_HOST "
-      + '(plus OS_EMAIL_SMTP_PORT / _SECURE / _USER / _PASSWORD) or config.email.options.host, '
-      + 'or choose another provider.',
-    );
-  }
-  if (emailProviderRequiresApiKey(provider) && !apiKey) {
-    throw new Error(
-      `provider='${provider}' selects ${provider} delivery but no API key is configured, so every send would `
-      + 'be recorded in sys_email as sent and nothing would leave the box — set OS_EMAIL_API_KEY '
-      + '(or config.email.apiKey), or set OS_EMAIL_PROVIDER=log if this environment is not meant to send mail.',
-    );
-  }
-  return { options };
-}
-
-/** Constructor options for `SmsServicePlugin`, as the capability loop builds them. */
-export interface SmsCapabilityArg {
-  options: Record<string, unknown>;
-}
-
-/**
- * Resolve `SmsServicePlugin` constructor options from `config.sms` + `OS_SMS_*`
- * env, and **refuse a provider tag no transport can deliver through** (#5713).
- *
- * The refusal is the point. Credentials for a real provider normally arrive from
- * the `sms` settings namespace at `kernel:ready`, so this function deliberately
- * does NOT demand them — a bare `OS_SMS_PROVIDER=twilio` on a host whose Twilio
- * keys are stored in Settings is a complete, working configuration and passes
- * through untouched. What it refuses is the one thing settings can never repair:
- * a provider *tag* outside `SMS_TRANSPORT_PROVIDERS`.
- *
- * That tag used to travel all the way into the plugin, which caught the
- * `makeSmsTransport: unknown provider 'twilo'` throw and substituted
- * `LogSmsTransport` behind the operator's back. Measured on `origin/main` before
- * this change, `new SmsServicePlugin({ provider: 'twilo' }).init(ctx)`:
- *
- *   - boots without throwing, registers the `sms` service;
- *   - transport = `LogSmsTransport`, `isConfigured() === false`;
- *   - one `logger.warn` line, then `send()` answers
- *     `{ status: 'sent', messageId: 'dev-sms-…' }`.
- *
- * So a phone-OTP sign-in tells the user "code sent" and nothing leaves the box —
- * the same declared-but-not-delivered shape #5132 closed for mail one layer up,
- * and the same door #5204 closed on the `SettingsService` env branch. This path
- * never reaches `SettingsService`: it runs at kernel-assembly time, before the
- * settings service exists, which is exactly why the `sms` namespace's `select`
- * options table (`sms.manifest.ts`) could not see it.
- *
- * The plugin's fallback is left alone on purpose. For a *known* provider with
- * incomplete constructor credentials it is correct — the settings bind can still
- * swap in a working transport — and it stays the last line of defence for hosts
- * that construct `SmsServicePlugin` themselves. `os serve` simply stops handing
- * it input it cannot use.
- *
- * `OS_SMS_PROVIDER=log` (the default) is how an environment says "this box does
- * not send SMS", which is what makes refusing the rest fair.
- */
-export function resolveSmsCapabilityArg(
-  cfgSms: Record<string, any> = {},
-  env: NodeJS.ProcessEnv = process.env,
-): SmsCapabilityArg {
-  const provider = String(env.OS_SMS_PROVIDER || cfgSms.provider || 'log').toLowerCase();
-  if (!isSmsTransportProvider(provider)) {
-    throw new Error(
-      `provider='${provider}' is not a transport this server can deliver through, so every OTP and `
-      + "notification SMS would be answered status: 'sent' and nothing would leave the box — "
-      + `pick one of ${SMS_TRANSPORT_PROVIDERS.join(' / ')} (Settings → SMS Delivery → Provider). `
-      + 'On this boot path the provider is OS_SMS_PROVIDER or config.sms.provider; set '
-      + 'OS_SMS_PROVIDER=log if this environment is not meant to send SMS.',
-    );
-  }
-  return {
-    options: {
-      provider,
-      ...(cfgSms.providerOptions ? { providerOptions: cfgSms.providerOptions } : {}),
-      ...(cfgSms.retries != null ? { retries: cfgSms.retries } : {}),
-    },
-  };
-}
+// [#22301] The constructor arguments a served boot hands the `storage`, `email`
+// and `sms` providers are read by ONE rule, `resolveCapabilityArgument`
+// (`@objectstack/core`), which `@objectstack/verify`'s `bootStack` reads too —
+// so an app's tests construct those providers from the configuration its users'
+// server does. The readers it calls moved with it: the storage root lives in
+// `@objectstack/core`; the mail and SMS readers live beside the transport
+// vocabulary they refuse against, in `@objectstack/plugin-email` and
+// `@objectstack/service-sms` (the reasons are in each module's header). These
+// names stay importable from here, as handles over those declarations — ⛔ never
+// a second copy.
+export {
+  resolveStorageCapabilityArg,
+  resolveStorageLocalRootEnv,
+  type StorageCapabilityArg,
+} from '@objectstack/core';
+export {
+  resolveEmailCapabilityArg,
+  resolveDeploymentAppName,
+  type EmailCapabilityArg,
+} from '@objectstack/plugin-email';
+export { resolveSmsCapabilityArg, type SmsCapabilityArg } from '@objectstack/service-sms';
 
 /**
  * The multi-node gate verdict, as `os serve` consumes it.

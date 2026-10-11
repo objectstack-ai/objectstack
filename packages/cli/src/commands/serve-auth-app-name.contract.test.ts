@@ -14,17 +14,23 @@
 //
 // Two halves, both needed. The resolver half proves the chain is the email
 // chain, rung for rung, so the two consumers cannot disagree about the name.
-// The construction half scans `serve.ts` (comments masked, as its siblings
-// `serve-email-config-parity.contract.test.ts` and
-// `serve-verify-security-parity.contract.test.ts` do), because nothing else
-// sees the AuthPlugin literal: the plugin is imported through a variable
-// specifier, so the type checker cannot, and only a booted CLI could.
+// [#22301] The email half is driven through the call `serve` makes for every
+// capability provider — `resolveCapabilityArgument` (`@objectstack/core`) with
+// `@objectstack/plugin-email` as the provider module — because that call, not
+// a line of `serve.ts`, decides which of the stack's keys the email
+// capability is built from. The construction half scans `serve.ts` (comments
+// masked, as its sibling `serve-verify-security-parity.contract.test.ts`
+// does), because nothing else sees the AuthPlugin literal: the plugin is
+// imported through a variable specifier, so the type checker cannot, and only
+// a booted CLI could.
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resolveDeploymentAppName, resolveEmailCapabilityArg } from './serve.js';
+import { resolveCapabilityArgument } from '@objectstack/core';
+import * as pluginEmail from '@objectstack/plugin-email';
+import { resolveDeploymentAppName } from './serve.js';
 import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
 
 const SERVE_SOURCE = maskComments(
@@ -58,9 +64,14 @@ function callArguments(source: string, callee: string): string[] {
 /** Argument text compared as code: whitespace and a trailing comma dropped. */
 const normalise = (args: string) => args.replace(/\s+/g, '').replace(/,$/, '');
 
+/** The app name the email capability is built with, by the call `serve`'s capability loop makes. */
 const emailAppName = (cfgEmail: Record<string, any>, env: NodeJS.ProcessEnv, configAppName?: string) =>
-  (resolveEmailCapabilityArg(cfgEmail, env, configAppName).options
-    .defaultTemplateContext as Record<string, unknown>).appName;
+  ((resolveCapabilityArgument('email', {
+    stack: { email: cfgEmail, appName: configAppName },
+    packageRoot: '/app',
+    providerModule: pluginEmail,
+    env,
+  }).argument as { defaultTemplateContext: Record<string, unknown> }).defaultTemplateContext).appName;
 
 describe('resolveDeploymentAppName is the email chain, rung for rung', () => {
   const RUNGS: Array<[string, Record<string, any>, NodeJS.ProcessEnv, string | undefined, string]> = [
@@ -80,7 +91,7 @@ describe('resolveDeploymentAppName is the email chain, rung for rung', () => {
 });
 
 describe('serve constructs AuthPlugin with the deployment app name', () => {
-  it('passes appName from resolveDeploymentAppName, with the arguments the email capability gets', () => {
+  it('passes appName from resolveDeploymentAppName, over the keys the email capability is built from', () => {
     const constructions = callArguments(SERVE_SOURCE, 'new AuthPlugin');
     // Absence must be loud: a scan that finds no construction proves nothing.
     expect(constructions.length, 'serve.ts must construct AuthPlugin exactly once').toBe(1);
@@ -90,8 +101,15 @@ describe('serve constructs AuthPlugin with the deployment app name', () => {
     expect(passed.length, 'AuthPlugin must receive appName from resolveDeploymentAppName').toBe(1);
     expect(literal).toMatch(/\bappName:\s*resolveDeploymentAppName\(/);
 
-    const emailCalls = callArguments(SERVE_SOURCE, 'resolveEmailCapabilityArg');
-    expect(emailCalls.length, 'serve.ts must resolve the email capability exactly once').toBe(1);
-    expect(normalise(passed[0])).toBe(normalise(emailCalls[0]));
+    // [#22301] The email capability is resolved by `resolveCapabilityArgument`,
+    // from the stack's `email` block (or `{}`), the environment and the stack's
+    // `appName` — the call the rungs above drive. AuthPlugin must read those
+    // same three off this boot's config, and the loop must hand the rule this
+    // boot's config and environment.
+    expect(normalise(passed[0])).toBe(normalise('(config as any).email ?? {}, process.env, (config as any).appName'));
+    const dispatched = callArguments(SERVE_SOURCE, 'resolveCapabilityArgument');
+    expect(dispatched.length, 'serve.ts must resolve the provider arguments at exactly one site').toBe(1);
+    expect(normalise(dispatched[0])).toContain('stack:config,');
+    expect(normalise(dispatched[0])).toContain('env:process.env');
   });
 });
