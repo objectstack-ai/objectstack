@@ -1,43 +1,41 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #22062 — plugin-email's declared-template boot sweep on the REAL engine and
- * the REAL SQL driver: which stored row a `(name, locale)` held by several
- * organizations resolves to, and what a steady boot costs.
+ * The email plugin on the REAL engine and the REAL SQL driver: what a boot and
+ * a send cost the `sys_email_template` table — nothing, now.
  *
- * ## Why here and not beside the sweep
+ * ## What this file used to pin (#22062)
  *
- * Both answers belong to the driver: which row comes first is whatever ORDER BY
- * the driver gives the read, and a statement count is a count of what reaches
- * the database. `@objectstack/plugin-email` cannot import a driver for its own
- * suite, so these run where `ObjectQL` and `SqlDriver` already are, against the
- * sweep's published entry points.
+ * plugin-email's declared-template boot sweep copied every `email_template`
+ * into `sys_email_template` rows, and #22062 made that copy cheap: a steady
+ * boot over 450 unchanged templates went from 1,800 statements to three reads
+ * and no write, and the bulk read was paged so it chose the same row as the
+ * per-template lookup for a `(name, locale)` several organizations held.
  *
- * ## What was measured before the fix (`ObjectQL` over better-sqlite3)
+ * ## What it pins now (ADR-0131 D6/D10, ruling C on §6 Q1)
  *
- *   - The per-template lookup, `find(…, { where: { name, locale }, limit: 1 })`,
- *     goes out as `… order by id asc limit ?`: the SQL driver orders every
- *     paged read by `id`. So its row is the smallest id, not the oldest row.
- *   - The same read in bulk with no `limit` gets NO ORDER BY and walks rows in
- *     storage order. Its first row for the slot below is `etpl_m`; the lookup's
- *     is `etpl_c`. A bulk read must therefore be paged too, or it picks another
- *     row than the lookup it replaces. The first case asserts that difference
- *     on the fixture, so the pin cannot drift into a fixture where both orders
- *     agree.
- *   - A steady boot over 450 unchanged templates issued 1,800 statements: per
- *     template one lookup, one UPDATE and the engine's two read-backs.
+ * The sweep, the boot seed and the live projector are gone: templates resolve
+ * from the registry, so the cheapest boot #22062 measured — three reads — is
+ * now zero statements against the table, and a send reads no row either. The
+ * rows earlier releases left behind — several organizations' copies of one
+ * slot included, the population the v18 migration ceremony promotes — keep
+ * their bytes and are never what a send renders.
+ *
+ * ## Why here and not beside the plugin
+ *
+ * A statement count is a count of what reaches the database, which belongs to
+ * the driver: `@objectstack/plugin-email` cannot import a driver for its own
+ * suite, so this runs where `ObjectQL` and `SqlDriver` already are.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SysEmailTemplate } from '@objectstack/platform-objects/audit';
-import { bootstrapDeclaredEmailTemplates, upsertDeclaredEmailTemplate } from '@objectstack/plugin-email';
+import { EmailServicePlugin } from '@objectstack/plugin-email';
 
 const SYS = { isSystem: true, positions: [], permissions: [] };
 const TABLE = 'sys_email_template';
-const NAME = 'auth.password_reset';
-const DECLARED_SUBJECT = 'Reset your password, {{user.name}}';
 
 const engines: ObjectQL[] = [];
 
@@ -46,7 +44,7 @@ afterEach(async () => {
 });
 
 /** A fresh engine on its own `:memory:` database, every statement it sends recorded. */
-async function boot(): Promise<{ engine: ObjectQL; statements: string[] }> {
+async function bootEngine(): Promise<{ engine: ObjectQL; statements: string[] }> {
   const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
   const engine = new ObjectQL();
   engine.registerDriver(driver, true);
@@ -66,26 +64,46 @@ async function boot(): Promise<{ engine: ObjectQL; statements: string[] }> {
   return { engine, statements };
 }
 
-function declared(over: Record<string, unknown> = {}) {
-  return {
-    name: NAME,
-    label: 'Password Reset',
-    category: 'auth',
-    subject: DECLARED_SUBJECT,
-    bodyHtml: '<p>Click <a href="{{url}}">here</a></p>',
-    variables: [{ name: 'url', type: 'string', required: true }],
-    ...over,
+/**
+ * Boot `EmailServicePlugin` to `kernel:ready` over `engine`, its manifest
+ * registered through the engine's own `registerApp`, and hand back the
+ * `email` service it installs. Sends are captured off the wire.
+ */
+async function bootEmail(engine: ObjectQL) {
+  const sent: Array<{ subject?: string }> = [];
+  const services: Record<string, unknown> = {
+    manifest: { register: (m: unknown) => engine.registerApp(m as never) },
+    objectql: engine,
   };
+  const hooks: Record<string, Array<() => Promise<void> | void>> = {};
+  const ctx = {
+    logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
+    getService: <T,>(name: string): T => {
+      if (!(name in services)) throw new Error(`service '${name}' not registered`);
+      return services[name] as T;
+    },
+    registerService: (name: string, svc: unknown) => { services[name] = svc; },
+    hook: (name: string, fn: () => Promise<void> | void) => { (hooks[name] ??= []).push(fn); },
+  };
+  const plugin = new EmailServicePlugin({
+    persist: false,
+    transport: { async send(m: { subject?: string }) { sent.push({ subject: m.subject }); return { messageId: `m${sent.length}` }; } } as never,
+    defaultFrom: { address: 'no-reply@example.test' },
+  });
+  await plugin.init(ctx as never);
+  await plugin.start(ctx as never);
+  for (const fn of hooks['kernel:ready'] ?? []) await fn();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return { email: services.email as any, sent, plugin };
 }
 
-/** The sweep's declared list, through the metadata-service fallback it reads when the registry holds none. */
-const listing = (items: unknown[]) => ({ list: () => items });
+/** Statements that name the template table. */
+const onTable = (statements: string[]) => statements.filter((s) => s.includes(`\`${TABLE}\``));
 
 /**
  * One `(name, locale)` held by three organizations and the global row, plus
- * another locale of the same name. Stored in an order that is neither id order
- * nor its reverse, every row stale, so whichever row the sweep picks is the one
- * it rewrites.
+ * another locale of the same name: the shape #22062 pinned the row choice on,
+ * every row carrying stale wording a send must never render.
  */
 async function seedSharedSlot(engine: ObjectQL): Promise<void> {
   const rows: Array<[string, string | null, string]> = [
@@ -97,64 +115,45 @@ async function seedSharedSlot(engine: ObjectQL): Promise<void> {
   ];
   for (const [id, organization_id, locale] of rows) {
     await engine.insert(TABLE, {
-      id, organization_id, name: NAME, label: 'Stale', category: 'auth', locale,
-      subject: `stale ${id}`, body_html: '<p>stale</p>', active: true, managed_by: 'package', customized: false,
+      id, organization_id, name: 'auth.password_reset', label: 'Stale', category: 'auth', locale,
+      subject: `stale ${id}`, body_html: '<p>stale</p>', active: true, managed_by: 'package', customized: id === 'etpl_c',
     }, { context: SYS } as never);
   }
 }
 
 async function subjects(engine: ObjectQL): Promise<Record<string, string>> {
-  const rows = (await engine.find(TABLE, { where: { name: NAME }, context: SYS } as never)) as any[];
+  const rows = (await engine.find(TABLE, { context: SYS } as never)) as any[];
   return Object.fromEntries(rows.map((r) => [r.id, r.subject]));
 }
 
-describe('[#22062] the declared-template boot sweep on the real engine and SQL driver', () => {
-  it('rewrites the row the per-template lookup chooses for a (name, locale) several organizations hold', async () => {
-    const { engine, statements } = await boot();
-    await seedSharedSlot(engine);
+const RESET_DATA = { appName: 'Acme', resetUrl: 'https://example.test/r', user: { name: 'Ada', email: 'ada@example.test' } };
 
-    // The per-template lookup's choice, measured live rather than assumed.
+describe('the email plugin on the real engine and SQL driver: no statement reaches sys_email_template', () => {
+  it('a boot and a send of a built-in template send no statement to the table', async () => {
+    const { engine, statements } = await bootEngine();
     statements.length = 0;
-    const [chosen] = (await engine.find(TABLE, { where: { name: NAME, locale: 'en-US' }, limit: 1, context: SYS } as never)) as any[];
-    expect(statements).toEqual(['select * from `sys_email_template` where `name` = ? and `locale` = ? order by `id` asc limit ?']);
-    expect(chosen.id).toBe('etpl_c');
-    // ANTI-VACUITY: an unpaged bulk read meets another row of this slot first.
-    const unpaged = (await engine.find(TABLE, { where: { name: { $in: [NAME] } }, context: SYS } as never)) as any[];
-    expect(unpaged.find((r) => r.locale === 'en-US').id).not.toBe(chosen.id);
 
-    const result = await bootstrapDeclaredEmailTemplates(engine as never, listing([declared()]));
+    const { email, sent } = await bootEmail(engine);
+    await email.sendTemplate({ template: 'auth.password_reset', to: 'ada@example.test', data: RESET_DATA });
 
-    expect(result).toEqual({ seeded: 1, skipped: 0 });
-    expect(await subjects(engine)).toEqual({
-      etpl_c: DECLARED_SUBJECT,
-      etpl_m: 'stale etpl_m',
-      etpl_z: 'stale etpl_z',
-      etpl_q: 'stale etpl_q',
-      etpl_0: 'stale etpl_0',
-    });
+    expect(sent.map((m) => m.subject)).toEqual(['Reset your Acme password']);
+    expect(onTable(statements)).toEqual([]);
+    expect(await subjects(engine)).toEqual({});
   });
 
-  it('the live door rewrites the same row over the same rows', async () => {
-    const { engine } = await boot();
+  it('rows several organizations hold for one slot keep their bytes and are never what a send renders', async () => {
+    const { engine, statements } = await bootEngine();
     await seedSharedSlot(engine);
-
-    expect(await upsertDeclaredEmailTemplate(engine as never, declared())).toBe(true);
-
-    expect((await subjects(engine)).etpl_c).toBe(DECLARED_SUBJECT);
-    expect(Object.values(await subjects(engine)).filter((s) => s === DECLARED_SUBJECT)).toHaveLength(1);
-  });
-
-  it('a steady boot over 450 unchanged templates sends three reads and no write', async () => {
-    const { engine, statements } = await boot();
-    const items = Array.from({ length: 450 }, (_, i) => declared({ name: `tpl.n${i}`, bodyText: i % 3 ? undefined : 'Plain' }));
-    expect(await bootstrapDeclaredEmailTemplates(engine as never, listing(items))).toEqual({ seeded: 450, skipped: 0 });
-
+    const before = await subjects(engine);
     statements.length = 0;
-    const result = await bootstrapDeclaredEmailTemplates(engine as never, listing(items));
 
-    expect(result).toEqual({ seeded: 0, skipped: 450 });
-    expect(statements.filter((s) => !/^select /i.test(s))).toEqual([]);
-    expect(statements).toHaveLength(3);
-    expect(statements.every((s) => /^select \* from `sys_email_template` where `name` in \(.*\) order by `id` asc limit \?$/.test(s))).toBe(true);
+    const { email, sent } = await bootEmail(engine);
+    await email.sendTemplate({ template: 'auth.password_reset', to: 'ada@example.test', data: RESET_DATA });
+    await email.sendTemplate({ template: 'auth.password_reset', to: 'ada@example.test', locale: 'zh-CN', data: RESET_DATA });
+
+    expect(sent.map((m) => m.subject)).toEqual(['Reset your Acme password', '重置您的 Acme 密码']);
+    expect(onTable(statements)).toEqual([]);
+    expect(await subjects(engine)).toEqual(before);
+    expect(Object.keys(before)).toHaveLength(5);
   });
 });
