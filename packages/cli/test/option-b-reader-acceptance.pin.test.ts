@@ -214,8 +214,11 @@ describe('#15004 — option-B acceptance pin: every subsystem must see its colle
     expect(ARTIFACT_ENVELOPE_KEYS).toEqual(
       // #17556 added `devHint` / `devLogins`: what the DEVELOPMENT BOOT BANNER
       // prints, read off the top level by the CLI and refused inside a package
-      // body — envelope keys by the same rule `devPlugins` is one.
-      ['api', 'devHint', 'devLogins', 'devPlugins', 'i18n', 'manifest', 'onEnable', 'packages', 'plugins', 'runtimeModule', 'server'],
+      // body — envelope keys by the same rule `devPlugins` is one. `appName` /
+      // `email` / `sms` are the deployment's product name and its mail and SMS
+      // configuration, read off the top level when the boot builds those
+      // providers.
+      ['api', 'appName', 'devHint', 'devLogins', 'devPlugins', 'email', 'i18n', 'manifest', 'onEnable', 'packages', 'plugins', 'runtimeModule', 'server', 'sms'],
     );
 
     // Every key option B drops is a package-owned collection, and every key it

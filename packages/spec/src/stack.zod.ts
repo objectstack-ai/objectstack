@@ -8,6 +8,8 @@ import { PLATFORM_CAPABILITY_TOKENS, RETIRED_PLATFORM_CAPABILITY_GUIDANCE } from
 import { DatasourceSchema } from './data/datasource.zod';
 import { TranslationBundleSchema, TranslationConfigSchema } from './system/translation.zod';
 import { StackServerConfigSchema } from './system/stack-server.zod';
+import { StackEmailConfigSchema } from './system/email-config.zod';
+import { StackSmsConfigSchema } from './system/sms-config.zod';
 import { DevLoginSchema } from './system/dev-login.zod';
 import { hasPlatformObjectPrefix } from './system/constants/platform-object-names';
 import { objectStackErrorMap, formatZodError } from './shared/error-map.zod';
@@ -587,6 +589,47 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
     .describe('Server-level runtime config consumed by objectstack serve/dev (inbound rate limit, proxy trust)'),
 
   /**
+   * The deployment's product name — the bottom configured rung of the chain
+   * `resolveDeploymentAppName` (`@objectstack/plugin-email`) reads:
+   * `OS_APP_NAME` > `email.appName` > `email.defaultTemplateContext.appName` >
+   * this > `'ObjectStack'`. `objectstack serve` hands the result to the email
+   * templates (`{{appName}}`) and to AuthPlugin (its emails and the TOTP
+   * issuer); `bootStack` reads it through the same function.
+   */
+  appName: z.string().optional()
+    .describe(
+      'Deployment product name for email templates and AuthPlugin — OS_APP_NAME env wins, then email.appName, '
+      + 'then email.defaultTemplateContext.appName, then this, then "ObjectStack"',
+    ),
+
+  /**
+   * Outbound mail configuration — {@link StackEmailConfigSchema}: the
+   * non-secret members of `EmailServiceConfigSchema`, read by
+   * `resolveEmailCapabilityArg` when `objectstack serve` / `bootStack`
+   * construct the email provider. `OS_EMAIL_*` overrides it per key, and the
+   * credentials (`apiKey`, the SMTP `options.password`) are refused here by
+   * name — they are environment-only, because this definition is compiled
+   * into the published artifact.
+   */
+  email: StackEmailConfigSchema.optional()
+    .describe(
+      'Outbound mail configuration (non-secret members of EmailServiceConfig; OS_EMAIL_* env overrides per key). '
+      + 'Credentials are environment-only: OS_EMAIL_API_KEY, OS_EMAIL_SMTP_PASSWORD',
+    ),
+
+  /**
+   * SMS configuration — {@link StackSmsConfigSchema}: the non-secret members
+   * `resolveSmsCapabilityArg` reads. Provider credentials (`providerOptions`)
+   * are refused here by name; they live in the `sms` settings namespace and
+   * its `OS_SMS_*` environment overrides.
+   */
+  sms: StackSmsConfigSchema.optional()
+    .describe(
+      'SMS configuration (provider tag and retries; OS_SMS_PROVIDER env wins). Provider credentials are not '
+      + 'authorable here: Setup → Settings → SMS Delivery, or its OS_SMS_* env overrides',
+    ),
+
+  /**
    * ObjectAI: Artificial Intelligence Layer
    *
    * Three-tier composition (Agent → Skill → Tool) aligned with Salesforce
@@ -1093,6 +1136,13 @@ export const COMPOSE_KEY_DISPOSITIONS = Object.freeze({
   onEnable: 'single',
   // #5051: the last key still on last-wins; aligned here, see the note above.
   i18n: 'single',
+  // Deployment configuration the boot reads off the top level — one product
+  // name, one mail configuration and one SMS configuration per booted stack,
+  // so two stacks declaring different ones is a conflict to name, like
+  // `api` / `server`.
+  appName: 'single',
+  email: 'single',
+  sms: 'single',
 } as const satisfies Record<StackDefinitionKey, ComposeDisposition>);
 
 /**
