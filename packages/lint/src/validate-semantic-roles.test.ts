@@ -427,13 +427,13 @@ describe('[#22161] one-line verdicts — semantic-role-field-unprovisioned', () 
     const [highlight] = validateSemanticRoles(stack([externalObject({ highlightFields: ['owner_id'] })]));
     expect(highlight.where).toBe('object "ext_customer"');
     expect(highlight.message).toBe(
-      'highlightFields points at "owner_id", an injected system column this external object stores nothing '
-        + 'behind, so every consumer renders it empty on every record',
+      'highlightFields points at "owner_id", an injected system column with no storage on this external '
+        + 'object (ADR-0015), so every consumer renders it empty on every record',
     );
     const [stage] = validateSemanticRoles(stack([externalObject({ stageField: 'created_by' })]));
     expect(stage.message).toBe(
-      'stageField points at "created_by", an injected system column this external object stores nothing '
-        + 'behind, so every consumer renders it empty on every record',
+      'stageField points at "created_by", an injected system column with no storage on this external '
+        + 'object (ADR-0015), so every consumer renders it empty on every record',
     );
   });
 

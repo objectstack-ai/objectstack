@@ -108,10 +108,12 @@ export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
       // [#22161] One verdict sentence; `where` names the object. Why an
       // injected anchor on an external object has no storage, and how this
       // differs from a pointer that names no field, are
-      // `os explain semantic-role-field-unprovisioned`.
+      // `os explain semantic-role-field-unprovisioned`. The ADR-0015 citation
+      // and the word "storage" stay: `validate-expressions.test.ts` holds this
+      // finding and the expression site's to the same object, column and reason.
       message:
-        `${slot} points at "${entry}", an injected system column this external object stores ` +
-        `nothing behind, so every consumer renders it empty on every record`,
+        `${slot} points at "${entry}", an injected system column with no storage on this external ` +
+        `object (ADR-0015), so every consumer renders it empty on every record`,
       hint:
         `If the remote table really carries "${entry}", declare it in the object's own fields ` +
         `(mapped through the external binding's columnMap); otherwise point ${slot} at a real ` +
