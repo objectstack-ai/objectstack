@@ -2,9 +2,16 @@
 '@objectstack/core': minor
 ---
 
-fix(core): an import reads WHICH fields are references through the spec's arbiter, so a `user` field written without `reference` resolves against `sys_user` (#22785)
+fix(core)!: an import reads WHICH fields are references through the spec's arbiter, so a `user` field written without `reference` resolves against `sys_user` (#22785)
 
-Clause-②: yes (widening)
+Clause-②: yes (narrowing)
+
+<!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, exported declaration or stored shape is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What changes is the runtime answer of one field map, `buildFieldMetaMap`, for a `user` field written without `reference`: the import resolves its cell against `sys_user`, which refuses the id of a user the caller cannot see, and the export expands its column into the user's name. Both answers are the ones a `Field.user` field already gets; the author's metadata stays as written. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); no exported declaration is removed or narrowed, `ExportFieldMeta` and `buildFieldMetaMap` keep their signatures (not runtime-interface-only or type-surface-only). -->
+
+**BREAKING** (an accept-set narrowing and a change to published output), shipped as `minor` under the launch-window convention for breaking changes. Two populations are affected, both only for a `user` field written without `reference`:
+
+- an import row whose cell holds the id of a user the caller cannot see (a user outside the caller's organizations): stored before, `reference_not_found` now, as on a `Field.user` field;
+- a downstream reader of that column in `GET /api/v1/data/:object/export`: the cell held the stored user id and now holds the user's name, as a `Field.user` column already does.
 
 A `user` field's target is fixed by its type: the spec's arbiter `referenceTargetOf` gives `{ type: 'user' }` the target `sys_user` whether or not `reference` is written (`Field.user()` writes it; hand-written JSON, a form or an AI author may not), and the data door's `$expand` already reads it that way. `buildFieldMetaMap`, the field map behind the import, export and import-template doors, counted a field as a reference only when it carried a `reference` string, so those doors disagreed with the arbiter for such a field. It now asks the arbiter both whether a field is a reference and what its target is.
 
@@ -24,4 +31,4 @@ A `user` field's target is fixed by its type: the spec's arbiter `referenceTarge
   - A present `reference` that is not a string: still no target, and no throw.
   - plugin-auth's identity import, which reads `sys_user`'s own map. That map has no reference-typed field without `reference`, so it is identical.
 
-**Fix, if a pipeline relied on the old answer:** none is needed for one that wrote visible user ids. A pipeline that imported ids of users outside the caller's organizations runs as a caller who can see them, as a `Field.user` field already required.
+**Fix, if a pipeline relied on the old answer:** none is needed for one that wrote visible user ids. A pipeline that imported ids of users outside the caller's organizations runs as a caller who can see them, as a `Field.user` field already required. A reader that needs the stored user id takes it from the record read (`GET /api/v1/data/:object`, without `expand`), not from the export.
