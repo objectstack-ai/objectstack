@@ -2531,7 +2531,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'The GRAIN: a PR-scoped declaration judged at PR scope (#16361)': 25,
   'THE DEPTH: a nested package is a candidate the axis can refuse (#16713)': 21,
   'THE ROOT: a packed `bin` target is a published surface the axis can refuse (#16692)': 37,
-  'THE COPY: a repo file a package build copies into what it packs (#15204)': 22,
+  'THE COPY: a repo file a package build copies into what it packs (#15204)': 23,
   '#18263: the refusal says its reason, and says it where the API can read it': 35,
   '#19008: the level headline is the parsed declaration, not a literal': 30,
   'The protocol lockstep evidence, in BOTH directions (ruling 6056808625)': 39,
