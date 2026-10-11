@@ -32,6 +32,11 @@
 // `org_member` position, so the platform's ownership floor is out of play and
 // the master check decides the control. `@objectstack/plugin-sharing`
 // resolves through its built `dist/`, as this package's other suites read it.
+//
+// The tenant layer's own verdict is the one layer field the detail objects
+// above cannot reach (they are not tenant-scoped), so the last block asks the
+// engine directly, with a deps bag whose stored row sits behind the tenant
+// wall, and holds that answer equal to the nonexistent id's too.
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
@@ -41,6 +46,8 @@ import { PermissionSetSchema } from '@objectstack/spec/security';
 import type { ExplainDecision } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
+import { explainAccess, type ExplainEngineDeps } from './explain-engine.js';
+import { PermissionEvaluator } from './permission-evaluator.js';
 
 const SYS = { context: { isSystem: true } } as never;
 const MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_default')!;
@@ -245,6 +252,58 @@ describe('explain answers a by-id write of a row the caller cannot read as the i
       expect(sharing?.outcome).toBe('excluded');
       expect(sharing?.detail).toMatch(new RegExp(`refuses this ${verb} on its '[a-z_]+' leg`));
       expect(statusesNamed(explained)).toEqual([doorStatus(answered)]);
+    });
+  }
+});
+
+describe('the tenant layer of a by-id write explanation of a row the caller cannot read, engine level', () => {
+  const OBJECT = 'qa_ras_walled';
+  const SET = PermissionSetSchema.parse({
+    name: 'qa_ras_walled_writer',
+    objects: { [OBJECT]: { allowRead: true, allowEdit: true, allowDelete: true, allowTransfer: true } },
+  });
+  const CONTEXT = { userId: 'usr_ras_walled', tenantId: 'org_home', positions: ['qa_pos'], permissions: [] };
+  const WALL = { organization_id: 'org_home' };
+  const STORED = { id: 'r_walled', organization_id: 'org_other', owner_id: 'usr_ras_other' };
+
+  /** One deps bag; only the stored row and the read question vary. */
+  const deps = (stored: Record<string, unknown> | null, read?: { absent: boolean }): ExplainEngineDeps => ({
+    ql: { getSchema: () => ({ name: OBJECT, sharingModel: 'public_read_write' }) },
+    resolveSets: async () => [SET],
+    evaluator: new PermissionEvaluator(),
+    getObjectSecurityMeta: async () => ({
+      isPrivate: false,
+      requiredPermissions: { all: [], read: [], create: [], update: [], delete: [] },
+      fieldRequiredPermissions: {},
+    }),
+    requiredCaps: () => [],
+    computeRlsFilter: async () => WALL,
+    getFieldMask: () => ({}),
+    getPartialMaskRules: async () => ({}),
+    baselinePermissionSets: [],
+    computeLayeredRlsFilter: async () => ({ layer0: WALL, layer1: null }),
+    fetchRecord: async () => stored,
+    ...(read ? { recordAbsentToCaller: async () => read.absent } : {}),
+  });
+
+  const explainWith = (d: ExplainEngineDeps, verb: Verb) =>
+    explainAccess(d, { object: OBJECT, operation: verb, context: { ...CONTEXT }, recordId: STORED.id });
+  const tenantLayerOf = (d: ExplainDecision) => d.layers.find((l) => l.layer === 'tenant_isolation');
+
+  for (const verb of VERBS) {
+    it(`${verb}: a row behind the tenant wall that the read does not return is explained as the id no row carries`, async () => {
+      const walled = await explainWith(deps(STORED, { absent: true }), verb);
+      const missing = await explainWith(deps(null, { absent: true }), verb);
+      expect(walled).toEqual(missing);
+      expect(tenantLayerOf(walled)?.verdict).toBe('narrows');
+      expect(walled.record).toEqual({ recordId: STORED.id, visible: false });
+    });
+
+    it(`${verb}: control, the same stored row with no read question wired reaches the wall's own refusal`, async () => {
+      const unasked = await explainWith(deps(STORED), verb);
+      expect(tenantLayerOf(unasked)?.verdict).toBe('denies');
+      expect(tenantLayerOf(unasked)?.record?.outcome).toBe('excluded');
+      expect(unasked.record).toEqual({ recordId: STORED.id, visible: false, decidedBy: 'tenant_isolation' });
     });
   }
 });
