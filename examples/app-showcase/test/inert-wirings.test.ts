@@ -26,7 +26,6 @@ import { validateFunctionalCompleteness } from '@objectstack/lint';
 import type { JobHandlerContext } from '@objectstack/runtime';
 import { healthFor, sweepProjectHealth } from '../src/automation/jobs/index.js';
 import * as jobsModule from '../src/automation/jobs/index.js';
-import { POSITION_PERMISSION_SET_BINDINGS } from '../src/security/bind-position-sets.js';
 import {
   ADMIN_EMAIL,
   PHONE_DEMO_USER,
@@ -705,10 +704,21 @@ describe('sharing rules target an object under record-sharing enforcement (#9237
   // readers that have not moved off `sys_position_permission_set`; until it is
   // deleted the two must name the same pairs, or those readers judge a
   // position by bindings the resolver does not grant.
-  it('the junction binder writes exactly the bindings the position definitions declare', () => {
+  it('each persona position declares the permission set its personas hold (ADR-0131 D3/D4)', () => {
+    // The position definition is the binding the resolver reads; no junction
+    // row is written for it. Pinned literally so a persona losing its set is a
+    // red here, not a silently narrower dogfood boot.
     const declared = positions.flatMap((p) => (p.permissionSets ?? []).map((s) => `${p.name} -> ${s}`)).sort();
-    expect(declared.length).toBeGreaterThan(0);
-    expect(POSITION_PERMISSION_SET_BINDINGS.map(([p, s]) => `${p} -> ${s}`).sort()).toEqual(declared);
+    expect(declared).toEqual([
+      'auditor -> showcase_auditor',
+      'client_liaison -> showcase_client_liaison',
+      'client_portal_user -> showcase_guest_portal',
+      'contributor -> showcase_contributor',
+      'exec -> showcase_executive',
+      'field_ops_delegate -> showcase_field_ops_delegate',
+      'manager -> showcase_manager',
+      'ops -> showcase_ops',
+    ]);
   });
 
   it('no rule is anchored on an object whose OWD leaves nothing to widen', () => {

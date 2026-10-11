@@ -72,8 +72,8 @@ export const ContributorPermissionSet = definePermissionSet({
   //
   // No policy below lists `positions`, deliberately. A set's row-level policies
   // are part of what the set grants, so they hold for EVERY holder of the set,
-  // whichever way it is held: through the `contributor` position binding
-  // (bind-position-sets.ts) or granted directly (the delegated admin below may
+  // whichever way it is held: through the `contributor` position's declared
+  // `permissionSets` (positions.ts) or granted directly (the delegated admin below may
   // hand this set out). `positions` narrows a policy to callers holding one of
   // the listed positions (ADR-0090 P2) — a tool for a policy on a baseline set
   // every member resolves, not for a set that is itself the grant.

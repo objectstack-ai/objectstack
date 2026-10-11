@@ -11,8 +11,8 @@
  * one-shot command boot under `NODE_ENV=development` would otherwise inherit
  * the self-heal:
  *
- *   - a NON-deferred one-shot boot (every write mode: `os meta resync --yes`,
- *     the data commands' `--apply`) runs boot schema sync, so it would apply
+ *   - a NON-deferred one-shot boot (every write mode: the data commands'
+ *     `--apply`) runs boot schema sync, so it would apply
  *     safe drift its operator never saw in a preview;
  *   - `os migrate plan` defers its DDL (#3917), so its own boot never reaches
  *     the reconcile — this file pins that it stays write-free on the card's
