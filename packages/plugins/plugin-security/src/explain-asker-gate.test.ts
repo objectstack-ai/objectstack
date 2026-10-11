@@ -21,6 +21,13 @@
 // (the question the write doors ask). A system asker is asked too, and the
 // read door returns it every row (the system asker's cells below).
 //
+// Ruling C (#22851) settles how a REFUSED read (a declared 4xx, such as no
+// read grant on the object) is classified, on that same read: for an asker
+// explaining another user it is "cannot read", the nonexistent id's answer;
+// for a principal explaining itself it is not, because that principal's own
+// by-id write doors do not treat it as absence, so its explanation shows what
+// those doors do (the edit-only principal's cells).
+//
 // ## The rig
 //
 // The real `SecurityPlugin` over a real `ObjectQL` and SQL driver
@@ -98,6 +105,23 @@ const BLIND_ADMIN = { userId: 'usr_ag_blind', positions: [] as string[], permiss
 /** A delegated administrator (D12, no `manage_users`) held to the member's read policy. */
 const DELEGATE = { userId: 'usr_ag_delegate', positions: [] as string[], permissions: [MEMBER_SET.name] };
 const SYSTEM = { isSystem: true };
+/** [#22851] A user administrator with no read grant on the object: its own read of every row is REFUSED. */
+const REFUSED_ADMIN = { userId: 'usr_ag_refused_admin', positions: [] as string[], permissions: [USERS_ONLY_SET.name] };
+/** [#22851] A delegated administrator (D12) with no read grant on the object: its own read is refused too. */
+const REFUSED_DELEGATE = { userId: 'usr_ag_refused_delegate', positions: [] as string[], permissions: [] as string[] };
+/**
+ * [#22851] Edits, deletes and transfers boards, and may not read them: the
+ * principal whose self-explanation keeps the write path's notion under ruling
+ * C, because its by-id write doors do not treat its refused read as absence.
+ */
+const EDIT_ONLY_SET = PermissionSetSchema.parse({
+  name: 'qa_ag_edit_only',
+  objects: { [BOARD]: { allowEdit: true, allowDelete: true, allowTransfer: true } },
+});
+const EDIT_ONLY_USER = 'usr_ag_edit_only';
+const EDIT_ONLY = { userId: EDIT_ONLY_USER, positions: [] as string[], permissions: [EDIT_ONLY_SET.name] };
+/** Per write verb, a board the edit-only principal's own door writes, so a door that lands changes no other case's row. */
+const editOnlyRowOf = (verb: ExplainOperation) => `b_edit_only_${verb}`;
 
 const HIDDEN = 'b_hidden';
 const OPEN = 'b_open';
@@ -142,7 +166,7 @@ beforeAll(async () => {
   await engine.syncSchemas();
 
   const e = engine as unknown as { insert: (o: string, row: unknown, opts: never) => Promise<unknown> };
-  for (const id of [MEMBER, ADMIN.userId, BLIND_ADMIN.userId, DELEGATE.userId]) {
+  for (const id of [MEMBER, ADMIN.userId, BLIND_ADMIN.userId, DELEGATE.userId, REFUSED_ADMIN.userId, REFUSED_DELEGATE.userId, EDIT_ONLY_USER]) {
     await e.insert('sys_user', { id, name: id, email: `${id}@example.test` }, SYS);
   }
   // The explained member's grant, as the explainer resolves it: a grant row
@@ -154,12 +178,20 @@ beforeAll(async () => {
   await e.insert('sys_user_permission_set', {
     id: 'ups_ag_member', user_id: MEMBER, permission_set_id: 'ps_ag_member', permission_set: MEMBER_SET.name,
   }, SYS);
+  await e.insert('sys_permission_set', {
+    id: 'ps_ag_edit_only', name: EDIT_ONLY_SET.name, label: EDIT_ONLY_SET.name, organization_id: null, managed_by: 'admin',
+    active: true, object_permissions: JSON.stringify({}), system_permissions: JSON.stringify([]),
+  }, SYS);
+  await e.insert('sys_user_permission_set', {
+    id: 'ups_ag_edit_only', user_id: EDIT_ONLY_USER, permission_set_id: 'ps_ag_edit_only', permission_set: EDIT_ONLY_SET.name,
+  }, SYS);
   await e.insert(BOARD, [
     { id: HIDDEN, name: 'hidden', owner_id: 'usr_ag_owner' },
     { id: OPEN, name: 'open', owner_id: 'usr_ag_owner' },
+    ...WRITE_VERBS.map((verb) => ({ id: editOnlyRowOf(verb), name: 'hidden', owner_id: 'usr_ag_owner' })),
   ], SYS);
 
-  const sets = [MEMBER_DEFAULT, MEMBER_SET, USER_ADMIN_SET, USERS_ONLY_SET];
+  const sets = [MEMBER_DEFAULT, MEMBER_SET, USER_ADMIN_SET, USERS_ONLY_SET, EDIT_ONLY_SET];
   const services: Record<string, unknown> = {
     manifest: { register: vi.fn() },
     objectql: engine,
@@ -183,13 +215,14 @@ beforeAll(async () => {
   plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
-  // The D12 boundary: this delegate's adminScope covers the member, and nobody
-  // else's does. Answered by a stub on the real gate's boundary question, as
-  // the file header says; the gate's write-path checks stay its own.
+  // The D12 boundary: these delegates' adminScope covers the member, and
+  // nobody else's does. Answered by a stub on the real gate's boundary
+  // question, as the file header says; the gate's write-path checks stay its own.
   const gate = (plugin as unknown as { delegatedAdminGate: { scopesCoverUser: (...a: any[]) => Promise<boolean> } })
     .delegatedAdminGate;
   vi.spyOn(gate, 'scopesCoverUser').mockImplementation(
-    async (_sets: unknown, target: string, caller: { userId?: string }) => caller?.userId === DELEGATE.userId && target === MEMBER,
+    async (_sets: unknown, target: string, caller: { userId?: string }) =>
+      (caller?.userId === DELEGATE.userId || caller?.userId === REFUSED_DELEGATE.userId) && target === MEMBER,
   );
 });
 
@@ -207,6 +240,19 @@ const explain = (asker: Record<string, unknown>, operation: ExplainOperation, re
 /** The read door: the asker's own by-id read. */
 const reads = async (asker: Record<string, unknown>, id: string): Promise<boolean> =>
   (await engine.findOne(BOARD, { where: { id }, context: { ...asker } } as never)) != null;
+
+/** The read door's whole answer: a row, no row, or a refusal with its status and code. */
+const readAnswer = (asker: Record<string, unknown>, id: string): Promise<string> =>
+  (engine.findOne(BOARD, { where: { id }, context: { ...asker } } as never) as Promise<unknown>).then(
+    (row) => (row != null ? 'row' : 'no row'),
+    (e: any) => `refused ${e?.statusCode ?? e?.status} ${e?.code}`,
+  );
+
+/** `asker` explains `userId` (another user), or itself when `userId` is omitted. */
+const explainAs = (
+  asker: Record<string, unknown>, operation: ExplainOperation, recordId: string, userId?: string,
+): Promise<ExplainDecision> =>
+  plugin.explainAccessForCaller({ object: BOARD, operation, recordId, ...(userId ? { userId } : {}) }, { ...asker });
 
 type Answer = { kind: 'admitted' } | { kind: 'refused'; code?: string; status?: number };
 const landed = (p: Promise<unknown>): Promise<Answer> =>
@@ -328,6 +374,75 @@ describe('controls', () => {
   }
 });
 
+/** `ctx`'s own by-id write door: a transfer is the update that writes `owner_id`. */
+const doorAs = (ctx: Record<string, unknown>, verb: ExplainOperation, id: string): Promise<Answer> =>
+  verb === 'delete'
+    ? landed(engine.delete(BOARD, { where: { id }, context: { ...ctx } } as never))
+    : landed(engine.update(BOARD, verb === 'transfer' ? { owner_id: 'usr_ag_successor' } : { name: 'edited' },
+        { where: { id }, context: { ...ctx } } as never));
+
+describe('[#22851] ruling C: a refused read is "cannot read" only for an asker explaining another user', () => {
+  it('armed: the refused askers\' and the edit-only principal\'s own reads are REFUSED, for a stored row and a nonexistent id alike', async () => {
+    for (const [who, asker] of [
+      ['the refused administrator', REFUSED_ADMIN],
+      ['the refused delegate', REFUSED_DELEGATE],
+      ['the edit-only principal', EDIT_ONLY],
+    ] as const) {
+      for (const id of [HIDDEN, OPEN, NONEXISTENT]) {
+        expect(await readAnswer(asker, id), `${who}'s read of ${id}`).toBe('refused 403 PERMISSION_DENIED');
+      }
+    }
+  });
+
+  for (const [who, asker] of [
+    ['a manage_users administrator with no read grant on the object', REFUSED_ADMIN],
+    ['a delegated administrator (D12) with no read grant on the object', REFUSED_DELEGATE],
+  ] as const) {
+    for (const verb of VERBS) {
+      it(`${who}, ${verb}: a stored row's whole explanation equals the nonexistent id's, layers included`, async () => {
+        const nonexistent = await explainAs(asker, verb, NONEXISTENT, MEMBER);
+        expect(nonexistent.record).toEqual({ recordId: NONEXISTENT, visible: false });
+        for (const id of [HIDDEN, OPEN]) {
+          const stored = await explainAs(asker, verb, id, MEMBER);
+          expect(stored.principal.userId).toBe(MEMBER);
+          expect(stored.record, `${verb} ${id}`).toEqual({ recordId: id, visible: false });
+          expect(withoutRecordId(stored), `${verb} ${id}, whole`).toEqual(withoutRecordId(nonexistent));
+        }
+      });
+    }
+  }
+
+  for (const verb of VERBS) {
+    it(`control, ${verb}: a principal explaining itself keeps the write path's notion, so a refused read is not the missing record`, async () => {
+      const id = WRITE_VERBS.includes(verb) ? editOnlyRowOf(verb) : HIDDEN;
+      const self = await explainAs(EDIT_ONLY, verb, id);
+      const nonexistent = await explainAs(EDIT_ONLY, verb, NONEXISTENT);
+      // Today's answer: the stored row's own story, the one a system asker is told about this principal.
+      const bySystem = await explainAs(SYSTEM, verb, id, EDIT_ONLY_USER);
+      expect(self.record, verb).toEqual(bySystem.record);
+      expect(self.layers.map((l) => l.record), verb).toEqual(bySystem.layers.map((l) => l.record));
+      expect(withoutRecordId(self), verb).not.toEqual(withoutRecordId(nonexistent));
+      expect(layerRecord(self, 'owd_baseline')?.outcome, verb).toBe('admitted');
+      expect(layerRecord(nonexistent, 'owd_baseline')?.outcome, verb).toBe('not_evaluated');
+      if (WRITE_VERBS.includes(verb)) {
+        // ...which is what that principal's own door does with the row.
+        expect(self.record, verb).toMatchObject({ visible: true });
+        expect(await doorAs(EDIT_ONLY, verb, id), `${verb} door`).toEqual({ kind: 'admitted' });
+      } else {
+        expect(self.record, verb).toEqual({ recordId: id, visible: false, decidedBy: 'object_crud' });
+      }
+    });
+  }
+
+  it('control: a reading administrator and a nonexistent id are unchanged by the refused-asker rule', async () => {
+    expect((await explainAs(ADMIN, 'read', HIDDEN, MEMBER)).record).toEqual({ recordId: HIDDEN, visible: false, decidedBy: 'rls' });
+    expect((await explainAs(ADMIN, 'update', HIDDEN, MEMBER)).record).toEqual({ recordId: HIDDEN, visible: false, decidedBy: 'rls' });
+    for (const asker of [REFUSED_ADMIN, REFUSED_DELEGATE, ADMIN, SYSTEM]) {
+      expect((await explainAs(asker, 'read', NONEXISTENT, MEMBER)).record).toEqual({ recordId: NONEXISTENT, visible: false });
+    }
+  });
+});
+
 describe('the read question, engine level: who it is asked of, and how often', () => {
   const OBJECT = 'qa_ag_engine';
   const SET = PermissionSetSchema.parse({
@@ -416,6 +531,44 @@ describe('the read question, engine level: who it is asked of, and how often', (
       expect(rls?.outcome, verb).toBe('excluded');
       expect(rls?.rowFilter, verb).toEqual({ name: 'open' });
       expect(rls?.detail, verb).toMatch(/^The principal cannot read this record, so its by-id \w+ answers 404 RECORD_NOT_FOUND/);
+    }
+  });
+
+  it('[#22851] an asker explaining another principal is answered by its own read\'s classification: a refusal is "cannot read"', async () => {
+    for (const verb of VERBS) {
+      // The door never answers absent, for anyone: only the asker's classified read can say "cannot read".
+      const question = door();
+      const refused = { context: ASKER, cannotRead: vi.fn(async () => true) };
+      const stored = await explainAccessForAsker(deps(question), { object: OBJECT, operation: verb, context: EXPLAINED, recordId: STORED.id }, refused);
+      const missing = await explainAccessForAsker(deps(question), { object: OBJECT, operation: verb, context: EXPLAINED, recordId: 'r_missing' }, refused);
+      expect(stored.record, verb).toEqual({ recordId: STORED.id, visible: false });
+      expect(withoutRecordId(stored), verb).toEqual(withoutRecordId(missing));
+      expect(question.mock.calls.map((c) => c[2]), verb).not.toContain(ASKER);
+    }
+  });
+
+  it('[#22851] a principal explaining itself is asked the write path\'s question, never the third-party classification', async () => {
+    for (const verb of VERBS) {
+      const question = door();
+      const classified = vi.fn(async () => true);
+      const d = await explainAccessForAsker(
+        deps(question), { object: OBJECT, operation: verb, context: EXPLAINED, recordId: STORED.id }, { context: EXPLAINED, cannotRead: classified },
+      );
+      expect(classified, verb).not.toHaveBeenCalled();
+      expect(question.mock.calls.map((c) => c[2]), verb).toEqual([EXPLAINED]);
+      expect(d.record, verb).toMatchObject({ recordId: STORED.id, visible: true });
+    }
+  });
+
+  it('[#22851] a store fault in a third-party asker\'s read fails the explanation', async () => {
+    const fault = Object.assign(new Error('datasource unavailable'), { code: 'ERR_DATASOURCE_UNAVAILABLE', status: 503 });
+    for (const verb of VERBS) {
+      await expect(
+        explainAccessForAsker(deps(door()), { object: OBJECT, operation: verb, context: EXPLAINED, recordId: STORED.id }, {
+          context: ASKER, cannotRead: async () => { throw fault; },
+        }),
+        verb,
+      ).rejects.toBe(fault);
     }
   });
 
