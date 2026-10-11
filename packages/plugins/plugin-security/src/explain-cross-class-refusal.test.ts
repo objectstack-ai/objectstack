@@ -263,9 +263,15 @@ for (const [driverName, makeDriver, available] of DRIVERS) {
       expect(admitted.record).toEqual({ recordId: 'r1', visible: true, decidedBy: 'rls' });
       expect(rlsRecordOf(admitted)).toMatchObject({ outcome: 'admitted', matchesRecord: true });
 
+      // [#22792] r2 is a row the caller cannot read, and the caller is the one
+      // asking: explain answers it as the id no row carries, layers included,
+      // as the find answers it (the row is not in `rows` above).
       const excluded = await w.explain('read', 'r2');
-      expect(excluded.record).toEqual({ recordId: 'r2', visible: false, decidedBy: 'rls' });
-      expect(rlsRecordOf(excluded)).toMatchObject({ outcome: 'excluded', matchesRecord: false });
+      const nonexistent = await w.explain('read', 'r_nonexistent');
+      expect(excluded.record).toEqual({ recordId: 'r2', visible: false });
+      expect(rlsRecordOf(excluded)).toEqual({ outcome: 'not_evaluated', rules: [], detail: 'Record not found; business RLS not evaluated.' });
+      expect({ ...excluded, record: { ...excluded.record, recordId: 'ID' } })
+        .toEqual({ ...nonexistent, record: { ...nonexistent.record, recordId: 'ID' } });
 
       expect(await outcome(w.request('update', 'r1'))).toBe('admitted');
       expect((await w.explain('update', 'r1')).record).toEqual({ recordId: 'r1', visible: true, decidedBy: 'rls' });

@@ -315,9 +315,19 @@ for (const [driverName, makeDriver, available] of DRIVERS) {
         const object = await w.explain('read');
         expect(object.allowed).toBe(true);
         expect(object.readFilter).toBeTruthy();
+        const nonexistent = await w.explain('read', 'r_nonexistent');
         for (const { id } of c.rows as Array<{ id: string }>) {
           const visible = c.visible.includes(id);
-          expect((await w.explain('read', id)).record, `read ${id}`).toEqual({ recordId: id, visible, decidedBy: 'rls' });
+          const read = await w.explain('read', id);
+          // [#22792] A row the caller cannot read, explained to that caller,
+          // answers as the id no row carries does, layers included: the asker's
+          // read decides what the record story may disclose.
+          expect(read.record, `read ${id}`)
+            .toEqual(visible ? { recordId: id, visible, decidedBy: 'rls' } : { recordId: id, visible: false });
+          if (!visible) {
+            expect({ ...read, record: { ...read.record, recordId: 'ID' } }, `read ${id}, whole`)
+              .toEqual({ ...nonexistent, record: { ...nonexistent.record, recordId: 'ID' } });
+          }
           // [#21771] A row the caller cannot read answers, on the write side,
           // what a nonexistent id answers: the missing-record shape.
           expect((await w.explain('update', id)).record, `update ${id}`)

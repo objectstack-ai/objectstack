@@ -23,7 +23,7 @@ import { explainRule } from './rule-explanations.js';
 // verdict of those ids to one line of at most 200 characters — so the pin
 // covers every firing variant this suite exercises, not a chosen few. Run the
 // whole file: those cases read what the cases above fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateApprovalApprovers: typeof validateApprovalApproversUnrecorded = (...args) => {
   const findings = validateApprovalApproversUnrecorded(...args);
   fired.push(...findings);
@@ -274,56 +274,62 @@ describe('unset-manager dead-end (#16748)', () => {
     expect(findings[0].message).toContain('locked'); // lockRecord defaults true
   });
 
+  // [#22161] The graded remedy below was the `fix:` line's until it became one
+  // line; it is `os explain approval-approvers-may-resolve-empty`'s now, so
+  // these legs read the explanation, and the one-line `fix:` gets its own pins
+  // right after them.
+  const managerRemedy = (): string => explainRule(APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY)!.paragraphs.join('\n');
+
   it('names the REAL remedy — the admin operation, not the Console form', () => {
-    const [finding] = validateApprovalApprovers(managerOnly());
+    const remedy = managerRemedy();
     // The prescription an operator can actually carry out. #16678 landed the
     // write surface, so the first thing the hint owes the reader is the
     // endpoint, its body and how to CLEAR the link.
-    expect(finding.hint).toContain('/api/v1/auth/admin/set-user-manager');
-    expect(finding.hint).toContain('{ userId, managerId }');
-    expect(finding.hint).toContain('managerId set to null');
+    expect(remedy).toContain('/api/v1/auth/admin/set-user-manager');
+    expect(remedy).toContain('{ userId, managerId }');
+    expect(remedy).toContain('managerId set to null');
     // The in-product door onto the same endpoint (the `set_user_manager` action
     // on `sys_user`, label "Set Manager") — an admin reading this in a terminal
     // is looking for the button, not the HTTP call.
-    expect(finding.hint).toContain('Set Manager');
-    expect(finding.hint).toContain('SCIM');
-    expect(finding.hint).toContain('import');
-    expect(finding.hint).toContain('directory sync');
+    expect(remedy).toContain('Set Manager');
+    expect(remedy).toContain('SCIM');
+    expect(remedy).toContain('import');
+    expect(remedy).toContain('directory sync');
 
     // ⛔ The assertion that went stale the day the endpoint landed. It must be
     // gone from the string, not merely contradicted further down it: an author
     // who reads "no product write surface" stops looking for the endpoint.
-    expect(finding.hint).not.toContain('no product write surface');
+    expect(remedy).not.toContain('no product write surface');
 
     // ⛔ And it still must not send them to a surface that cannot write it —
     // the column stays OUT of ADR-0092 Tier 1 and readonly on the form, so a
     // dedicated operation is not the same thing as an editable profile column.
     // The word "Console" appears only inside that denial, never as an
     // instruction.
-    expect(finding.hint).toContain('never populated by editing the user in the Console');
-    expect(finding.hint).not.toMatch(/[Ee]dit .{0,40}in the Console\b(?!.*NOT)/);
+    expect(remedy).toContain('never populated by editing the user in the Console');
+    expect(remedy).not.toMatch(/[Ee]dit .{0,40}in the Console\b(?!.*NOT)/);
     // It still offers the escape that needs no operator action at all.
-    expect(finding.hint).toContain("org_membership_level', value: 'owner'");
+    expect(remedy).toContain("org_membership_level', value: 'owner'");
   });
 
   it('GRADES the routes — an exact diagnosis whose remedy cannot be carried out is worse than none', () => {
     // A remedy that names a route with no writer is the #17037 shape. The four
     // routes are measured against this tree, so the hint must SEPARATE the ones
     // that work here from the ones that need the deployment's own provisioning.
-    const [finding] = validateApprovalApprovers(managerOnly());
+    const remedy = managerRemedy();
 
     // The route added by #16678, and the refusals that make it safe to point an
     // operator at: naming an endpoint without naming what it declines is the
     // same "prescription that cannot be carried out" defect one layer in.
-    expect(finding.hint).toContain('their own manager');
-    expect(finding.hint).toContain('close a cycle');
-    expect(finding.hint).toContain('organization boundary');
+    expect(remedy).toContain('their own manager');
+    expect(remedy).toContain('close a cycle');
+    expect(remedy).toContain('organization boundary');
 
     // The pre-existing route with a demonstrated writer: a system-context write
     // bypasses the managed-update whitelist (`isUserContextWrite` is
     // `userId && !isSystem`). Kept — the endpoint did not replace it.
-    expect(finding.hint).toContain('written by a seed, or by any other system-context write');
-    expect(finding.hint).toContain('bypasses the managed-update whitelist');
+    expect(remedy).toContain('written by a seed, or by any other system-context write');
+    expect(remedy).toContain('bypasses the managed-update whitelist');
 
     // The bulk route also WORKS HERE, so it is graded beside the endpoint and
     // ⛔ never among the routes the deployment must supply: the admin import
@@ -333,22 +339,22 @@ describe('unset-manager dead-end (#16748)', () => {
     // import does not write the column — away from the one supported way to
     // link a whole file. It must be gone from the string, not merely
     // contradicted further down it.
-    expect(finding.hint).toContain('/api/v1/auth/admin/import-users');
-    expect(finding.hint).toContain('reads a manager_id column');
-    expect(finding.hint).toContain('once every row in the file exists');
-    expect(finding.hint).toContain("reported on that row's manager result");
-    expect(finding.hint).not.toMatch(/does not write it/);
+    expect(remedy).toContain('/api/v1/auth/admin/import-users');
+    expect(remedy).toContain('reads a manager_id column');
+    expect(remedy).toContain('once every row in the file exists');
+    expect(remedy).toContain("reported on that row's manager result");
+    expect(remedy).not.toMatch(/does not write it/);
     // Placement is the grade: ahead of the clause that hands the remaining
     // routes to the deployment.
-    const importAt = finding.hint.indexOf('/api/v1/auth/admin/import-users');
-    const deploymentAt = finding.hint.indexOf('a provisioning path your own deployment supplies');
+    const importAt = remedy.indexOf('/api/v1/auth/admin/import-users');
+    const deploymentAt = remedy.indexOf('a provisioning path your own deployment supplies');
     expect(importAt).toBeGreaterThan(-1);
     expect(deploymentAt).toBeGreaterThan(importAt);
 
     // ⛔ The one that is NOT this repo's to offer must be marked as the
     // deployment's own, and the hint must say WHY rather than merely hedging.
-    expect(finding.hint).toContain('a provisioning path your own deployment supplies');
-    expect(finding.hint).toContain("declares the SCIM 'manager' attribute without projecting it");
+    expect(remedy).toContain('a provisioning path your own deployment supplies');
+    expect(remedy).toContain("declares the SCIM 'manager' attribute without projecting it");
 
     // ⛔ And they must not be deleted: a deployment running a real directory
     // sync may well populate the column, and the defect was presenting all
@@ -356,9 +362,19 @@ describe('unset-manager dead-end (#16748)', () => {
     // PRECEDENCE — the endpoint refuses an `idp_provisioned` identity, and so
     // does the import's `manager_id` column, which runs the same derivation —
     // so the hint must not read as "use the endpoint instead of your directory".
-    expect(finding.hint).toContain('SCIM provisioning and directory sync can populate it');
-    expect(finding.hint).toContain("source 'idp_provisioned' the admin operation refuses");
-    expect(finding.hint).toContain("the import's manager_id column included");
+    expect(remedy).toContain('SCIM provisioning and directory sync can populate it');
+    expect(remedy).toContain("source 'idp_provisioned' the admin operation refuses");
+    expect(remedy).toContain("the import's manager_id column included");
+  });
+
+  it('the one-line `fix:` names the first route and the escape, and never the Console form', () => {
+    const [finding] = validateApprovalApprovers(managerOnly());
+    expect(finding.hint).toBe(
+      "Set every submitter's sys_user.manager_id (Setup → Users → Set Manager, or the admin user import), or add " +
+        "an approver that cannot resolve empty, e.g. { type: 'org_membership_level', value: 'owner' }",
+    );
+    expect(finding.hint).not.toContain('no product write surface');
+    expect(finding.hint).not.toMatch(/[Ee]dit .{0,40}in the Console\b/);
   });
 
   it('does not claim a runtime fact it did not read', () => {
@@ -372,15 +388,15 @@ describe('unset-manager dead-end (#16748)', () => {
   });
 
   it("names the node-level escape — onEmptyApprovers: 'fallback' with fallbackApprovers", () => {
-    const [finding] = validateApprovalApprovers(managerOnly());
-    expect(finding.hint).toContain("onEmptyApprovers: 'fallback'");
-    expect(finding.hint).toContain('fallbackApprovers');
+    const remedy = managerRemedy();
+    expect(remedy).toContain("onEmptyApprovers: 'fallback'");
+    expect(remedy).toContain('fallbackApprovers');
     // It is offered as a route that needs NO write to the column — the point
     // of naming it beside an endpoint the operator may not be able to reach.
-    expect(finding.hint).toContain('needs no write to the column');
+    expect(remedy).toContain('needs no write to the column');
     // ⛔ And the pre-existing routes are not displaced by it.
-    expect(finding.hint).toContain('/api/v1/auth/admin/set-user-manager');
-    expect(finding.hint).toContain("org_membership_level', value: 'owner'");
+    expect(remedy).toContain('/api/v1/auth/admin/set-user-manager');
+    expect(remedy).toContain("org_membership_level', value: 'owner'");
   });
 
   // ⛔ The load-bearing negative: declaring the policy must NOT silence the
@@ -782,5 +798,61 @@ describe('[#22161] one-line verdicts — approval-approvers-may-resolve-empty, a
       const text = entry!.paragraphs.join('\n');
       for (const fact of list) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
     }
+  });
+});
+
+// [#22161] Slice 11: the `fix:` line. Both empty-slate arms name their remedy
+// in one line; the graded routes and the admin-override recovery are the
+// explanation's. (The other `approval-*` hints over 200 are a later slice's.)
+describe('[#22161] one-line fixes — approval-approvers-may-resolve-empty', () => {
+  it('every `fix:` line of the id the cases above fired is one line of at most 200 characters', () => {
+    const emptySlate = fired.filter((f) => f.rule === APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY);
+    // Coverage control: both arms fired, so the bound cannot pass over one.
+    expect(emptySlate.some((f) => f.message.includes('routes to a group'))).toBe(true);
+    expect(emptySlate.some((f) => f.message.includes("{ type: 'manager' }"))).toBe(true);
+    for (const f of emptySlate) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('the group arm names its three routes in one line', () => {
+    const [group] = validateApprovalApprovers(stackWithApprovers([{ type: 'position', value: 'exec' }]));
+    expect(group.hint).toBe(
+      "Staff at least one target, add an approver that cannot resolve empty (e.g. { type: 'org_membership_level', " +
+        "value: 'owner' }), or name who decides in fallbackApprovers with onEmptyApprovers: 'fallback'",
+    );
+  });
+
+  it('`os explain` carries what the `fix:` lines no longer say', () => {
+    const text = explainRule(APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY)!.paragraphs.join('\n');
+    for (const fact of [
+      'make sure at least one target is always staffed',
+      // #22824: a slate that names no one opens on the organization's
+      // administrators; `fallback` names who decides instead.
+      "a slate that still names no one opens on the organization's administrators",
+      'names who decides instead',
+      "instead of on the organization's administrators, which needs no write to the column at all",
+      '/api/v1/auth/admin/set-user-manager',
+      '/api/v1/auth/admin/import-users',
+      'needs no write to the column at all',
+    ]) expect(text, `explanation names ${fact}`).toContain(fact);
+  });
+});
+
+// [#22161] Slice 11, after #22824 landed beside it: no sentence the rule prints
+// or explains may still describe the empty-slate outcome #22824 retired (the
+// request waiting on a slate nobody can act on, decided only by an override
+// for an organization that HAS administrators).
+describe('[#22161] one-line fixes — approval-approvers-may-resolve-empty, against #22824', () => {
+  it('neither fix line nor the explanation describes the retired empty-slate outcome', () => {
+    const [group] = validateApprovalApprovers(stackWithApprovers([{ type: 'position', value: 'exec' }]));
+    const [manager] = validateApprovalApprovers(stackWithApprovers([{ type: 'manager' }]));
+    const text = explainRule(APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY)!.paragraphs.join('\n');
+    for (const printed of [group.hint, manager.hint, text]) {
+      expect(printed).not.toMatch(/waits forever|recoverable only|nobody can act on|no in-product recovery/);
+    }
+    // The override survives only as the no-administrator case.
+    expect(text).toContain("only an organization with no administrator leaves the request on an empty");
   });
 });

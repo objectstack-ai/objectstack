@@ -21,6 +21,8 @@
  *   POST /security/_activation/:type/:name                 → switch a position (`position`) or a
  *                                                            permission set (`permission`) on/off
  *                                                            for this deployment (`./catalog-activation.ts`)
+ *   POST /security/permission-sets/:name/clone            → copy a permission set's whole definition
+ *                                                            under a new name (`./permission-set-clone.ts`)
  */
 
 import {
@@ -28,6 +30,7 @@ import {
     isAudienceBindingSuggestionStatus, unknownAudienceBindingSuggestionStatusMessage,
 } from '@objectstack/core';
 import { isCatalogActivationWrite, handleCatalogActivationWrite } from './catalog-activation.js';
+import { isPermissionSetCloneWrite, handlePermissionSetCloneWrite } from './permission-set-clone.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 
@@ -96,6 +99,15 @@ export async function handleSecurityRequest(
     const activationParts = path.split('/').filter(Boolean);
     if (isCatalogActivationWrite(activationParts, method.toUpperCase())) {
         return handleCatalogActivationWrite(deps, activationParts, _body, context);
+    }
+
+    // [ADR-0126 §7.1] THE PERMISSION-SET CLONE DOOR — copy a set's whole
+    // definition under a new name. Answered ahead of the `security` service
+    // probe for the activation door's reason: it does not use that service. It
+    // reads the security catalog and saves through the metadata protocol,
+    // behind the metadata door's own authority (`./permission-set-clone.ts`).
+    if (isPermissionSetCloneWrite(activationParts, method.toUpperCase())) {
+        return handlePermissionSetCloneWrite(deps, activationParts, _body, context);
     }
 
     // [#4127 batch 3] The `as any` was the only thing between this call and

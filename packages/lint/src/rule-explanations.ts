@@ -70,9 +70,10 @@ const FIELD_NO_CONSUMERS_EXPLANATION: RuleExplanation = {
       'drawn), or a dataset or cube member path the analytics door refuses (a hop or column that does ' +
       'not resolve, or a join the dataset\'s `include` does not declare).',
     'The verdict on the warning is `inert` when no site of any kind names the field, and ' +
-      '`carrier-only` when only carriers do — then the warning lists each carrier site, because ' +
-      'removing the declaration means cleaning them too. Verdicts are per object: a consumer of the ' +
-      'same field name on another object does not cover this declaration.',
+      '`carrier-only` when only carriers do — then the `fix:` line names the first carrier site and counts ' +
+      'the rest, because removing the declaration means cleaning them too (each one names the field). ' +
+      'Verdicts are per object: a consumer of the same field name on another object does not cover this ' +
+      'declaration.',
     'Never reported, because the platform reads them without an authored consumer: a system column ' +
       'the registry injects (when the object re-declares it), the record\'s title field, and a ' +
       '`master_detail` field (the relationship is consumed by being declared). Fields an ' +
@@ -715,6 +716,8 @@ const VISIBILITY_PREDICATE_OVER_BUDGET_EXPLANATION: RuleExplanation = {
       'far fewer AST nodes (`maxListElements` is 64, so a very large set needs the next option), or ' +
       'precompute the heavy part into a formula or roll-up field and test that one field. The finding ' +
       'does not echo the predicate; its `path` locates it.',
+    'Logic genuinely this large is not element visibility: compute it once on the record rather than ' +
+      're-deriving it in every predicate that needs it.',
   ],
 };
 
@@ -1021,6 +1024,10 @@ const HOOK_API_UPDATE_READONLY_FIELD_EXPLANATION: RuleExplanation = {
       'channel, not the field, so that correct stamp is never touched. `ctx.api.sudo()` is no way out ' +
       'from a body: `sudo()` lives on the in-process scoped context and is not marshalled into the ' +
       'sandbox, so calling it is a TypeError at run time.',
+    'Seeding a readonly column at create time is a SYSTEM act, so the two routes are the remedy whichever ' +
+      'verb the body calls: `runAs: \'system\'` on this hook, or the own-hook stamp — on an update the ' +
+      'recommended shape, since a value automation maintains belongs on the record\'s own hook. Otherwise drop ' +
+      'the field from the payload, or drop `readonly: true` from the field.',
     'The rule gates because both halves are declared in this stack: the field\'s `readonly` and the ' +
       'body\'s literal `ctx.api` write. `id` in an update payload is the write\'s address, not a field ' +
       'write, and is not judged; a body that does not parse is skipped, and its ' +
@@ -1122,6 +1129,22 @@ const CROSS_CLASS_COMPARISON =
   'formula field has no stored column a row filter can read. So the platform defines no comparison between ' +
   'such columns. The classification is the spec\'s (`crossFieldComparisonVerdict`), the one driver-sql applies.';
 
+/**
+ * The comparison classes with the declared types each holds — both rules'
+ * cross-class arm, which used to print this listing on its `fix:` line.
+ * `validate-rls-predicate-enforceability.test.ts` holds it to
+ * `CROSS_FIELD_CLASS_LISTING`, which the rule reads off the spec's class table.
+ */
+const CROSS_CLASS_LISTING =
+  'Compare a field only with a field of the same comparison class: a number only with a number (`number`, ' +
+  '`currency`, `percent`, `rating`, `slider`, `progress`, `summary`); text only with text (`text`, `textarea`, ' +
+  '`email`, `url`, `phone`, `password`, `secret`, `markdown`, `html`, `richtext`, `code`, `color`, `signature`, ' +
+  '`qrcode`, `autonumber`, `select`, `radio`, `lookup`, `master_detail`, `user`, `tree`); a boolean only with a ' +
+  'boolean (`boolean`, `toggle`); a date only with a date (`date`); a datetime only with a datetime ' +
+  '(`datetime`); a time of day only with a time of day (`time`). A file field and a formula field cannot be ' +
+  'compared with another column at all. If the two columns do hold comparable values, one of them is declared ' +
+  'with the wrong type: fix the declaration, not the predicate.';
+
 const RLS_PREDICATE_UNPARSEABLE_EXPLANATION: RuleExplanation = {
   rule: 'rls-predicate-unparseable',
   covers: 'why a predicate that does not parse is dropped',
@@ -1146,6 +1169,15 @@ const RLS_PREDICATE_OVER_BUDGET_EXPLANATION: RuleExplanation = {
       'error — on purpose, because the runtime\'s only decision is whether to drop the policy. This rule tells ' +
       'the two apart because the fix differs: there is no syntax or dialect error to correct, so the predicate ' +
       'must get smaller. The finding names the bound and its value; its `path` locates the predicate.',
+    'So make it smaller, or move the work off the predicate. (1) Collapse a long `field == a || field == b || …` ' +
+      'chain into a single `field in [a, b, …]`, which is far fewer AST nodes (`maxListElements` is 64, so a very ' +
+      'large set needs option 2). (2) Pre-resolve the set into a membership key the runtime exposes and test ' +
+      '`field in current_user.<key>` (ADR-0105 D11) — one comparison whatever the set size. (3) Denormalise a ' +
+      'repeated sub-expression onto this object as a formula/rollup field and test that single column. (4) Split ' +
+      'a TOP-LEVEL `||` across several `rowLevelSecurity` policies: applicable policies are OR-ed, so that is ' +
+      'equivalent — but never split a top-level `&&` this way, which would WIDEN access rather than preserve it. ' +
+      'Logic genuinely this large is not a row filter: move it to a hook or action body ' +
+      '(`ScriptBody { language: \'js\' }`, the L2 sandboxed surface).',
     RLS_UNCOMPILABLE_DROP,
     RLS_DROPPED_USING,
     RLS_DROPPED_CHECK,
@@ -1160,6 +1192,15 @@ const RLS_PREDICATE_UNENFORCEABLE_EXPLANATION: RuleExplanation = {
       'function call (`size(…)`, `has(…)`), arithmetic, a ternary, a related-record path, a list literal under ' +
       '`==` / `!=` or the bare `current_user` root used as a value is outside it, and the compiler refuses it. ' +
       'The finding quotes the verdict half of the compiler\'s own refusal.',
+    'The lowerable subset is: `==` `!=` `>` `<` `>=` `<=`, `in`, `&&` `||` `!`, `== null` / `!= null`, and the ' +
+      'string methods `startsWith` / `endsWith` / `contains` — over SINGLE-column field paths (ADR-0058 D2), ' +
+      'compared against a literal or a `current_user.*` value. Three traps in particular: (1) a function call — ' +
+      '`size(record.tags) > 0`, `has(record.x)` — is correct in an object VALIDATION rule, which is INTERPRETED, ' +
+      'and wrong here, where the predicate is COMPILED to a filter; write the null test as `field != null`. ' +
+      '(2) A related-record path (`record.account.region`) is a join, which the compiler refuses by design ' +
+      '(ADR-0055) — denormalise the value onto this object (a formula/rollup field) and test that column. ' +
+      '(3) Arithmetic on a column (`amount * 2 > 100`) never lowers — precompute it into a field, or compare the ' +
+      'column against the literal directly.',
     RLS_UNCOMPILABLE_DROP,
     // The two key lists are held equal to the rule's per-key probe types by the rule's test.
     'A predicate can pass that shape check and still be refused for the TYPE of the value a `current_user` ' +
@@ -1173,13 +1214,33 @@ const RLS_PREDICATE_UNENFORCEABLE_EXPLANATION: RuleExplanation = {
       'per-request "DENY (fail closed)" WARN, emitted only when nothing else applicable compiles. A refusal that ' +
       'depends on WHICH caller asks — a constant comparison such as `current_user.email == \'ops@acme.com\'` — is ' +
       'not reported: no single probe can stand for every request.',
+    'Each holding breaks one rule. `==` / `!=` compare ONE value and a string method takes ONE string, so a ' +
+      'membership set is tested with `in` — "one of these" is `x in set`, "none of these" is `!(x in set)`. `in` ' +
+      'tests membership in a SET, so one value is compared with `==` / `!=`. And `current_user` is the caller ' +
+      'context, not a value: name the key that holds what you mean. The `fix:` line rewrites the first site the ' +
+      'fault lands on and counts the rest; every site admits the same rewrite. A site also admits a second one: a ' +
+      'string method can be passed ONE of the one-value keys above instead of a set, and a set is named by one of ' +
+      'the membership keys above, or by an app-staged §7.3.1 set (`field in current_user.<key>`).',
     'The same per-request drop, with the same signal, follows a lowered comparand the platform\'s shared filter ' +
       'check refuses — a `null` list member or a `null` ordering bound, which no two backends agree on: ' +
       '`RLSCompiler` runs that check on every compiled policy filter before any backend sees it.',
+    '`null` has no place inside a list or opposite an ordering operator — the platform refuses both in every ' +
+      'filter it is sent, because no two backends agree on what they match. Test for no value with `== null` and ' +
+      'for a value with `!= null`. A list that keeps other members either keeps matching a missing value ' +
+      '(`(field in [...] || field == null)`, the `fix:` line\'s rewrite) or drops the `null` member; an ordering ' +
+      'bound of `null` becomes `!= null` (has a value) or `== null` (has none), or a real bound.',
     RLS_DROPPED_USING,
     RLS_DROPPED_CHECK,
     LIST_HOLDING_COMPARISON,
+    'A row filter compares one value with one value, so it cannot test membership in a list another column ' +
+      'holds: compare with a single-valued column, or with a literal or a `current_user` value — "one of these ' +
+      'values" is `record.status in [\'open\', \'pending\']` or `record.owner in current_user.org_user_ids` — or ' +
+      'move the condition into a validation rule or a hook.',
     CROSS_CLASS_COMPARISON,
+    CROSS_CLASS_LISTING,
+    'To keep the rule without a second column, compare with a literal or a `current_user` value, test a file ' +
+      'field with `!= null`, or store the value you mean in a field of the right type and compare that — or move ' +
+      'the condition into a validation rule or a hook.',
     'Such a comparison is not dropped; it is refused where it runs. On a `using`, every read the policy scopes ' +
       'is refused on the SQL drivers (`INVALID_FILTER` / 400: driver-sql refuses the comparison by the columns\' ' +
       'declared types), and every by-id update or delete it scopes fails closed (`PERMISSION_DENIED` / 403). On ' +
@@ -1195,6 +1256,11 @@ const RLS_PREDICATE_UNENFORCEABLE_EXPLANATION: RuleExplanation = {
       'quotes the engine\'s verdict with its code and status. The analytics face hands the read scope to this ' +
       'same admission before it runs a query, so every analytics query over the object that this policy scopes ' +
       'is refused. Each clause earns one finding: the engine judges only a clause every earlier check left clean.',
+    'What the engine refuses, it refuses for a reason the `fix:` line names in one line: a text operator ' +
+      '(`startsWith` / `endsWith` / `contains`) runs only on a field that holds a string, and a date or datetime ' +
+      'field only against a value its storage can read. A `{…}` placeholder is saved-filter syntax, and an RLS ' +
+      'predicate does not use it: the predicate is CEL, and the caller\'s values are the `current_user` keys ' +
+      '(accessible_org_ids, email, id, org_user_ids, organization_id, positions).',
   ],
 };
 
@@ -1224,6 +1290,12 @@ const RLS_PREDICATE_UNKNOWN_FIELD_EXPLANATION: RuleExplanation = {
       'write path had no field-existence check at all, so a negated miss was satisfied VACUOUSLY by the ' +
       'post-image and PERMITTED exactly the writes the policy was written to refuse, on every driver. Fix the ' +
       'name rather than relying on either behaviour.',
+    'So point the predicate at a column the object really declares — the verdict\'s "Did you mean" names the ' +
+      'nearest one — or delete the policy if the narrowing is gone: a policy naming a column that does not exist ' +
+      'is not protection. If the field was RENAMED, this policy has been wrong since that rename, so check which ' +
+      'runtime it ran on before you judge the blast radius. If the value was meant to live on another object, ' +
+      'RLS cannot join to it (ADR-0055) — denormalise it onto the policy\'s object (a formula/rollup field) and ' +
+      'test that column instead.',
   ],
 };
 
@@ -1274,9 +1346,23 @@ const SHARING_RULE_UNLOWERABLE_CONDITION_EXPLANATION: RuleExplanation = {
     'A `condition` outside the pushdown subset — a function call such as `has(…)` (correct in an object ' +
       'validation, which is interpreted, and wrong here, where the condition is compiled), arithmetic, a ' +
       'ternary or a related-record path — does not lower. The finding quotes the compiler\'s own refusal.',
+    'The lowerable subset is: `==` `!=` `>` `<` `>=` `<=`, `in`, `&&` `||` `!`, `== null` / `!= null`, and the ' +
+      'string methods `startsWith` / `endsWith` / `contains` — over SINGLE-column `record.<field>` paths ' +
+      '(ADR-0058 D2). Two traps in particular: `has(record.x)` is correct in an object VALIDATION rule, which is ' +
+      'INTERPRETED, and wrong here, where the condition is COMPILED — write the null test as ' +
+      '`record.x != null`; and a related-record path (`record.account.region`) is a join, which the compiler ' +
+      'refuses by design (ADR-0055) — denormalise the value onto this object (a formula/rollup field) and test ' +
+      'that column, or share the related object instead.',
     SHARING_RULE_SKIPPED,
     LIST_HOLDING_COMPARISON,
+    'A row filter compares one value with one value, so it cannot test membership in a list another column ' +
+      'holds: compare with a single-valued column, or with a literal — "one of these values" is ' +
+      '`record.status in [\'open\', \'pending\']` — or keep the value the rule keys on in a single-valued ' +
+      'field and compare with that.',
     CROSS_CLASS_COMPARISON,
+    CROSS_CLASS_LISTING,
+    'To keep the rule without a second column, compare with a literal — "one of these values" is ' +
+      '`record.status in [\'open\', \'pending\']` — or test a file field with `!= null`.',
     'Such a comparison lowers, so the rule IS seeded into `sys_sharing_rule`, but every criteria query it runs ' +
       'is refused on the SQL drivers (`INVALID_FILTER` / 400: driver-sql refuses the comparison by the ' +
       'columns\' declared types), and `SharingRuleService` reads a refused query as matching no record. No ' +
@@ -1296,7 +1382,29 @@ const SHARING_RULE_RUNTIME_VARIABLE_CONDITION_EXPLANATION: RuleExplanation = {
       'compiler refuses a `current_user.*` read.',
     SHARING_RULE_SKIPPED,
     'The fix is a different mechanism, not a different spelling, and which one depends on the anchor object\'s ' +
-      '`sharingModel`; the `fix:` line names both.',
+      '`sharingModel`, because the security layers are AND-composed (`getReadFilter` = RLS AND ' +
+      'controlled-by-parent AND sharing) and an AND term can only REMOVE rows — it can never add one back.',
+    'On `public_read` / `public_read_write` the sharing layer imposes nothing on reads (`buildReadFilter` ' +
+      'constrains `private` only), so an RLS policy on a permission set (`rowLevelSecurity[].using`, where ' +
+      '`current_user.*` IS resolved) is the right mechanism there: it NARROWS an open baseline, the direction ' +
+      'AND can express.',
+    'On `private` — including a CUSTOM object that declares no `sharingModel`, which resolves to `private` ' +
+      '(ADR-0090 D1) — that same policy CANNOT work: the sharing layer has already withheld the row, and AND-ing ' +
+      'a predicate onto it can only withhold more, so the policy lints clean, passes every gate and grants ' +
+      'nothing.',
+    'The two doors that widen a `private` object for a non-admin principal both key on WHO OWNS the row or on ' +
+      'an explicit share row, never on a property of the record: the ADR-0057 D1 depth scopes (`readScope` / ' +
+      '`writeScope` on the object permission — `own` | `own_and_reports` | `unit` | `unit_and_below` | `org`), ' +
+      'which widen the owner-match to `owner_id IN (…)`; and a `sys_record_share` row, which on this path only a ' +
+      'criteria sharing rule writes — this rule. So keep the rule for the part of the predicate that is a ' +
+      'property of the RECORD (e.g. `record.stage == \'closed_won\'`) and name the audience through ' +
+      '`sharedWith`, which is what the `fix:` line says.',
+    'If the audience is genuinely record-relative ("the owner\'s manager", "this record\'s approver"), no ' +
+      'mechanism expresses it today: `sharedWith` recipients resolve tenant-wide, so reaching for `position` ' +
+      'shares every matched row with EVERY holder of that position (the skip-level, the manager two teams over) ' +
+      '— an over-broad grant, not the narrower one you meant. That is a known gap in the platform, not ' +
+      'something a different spelling of this rule can close: leave the grant unauthored rather than widening ' +
+      'it, and ask for record-relative sharing recipients.',
   ],
 };
 
@@ -1389,6 +1497,9 @@ const FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID_EXPLANATION: RuleExplanation = {
       'layer out: `schedule` is a sibling of `timeRelative` on the START node\'s `config`, not a key ' +
       'inside it (omitting it means daily at 08:00 UTC), and `runAs` is a FLOW-level key: a sweep has no ' +
       'trigger user, so declare `runAs: \'system\'` beside `nodes` and `edges`.',
+    'A descriptor that satisfies `TimeRelativeTriggerSchema` binds, because it is the same schema the ' +
+      'trigger safeParses at bind time; an unrecognized key names the declared key it was probably meant to ' +
+      'be. The descriptor\'s keys are listed in content/docs/references/automation/time-relative-trigger.mdx.',
     FLOW_GATE_REACH,
   ],
 };
@@ -1672,7 +1783,8 @@ const REACT_CHART_AGGREGATE_INVALID_EXPLANATION: RuleExplanation = {
     'Every refusal the schema, the published react-blocks type and objectui\'s renderer agree on is an ' +
       'error. An absent `groupBy` is a warning, and it is a tolerance, not a supported shape: the ' +
       'aggregate returns one ungrouped row and the chart plots a single point; a single number belongs ' +
-      'in an object-metric block.',
+      'in an object-metric block. It stays a warning rather than an error only because promoting it is its ' +
+      'own step.',
   ],
 };
 
@@ -1996,10 +2108,13 @@ const COMPONENT_TYPE_UNKNOWN_EXPLANATION: RuleExplanation = {
       'registered string-arm type — and the verdict names the closest declared spellings. A type ' +
       'outside those namespaces is untouched. It was an error from birth because the in-repo page ' +
       'corpus was measured clean first. A source-authored (`kind: \'react\'`) page is not walked.',
+    'A custom component registered by your own plugin belongs in its own namespace (`my-plugin:…`), so it ' +
+      'cannot be mistaken for platform vocabulary: a reserved namespace is closed to it.',
     'A RETIRED type (`RETIRED_PAGE_COMPONENT_TYPES`) is reported by exact name, before the namespace ' +
       'check, because a retirement can take its namespace with it: `user:profile` was the `user:` ' +
-      'namespace\'s only member. The verdict quotes the head of the retirement\'s prescription. The ' +
-      'whole prescription — what replaces the type, or that nothing does — is the parse door\'s ' +
+      'namespace\'s only member. The verdict quotes the head of the retirement\'s prescription and the ' +
+      '`fix:` line its "delete the …" sentence; the page cannot validate or publish while the node is ' +
+      'present. The whole prescription — what replaces the type, or that nothing does — is the parse door\'s ' +
       'refusal of the same name, which `os validate` and `os build` print, and the kept ' +
       '`ComponentPropsMap` row carries it too: one copy, never restated here.',
   ],
@@ -2037,6 +2152,39 @@ const FILTER_PRESET_COMPARAND_EXPLANATION: RuleExplanation = {
 
 // ── Approval approvers (`validate-approval-approvers.ts`) ───────────────────
 
+/**
+ * How an operator populates `sys_user.manager_id` — the `manager` arm's
+ * remedy, which its `fix:` line printed whole until it became one line. The
+ * measurement behind each graded route is the docblock above `MANAGER_ONLY_FIX`
+ * in `validate-approval-approvers.ts`; this is the one printed copy.
+ */
+const MANAGER_ONLY_REMEDY =
+  'sys_user.manager_id is not a profile column — the data API\'s managed-update whitelist is ' +
+  '{name, image, locale} and the column is readonly on the user form, so it is never populated by ' +
+  'editing the user in the Console. It has a dedicated admin operation instead: a platform admin ' +
+  'uses Set Manager (Setup → Users, from the user\'s row menu or record header) or POSTs ' +
+  '{ userId, managerId } to /api/v1/auth/admin/set-user-manager, with managerId set to null ' +
+  'to clear the link.';
+
+/** The routes an operator can actually take, GRADED — the paragraph after {@link MANAGER_ONLY_REMEDY}. */
+const MANAGER_ONLY_ROUTES =
+  'That endpoint is the route this platform gives you, and it refuses a link that would make a ' +
+  'user their own manager, close a cycle, run past the chain depth cap, or point across an ' +
+  'organization boundary. For many users at once, the admin bulk import ' +
+  '(POST /api/v1/auth/admin/import-users) reads a manager_id column holding the manager\'s ' +
+  'email address, or phone number where phone sign-in is enabled — someone in the same file or ' +
+  'an existing user — and links each row once every row in the file exists, through those same ' +
+  'refusals; a link it cannot make is reported on that row\'s manager result and never fails the ' +
+  'user it imported. The column is also written by a seed, or by any other system-context ' +
+  'write, which bypasses the managed-update whitelist. SCIM provisioning and directory sync can ' +
+  'populate it too, but only through a provisioning path your own deployment supplies: this ' +
+  'platform declares the SCIM \'manager\' attribute without projecting it onto the column — and ' +
+  'where an identity carries source \'idp_provisioned\' the admin operation refuses, the import\'s ' +
+  'manager_id column included, leaving that directory the one surface that authors its ' +
+  'manager. Or declare onEmptyApprovers: \'fallback\' on the node, with a ' +
+  'fallbackApprovers list: an empty manager rung then opens the request on those people instead ' +
+  'of on the organization\'s administrators, which needs no write to the column at all.';
+
 const APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY_EXPLANATION: RuleExplanation = {
   rule: 'approval-approvers-may-resolve-empty',
   covers: 'why an all-group or all-manager slate can stall',
@@ -2051,7 +2199,7 @@ const APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY_EXPLANATION: RuleExplanation = {
       'decides instead; only an organization with no administrator leaves the request on an empty ' +
       '`pending_approvers` slate, for a platform administrator\'s override. An approver of any ' +
       'other type on the node is a non-group route, so a mixed slate is not judged.',
-    'The `manager` arm is the same dead end with a cause the product cannot repair. ' +
+    'The `manager` arm reaches the same empty slate with a cause the flow cannot repair. ' +
       '`{ type: \'manager\' }` resolves from `sys_user.manager_id` of the user the record names ' +
       '(the field `value` names, else the owner), and returns nobody where that column is unset; a ' +
       'static check cannot read that column, so this does not assert the slate IS empty — it reports ' +
@@ -2066,6 +2214,15 @@ const APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY_EXPLANATION: RuleExplanation = {
       'users are wired.',
     'Both arms are `info`: staffing and the manager column are runtime data a linter cannot see, so ' +
       'the rule flags the SHAPE, and an `info` finding never blocks a build or a publish.',
+    'For the group arm: make sure at least one target is always staffed, or add a guaranteed-staffed ' +
+      'approver entry, e.g. { type: \'org_membership_level\', value: \'owner\' }, or declare ' +
+      'onEmptyApprovers: \'fallback\' with a fallbackApprovers list to name who decides when the ' +
+      'groups come back empty.',
+    MANAGER_ONLY_REMEDY,
+    MANAGER_ONLY_ROUTES,
+    'For either arm, a slate that still names no one opens on the organization\'s administrators under ' +
+      'the default `onEmptyApprovers: \'admin_rescue\'` (the first paragraph), and declaring ' +
+      '`onEmptyApprovers: \'fallback\'` with a `fallbackApprovers` list names who decides instead.',
   ],
 };
 
@@ -2465,6 +2622,13 @@ const FILTER_EMPTY_COMBINATOR_EXPLANATION: RuleExplanation = {
       'disjunction never opens a read scope to the whole table); and `$not: {}` matches NO row, ' +
       'the opposite of the "no filter" an empty operand looks like. An error: no reading of the ' +
       'literal behaves as written, and a literal empty combinator is not an authoring surface.',
+    'To express "no filter", DELETE the key — an absent `filter` and a filter that reduces to TRUE run ' +
+      'identically, and only the absent key says so to the next reader (and to the next AI author that ' +
+      'copies this metadata). If you really do want a predicate that selects nothing, ' +
+      '`{ <field>: { $in: [] } }` is the declared spelling for it (an empty `$in` list matches nothing, on ' +
+      'every backend) — it says so where an empty combinator only implies it. A PROGRAMMATIC producer that ' +
+      'loops to zero operands keeps the runtime identity unchanged — this rule judges only what is written in ' +
+      'the metadata.',
     EMPTY_FILTER_SCOPE,
   ],
 };
@@ -3159,10 +3323,13 @@ const PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION: RuleExplanation = {
       'the key at its residue value gets a clean parse, no signal, and a line that grants nothing. ' +
       'This rule is that missing signal, judged on the raw authored stack before the parse, where ' +
       'the residue is still attributable to a line somebody wrote.',
-    'A warning: the line is harmless, only dead. The fix line is the retirement\'s own ' +
-      'prescription, read from the tombstone on `ObjectPermissionSchema`, so the parse-time refusal ' +
-      'and this finding never word it differently. Judged at every CLI door and at the runtime ' +
-      'publish gate for a `permission` write.',
+    'A warning: the line is harmless, only dead. The fix line is the "Delete the key" sentence of the ' +
+      'retirement\'s own prescription, read from the tombstone on `ObjectPermissionSchema` and cut, never ' +
+      'retyped, so the parse-time refusal and this finding never word it differently. Deleting the key opens ' +
+      'nothing: a dispatched `restore` or `purge` stays denied fail-closed by the permission evaluator\'s ' +
+      'destructive-operation backstop, and the bit returns with the M2 lifecycle initiative alongside the ' +
+      'operation it gates; `os migrate meta` lists the mechanical edits for existing sources. Judged at every ' +
+      'CLI door and at the runtime publish gate for a `permission` write.',
   ],
 };
 

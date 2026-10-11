@@ -54,12 +54,31 @@ export interface BodyExtractionWarning {
 }
 
 /**
- * One registered callable that no slot lowered into a metadata `body`, the
- * unit `objectstack build --strict-body` counts and lists. The row is the
- * extractor's refusal, verbatim, when extraction was tried and refused.
- * Otherwise it says why extraction was never tried.
+ * One registered callable the runtime module still has to carry, the unit
+ * `objectstack build --strict-body` counts and lists. The row is the
+ * extractor's refusal, verbatim, when some slot tried extraction and was
+ * refused. Otherwise it says why extraction was never tried.
  */
 export type BodylessCallable = BodyExtractionWarning | { origin: string; reason: string };
+
+/** Is this row the extractor's refusal (as opposed to a slot that was never extracted)? */
+export function isExtractionRefusal(row: BodylessCallable): row is BodyExtractionWarning {
+  return 'kind' in row;
+}
+
+/**
+ * How a slot that did not lower its callable leaves it. A callable bound at
+ * several slots reports the row of its highest-ranked one, the first among
+ * equals, so the row is the extractor's refusal whenever some slot refused it.
+ *
+ * A rank above 0 is a slot with no body at all, which runs the callable only
+ * from the runtime module. Another slot lowering the same callable gives THAT
+ * slot a body and leaves this one without, so it does not take the callable
+ * off `bodylessCallables`. Only a slot that carries its own authored `body`
+ * (rank 0) is taken off by a lowering elsewhere.
+ */
+type UnloweredSlot = 'refused' | 'functions-entry' | 'authored-body';
+const UNLOWERED_SLOT_RANK: Record<UnloweredSlot, number> = { 'authored-body': 0, 'functions-entry': 1, refused: 2 };
 
 /** Why a top-level `functions` entry is never lowered: it has no `body` slot. */
 export const FUNCTIONS_ENTRY_NO_BODY_REASON =
@@ -74,27 +93,36 @@ export interface LoweringResult {
   lowered: Record<string, unknown>;
   /** name → original handler function. Empty when nothing needed lowering. */
   functions: Record<string, (...args: unknown[]) => unknown>;
-  /** Number of inline function handlers replaced. */
+  /** Number of registered callables (the keys of `functions`), each once. */
   count: number;
-  /** Number of handlers that successfully emitted a metadata-only `body`. */
+  /** Number of SLOTS that emitted a metadata-only `body` (one callable can fill several). */
   bodyExtracted: number;
-  /** Per-extraction failures (still emit handler ref + bundle, but warn). */
+  /** Per-slot extraction failures (still emit handler ref + bundle, but warn). */
   bodyExtractionWarnings: BodyExtractionWarning[];
   /**
-   * Every registered callable (an entry of `functions`) that no slot lowered
-   * into a metadata `body`, each ONCE, in registration order, keyed by its
-   * ref. This is the list `--strict-body` counts: the callables the runtime
-   * module still has to carry.
+   * Every registered callable (an entry of `functions`) the runtime module
+   * still has to carry, each ONCE, in the order a slot first left it
+   * unlowered, keyed by its ref. That is a callable bound at a slot with no
+   * body at all (a `functions` entry, which has no body slot, or a slot whose
+   * extraction was refused), whether or not another slot lowered it, and a
+   * callable beside an authored `body` that no slot lowered. This is the list
+   * `--strict-body` counts, the population `objectstack build` decides the
+   * runtime module from, and (its refusal rows, {@link isExtractionRefusal})
+   * the default build's warning.
    *
    * ⛔ Not derivable from the counters above. `count - bodyExtracted` is
-   * this list's length only when every callable is walked once, and the
-   * extraction warnings are a subset of it:
+   * this list's length only when every callable is walked once at one slot,
+   * and the extraction warnings are a subset of it:
    *   - a `functions` entry, or an inline function beside an authored
    *     `body`, is never extracted, so it leaves no warning;
    *   - a stack carrying the same callable at the top level AND in a
    *     `packages[i].manifest` body (ADR-0130 D4) is walked twice. `count`
    *     dedups by identity, while extraction runs once per walk, so each
-   *     refusal is recorded twice and each success is counted twice.
+   *     refusal is recorded twice and each success is counted twice;
+   *   - one function bound at two or more slots in one walk (a handler
+   *     shared by two hooks) counts once in `count` and once per lowered slot
+   *     in `bodyExtracted`, and a slot that lowered it says nothing about a
+   *     `functions` entry or a refused slot bound to the same function.
    */
   bodylessCallables: BodylessCallable[];
   /**
@@ -146,16 +174,19 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
   const warnings: BodyExtractionWarning[] = [];
   const loweredHookRefs = new Set<string>();
   /**
-   * ref → the row `bodylessCallables` reports for it unless some slot lowers
-   * it. The first slot that does not lower a callable supplies its row.
+   * ref → the row `bodylessCallables` reports for it, and that row's slot
+   * rank ({@link UnloweredSlot}). A higher-ranked slot replaces the row in
+   * place, so the list keeps the order slots first left a callable unlowered.
    */
-  const unlowered = new Map<string, BodylessCallable>();
+  const unlowered = new Map<string, { row: BodylessCallable; rank: number }>();
   /** The refs some slot lowered into a `body`. */
   const loweredRefs = new Set<string>();
   let bodyExtracted = 0;
 
-  function noteUnlowered(ref: string, row: BodylessCallable): void {
-    if (!unlowered.has(ref)) unlowered.set(ref, row);
+  function noteUnlowered(ref: string, row: BodylessCallable, slot: UnloweredSlot): void {
+    const rank = UNLOWERED_SLOT_RANK[slot];
+    const held = unlowered.get(ref);
+    if (held === undefined || rank > held.rank) unlowered.set(ref, { row, rank });
   }
 
   // Try to extract a metadata-only body from a callable. Returns null if the
@@ -186,7 +217,7 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
         freeIdentifiers: err instanceof HookBodyExtractionError ? err.freeIdentifiers : [],
       };
       warnings.push(warning);
-      noteUnlowered(ref, warning);
+      noteUnlowered(ref, warning, 'refused');
       return null;
     }
   }
@@ -256,7 +287,7 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
               loweredHookRefs.add(ref);
             }
           } else {
-            noteUnlowered(ref, { origin: `hook '${name}'`, reason: AUTHORED_BODY_BESIDE_FUNCTION_REASON });
+            noteUnlowered(ref, { origin: `hook '${name}'`, reason: AUTHORED_BODY_BESIDE_FUNCTION_REASON }, 'authored-body');
           }
           hook.handler = ref;
         }
@@ -299,7 +330,7 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
             ? next.name
             : 'anon_fn';
           const ref = register(next.handler as AnyFn, name);
-          noteUnlowered(ref, { origin: `function '${name}'`, reason: FUNCTIONS_ENTRY_NO_BODY_REASON });
+          noteUnlowered(ref, { origin: `function '${name}'`, reason: FUNCTIONS_ENTRY_NO_BODY_REASON }, 'functions-entry');
           next.name = ref;
           next.handler = ref;
         }
@@ -311,7 +342,7 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
       for (const [key, value] of Object.entries(fnsField)) {
         if (typeof value === 'function') {
           const ref = register(value as AnyFn, key);
-          noteUnlowered(ref, { origin: `function '${key}'`, reason: FUNCTIONS_ENTRY_NO_BODY_REASON });
+          noteUnlowered(ref, { origin: `function '${key}'`, reason: FUNCTIONS_ENTRY_NO_BODY_REASON }, 'functions-entry');
           out[ref] = ref;
         } else if (isPlainObject(value) && typeof value.handler === 'function') {
           // A DECLARED entry (`{ handler, effect: 'writes' }`, #4396). Lower the
@@ -320,7 +351,7 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
           // artifact — dropping it here would silently un-declare the function
           // on every built deployment while it kept working from source.
           const ref = register(value.handler as AnyFn, key);
-          noteUnlowered(ref, { origin: `function '${key}'`, reason: FUNCTIONS_ENTRY_NO_BODY_REASON });
+          noteUnlowered(ref, { origin: `function '${key}'`, reason: FUNCTIONS_ENTRY_NO_BODY_REASON }, 'functions-entry');
           out[ref] = { ...value, handler: ref };
         } else {
           // NOTHING ELSE IS THIS STEP'S TO JUDGE (#7318). Everything that is not
@@ -385,7 +416,12 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
     count: Object.keys(functions).length,
     bodyExtracted,
     bodyExtractionWarnings: warnings,
-    bodylessCallables: [...unlowered].filter(([ref]) => !loweredRefs.has(ref)).map(([, row]) => row),
+    // A slot with no body (rank > 0) keeps its callable on the list whatever
+    // another slot did: the hook that lowered a shared function does not run
+    // the `functions` entry, or the refused slot, bound to that same function.
+    bodylessCallables: [...unlowered]
+      .filter(([ref, { rank }]) => rank > 0 || !loweredRefs.has(ref))
+      .map(([, { row }]) => row),
     loweredHookRefs,
   };
 }
@@ -407,7 +443,7 @@ function lowerActionCallable(
   raw: unknown,
   register: (fn: AnyFn, base: string) => string,
   tryExtract: (fn: AnyFn, label: string, ref: string, face: LoweringFace) => { language: 'js'; source: string; capabilities: string[] } | null,
-  noteUnlowered: (ref: string, row: BodylessCallable) => void,
+  noteUnlowered: (ref: string, row: BodylessCallable, slot: UnloweredSlot) => void,
   ownerLabel: string,
 ): unknown {
   if (!isPlainObject(raw)) return raw;
@@ -424,7 +460,7 @@ function lowerActionCallable(
     const body = tryExtract(fn, `action '${baseName}'`, ref, 'action');
     if (body) action.body = body;
   } else {
-    noteUnlowered(ref, { origin: `action '${baseName}'`, reason: AUTHORED_BODY_BESIDE_FUNCTION_REASON });
+    noteUnlowered(ref, { origin: `action '${baseName}'`, reason: AUTHORED_BODY_BESIDE_FUNCTION_REASON }, 'authored-body');
   }
   // Keep a string-named target so the legacy executor can still resolve it.
   action.target = ref;

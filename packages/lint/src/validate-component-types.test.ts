@@ -15,6 +15,7 @@ import {
 import {
   validateComponentTypes as validateComponentTypesUnrecorded,
   retiredTypeHead,
+  retiredTypeRemedy,
   COMPONENT_TYPE_UNKNOWN,
 } from './validate-component-types.js';
 import { explainRule } from './rule-explanations.js';
@@ -25,7 +26,7 @@ import { explainRule } from './rule-explanations.js';
 // 200 characters — so the pin covers every firing variant this suite exercises
 // (every retired type included), not a chosen few. Run the whole file: those
 // cases read what the cases above fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateComponentTypes: typeof validateComponentTypesUnrecorded = (...args) => {
   const findings = validateComponentTypesUnrecorded(...args);
   fired.push(...findings);
@@ -194,7 +195,12 @@ describe('reports an EXACT retired component type, relaying the spec prescriptio
     expect(f.message).toBe(retiredVerdict(type));
     expect(prescription.startsWith(retiredTypeHead(prescription))).toBe(true);
     expect(retiredTypeHead(prescription)).toContain(`\`${type}\``);
-    expect(f.hint).toContain(type);
+    // [#22161] The `fix:` line is the remedy itself, cut from the same entry —
+    // never "the prescription above", which the verdict no longer quotes.
+    expect(f.hint).toBe(retiredTypeRemedy(prescription));
+    expect(f.hint).toMatch(/^Delete the /);
+    expect(prescription.toLowerCase()).toContain(f.hint.toLowerCase());
+    expect(f.hint).not.toMatch(/\babove\b/);
   });
 
   /**
@@ -356,5 +362,51 @@ describe('[#22161] one-line verdicts — component-type-unknown', () => {
     for (const prescription of RETIRED_PAGE_COMPONENT_TYPES.values()) {
       expect(text).not.toContain(prescription.slice(0, 80));
     }
+  });
+});
+
+// [#22161] Slice 11: the `fix:` line. The retired arm's hint said "Apply the
+// prescription above" after the verdict had been cut to the prescription's
+// head; it now carries the remedy, cut (never rewritten) from the same entry.
+describe('[#22161] one-line fixes — component-type-unknown', () => {
+  it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {
+    // Coverage control: the retired arm fired for every retired type, and the
+    // own-namespace arm fired, so the bound cannot pass over an arm.
+    for (const type of RETIRED_PAGE_COMPONENT_TYPES.keys()) {
+      expect(fired.some((f) => f.hint === retiredTypeRemedy(RETIRED_PAGE_COMPONENT_TYPES.get(type)!)), type).toBe(true);
+    }
+    expect(fired.some((f) => f.hint.includes('give it its own namespace'))).toBe(true);
+    for (const f of fired) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('each retired type\'s remedy, as the map words it', () => {
+    expect(retiredTypeRemedy(RETIRED_PAGE_COMPONENT_TYPES.get('user:profile')!)).toBe(
+      'Delete the component node and let the shell render the profile',
+    );
+    expect(retiredTypeRemedy(RETIRED_PAGE_COMPONENT_TYPES.get('element:form')!)).toBe(
+      'Delete the `element:form` component and use the object-bound `object-form` block instead',
+    );
+  });
+
+  it('retiredTypeRemedy cuts the "delete the" sentence, at its dash only past 200, and never rewrites', () => {
+    expect(retiredTypeRemedy('`a:b` is gone — x. Delete the `a:b` node — use `a:c`. Run it.'))
+      .toBe('Delete the `a:b` node — use `a:c`');
+    expect(retiredTypeRemedy(`\`a:b\` is gone: delete the node and ${'x'.repeat(200)} — then y.`))
+      .toBe(`Delete the node and ${'x'.repeat(200)}`);
+    expect(retiredTypeRemedy('`a:b` is gone.')).toMatch(/^Delete the component node/);
+  });
+
+  it('the own-namespace arm reads as one line and keeps the example name', () => {
+    const [f] = validateComponentTypes(page([{ type: 'record:zzzz_qqqq_wwww' }]));
+    expect(f.hint).toBe(
+      'Use a declared component type, or — for a custom component registered by your own plugin — give it ' +
+        'its own namespace (e.g. `my-plugin:zzzz_qqqq_wwww`)',
+    );
+    expect(explainRule(COMPONENT_TYPE_UNKNOWN)!.paragraphs.join('\n')).toContain(
+      'cannot be mistaken for platform vocabulary',
+    );
   });
 });
