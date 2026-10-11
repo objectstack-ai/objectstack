@@ -635,6 +635,20 @@ export const ERROR_CODE_LEDGER = {
     'REGISTRY_TYPE_NOT_CANONICAL',  // [#9111] a SchemaRegistry overlay entry was offered a non-canonical metadata `type` — the mint door asserts, the caller folds
     'ROLLED_BACK',             // atomic data-batch row was written, then undone by the batch rollback (#4793)
     'STORED_TYPE_NOT_CANONICAL',  // [#8908] a package draft is stored under a non-canonical metadata type (pre-#7894 second-namespace residue) — refused at the publish pre-flight, batch-atomic; [#9174] also refused on `revertCommit`'s restore limb, per-item on `failed[]`, NOT batch-atomic
+    // [ADR-0131 D6] The `unmanaged` install mode's two refusals, both stamped
+    // by `importUnmanagedPackage` (`protocol.ts`) before the new base exists,
+    // so nothing is written. Each gives a consumer a branch no existing code
+    // gives: the package installs MANAGED instead, and neither the
+    // `OS_METADATA_WRITABLE` hatch (`NOT_CREATABLE`'s remedy) nor a retry
+    // helps. No HTTP door on this tree yet; the thrown value is the boundary.
+    //  - UNCOPYABLE, 422: the body carries what the copy cannot write as
+    //    environment rows — a runtime-uncreatable type, code, an extension of
+    //    another package's items, or an artifact envelope.
+    //  - WALLED_POSTURE, 409: the deployment's REQUESTED tenancy posture
+    //    (`group` / `isolated`, or an unrecognised value, read fail-closed)
+    //    walls organizations, and one shared editable copy cannot sit behind it.
+    'UNMANAGED_INSTALL_UNCOPYABLE',
+    'UNMANAGED_INSTALL_WALLED_POSTURE',
     'UNSUPPORTED_QUERY_PARAM',
     'VALIDATION_FAILED',
     'VERSION_NOT_FOUND',
