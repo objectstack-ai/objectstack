@@ -530,7 +530,7 @@
       "title": "Every flow trigger type fires and produces a run of its bound flow; the run's trigger block records the launch event",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -554,7 +554,7 @@
         "boot showcase isolated (dogfood §0); sign in as the dev admin",
         "record_change (create leg): POST /api/v1/data/showcase_task with priority='urgent' — showcase_urgent_task_alert fires via record-after-write with previous == null (#3427)",
         "record_change (update leg): POST a normal-priority task, then PATCH priority→'urgent'; also PATCH a task status→'done' and confirm a further save WITHOUT a transition fires nothing",
-        "api: POST /api/v1/automation/hooks/showcase_inbound_task_webhook/intake with JSON {title, assignee, project} and header x-objectstack-signature: sha256=<HMAC-SHA256 of the raw body, key 'showcase-webhook-secret'> — expect a 202 ACK; then find the created showcase_task",
+        "api: POST /api/v1/automation/hooks/showcase_inbound_task_webhook/intake with JSON {title, assignee, project} and header x-objectstack-signature: t=<unix seconds>,v1=<HMAC-SHA256 of '<t>.<raw body>', key 'showcase-webhook-secret'> — signHttpBodyAt(rawBody, 'showcase-webhook-secret', Math.floor(Date.now() / 1000)) from @objectstack/core writes it, and the door refuses a t more than 300 s from the server clock — expect a 202 ACK; then find the created showcase_task",
         "schedule: wait up to ~60s for showcase_scheduled_digest (interval 60000ms) to tick; wait a second interval for a second tick",
         "screen: from /apps/showcase_app/showcase_task run the row action showcase_bulk_reassign, fill the dialog, submit",
         "autolaunched: POST /api/v1/automation/showcase_batch_reminders/trigger {params:{tasks:[…]}}",
@@ -630,6 +630,12 @@
           "date": "2026-10-05",
           "change": "clause 1, step 9 and the title re-pointed (assertion defect, #21784 VF4). The service-automation engine's buildRunTrigger sets trigger.type = context.event ?? 'manual': the launch event, not Flow.type, and execution.zod.ts describes trigger.type as a free string. This predates 17.6.0 (#7533). The verifier's wording is used: the kind is identified through the run's flow, and trigger.type is recorded as the launch event",
           "ref": "#21797"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-11",
+          "change": "api step: the intake recipe signs with the timestamped x-objectstack-signature form t=<unix seconds>,v1=<hex> that signHttpBodyAt in @objectstack/core writes (HMAC-SHA256 of '<t>.<raw body>' under the secret; the door refuses a t more than 300 s from its clock), no longer with the body-only form. Guidance step of the inbound-hook convergence; the door's refusal of the body-only form is the follow-up card",
+          "ref": "#22825"
         }
       ]
     },

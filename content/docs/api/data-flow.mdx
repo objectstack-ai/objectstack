@@ -311,7 +311,7 @@ The lifecycle events are defined by the `HookEvent` enum (8 events). Reads fire 
 | Hook | Phase | Can Modify? | Can Abort? |
 |:---|:---|:---|:---|
 | `beforeInsert/Update/Delete` | Pre-persist | ✅ Yes (mutate `input`) | ✅ Yes (throw with `onError: 'abort'`) |
-| `afterInsert/Update/Delete` | Post-persist | ✅ Yes (mutate `result`) | ❌ No (record is saved) |
+| `afterInsert/Update/Delete` | Post-persist, before the unit of work commits | ✅ Yes (mutate `result`) | ✅ Yes (a blocking hook that throws with `onError: 'abort'`, the default): the write is refused and rolled back. On an object outside the default datasource, or on a driver with no transactions, the caller is refused but the row stays stored — see [After hooks run inside the unit of work](/docs/automation/hooks#after-hooks-run-inside-the-unit-of-work) |
 
 <Callout type="tip">
 **Side Effects:** Place side effects (emails, notifications, external API calls) in `after*` hooks. Set `async: true` so they run fire-and-forget without blocking the operation, and use `onError: 'log'` so a failing side effect doesn't roll back the write.

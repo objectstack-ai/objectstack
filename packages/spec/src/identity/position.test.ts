@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { PositionSchema, type Position } from './position.zod';
+import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
+import { PermissionSetSchema } from '../security/permission.zod';
+import { METADATA_FORM_REGISTRY } from '../system/metadata-form-registry';
 
 describe('PositionSchema', () => {
   describe('Basic Properties', () => {
@@ -283,5 +286,44 @@ describe('unknown keys are rejected, not stripped', () => {
     });
     expect(parsed._packageId).toBe('com.showcase');
     expect(parsed._lock).toBe('full');
+  });
+});
+
+// [ADR-0131 D4] "References to declared items are by machine name, resolved
+// registry-first." The position form is the one authoring surface for the
+// position → permission-set binding, so its `permissionSets` row names the
+// permission-set registry picker rather than a free-text tag box. The form is
+// read through the registry `/meta/types` serves, so a parse that dropped
+// `widget` would turn this red too.
+describe('the position form picks `permissionSets` from the permission-set registry', () => {
+  type Row = { field?: string; widget?: string; type?: string };
+  const rows = (): Row[] =>
+    ((METADATA_FORM_REGISTRY.position?.sections ?? []) as Array<{ fields?: Row[] }>)
+      .flatMap((s) => s.fields ?? []);
+  const rowFor = (key: string) => rows().filter((r) => r.field === key);
+
+  it('CONTROLS: the row probe finds a known row and reports a known absence', () => {
+    expect(rowFor('name'), 'lit control: the position form has always offered `name`').toHaveLength(1);
+    expect(rowFor('noSuchKeyAtAll'), 'dark control: a key the form does not offer').toHaveLength(0);
+  });
+
+  it('offers `permissionSets` once, as the `ref-multi:permission` picker', () => {
+    const [row, ...extra] = rowFor('permissionSets');
+    expect(extra, 'one row only').toEqual([]);
+    expect(row?.widget).toBe('ref-multi:permission');
+  });
+
+  it('the registry type the row names is the permission-set catalog', () => {
+    const [row] = rowFor('permissionSets');
+    const registryType = row?.widget?.split(':')[1];
+    expect(registryType).toBe('permission');
+    expect(getMetadataTypeSchema(registryType!)).toBe(PermissionSetSchema);
+  });
+
+  it('the multi-value key sits on a list: `permissionSets` refuses a bare name', () => {
+    const result = PositionSchema.safeParse({ name: 'auditor', label: 'Auditor', permissionSets: 'read_all' });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'permissionSets');
+    expect(issue?.code).toBe('invalid_type');
   });
 });
