@@ -385,8 +385,9 @@ const RUNTIME_CREATE_ALLOWED_TYPES: ReadonlySet<string> = new Set(
  * above (Prime Directive #8), and deliberately a different question from
  * {@link OVERLAY_ALLOWED_TYPES}: `allowEnvironmentOverlay` decides whether an
  * environment may overlay a packaged item at all, `supportsOverlay` only that
- * removing such a row restores the managed definition, so it is repair. It
- * opens no save and decides no read. Read only by
+ * removing such a row removes no managed definition (and changes what is
+ * served for `permission` alone), so it is repair. It opens no save and
+ * decides no read. Read only by
  * {@link SysMetadataRepository.assertDeleteAllowed}.
  */
 const OVERLAY_CAPABLE_TYPES: ReadonlySet<string> = new Set(

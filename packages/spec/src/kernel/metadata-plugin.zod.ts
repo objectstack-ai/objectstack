@@ -249,9 +249,10 @@ const MetadataTypeRegistryEntryBaseSchema = z.object({
   /**
    * Whether a stored overlay row of an item a managed package ships may be
    * REMOVED through the ordinary delete door without the type's
-   * environment-overlay permission ({@link allowEnvironmentOverlay}), because
-   * removing it restores the managed definition (the repair carve-out for
-   * overlay rows stored before a type's permission was rolled back).
+   * environment-overlay permission ({@link allowEnvironmentOverlay}): the
+   * removal removes no managed definition, and changes what is served for
+   * `permission` alone (the repair carve-out for overlay rows stored before a
+   * type's permission was rolled back).
    *
    * It opens no save and it decides no read: whether an environment overlay of
    * a packaged item is written or served is decided by
@@ -260,8 +261,9 @@ const MetadataTypeRegistryEntryBaseSchema = z.object({
    */
   supportsOverlay: z.boolean().default(true).describe(
     'Whether a stored overlay row of an item a managed package ships may be removed through the '
-    + 'ordinary delete door without the type\'s environment-overlay permission, because removing it '
-    + 'restores the managed definition; it opens no save and it decides no read'
+    + 'ordinary delete door without the type\'s environment-overlay permission: the removal removes '
+    + 'no managed definition, and changes what is served for permission alone; it opens no save and '
+    + 'it decides no read'
   ),
 
   /**

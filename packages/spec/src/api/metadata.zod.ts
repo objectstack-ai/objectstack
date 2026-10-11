@@ -299,7 +299,7 @@ export const MetadataTypeInfoResponseSchema = lazySchema(() => BaseResponseSchem
     label: z.string().describe('Display label'),
     description: z.string().optional().describe('Description'),
     filePatterns: z.array(z.string()).describe('File glob patterns'),
-    supportsOverlay: z.boolean().describe('Whether a stored overlay row of an item a managed package ships may be removed through the ordinary delete door without the type\'s environment-overlay permission, because removing it restores the managed definition; it opens no save and it decides no read'),
+    supportsOverlay: z.boolean().describe('Whether a stored overlay row of an item a managed package ships may be removed through the ordinary delete door without the type\'s environment-overlay permission: the removal removes no managed definition, and changes what is served for permission alone; it opens no save and it decides no read'),
     domain: z.string().describe('Protocol domain'),
     actions: z.array(ActionSchema).optional().describe('Declarative type-level actions (buttons) the metadata-admin UI renders for this type'),
   }).optional().describe('Type info'),

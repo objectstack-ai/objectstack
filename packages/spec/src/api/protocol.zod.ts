@@ -207,7 +207,7 @@ export const GetMetaTypesResponseSchema = lazySchema(() => z.object({
     label: z.string().describe('Human-readable label'),
     description: z.string().optional().describe('Brief description'),
     filePatterns: z.array(z.string()).describe('Glob patterns used to discover artifacts of this type'),
-    supportsOverlay: z.boolean().describe('Whether a stored overlay row of an item a managed package ships may be removed through the ordinary delete door without the type\'s environment-overlay permission, because removing it restores the managed definition; it opens no save and it decides no read'),
+    supportsOverlay: z.boolean().describe('Whether a stored overlay row of an item a managed package ships may be removed through the ordinary delete door without the type\'s environment-overlay permission: the removal removes no managed definition, and changes what is served for permission alone; it opens no save and it decides no read'),
     allowEnvironmentOverlay: z.boolean().describe('True when the registry grants environment overlays of this type\'s packaged items, or when OS_METADATA_WRITABLE names the type (overrideSource env), which opens the type\'s writes of items no managed package ships and never a managed item (ADR-0131 D6)'),
     allowRuntimeCreate: z.boolean().describe('New artifacts of this type can be created via runtime API'),
     supportsVersioning: z.boolean().describe('History is tracked for this type'),

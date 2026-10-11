@@ -15792,8 +15792,10 @@ export class ObjectStackProtocolImplementation implements
      * overlay an item a managed package ships, on the save AND on the served
      * read ({@link isSealedManagedItem}, {@link declinesStoredRow});
      * `supportsOverlay` decides the removal carve-out alone — such a row may be
-     * removed without that permission, because removing it restores the
-     * managed definition. It opens no save and it decides no read. Commit
+     * removed without that permission: the removal removes no managed
+     * definition, and changes what is served for `permission` alone
+     * ({@link refusePackagedBaseRemoval}). It opens no save and it decides no
+     * read. Commit
      * ee58392e1 rolled the permission back for six types — `permission`,
      * `position`, `page`, `app`, `dataset`, `book` — and deliberately left
      * this flag alone, which is exactly the state #6960 was filed about: rows
@@ -25962,9 +25964,10 @@ export class ObjectStackProtocolImplementation implements
         //  • Artifact-backed item → delete becomes a tombstone overlay,
         //    requires `allowEnvironmentOverlay`…
         //  • …EXCEPT when the type's entry carries `supportsOverlay: true` —
-        //    the removal carve-out: removing the row restores the managed
-        //    definition, so it is repair and is allowed without it. The flag
-        //    opens no save and decides no read. [#6960, delete-only; see below.]
+        //    the removal carve-out: removing the row removes no managed
+        //    definition (and changes what is served for `permission` alone),
+        //    so it is repair and is allowed without it. The flag opens no save
+        //    and decides no read. [#6960, delete-only; see below.]
         //  • DB-only item → hard delete of a user-created row,
         //    requires `allowRuntimeCreate` (or `allowEnvironmentOverlay`).
         if (this.environmentId !== undefined) {
