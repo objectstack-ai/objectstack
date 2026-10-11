@@ -36,6 +36,11 @@
  *    is a confident wrong answer;
  * 4. the existing green path still reports its counts unchanged.
  *
+ * [ADR-0131 D2] The cases that drove these through the two position seeders
+ * are gone with the seeders. What is pinned here is the shared accumulator
+ * (`write-refusals.ts`) the surviving writers report through; each surviving
+ * writer's own suite pins its call into it.
+ *
  * The classification is the SHIPPED predicate's (`isUniqueViolationError` in
  * `@objectstack/types`), never a local `23505` / `ER_DUP_ENTRY` regex — the
  * four-mutually-different-answers defect that module was written to retire. The
@@ -48,9 +53,6 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import ts from 'typescript';
 import { describe, it, expect } from 'vitest';
-import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
-import { bootstrapDeclaredPositions } from './bootstrap-declared-positions.js';
-import { bootstrapBuiltinRoles } from './bootstrap-builtin-positions.js';
 import {
   createSeedWriteRefusals,
   reportSeedWriteRefusals,
@@ -142,137 +144,12 @@ function makeWarnOnlyLogger() {
   };
 }
 
-/** A metadata service that declares no position: every position here comes from the registry. */
-const NO_METADATA_POSITIONS = { get: async () => undefined, list: async () => [] };
-
-/**
- * `sys_position` double whose INSERT is vetoed the way a legacy platform-wide
- * unique index vetoes it: the row never lands and the driver throws.
- *
- * Modelled on the double in `bootstrap-declared-positions.test.ts` — `$in` is
- * supported because the seeders hoist one batched existence read out of their
- * loop, and a double that answered `[]` to `$in` would report "nothing is
- * seeded" and make every re-seed look like a first boot.
- */
-function makeQl(
-  declared: any[] = [],
-  opts: { insertThrows?: () => unknown; updateThrows?: () => unknown } = {},
-) {
-  const rows: any[] = [];
-  return {
-    rows,
-    // The members the security catalog read takes from the engine registry —
-    // the declared-positions seeder reads through it (ADR-0131 C2 S2b), with
-    // `NO_METADATA_POSITIONS` as the metadata service.
-    registry: {
-      listItems: (type: string) => (type === 'position' ? [...declared] : []),
-      getItem: (type: string, name: string) => (type === 'position' ? declared.find((d) => d?.name === name) : undefined),
-      isPackageDisabled: () => false,
-    },
-    async find(object: string, q: any) {
-      if (object !== 'sys_position') return [];
-      const where = q?.where ?? {};
-      const matched = rows.filter((r) =>
-        Object.entries(where).every(([k, v]) => {
-          // Refuse what this double does not implement, rather than reading a
-          // combinator as a field name and silently matching nothing.
-          if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
-          if (v && typeof v === 'object' && !Array.isArray(v)) {
-            const inList = (v as any).$in;
-            if (Array.isArray(inList)) return inList.includes(r[k]);
-            throw new Error(`fake driver: unsupported operator ${Object.keys(v).join(',')}`);
-          }
-          return r[k] === v;
-        }),
-      );
-      // The caller's bound is applied AFTER the filter, by presence: a double
-      // that silently drops `limit` answers a different question than the real
-      // engine and hides a paging defect from every test that uses it.
-      return typeof q?.limit === 'number' ? matched.slice(0, q.limit) : matched;
-    },
-    async insert(object: string, data: any) {
-      if (opts.insertThrows) throw opts.insertThrows();
-      if (object !== 'sys_position') return null;
-      rows.push({ ...data });
-      return { id: data.id };
-    },
-    // Pinned to ObjectQL.update's own dispatch predicate: a fake looser than
-    // the real engine is how a dead call shape ships with its suite green.
-    async update(object: string, data: any, options?: any) {
-      if (opts.updateThrows) throw opts.updateThrows();
-      const dispatch = assertEngineUpdateDispatch(data, options);
-      if (object !== 'sys_position') return dispatch.kind === 'by-id' ? null : 0;
-      const targets = dispatch.kind === 'by-id'
-        ? rows.filter((r) => r.id === dispatch.id)
-        : rows;
-      for (const r of targets) Object.assign(r, data);
-      return dispatch.kind === 'by-id' ? (targets[0] ?? null) : targets.length;
-    },
-  };
-}
-
-const THREE_POSITIONS = [
-  { name: 'contributor', label: 'Contributor', description: 'Does work' },
-  { name: 'reviewer', label: 'Reviewer', description: 'Reviews work' },
-  { name: 'approver', label: 'Approver', description: 'Approves work' },
-];
-
-/**
- * The refusal lines this change adds, as opposed to any pre-existing ones —
- * gathered across BOTH sinks, because the two classes deliberately land on
- * different channels. A test that watched only `warn` would read the
- * unique-violation line's promotion to `error` as its disappearance.
- */
-function refusalLines(...sinks: WarnLine[][]): WarnLine[] {
-  return sinks.flat().filter((w) => typeof w.meta.refused === 'number');
-}
-
 /* ------------------------------------------------------------------------- *
- *  1 — a refused INSERT is LOUD, and the pass still returns
+ *  1 — the report never echoes the driver message
  * ------------------------------------------------------------------------- */
 
-describe('a unique-violation refusal during catalog seeding is boot-visible', () => {
-  it('warns, and does NOT throw, when every declared position is vetoed', async () => {
-    const { logger, warns, errors } = makeLogger();
-    const ql = makeQl(THREE_POSITIONS, { insertThrows: mysqlDuplicateEntry });
-
-    // ⭐ Resolves rather than rejects. A rethrow would turn a silent
-    // degradation into a boot failure on every deployment carrying the legacy
-    // index — a behaviour change this repair deliberately does not make.
-    const r = await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS, { logger, organizationId: 'org_1' });
-
-    // The seed really did land nothing — the defect's precondition holds.
-    expect(r.seeded).toBe(0);
-    expect(ql.rows).toHaveLength(0);
-
-    // ⭐ On the DURABILITY channel, not the functional one: the boot goes on to
-    // look healthy while a catalog it reported as seeded did not land.
-    expect(errors).toHaveLength(1);
-    expect(refusalLines(warns)).toHaveLength(0);
-    const [line] = errors;
-    // The cause slot stays empty and the detail travels in meta — a summary of
-    // N refusals has no single cause, and putting meta in the cause slot is
-    // where a `Logger` neither reads nor serializes it.
-    expect(line.cause).toBeUndefined();
-    expect(line.meta).toMatchObject({
-      object: 'sys_position',
-      organization: 'org_1',
-      refused: 3,
-      class: 'unique-violation',
-    });
-    // The value-free code channel is what identifies the dialect's refusal.
-    expect(line.meta.driverCodes).toEqual(['1062', 'ER_DUP_ENTRY']);
-    // The operator is told it is a deployment-schema defect and given the remedy.
-    expect(line.message).toContain('REFUSED BY A UNIQUE CONSTRAINT');
-    expect(line.message).toContain('os migrate plan');
-    expect(line.message).toContain('os migrate apply');
-    // ⭐ And it points at where the COLLIDING INDEX is named — the engine's own
-    // redacted entries — rather than reprinting driver text from here.
-    expect(line.message).toContain('COLLIDING INDEX');
-    expect(line.message).toContain('Insert operation failed');
-  });
-
-  it('never echoes the driver message or the bound statement into the warning', async () => {
+describe('a refusal report carries no bound statement', () => {
+  it('never echoes the driver message or the bound statement into the line', () => {
     const { logger, warns, errors } = makeLogger();
     // A driver message shaped the way knex builds one: the fully bound
     // statement, values inlined, then the database's own diagnostic.
@@ -284,77 +161,19 @@ describe('a unique-violation refusal during catalog seeding is boot-visible', ()
       ),
       { code: 'ER_DUP_ENTRY', errno: 1062 },
     );
-    const ql = makeQl(THREE_POSITIONS, { insertThrows: () => leaky });
+    const refusals = createSeedWriteRefusals();
+    refusals.record('sys_position', leaky);
 
-    await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS, { logger, organizationId: 'org_1' });
+    reportSeedWriteRefusals(logger, refusals, 'org_1');
 
-    const serialized = JSON.stringify(refusalLines(warns, errors));
+    const serialized = JSON.stringify([...warns, ...errors]);
+    expect(errors).toHaveLength(1);
     // [#8682] This is a server LOG, which is exactly the boundary the bound-
-    // statement redaction governs. The seeder reads the value-free `code` /
-    // `errno` channel and never the message channel, so a canary in the
+    // statement redaction governs. The accumulator reads the value-free `code`
+    // / `errno` channel and never the message channel, so a canary in the
     // statement cannot reach the log through this line.
     expect(serialized).not.toContain('SENSITIVE-CANARY-9f3a2b');
     expect(serialized).not.toContain('insert into');
-  });
-
-  it('reports a refused UPDATE on the same channel as a refused INSERT', async () => {
-    const { logger, warns, errors } = makeLogger();
-    const ql = makeQl(
-      [{ name: 'contributor', label: 'Contributor v2', description: 'new text' }],
-      { updateThrows: postgresUniqueViolation },
-    );
-    ql.rows.push({
-      id: 'position_existing', name: 'contributor', label: 'Contributor', description: 'old',
-      organization_id: 'org_1',
-    });
-
-    const r = await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS, { logger, organizationId: 'org_1' });
-
-    expect(r.updated).toBe(0);
-    const refusals = refusalLines(warns, errors);
-    expect(refusals).toHaveLength(1);
-    expect(refusals[0].meta).toMatchObject({ refused: 1, class: 'unique-violation' });
-    expect(refusals[0].meta.driverCodes).toEqual(['23505']);
-    expect(errors).toHaveLength(1);
-  });
-});
-
-/* ------------------------------------------------------------------------- *
- *  2 — AGGREGATED: N refusals produce ONE line
- * ------------------------------------------------------------------------- */
-
-describe('the refusal warning is aggregated, not one line per refused row', () => {
-  it('prints ONE line for 40 refusals in a single pass', async () => {
-    const { logger, warns, errors } = makeLogger();
-    const many = Array.from({ length: 40 }, (_, i) => ({
-      name: `position_${i}`, label: `Position ${i}`, description: 'x',
-    }));
-    const ql = makeQl(many, { insertThrows: mysqlDuplicateEntry });
-
-    const r = await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS, { logger, organizationId: 'org_1' });
-
-    expect(r.seeded).toBe(0);
-    const refusals = refusalLines(warns, errors);
-    // ⭐ ONE actionable line per object per class per pass. The alternative
-    // floods the boot log and buries the one sentence naming the remedy —
-    // the same reason `warnOrganizationLessRows` aggregates.
-    expect(refusals).toHaveLength(1);
-    // …and it still carries the true count, so the line is a report and not
-    // merely a sample.
-    expect(refusals[0].meta.refused).toBe(40);
-  });
-
-  it('aggregates the built-in position pass the same way', async () => {
-    const { logger, warns, errors } = makeLogger();
-    const ql = makeQl([], { insertThrows: mysqlDuplicateEntry });
-
-    const r = await bootstrapBuiltinRoles(ql, { logger, organizationId: 'org_1' });
-
-    expect(r.seeded).toBe(0);
-    const refusals = refusalLines(warns, errors);
-    expect(refusals).toHaveLength(1);
-    expect(refusals[0].meta.refused).toBeGreaterThan(1);
-    expect(refusals[0].meta.class).toBe('unique-violation');
   });
 });
 
@@ -363,25 +182,6 @@ describe('the refusal warning is aggregated, not one line per refused row', () =
  * ------------------------------------------------------------------------- */
 
 describe('a refusal that is not a unique violation keeps its own class', () => {
-  it('does not send the operator to `os migrate` for a connection failure', async () => {
-    const { logger, warns, errors } = makeLogger();
-    const ql = makeQl(THREE_POSITIONS, { insertThrows: connectionFailure });
-
-    await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS, { logger, organizationId: 'org_1' });
-
-    // ⭐ FUNCTIONAL channel, deliberately. Escalating a retrying outage to
-    // `error` is the over-application that trains everyone to skim `error`,
-    // which is what made the founding incident's `warn` unreadable.
-    expect(errors).toHaveLength(0);
-    const refusals = refusalLines(warns);
-    expect(refusals).toHaveLength(1);
-    expect(refusals[0].meta).toMatchObject({ refused: 3, class: 'other' });
-    expect(refusals[0].message).toContain('NOT a unique-constraint violation');
-    // ⭐ The migrate remedy belongs to the OTHER class and must not appear
-    // here: no migration can repair a database that is unreachable, and a
-    // confident wrong remedy is worse than none.
-    expect(refusals[0].message).not.toContain('os migrate plan');
-  });
 
   it('separates the two classes into two lines when a pass sees both', () => {
     const { logger, warns, errors } = makeLogger();
@@ -526,16 +326,6 @@ describe('the two classes take different log levels (AGENTS.md degradation rule)
     // slot the reduced sink does not have.
     expect(warns[0].meta.refused).toBe(1);
   });
-
-  it('reaches the durability channel through the real seeder, not just the helper', async () => {
-    const { logger, warns, errors } = makeLogger();
-    const ql = makeQl(THREE_POSITIONS, { insertThrows: postgresUniqueViolation });
-
-    await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS, { logger, organizationId: 'org_1' });
-
-    expect(errors).toHaveLength(1);
-    expect(refusalLines(warns)).toHaveLength(0);
-  });
 });
 
 /* ------------------------------------------------------------------------- *
@@ -543,19 +333,6 @@ describe('the two classes take different log levels (AGENTS.md degradation rule)
  * ------------------------------------------------------------------------- */
 
 describe('a pass that is not refused reports exactly what it did before', () => {
-  it('says nothing about refusals and reports its counts unchanged', async () => {
-    const { logger, warns, errors } = makeLogger();
-    const ql = makeQl(THREE_POSITIONS);
-
-    const r = await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS, { logger, organizationId: 'org_1' });
-
-    expect(r).toMatchObject({ seeded: 3, updated: 0, unchanged: 0, unreadable: 0 });
-    expect(ql.rows).toHaveLength(3);
-    // ⭐ Silence on the healthy path is load-bearing: a warning printed on
-    // every boot of every deployment is the false-alarm class that trains
-    // operators to skim exactly this channel.
-    expect(refusalLines(warns, errors)).toHaveLength(0);
-  });
 
   it('emits nothing at all when a pass recorded no refusal', () => {
     const { logger, warns } = makeLogger();

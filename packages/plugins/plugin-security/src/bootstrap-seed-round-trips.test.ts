@@ -43,15 +43,11 @@
 import { describe, it, expect } from 'vitest';
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { bootstrapDeclaredPermissions } from './bootstrap-declared-permissions.js';
-import { bootstrapDeclaredPositions } from './bootstrap-declared-positions.js';
 import { bootstrapDeclaredCapabilities } from './bootstrap-declared-capabilities.js';
 
 /**
  * The engine registry as the security catalog read uses one — its list, its
- * by-name read and its disabled-package question — over a fixed list. The
- * declared-positions seeder reads through that catalog read (ADR-0131 C2 S2b),
- * which also takes the metadata service: {@link NO_METADATA_POSITIONS} is one
- * that declares nothing, so every position here comes from the registry.
+ * by-name read and its disabled-package question — over a fixed list.
  */
 function catalogRegistry(type: string, items: () => any[]) {
   return {
@@ -60,7 +56,6 @@ function catalogRegistry(type: string, items: () => any[]) {
     isPackageDisabled: () => false,
   };
 }
-const NO_METADATA_POSITIONS = { get: async () => undefined, list: async () => [] };
 
 interface CountingQl {
   rows: any[];
@@ -178,17 +173,8 @@ const declaredSets = (n: number): DeclaredSet[] =>
     _packageId: 'com.example.crm',
   }));
 
-const declaredPositions = (n: number) =>
-  Array.from({ length: n }, (_, i) => ({
-    name: `pkg_pos_${i}`,
-    label: `Position ${i}`,
-    description: `desc ${i}`,
-  }));
-
 const permissionQl = (declared: any[], behaviour = {}) =>
   makeCountingQl('sys_permission_set', 'permission', declared, behaviour);
-const positionQl = (declared: any[], behaviour = {}) =>
-  makeCountingQl('sys_position', 'position', declared, behaviour);
 
 describe('#10946 — steady-state rebuild is O(1) round trips (permission sets)', () => {
   it('does not grow the rebuild round-trip count with the number of declared sets', async () => {
@@ -228,33 +214,6 @@ describe('#10946 — steady-state rebuild is O(1) round trips (permission sets)'
   });
 });
 
-describe('#10946 — steady-state rebuild is O(1) round trips (positions)', () => {
-  it('does not grow the rebuild round-trip count with the number of declared positions', async () => {
-    const measure = async (n: number) => {
-      const ql = positionQl(declaredPositions(n));
-      await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS);
-      ql.reset();
-      const r = await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS);
-      expect(r.seeded).toBe(0);
-      expect(r.updated).toBe(0);
-      expect(r.unchanged).toBe(n);
-      return ql.roundTrips();
-    };
-
-    const [n1, n5, n20, n40] = [await measure(1), await measure(5), await measure(20), await measure(40)];
-    expect([n1, n5, n20, n40]).toEqual([1, 1, 1, 1]);
-  });
-
-  it('issues ONE batched `$in` existence read for the whole declaration', async () => {
-    const ql = positionQl(declaredPositions(12));
-    await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS);
-    ql.reset();
-    await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS);
-    expect(ql.calls.find).toBe(1);
-    expect(ql.wheres[0]).toEqual({ name: { $in: declaredPositions(12).map((p) => p.name) } });
-  });
-});
-
 /**
  * ⚠️ LOAD-BEARING. Without these, an implementation that skipped every write
  * would pass every count above while reconciling nothing at all.
@@ -289,39 +248,6 @@ describe('#10946 — drift STILL reconciles', () => {
     expect(r.updated).toBe(1);
     expect(JSON.parse(ql.rows[1].object_permissions)).toEqual({ crm_lead: { allowRead: true } });
   });
-
-  it('a position row whose stored label/description differ still gets its UPDATE', async () => {
-    const ql = positionQl(declaredPositions(20));
-    await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS);
-
-    const upgraded = declaredPositions(20);
-    upgraded[3] = { ...upgraded[3], label: 'Renamed', description: 'new text' };
-    (ql as any).registry = catalogRegistry('position', () => upgraded);
-
-    ql.reset();
-    const r = await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS);
-    expect(r.updated).toBe(1);
-    expect(r.unchanged).toBe(19);
-    expect(ql.calls.update).toBe(1);
-    const row = ql.rows.find((x) => x.name === 'pkg_pos_3');
-    expect(row.label).toBe('Renamed');
-    expect(row.description).toBe('new text');
-  });
-
-  it('a re-seed still never touches the record-authoritative columns (#2909 T2 kept)', async () => {
-    const ql = positionQl([{ name: 'contributor', label: 'Contributor v2', description: 'new' }]);
-    ql.rows.push({
-      id: 'pos_1', name: 'contributor', label: 'Contributor', description: 'old',
-      active: false, is_default: true, delegatable: true, managed_by: 'package',
-    });
-    await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS);
-    const row = ql.rows[0];
-    expect(row.label).toBe('Contributor v2');
-    expect(row.active).toBe(false);
-    expect(row.is_default).toBe(true);
-    expect(row.delegatable).toBe(true);
-    expect(row.managed_by).toBe('package');
-  });
 });
 
 describe('#10946 — a genuinely NEW declaration is still created', () => {
@@ -340,20 +266,6 @@ describe('#10946 — a genuinely NEW declaration is still created', () => {
     expect(r.unchanged).toBe(5);
     expect(ql.rows.map((x) => x.name)).toContain('pkg_set_new');
     // one batched read + one insert — the other five cost nothing at all
-    expect(ql.roundTrips()).toBe(2);
-  });
-
-  it('the batched read does not turn "absent" into "present" (positions)', async () => {
-    const ql = positionQl(declaredPositions(5));
-    await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS);
-
-    const grown = [...declaredPositions(5), { name: 'pkg_pos_new', label: 'New', description: null }];
-    (ql as any).registry = catalogRegistry('position', () => grown);
-
-    ql.reset();
-    const r = await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS);
-    expect(r.seeded).toBe(1);
-    expect(r.unchanged).toBe(5);
     expect(ql.roundTrips()).toBe(2);
   });
 });
@@ -404,19 +316,6 @@ describe('#10946 — a read that CANNOT ANSWER is not the answer "none exist"', 
     expect(r.unreadable).toBe(4);
     expect(ql.calls.insert).toBe(0);
     expect(ql.rows).toHaveLength(4);
-  });
-
-  it('a throwing read does NOT re-create rows that are already seeded (positions)', async () => {
-    const seeded = positionQl(declaredPositions(4));
-    await bootstrapDeclaredPositions(seeded, NO_METADATA_POSITIONS);
-
-    const broken = positionQl(declaredPositions(4), { findThrows: true });
-    broken.rows.push(...seeded.rows.map((r) => ({ ...r })));
-    const r = await bootstrapDeclaredPositions(broken, NO_METADATA_POSITIONS);
-    expect(r.seeded).toBe(0);
-    expect(r.unreadable).toBe(4);
-    expect(broken.calls.insert).toBe(0);
-    expect(broken.rows).toHaveLength(4);
   });
 
   it('an EMPTY result set is still trusted as "none exist" — the first boot depends on it', async () => {
