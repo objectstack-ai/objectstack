@@ -249,6 +249,38 @@ describe('[#6190, ADR-0131 D6] cold boot names every legacy organization-scoped 
         expect(call).toBeGreaterThan(1);
         expect(result).toMatchObject({ loaded: 1, errors: 0, storeUnavailable: false });
         expect(warns.filter((w) => w.includes('DB hydration skipped'))).toEqual([]);
-        expect(warns.filter((w) => w.includes(AUDIT))).toEqual([]);
+        // [#15206] …and the failed read is said, not swallowed: its term is
+        // NOT MEASURED, with the reason.
+        const audit = warns.filter((w) => w.includes(AUDIT));
+        expect(audit).toHaveLength(1);
+        expect(audit[0]).toContain('NOT MEASURED');
+        expect(audit[0]).toContain('sys_metadata (probe exploded)');
+    });
+
+    it('[#15206] a read that fails costs its own term only: the other terms are reported as measured', async () => {
+        const { engine } = makeEngine([
+            row({ type: 'flow', name: 'org_sweep', organization_id: 'org_a' }),
+        ], {
+            ledgers: {
+                sys_metadata_commit: [{ organization_id: 'org_a' }],
+                sys_metadata_audit: [{ organization_id: 'org_b' }],
+            },
+        });
+        const inner = engine.count;
+        engine.count = async (t: string, q: any) => {
+            if (t === 'sys_metadata_history') throw new Error('history count refused');
+            return inner(t, q);
+        };
+
+        const { result, warns } = await bootAndCapture(engine);
+
+        expect(result).toMatchObject({ errors: 0, storeUnavailable: false });
+        const line = warns.find((w) => w.includes(AUDIT));
+        expect(line, `no ${AUDIT} line in: ${JSON.stringify(warns)}`).toBeDefined();
+        expect(line).toContain('flow×1 (org_sweep@org_a)');
+        expect(line).toContain('sys_metadata_commit×1, sys_metadata_audit×1');
+        expect(line).toContain('NOT MEASURED');
+        expect(line).toContain('sys_metadata_history (history count refused)');
+        expect(line).not.toContain('sys_metadata_history×');
     });
 });
