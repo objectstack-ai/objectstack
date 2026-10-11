@@ -76,8 +76,15 @@ async function soleGrantAnchoredAdmin(): Promise<Rig> {
     manifest: { register: (m: any) => { manifest = m; } },
     objectql: engine,
     metadata: {
-      get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
-      list: async () => [...((manifest.permissions as unknown[]) ?? [])],
+      // [ADR-0131 D3/D4] The bootstrap sets the manifest ships are the
+      // catalog's `permission` definitions — what the security catalog the
+      // plugin binds at `start()` resolves a grant's set name to.
+      get: async (type: string, name: string) =>
+        type === 'permission'
+          ? ((manifest.permissions as any[]) ?? []).find((p) => p?.name === name) ?? null
+          : engine.getSchema(name) ?? null,
+      list: async (type?: string) =>
+        type === undefined || type === 'permission' ? [...((manifest.permissions as unknown[]) ?? [])] : [],
     },
   };
   const ctx: any = {

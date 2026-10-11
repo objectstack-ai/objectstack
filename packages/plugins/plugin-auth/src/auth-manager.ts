@@ -58,6 +58,7 @@ import {
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import { createObjectQLAdapterFactory, withSystemContext, withSystemReadContext } from './objectql-adapter.js';
+import { permissionSetInEffect } from './catalog-set-in-effect.js';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
 import { runWithAuthActorScope, setAuthActorResolver } from './auth-actor-attribution.js';
 import {
@@ -4763,10 +4764,11 @@ export class AuthManager {
         const resolvable = await this.selfRegistrationSetResolvable(setName);
         if (!resolvable) {
           const message =
-            `the declared self-registration permission set '${setName}' cannot be resolved in ` +
-            'sys_permission_set (missing, deactivated, or the permission-set store is unavailable) — ' +
+            `the declared self-registration permission set '${setName}' cannot be resolved ` +
+            '(not in the security catalog, switched off in sys_metadata_activation, without a ' +
+            'sys_permission_set row to grant it by, or the store is unavailable) — ' +
             'self-registration is refused rather than admitting an ungranted user. ' +
-            'Create/activate the set, or point selfRegistrationPermissionSet at an existing one.';
+            'Declare or switch on the set, or point selfRegistrationPermissionSet at an existing one.';
           this.audienceLogError(`[audience] ${message}`);
           return { error: AUDIENCE_CONFIG_ERROR, errorDescription: message };
         }
@@ -5004,10 +5006,25 @@ export class AuthManager {
     }
   }
 
-  /** At least one ACTIVE `sys_permission_set` row carries the declared name. */
+  /**
+   * [ADR-0131 D3/D4] The declared set would GRANT: the security catalog holds
+   * it and the activation ledger does not switch it off — the resolver's own
+   * reading ({@link permissionSetInEffect}) — and a `sys_permission_set` row
+   * carries the id the grant's required `permission_set_id` is written with
+   * ({@link settleSelfRegistrationGrant}). The row's `active` is not read.
+   * A read that fails answers `false`: the admission refuses.
+   */
   private async selfRegistrationSetResolvable(setName: string): Promise<boolean> {
+    const engine = this.config.dataEngine;
+    if (!engine || typeof (engine as any).find !== 'function') return false;
+    try {
+      const reader = withSystemReadContext(engine) as any;
+      if (!(await permissionSetInEffect(engine, (object, query) => reader.find(object, query), setName))) return false;
+    } catch {
+      return false;
+    }
     const rows = await this.findPermissionSetRows(setName);
-    return rows.some((r) => r?.active !== false && typeof r?.id === 'string' && r.id);
+    return rows.some((r) => typeof r?.id === 'string' && r.id);
   }
 
   private async findPermissionSetRows(setName: string): Promise<any[]> {
@@ -5238,12 +5255,14 @@ export class AuthManager {
       } catch {
         organizationId = null;
       }
-      // ACTIVE is a selection predicate — a deactivated set legitimately does
-      // not resolve, so it stays a filter. A missing or blank `id` is NOT a
-      // selection: it is a MALFORMED row, and dropping it silently is the
+      // [ADR-0131 D3] The row is read for the id the grant's required
+      // `permission_set_id` is written with, and for nothing else: whether the
+      // set grants was asked at admission, of the catalog and the activation
+      // ledger, and the row's `active` is not read. A missing or blank `id` is
+      // a MALFORMED row, and dropping it silently is the
       // opposite defect from a dead limb, wrong in two ways that both look
       // normal from outside. (1) The family narrows to nothing and the report
-      // below blames "no active row named X" while an active row named X is
+      // below blames "no row named X" while a row named X is
       // sitting right there — and that report is the only signal, because
       // nothing retries this. (2) Worse, when the malformed row is the
       // ORG-SCOPED one, the `organization_id == null` arm below then resolves
@@ -5253,15 +5272,13 @@ export class AuthManager {
       // "unambiguous single row" this code believes it selected is not that.
       // So a malformed candidate REFUSES the grant and names itself, which is
       // the same gap-not-empty-answer direction the rest of this method takes.
-      const candidates = (await this.findPermissionSetRows(staged.setName)).filter(
-        (r) => r?.active !== false,
-      );
+      const candidates = await this.findPermissionSetRows(staged.setName);
       const malformed = candidates.filter((r) => !(typeof r?.id === 'string' && r.id));
       if (malformed.length > 0) {
         this.reportUngrantedSelfRegistrant(
           userId,
           staged.setName,
-          `${malformed.length} active sys_permission_set row(s) named '${staged.setName}' carry no usable id, ` +
+          `${malformed.length} sys_permission_set row(s) named '${staged.setName}' carry no usable id, ` +
             'so which row this grant would resolve to cannot be decided — refusing rather than ' +
             'silently dropping them and granting whichever row is left',
         );
@@ -5277,8 +5294,8 @@ export class AuthManager {
           userId,
           staged.setName,
           organizationId
-            ? `no active sys_permission_set row named '${staged.setName}' resolves for organization ${organizationId}`
-            : `no active sys_permission_set row named '${staged.setName}' resolves`,
+            ? `no sys_permission_set row named '${staged.setName}' resolves for organization ${organizationId}`
+            : `no sys_permission_set row named '${staged.setName}' resolves`,
         );
         return;
       }

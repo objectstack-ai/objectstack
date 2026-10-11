@@ -51,6 +51,7 @@ import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
 import { resetPlatformAdminEmailMemo } from '@objectstack/core';
 
 import { registerLastAdminGuard, USER_STANDING_KEYS, type LastAdminGuardEngine } from './last-admin-guard.js';
+import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 const ENV = 'OS_PLATFORM_OWNER_EMAIL';
 /**
@@ -104,6 +105,28 @@ const sysPermissionSet = {
     active: { name: 'active', type: 'boolean' as const },
   },
 };
+
+/** [ADR-0131 D3, ADR-0126 §4] The activation ledger a permission set is switched off in. */
+const sysMetadataActivation = {
+  name: 'sys_metadata_activation',
+  label: 'Metadata Activation',
+  fields: {
+    id: { name: 'id', type: 'text' as const, primaryKey: true },
+    metadata_type: { name: 'metadata_type', type: 'text' as const },
+    name: { name: 'name', type: 'text' as const },
+    package_id: { name: 'package_id', type: 'text' as const },
+    active: { name: 'active', type: 'boolean' as const },
+  },
+};
+
+/** Switch `admin_full_access` off in the ledger — before any grant names it, so the guard reads a fresh environment. */
+async function switchAdminSetOff(engine: ObjectQL): Promise<void> {
+  await engine.insert(
+    'sys_metadata_activation',
+    { id: 'act_admin', metadata_type: 'permission', name: ADMIN_FULL_ACCESS, package_id: 'pkg', active: false },
+    SYSTEM,
+  );
+}
 
 const sysUserPermissionSet = {
   name: 'sys_user_permission_set',
@@ -177,10 +200,12 @@ async function boot(opts: { unguarded?: boolean } = {}): Promise<ObjectQL> {
     true,
   );
   await engine.init();
-  for (const o of [sysUser, sysMember, sysPermissionSet, sysUserPermissionSet]) {
+  for (const o of [sysUser, sysMember, sysPermissionSet, sysUserPermissionSet, sysMetadataActivation]) {
     engine.registry.registerObject(o as never);
   }
   await engine.syncSchemas();
+  // [ADR-0131 D3/D4] The set a grant names is the catalog's definition.
+  bindTestSecurityCatalog(engine, { permissions: [{ name: ADMIN_FULL_ACCESS }] });
   if (!opts.unguarded) {
     registerLastAdminGuard(engine as unknown as LastAdminGuardEngine, { packageId: 'test.last-admin-guard' });
   }
@@ -508,8 +533,8 @@ describe('[#11663 L5] under a WALLED posture the legacy grant is not an administ
   });
 
   it('the emptied-not-fresh refusal names the remedy that WORKS under a wall', async () => {
-    // [#11663 L5] The refusal itself is unchanged — a deactivated
-    // `admin_full_access` row with stranded unscoped grants is still the
+    // [#11663 L5] The refusal itself is unchanged — a switched-off
+    // `admin_full_access` with stranded unscoped grants is still the
     // evidence, and the write is still refused. What changed is that 「restore
     // the row」 stopped ending the emptiness on a walled rig, so the message
     // names the channel that does.
@@ -517,7 +542,7 @@ describe('[#11663 L5] under a WALLED posture the legacy grant is not an administ
     declare(undefined);
     const engine = await boot();
     await seedUser(engine, 'usr_legacy', 'legacy@corp.example', true);
-    await engine.insert('sys_permission_set', { id: 'ps_a', name: ADMIN_FULL_ACCESS, active: false }, SYSTEM);
+    await switchAdminSetOff(engine);
     await engine.insert(
       'sys_user_permission_set',
       { id: 'ups_1', user_id: 'usr_legacy', permission_set_id: 'ps_a', permission_set: ADMIN_FULL_ACCESS },
@@ -536,7 +561,7 @@ describe('[#11663 L5] under a WALLED posture the legacy grant is not an administ
     declare(undefined);
     const engine = await boot();
     await seedUser(engine, 'usr_legacy', 'legacy@corp.example', true);
-    await engine.insert('sys_permission_set', { id: 'ps_a', name: ADMIN_FULL_ACCESS, active: false }, SYSTEM);
+    await switchAdminSetOff(engine);
     await engine.insert(
       'sys_user_permission_set',
       { id: 'ups_1', user_id: 'usr_legacy', permission_set_id: 'ps_a', permission_set: ADMIN_FULL_ACCESS },
@@ -551,7 +576,7 @@ describe('[#11663 L5] under a WALLED posture the legacy grant is not an administ
     }
     // The refusal really fired — without this the absence below would be the
     // absence of any message at all.
-    expect(message).toMatch(/DEACTIVATED/);
+    expect(message).toMatch(/switched OFF/);
     expect(message).not.toMatch(/OS_PLATFORM_OWNER_EMAIL/);
   });
 });

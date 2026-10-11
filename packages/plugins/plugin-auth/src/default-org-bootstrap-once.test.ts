@@ -37,6 +37,7 @@ import {
 } from './ensure-default-organization.js';
 import { createEnsureDefaultOrganizationOnce } from './default-org-bootstrap-once.js';
 import { DEFAULT_ORG_OWNER_BIND_MIGRATION_ID } from './membership-backfill-ledger.js';
+import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
 // The legacy grant anchor this helper falls back to is posture-keyed, and the
 // config anchor reads `OS_PLATFORM_OWNER_EMAIL` live: pin both to the
@@ -121,6 +122,8 @@ function rig(seed: Partial<Record<string, Row[]>> = {}) {
       return row ?? null;
     }),
   };
+  // [ADR-0131 D3/D4] The set the fixture's rows name is a catalog definition.
+  bindCatalogFromTables(ql, tables);
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
   /** The options every `ensure` call received, in call order. */
   const ensureCalls: EnsureDefaultOrganizationOptions[] = [];

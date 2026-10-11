@@ -1866,21 +1866,20 @@ describe('[#8158] a non-system caller with NO organization does not get the syst
 });
 
 // ---------------------------------------------------------------------------
-// commit 04d03c3a0 — a DEACTIVATED `sys_position` confers no sharing-rule shares
+// commit 04d03c3a0 — a DEACTIVATED position confers no sharing-rule shares
 //
 // Maintainer ruling, 2026-08-15, the recitable line:
 //
 //   > Access-conferring paths filter deactivated positions; addressing paths
 //   > do not.
 //
-// #8613 enforced `sys_position.active` at the authorization DERIVATION seam
-// (`resolveAuthzContext`), where a deactivated position stops carrying its
-// permission sets. A sharing rule reaches users by a second road that never
-// passes that seam — `expandRecipient` → `PositionGraphService` — so a rule
-// sharing records with `cfo` kept sharing them after `cfo` was deactivated,
-// while the `deactivate_position` dialog promises, unqualified, that "the
-// position stops granting permissions until re-activated". A record share is
-// access, so the promise covers it.
+// The authorization DERIVATION seam drops a deactivated position from what it
+// grants. A sharing rule reaches users by a second road that never passes that
+// seam — `expandRecipient` → `PositionGraphService` — so the call site drops a
+// deactivated position itself. [ADR-0131 D3, ADR-0126 §4] Deactivation lives in
+// the activation ledger (`sys_metadata_activation`, one row per
+// `(metadata_type, name)`, deployment-wide), read as the resolver reads it; the
+// `sys_position` row's `active` switches nothing.
 //
 // The tests below pin BOTH directions the ruling names, because the boundary
 // is the part most easily lost in a later refactor:
@@ -1895,7 +1894,7 @@ describe('[#8158] a non-system caller with NO organization does not get the syst
 //     permitted). Moving this filter down into the helper would take those
 //     with it — which is exactly what the pin in ② fails on.
 // ---------------------------------------------------------------------------
-describe('#8710 — a deactivated sys_position confers no sharing-rule shares', () => {
+describe('#8710 — a deactivated position confers no sharing-rule shares', () => {
   let engine: ReturnType<typeof makeEngine>;
   let sharing: SharingService;
   let rules: SharingRuleService;
@@ -1911,8 +1910,12 @@ describe('#8710 — a deactivated sys_position confers no sharing-rule shares', 
   const shareRecipients = () =>
     (engine._tables.sys_record_share ?? []).map((r: Row) => String(r.recipient_id)).sort();
 
-  /** The catalogue row for `cfo` in org1 — the flag under test. */
-  const cfoRow = () => (engine._tables.sys_position ?? []).find((r: Row) => r.id === 'pos_cfo')!;
+  /** Switch `cfo` in the activation ledger — the flag under test. */
+  const switchCfo = (active: unknown, metadataType = 'position') => {
+    engine._tables.sys_metadata_activation = [
+      { id: `act_${metadataType}_cfo`, metadata_type: metadataType, name: 'cfo', package_id: '', active },
+    ];
+  };
 
   beforeEach(() => {
     engine = makeEngine();
@@ -1928,14 +1931,15 @@ describe('#8710 — a deactivated sys_position confers no sharing-rule shares', 
     engine._tables.sys_position = [
       { id: 'pos_cfo', name: 'cfo', organization_id: 'org1', active: true },
     ];
+    engine._tables.sys_metadata_activation = [];
     sharing = new SharingService({ engine: engine as any });
     rules = new SharingRuleService({ engine: engine as any, sharing });
   });
 
-  // ── ① the change: an access-conferring path stops at a deactivated row ──
+  // ── ① the change: an access-conferring path stops at a switched-off position ──
 
-  it('shares nothing once the position is deactivated', async () => {
-    cfoRow().active = false;
+  it('shares nothing once the position is switched off in the ledger', async () => {
+    switchCfo(false);
     const rule = await rules.defineRule(RULE, SYS);
     const res = await rules.evaluateRule(rule.id, SYS);
     expect(res.expandedUsers).toBe(0);
@@ -1943,7 +1947,7 @@ describe('#8710 — a deactivated sys_position confers no sharing-rule shares', 
     expect(shareRecipients()).toEqual([]);
   });
 
-  it('REVOKES the shares it already materialised when the position is deactivated', async () => {
+  it('REVOKES the shares it already materialised when the position is switched off', async () => {
     // Deactivation has to retract, not merely stop granting: the admin's
     // mental model is "the position stops granting permissions", and a share
     // that survives until the next authoring edit is the leak in slow motion.
@@ -1951,7 +1955,7 @@ describe('#8710 — a deactivated sys_position confers no sharing-rule shares', 
     expect((await rules.evaluateRule(rule.id, SYS)).grantsCreated).toBe(1);
     expect(shareRecipients()).toEqual(['u_cfo']);
 
-    cfoRow().active = false;
+    switchCfo(false);
     const res = await rules.evaluateRule(rule.id, SYS);
     expect(res.grantsRevoked).toBe(1);
     expect(shareRecipients()).toEqual([]);
@@ -1965,22 +1969,19 @@ describe('#8710 — a deactivated sys_position confers no sharing-rule shares', 
     await rules.evaluateRule(rule.id, SYS);
     expect(shareRecipients()).toEqual(['u_cfo']);
 
-    cfoRow().active = false;
+    switchCfo(false);
     expect(await rules.revokeRuleGrantsForRetiredRecipients(await rules.getRule(rule.id, SYS) as any)).toBe(1);
     expect(shareRecipients()).toEqual([]);
   });
 
-  it('reads "deactivated" with the SHARED predicate — every driver spelling of false', async () => {
-    // `isRowActive` (@objectstack/core) is the one definition of activeness
-    // #8613 established; SQLite hands back 1/0 and a JSON column can hand back
-    // 'false', so `row.active === false` would miss the deactivated row on the
-    // primary driver. Two notions of "is this row active" is how this class of
-    // defect gets made — hence the shared predicate, pinned here by its own
-    // stored spellings.
-    for (const stored of [false, 0, '0', 'false']) {
+  it('reads the ledger as the resolver does — a driver 0 is off, so is false', async () => {
+    // SQLite/libsql round-trip booleans as 0/1; a `=== false` test alone would
+    // read a switched-off position as on. The resolver's reading is
+    // `active === false || active === 0`, and the two readers must agree.
+    for (const stored of [false, 0]) {
       engine._tables.sys_record_share = [];
       engine._tables.sys_sharing_rule = [];
-      cfoRow().active = stored;
+      switchCfo(stored);
       const rule = await rules.defineRule(RULE, SYS);
       expect(await rules.evaluateRule(rule.id, SYS), `active=${JSON.stringify(stored)}`)
         .toMatchObject({ expandedUsers: 0, grantsCreated: 0 });
@@ -1990,28 +1991,26 @@ describe('#8710 — a deactivated sys_position confers no sharing-rule shares', 
 
   // ── ② the anti-vacuity + fail-open controls: what must NOT change ──────
 
-  it('an ACTIVE position shares exactly as before', async () => {
+  it('an ACTIVE position shares exactly as before — a ledger row switched ON included', async () => {
+    switchCfo(true);
     const rule = await rules.defineRule(RULE, SYS);
     expect(await rules.evaluateRule(rule.id, SYS)).toMatchObject({ expandedUsers: 1, grantsCreated: 1 });
     expect(shareRecipients()).toEqual(['u_cfo']);
   });
 
-  it('an ABSENT `active` column still grants — absent means active, never a mass revocation', async () => {
-    // Rows predating the column, arriving through a migration, or projected
-    // without it carry no value at all. Requiring `true` would revoke every
-    // such rule's shares the day this lands (row-active.ts, reason 1).
-    delete (cfoRow() as any).active;
+  it('the sys_position row\'s active switches nothing — only the ledger does', async () => {
+    // [ADR-0131 D3] The resolver reads no catalog row, so a row flag is not a
+    // deactivation; reading it here would make the two readers disagree.
+    (engine._tables.sys_position[0] as Row).active = false;
     const rule = await rules.defineRule(RULE, SYS);
     expect(await rules.evaluateRule(rule.id, SYS)).toMatchObject({ expandedUsers: 1, grantsCreated: 1 });
     expect(shareRecipients()).toEqual(['u_cfo']);
   });
 
-  it('a name with NO catalogue row at all still grants — there is no flag to read', async () => {
+  it('a name with NO ledger row still grants — absent means active, never a mass revocation', async () => {
     // The membership-derived names (`sys_member.role`, ADR-0057 D4's
-    // transition source) have no `sys_position` row, and #8613 leaves exactly
-    // those untouched. `isRowActive(undefined)` is FALSE, so a fix that piped
-    // "no row" straight into the predicate would silently revoke every
-    // membership-derived position share.
+    // transition source) are in no catalog and carry no ledger row; they are
+    // left untouched, as the resolver leaves them.
     engine._tables.sys_position = [];
     engine._tables.sys_member = [{ id: 'm1', organization_id: 'org1', user_id: 'u_role', role: 'cfo' }];
     const rule = await rules.defineRule(RULE, SYS);
@@ -2019,14 +2018,37 @@ describe('#8710 — a deactivated sys_position confers no sharing-rule shares', 
     expect(shareRecipients()).toEqual(['u_cfo', 'u_role']);
   });
 
-  it('another org deactivating the SAME name does not stop this org\'s shares', async () => {
-    // `sys_position.name` is unique per ORGANIZATION (#8468), so two tenants
-    // legitimately hold a `cfo` row. Reading the flag off the wrong tenant's
-    // row would export one admin's deactivation into every other tenant.
-    engine._tables.sys_position.push({ id: 'pos_cfo_org2', name: 'cfo', organization_id: 'org2', active: false });
+  it('another TYPE switched off under the same name does not stop the position', async () => {
+    // The ledger is shared by every activation type; only a `position` row
+    // speaks for a position (a permission set is commonly named like one).
+    switchCfo(false, 'permission');
     const rule = await rules.defineRule(RULE, SYS);
     expect(await rules.evaluateRule(rule.id, SYS)).toMatchObject({ expandedUsers: 1, grantsCreated: 1 });
     expect(shareRecipients()).toEqual(['u_cfo']);
+  });
+
+  it('a ledger read that fails still grants — never a mass revocation', async () => {
+    const find = engine.find.bind(engine);
+    (engine as any).find = async (object: string, opts?: any) => {
+      if (object === 'sys_metadata_activation') throw new Error('ledger unreachable');
+      return find(object, opts);
+    };
+    const rule = await rules.defineRule(RULE, SYS);
+    expect(await rules.evaluateRule(rule.id, SYS)).toMatchObject({ expandedUsers: 1, grantsCreated: 1 });
+  });
+
+  it('a composition that registers no ledger object issues no ledger read, and the position still shares', async () => {
+    const find = engine.find.bind(engine);
+    let ledgerReads = 0;
+    (engine as any).find = async (object: string, opts?: any) => {
+      if (object === 'sys_metadata_activation') ledgerReads += 1;
+      return find(object, opts);
+    };
+    (engine as any).registry = { getObject: (name: string) => (name === 'sys_metadata_activation' ? undefined : { name }) };
+    switchCfo(false); // a row the composition does not serve
+    const rule = await rules.defineRule(RULE, SYS);
+    expect(await rules.evaluateRule(rule.id, SYS)).toMatchObject({ expandedUsers: 1, grantsCreated: 1 });
+    expect(ledgerReads).toBe(0);
   });
 
   it('the ADDRESSING primitive stays a RAW directory read — the filter is the call site\'s', async () => {
@@ -2034,39 +2056,39 @@ describe('#8710 — a deactivated sys_position confers no sharing-rule shares', 
     // holds position P" for every consumer of the graph; approval ROUTING and
     // the plugin-security write gates read that answer and MUST keep seeing
     // the deactivated position's holders (filtering there is fail-open /
-    // access-widening respectively, #8613's carve-outs, reaffirmed by the
-    // 2026-08-15 ruling). An ablation that moves this PR's filter down into
-    // `expandPositionUsers` turns this red.
-    cfoRow().active = false;
+    // access-widening respectively, reaffirmed by the 2026-08-15 ruling). An
+    // ablation that moves this filter down into `expandPositionUsers` turns
+    // this red.
+    switchCfo(false);
     const graph = new PositionGraphService({ engine: engine as any, organizationId: 'org1' });
     expect(await graph.expandPositionUsers('cfo')).toEqual(['u_cfo']);
   });
 
   // ── the cache: one read per position per pass, and never one pass longer ──
 
-  it('reads the catalogue once per position per evaluator pass, and re-reads on the next', async () => {
+  it('reads the ledger once per position per evaluator pass, and re-reads on the next', async () => {
     // The ruling accepts the extra read but asks for it cached per evaluator
     // pass. Both halves are the assertion: within one pass two rules naming
     // the same position pay one read; ACROSS passes the verdict is re-read, or
     // a deactivation would take effect late — its own defect.
     const find = engine.find.bind(engine);
-    let catalogueReads = 0;
+    let ledgerReads = 0;
     (engine as any).find = async (object: string, opts?: any) => {
-      if (object === 'sys_position') catalogueReads += 1;
+      if (object === 'sys_metadata_activation') ledgerReads += 1;
       return find(object, opts);
     };
     await rules.defineRule(RULE, SYS);
     await rules.defineRule({ ...RULE, name: 'cfo_won_deals_2', label: 'CFO — won deals (2)' }, SYS);
 
     await rules.evaluateAllForRecord('opportunity', 'opp1', SYS);
-    expect(catalogueReads).toBe(1);
+    expect(ledgerReads).toBe(1);
     // One share row, not two: `grant` upserts per (record, recipient), so the
     // second rule re-grants the row the first one created.
     expect(shareRecipients()).toEqual(['u_cfo']);
 
-    cfoRow().active = false;
+    switchCfo(false);
     await rules.evaluateAllForRecord('opportunity', 'opp1', SYS);
-    expect(catalogueReads).toBe(2);
+    expect(ledgerReads).toBe(2);
     expect(shareRecipients()).toEqual([]);
   });
 });

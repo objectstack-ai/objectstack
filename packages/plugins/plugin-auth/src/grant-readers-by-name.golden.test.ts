@@ -36,6 +36,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { resetPlatformAdminEmailMemo } from '@objectstack/core';
 import { SecurityPlugin, bootstrapPlatformAdmin, reconcileOrgAdminGrant } from '@objectstack/plugin-security';
 import { SysUser, SysAccount, SysMember, SysOrganization } from '@objectstack/platform-objects/identity';
+import { SysMetadataActivation } from '@objectstack/platform-objects/system';
 
 import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-guard.js';
 import { ensureDefaultOrganization } from './ensure-default-organization.js';
@@ -91,8 +92,15 @@ async function standingByReader(posture: Posture): Promise<Record<string, unknow
     manifest: { register: (m: any) => { manifest = m; } },
     objectql: engine,
     metadata: {
-      get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
-      list: async () => [...((manifest.permissions as unknown[]) ?? [])],
+      // [ADR-0131 D3/D4] The bootstrap sets the manifest ships are the
+      // catalog's `permission` definitions — what the security catalog the
+      // plugin binds at `start()` resolves a grant's set name to.
+      get: async (type: string, name: string) =>
+        type === 'permission'
+          ? ((manifest.permissions as any[]) ?? []).find((p) => p?.name === name) ?? null
+          : engine.getSchema(name) ?? null,
+      list: async (type?: string) =>
+        type === undefined || type === 'permission' ? [...((manifest.permissions as unknown[]) ?? [])] : [],
     },
     ...(walled
       ? { 'org-scoping': { name: 'com.objectstack.org-scoping' }, tenancy: { posture } }
@@ -118,7 +126,8 @@ async function standingByReader(posture: Posture): Promise<Record<string, unknow
     version: '1.0.0',
     type: 'plugin',
     scope: 'system',
-    objects: [SysUser, SysAccount, SysMember, SysOrganization, ...securityObjects],
+    // [ADR-0131 D3] The activation ledger a permission set is switched off in.
+    objects: [SysUser, SysAccount, SysMember, SysOrganization, SysMetadataActivation, ...securityObjects],
   } as any);
   await engine.syncSchemas();
   await plugin.start(ctx);
@@ -200,11 +209,13 @@ async function standingByReader(posture: Posture): Promise<Record<string, unknow
   guard.revokeSoleAdministratorGrant = adminGrant
     ? await verdict(() => engine.delete('sys_user_permission_set', { where: { id: adminGrant.id }, ...sys }))
     : 'no-grant-row';
-  const [adminSet] = (await engine.find('sys_permission_set', {
-    where: { name: 'admin_full_access', organization_id: null }, context: SYS,
-  })) as any[];
-  guard.deactivateAdministratorSet = await verdict(() =>
-    engine.update('sys_permission_set', { id: adminSet.id, active: false }, sys));
+  // [ADR-0131 D3, ADR-0126 §4] Deactivation is the activation ledger's row,
+  // not the set row's `active` (which the resolver no longer reads).
+  guard.deactivateAdministratorSet = await verdict(() => engine.insert(
+    'sys_metadata_activation',
+    { id: 'act_admin', metadata_type: 'permission', name: 'admin_full_access', package_id: 'com.objectstack.plugin-security', active: false },
+    sys,
+  ));
   guard.banSoleAdministrator = await verdict(() => engine.update('sys_user', { id: 'usr_admin', banned: true }, sys));
 
   return {
