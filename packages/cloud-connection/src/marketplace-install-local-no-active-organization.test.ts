@@ -61,8 +61,9 @@ vi.mock('@objectstack/spec/data', async (importOriginal) => ({
 }));
 
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
-import { INSTALLER_USER_ID, withInstallerGrants } from './install-local-principal.fixtures.js';
+import { INSTALLER_USER_ID, withInstallerGrants, INSTALLER_SET } from './install-local-principal.fixtures.js';
 import { LocalManifestSource } from './local-manifest-source.js';
+import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 type Handler = (c: any) => Promise<any>;
 
@@ -116,7 +117,7 @@ async function boot(opts: { posture: 'single' | 'isolated'; activeOrg?: string }
         syncSchemas: async () => undefined,
         find: async (object: string, query?: any) => { reads.push({ object, query }); return []; },
     });
-    const objectql = {
+    const objectql = bindTestSecurityCatalog({
         ...granted,
         find: async (object: string, query?: any) => {
             if (object === 'sys_member' || object === 'sys_organization_member') {
@@ -125,7 +126,7 @@ async function boot(opts: { posture: 'single' | 'isolated'; activeOrg?: string }
             }
             return granted.find(object, query);
         },
-    };
+    }, { permissions: [INSTALLER_SET] });
     const register = vi.fn();
     const services: Record<string, unknown> = {
         manifest: { register },

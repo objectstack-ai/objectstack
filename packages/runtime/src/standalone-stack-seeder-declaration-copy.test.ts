@@ -337,14 +337,15 @@ describe('#14491 Q2 — the runtime type of a sharing rule `condition` at the se
 });
 
 describe('#14491 Q3 — whether a `capability` arrives without its `scope` default', () => {
-  it('YES: the registry copy carries no `scope` (and no `_packageVersion`); the door copy carries `scope: platform`', () => {
+  it('YES: the registry copy carries no `scope`; the door copy carries `scope: platform`', () => {
     const reg = byName(registryCopy.capability, 'probe.export');
     const door = byName(doorCopy.capability, 'probe.export');
     expect(reg).not.toHaveProperty('scope');
-    expect(reg).not.toHaveProperty('_packageVersion');
+    // The registry stamps the package's version as the door does (#22689), so
+    // the two copies no longer differ by `_packageVersion`.
     expect(reg).toMatchObject({
       name: 'probe.export', label: 'Export probe data',
-      _packageId: 'com.test.issue-14491', _provenance: 'package',
+      _packageId: 'com.test.issue-14491', _packageVersion: '3.0.0', _provenance: 'package',
     });
     expect(door).toMatchObject({
       name: 'probe.export', scope: 'platform',

@@ -118,7 +118,7 @@ interface BootstrapLogger {
  * injected a sink with no `error`.
  *
  * The spelling is `logSeedDurabilityFailure` in `plugin-security`'s
- * `per-organization-catalog.ts`, re-derived here rather than imported: that
+ * `write-refusals.ts`, re-derived here rather than imported: that
  * helper is deliberately absent from `plugin-security`'s `index.ts` (an
  * intra-package helper, not public API), and `plugin-auth` does not depend on
  * `plugin-security` at runtime. Its two prohibitions are the measured part and

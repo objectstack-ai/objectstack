@@ -1,7 +1,30 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { validatePresetComparands, FILTER_PRESET_COMPARAND } from './validate-preset-comparands.js';
+import {
+  DATE_RANGE_PRESETS,
+  DATE_RANGE_PRESET_MACRO_WINDOWS,
+  bareDateRangePresetComparandMessage,
+} from '@objectstack/spec/data';
+import {
+  validatePresetComparands as validatePresetComparandsUnrecorded,
+  presetComparandVerdict,
+  FILTER_PRESET_COMPARAND,
+} from './validate-preset-comparands.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding is one verdict sentence; the reasoning it used to carry
+// is the id's `os explain` entry. Every call below records what it fired, and
+// the last cases in this file hold each recorded verdict to one line of at most
+// 200 characters — so the pin covers every firing variant this suite exercises,
+// not a chosen few. Run the whole file: those cases read what the cases above
+// fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validatePresetComparands: typeof validatePresetComparandsUnrecorded = (...args) => {
+  const findings = validatePresetComparandsUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 describe('validatePresetComparands (#8793 — the ruled C half of #8690)', () => {
   it('returns nothing for an empty / absent stack', () => {
@@ -246,8 +269,8 @@ describe('validatePresetComparands — arm 2, the FIELD-TYPED equality / members
       expect(f.hint).toContain('{date-macro}');
     }
     // The implicit-equality position is reported under the operator it lowers to.
-    expect(findings[0].message).toContain('As a bare "$eq" comparand');
-    expect(findings[2].message).toContain('As a bare "$in" comparand');
+    expect(findings[0].message).toContain('as a bare "$eq" comparand');
+    expect(findings[2].message).toContain('as a bare "$in" comparand');
   });
 
   it('judges $ne / $nin, every member of a list, and a declared datetime field the same way', () => {
@@ -456,17 +479,11 @@ describe('validatePresetComparands — arm 2, the FIELD-TYPED equality / members
     expect(f.where).toBe('dashboard "sales" · widget "w"');
     expect(f.path).toBe('dashboards[0].widgets[0].filter.created_at');
     // Verbatim. The author acts on this text; a re-wording is a decision, not a
-    // refactor, and it should turn this red.
+    // refactor, and it should turn this red. [#22161] One verdict sentence: the
+    // rest of the shared refusal is the id's `os explain` entry.
     expect(f.message).toBe(
-      '"last_30_days" is a dashboard date-range PRESET name, not a filter value. '
-      + 'It is only understood by the dashboard date-filter positions '
-      + "(dateRange.defaultRange, a date global filter's defaultValue), where the "
-      + 'console lowers it to {date-macro} bounds before querying. As a bare "$eq" '
-      + 'comparand nothing resolves it: a declared datetime/date field refuses the '
-      + 'query at the engine (INVALID_FILTER / 400), and any other column compares '
-      + "the literal string. Write the date-macro window instead — e.g. { $gte: "
-      + "'{30_days_ago}' } — or an ISO date such as \"2026-01-15\". Refused at "
-      + 'authoring time so the error surfaces where the filter is written.',
+      '"last_30_days" is a dashboard date-range PRESET name, not a filter value as a bare "$eq" '
+      + "comparand; its window is { $gte: '{30_days_ago}' }",
     );
     expect(f.hint).toBe(
       'Presets belong to the dashboard date-filter bar (dateRange.defaultRange, a '
@@ -688,5 +705,61 @@ describe('validatePresetComparands — page filterBy and lookup-field lookupFilt
       ],
       pages: [{ name: 'deals', type: 'list', interfaceConfig: { source: 'crm_deal', filterBy: legal } }],
     })).toEqual([]);
+  });
+});
+
+describe('[#22161] one-line verdicts — filter-preset-comparand', () => {
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    // The coverage control first: the id fired, so the shape assertion below
+    // cannot pass over an empty record.
+    expect([...new Set(fired.map((f) => f.rule))]).toEqual([FILTER_PRESET_COMPARAND]);
+    for (const f of fired) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('opens with the shared refusal\'s own first sentence, and names the window that refusal names', () => {
+    // One wording across the two doors (the schema door prints the whole
+    // refusal): the verdict's head is a PREFIX of it, cut and never rewritten,
+    // and its window is the very text the refusal's prescription quotes.
+    for (const preset of DATE_RANGE_PRESETS) {
+      const refusal = bareDateRangePresetComparandMessage(preset, '$gte');
+      const verdict = presetComparandVerdict(preset, '$gte');
+      const head = verdict.slice(0, verdict.indexOf(' as a bare'));
+      expect(refusal.startsWith(`${head}. `), preset).toBe(true);
+      const window = verdict.slice(verdict.indexOf('its window is ') + 'its window is '.length);
+      expect(refusal, preset).toContain(`e.g. ${window} — or an ISO date`);
+      const [start] = DATE_RANGE_PRESET_MACRO_WINDOWS[preset];
+      expect(window, preset).toContain(start);
+    }
+  });
+
+  it('stays within the bound for every preset under the longest operator spelling it reports', () => {
+    // `greater_than_or_equal` is the longest view-rule spelling `normalizeFilterOperator`
+    // folds onto an ordering operator; `$between` carries the longest window.
+    for (const preset of DATE_RANGE_PRESETS) {
+      for (const op of ['greater_than_or_equal', 'less_than_or_equal', '$between', 'not_equals']) {
+        const verdict = presetComparandVerdict(preset, op);
+        expect(verdict.length, verdict).toBeLessThanOrEqual(200);
+      }
+    }
+  });
+
+  it('`os explain` carries what the verdict no longer says', () => {
+    const entry = explainRule(FILTER_PRESET_COMPARAND);
+    expect(entry, 'no `os explain filter-preset-comparand` entry').toBeDefined();
+    const text = entry!.paragraphs.join('\n');
+    for (const fact of [
+      'dateRange.defaultRange',
+      '`{date-macro}` bounds',
+      '`INVALID_FILTER`, 400',
+      'compares the literal string',
+      'picklist',
+      'lowers to, `$eq`',
+      'ISO date',
+    ]) {
+      expect(text, `explanation names ${fact}`).toContain(fact);
+    }
   });
 });

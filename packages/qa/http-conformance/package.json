@@ -18,6 +18,7 @@
     "@objectstack/driver-sqlite-wasm": "workspace:*",
     "@objectstack/hono": "workspace:*",
     "@objectstack/objectql": "workspace:*",
+    "@objectstack/plugin-approvals": "workspace:*",
     "@objectstack/plugin-hono-server": "workspace:*",
     "@objectstack/runtime": "workspace:*",
     "@objectstack/spec": "workspace:*",

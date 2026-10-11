@@ -3787,9 +3787,16 @@ describe('explainAccessForCaller (ADR-0090 D6/D12)', () => {
         return row[k] === v;
       });
     const baseSchema: any = { name: 'task', fields: { id: { name: 'id' }, owner_id: { name: 'owner_id' }, name: { name: 'name' } } };
+    // [ADR-0131 D3/D4] The engine registry the security catalog reads the sets from.
+    const catalogSets = () => [memberDefault, subAdmin, hrAdmin];
     const ql = {
       registerMiddleware: vi.fn(),
       getSchema: () => baseSchema,
+      registry: {
+        getItem: (type: string, name: string) => (type === 'permission' ? catalogSets().find((d: any) => d.name === name) : undefined),
+        listItems: (type: string) => (type === 'permission' ? catalogSets() : []),
+        isPackageDisabled: () => false,
+      },
       async find(object: string, opts: any) {
         const rows = (tables[object] ?? []).filter((r) => matches(r, opts?.where));
         return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
@@ -3803,7 +3810,11 @@ describe('explainAccessForCaller (ADR-0090 D6/D12)', () => {
     const services: Record<string, any> = {
       manifest: { register: vi.fn() },
       objectql: ql,
-      metadata: { get: async () => baseSchema, list: async () => [memberDefault, subAdmin, hrAdmin] },
+      metadata: {
+        get: async (type: string, name: string) =>
+          type === 'permission' ? [memberDefault, subAdmin, hrAdmin].find((s: any) => s.name === name) ?? null : baseSchema,
+        list: async () => [memberDefault, subAdmin, hrAdmin],
+      },
     };
     const ctx: any = {
       logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -4411,7 +4422,21 @@ describe('audience-anchor bindings read the stack\'s declared capabilities (#185
       sys_position_permission_set: [],
     };
     const inserts: Array<{ object: string; data: any }> = [];
+    // [ADR-0131 D3/D4] The registry the built-in positions are declared to —
+    // where `everyone` names the baseline the boot binding above judges.
+    const items = new Map<string, any>();
+    const registry = {
+      // Stamped with `_packageId` as the engine registry stamps it: the declared-capability
+      // reader tells the platform's own capability items apart by it.
+      registerItem: (type: string, item: any, _key?: string, packageId?: string) => {
+        items.set(`${type}:${item.name}`, packageId ? { ...item, _packageId: packageId } : item);
+      },
+      getItem: (type: string, name: string) => items.get(`${type}:${name}`),
+      listItems: (type: string) => [...items.entries()].filter(([k]) => k.startsWith(`${type}:`)).map(([, v]) => v),
+      isPackageDisabled: () => false,
+    };
     const ql: any = {
+      registry,
       registerMiddleware: () => {},
       find: async (object: string, opts?: any) => {
         const where = opts?.where ?? {};
@@ -4483,7 +4508,11 @@ describe('audience-anchor bindings read the stack\'s declared capabilities (#185
       String(c[0]).includes('refusing to bind fallback set to everyone'),
     );
     const bindings = inserts.filter((i) => i.object === 'sys_position_permission_set');
-    return { plugin, ql, ctx, bindings, refusals };
+    const declaredRefusals = ctx.logger.warn.mock.calls.filter((c: any[]) =>
+      String(c[0]).includes('the everyone anchor does not name a baseline set'),
+    );
+    const everyoneSets = registry.getItem('position', 'everyone')?.permissionSets;
+    return { plugin, ql, ctx, bindings, refusals, declaredRefusals, everyoneSets };
   }
 
   it('binds the isDefault set when the stack declares its systemPermissions token', async () => {
@@ -4493,6 +4522,18 @@ describe('audience-anchor bindings read the stack\'s declared capabilities (#185
     expect(refusals).toHaveLength(0);
     expect(bindings).toHaveLength(1);
     expect(bindings[0].data).toMatchObject({ position_id: 'pos_everyone', permission_set_id: 'ps_app' });
+  });
+
+  // [ADR-0131 D3/D4] The `everyone` definition names the same baseline the
+  // binding above writes, judged by the same check against the same context.
+  it('the everyone definition names the isDefault set when the stack declares its token, and not when it does not', async () => {
+    const declared = await boot('crm.export_pipeline', [{ name: 'crm.export_pipeline', label: 'Export Pipeline' }]);
+    expect(declared.declaredRefusals).toHaveLength(0);
+    expect(declared.everyoneSets).toEqual(['app_member_default', 'member_default']);
+    const undeclared = await boot('crm.settle_ledger', [{ name: 'crm.export_pipeline', label: 'Export Pipeline' }]);
+    expect(undeclared.declaredRefusals).toHaveLength(1);
+    expect(undeclared.declaredRefusals[0][1]).toMatchObject({ set: 'app_member_default', offending: 'system permissions' });
+    expect(undeclared.everyoneSets).toEqual(['member_default']);
   });
 
   it('still refuses an UNDECLARED token — the control for the case above', async () => {

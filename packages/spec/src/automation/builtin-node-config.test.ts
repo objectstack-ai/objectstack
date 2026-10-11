@@ -402,7 +402,8 @@ describe('MapConfigSchema — an unknown key is refused, not stripped', () => {
   it('accepts every declared key', () => {
     expect(MapConfigSchema.parse({
       collection: '{tasks}', flowName: 'one_task_signoff', iteratorVariable: 'item',
-      indexVariable: 'i', itemObject: 'showcase_task', input: { id: '{item.id}' }, outputVariable: 'results',
+      // [#19939] `input.*` is a value slot: the item's id is a CEL envelope.
+      indexVariable: 'i', itemObject: 'showcase_task', input: { id: { dialect: 'cel', source: 'item.id' } }, outputVariable: 'results',
     }).flowName).toBe('one_task_signoff');
   });
 
@@ -578,8 +579,9 @@ describe('assignment value contract — a CEL envelope beside literals; the `{to
     // is carried there by `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS` — NOT by
     // `SCHEMALESS_NODE_CONFIG_SCHEMAS`, whose meaning ("publishes no
     // descriptor") other readers depend on.
-    // #19938 — the CRUD write map joined through the same channel.
-    expect(Object.keys(LEDGER_DECLARED_NODE_CONFIG_SCHEMAS)).toEqual(['assignment', 'create_record', 'update_record']);
+    // #19938 — the CRUD write map joined through the same channel; #19939 —
+    // the `map` node's per-item `input` map.
+    expect(Object.keys(LEDGER_DECLARED_NODE_CONFIG_SCHEMAS)).toEqual(['assignment', 'create_record', 'update_record', 'map']);
     expect(Object.keys(SCHEMALESS_NODE_CONFIG_SCHEMAS).sort()).toEqual(['decision', 'script', 'subflow']);
     const projected = getSchemalessNodeConfigJsonSchemas().assignment as
       { properties?: Record<string, { additionalProperties?: Record<string, unknown> }> };

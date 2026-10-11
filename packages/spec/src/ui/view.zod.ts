@@ -4072,11 +4072,13 @@ function foldFormGroupsIntoSections<T extends WithFormSectionAlias>(
  *
  * ## What was ruled, and why the schema is where it lands
  *
- * objectui's `FormPage` performs a **verbatim redirect** on this value, and
- * objectui#4190 dead-ended asking what the value may be: nothing in this
- * package said whether it was a path, an address, or a template, so the
- * consumer could not be hardened without inventing the contract. The ruling
- * picked the narrowest shape with measured pull:
+ * History, as it stood when #7496 was ruled: objectui's `FormPage` handed this
+ * value, as authored, to a browser-level navigation, and objectui#4190
+ * dead-ended asking what the value may be: nothing in this package said
+ * whether it was a path, an address, or a template, so the consumer could not
+ * be hardened without inventing the contract. This paragraph records why the
+ * ruling was needed, not how any renderer behaves today. The ruling picked the
+ * narrowest shape with measured pull:
  *
  *  1. **relative paths only** — an absolute URL is refused. This is the
  *     open-redirect face: the post-submit target is authored metadata, and
@@ -4086,8 +4088,11 @@ function foldFormGroupsIntoSections<T extends WithFormSectionAlias>(
  *  2. **interpolation only from declared record fields**, every interpolated
  *     value **URL-escaped** when the redirect is built.
  *  3. a **verbatim redirect on the resolved relative path IS the intended
- *     consumption** — so the value that reaches `window.location.assign` is
- *     this string with its tokens substituted, and nothing else.
+ *     consumption** — the destination is this string with its tokens
+ *     substituted, and nothing else.
+ *
+ * The ruling fixes the destination, not how a renderer travels to it: the
+ * navigation mechanism is each consumer's own, so nothing here names one.
  *
  * Widening (e.g. an allowlist of absolute origins) waits for measured demand.
  *

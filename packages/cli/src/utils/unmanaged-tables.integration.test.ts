@@ -130,12 +130,15 @@ describe('os migrate plan — unmanaged tables, against a real database (#13204)
     deferSchemaDdl: true,
     readOnlyProbe: true,
     composeHostStack: true,
+    // [#22506] `plan` composes what `os serve` mounts around the stack too —
+    // and [#22580] the sweep runs only over a set that mirrors the served boot.
+    composeServedPlatform: true,
   });
 
   async function sweep(): Promise<UnmanagedTablesReport> {
     const { normalizeRows } = await import('@objectstack/metadata-protocol');
     return collectUnmanagedTables({
-      driver: stack!.driver,
+      drivers: stack!.drivers,
       declaredObjects: stack!.allObjects(),
       composition: stack!.composition,
       normalize: normalizeRows,
@@ -198,6 +201,7 @@ describe('os migrate plan — unmanaged tables, against a real database (#13204)
     // assertion below pass for the wrong reason.
     expect(stack!.driver).not.toBeNull();
     expect(stack!.composition.hostConfigLoaded).toBe(true);
+    expect(stack!.composition.servedBoot).toEqual({ mirrored: true });
     expect(stack!.managedTableCount).toBeGreaterThan(0);
     const declared = (stack!.allObjects() as Array<{ name?: string }>).map((o) => o?.name);
     expect(declared).toContain('sys_permission_set');

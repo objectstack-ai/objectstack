@@ -117,6 +117,8 @@ import { flowBoundVariableNameSchema } from './flow-bound-variable-name';
 import {
   AssignmentConfigSchema,
   CreateRecordConfigSchema,
+  FlowValueSlotSchema,
+  MapConfigSchema,
   UpdateRecordConfigSchema,
 } from './builtin-node-config.zod';
 
@@ -301,9 +303,17 @@ export const ScriptConfigSchema = lazySchema(() => strictObject({
    */
   function: z.string().min(1)
     .describe('Registered function to call (defineStack({ functions })). Contractually pure — it returns a value a later declarative node persists'),
-  /** Inputs passed to the function; values interpolate `{token}` templates against the live flow variables. */
-  inputs: z.record(z.string(), z.unknown()).optional()
-    .describe('Inputs passed to the function (values interpolate {token} templates)'),
+  /**
+   * Inputs passed to the function as its `input` — a `value` slot per key
+   * (#19939): a CEL value envelope evaluated against the live flow variables
+   * (so a function can consume a prior node's output with its type kept), or a
+   * literal; a `{token}` template is refused ({@link FlowValueSlotSchema}).
+   */
+  inputs: z.record(z.string(), FlowValueSlotSchema).optional()
+    .describe(
+      'Inputs passed to the function: each value a CEL value envelope `{ dialect: \'cel\', source }` evaluated '
+      + 'against the live flow variables, or a literal written as it is — a `{…}` template token is refused',
+    ),
   /**
    * Flow variable the function's RETURN value is bound to (pure-function
    * pattern — data I/O stays on the graph) — never a `$` name: those are the
@@ -384,9 +394,19 @@ export const SubflowConfigSchema = lazySchema(() => strictObject({
 }, {
   /** The flow to invoke (execute-time required). */
   flowName: z.string().min(1).describe('Flow invoked as this step (it may pause — approval / screen / wait)'),
-  /** Values passed to the child's input variables; `{token}` templates resolve against the parent's variables. */
-  input: z.record(z.string(), z.unknown()).optional()
-    .describe("Values passed to the subflow's input variables (interpolate {token} templates)"),
+  /**
+   * Values passed to the child's input variables — a `value` slot per key
+   * (#19939): a CEL value envelope evaluated in the parent's scope, or a
+   * literal; a `{token}` template is refused ({@link FlowValueSlotSchema}). A
+   * value handed over is SUPPLIED, `null` included, so it wins over the child
+   * variable's `defaultValue`; a key left out lets the default apply.
+   */
+  input: z.record(z.string(), FlowValueSlotSchema).optional()
+    .describe(
+      "Values passed to the subflow's input variables: each value a CEL value envelope `{ dialect: 'cel', source }` "
+      + "evaluated in the parent's scope, or a literal written as it is — a `{…}` template token is refused. A "
+      + "value handed over, null included, wins over the child variable's defaultValue",
+    ),
   /** Parent flow variable the child's output is bound to — never a `$` name: those are the engine's (#22502). */
   outputVariable: flowBoundVariableNameSchema('outputVariable').optional()
     .describe("Parent flow variable the subflow's output is bound to — a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}`"),
@@ -629,26 +649,31 @@ export type SchemalessNodeType = keyof typeof SCHEMALESS_NODE_CONFIG_SCHEMAS;
 /**
  * Node types that DO publish a descriptor `configSchema` and still declare an
  * expression slot through a spec Zod, because the descriptor cannot carry the
- * marker (#14149; the CRUD pair since #19938).
+ * marker (#14149; the CRUD pair since #19938; `map` since #19939).
  *
  * Each of these descriptors declares its map as `additionalProperties: true`
  * — `assignment`'s `assignments`, `create_record` / `update_record`'s
- * `fields` — and that openness IS the descriptor's contract, pinned by the
- * form↔Zod ledger, so there is no descriptor property to mark. The value
- * contract lives on the spec Zod's map value (`.meta({ xExpression: 'value' })`
- * — `AssignmentValueSchema` and `FlowValueSlotSchema`,
- * `builtin-node-config.zod.ts`), and the expression ledger's reconciliation
- * ratchet reads it from the JSON projection below, walking the map's
- * `additionalProperties` as the `*` segment the ledger paths `assignments.*`
- * and `fields.*` spell. Kept apart from {@link SCHEMALESS_NODE_CONFIG_SCHEMAS}
- * on purpose: that map means "publishes no descriptor", its other readers
- * (`metadata-protocol`'s reference-site attribution) walk it for that reason,
- * and none of these three is a member of that class.
+ * `fields`, `map`'s `input` — and that openness IS the descriptor's contract,
+ * pinned by the form↔Zod ledger, so there is no descriptor property to mark.
+ * The value contract lives on the spec Zod's map value
+ * (`.meta({ xExpression: 'value' })` — `AssignmentValueSchema` and
+ * `FlowValueSlotSchema`, `builtin-node-config.zod.ts`), and the expression
+ * ledger's reconciliation ratchet reads it from the JSON projection below,
+ * walking the map's `additionalProperties` as the `*` segment the ledger paths
+ * `assignments.*`, `fields.*` and `input.*` spell. `map`'s other expression
+ * slot, `collection`, keeps arriving through its descriptor (`xExpression:
+ * 'template'`): `MapConfigSchema` carries no marker there, so the two channels
+ * never declare one slot twice. Kept apart from
+ * {@link SCHEMALESS_NODE_CONFIG_SCHEMAS} on purpose: that map means "publishes
+ * no descriptor", its other readers (`metadata-protocol`'s reference-site
+ * attribution) walk it for that reason, and none of these four is a member of
+ * that class.
  */
 export const LEDGER_DECLARED_NODE_CONFIG_SCHEMAS = {
   assignment: AssignmentConfigSchema,
   create_record: CreateRecordConfigSchema,
   update_record: UpdateRecordConfigSchema,
+  map: MapConfigSchema,
 } as const satisfies Record<string, z.ZodType>;
 
 /** Node types whose expression slots reach the ledger through {@link LEDGER_DECLARED_NODE_CONFIG_SCHEMAS}. */

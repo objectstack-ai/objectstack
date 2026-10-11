@@ -54,6 +54,7 @@ import { PermissionSetSchema } from '@objectstack/spec/security';
 import { hasPlatformAdminStanding } from '@objectstack/core';
 import { PermissionEvaluator } from './permission-evaluator';
 import { explainAccess, buildContextForUser, type ExplainEngineDeps } from './explain-engine';
+import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
 const ADMIN = PermissionSetSchema.parse({
   name: 'admin_full_access',
@@ -112,13 +113,13 @@ function makeAuthzQl(tables: Record<string, Array<Record<string, unknown>>>) {
       if (v === null) return (row[k] ?? null) === null;
       return row[k] === v;
     });
-  return {
+  return bindCatalogFromTables({
     getSchema: () => PRIVATE_SCHEMA,
     async find(object: string, opts: any) {
       const rows = (tables[object] ?? []).filter((r) => matches(r, opts?.where));
       return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
     },
-  };
+  }, tables);
 }
 
 function authzTables(shape: 'name-only' | 'genuine') {

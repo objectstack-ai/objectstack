@@ -21,11 +21,14 @@
 //     chain, the validation pass, the SecurityPlugin middleware (object
 //     grants, RLS, FLS) all live INSIDE those calls, so they run here exactly
 //     as they run for a REST write. `handle.test.ts` pins that parity on the
-//     same row AND the same refusal. [#22301] The two update doors also take
-//     the system principal by name (`{ system: true }` → `{ isSystem: true }`,
-//     the context a system job's write carries), and `hooks.updateWhere` is
-//     the engine's predicate path (`multi: true`), which no REST door reaches:
-//     `handle.update-doors.test.ts` pins both.
+//     same row AND the same refusal. [#22301] Every `hooks` write door also
+//     takes the system principal by name (`{ system: true }` → `{ isSystem:
+//     true }`, the context a system job's write carries), and
+//     `hooks.updateWhere` is the engine's predicate path (`multi: true`),
+//     which no REST door reaches: `handle.update-doors.test.ts` pins the
+//     update half, and `handle.system-insert-delete.test.ts` pins a system
+//     insert and a system delete, the user-less record trigger each fires,
+//     and a delete-triggered flow reading a row the engine no longer holds.
 //   flows.run / flows.resume · actions.run → the runtime's `HttpDispatcher`,
 //     driven in-process (no Hono, no socket, no JSON round-trip). The REST
 //     `/automation` and `/actions` routes are the only doors that carry the
@@ -125,9 +128,10 @@ export interface AsUser {
  * the other system door, and it is not this one: it also sets `skipTriggers`
  * and `seedReplay`, because a fixture is end-state data, not an event.)
  *
- * Accepted by the UPDATE doors only: `hooks.run(object, 'update', …)` and
- * `hooks.updateWhere`. Named, never defaulted: a write that names no caller
- * is refused, so a forgotten `as` can never become a system write.
+ * Accepted by the `hooks` write doors: `hooks.run` (`insert`, `update` and
+ * `delete`) and `hooks.updateWhere`. Named, never defaulted: a write that
+ * names no caller is refused, so a forgotten `as` can never become a system
+ * write.
  */
 export interface AsSystem {
   system: true;
@@ -178,7 +182,9 @@ export interface VerifyHandle {
      * engine's own error: assert on its `code` (and `statusCode`), never on
      * the message alone.
      *
-     * `update` and `delete` address the row by `input.id`.
+     * `update` and `delete` address the row by `input.id`. The caller is a
+     * person (`{ as }`, this overload) or the system (`{ system: true }`,
+     * the next one), never both.
      *
      * An ANONYMOUS write, a public-form submission (the write a web-to-lead
      * or web-to-case branch runs on), is not this door: it is the form's own
@@ -193,16 +199,25 @@ export interface VerifyHandle {
       opts: AsUser,
     ): Promise<EngineRow>;
     /**
-     * [#22301] The same by-id `update` as the SYSTEM principal ({@link AsSystem}):
-     * `update(object, { ...input, id }, { where: { id }, context: { isSystem:
-     * true } })`. No permission gate; the hooks, the declared validations and
-     * the record-change trigger run as they do for any system write.
+     * [#22301] The same three writes as the SYSTEM principal ({@link AsSystem}):
+     * the engine calls above with `context: { isSystem: true }`, the write an
+     * integration or a system job makes. No permission gate. The bound hooks
+     * see `session.isSystem` and no `userId`, the declared validations run,
+     * and the record-change trigger fires the object's flows with no trigger
+     * user, as it does for any system write.
      *
-     * Only `update` takes `{ system: true }`. A system insert of fixture rows
-     * is `seed`; a system insert or delete that fires record triggers has no
-     * door here, and asking for one is refused (`INVALID_REQUEST` / `400`).
+     * A system `delete` hands a `record-after-delete` flow the row's
+     * pre-image (as `record` and as `previous`), and by then the engine no
+     * longer holds the row: a `get_record` of it finds nothing (a
+     * `record-before-delete` flow on the same delete still finds it). That
+     * is the door for a delete-triggered flow over a record the engine no
+     * longer holds.
+     *
+     * `seed` is not this door: it also sets `skipTriggers` and `seedReplay`,
+     * so it fires no record-change flow. Insert through `seed` for end-state
+     * fixture data, and through this door for a write the app should react to.
      */
-    run(object: string, operation: 'update', input: EngineRow, opts: AsSystem): Promise<EngineRow>;
+    run(object: string, operation: 'insert' | 'update' | 'delete', input: EngineRow, opts: AsSystem): Promise<EngineRow>;
     /**
      * [#22301] A PREDICATE update: one payload written to every row `where`
      * selects. This is the engine's own predicate path, `update(object, data,
@@ -482,13 +497,9 @@ export async function createHandle(kernel: ObjectKernel, origin: string): Promis
         if (operation !== 'insert' && operation !== 'update' && operation !== 'delete') {
           throw new Error(`verify: hooks.run operation must be 'insert' | 'update' | 'delete', got '${String(operation)}'`);
         }
+        // The system principal is named on any of the three, and the call is
+        // the same engine call either way: only the context differs.
         const system = namesSystem(opts, 'hooks.run');
-        if (system && operation !== 'update') {
-          throw callShapeRefusal(
-            `verify: hooks.run takes { system: true } on 'update' only, got '${operation}'. ` +
-              'A system insert of fixture rows is seed(object, rows); a system insert or delete that fires record triggers has no handle door.',
-          );
-        }
         const id = operation === 'insert' ? undefined : requireId(input, operation);
         const context = system ? { ...SYSTEM_CONTEXT } : await contextFor((opts as AsUser).as);
         const ql = await engine();

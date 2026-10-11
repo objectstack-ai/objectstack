@@ -470,6 +470,11 @@ const DISPATCHER_DOMAINS = {
   // check's own thesis applied to a refusal that two domains emit.
   'activation-gate.ts': { handBuilt: 0 },
   'analytics.ts': { handBuilt: 0 },
+  // [#22576] The `/approvals/act` bridge: the approvals member's own HTML
+  // `Response` is handed back as `result` (the `/auth` shape), and every
+  // refusal it makes itself — the two 501s, the sanitised 500s — goes through
+  // `deps.error`.
+  'approvals.ts': { handBuilt: 0 },
   'automation.ts': { handBuilt: 0 },
   'data.ts': { handBuilt: 0 },
   'i18n.ts': { handBuilt: 0 },

@@ -252,7 +252,10 @@ async function boot(scenario: Scenario): Promise<Booted> {
   };
 
   const metadata = {
-    get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+    get: async (type: string, name: string) =>
+      type === 'position' || type === 'permission'
+        ? ((await metadata.list(type)) as Array<{ name?: string }>).find((d) => d.name === name) ?? null
+        : engine.getSchema(name) ?? null,
     list: async (type: string) => {
       if (type === 'position') return DECLARED_POSITIONS.map((p) => ({ ...p }));
       if (type === 'permission') return [...defaultPermissionSets, QA_ADMIN, APP_DEFAULT];
@@ -472,7 +475,7 @@ for (const name of Object.keys(SCENARIOS) as ScenarioName[]) {
     if (scenario.organizationAtBoot) {
       it('grants every principal what it was granted before the declarations', async () => {
         const { engine } = booted.get(name)!;
-        expect(await grantsByPrincipal(engine, scenario.posture)).toEqual(GRANT_GOLDEN[scenario.posture]);
+        expect(await grantsByPrincipal(engine, scenario.posture)).toEqual(grantGoldenFor(scenario));
       });
 
       it('still refuses a tenant a dangling position name, and deleting or relabelling a built-in row', async () => {
@@ -700,12 +703,20 @@ const DOOR_AUTHORED_ROWS: Record<'single' | 'walled', { census: string[]; ledger
 };
 
 /**
- * Recorded before the declarations (module doc). `field_default` on every
- * human principal is the `everyone` binding; `single` also binds the
- * platform's `member_default` (its organization-less catalog holds that set),
- * while the walled organization's catalog holds only its own copy of the app's
- * set. The organization administrator's set is the walled `organization_admin`
+ * Recorded before the declarations (module doc). `field_default` and
+ * `member_default` on every human principal are the `everyone` anchor's sets.
+ * The organization administrator's set is the walled `organization_admin`
  * against the wall-less `organization_admin_no_bypass` (ADR-0105 D4).
+ *
+ * ⚠️ One recorded move ([ADR-0131] D3/D4, C3 stage 1): `everyone`'s sets are
+ * the baseline its definition names — the same in every posture. Before, they
+ * were junction rows the boot wrote per organization, and the walled
+ * organization's catalog held only its own copy of the app's set, so walled
+ * `everyone` never bound the organization-less `member_default`. It now
+ * names it under a wall too. `member_default` carries no system or tab
+ * permission, and enforcement applied it to every human as the additive
+ * baseline already (ADR-0090 D5), so the walled envelope gains its name and
+ * nothing it grants.
  */
 const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {
   single: {
@@ -771,7 +782,7 @@ const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {
       accessible_org_ids: ['org_eq'],
       email: 'member@eq.example',
       org_user_ids: ['usr_member', 'usr_orgadmin'],
-      permissions: ['field_default', 'viewer_readonly'],
+      permissions: ['field_default', 'member_default', 'viewer_readonly'],
       positions: ['everyone', 'org_member'],
       posture: 'MEMBER',
       systemPermissions: [],
@@ -780,7 +791,7 @@ const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {
       accessible_org_ids: ['org_eq'],
       email: 'orgadmin@eq.example',
       org_user_ids: ['usr_member', 'usr_orgadmin'],
-      permissions: ['field_default', 'organization_admin'],
+      permissions: ['field_default', 'member_default', 'organization_admin'],
       positions: ['everyone', 'org_owner'],
       posture: 'TENANT_ADMIN',
       systemPermissions: ['manage_org_users', 'setup.access', 'setup.write'],
@@ -789,7 +800,7 @@ const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {
       accessible_org_ids: [],
       email: 'admin@eq.example',
       org_user_ids: ['usr_admin', 'usr_member', 'usr_orgadmin'],
-      permissions: ['admin_full_access', 'field_default'],
+      permissions: ['admin_full_access', 'field_default', 'member_default'],
       positions: ['everyone', 'platform_admin'],
       posture: 'PLATFORM_ADMIN',
       systemPermissions: [
@@ -805,3 +816,26 @@ const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {
     },
   },
 };
+
+/** The `everyone` anchor's sets in {@link GRANT_GOLDEN} — the deployment's baseline. */
+const BASELINE_SETS = ['field_default', 'member_default'];
+
+/**
+ * {@link GRANT_GOLDEN} for a scenario. Under {@link SHADOWING_DEFINITIONS} a
+ * stored package-less `everyone` definition answers the catalog read ahead of
+ * the built-in (the registry's bare-slot precedence, ADR-0005) and names no
+ * set, so the envelope carries no baseline name — enforcement still applies the
+ * baseline additively (ADR-0090 D5). A v18 boot refuses such a stored
+ * definition under a packaged name (`os migrate security-catalog-overlays`).
+ */
+function grantGoldenFor(scenario: Scenario): unknown {
+  const golden = GRANT_GOLDEN[scenario.posture] as Record<string, { permissions: string[] }>;
+  if (!scenario.shadowedBuiltins) return golden;
+  return Object.fromEntries(
+    Object.entries(golden).map(([who, grants]) => [
+      who,
+      who === 'agent' ? grants : { ...grants, permissions: grants.permissions.filter((p) => !BASELINE_SETS.includes(p)) },
+    ]),
+  );
+}
+

@@ -44,7 +44,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       flows: [{
         name: 'lead_flow',
         nodes: [
-          { id: 'start', type: 'start', config: { objectName: 'crm_lead' } },
+          { id: 'start', type: 'start', config: { objectName: 'crm_lead', triggerType: 'record-after-update' } },
           { id: 'check', type: 'decision', config: { condition: 'record.rating >= 4' } },
         ],
         edges: [{ id: 'e1', source: 'check', target: 'end', condition: 'record.rating < 4' }],
@@ -78,7 +78,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       flows: [{
         name: 'lead_flow',
         nodes: [
-          { id: 'start', type: 'start', config: { objectName: 'crm_lead' } },
+          { id: 'start', type: 'start', config: { objectName: 'crm_lead', triggerType: 'record-after-update' } },
           { id: 'check', type: 'decision', config: { condition: 'record.raitng >= 4' } },
         ],
         edges: [],
@@ -475,7 +475,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
           name: 'record_change',
           variables: [{ name: 'status', type: 'text' }],
           nodes: [
-            { id: 'start', type: 'start', config: { objectName: 'duly_assignment', condition: 'record.status == "dispatched"' } },
+            { id: 'start', type: 'start', config: { objectName: 'duly_assignment', triggerType: 'record-after-update', condition: 'record.status == "dispatched"' } },
           ],
           edges: [],
         }],
@@ -2757,7 +2757,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         objects,
         flows: [{
           name: 'sweep',
-          nodes: [{ id: 'start', type: 'start', config: { objectName: 'crm_lead' } }, container],
+          nodes: [{ id: 'start', type: 'start', config: { objectName: 'crm_lead', triggerType: 'record-after-update' } }, container],
           edges: [],
         }],
       });
@@ -3108,8 +3108,8 @@ describe('null-guard gate (#4763)', () => {
 
     // #4811 re-measured the reason this one is excluded. It is NOT the
     // flattened scope (this gate never resolves a bare identifier — only
-    // `record.<f>`/`previous.<f>`, and the engine binds both roots
-    // unconditionally). It is that `record-change-trigger.ts` seeds the flow's
+    // `record.<f>`/`previous.<f>`, and a record-triggered run binds both
+    // roots — #22677). It is that `record-change-trigger.ts` seeds the flow's
     // record as `{ ...(inputData ?? {}), ...after }` (spelled `inputDoc` until
     // #5671 dropped that alias read) with no `materializeDeclaredFields`,
     // so a declared column the write never mentioned is an ABSENT key — and on
@@ -3122,7 +3122,7 @@ describe('null-guard gate (#4763)', () => {
           flows: [{
             name: 'escalate',
             nodes: [
-              { id: 'start', type: 'start', config: { objectName: 'showcase_project' } },
+              { id: 'start', type: 'start', config: { objectName: 'showcase_project', triggerType: 'record-after-update' } },
               { id: 'd', type: 'decision', config: { condition: 'record.budget > 100000' } },
             ],
             edges: [{ id: 'e1', source: 'd', target: 'end', condition: 'record.spent > record.budget' }],
@@ -4028,7 +4028,7 @@ describe('validateStackExpressions — injected system columns (#5378)', () => {
       flows: [{
         name: 'contact_welcome',
         nodes: [
-          { id: 'start', type: 'start', config: { objectName: 'crm_contact', condition } },
+          { id: 'start', type: 'start', config: { objectName: 'crm_contact', triggerType: 'record-after-update', condition } },
         ],
         edges: [],
       }],
@@ -4453,7 +4453,7 @@ describe('structural condition shape (#15662)', () => {
         {
           id: 'start', type: 'start',
           config: {
-            objectName: 'crm_lead',
+            objectName: 'crm_lead', triggerType: 'record-after-update',
             ...('startCondition' in opts ? { condition: opts.startCondition } : {}),
           },
         },
@@ -4620,7 +4620,7 @@ describe('blank structural condition (#17495)', () => {
         {
           id: 'start', type: 'start',
           config: {
-            objectName: 'crm_lead',
+            objectName: 'crm_lead', triggerType: 'record-after-update',
             ...('startCondition' in opts ? { condition: opts.startCondition } : {}),
           },
         },
@@ -4751,7 +4751,7 @@ describe("validateStackExpressions — a non-record entry in an object's `fields
     flows: [{
       name: 'account_flow',
       nodes: [
-        { id: 'start', type: 'start', config: { objectName: 'crm_account' } },
+        { id: 'start', type: 'start', config: { objectName: 'crm_account', triggerType: 'record-after-update' } },
         { id: 'check', type: 'decision', config: { condition } },
       ],
       edges: [],

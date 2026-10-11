@@ -203,6 +203,14 @@ describe('os migrate plan/apply refuse an unloadable host config (#12953)', () =
       expect(() => JSON.parse(unloadablePlan.stdout)).not.toThrow();
       expect(() => JSON.parse(unloadableApply.stdout)).not.toThrow();
     });
+
+    it('[#22580] withholds the unmanaged-tables sweep, naming the config that did not load', () => {
+      // A set that cannot be composed is not the served boot's: the sweep's
+      // reason is the composition's own, and it names the config.
+      const payload = JSON.parse(unloadablePlan.stdout) as { unmanagedTables?: { status?: string; detail?: string } };
+      expect(payload.unmanagedTables?.status).toBe('unreadable');
+      expect(payload.unmanagedTables?.detail).toContain('objectstack.config.ts');
+    });
   });
 
   describe('direction 2 — there is NO host config: unchanged', () => {
@@ -221,6 +229,15 @@ describe('os migrate plan/apply refuse an unloadable host config (#12953)', () =
       expect(absentPlan.stderr).not.toMatch(/Remedy:/);
       expect(absentApply.stderr).not.toMatch(/Remedy:/);
     });
+
+    it('[#22580] withholds the unmanaged-tables sweep for the reason that holds: nothing to compose', () => {
+      // Neither a config nor a compiled artifact: the set is the data stack
+      // alone. The reason used to claim a compiled artifact this project
+      // never had.
+      const payload = JSON.parse(absentPlan.stdout) as { unmanagedTables?: { status?: string; detail?: string } };
+      expect(payload.unmanagedTables?.status).toBe('unreadable');
+      expect(payload.unmanagedTables?.detail).toContain('neither a host config nor a compiled artifact');
+    });
   });
 
   describe('direction 3 — the host config LOADS: unchanged', () => {
@@ -236,6 +253,11 @@ describe('os migrate plan/apply refuse an unloadable host config (#12953)', () =
       expect(payload.composition?.hostConfigLoaded).toBe(true);
       expect(loadablePlan.stderr).not.toMatch(/Remedy:/);
       expect(loadableApply.stderr).not.toMatch(/Remedy:/);
+    });
+
+    it('[#22580] runs the unmanaged-tables sweep: the set mirrors the served boot', () => {
+      const payload = JSON.parse(loadablePlan.stdout) as { unmanagedTables?: { status?: string } };
+      expect(payload.unmanagedTables?.status).toBe('read');
     });
   });
 });

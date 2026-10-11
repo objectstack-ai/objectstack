@@ -67,6 +67,7 @@ import {
   assertDefinitionExposed,
   assertNoInternalFieldNamed,
   assertObjectsExposed,
+  servesLabelTarget,
   type ObjectDeclarationProvider,
   type RegisteredDefinitionKind,
 } from './api-exposure-door.js';
@@ -106,6 +107,7 @@ import {
   resolveDimensionLabels,
   createOrderLabelResolver,
   withLabelFetchCache,
+  withServedLabelTargets,
   type DimensionLabelDeps,
 } from './dimension-labels.js';
 import { evaluateAnalyticsQueryOverRows } from './preview-evaluator.js';
@@ -1469,11 +1471,20 @@ export class AnalyticsService implements IAnalyticsService {
     this.configuredAllowedRelationships = config.getAllowedRelationships;
     this.relationshipResolver = config.relationshipResolver;
     this.sourceFieldMeta = config.sourceFieldMeta;
-    this.labelResolver = config.labelResolver;
     this.draftRowsResolver = config.draftRowsResolver;
     this.isRegisteredObject = config.isRegisteredObject;
     this.getObjectFieldNames = config.getObjectFieldNames;
     this.objectDeclarationProvider = config.getObjectDeclaration;
+    // [#22661] A label pass reads a SECOND object — the target a reference-class
+    // dimension points at — so the configured resolver is taken through the
+    // generic-exit gate's label face: a target the spec's exposure decision does
+    // not serve is never read, and the stored id renders. Wrapped once, here,
+    // so every pass that reads labels inherits it. No declaration probe wired:
+    // no gate, as on the query face (which reports that once).
+    const declarations = this.objectDeclarationProvider;
+    this.labelResolver = config.labelResolver && declarations
+      ? withServedLabelTargets(config.labelResolver, (target) => servesLabelTarget(target, declarations, this.logger))
+      : config.labelResolver;
     this.getObjectDatasource = config.getObjectDatasource;
     this.isExternalObject = config.isExternalObject;
     // [#8286] Resolved ONCE, at construction, from the host's explicit choice

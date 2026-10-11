@@ -121,7 +121,10 @@ async function grantsByPrincipal(posture: Posture): Promise<Record<string, unkno
     manifest: { register: vi.fn() },
     objectql: engine,
     metadata: {
-      get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+      get: async (type: string, name: string) =>
+        type === 'permission'
+          ? ([...defaultPermissionSets, QA_ADMIN] as Array<{ name?: string }>).find((s) => s?.name === name) ?? null
+          : engine.getSchema(name) ?? null,
       list: async () => [...defaultPermissionSets, QA_ADMIN],
     },
     ...(posture === 'isolated'

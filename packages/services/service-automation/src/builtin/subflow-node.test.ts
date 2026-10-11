@@ -127,7 +127,7 @@ describe('subflow node executor', () => {
   it('invokes the child flow, maps input, and captures its output', async () => {
     engine.registerFlow('parent_flow', parentFlow({
       flowName: 'child_flow',
-      input: { msg: '{greeting}' },
+      input: { msg: { dialect: 'cel', source: 'greeting' } },
       outputVariable: 'subResult',
     }));
 
@@ -395,7 +395,7 @@ describe('subflow node executor', () => {
   it('accepts the legacy `config.flow` spelling via the conversion layer (#4278)', async () => {
     engine.registerFlow('parent_flow', parentFlow({
       flow: 'child_flow',
-      input: { msg: '{greeting}' },
+      input: { msg: { dialect: 'cel', source: 'greeting' } },
       outputVariable: 'subResult',
     }));
 

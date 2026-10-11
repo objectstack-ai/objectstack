@@ -113,7 +113,7 @@ import {
   GRANT_SET_NAME_FIELD,
   PERMISSION_SET_CATALOG_OBJECT,
 } from './grant-permission-set-name.js';
-import { rowOrganizationId, seedCtx } from './per-organization-catalog.js';
+import { rowOrganizationId, seedCtx } from './organization-scope.js';
 
 /** Ledger row id of the one-time grant name backfill. */
 export const GRANT_SET_NAME_BACKFILL_MIGRATION_ID = 'adr-0131-grant-permission-set-name-backfill';

@@ -147,7 +147,8 @@ function viaParent(child: Flow, withOutput: boolean): Flow {
         label: 'Call the elevated child',
         config: {
           flowName: child.name,
-          input: { noteId: '{noteId}' },
+          // `input.*` is a value slot (#19939): the parent's own input, as a CEL envelope.
+          input: { noteId: { dialect: 'cel', source: 'noteId' } },
           ...(withOutput ? { outputVariable: 'found' } : {}),
         },
       },

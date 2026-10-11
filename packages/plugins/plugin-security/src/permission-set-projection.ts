@@ -91,7 +91,8 @@
  */
 
 import { PermissionSetSchema } from '@objectstack/spec/security';
-import { seedCtx, type SeedWriteRefusals } from './per-organization-catalog.js';
+import { seedCtx } from './organization-scope.js';
+import { type SeedWriteRefusals } from './write-refusals.js';
 import { buildExistingByName, type ExistingByNameIndex } from './seed-name-lookup.js';
 import type { PermissionSetNameCollisionDiagnostic } from './permission-set-name-collision.js';
 import {

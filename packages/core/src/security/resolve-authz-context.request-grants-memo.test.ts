@@ -418,10 +418,10 @@ describe('request-scoped grants memo — the round-trip count', () => {
     const standaloneQl = makeQl(makeTables());
     await resolveUserAuthzGrants(standaloneQl, 'u_member', { tenantId: 'org_a', seedEmail: 'member@x.com', nowMs: T0 });
     const oneResolution = standaloneQl.calls.length;
-    // [ADR-0131 D4] Ten: the member's organization grant reads its set by name,
-    // the organization's own row and the organization-less one, where the id
-    // read was one.
-    expect(oneResolution).toBe(10);
+    // [ADR-0131 D3/D4] Six: the sets and the positions are read from the
+    // catalog in-process, and ONE activation-ledger read answers which of them
+    // are switched off — no `sys_position` or `sys_permission_set` read.
+    expect(oneResolution).toBe(6);
 
     const memoQl = await armedQl(makeTables());
     const withMemo = await resolveAuthzContext({ ql: memoQl, headers: {}, getSession: sessionReadThatResolves(memoQl, member), nowMs: T0 });
@@ -447,10 +447,10 @@ describe('request-scoped grants memo — the round-trip count', () => {
     expect(ql.middlewareCount()).toBe(0);
     const first = await resolveAuthzContext({ ql, headers: {}, getSession: sessionReadThatResolves(ql, member), nowMs: T0 });
     expect(ql.middlewareCount()).toBe(1);
-    expect(ql.calls.length).toBe(20);
+    expect(ql.calls.length).toBe(12);
     const before = ql.calls.length;
     const second = await resolveAuthzContext({ ql, headers: {}, getSession: sessionReadThatResolves(ql, member), nowMs: T0 });
-    expect(ql.calls.length - before).toBe(10);
+    expect(ql.calls.length - before).toBe(6);
     expect(ql.middlewareCount()).toBe(1);
     expect(second).toEqual(first);
   });
@@ -488,9 +488,8 @@ describe('request-scoped grants memo — isolation', () => {
     expect(memberCtx.positions).toContain('org_owner'); // the member OWNS org_b
     expect(ownerCtx.org_user_ids).not.toContain('u_outsider');
     expect(memberCtx.org_user_ids).toEqual(expect.arrayContaining(['u_member', 'u_outsider']));
-    // Two requests, one resolution each — neither holds a user grant that
-    // applies where it operates, so neither reads a set by name.
-    expect(ql.calls.length).toBe(16);
+    // Two requests, one resolution each, six reads apiece.
+    expect(ql.calls.length).toBe(12);
   });
 
   it('nothing outlives the request: the next request reads the grants as they are now', async () => {
@@ -508,7 +507,7 @@ describe('request-scoped grants memo — isolation', () => {
     const second = await resolveAuthzContext({ ql, headers: {}, getSession: sessionReadThatResolves(ql, member), nowMs: T0, tenancyPosture: 'isolated' });
     expect(second.positions).not.toContain('auditor');
     expect(second.permissions).not.toContain('read_all');
-    expect(ql.calls.length - before).toBe(10);
+    expect(ql.calls.length - before).toBe(6);
   });
 
   it('a continuation the request started reads afresh once the request settled', async () => {
@@ -533,7 +532,7 @@ describe('request-scoped grants memo — isolation', () => {
     const before = ql.calls.length;
     settled.resolve();
     await late;
-    expect(ql.calls.length - before).toBe(10);
+    expect(ql.calls.length - before).toBe(6);
   });
 
   it('a session read resolved against a SECOND engine serves nothing to the first engine\'s step 2', async () => {
@@ -547,8 +546,8 @@ describe('request-scoped grants memo — isolation', () => {
       nowMs: T0,
       tenancyPosture: 'isolated',
     });
-    expect(qlB.calls.length).toBe(10);
-    expect(qlA.calls.length).toBe(10);
+    expect(qlB.calls.length).toBe(6);
+    expect(qlA.calls.length).toBe(6);
     const baseline = await resolveAuthzContext({ ql: makeQl(makeTables()), headers: {}, getSession: sessionReadOnly(member), nowMs: T0, tenancyPosture: 'isolated' });
     expect(ctx).toEqual(baseline);
   });
@@ -561,7 +560,7 @@ describe('request-scoped grants memo — isolation', () => {
       headers: {},
       getSession: async () => {
         // The inner call resolves twice-over-once in ITS OWN scope: its session
-        // read's resolution serves its step 2 (10 reads), and that scope closes.
+        // read's resolution serves its step 2 (6 reads), and that scope closes.
         const inner = await resolveAuthzContext({
           ql,
           headers: {},
@@ -576,7 +575,7 @@ describe('request-scoped grants memo — isolation', () => {
       tenancyPosture: 'isolated',
     });
     // Inner 8, outer step 2 afresh 8.
-    expect(ql.calls.length).toBe(20);
+    expect(ql.calls.length).toBe(12);
     const baseline = await resolveAuthzContext({ ql: makeQl(makeTables()), headers: {}, getSession: sessionReadOnly(member), nowMs: T0, tenancyPosture: 'isolated' });
     expect(ctx).toEqual(baseline);
   });
@@ -620,7 +619,7 @@ describe('request-scoped grants memo — step 2 reads afresh whenever a fresh re
     expect(ctx.positions).not.toContain('auditor');
     expect(ctx).toEqual(await postWriteBaseline());
     // …because step 2 read afresh after the landing.
-    expect(ql.calls.length).toBe(20);
+    expect(ql.calls.length).toBe(12);
   });
 
   it('a write that bumped before the first resolution and is still in flight at step 2', async () => {
@@ -632,7 +631,7 @@ describe('request-scoped grants memo — step 2 reads afresh whenever a fresh re
       tables.sys_user_position = withoutMembersAuditor(tables.sys_user_position);
     });
     const ctx = await resolveAuthzContext({ ql, headers: {}, getSession: sessionReadThatResolves(ql, member), nowMs: T0, tenancyPosture: 'isolated' });
-    expect(ql.calls.length).toBe(20);
+    expect(ql.calls.length).toBe(12);
     // Not landed yet: a fresh read still sees the row, and so did step 2.
     expect(ctx.positions).toContain('auditor');
     landing.resolve();
@@ -657,7 +656,7 @@ describe('request-scoped grants memo — step 2 reads afresh whenever a fresh re
       tenancyPosture: 'isolated',
     });
     expect(ctx.positions).not.toContain('auditor');
-    expect(ql.calls.length).toBe(20);
+    expect(ql.calls.length).toBe(12);
     expect(ctx).toEqual(await postWriteBaseline());
   });
 
@@ -675,7 +674,7 @@ describe('request-scoped grants memo — step 2 reads afresh whenever a fresh re
       nowMs: T0,
       tenancyPosture: 'isolated',
     });
-    expect(ql.calls.length).toBe(20);
+    expect(ql.calls.length).toBe(12);
   });
 
   it('a write that starts while the first resolution is still reading', async () => {
@@ -684,19 +683,19 @@ describe('request-scoped grants memo — step 2 reads afresh whenever a fresh re
     let started = false;
     let w: Promise<void> | undefined;
     ql.find = async (object: string, opts: any) => {
-      if (!started && object === 'sys_position') { started = true; w = ql.write('sys_audit_log', 'insert', async () => {}); }
+      if (!started && object === 'sys_metadata_activation') { started = true; w = ql.write('sys_audit_log', 'insert', async () => {}); }
       return find(object, opts);
     };
     await resolveAuthzContext({ ql, headers: {}, getSession: sessionReadThatResolves(ql, member), nowMs: T0, tenancyPosture: 'isolated' });
     await w;
-    expect(ql.calls.length).toBe(20);
+    expect(ql.calls.length).toBe(12);
   });
 
   it('a step-2 clock later than the first resolution\'s, inside its validity window, is served', async () => {
     // temp_role is valid until T0 + 1 day: T0 + 1 hour is inside the window.
     const ql = await armedQl(makeTables());
     const ctx = await resolveAuthzContext({ ql, headers: {}, getSession: sessionReadThatResolves(ql, member, T0), nowMs: T0 + HOUR, tenancyPosture: 'isolated' });
-    expect(ql.calls.length).toBe(10);
+    expect(ql.calls.length).toBe(6);
     expect(ctx.positions).toContain('temp_role');
     const baseline = await resolveAuthzContext({ ql: makeQl(makeTables()), headers: {}, getSession: sessionReadOnly(member), nowMs: T0 + HOUR, tenancyPosture: 'isolated' });
     expect(ctx).toEqual(baseline);
@@ -709,14 +708,14 @@ describe('request-scoped grants memo — step 2 reads afresh whenever a fresh re
     const ctx = await resolveAuthzContext({ ql, headers: {}, getSession: sessionReadThatResolves(ql, member, T0), nowMs: T0 + 2 * DAY, tenancyPosture: 'isolated' });
     expect(ctx.positions).not.toContain('temp_role');
     expect(ctx.permissions).not.toContain('temp_tools');
-    expect(ql.calls.length).toBe(20);
+    expect(ql.calls.length).toBe(12);
     const baseline = await resolveAuthzContext({ ql: makeQl(makeTables()), headers: {}, getSession: sessionReadOnly(member), nowMs: T0 + 2 * DAY, tenancyPosture: 'isolated' });
     expect(ctx).toEqual(baseline);
 
     // A step-2 clock EARLIER than the resolution it would be served.
     const ql2 = await armedQl(makeTables());
     await resolveAuthzContext({ ql: ql2, headers: {}, getSession: sessionReadThatResolves(ql2, member, T0), nowMs: T0 - DAY, tenancyPosture: 'isolated' });
-    expect(ql2.calls.length).toBe(20);
+    expect(ql2.calls.length).toBe(12);
   });
 
   it('a bypassGrantsCache caller is never served from the memo', async () => {
@@ -734,7 +733,7 @@ describe('request-scoped grants memo — step 2 reads afresh whenever a fresh re
       tenancyPosture: 'isolated',
     });
     // session read 8 + the bypass caller's own 8 + step 2 served (0).
-    expect(ql.calls.length).toBe(20);
+    expect(ql.calls.length).toBe(12);
   });
 
   it('a first resolution that failed is not remembered', async () => {
@@ -759,7 +758,7 @@ describe('request-scoped grants memo — served values are clones', () => {
     const sink: { payload?: any; grants?: UserAuthzGrants } = {};
     const member = sessionOf('u_member', 'member@x.com', 'org_a');
     const ctx = await resolveAuthzContext({ ql, headers: {}, getSession: sessionReadThatResolves(ql, member, T0, sink), nowMs: T0, tenancyPosture: 'isolated' });
-    expect(ql.calls.length).toBe(10);
+    expect(ql.calls.length).toBe(6);
     expect(ctx.positions).toEqual(sink.payload.user.positions);
     expect(ctx.positions).not.toBe(sink.payload.user.positions);
     ctx.positions.push('mutated_downstream');

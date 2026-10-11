@@ -20,12 +20,13 @@ import { METADATA_FORM_REGISTRY } from '@objectstack/spec/system';
 import { getMetadataTypeSchema } from '@objectstack/spec/kernel';
 
 import {
-  validatePredicatePathRefs,
+  validatePredicatePathRefs as validatePredicatePathRefsUnrecorded,
   PREDICATE_PATH_UNRESOLVED,
   PREDICATE_PATH_UNROOTED,
   PREDICATE_RHS_PATH_SHAPED,
 } from './validate-predicate-path-refs.js';
 import { AUTHORING_RULES } from './authoring-rules.js';
+import { explainRule } from './rule-explanations.js';
 // The published barrel is loaded HERE, at module top, and not by a dynamic
 // import inside the case that reads the id off it. That import loads the whole
 // `@objectstack/lint` index graph, and inside a case the load is charged to
@@ -56,6 +57,23 @@ const DemoSchema = z.object({
   bag: z.record(z.string(), z.unknown()).optional(),
   tags: z.array(z.string()).optional(),
 });
+
+// [#22161] Each finding of the three ids is one verdict sentence; the reasoning
+// it used to carry is the id's `os explain` entry. Every call below records
+// what it fired, and the last cases in this file hold each recorded verdict to
+// one line of at most 200 characters — so the pin covers every firing variant
+// this suite exercises (the shipped-corpus block included), not a chosen few.
+// Run the whole file: those cases read what the cases above fired.
+const PREDICATE_IDS: readonly string[] = [PREDICATE_PATH_UNRESOLVED, PREDICATE_PATH_UNROOTED, PREDICATE_RHS_PATH_SHAPED];
+const fired: Array<{ rule: string; message: string }> = [];
+const validatePredicatePathRefs: typeof validatePredicatePathRefsUnrecorded = (...args) => {
+  const findings = validatePredicatePathRefsUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
+
+/** The `os explain` text of `rule`, one string. */
+const explanationOf = (rule: string): string => explainRule(rule)?.paragraphs.join('\n') ?? '';
 
 const resolveSchema = (schemaId: string) => (schemaId === 'demo' ? DemoSchema : undefined);
 const run = (stack: Record<string, unknown>) => validatePredicatePathRefs(stack, { resolveSchema });
@@ -818,5 +836,47 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     expect(findings).toHaveLength(19);
     expect(new Set(findings.map((f) => f.rule))).toEqual(new Set([PREDICATE_PATH_UNROOTED]));
     expect(findings[0].message).toContain('`type`');
+  });
+});
+
+describe('[#22161] one-line verdicts — the three predicate ids', () => {
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    // The coverage control first: each id fired at least once, so the shape
+    // assertion below cannot pass over an empty record.
+    expect([...new Set(fired.map((f) => f.rule))].sort()).toEqual([...PREDICATE_IDS].sort());
+    for (const f of fired) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('the two resolution verdicts end with one consequence clause', () => {
+    const [unresolved] = run(form([{ fields: [{ field: 'x', visibleWhen: "data.tpye == 'formula'" }] }]));
+    const [unrooted] = run(form([{ fields: [{ field: 'x', visibleWhen: "type == 'formula'" }] }]));
+    expect(unresolved.message).toBe(
+      'predicate references `data.tpye`, but `tpye` is not a key of `data`, so the predicate never ' +
+        'evaluates and the console fails open: the element always renders',
+    );
+    expect(unrooted.message).toBe(
+      'predicate names `type` bare, but it is a key of the edited schema with its `data.` root dropped, ' +
+        'so the predicate never evaluates and the console fails open: the element always renders',
+    );
+  });
+
+  // What each verdict stopped saying, which `os explain RULE_ID` now prints.
+  const MOVED: Record<string, readonly string[]> = {
+    [PREDICATE_PATH_UNRESOLVED]: ['fails OPEN', 'pixel-identical', '`getMetadataTypeSchema(schemaId)`', 'record map', '`visibility-predicate-syntax`'],
+    [PREDICATE_PATH_UNROOTED]: ['never flattens', 'fails OPEN', '`visibility-bare-identifier`', 'overload', 'comprehension-macro'],
+    [PREDICATE_RHS_PATH_SHAPED]: ['literal parser', 'hides the element on every row', '`path == \'literal\'`', 'real CEL evaluator', 'stand down'],
+  };
+
+  it('covers exactly the three ids', () => {
+    expect(Object.keys(MOVED).sort()).toEqual([...PREDICATE_IDS].sort());
+  });
+
+  it.each([...PREDICATE_IDS])('`os explain %s` carries what its verdict no longer says', (rule) => {
+    expect(explainRule(rule), `no \`os explain ${rule}\` entry`).toBeDefined();
+    const text = explanationOf(rule);
+    for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
   });
 });

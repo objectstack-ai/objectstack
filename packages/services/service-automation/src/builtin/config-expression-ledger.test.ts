@@ -317,6 +317,30 @@ describe('configSchema ↔ expression-ledger reconciliation (#4027)', () => {
     },
   );
 
+  /**
+   * [#19939] The maps a node hands to a CALLEE — `subflow.input`, `script.inputs`
+   * (schemaless: no descriptor `configSchema`) and `map.input` (its descriptor
+   * declares the map `additionalProperties: true`, like the CRUD `fields`) —
+   * are `value` slots, each declared through the spec Zod channel and never
+   * through a descriptor, so neither channel declares one slot twice.
+   */
+  it.each([
+    ['subflow', 'input.*'],
+    ['map', 'input.*'],
+    ['script', 'inputs.*'],
+  ])('%s.%s is covered — a #19939 callee input map, declared on the spec Zod channel', (nodeType, path) => {
+    const slot = FLOW_NODE_EXPRESSION_PATHS.find((e) => e.nodeType === nodeType && e.path === path);
+    expect(slot, 'the S1 slot: a callee input value may be a CEL envelope (#11182 ruling D)').toBeDefined();
+    expect(slot!.role).toBe('value');
+    expect(declaredFromSchemalessConfigs().map(key)).toContain(key(slot!));
+    expect(declaredFromDescriptors().map(key)).not.toContain(key(slot!));
+  });
+
+  it('map keeps `collection` on its descriptor channel beside the new `input.*` — one slot, one channel', () => {
+    expect(declaredFromDescriptors().filter((d) => d.nodeType === 'map').map(key)).toEqual(['map.collection (flow-template)']);
+    expect(declaredFromSchemalessConfigs().filter((d) => d.nodeType === 'map').map(key)).toEqual(['map.input.* (value)']);
+  });
+
   it('screen.fields[].visibleWhen is covered — the #3528 regression', () => {
     const screen = FLOW_NODE_EXPRESSION_PATHS.find(
       (e) => e.nodeType === 'screen' && e.path === 'fields[].visibleWhen',

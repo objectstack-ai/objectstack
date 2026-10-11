@@ -54,7 +54,7 @@ import { bootstrapBuiltinRoles } from './bootstrap-builtin-positions.js';
 import {
   createSeedWriteRefusals,
   reportSeedWriteRefusals,
-} from './per-organization-catalog.js';
+} from './write-refusals.js';
 
 /* ------------------------------------------------------------------------- *
  *  Measured driver errors — spellings copied from the shipped classifier's
@@ -633,7 +633,7 @@ describe('a pass that is not refused reports exactly what it did before', () => 
  * both and churning it buys nothing.
  */
 describe('SeedLogger guarantees the channel a durability report degrades to', () => {
-  const CATALOG_SOURCE = resolve(__dirname, 'per-organization-catalog.ts');
+  const CATALOG_SOURCE = resolve(__dirname, 'write-refusals.ts');
 
   /** Declared members of the `SeedLogger` type alias, mapped to their optionality. */
   function seedLoggerMembers(): Map<string, boolean> {

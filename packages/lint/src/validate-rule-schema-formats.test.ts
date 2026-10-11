@@ -25,13 +25,30 @@ import { describe, it, expect } from 'vitest';
 import { ObjectStackSchema } from '@objectstack/spec';
 
 import {
-  validateRuleSchemaFormats,
+  validateRuleSchemaFormats as validateRuleSchemaFormatsUnrecorded,
   nearestRegisteredFormat,
   MAX_SCHEMA_WALK_DEPTH,
   VALIDATION_RULE_SCHEMA_UNKNOWN_FORMAT,
 } from './validate-rule-schema-formats.js';
 import { registeredFormatNames, validateRuleCompilability } from './validate-rule-compilability.js';
 import { AUTHORING_COMMANDS, AUTHORING_RULES, authoringRulesFor, runAuthoringRules } from './authoring-rules.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding is one verdict sentence; the reasoning it used to
+// carry is the id's `os explain` entry. Every call below records what it
+// fired, and the last cases in this file hold each recorded verdict to one
+// line of at most 200 characters — so the pin covers every firing variant
+// this suite exercises, not a chosen few. Run the whole file: those cases read
+// what the cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validateRuleSchemaFormats: typeof validateRuleSchemaFormatsUnrecorded = (...args) => {
+  const findings = validateRuleSchemaFormatsUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
+
+/** The `os explain` text of `rule`, one string. */
+const explanationOf = (rule: string): string => explainRule(rule)?.paragraphs.join('\n') ?? '';
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const MANIFEST = { id: 'com.example.schema-format-probe', name: 'schema_format_probe', version: '1.0.0', type: 'app' } as const;
@@ -75,10 +92,16 @@ describe('validateRuleSchemaFormats — the dropped keyword goes RED (#5178)', (
     // Named: which rule, on which object, and exactly where in the schema.
     expect(f.where).toBe("object 'account' · validation 'support_shape'");
     expect(f.path).toBe('objects.account.validations.support_shape.schema#/properties/email/format');
-    expect(f.message).toContain("format: 'emial'");
-    expect(f.message).toContain('#/properties/email/format');
-    // The consequence, in the direction that matters: the record is accepted.
+    // [#22161] The verdict names the format; `where` and `path` carry the rule,
+    // the object and the pointer, so the message does not repeat them.
+    expect(f.message).toBe(
+      "`format: 'emial'` is not a registered format, so ajv drops the keyword and the rule enforces it on " +
+        'no record: every write is ACCEPTED',
+    );
+    // The consequence, in the direction that matters: the record is accepted…
     expect(f.message).toContain('ACCEPTED');
+    // …and how ajv gets there is `os explain`.
+    expect(explanationOf(VALIDATION_RULE_SCHEMA_UNKNOWN_FORMAT)).toContain('DROPS the keyword');
     // The fix, concretely — an author cannot act on "unknown format".
     expect(f.hint).toContain("Did you mean `format: 'email'`?");
     // …and the full vocabulary, so a name that is merely unfamiliar is
@@ -395,5 +418,33 @@ describe('validateRuleSchemaFormats is wired into every authoring command', () =
     const mine = findings.filter((f) => f.rule === VALIDATION_RULE_SCHEMA_UNKNOWN_FORMAT);
     expect(mine).toHaveLength(1);
     expect(mine[0].severity).toBe('error');
+  });
+});
+
+describe('[#22161] one-line verdicts — validation-rule-json-schema-unknown-format', () => {
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    // The coverage control first: the id fired, so the shape assertion below
+    // cannot pass over an empty record.
+    expect([...new Set(fired.map((f) => f.rule))]).toEqual([VALIDATION_RULE_SCHEMA_UNKNOWN_FORMAT]);
+    for (const f of fired) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('`os explain` carries what the verdict no longer says', () => {
+    const text = explanationOf(VALIDATION_RULE_SCHEMA_UNKNOWN_FORMAT);
+    for (const fact of [
+      'unknown format "NAME" ignored',
+      'DROPS the keyword',
+      'at the publish gate alike',
+      '`type`, `required`',
+      'The record is ACCEPTED',
+      'read off a live instance',
+      '`default`, `const`, `enum` or `examples`',
+      'new Ajv({ allErrors: true, strict: false })',
+    ]) {
+      expect(text, `explanation names ${fact}`).toContain(fact);
+    }
   });
 });

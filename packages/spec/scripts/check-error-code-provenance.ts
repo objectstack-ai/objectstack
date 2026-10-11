@@ -55,15 +55,26 @@
  *     `apps/`, not `examples/`, not package `scripts/` trees.
  *   - The ledger file itself is excluded by name: its waiver tables spell
  *     `code: '…'` about codes, which is mention, not stamping.
+ *   - A CONSTANT is read at its definition, by its initializer, whatever its
+ *     name (`constdef`). The rule used to be the NAME — a `*_CODE` binding —
+ *     and that proxy missed eleven declared constants in five packages, three
+ *     of them with no provenance record at all (#22664). Two consequences are
+ *     declared rather than left implicit: the site is attributed to the
+ *     package that DEFINES the constant, so a second package that imports it
+ *     and stamps it is not seen as a second emitter (a shared constant one
+ *     package over is the ledger's waiver class:
+ *     `UNIQUE_SCOPE_CONFIRMATION_REQUIRED`, `UPDATE_ID_MISMATCH`); and a
+ *     constant that is only ever COMPARED against is still a site — the
+ *     over-match bound below, measured at zero such constants when the rule
+ *     widened.
  *   - BLIND, and inheriting the sibling gate's declared blindness rather than
- *     re-litigating it: a code arriving through a constant NOT named `*_CODE`
- *     (`GLOBAL_UNIQUE_CONFIRMATION_REQUIRED` in `@objectstack/types` defines a
- *     registered code and is invisible here), an object-literal or helper
- *     indirection (`{ code }` shorthand, `makeError(code, …)` call sites), a
- *     template literal, and a class field. Those shapes DO have recognizers in
- *     the sibling gate; a registered code reaching a stamp through one of them
- *     is simply not this gate's finding yet. Widening is a gate-population
- *     change with an unmeasured blast radius — its own card, never a rider.
+ *     re-litigating it: an object-literal or helper indirection (`{ code }`
+ *     shorthand, `makeError(code, …)` call sites, a `cond ? 'A' : 'B'` or
+ *     `?? 'X'` operand), a template literal, and a class field. Those shapes
+ *     DO have recognizers in the sibling gate; a registered code reaching a
+ *     stamp through one of them is simply not this gate's finding yet.
+ *     Widening is a gate-population change with an unmeasured blast radius —
+ *     its own card, never a rider.
  *   - OVER-matching is accepted and absorbed by rows/waivers rather than
  *     heuristics: a TYPE-position literal (`{ code: 'ITEM_LOCKED'; reason:
  *     string }`) matches the object-literal pattern. That is deliberate — the
@@ -109,10 +120,20 @@ export const STAMP_PATTERNS: ReadonlyArray<{ name: string; re: RegExp }> = [
   { name: 'objlit', re: /\bcode:\s*'([A-Z][A-Z0-9_]*)'/g },
   // `err.code = 'X'` — stamped onto a value about to be thrown.
   { name: 'assign', re: /\.code\s*=\s*'([A-Z][A-Z0-9_]*)'/g },
-  // `X_CODE = 'X'` — a `*_CODE`-named constant's literal initializer (the
-  // driver-memory `UNIQUE_VIOLATION_CODE` shape). The optional `[^=\n]*?`
-  // limb admits a type annotation between name and `=`.
-  { name: 'constdef', re: /\b[A-Z][A-Z0-9_]*_CODE\s*(?::[^=\n]*?)?=\s*'([A-Z][A-Z0-9_]*)'/g },
+  // A constant whose literal initializer is a registered code: the binding is
+  // the site, whatever it is named. Two limbs:
+  //   - `const|let|var NAME = 'X'` — a DECLARED binding of any name (the
+  //     `@objectstack/mcp` stdio bridge's `const OBJECT_API_DISABLED = …`, the
+  //     plugin-auth `SELF_REGISTRATION_CLOSED` shape). The registered set is
+  //     the filter, so the name no longer has to say "code".
+  //   - `X_CODE = 'X'` — a `*_CODE`-named binding with no keyword in front (a
+  //     class `static readonly`, a second declarator), kept so the widening
+  //     is a superset of the name rule it replaced, never a trade.
+  // The optional `[^=\n]*?` limb admits a type annotation between name and `=`.
+  {
+    name: 'constdef',
+    re: /(?:\b(?:const|let|var)\s+[A-Za-z_$][\w$]*|\b[A-Z][A-Z0-9_]*_CODE)\s*(?::[^=\n]*?)?=\s*'([A-Z][A-Z0-9_]*)'/g,
+  },
 ];
 
 export interface StampSite {
@@ -301,8 +322,9 @@ export function deriveFindings(
 
 function printBounds(): void {
   console.log('bounds: packages/**/src non-test .ts/.tsx; ledger file excluded (mention, not stamping);');
-  console.log(`bounds: patterns = ${STAMP_PATTERNS.map((p) => p.name).join(', ')} — blind to non-*_CODE constants,`);
-  console.log('bounds: helper/shorthand indirections, templates and class fields (see the header; sibling-gate shapes).');
+  console.log(`bounds: patterns = ${STAMP_PATTERNS.map((p) => p.name).join(', ')} — a constant is read at its definition`);
+  console.log('bounds: and attributed to the DEFINING package; blind to helper/shorthand/ternary indirections, templates');
+  console.log('bounds: and class fields (see the header; sibling-gate shapes).');
 }
 
 function run(report: boolean): number {
@@ -411,8 +433,8 @@ let selfTestReachedVerdict = false;
 // The counts are a FLOOR, not an equality: adding cases is ordinary work and
 // must not red. A battery BELOW its floor means cases stopped running.
 const SELF_TEST_BATTERIES: Readonly<Record<string, number>> = Object.freeze({
-  'each published STAMP pattern catches its own spelling': 4,
-  'the population boundary and comment masking: what is NOT a site': 2,
+  'each published STAMP pattern catches its own spelling': 6,
+  'the population boundary and comment masking: what is NOT a site': 4,
   'the reconciliation: an unlisted stamper reddens, a listed one is green': 2,
   'a waiver admits EXACTLY its (package, code) pair': 2,
   'every stale-waiver direction reddens': 3,
@@ -492,12 +514,33 @@ function selfTest(): number {
     'constdef admits a type annotation',
     scanSourceText(`const MY_CODE: string = '${CODE_A}';`, registered).some((h) => h.pattern === 'constdef'),
   );
+  // The binding is the site whatever it is named — the stdio-bridge shape the
+  // `*_CODE` name rule could not see.
+  check(
+    'constdef catches a declared constant of ANY name',
+    scanSourceText(`const REFUSAL = '${CODE_A}';`, registered).some((h) => h.pattern === 'constdef'),
+  );
+  // …and the keyword-less `*_CODE` limb keeps the widening a superset.
+  check(
+    'constdef keeps a keyword-less *_CODE binding',
+    scanSourceText(`static readonly MY_CODE = '${CODE_A}';`, registered).some((h) => h.pattern === 'constdef'),
+  );
   // Population boundary: a code outside the registered set is the sibling
   // gate's subject, never a site here.
   battery('the population boundary and comment masking: what is NOT a site');
   check(
     'a code outside the registered set is out of population',
     scanSourceText(`return { code: '${CODE_OUT}' };`, registered).length === 0,
+  );
+  // Precision of the widened `constdef`: it reads a DECLARATION, so neither a
+  // re-assignment to an undeclared non-`*_CODE` name nor a comparison is one.
+  check(
+    'a re-assignment to a non-*_CODE name is not a site',
+    scanSourceText(`status = '${CODE_A}';`, registered).length === 0,
+  );
+  check(
+    'a comparison against a registered code is not a site',
+    scanSourceText(`if (e.code === '${CODE_A}') return;`, registered).length === 0,
   );
   // Comment masking: a code quoted in prose is not a site.
   check(

@@ -24,6 +24,15 @@ export default defineConfig({
         find: /^@objectstack\/hono$/,
         replacement: path.resolve(__dirname, '../../adapters/hono/src/index.ts'),
       },
+      // `hono-approvals-act.conformance.test.ts` boots the REAL approvals
+      // plugin on both of its doors — the self-hosted raw-app mount and the
+      // `handleActionPage` member behind the dispatcher domain — so its verdict
+      // about either is about this checkout's plugin source, not its last
+      // `dist` (`scripts/check-test-source-alias.mjs`).
+      {
+        find: /^@objectstack\/plugin-approvals$/,
+        replacement: path.resolve(__dirname, '../../plugins/plugin-approvals/src/index.ts'),
+      },
     ],
   },
   test: {

@@ -555,6 +555,46 @@ function refuse(message: string, object: string = SystemObjectName.USER): Error 
   return err;
 }
 
+/**
+ * [ADR-0131 D3, ADR-0126 §4] Refuse an activation-ledger write that would
+ * switch the `admin_full_access` permission set off. A write that does not set
+ * `active` false passes. An update that does not carry the row's type and name
+ * reads them back by `id`. One whose row cannot be read is refused: the
+ * failure mode is an installation-wide lockout.
+ */
+export async function refuseLedgerSwitchingAdminOff(
+  engine: { find: (object: string, query: EngineQueryOptions, options?: BaseEngineOptions) => Promise<unknown> },
+  data: Record<string, unknown>,
+  id: unknown,
+): Promise<void> {
+  if (!(data.active === false || data.active === 0)) return;
+  let metadataType = data.metadata_type;
+  let name = data.name;
+  if (metadataType === undefined || name === undefined) {
+    const rows = id === undefined || id === null
+      ? []
+      : await engine.find(METADATA_ACTIVATION, { where: { id }, limit: 1 } as EngineQueryOptions, SYSTEM_READ);
+    const row = Array.isArray(rows) ? (rows[0] as Record<string, unknown> | undefined) : undefined;
+    if (!row) {
+      throw refuse(
+        `Refusing this '${METADATA_ACTIVATION}' write: it switches a row off and the row it targets could `
+          + `not be read, so it may be the '${ADMIN_FULL_ACCESS}' permission set (${BREAK_GLASS_CITATION}).`,
+        METADATA_ACTIVATION,
+      );
+    }
+    metadataType ??= row.metadata_type;
+    name ??= row.name;
+  }
+  if (metadataType === 'permission' && name === ADMIN_FULL_ACCESS) {
+    throw refuse(
+      `Refusing this '${METADATA_ACTIVATION}' write: switching the '${ADMIN_FULL_ACCESS}' permission set off `
+        + 'un-makes every grant-derived platform administrator at once, with no identity table touched '
+        + `(${BREAK_GLASS_CITATION}).`,
+      METADATA_ACTIVATION,
+    );
+  }
+}
+
 /** Marker so the fail-closed wrapper re-throws a deliberate refusal unchanged. */
 function isRefusal(err: unknown): boolean {
   return (err as { code?: string } | null)?.code === 'PERMISSION_DENIED';
@@ -780,6 +820,22 @@ export const PERMISSION_SET_STANDING_KEYS = ['name', 'active', 'organization_id'
  */
 export const USER_STANDING_KEYS = ['email', 'email_verified'] as const;
 
+/** [ADR-0131 D3, ADR-0126 §4] The activation ledger the resolver honours deactivation from. */
+export const METADATA_ACTIVATION = 'sys_metadata_activation';
+
+/**
+ * [ADR-0131 D3, ADR-0126 §4] Same, for the activation ledger. Since the
+ * catalog switch the resolver reads a permission set's deactivation from the
+ * ledger, not from the `sys_permission_set` row, so a ledger row switching
+ * `admin_full_access` off un-makes every grant-derived platform administrator.
+ *
+ * Judged by {@link refuseLedgerSwitchingAdminOff}: a write that would switch
+ * it off is refused outright, with no enumeration. The ledger is engine-owned
+ * (the data API reads it only) and no enable/disable door accepts the
+ * `permission` type today, so the refusal binds the system-context writes alone.
+ */
+export const ACTIVATION_LEDGER_STANDING_KEYS = ['metadata_type', 'name', 'active'] as const;
+
 /**
  * [commit f8eb73601] The three lists above, keyed by the table each one judges — the shape
  * the correspondence gate consumes.
@@ -800,7 +856,7 @@ export const USER_STANDING_KEYS = ['email', 'email_verified'] as const;
 export const STANDING_KEYS_BY_TABLE: Readonly<Record<string, readonly string[]>> = {
   [SystemObjectName.MEMBER]: MEMBER_STANDING_KEYS,
   [USER_PERMISSION_SET]: GRANT_STANDING_KEYS,
-  [SystemObjectName.PERMISSION_SET]: PERMISSION_SET_STANDING_KEYS,
+  [METADATA_ACTIVATION]: ACTIVATION_LEDGER_STANDING_KEYS,
   [SystemObjectName.USER]: USER_STANDING_KEYS,
 };
 
@@ -854,23 +910,7 @@ export const STANDING_KEY_EXCLUSIONS: Readonly<Record<string, Readonly<Record<st
 
   [USER_PERMISSION_SET]: {},
 
-  [SystemObjectName.PERMISSION_SET]: {
-    id:
-      'On this engine `data.id` on an update ADDRESSES the row rather than proposing a new '
-      + 'primary key (see the note above `PERMISSION_SET_STANDING_KEYS`), so a key rewrite is not '
-      + 'expressible through this write path at all.',
-    system_permissions:
-      'What the set CONTAINS does not un-make a platform admin: `hasPlatformAdminGrant` is set '
-      + "from `ps.name === 'admin_full_access'` on an ACTIVE set, and the posture rung and "
-      + 'superuser bypass ride on that boolean. Emptying the blob costs the holder setup/studio '
-      + 'access — recoverable from inside the product, an ADR-0086 capability question, not a '
-      + 'break-glass one.',
-    systemPermissions: 'Camel-case spelling of `system_permissions` — same reason.',
-    tab_permissions:
-      'Tab visibility per app. Same reason as `system_permissions`: it is content of the set, '
-      + 'never the name-and-active pair the derivation reads.',
-    tabPermissions: 'Camel-case spelling of `tab_permissions` — same reason.',
-  },
+  [METADATA_ACTIVATION]: {},
 
   [SystemObjectName.USER]: {
     id:
@@ -1683,6 +1723,18 @@ export function registerLastAdminGuard(
     await enforceStanding('user-standing-update', SystemObjectName.USER, ctx.input, data);
   };
 
+  /**
+   * [ADR-0131 D3, ADR-0126 §4] The ledger half: refuse a write that switches
+   * `admin_full_access` off ({@link ACTIVATION_LEDGER_STANDING_KEYS}).
+   */
+  const guardActivationLedgerWrite = async (rawCtx: unknown): Promise<void> => {
+    const ctx = ctxOf(rawCtx);
+    if (ctx.object !== METADATA_ACTIVATION) return;
+    const data = (ctx.input?.data ?? {}) as Record<string, unknown>;
+    if (!touchesAny(data, ACTIVATION_LEDGER_STANDING_KEYS)) return;
+    await refuseLedgerSwitchingAdminOff(engine, data, ctx.input?.id);
+  };
+
   const guardPermissionSetDelete = async (rawCtx: unknown): Promise<void> => {
     const ctx = ctxOf(rawCtx);
     if (ctx.object !== SystemObjectName.PERMISSION_SET) return;
@@ -1744,11 +1796,22 @@ export function registerLastAdminGuard(
     priority: 20,
     packageId,
   });
+  engine.registerHook('beforeInsert', guardActivationLedgerWrite, {
+    object: METADATA_ACTIVATION,
+    priority: 20,
+    packageId,
+  });
+  engine.registerHook('beforeUpdate', guardActivationLedgerWrite, {
+    object: METADATA_ACTIVATION,
+    priority: 20,
+    packageId,
+  });
 
   logger?.info(
     '[LastAdminGuard] last-administrator guard registered on sys_user (ban + delete, and the ' +
       'email/email_verified pair the deployment-config anchor derives from), sys_member and ' +
       'sys_user_permission_set (standing revocation), and sys_permission_set ' +
-      '(the admin_full_access row every platform admin is derived from) — ADR-0135 D5.2',
+      '(the admin_full_access row every platform admin is derived from), and sys_metadata_activation ' +
+      '(switching admin_full_access off) — ADR-0135 D5.2',
   );
 }

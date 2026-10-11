@@ -65,7 +65,7 @@ import {
 // generic replacement text — the same two `@objectstack/rest` composes into
 // `isScriptFaultMessage` / `UNCLASSIFIED_FAULT`, so this door's crash reading
 // cannot drift from the `/data` door's. ⛔ Never re-inline either.
-import { isNativeErrorName, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
+import { isNativeErrorName, INTERNAL_ERROR_MESSAGE, sandboxBusinessMessage } from '@objectstack/types';
 import * as actionExec from '../action-execution.js';
 import { actorUserFromExecutionContext, resolveActorDisplayName } from '../security/actor-user.js';
 import { validationFailure, validationFailureDetails, VALIDATION_FAILED_STATUS } from '../validation-failure.js';
@@ -847,11 +847,21 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
     } catch (err: any) {
         const full = err?.message ?? String(err);
         // The sandbox wraps a user throw as `<kind> '<name>' threw: <msg>` for
-        // server logs; surface only the business `<msg>` (SandboxError.innerMessage)
-        // to the client so an action's error toast reads as plain text instead of
-        // leaking the debug prefix. Keep the full wrapper in the log for debugging.
+        // server logs; surface only the business `<msg>` to the client so an
+        // action's error toast reads as plain text instead of leaking the debug
+        // prefix. Keep the full wrapper in the log for debugging.
+        //
+        // [#22588] Read through `sandboxBusinessMessage` — the ONE read `/data`,
+        // the bulk doors and `/analytics/dataset/query` make — rather than a
+        // local `innerMessage` read. The local copy differed in one case only:
+        // a CRASH, whose native-error text it rewrote onto `err.message` before
+        // the crash terminal below answered the sanitised 500 anyway; the shared
+        // read declines a crash, so the wire answer is unchanged and the log
+        // keeps the full wrapper. `inner` stays the raw field: the crash and
+        // unexpected-fault predicates below ask about its presence, not its
+        // classification.
         const inner: unknown = err?.innerMessage;
-        const clientMsg = (typeof inner === 'string' && inner) ? inner : full;
+        const clientMsg = sandboxBusinessMessage(err) ?? full;
         if (clientMsg !== full) {
             console.error(`[action ${objectName}/${actionName}] ${full}`);
             // Every exit below reads `.message`; hand it the client-safe text so

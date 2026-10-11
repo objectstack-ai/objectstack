@@ -40,11 +40,14 @@
  *   - CONTROL: a single-package config (no `packages[]`) is unchanged and has
  *     no residual on either door.
  *
- * ⚠️ What this file does NOT pin: the data door for a residual OBJECT. Both
- * doors list it on `/meta/object` and answer `404` on `/data/<name>` — the
- * residual rule registers metadata, and no engine registration follows. That
- * is the artifact door's answer this card makes the config boot match, not a
- * behaviour to freeze.
+ * The DATA door is read beside the metadata door (#22615): every `acme_*`
+ * object `/meta/object` lists is read back on `/data/<name>`. A residual object
+ * is listed under the stack's `manifest.id` AND served under it — the engine's
+ * `manifest` service registers the residual rule's own objects
+ * (`unclaimedTopLevel`), so both doors give one answer through both boots.
+ * Before that, both boots listed `acme_note` and answered `404` on
+ * `/data/acme_note`. The bodies' own objects are the control: `200` before and
+ * after, on every row.
  *
  * ⚠️ Pedigree, not counts: every doc page carries a marker written into exactly
  * one source, read back from the served doc.
@@ -325,6 +328,8 @@ interface Reading {
   /** `name@owner`, sorted. */
   objects: string[];
   views: string[];
+  /** `name:status` of `GET /data/<name>` for every object `objects` lists, sorted. */
+  data: string[];
   /** The count each residual line reports — one entry per line printed. */
   residual: number[];
 }
@@ -364,14 +369,23 @@ async function read(dir: string, args: string[]): Promise<Reading> {
         marker: /MARKER-22521-[\w-]+/.exec(JSON.stringify(one.body))?.[0],
       };
     }
-    const objects = owned(await list('object'));
+    const listedObjects = await list('object');
+    const objects = owned(listedObjects);
     const views = owned(await list('view'));
+    // The data door, for exactly the objects the metadata door listed: one
+    // answer per object across the two doors (#22615).
+    const data: string[] = [];
+    for (const item of listedObjects) {
+      const rows = await request(serve, `the data read of ${item.name}`, `${base}/data/${item.name}`, { headers });
+      data.push(`${item.name}:${rows.status}`);
+    }
+    data.sort();
     const residual = serve.output()
       .split('\n')
       .map((line) => RESIDUAL_LINE.exec(line)?.[1])
       .filter((count): count is string => count !== undefined)
       .map(Number);
-    return { docs, objects, views, residual };
+    return { docs, objects, views, data, residual };
   } finally {
     await stop(serve.child);
   }
@@ -455,6 +469,8 @@ describe('#22521 row 2: flat src/docs with a manifest.id naming no package', () 
       acme_faq: { packageId: RELEASE_ID, marker: 'MARKER-22521-flat-faq' },
     });
     expect(artifact.residual).toEqual([2]);
+    // The control for #22615's data-door reading: the bodies' own objects.
+    expect(artifact.data, JSON.stringify(artifact)).toEqual(['acme_account:200', 'acme_case:200']);
   });
 
   it('the config boot gives the artifact boot\'s answer, without --dev', () => {
@@ -493,6 +509,12 @@ describe('#22521 row 4: a top-level object and view no package owns', () => {
     // Before the fix: neither acme_note nor its view listed, no residual line.
     expect(configDev).toEqual(artifact);
   });
+
+  it('the data door serves the residual object the metadata door lists, through both boots (#22615)', () => {
+    // Before #22615, on both boots: `acme_note:404` beside the listing above.
+    expect(artifact.data, JSON.stringify(artifact)).toEqual(['acme_account:200', 'acme_case:200', 'acme_note:200']);
+    expect(configDev.data, JSON.stringify(configDev)).toEqual(artifact.data);
+  });
 });
 
 describe('#22521 row 3: inline docs spread on a composed stack\'s top level', () => {
@@ -519,6 +541,7 @@ describe('#22521 row 3: inline docs spread on a composed stack\'s top level', ()
       acme_inline: { packageId: APP_ID, marker: 'MARKER-22521-inline' },
     });
     expect(configDev.residual).toEqual([1]);
+    expect(configDev.data, JSON.stringify(configDev)).toEqual(['acme_account:200', 'acme_case:200']);
   });
 });
 
@@ -540,6 +563,7 @@ describe('#22521 control: a single-package config has no residual on either door
     });
     expect(artifact.objects).toEqual([`acme_account@${APP_ID}`, `acme_note@${APP_ID}`]);
     expect(artifact.views).toEqual([`acme_note.default@${APP_ID}`]);
+    expect(artifact.data).toEqual(['acme_account:200', 'acme_note:200']);
     expect(artifact.residual).toEqual([]);
   });
 

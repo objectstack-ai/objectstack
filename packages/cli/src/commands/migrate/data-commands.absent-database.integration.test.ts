@@ -179,6 +179,14 @@ function runCli(argv: string[], dbFile: string): Promise<Run> {
           // The fixed key `serve-process.ts` hands its children, so no boot
           // mints and persists a crypto key into this runner's home directory.
           OS_SECRET_KEY: '0e2e'.repeat(16),
+          // [#22579] The deployment the controls model keeps every object in
+          // ONE database: their served-shape boots are in-process stacks, which
+          // provision no `telemetry` sibling. The source entry pins
+          // `NODE_ENV=development`, under which the commands' boot mirrors a
+          // development `os serve` — one that keeps lifecycle-classed objects
+          // (`sys_audit_log`, `sys_activity`) in a sibling — so the fixture
+          // declares its own topology, as a deployment with no sibling does.
+          OS_TELEMETRY_DB: '0',
         }),
         stdio: ['ignore', 'pipe', 'pipe'],
       },

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import {
+  DATE_RANGE_PRESET_MACRO_WINDOWS,
   VALID_AST_OPERATORS,
   bareDateRangePresetComparandMessage,
   canonicalAstOperator,
@@ -71,9 +72,11 @@ import { indexObjectGraph, recordsOf, resolveFieldPath, type ObjectGraph } from 
  * `date` / `datetime` field refuses one of the 13 declared preset names in
  * EVERY comparand position — bare (implicit equality), `$eq` / `$ne`, `$in` /
  * `$nin` and their view-rule and triple spellings, alongside the ordering
- * positions already judged.* Same message, same prescription (the #5240
- * convention): the window the preset already means is exactly what an author
- * writing `close_date == 'last_30_days'` intended.
+ * positions already judged.* Same verdict, same prescription (the #5240
+ * convention; [#22161] both arms print {@link presetComparandVerdict}, which
+ * opens with the schema door's own first sentence): the window the preset
+ * already means is exactly what an author writing
+ * `close_date == 'last_30_days'` intended.
  *
  * Measured first (ruling item 3), as real queries on a declared `date` field
  * (`close_date`) and a declared `datetime` sibling, on two real drivers —
@@ -279,6 +282,26 @@ function literalObjectName(v: unknown): string | undefined {
   return s && !s.includes('{') ? s : undefined;
 }
 
+/**
+ * [#22161] The one-line verdict. It opens with the shared refusal's own first
+ * sentence (`bareDateRangePresetComparandMessage`, cut and never rewritten — the
+ * sentence both doors open with), then names the operator the comparand sits
+ * under and the window the preset means, which is what the `fix:` line points
+ * at. The window is read from the table the shared refusal quotes
+ * (`DATE_RANGE_PRESET_MACRO_WINDOWS`), in the refusal's spelling — the tests
+ * hold the two equal. The rest of the shared refusal (where a preset IS
+ * understood, what each layer does with a bare one) is the id's `os explain`
+ * entry.
+ */
+export function presetComparandVerdict(preset: DateRangePreset, operator: string): string {
+  const refusal = bareDateRangePresetComparandMessage(preset, operator);
+  const stop = refusal.indexOf('. ');
+  const head = stop > 0 ? refusal.slice(0, stop) : refusal;
+  const [start, end] = DATE_RANGE_PRESET_MACRO_WINDOWS[preset];
+  const window = end === null ? `{ $gte: '${start}' }` : `{ $between: ['${start}', '${end}'] }`;
+  return `${head} as a bare "${operator}" comparand; its window is ${window}`;
+}
+
 function finding(
   where: string,
   path: string,
@@ -290,7 +313,7 @@ function finding(
     rule: FILTER_PRESET_COMPARAND,
     where,
     path,
-    message: bareDateRangePresetComparandMessage(preset, operator),
+    message: presetComparandVerdict(preset, operator),
     hint:
       'Presets belong to the dashboard date-filter bar (dateRange.defaultRange, a date '
       + "global filter's defaultValue). In a filter comparand, write the {date-macro} "

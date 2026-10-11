@@ -60,6 +60,7 @@
 import { describe, it, expect } from 'vitest';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { HttpDispatcher, type HttpDispatcherResult } from '../http-dispatcher.js';
+import { bindCatalogFromTables } from '../security/security-catalog.testkit.js';
 
 const PREFIX = '/api/v1';
 const ENV_ID = 'env_alpha';
@@ -130,13 +131,13 @@ function registryWith(): SchemaRegistry {
 }
 
 function kernelWith(registry: SchemaRegistry): any {
-    const ql = {
+    const ql = bindCatalogFromTables({
         registry,
         find: async (object: string, q: any = {}) => {
             const rows = (TABLES[object] ?? []).filter((row: any) => matchesWhere(row, q?.where));
             return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
         },
-    };
+    }, TABLES);
     const auth = { api: { getSession: async () => ({ user: { id: 'u_admin' } }) } };
     const services: Record<string, unknown> = { objectql: ql, auth };
     return {

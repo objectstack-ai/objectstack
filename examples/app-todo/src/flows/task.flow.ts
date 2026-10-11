@@ -366,10 +366,22 @@ export const TaskCompletionFlow: Flow = {
         // Registered in `defineStack({ functions })` — see objectstack.config.ts
         // and src/functions/task.functions.ts.
         function: 'computeNextTaskDueDate',
+        // CEL value envelopes, evaluated against the flow's variables — the
+        // `{…}` template dialect is retired from the function's `inputs` too.
+        // Each field may be absent from the completed task's row, and CEL
+        // refuses an absent key where the template handed nothing, so each is
+        // guarded: the function reads `null` exactly as it read the empty
+        // value (no due date → `null`, no interval → the field's default 1).
         inputs: {
-          dueDate: '{completedTask.due_date}',
-          recurrenceType: '{completedTask.recurrence_type}',
-          interval: '{completedTask.recurrence_interval}',
+          dueDate: { dialect: 'cel', source: 'has(completedTask.due_date) ? completedTask.due_date : null' },
+          recurrenceType: {
+            dialect: 'cel',
+            source: 'has(completedTask.recurrence_type) ? completedTask.recurrence_type : null',
+          },
+          interval: {
+            dialect: 'cel',
+            source: 'has(completedTask.recurrence_interval) ? completedTask.recurrence_interval : null',
+          },
         },
         outputVariable: 'nextDueDate',
       },

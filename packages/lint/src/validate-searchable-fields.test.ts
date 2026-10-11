@@ -1,16 +1,48 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { resolveSearchFields } from '@objectstack/spec/data';
 import {
-  validateSearchableFields,
-  checkSearchableFieldList,
+  resolveSearchFields,
+  SEARCHABLE_ENUM_TYPES,
+  SEARCHABLE_TEXTUAL_TYPES,
+  SEARCH_VIRTUAL_TYPES,
+} from '@objectstack/spec/data';
+import {
+  validateSearchableFields as validateSearchableFieldsUnrecorded,
+  checkSearchableFieldList as checkSearchableFieldListUnrecorded,
   indexObjectSearchTargets,
   SEARCHABLE_FIELD_UNKNOWN,
   SEARCHABLE_FIELD_UNSEARCHABLE,
   SEARCHABLE_FIELD_UNPROVISIONED,
 } from './validate-searchable-fields.js';
 import { indexUnprovisionedAnchors } from './system-fields.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding of the three ids is one verdict sentence; the reasoning
+// it used to carry is the id's `os explain` entry. Every call below records
+// what it fired, and the last cases in this file hold each recorded verdict to
+// one line of at most 200 characters — so the pin covers every firing variant
+// this suite exercises, not a chosen few. Run the whole file: those cases read
+// what the cases above fired.
+const SEARCH_IDS: readonly string[] = [
+  SEARCHABLE_FIELD_UNKNOWN,
+  SEARCHABLE_FIELD_UNSEARCHABLE,
+  SEARCHABLE_FIELD_UNPROVISIONED,
+];
+const fired: Array<{ rule: string; message: string }> = [];
+const validateSearchableFields: typeof validateSearchableFieldsUnrecorded = (...args) => {
+  const findings = validateSearchableFieldsUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
+const checkSearchableFieldList: typeof checkSearchableFieldListUnrecorded = (...args) => {
+  const findings = checkSearchableFieldListUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
+
+/** The `os explain` text of `rule`, one string. */
+const explanationOf = (rule: string): string => explainRule(rule)?.paragraphs.join('\n') ?? '';
 
 /**
  * The drift this rule exists for: `email` was renamed to `billing_email` and
@@ -633,8 +665,9 @@ describe('validateSearchableFields — list views that narrow the set', () => {
 
 /**
  * [#6675] Skill-parity — `skills/objectstack-ui/SKILL.md` › "Toolbar Search
- * (`searchableFields`, ADR-0061)" quotes this rule's two diagnostics verbatim
- * and states three boundaries as fact. The skill ships to third parties via
+ * (`searchableFields`, ADR-0061)" names this rule's two diagnostics by id
+ * (`rules/list-views.md`; [#22161] it quotes neither verdict's text) and states
+ * three boundaries as fact. The skill ships to third parties via
  * `npx skills add`, so a reader who follows it is following THIS code; if the
  * wording or a verdict moves and nobody re-reads the skill, the published text
  * teaches a rule the platform no longer has.
@@ -740,9 +773,7 @@ describe('validateSearchableFields — objectstack-ui SKILL.md parity (#6675)', 
     expect(findings[0].severity).toBe('error');
     expect(findings[0].message).toBe(
       'list-view searchableFields entry "account_id.name" is not a field on object '
-      + '"support_case". The declaration is stale: searching it can never match, and the '
-      + 'engine silently drops it — leaving a narrower search than declared, or the '
-      + 'auto-default set once every entry is dropped.',
+      + '"support_case", so the engine drops it from the search.',
     );
   });
 
@@ -753,11 +784,8 @@ describe('validateSearchableFields — objectstack-ui SKILL.md parity (#6675)', 
     expect(findings[0].rule).toBe(SEARCHABLE_FIELD_UNSEARCHABLE);
     expect(findings[0].severity).toBe('error');
     expect(findings[0].message).toBe(
-      'list-view searchableFields entry "status" is outside object "support_case"\'s '
-      + 'declared searchableFields (subject, case_number, description) — the set \'search\' '
-      + 'scans. Clients echo this declaration verbatim as the \'$searchFields\' override, '
-      + 'and the runtime refuses an entry outside the allowed set: every toolbar search on '
-      + 'this list returns 400 INVALID_FIELD.',
+      'list-view searchableFields entry "status" is outside the declared searchableFields '
+      + '(subject, case_number, description), so list search answers 400 INVALID_FIELD',
     );
   });
 
@@ -941,7 +969,9 @@ describe('[#8404] validateSearchableFields — a declared unprovisioned anchor',
     expect(warned[0].severity).toBe('warning');
     expect(warned[0].path).toBe('objects[0].searchableFields[1]');
     expect(warned[0].message).toContain('owner_id');
-    expect(warned[0].message).toContain('external object (ADR-0015)');
+    // [#22161] The shared one-clause anchor verdict; its long form (ADR-0015
+    // federation) is the id's `os explain` entry.
+    expect(warned[0].message).toContain("injected column with no storage on external object 'ext_customer'");
     // The canonical consequence, not the narrowing one.
     expect(warned[0].message).toContain('narrower than it declares');
     expect(warned[0].hint).toContain('columnMap');
@@ -986,8 +1016,10 @@ describe('[#8404] validateSearchableFields — a declared unprovisioned anchor',
       'objects[0].searchableFields[1]',
       'objects[0].listViews.all.searchableFields[0]',
     ]);
-    expect(warned[1].message).toContain('$searchFields');
-    expect(warned[1].message).toContain('empty on every');
+    // [#22161] Why a view's narrowing reaches the runtime (the `$searchFields`
+    // echo) is the id's `os explain` entry; the verdict keeps the consequence.
+    expect(warned[1].message).toContain("the list's toolbar search scans an empty column");
+    expect(warned[0].message).not.toContain('toolbar');
     // The stub keeps the anchor inside the resolved allow-list, so the #4830
     // admissibility rule stays silent and this is the ONLY finding on it.
     expect(findings.filter((f) => f.rule === SEARCHABLE_FIELD_UNSEARCHABLE)).toHaveLength(0);
@@ -1024,5 +1056,63 @@ describe('[#8404] validateSearchableFields — a declared unprovisioned anchor',
     expect(withIndex).toHaveLength(1);
     expect(withIndex[0].rule).toBe(SEARCHABLE_FIELD_UNPROVISIONED);
     expect(withIndex[0].path).toBe('p[1]');
+  });
+});
+
+describe('[#22161] one-line verdicts — the three searchable ids', () => {
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    // The coverage control first: each id fired at least once, so the shape
+    // assertion below cannot pass over an empty record.
+    expect([...new Set(fired.map((f) => f.rule))].sort()).toEqual([...SEARCH_IDS].sort());
+    for (const f of fired) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('a declared set longer than three names is quoted to three, with the rest counted', () => {
+    const findings = validateSearchableFields({
+      objects: [
+        {
+          name: 'crm_account',
+          fields: {
+            name: { type: 'text' }, code: { type: 'text' }, city: { type: 'text' },
+            email: { type: 'email' }, phone: { type: 'phone' }, notes: { type: 'textarea' },
+          },
+          searchableFields: ['name', 'code', 'city', 'email', 'phone'],
+          listViews: { all: { type: 'grid', searchableFields: ['notes'] } },
+        },
+      ],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('(name, code, city (and 2 more))');
+    // The one fact the verdict drops, the hint still carries: where the set lives.
+    expect(findings[0].hint).toContain('crm_account.searchableFields');
+  });
+
+  // What each verdict stopped saying, which `os explain RULE_ID` now prints.
+  const MOVED: Record<string, readonly string[]> = {
+    [SEARCHABLE_FIELD_UNKNOWN]: ['`resolveSearchFields`', 'narrower set', 'AUTO-DEFAULT', '`$searchFields`', 'exact string'],
+    [SEARCHABLE_FIELD_UNSEARCHABLE]: ['`$searchFields`', '`resolveSearchFieldResolution`', 'AUTO-DEFAULT', 'driver-sql', 'existence-only'],
+    [SEARCHABLE_FIELD_UNPROVISIONED]: ['ADR-0015', '`$searchFields`', 'reads as search coverage', 'scans nothing at all', 'warning'],
+  };
+
+  it('covers exactly the three ids', () => {
+    expect(Object.keys(MOVED).sort()).toEqual([...SEARCH_IDS].sort());
+  });
+
+  it.each([...SEARCH_IDS])('`os explain %s` carries what its verdict no longer says', (rule) => {
+    expect(explainRule(rule), `no \`os explain ${rule}\` entry`).toBeDefined();
+    const text = explanationOf(rule);
+    for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
+
+  it('the explanation\'s lists match the spec constants it writes out', () => {
+    // The explanation module imports nothing, so the auto-default type list and
+    // the virtual-type claim it states are held to their spec sources here.
+    const types = [...SEARCHABLE_TEXTUAL_TYPES, ...SEARCHABLE_ENUM_TYPES].join(' / ');
+    expect(explanationOf(SEARCHABLE_FIELD_UNSEARCHABLE)).toContain(`(${types})`);
+    expect([...SEARCH_VIRTUAL_TYPES]).toEqual(['formula']);
+    expect(explanationOf(SEARCHABLE_FIELD_UNSEARCHABLE)).toContain('`formula` alone');
   });
 });

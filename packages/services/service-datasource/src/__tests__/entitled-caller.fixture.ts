@@ -30,6 +30,7 @@
  * makes them worth having.
  */
 
+import { bindSecurityCatalogReader, createSecurityCatalogReader } from '@objectstack/core';
 import { DATASOURCE_ADMIN_CAPABILITY } from '../admin-routes.js';
 
 /** The credential that resolves to a caller holding the capability. */
@@ -92,7 +93,7 @@ export function createSessionAuthService() {
  * rather than a validity edge case that belongs to `@objectstack/core`'s suite.
  */
 export function createGrantsEngine() {
-  return {
+  const engine = {
     find: async (object: string, opts: any) => {
       if (object === 'sys_user_permission_set') {
         return opts?.where?.user_id === ENTITLED_USER
@@ -125,4 +126,16 @@ export function createGrantsEngine() {
       return [];
     },
   };
+  // [ADR-0131 D3/D4] The set as the security catalog declares it — the resolver
+  // reads a set's body from its definition, never from the row above.
+  const definition = { name: GRANT_SET_NAME, systemPermissions: [DATASOURCE_ADMIN_CAPABILITY] };
+  bindSecurityCatalogReader(engine, createSecurityCatalogReader({
+    registry: {
+      getItem: (type, name) => (type === 'permission' && name === GRANT_SET_NAME ? definition : undefined),
+      listItems: (type) => (type === 'permission' ? [definition] : []),
+      isPackageDisabled: () => false,
+    },
+    metadata: { get: () => undefined, list: () => [] },
+  }));
+  return engine;
 }

@@ -40,12 +40,14 @@ import { buildExistingByName } from './seed-name-lookup.js';
 import { isBuiltinPositionName } from './builtin-positions.js';
 import {
   createSeedWriteRefusals,
-  seedCtx,
-  warnOrganizationLessRows,
   reportSeedWriteRefusals,
   type SeedLogger,
   type SeedWriteRefusals,
-} from './per-organization-catalog.js';
+} from './write-refusals.js';
+import {
+  seedCtx,
+  warnOrganizationLessRows,
+} from './organization-scope.js';
 
 function genId(prefix: string): string {
   const rand = Math.random().toString(36).slice(2, 10);

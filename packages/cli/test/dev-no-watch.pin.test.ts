@@ -34,8 +34,15 @@
  *     those cases spawn the source entry — which is what puts this file in the
  *     `integration` tier (`vitest-tiers.ts`).
  *
- * ⛔ Refusal prose is not pinned. The spawned cases assert the exit status, the
- * value the failure names, and that nothing was started.
+ * ⛔ This CLI's refusal prose is not pinned. The spawned cases assert the exit
+ * status, the value the failure names, and that nothing was started. The one
+ * sentence read verbatim is pnpm's own no-match answer, because on the PACKAGE
+ * path it is the refusal itself (`PNPM_NO_PROJECTS` says why).
+ *
+ * Every spawned assertion carries the child's whole answer as its failure
+ * message (`told`): this file runs in a shared merge-queue runner, and a red
+ * reading only `expected 1 to be +0` cannot be told apart from pnpm missing, a
+ * spawn failure or a killed child.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -61,8 +68,17 @@ const DEV_SCRIPT_MARK = 'DEV-SCRIPT-RAN';
 const parseDev = (argv: string[]) =>
   Parser.parse(argv, { flags: Dev.flags, args: Dev.args, strict: true });
 
+/** One `os dev` child, reported as `execFile` handed it back — never folded into `1`. */
 interface Run {
-  code: number;
+  /**
+   * The exit status, `0` on success. `null` when the child has none because a
+   * signal ended it (`signal` names which). A string when Node failed the run
+   * before any exit status existed: a spawn error (`EAGAIN`, `ENOMEM`,
+   * `ENOENT`) or `ERR_CHILD_PROCESS_STDIO_MAXBUFFER`.
+   */
+  code: number | string | null;
+  /** The signal that ended the child, or `null`. */
+  signal: NodeJS.Signals | null;
   out: string;
 }
 
@@ -74,13 +90,8 @@ function runDev(args: string[], cwd: string): Promise<Run> {
       { cwd, maxBuffer: 8 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {
         resolvePromise({
-          // `err.code` is the real exit status; a signalled child has none and
-          // is reported as a failure, never as 0.
-          code: err
-            ? typeof (err as { code?: unknown }).code === 'number'
-              ? (err as unknown as { code: number }).code
-              : 1
-            : 0,
+          code: err ? (err.code ?? null) : 0,
+          signal: err?.signal ?? null,
           out: `${String(stdout)}\n${String(stderr)}`,
         });
       },
@@ -88,9 +99,26 @@ function runDev(args: string[], cwd: string): Promise<Run> {
   });
 }
 
+/** A run spelled out as an assertion's failure message, so a red names its own cause. */
+const told = (run: Run): string =>
+  `os dev ended with code ${JSON.stringify(run.code)}, signal ${JSON.stringify(run.signal)}; ` +
+  `its output (stdout, then stderr):\n${run.out}`;
+
 /** The `✗` line `printError` writes — the one sentence the failure is judged by. */
 const failureLine = (out: string): string =>
   out.split('\n').find((line) => line.trimStart().startsWith('✗')) ?? '';
+
+/**
+ * pnpm's own answer to a PACKAGE that selects nothing: the refusal itself, and
+ * the one line proving pnpm judged the filter. `dev.ts` has no sentence of its
+ * own for it (pnpm owns the filter grammar, so `--fail-if-no-match` makes pnpm
+ * the one that answers). The `✗` line on that path is the CLI's catch-all for
+ * EVERY failure of `pnpm … dev`, and it names `false` only because it echoes
+ * the command; with pnpm off `PATH` the child prints that same `✗` line and
+ * still exits 1. Measured on pnpm 10.28.0 and 10.31.0 in a directory holding
+ * no workspace (`projectDir`'s shape): this line on stdout, exit 1.
+ */
+const PNPM_NO_PROJECTS = /^No projects found in "/m;
 
 describe('the watch opt-out is reachable', () => {
   it('`os dev --no-watch` parses, and the boot it describes runs no watcher', async () => {
@@ -154,26 +182,27 @@ afterAll(() => {
 
 describe('a PACKAGE that selects no workspace project fails', () => {
   it('`os dev --watch=false` exits 1 instead of 0', () => {
-    expect(watchEqualsFalse.code).toBe(1);
+    expect(watchEqualsFalse.code, told(watchEqualsFalse)).toBe(1);
   });
 
-  it('and the failure names the value that matched nothing', () => {
-    expect(failureLine(watchEqualsFalse.out)).toMatch(/(^|\s)false(\s|$)/);
+  it('and the failure is pnpm refusing the PACKAGE, under a line naming the value that matched nothing', () => {
+    expect(watchEqualsFalse.out, told(watchEqualsFalse)).toMatch(PNPM_NO_PROJECTS);
+    expect(failureLine(watchEqualsFalse.out), told(watchEqualsFalse)).toMatch(/(^|\s)false(\s|$)/);
   });
 });
 
 describe('`--no-watch` where os dev boots no environment is refused, not ignored', () => {
   it('the fixture starts its own dev script when asked — the control', () => {
-    expect(bareAtWorkspace.code).toBe(0);
-    expect(bareAtWorkspace.out).toContain(DEV_SCRIPT_MARK);
+    expect(bareAtWorkspace.code, told(bareAtWorkspace)).toBe(0);
+    expect(bareAtWorkspace.out, told(bareAtWorkspace)).toContain(DEV_SCRIPT_MARK);
   });
 
   it('exits 1, naming the flag', () => {
-    expect(noWatchAtWorkspace.code).toBe(1);
-    expect(failureLine(noWatchAtWorkspace.out)).toContain('--no-watch');
+    expect(noWatchAtWorkspace.code, told(noWatchAtWorkspace)).toBe(1);
+    expect(failureLine(noWatchAtWorkspace.out), told(noWatchAtWorkspace)).toContain('--no-watch');
   });
 
   it('and starts nothing', () => {
-    expect(noWatchAtWorkspace.out).not.toContain(DEV_SCRIPT_MARK);
+    expect(noWatchAtWorkspace.out, told(noWatchAtWorkspace)).not.toContain(DEV_SCRIPT_MARK);
   });
 });

@@ -76,16 +76,6 @@ const GATED: ReadonlyArray<{
   readsSchemaTree?: string;
   ratchet?: true;
 }> = [
-  // First, because it is UPSTREAM of the two below and the cheapest thing in the
-  // list: it reads a directory and splices text, with no schema build. Both
-  // `spec-changes.json` and the upgrade guide are projections of the migration
-  // registry (#7297), so a registry left stale after an entry file was added
-  // reports as THREE stale artifacts, of which only this one names the cause.
-  {
-    check: 'check:migration-registry',
-    gen: 'gen:migration-registry',
-    artifact: 'src/migrations/registry.ts — its generated regions, from src/migrations/entries/',
-  },
   // Its committed copy is gone too (#22485): the publish lane writes the shipped one
   // into the package, `gen:spec-changes` writes the same gitignored file locally,
   // and the gate generates in memory, so it never reports stale.
@@ -438,6 +428,19 @@ const UNGATED_GENERATORS: ReadonlyArray<{ gen: string; why: string }> = [
       '`pnpm build` — green by construction, the #4177/#4232 class.',
   },
   { gen: 'gen:sbom', why: 'the SBOM is a release artifact, regenerated at publish time rather than checked in' },
+  // Its gate, `check:migration-registry`, retired with the committed copy (#22554):
+  // there is nothing left to compare. Not a hole, for the reason `gen:openapi`'s
+  // entry gives, and more strongly — this output is never read stale by a build.
+  {
+    gen: 'gen:migration-registry',
+    why:
+      'src/migrations/registry.ts is GITIGNORED build output since #22554, generated whole from ' +
+      'src/migrations/registry.ts.template and src/migrations/entries/. There is no committed copy for a ' +
+      'gate to compare: the generator runs on `pnpm install` (`prepare`), as the first step of `build`, and ' +
+      'before `typecheck`, `test` and `test:repo` (their scripts, and the turbo task they depend on, whose ' +
+      'output is the file), and its --self-test (splicing, ordering, determinism) runs inside every ' +
+      'generation. A malformed entry fails the generation itself, loudly, before anything reads the file.',
+  },
 ];
 
 /**
