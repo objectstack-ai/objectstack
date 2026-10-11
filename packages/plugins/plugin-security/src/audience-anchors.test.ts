@@ -1,66 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// ADR-0090 D5/D9 — audience anchors: everyone/guest seeding and the
-// high-privilege binding gate.
+// ADR-0090 D5/D9 — audience anchors: the high-privilege binding gate. The
+// anchors themselves are declared position metadata (`builtin-positions.ts`);
+// the boot writes no row for them (ADR-0131 D2).
 
 import { describe, it, expect } from 'vitest';
 import { describeAnchorForbiddenBits } from '@objectstack/spec/security';
-import { bootstrapBuiltinRoles } from './bootstrap-builtin-positions';
-import { securityBuiltinPositions } from './builtin-positions';
 import { describeHighPrivilegeBits } from './security-plugin';
-
-function makeQl() {
-  const tables: Record<string, any[]> = { sys_position: [] };
-  return {
-    tables,
-    async find(object: string, opts: any) {
-      const where = opts?.where ?? {};
-      return (tables[object] ?? []).filter((r) =>
-        Object.entries(where).every(([k, v]) => (r as any)[k] === v),
-      );
-    },
-    async insert(object: string, data: any) {
-      (tables[object] ??= []).push(data);
-      return data;
-    },
-    async update(object: string, data: any) {
-      const t = tables[object] ?? [];
-      const i = t.findIndex((r) => r.id === data.id);
-      if (i >= 0) t[i] = { ...t[i], ...data };
-      return t[i];
-    },
-  } as any;
-}
-
-describe('audience anchors (ADR-0090 D5/D9)', () => {
-  it('seeds everyone and guest alongside the builtin identity names', async () => {
-    const ql = makeQl();
-    const res = await bootstrapBuiltinRoles(ql);
-    const names = ql.tables.sys_position.map((r: any) => r.name);
-    expect(names).toEqual(
-      expect.arrayContaining(['platform_admin', 'org_owner', 'org_admin', 'org_member', 'everyone', 'guest']),
-    );
-    expect(res.seeded).toBe(6);
-    // platform-managed, undeletable posture (A4 #2920 unified vocab; formerly 'system')
-    for (const r of ql.tables.sys_position) expect(r.managed_by).toBe('platform');
-  });
-
-  // [ADR-0131 C2 S2] The seed reads the declarations — the same list the
-  // plugin registers as position metadata — and has no list of its own.
-  it('seeds exactly the declared built-in positions, with their declared label and description', async () => {
-    const ql = makeQl();
-    await bootstrapBuiltinRoles(ql);
-    const seeded = ql.tables.sys_position.map((r: any) => ({ name: r.name, label: r.label, description: r.description }));
-    expect(seeded).toEqual(securityBuiltinPositions.map(({ name, label, description }) => ({ name, label, description })));
-  });
-
-  it('re-seed is idempotent (updates, no duplicates)', async () => {
-    const ql = makeQl();
-    await bootstrapBuiltinRoles(ql);
-    const res2 = await bootstrapBuiltinRoles(ql);
-    expect(res2.seeded).toBe(0);
-    expect(ql.tables.sys_position.filter((r: any) => r.name === 'everyone')).toHaveLength(1);
-  });
-});
 
 describe('describeHighPrivilegeBits (anchor-binding predicate)', () => {
   it('flags VAMA, destructive bits and system permissions (the ADR-0090 D5 list)', () => {

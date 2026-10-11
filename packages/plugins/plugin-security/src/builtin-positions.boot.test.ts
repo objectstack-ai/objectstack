@@ -1,22 +1,18 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [ADR-0131 D2, C2 stages S2 and S2b] The six built-in positions as declared
- * metadata, and the declared-positions seeder reading through the security
- * catalog read, read off a REAL boot of this plugin: what the catalog read
- * lists, what the boot writes into `sys_position`, what every principal is
- * granted, and which position writes are still refused.
+ * [ADR-0131 D2, C2 stages S2 and S2b, C3 stage 6a] The six built-in positions
+ * as declared metadata, read off a REAL boot of this plugin: what the catalog
+ * read lists, what the boot writes into `sys_position`, what every principal
+ * is granted, and which position writes are still refused.
  *
- * The stage moves where the six come from — one declaration list, registered
- * with the engine registry and read by the built-in seeder — and keeps the
- * declared-positions seeder off them. No resolver reads a definition yet, so
- * the only ways a grant could move are a catalog row that is no longer seeded,
- * seeded differently, or seeded twice: above all `everyone`, which carries
- * every authenticated principal's baseline through its binding. So this boot
- * is the plugin's own — `init`, `start`, then its `kernel:ready` handlers in
- * registration order (catalog seeding and the baseline binding to `everyone`
- * included) — over a real `ObjectQL` engine on SQLite, with a stack-declared
- * position in the metadata service beside the six.
+ * The six are one declaration list, registered with the engine registry, and
+ * `everyone`'s baseline is that anchor's declared `permissionSets`. Since
+ * stage 6a no boot step writes a `sys_position` row: the built-in seeder, the
+ * declared-positions seeder and the baseline junction writer are retired. So
+ * this boot is the plugin's own — `init`, `start`, then its `kernel:ready`
+ * handlers in registration order — over a real `ObjectQL` engine on SQLite,
+ * with a stack-declared position in the metadata service beside the six.
  *
  * ## The scenarios
  *
@@ -29,31 +25,28 @@
  *  - `walled` — one pass per organization at boot, then one more organization
  *    created after it (the organization-creation path);
  *
- * each booted three ways:
+ * each booted four ways:
  *
- *  - as it is;
+ *  - as it is (a fresh database);
  *  - with `a door-authored position in the registry` — one position registered
  *    the way a metadata author's saved definition is hydrated (no package);
  *  - with `a stored definition under a built-in name` — `org_admin` and
  *    `everyone` saved the same way before the six were declared, so each
- *    shadows its declaration at read (the registry's bare slot answers first).
+ *    shadows its declaration at read (the registry's bare slot answers first);
+ *  - as `an existing database` — holding the rows the retired seeders wrote on
+ *    an earlier boot ({@link LEGACY_ROWS}).
  *
  * ## The goldens
  *
- * The row census, the `sys_position` write ledger and the grant envelopes of
- * the three postures as they are were recorded from the tree BEFORE the
- * declarations existed (objectstack `51290bca2c`, this file run against that
- * tree's sources; S2's PR record carries the run) and are unchanged since.
+ * The census and the write ledger: no boot writes a `sys_position` row in any
+ * scenario, and an existing database keeps exactly the rows it had. The census
+ * instrument is proven able to see a row by a positive control (one
+ * organization-authored create, read back as exactly one row).
  *
- * S2b changes the census and the ledger in one place, the door-authored
- * scenarios: the declared-positions seeder took the registry ALONE whenever it
- * held a position besides the six, so the door-authored position silenced the
- * stack's `field_rep` in every pass — and in every organization created later.
- * It now reads both sources, so `field_rep` is seeded beside it. The
- * door-authored position's own rows are what the registry-only read wrote
- * (a separate pin, green on both sides of S2b), the stored definitions under
- * a built-in name change no row and no write, and no principal's grants move
- * in any scenario: none of them holds a position S2b newly seeds.
+ * The grant envelopes were recorded from the tree BEFORE the declarations
+ * existed (objectstack `51290bca2c`; S2's PR record carries the run), with the
+ * one recorded move stage 1 made ({@link GRANT_GOLDEN}). Stage 6a moves none:
+ * a fresh database and an existing one grant every principal the same.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -112,7 +105,12 @@ const APP_DEFAULT = {
 type PostureName = 'single' | 'single + organization' | 'walled';
 const DOOR = 'a door-authored position in the registry';
 const SHADOW = 'a stored definition under a built-in name';
-type ScenarioName = PostureName | `${PostureName}, ${typeof DOOR}` | `${PostureName}, ${typeof SHADOW}`;
+const EXISTING = 'an existing database';
+type ScenarioName =
+  | PostureName
+  | `${PostureName}, ${typeof DOOR}`
+  | `${PostureName}, ${typeof SHADOW}`
+  | `${PostureName}, ${typeof EXISTING}`;
 interface Scenario {
   readonly posture: 'single' | 'isolated';
   /** Organizations (with the memberships) present before `kernel:ready`. */
@@ -123,17 +121,21 @@ interface Scenario {
   readonly authoredPosition: boolean;
   /** Package-less definitions under built-in names in the registry before the boot ({@link SHADOWING_DEFINITIONS}). */
   readonly shadowedBuiltins: boolean;
+  /** The rows the retired seeders wrote on an earlier boot, present before this one ({@link LEGACY_ROWS}). */
+  readonly existingRows: boolean;
 }
-const POSTURES: Record<PostureName, Omit<Scenario, 'authoredPosition' | 'shadowedBuiltins'>> = {
+type Variant = 'authoredPosition' | 'shadowedBuiltins' | 'existingRows';
+const POSTURES: Record<PostureName, Omit<Scenario, Variant>> = {
   single: { posture: 'single', organizationAtBoot: false, lateOrganization: false },
   'single + organization': { posture: 'single', organizationAtBoot: true, lateOrganization: false },
   walled: { posture: 'isolated', organizationAtBoot: true, lateOrganization: true },
 };
 const SCENARIOS = Object.fromEntries(
   (Object.keys(POSTURES) as PostureName[]).flatMap((name) => [
-    [name, { ...POSTURES[name], authoredPosition: false, shadowedBuiltins: false }],
-    [`${name}, ${DOOR}`, { ...POSTURES[name], authoredPosition: true, shadowedBuiltins: false }],
-    [`${name}, ${SHADOW}`, { ...POSTURES[name], authoredPosition: false, shadowedBuiltins: true }],
+    [name, { ...POSTURES[name], authoredPosition: false, shadowedBuiltins: false, existingRows: false }],
+    [`${name}, ${DOOR}`, { ...POSTURES[name], authoredPosition: true, shadowedBuiltins: false, existingRows: false }],
+    [`${name}, ${SHADOW}`, { ...POSTURES[name], authoredPosition: false, shadowedBuiltins: true, existingRows: false }],
+    [`${name}, ${EXISTING}`, { ...POSTURES[name], authoredPosition: false, shadowedBuiltins: false, existingRows: true }],
   ]),
 ) as Record<ScenarioName, Scenario>;
 
@@ -181,6 +183,14 @@ interface Booted {
   ledger: string[];
   /** The rows the boot left, one string per row. */
   census: string[];
+}
+
+/** Every `sys_position` row, one string per row, past every scope. */
+async function positionCensus(engine: ObjectQL): Promise<string[]> {
+  const rows = (await engine.find('sys_position', { where: {}, limit: 5000, context: SYS })) as any[];
+  return rows
+    .map((r) => [r.name, r.organization_id ?? '-', r.managed_by, r.active, r.is_default, r.label, r.description ?? '-'].join(' | '))
+    .sort();
 }
 
 async function boot(scenario: Scenario): Promise<Booted> {
@@ -309,19 +319,25 @@ async function boot(scenario: Scenario): Promise<Booted> {
     ], { context: { isSystem: true, tenantId: ORG } } as any);
   }
 
-  // The plugin's own boot: seeders, the baseline binding to `everyone`, the
-  // organization-admin backfill — in registration order, as the kernel fires them.
+  if (scenario.existingRows) {
+    // What an earlier boot's retired seeders left: written through the
+    // unwrapped engine, so the ledger records only what THIS boot writes.
+    const organizationId = scenario.posture === 'isolated' ? ORG : undefined;
+    const context = organizationId ? { isSystem: true, tenantId: organizationId } : SYS;
+    for (const row of LEGACY_ROWS) {
+      await insert('sys_position', { id: `pos_${row.name}`, ...row, active: true, is_default: false }, { context } as any);
+    }
+  }
+
+  // The plugin's own boot: the bootstrap, the `everyone` baseline declaration,
+  // the organization-admin backfill — in registration order, as the kernel fires them.
   for (const handler of hooks.get('kernel:ready') ?? []) await handler();
   if (scenario.lateOrganization) {
     await engine.insert('sys_organization', { id: LATE_ORG, name: 'Late Org', slug: 'late' }, { context: SYS } as any);
   }
   recording = false;
 
-  const rows = (await engine.find('sys_position', { where: {}, limit: 5000, context: SYS })) as any[];
-  const census = rows
-    .map((r) => [r.name, r.organization_id ?? '-', r.managed_by, r.active, r.is_default, r.label, r.description ?? '-'].join(' | '))
-    .sort();
-  return { engine, metadata, ledger, census };
+  return { engine, metadata, ledger, census: await positionCensus(engine) };
 }
 
 /** The four principals' resolved grants — needs the organization and its memberships. */
@@ -387,7 +403,7 @@ async function grantsByPrincipal(engine: ObjectQL, posture: 'single' | 'isolated
  * that show the refusals are not blanket: a write through the data door by the
  * organization administrator (superuser wildcard, not a system context).
  */
-async function tenantPositionWrites(engine: ObjectQL): Promise<Record<string, WriteOutcome>> {
+async function tenantPositionWrites(engine: ObjectQL, existingRows: boolean): Promise<Record<string, WriteOutcome>> {
   const tenant = { userId: 'usr_orgadmin', positions: [], permissions: ['qa_admin'], tenantId: ORG };
   const own = async (name: string) => {
     const rows = (await engine.find('sys_position', { where: { name }, limit: 5, context: { isSystem: true, tenantId: ORG } })) as any[];
@@ -412,10 +428,15 @@ async function tenantPositionWrites(engine: ObjectQL): Promise<Record<string, Wr
     'control: assign a stack-declared position (no row needed)': await outcome(engine.insert(
       'sys_user_position', { user_id: 'usr_member', position: DECLARED_POSITIONS[0].name }, { context: tenant } as any,
     )),
-    'delete the everyone row': await outcome(engine.delete('sys_position', { where: { id: everyone?.id }, context: tenant } as any)),
-    'relabel the platform_admin row': await outcome(engine.update(
-      'sys_position', { id: platformAdmin?.id, label: 'Repurposed' }, { context: tenant } as any,
-    )),
+    // Only an existing database holds a built-in row to refuse (stage 6a).
+    ...(existingRows
+      ? {
+        'delete the everyone row': await outcome(engine.delete('sys_position', { where: { id: everyone?.id }, context: tenant } as any)),
+        'relabel the platform_admin row': await outcome(engine.update(
+          'sys_position', { id: platformAdmin?.id, label: 'Repurposed' }, { context: tenant } as any,
+        )),
+      }
+      : {}),
   };
 }
 
@@ -458,25 +479,24 @@ for (const name of Object.keys(SCENARIOS) as ScenarioName[]) {
       }
     });
 
-    // P2.2 — the rows, and who wrote them: the built-ins, every stack-declared
-    // position and every door-authored one, in every organization (S2b).
-    it('seeds the built-ins, the stack-declared positions and the door-authored ones', () => {
-      const { census, ledger } = booted.get(name)!;
-      expect({ census, ledger }).toEqual(CATALOG_GOLDEN[name]);
-    });
+    // P2.2 — the rows, and who wrote them: none, in any pass (stage 6a). An
+    // existing database keeps exactly the rows it had.
+    it('writes no sys_position row, and leaves an existing database\u2019s rows as they were', async () => {
+      const { engine, census, ledger } = booted.get(name)!;
+      expect({ census, ledger }).toEqual({ census: scenario.existingRows ? legacyCensus(scenario) : [], ledger: [] });
 
-    if (scenario.authoredPosition) {
-      // S2b moves which positions seed beside the door-authored one, never
-      // that one's own rows: the same row, written once per pass, with what the
-      // registry-only read wrote.
-      it('writes the door-authored position’s rows as the registry-only read wrote them', () => {
-        const { census, ledger } = booted.get(name)!;
-        expect({
-          census: census.filter((line) => line.startsWith('door_authored ')),
-          ledger: ledger.filter((line) => line.includes(' door_authored@')),
-        }).toEqual(DOOR_AUTHORED_ROWS[scenario.lateOrganization ? 'walled' : 'single']);
-      });
-    }
+      // Positive control: the census sees a row — one organization-authored
+      // create reads back as exactly one more. Removed again, so the cases
+      // below read the boot's state.
+      const context = { isSystem: true, tenantId: ORG };
+      await engine.insert('sys_position', { id: 'pos_census_control', name: 'zz_census_control', label: 'Control' }, { context } as any);
+      const after = await positionCensus(engine);
+      expect(after.filter((line) => !census.includes(line))).toEqual([
+        `zz_census_control | ${ORG} | admin | true | false | Control | -`,
+      ]);
+      await engine.delete('sys_position', { where: { id: 'pos_census_control' }, context } as any);
+      expect(await positionCensus(engine)).toEqual(census);
+    });
 
     if (scenario.organizationAtBoot) {
       it('grants every principal what it was granted before the declarations', async () => {
@@ -485,8 +505,10 @@ for (const name of Object.keys(SCENARIOS) as ScenarioName[]) {
       });
 
       it('still refuses a tenant a dangling position name, and deleting or relabelling a built-in row', async () => {
+        // A fresh database holds no built-in row to delete or relabel; the two
+        // refusals are read where the rows are, on an existing database.
         const { engine } = booted.get(name)!;
-        expect(await tenantPositionWrites(engine)).toEqual(REFUSAL_GOLDEN);
+        expect(await tenantPositionWrites(engine, scenario.existingRows)).toEqual(refusalGoldenFor(scenario));
       });
     }
   });
@@ -497,7 +519,8 @@ for (const name of Object.keys(SCENARIOS) as ScenarioName[]) {
  * catalog does not hold, a dangling one or a row with no definition alike, is
  * the position catalog refusal's envelope (`reference_not_found` at
  * `position`); a stack-declared position is assigned with no row; the two
- * built-in rows are refused on their `platform` provenance.
+ * built-in rows an existing database holds are refused on their `platform`
+ * provenance.
  */
 const REFUSAL_GOLDEN: Record<string, WriteOutcome> = {
   'assign a position the security catalog does not hold': {
@@ -528,191 +551,48 @@ const REFUSAL_GOLDEN: Record<string, WriteOutcome> = {
   },
 };
 
-/**
- * Each recorded row's `label | description`, as the census spells it — one
- * entry per name, the same in every organization.
- */
-const TEXT: Record<string, string> = {
-  everyone:
-    'Everyone | Built-in audience anchor: every authenticated member holds this position implicitly. Permission sets bound to it are the default grants for the tenant (ADR-0090 D5). High-privilege sets cannot be bound here.',
-  field_rep:
-    'Field Rep | Works the territory',
-  guest:
-    'Guest | Built-in audience anchor: unauthenticated principals hold this position implicitly and exclusively. Bindings face the strictest checks — named objects only, read-mostly, never a wildcard (ADR-0090 D9).',
-  org_admin:
-    'Organization Admin | Organization administrator within a tenant.',
-  org_member:
-    'Organization Member | Organization member within a tenant.',
-  org_owner:
-    'Organization Owner | Organization owner within a tenant.',
-  platform_admin:
-    'Platform Admin | Platform operator (SaaS admin). NOT a tenant user role.',
-  door_authored:
-    'Door Authored | -',
-};
-
-/** The three postures as they are: recorded before the declarations (module doc), unchanged by S2b. */
-const PLAIN_GOLDEN: Record<PostureName, { census: string[]; ledger: string[] }> = {
-  single: {
-    census: [
-      `everyone | - | platform | true | false | ${TEXT.everyone}`,
-      `field_rep | - | admin | true | false | ${TEXT.field_rep}`,
-      `guest | - | platform | true | false | ${TEXT.guest}`,
-      `org_admin | - | platform | true | false | ${TEXT.org_admin}`,
-      `org_member | - | platform | true | false | ${TEXT.org_member}`,
-      `org_owner | - | platform | true | false | ${TEXT.org_owner}`,
-      `platform_admin | - | platform | true | false | ${TEXT.platform_admin}`,
-    ],
-    ledger: [
-      'insert field_rep@-',
-      'insert platform_admin@- managed_by=platform',
-      'insert org_owner@- managed_by=platform',
-      'insert org_admin@- managed_by=platform',
-      'insert org_member@- managed_by=platform',
-      'insert everyone@- managed_by=platform',
-      'insert guest@- managed_by=platform',
-    ],
-  },
-  'single + organization': {
-    census: [
-      `everyone | - | platform | true | false | ${TEXT.everyone}`,
-      `field_rep | - | admin | true | false | ${TEXT.field_rep}`,
-      `guest | - | platform | true | false | ${TEXT.guest}`,
-      `org_admin | - | platform | true | false | ${TEXT.org_admin}`,
-      `org_member | - | platform | true | false | ${TEXT.org_member}`,
-      `org_owner | - | platform | true | false | ${TEXT.org_owner}`,
-      `platform_admin | - | platform | true | false | ${TEXT.platform_admin}`,
-    ],
-    ledger: [
-      'insert field_rep@-',
-      'insert platform_admin@- managed_by=platform',
-      'insert org_owner@- managed_by=platform',
-      'insert org_admin@- managed_by=platform',
-      'insert org_member@- managed_by=platform',
-      'insert everyone@- managed_by=platform',
-      'insert guest@- managed_by=platform',
-    ],
-  },
-  walled: {
-    census: [
-      `everyone | org_eq | platform | true | false | ${TEXT.everyone}`,
-      `everyone | org_late | platform | true | false | ${TEXT.everyone}`,
-      `field_rep | org_eq | admin | true | false | ${TEXT.field_rep}`,
-      `field_rep | org_late | admin | true | false | ${TEXT.field_rep}`,
-      `guest | org_eq | platform | true | false | ${TEXT.guest}`,
-      `guest | org_late | platform | true | false | ${TEXT.guest}`,
-      `org_admin | org_eq | platform | true | false | ${TEXT.org_admin}`,
-      `org_admin | org_late | platform | true | false | ${TEXT.org_admin}`,
-      `org_member | org_eq | platform | true | false | ${TEXT.org_member}`,
-      `org_member | org_late | platform | true | false | ${TEXT.org_member}`,
-      `org_owner | org_eq | platform | true | false | ${TEXT.org_owner}`,
-      `org_owner | org_late | platform | true | false | ${TEXT.org_owner}`,
-      `platform_admin | org_eq | platform | true | false | ${TEXT.platform_admin}`,
-      `platform_admin | org_late | platform | true | false | ${TEXT.platform_admin}`,
-    ],
-    ledger: [
-      'insert field_rep@org_eq',
-      'insert platform_admin@org_eq managed_by=platform',
-      'insert org_owner@org_eq managed_by=platform',
-      'insert org_admin@org_eq managed_by=platform',
-      'insert org_member@org_eq managed_by=platform',
-      'insert everyone@org_eq managed_by=platform',
-      'insert guest@org_eq managed_by=platform',
-      'insert field_rep@org_late',
-      'insert platform_admin@org_late managed_by=platform',
-      'insert org_owner@org_late managed_by=platform',
-      'insert org_admin@org_late managed_by=platform',
-      'insert org_member@org_late managed_by=platform',
-      'insert everyone@org_late managed_by=platform',
-      'insert guest@org_late managed_by=platform',
-    ],
-  },
-};
+/** {@link REFUSAL_GOLDEN} for a scenario: the built-in row cases need an existing database's rows. */
+function refusalGoldenFor(scenario: Scenario): Record<string, WriteOutcome> {
+  if (scenario.existingRows) return REFUSAL_GOLDEN;
+  const { 'delete the everyone row': _d, 'relabel the platform_admin row': _r, ...fresh } = REFUSAL_GOLDEN;
+  return fresh;
+}
 
 /**
- * The door-authored scenarios after S2b: the posture's own rows plus the
- * door-authored position's, `field_rep` included in every pass — before S2b it
- * was missing from all of them (module doc).
+ * The rows the retired seeders wrote — the six built-ins (`platform`) and the
+ * stack's declared `field_rep` — as an existing database holds them: one
+ * organization-less set under `single`, the organization's own set under a
+ * wall. The text is what those seeders stamped from the same declarations.
  */
-const DOOR_GOLDEN: Record<PostureName, { census: string[]; ledger: string[] }> = {
-  single: {
-    census: [
-      `door_authored | - | admin | true | false | ${TEXT.door_authored}`,
-      ...PLAIN_GOLDEN.single.census,
-    ],
-    ledger: [
-      'insert door_authored@-',
-      ...PLAIN_GOLDEN.single.ledger,
-    ],
+const LEGACY_ROWS: ReadonlyArray<{ name: string; label: string; description: string; managed_by?: string }> = [
+  { name: 'field_rep', label: 'Field Rep', description: 'Works the territory' },
+  { name: 'platform_admin', label: 'Platform Admin', description: 'Platform operator (SaaS admin). NOT a tenant user role.', managed_by: 'platform' },
+  { name: 'org_owner', label: 'Organization Owner', description: 'Organization owner within a tenant.', managed_by: 'platform' },
+  { name: 'org_admin', label: 'Organization Admin', description: 'Organization administrator within a tenant.', managed_by: 'platform' },
+  { name: 'org_member', label: 'Organization Member', description: 'Organization member within a tenant.', managed_by: 'platform' },
+  {
+    name: 'everyone',
+    label: 'Everyone',
+    description:
+      'Built-in audience anchor: every authenticated member holds this position implicitly. Permission sets bound to it are the default grants for the tenant (ADR-0090 D5). High-privilege sets cannot be bound here.',
+    managed_by: 'platform',
   },
-  'single + organization': {
-    census: [
-      `door_authored | - | admin | true | false | ${TEXT.door_authored}`,
-      ...PLAIN_GOLDEN['single + organization'].census,
-    ],
-    ledger: [
-      'insert door_authored@-',
-      ...PLAIN_GOLDEN['single + organization'].ledger,
-    ],
+  {
+    name: 'guest',
+    label: 'Guest',
+    description:
+      'Built-in audience anchor: unauthenticated principals hold this position implicitly and exclusively. Bindings face the strictest checks — named objects only, read-mostly, never a wildcard (ADR-0090 D9).',
+    managed_by: 'platform',
   },
-  walled: {
-    census: [
-      `door_authored | org_eq | admin | true | false | ${TEXT.door_authored}`,
-      `door_authored | org_late | admin | true | false | ${TEXT.door_authored}`,
-      ...PLAIN_GOLDEN.walled.census,
-    ],
-    ledger: [
-      'insert door_authored@org_eq',
-      'insert field_rep@org_eq',
-      'insert platform_admin@org_eq managed_by=platform',
-      'insert org_owner@org_eq managed_by=platform',
-      'insert org_admin@org_eq managed_by=platform',
-      'insert org_member@org_eq managed_by=platform',
-      'insert everyone@org_eq managed_by=platform',
-      'insert guest@org_eq managed_by=platform',
-      'insert door_authored@org_late',
-      'insert field_rep@org_late',
-      'insert platform_admin@org_late managed_by=platform',
-      'insert org_owner@org_late managed_by=platform',
-      'insert org_admin@org_late managed_by=platform',
-      'insert org_member@org_late managed_by=platform',
-      'insert everyone@org_late managed_by=platform',
-      'insert guest@org_late managed_by=platform',
-    ],
-  },
-};
+];
 
-/**
- * The census and the ledger, per scenario. A stored definition under a
- * built-in name changes neither: the declared seeder writes no row for the
- * name and restamps none, and the built-in rows are exactly what
- * `bootstrapBuiltinRoles` writes from the declarations.
- */
-const CATALOG_GOLDEN = Object.fromEntries(
-  (Object.keys(POSTURES) as PostureName[]).flatMap((name) => [
-    [name, PLAIN_GOLDEN[name]],
-    [`${name}, ${DOOR}`, DOOR_GOLDEN[name]],
-    [`${name}, ${SHADOW}`, PLAIN_GOLDEN[name]],
-  ]),
-) as Record<ScenarioName, { census: string[]; ledger: string[] }>;
-
-/**
- * The door-authored position's own rows and writes — the same before S2b
- * (the registry-only read) and after it.
- */
-const DOOR_AUTHORED_ROWS: Record<'single' | 'walled', { census: string[]; ledger: string[] }> = {
-  single: {
-    census: [`door_authored | - | admin | true | false | ${TEXT.door_authored}`],
-    ledger: ['insert door_authored@-'],
-  },
-  walled: {
-    census: [
-      `door_authored | org_eq | admin | true | false | ${TEXT.door_authored}`,
-      `door_authored | org_late | admin | true | false | ${TEXT.door_authored}`,
-    ],
-    ledger: ['insert door_authored@org_eq', 'insert door_authored@org_late'],
-  },
-};
+/** {@link LEGACY_ROWS} as the census spells them, for a scenario's posture. */
+function legacyCensus(scenario: Scenario): string[] {
+  const organization = scenario.posture === 'isolated' ? ORG : '-';
+  return LEGACY_ROWS
+    .map((r) => [r.name, organization, r.managed_by ?? 'admin', true, false, r.label, r.description].join(' | '))
+    .sort();
+}
 
 /**
  * Recorded before the declarations (module doc). `field_default` and

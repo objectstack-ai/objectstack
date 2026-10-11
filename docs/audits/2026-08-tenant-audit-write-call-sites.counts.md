@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 239 |
-| Object name statically decidable | 160 |
-| Object name chosen at run time | 79 |
-| Against a tenancy-enabled object | 159 |
+| Write call sites | 233 |
+| Object name statically decidable | 158 |
+| Object name chosen at run time | 75 |
+| Against a tenancy-enabled object | 157 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 178 |
+| Threading a tenant context | 172 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 53 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 127 |
+| Threading a decidably elevated context | 126 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 104 |
+| Threading a context of undecidable elevation | 99 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,11 +90,11 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-11 at `f3ff683a1`.
+Measured on 2026-10-11 at `64e53f1d0`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 635 |
+| tracked non-test sources scanned | 633 |
 | engine-shaped types recognised | 72 |
 | declared objects in the registry | 117 |
 | same-named calls subtracted as non-engine | 162 |
@@ -107,7 +107,7 @@ Measured on 2026-10-11 at `f3ff683a1`.
 | `packages/plugins/organizations/src/claim-orphan-org-rows.ts` | `update` | `schema.name` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-approvals/src/action-slot-backfill.ts` | `update` | `sys_approval_action` | enabled | elevated | 2 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `update` | `object` | undecidable | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_action` | enabled | elevated | 15 |
+| `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_action` | enabled | elevated | 14 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `delete` | `sys_approval_approver` | enabled | elevated | 2 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_approver` | enabled | elevated | 2 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_request` | enabled | elevated | 1 |
@@ -159,10 +159,6 @@ Measured on 2026-10-11 at `f3ff683a1`.
 | `packages/plugins/plugin-pinyin-search/src/companion-projection.ts` | `update` | `schema.name` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/auto-org-admin-grant.ts` | `delete` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/auto-org-admin-grant.ts` | `insert` | `object` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-security/src/bootstrap-builtin-positions.ts` | `insert` | `object` | undecidable | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-security/src/bootstrap-builtin-positions.ts` | `update` | `object` | undecidable | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-security/src/bootstrap-declared-positions.ts` | `insert` | `object` | undecidable | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-security/src/bootstrap-declared-positions.ts` | `update` | `object` | undecidable | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/bootstrap-platform-admin.ts` | `insert` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/bootstrap-platform-admin.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/claim-seed-ownership.ts` | `update` | `schema.name` | undecidable | elevated | 1 |
@@ -177,7 +173,6 @@ Measured on 2026-10-11 at `f3ff683a1`.
 | `packages/plugins/plugin-security/src/position-environment-backfill.ts` | `insert` | `DATA_MIGRATION_FLAG_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/position-write-through.ts` | `delete` | `sys_position` | enabled | elevated | 1 |
 | `packages/plugins/plugin-security/src/position-write-through.ts` | `update` | `sys_position` | enabled | elevated | 1 |
-| `packages/plugins/plugin-security/src/security-plugin.ts` | `insert` | `sys_position_permission_set` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `delete` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 2 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `insert` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `update` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 3 |

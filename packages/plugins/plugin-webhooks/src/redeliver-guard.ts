@@ -21,21 +21,33 @@
  *     should still receive this payload, or under which key — and an operator
  *     deleting a webhook has expressed that it should stop. The maintainer
  *     named this case specifically.
- *  2. **A secret is stored but does not come back.** The subscription is signed
+ *  2. **The subscription is inactive.** [#22804] `active` is the operator's
+ *     off switch for the endpoint, and the field declares that an inactive
+ *     webhook is skipped by the dispatcher. An explicit replay is the
+ *     dispatcher too: sending a past delivery to a switched-off endpoint would
+ *     undo the switch without saying so. The test is the dispatcher's own
+ *     predicate — the subscription cache loads `{ active: true }`, so the
+ *     guard allows only `active === true`, and a row whose `active` is null or
+ *     absent (unreachable through the engine, which fills the declared default
+ *     `true` and requires the field) is refused, exactly as the dispatcher
+ *     skips it. Re-activating the webhook, then replaying, is the open path.
+ *     Checked after "gone" and before the secret, so an inactive webhook whose
+ *     key is also unrecoverable names the operator's first remedy.
+ *  3. **A secret is stored but does not come back.** The subscription is signed
  *     and the key cannot be recovered — a rotated KMS key, an unregistered
  *     CryptoProvider, a deleted `sys_secret` row. Deliveries for it are being
  *     dropped right now; replaying an old one is the same fail-open by another
  *     route.
- *  3. **The lookup itself failed.** Handled by the caller
+ *  4. **The lookup itself failed.** Handled by the caller
  *     (`assertRedeliverAllowed` turns a throwing guard into a refusal), because
  *     "we could not check" must never read as "allowed".
  *
- * It ALLOWS a subscription that is legitimately unsigned (`secret` is optional
- * on the authoring envelope) and any row from another producer (`source !==
- * 'webhook'`) — this guard speaks only for webhook rows.
+ * It ALLOWS an active subscription that is legitimately unsigned (`secret` is
+ * optional on the authoring envelope) and any row from another producer
+ * (`source !== 'webhook'`) — this guard speaks only for webhook rows.
  *
  * ## The narrow fail-open this closes deliberately
- * Case 2 is checked as *"a value is stored but nothing came back"*, not as
+ * Case 3 is checked as *"a value is stored but nothing came back"*, not as
  * *"the resolver threw"*. Presence is decidable from the masked read even
  * though the value is not, so the guard asks the question it can actually
  * answer.
@@ -64,8 +76,8 @@ import {
  * explicit system opt-in. The guard runs inside the messaging service's
  * redeliver path, after the delivery row has been read under the requesting
  * caller's organization, and reads the subscription that row belongs to only
- * for its existence, name and secret posture — the inputs of the refusal
- * reason it returns. What it reads and returns is unchanged by the opt-in; it
+ * for its existence, `active` switch, name and secret posture — the inputs of
+ * the refusal reason it returns. What it reads and returns is unchanged by the opt-in; it
  * may simply no longer rely on a missing principal to pass the security
  * middleware's principal-less hand-off, which ADR-0096 D5 closes.
  */
@@ -107,6 +119,20 @@ export function createWebhookRedeliverGuard(
             );
         }
 
+        // [#22804] Case 2: the off switch. `=== true` is the dispatcher's own
+        // predicate (`AutoEnqueuer` loads `{ active: true }`), so a replay is
+        // refused for exactly the rows automatic dispatch skips — `false`, and
+        // a null or absent value too. Before the secret checks on purpose:
+        // re-activating is the remedy an operator reaches for first.
+        if (subscription.active !== true) {
+            return (
+                `webhook '${String(subscription.name ?? row.refId)}' is inactive, and an inactive webhook `
+                + 'is skipped by the dispatcher, so this delivery is refused rather than sent to an '
+                + 'endpoint that was switched off. Fix: re-activate the webhook, then redeliver; '
+                + 'new events are delivered again from the moment it is active.'
+            );
+        }
+
         // Presence is decidable on the masked read — a set secret comes back as
         // the engine's mask, an unset one as null — even though the value is not.
         const storesSecret =
@@ -120,8 +146,8 @@ export function createWebhookRedeliverGuard(
         // the rule moved down one level instead of being written twice. This
         // guard's contract is unchanged in both directions, which is the point:
         // a stored-but-unresolvable key still returns the refusal REASON below
-        // (case 2), and any OTHER failure still propagates, because "we could
-        // not check" must never read as "allowed" (case 3, handled by
+        // (case 3), and any OTHER failure still propagates, because "we could
+        // not check" must never read as "allowed" (case 4, handled by
         // `assertRedeliverAllowed`).
         let plaintext: string | undefined;
         try {

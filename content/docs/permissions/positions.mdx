@@ -80,7 +80,9 @@ including holders of plain CRUD on the table — is denied.
 ## Built-in identity positions (ADR-0068)
 
 `current_user.positions` is a string array — the only canonical field (there
-is no singular `current_user.position` at runtime). Framework-seeded names:
+is no singular `current_user.position` at runtime). The built-in names are
+declared by the platform — served by the security catalog, with no
+`sys_position` row (ADR-0131 D2):
 
 | Position | Meaning |
 |:---|:---|

@@ -63,10 +63,11 @@ export function validateSeedReplaySafety(stack: AnyRec): SeedReplaySafetyFinding
       rule: SEED_INSERT_MODE_DUPLICATES_ON_REPLAY,
       where,
       path: `data[${i}].mode`,
+      // [#22161] One verdict sentence; why seeds are replayed and what the
+      // idempotent modes match on are `os explain seed-insert-mode-duplicates-on-replay`.
       message:
         "`mode: 'insert'` re-inserts every record on each replay boot (dev-server restart, " +
-        'package re-publish) with no existing-row check, so the dataset duplicates the table ' +
-        'on every restart — seeds are replayed, not applied once.',
+        'package re-publish) with no existing-row check, so every restart duplicates its rows',
       hint:
         "Use `mode: 'ignore'` (skip rows that already exist) or `'upsert'` (create-or-update), " +
         "and declare an `externalId` to match on: a single natural-key field (e.g. `externalId: 'code'`), " +

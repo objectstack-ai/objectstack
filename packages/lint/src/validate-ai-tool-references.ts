@@ -227,22 +227,17 @@ export function validateAiToolReferences(stack: AnyRec): AiToolRefFinding[] {
         rule: AI_SKILL_TOOL_UNRESOLVED,
         where: `skill "${skillName}" · tools`,
         path: `skills[${si}].tools[${ti}]`,
+        // [#22161] One verdict sentence per arm, opening on the tool (`where`
+        // names the skill); the resolution ladder, when an action materialises
+        // as a tool and why it only warns are `os explain ai-skill-tool-unresolved`.
         message: isPattern
-          ? `Skill "${skillName}" subscribes to tool family "${ref}", which matches nothing this ` +
-            `stack can resolve (no declared tool, no platform tool, and no AI-exposed declarative ` +
-            `action materialises into it). The subscription contributes zero tools at runtime.`
+          ? `Tool family "${ref}" matches no tool this stack can resolve, so the subscription ` +
+            `contributes zero tools at runtime`
           : unexposed
-            ? `Skill "${skillName}" references tool "${ref}", but the action "${unexposed}" does ` +
-              `not become an AI tool: the runtime materialises \`action_<name>\` only for an ` +
-              `action that opts in with \`ai.exposed: true\` + \`ai.description\` (ADR-0011) AND ` +
-              `has a headless path (type \`script\`/\`api\`/\`flow\` with a target or body — ` +
-              `\`url\`/\`modal\`/\`form\` are UI-only). The reference is dropped at runtime, so ` +
-              `the skill promises a capability the agent cannot call.`
-            : `Skill "${skillName}" references tool "${ref}", which resolves to nothing this stack ` +
-              `can see: not a \`stack.tools\` record, not a platform-registered tool, and not a ` +
-              `materialised action tool (\`action_<name>\`). The runtime silently drops the ` +
-              `reference, so the skill's instructions claim a capability the agent does not have — ` +
-              `the assistant will improvise or fail when asked to use it.` +
+            ? `Tool "${ref}" names action "${unexposed}", which does not become an AI tool (it needs ` +
+              `\`ai.exposed\` and a headless path), so the runtime drops the reference`
+            : `Tool "${ref}" resolves to no stack, platform or materialised action tool, so the ` +
+              `runtime drops it and the agent cannot call it.` +
               suggest(ref, universe),
         hint: unexposed
           ? `Either opt "${unexposed}" in — set \`ai: { exposed: true, description: '…' }\` (≥40 ` +

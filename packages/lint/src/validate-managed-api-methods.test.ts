@@ -9,10 +9,26 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { MANAGED_WRITE_VERB_AFFORDANCE } from '@objectstack/spec/data';
+
+import { explainRule } from './rule-explanations.js';
 import {
   MANAGED_API_METHOD_UNAFFORDABLE,
-  validateManagedApiMethods,
+  validateManagedApiMethods as validateManagedApiMethodsUnrecorded,
 } from './validate-managed-api-methods';
+
+// [#22161] Each finding is one verdict sentence; the reasoning it used to
+// carry is `os explain object/managed-api-method-unaffordable`. Every direct
+// call below records what it fired, and the last cases in this file hold each
+// recorded verdict to one line of at most 200 characters — every firing
+// variant this suite exercises, not a chosen few. Run the whole file: those
+// cases read what the cases above fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validateManagedApiMethods: typeof validateManagedApiMethodsUnrecorded = (...args) => {
+  const findings = validateManagedApiMethodsUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 /** The #7521 shape: `platform` bucket, `userActions` closing every write. */
 const sysEnvironment = {
@@ -97,5 +113,65 @@ describe('validateManagedApiMethods — the walk', () => {
     expect(validateManagedApiMethods('nope')).toEqual([]);
     expect(validateManagedApiMethods({})).toEqual([]);
     expect(validateManagedApiMethods({ objects: [null, 42] })).toEqual([]);
+  });
+});
+
+describe('[#22161] one-line verdicts — object/managed-api-method-unaffordable', () => {
+  it('reads as one sentence, the object left to `where`', () => {
+    const [f] = validateManagedApiMethods({ objects: [sysEnvironment] });
+    expect(f.message).toBe(
+      "`enable.apiMethods` advertises [create, update], which `managedBy: 'platform'` affordances refuse "
+        + '(needs userActions create/edit), so the registry strips them',
+    );
+    expect(f.message).not.toContain('sys_environment');
+  });
+
+  it('`os explain` carries what the verdict no longer says', () => {
+    const entry = explainRule(MANAGED_API_METHOD_UNAFFORDABLE);
+    expect(entry, 'no `os explain object/managed-api-method-unaffordable` entry').toBeDefined();
+    const text = entry!.paragraphs.join('\n');
+    for (const fact of [
+      'ADR-0092, ADR-0103',
+      '`checkManagedApiMethodAffordances`',
+      'the only trace is a boot-log line',
+      'warn-and-strip on purpose',
+      'One finding per object, not per verb',
+      'ADR-0092 D4',
+      'Reads are never affordance-gated',
+    ]) {
+      expect(text, `explanation names ${fact}`).toContain(fact);
+    }
+  });
+
+  it('the verb table the explanation names is the shared predicate\'s, verb by verb', () => {
+    // The explanation module imports nothing, so its verb → affordance table is
+    // held to `MANAGED_WRITE_VERB_AFFORDANCE` here, and each row to the rule by
+    // running the rule on an all-locked object advertising that one verb.
+    const text = explainRule(MANAGED_API_METHOD_UNAFFORDABLE)!.paragraphs.join('\n');
+    expect(MANAGED_WRITE_VERB_AFFORDANCE).toEqual({
+      create: 'create', update: 'edit', upsert: 'edit', delete: 'delete', purge: 'delete',
+    });
+    expect(text).toContain(
+      '`create` needs `create`, `update` and `upsert` need `edit`, `delete` and `purge` need `delete`',
+    );
+    for (const [verb, needs] of Object.entries(MANAGED_WRITE_VERB_AFFORDANCE)) {
+      const findings = validateManagedApiMethodsUnrecorded({
+        objects: [{ name: 'sys_locked', managedBy: 'better-auth', enable: { apiMethods: ['get', verb] } }],
+      });
+      expect(findings, verb).toHaveLength(1);
+      expect(findings[0].message, verb).toContain(`[${verb}]`);
+      expect(findings[0].message, verb).toContain(`(needs userActions ${needs})`);
+    }
+  });
+
+  it('every verdict the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === MANAGED_API_METHOD_UNAFFORDABLE);
+    // The coverage control first: one verb and several verbs both fired.
+    expect(converted.some((f) => f.message.includes('[create, update]'))).toBe(true);
+    expect(converted.some((f) => f.message.includes('[create, update, delete]'))).toBe(true);
+    for (const f of converted) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
   });
 });
