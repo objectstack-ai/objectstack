@@ -382,8 +382,8 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
   // ── ADR-0057 — ERP authorization core (enforced + e2e proven) ──────────
   { id: 'scope-depth', summary: 'permission-grant access DEPTH (own/own_and_reports/unit/unit_and_below/org)', state: 'enforced',
     enforcement: 'plugin-security getEffectiveScope (stash) + plugin-sharing delegates HIERARCHY scopes to a pluggable IHierarchyScopeResolver (open: fail-closed to own; enterprise @objectstack/security-enterprise; reference resolver in this proof) — ADR-0057 D1', proof: 'showcase-scope-depth.dogfood.test.ts' },
-  { id: 'declarative-rbac-seeding', summary: 'stack-declared roles + sharingRules seeded at boot', state: 'enforced',
-    enforcement: 'plugin-security bootstrapDeclaredPositions + plugin-sharing bootstrapDeclaredSharingRules — ADR-0057 D6', proof: 'showcase-declarative-rbac-seeding.dogfood.test.ts' },
+  { id: 'declarative-rbac-seeding', summary: 'stack-declared positions served by the security catalog (no row) + sharingRules seeded at boot', state: 'enforced',
+    enforcement: 'core createSecurityCatalogReader (positions from the registry, ADR-0131 D2) + plugin-sharing bootstrapDeclaredSharingRules — ADR-0057 D6', proof: 'showcase-declarative-rbac-seeding.dogfood.test.ts' },
   { id: 'declarative-permission-seeding', summary: 'stack-declared permission sets seeded into sys_permission_set with package provenance (packageId + managed_by)', state: 'enforced',
     enforcement: 'plugin-security bootstrapDeclaredPermissions — ADR-0086 D5 (managed_by:package re-seeded on boot/upgrade; env-authored platform/user/legacy rows never clobbered); provenance fields ADR-0086 D3 (spec PermissionSetSchema.packageId/managedBy + sys_permission_set.package_id/managed_by)', proof: 'showcase-permission-seeding.dogfood.test.ts',
     note: 'Closes the ADR-0078 inert-metadata violation for stack.permissions — declared sets were runtime-enforced via the registry but never materialized as records (invisible to the admin surface, uninstall undefined). This row pins the seeding so it cannot silently regress to inert.' },

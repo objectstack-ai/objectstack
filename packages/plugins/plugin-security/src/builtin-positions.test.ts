@@ -12,7 +12,7 @@
 import { describe, it, expect } from 'vitest';
 import { AUDIENCE_ANCHOR_POSITIONS, BUILTIN_IDENTITY_METADATA, BUILTIN_IDENTITY_NAMES } from '@objectstack/spec';
 import { PositionSchema } from '@objectstack/spec/identity';
-import { isBuiltinPositionName, registerBuiltinPositions, securityBuiltinPositions } from './builtin-positions.js';
+import { registerBuiltinPositions, securityBuiltinPositions } from './builtin-positions.js';
 
 describe('securityBuiltinPositions', () => {
   it('declares the four identity names, then the two audience anchors, and nothing else', () => {
@@ -30,11 +30,6 @@ describe('securityBuiltinPositions', () => {
     for (const declaration of securityBuiltinPositions) {
       expect(PositionSchema.safeParse(declaration).success, declaration.name).toBe(true);
     }
-  });
-
-  it('answers membership by exact name only', () => {
-    for (const name of [...BUILTIN_IDENTITY_NAMES, ...AUDIENCE_ANCHOR_POSITIONS]) expect(isBuiltinPositionName(name)).toBe(true);
-    for (const name of ['Everyone', 'org_admins', 'field_rep', '', undefined, 42]) expect(isBuiltinPositionName(name)).toBe(false);
   });
 });
 

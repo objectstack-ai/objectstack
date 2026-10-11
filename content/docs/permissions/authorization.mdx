@@ -164,9 +164,11 @@ package (metadata); subject bindings and env-specific values stay as config.**
   env-admin-only construct.
 - This is what makes package **uninstall** well-defined (drop the package's
   own sets) and the objectui Access matrix scopable to `{ packageId }`.
-- Declared positions and sharing rules seed the same way
-  (`bootstrapDeclaredPositions`, ADR-0057 D6) — a declarable-but-never-seeded
-  array is exactly the inert-metadata smell ADR-0078 prohibits.
+- Declared sharing rules seed the same way (ADR-0057 D6) — a
+  declarable-but-never-seeded array is exactly the inert-metadata smell
+  ADR-0078 prohibits. Declared positions need no row at all: the security
+  catalog serves them from the registry, and no boot step writes a
+  `sys_position` row (ADR-0131 D2).
 
 ### Package capability declaration (ADR-0066 D1)
 
@@ -273,7 +275,7 @@ one of two doors, each writing only what it owns:
 
 | Stage | What holds today | Owned by |
 |---|---|---|
-| 1 · Package development | Zod-validated authoring; positions / sharingRules / permissions seeded at boot with provenance | ADR-0057 D6, ADR-0086 D5, ADR-0049/0078 gates |
+| 1 · Package development | Zod-validated authoring; sharingRules / permissions seeded at boot with provenance; positions served from the registry, with no row (ADR-0131 D2) | ADR-0057 D6, ADR-0086 D5, ADR-0131 D2, ADR-0049/0078 gates |
 | 2 · Distribution / install / upgrade / uninstall | Install-consent scopes (ADR-0025 — consent ≠ RBAC grants); namespaced, collision-free composition; provenance axis makes uninstall well-defined | ADR-0025/0028/0048/0086 |
 | 3 · Environment composition / assignment | Platform-owned assignment records (`sys_user_position` etc.); anti-escalation; union semantics | ADR-0057 D4 |
 | 4 · Runtime enforcement | The six-gate chain above; each enforced primitive holds a row naming its enforcement site — the matrix file is the authority on the count and on which rows CI can check | ADR-0056 D10 matrix |
