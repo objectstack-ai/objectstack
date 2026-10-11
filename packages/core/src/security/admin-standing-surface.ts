@@ -98,39 +98,28 @@ export interface AdminStandingTable {
  * ADMISSION path (`resolveApiKeyAdmission`) is outside it on purpose: it
  * authenticates a principal and seeds `permissions` with the key's scopes, and
  * confers no administrator standing of its own — `hasPlatformAdminGrant` is set
- * from a `sys_permission_set` row reached through an UNSCOPED
+ * from the catalog's `admin_full_access` set reached through an UNSCOPED
  * `sys_user_permission_set` grant (§6b, on a NON-WALLED posture only since
  * #11663 L5) or from the deployment config matched against the caller's own
  * STORED `sys_user` row (§6b-config, on every posture), never from a scope
  * string and never from the caller-seedable `grants.email`.
  */
 export const ADMIN_STANDING_SURFACE: Readonly<Record<string, AdminStandingTable>> = {
-  sys_permission_set: {
+  sys_metadata_activation: {
     role: 'derives',
     reason:
-      'The row `admin_full_access` is resolved BY NAME from (§6b) — `platform_admin` is the '
-      + "POSITION that row derives, not the row's own name. Renaming it, deleting it or switching "
-      + 'it off (ADR-0049 `active`, which this resolver honours) un-makes every GRANT-derived platform '
-      + 'admin at once, with no identity table touched. ⚠️ It does NOT un-make a CONFIG-derived '
-      + 'one (§6b-config): that route sets the same standing from '
-      + "`ADMIN_FULL_ACCESS_CAPABILITIES` in `@objectstack/spec` and matches the caller's own "
-      + 'stored `sys_user` row, so it touches an identity table and never reads this one. With '
-      + '`OS_PLATFORM_OWNER_EMAIL` unset the first sentence is the whole truth; with it declared, '
-      + 'this row stops being the single point that un-makes every administrator. [ADR-0131 D4] '
-      + "Its organization decides which row a grant's name resolves to — the grant's own "
-      + "organization's row, else the organization-less one — so an UNSCOPED grant reaches only "
-      + 'the organization-less `admin_full_access`: moving that row into an organization un-makes '
-      + 'every grant-derived platform admin exactly as deleting it does.',
+      '[ADR-0131 D3, ADR-0126 §4] The activation ledger the resolver reads deactivation from '
+      + '(`readDisabledCatalogNames`, §6a): a `permission` row of `admin_full_access` whose `active` '
+      + 'is false un-makes every GRANT-derived platform administrator at once (§6b), with no identity '
+      + 'table touched; a `position` row switches that position off. Deployment-wide (no tenant '
+      + 'column). The `sys_permission_set` and `sys_position` rows are no longer read at all: the '
+      + 'set itself — its existence and its body — is the catalog definition (see the '
+      + '`security-catalog` non-table input). ⚠️ It does NOT un-make a CONFIG-derived administrator '
+      + '(§6b-config), which never reads a set.',
     columns: [
-      'id',
+      'metadata_type',
       'name',
       'active',
-      'organization_id',
-      'organizationId',
-      'system_permissions',
-      'systemPermissions',
-      'tab_permissions',
-      'tabPermissions',
     ],
   },
 
@@ -206,32 +195,21 @@ export const ADMIN_STANDING_SURFACE: Readonly<Record<string, AdminStandingTable>
     role: 'reads-only',
     reason:
       'ADR-0057 D4 platform-RBAC position assignments (§4). A position can carry permission sets '
-      + '(see `sys_position_permission_set`) but never platform-admin standing — §6b requires the '
-      + 'set to be reached through an unscoped USER grant (`unscopedUserPsIds`), so a '
+      + '(its catalog definition\'s `permissionSets`, ADR-0131 D3/D4) but never platform-admin '
+      + 'standing — §6b requires the set to be reached through an unscoped USER grant, so a '
       + 'position-bound `admin_full_access` resolves the set name into `permissions` and leaves '
       + '`hasPlatformAdminGrant` false.',
-  },
-
-  sys_position: {
-    role: 'reads-only',
-    reason:
-      'Read to drop DEACTIVATED positions (ADR-0049, §6a). Same reason as `sys_user_position`: '
-      + 'the position path cannot reach `hasPlatformAdminGrant`.',
-  },
-
-  sys_position_permission_set: {
-    role: 'reads-only',
-    reason:
-      'Position-bound permission sets (§6a). Contributes ids to `psIds` — and therefore names to '
-      + '`permissions` — but not to `unscopedUserPsIds`, which is the set §6b tests for '
-      + 'platform-admin standing.',
   },
 };
 
 /** A derivation input that is not a table — see {@link ADMIN_STANDING_NON_TABLE_INPUTS}. */
 export interface AdminStandingNonTableInput {
-  /** How the value reaches the resolver, e.g. `env` for a process environment variable. */
-  readonly kind: 'env';
+  /**
+   * How the value reaches the resolver: `env` for a process environment
+   * variable, `security-catalog` for a definition the resolver reads from the
+   * catalog bound to its engine (ADR-0131 D3/D4).
+   */
+  readonly kind: 'env' | 'security-catalog';
   /** The exact spelling an operator sets — quotable verbatim in a refusal message. */
   readonly name: string;
   /** What it decides, and what a break-glass guard can and cannot do about it. */
@@ -265,6 +243,17 @@ export const ADMIN_STANDING_NON_TABLE_INPUTS: readonly AdminStandingNonTableInpu
       + 'ZERO config-derived administrators, fail closed. No runtime write reaches it, so no '
       + 'break-glass guard can simulate a change to it: revocation is a configuration change plus '
       + 'a process roll, by design.',
+  },
+  {
+    kind: 'security-catalog',
+    name: 'admin_full_access',
+    reason:
+      'The permission-set definition an unscoped `admin_full_access` user grant names, read from '
+      + 'the security catalog by name (ADR-0131 D3/D4) — the platform\'s own declaration, shipped '
+      + 'on the security plugin\'s manifest. A name the catalog does not hold confers nothing, so '
+      + 'every grant-derived platform administrator rests on it. It is code-declared and refused '
+      + 'an overlay at the metadata door, so no runtime write reaches it either: removing it is '
+      + 'a code change plus a process roll.',
   },
 ];
 

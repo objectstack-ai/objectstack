@@ -112,13 +112,14 @@ describe('showcase FLS read side: a readable:false field is STRIPPED, not masked
     // `showcase_project`, so this set contributes nothing but the field deny —
     // which is what makes the assertions below attributable to FLS alone.
     //
-    // `active: true` is load-bearing: the security plugin's DB loader filters
-    // deactivated rows out (`isRowActive`), and an inactive set grants nothing,
-    // including nothing to deny — the field would come back readable and every
-    // assertion here would fail as if the strip were broken.
-    await ql.insert(
-      'sys_permission_set',
-      {
+    // A deactivated set grants nothing, including nothing to deny: the field
+    // would come back readable and every assertion here would fail as if the
+    // strip were broken. Deactivation is the activation ledger's (ADR-0131 D3);
+    // this set has no ledger row, so it is in effect.
+    // [ADR-0131 D3/D4] Authored through the data door, as Setup authors it: the
+    // write-through stores the definition the security catalog resolves. A
+    // system-context row insert has no definition and grants nothing.
+    const authored = await stack.apiAs(adminTok, 'POST', '/data/sys_permission_set', {
         name: SCRATCH_SET,
         label: 'Scratch: FLS read deny on showcase_project.budget',
         description:
@@ -132,9 +133,8 @@ describe('showcase FLS read side: a readable:false field is STRIPPED, not masked
         }),
         system_permissions: JSON.stringify([]),
         active: true,
-      },
-      { context: SYS },
-    );
+      });
+    expect(authored.status, 'scratch set authored through the data door').toBeLessThan(300);
     const ps = await ql.findOne('sys_permission_set', { where: { name: SCRATCH_SET }, context: SYS });
     expect(ps?.id, 'scratch permission set authored').toBeTruthy();
     const memberId = (await ql.findOne('sys_user', { where: { email: MEMBER }, context: SYS }))?.id;

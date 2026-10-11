@@ -102,6 +102,7 @@ import {
 import type { RouteHandler } from '@objectstack/spec/contracts';
 import { registerPackageRoutes } from './package-routes.js';
 import { RestServer } from './rest-server.js';
+import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
 // [#17865] This file observes the REST fault log, so it declares the level it
 // asserts against instead of inheriting the suite's quiet one. 'info' is the
@@ -434,12 +435,12 @@ function qlWith(opts: { memberships: Array<{ user_id: string; organization_id: s
       { id: 'ps_pkg', name: 'pkg_admin', system_permissions: ['manage_metadata', 'studio.access'] },
     ],
   };
-  return {
+  return bindCatalogFromTables({
     find: async (object: string, q: any = {}) => {
       const rows = (tables[object] ?? []).filter((row: any) => matchesWhere(row, q?.where));
       return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
     },
-  };
+  }, tables);
 }
 
 /** A real kernel, as `kernelManager.getOrCreate` would hand back. */

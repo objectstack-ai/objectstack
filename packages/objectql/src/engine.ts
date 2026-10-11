@@ -26,6 +26,9 @@ import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 // engine is what `metadata-protocol.validateData` returns, so letting the two
 // drift would put a translation layer between a verdict and its contract.
 import type { ValidateDataIssue, ValidateDataResponse } from '@objectstack/spec/api';
+// [#22646] The ADR-0112 catalog — `rejectCredentialAggregation`'s refusal
+// envelope carries `INVALID_FIELD` from it rather than a bare `Error`.
+import { StandardErrorCode } from '@objectstack/spec/api';
 import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, referenceCarrierOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField, driverSupportsTransactions, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
 import type { FileRefusedValue } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
@@ -247,7 +250,7 @@ import {
 } from './secret-fields.js';
 import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-door.js';
 import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
-import { pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
+import { applyProtection, pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
 import { SchemaRegistry, computeFQN, type ArtifactInstallScope } from './registry.js';
 import { expandSearchToFilter } from './search-filter.js';
 import { isSearchCompanionRequested, stripSearchCompanion } from './search-companion.js';
@@ -4066,6 +4069,32 @@ function cascadeSetAdd(index: Map<string, Set<string>>, object: string, id: unkn
   return true;
 }
 
+/**
+ * [ADR-0010 §3.7] Stamp a manifest item with its owning package's
+ * `(packageId, packageVersion)` before the registry stores it: the call the
+ * artifact loader makes (`metadata/plugin.ts`), so both load paths serve one
+ * envelope. The registry's own `applyProtection` knows the id only, and
+ * `applyProtection` stamps a key only while it is unset, so the version
+ * stamped here is the one the item keeps. With no version this does nothing:
+ * the registry stamps the id, exactly as before.
+ */
+function stampPackage<T>(item: T, packageId: string, packageVersion: string | undefined): T {
+  if (packageVersion !== undefined) applyProtection(item as any, { packageId, packageVersion });
+  return item;
+}
+
+/**
+ * {@link stampPackage} for an authored OBJECT definition, on a shallow copy.
+ * The registry stamps an object schema on its own copy (`applySystemFields`
+ * and friends run first), so `registerApp` leaves the caller's definition
+ * unstamped, and a manifest registered twice, or recorded by a second install,
+ * shows the same objects both times. `applyProtection` writes top-level keys
+ * only, so a shallow copy holds every key it touches.
+ */
+function stampObjectPackage(def: ServiceObject, packageId: string, packageVersion: string | undefined): ServiceObject {
+  return packageVersion === undefined ? def : stampPackage({ ...def }, packageId, packageVersion);
+}
+
 export class ObjectQL implements IObjectQLEngine {
   /**
    * Ambient transaction store (ADR-0034). While a `transaction()` callback
@@ -7292,6 +7321,9 @@ export class ObjectQL implements IObjectQLEngine {
   registerApp(manifest: any, scope?: ArtifactInstallScope) {
       const id = manifest.id || manifest.name;
       const namespace = manifest.namespace as string | undefined;
+      // Stamped beside `id` on every item below ({@link stampPackage}), so an
+      // item served from this path tells an upgrade's new item from its old one.
+      const version = manifest.version as string | undefined;
       this.invalidateSummaryIndex(); // new objects may add/change summary fields
       this.logger.debug('Registering package manifest', { id, namespace });
 
@@ -7326,7 +7358,7 @@ export class ObjectQL implements IObjectQLEngine {
           if (Array.isArray(manifest.objects)) {
              this.logger.debug('Registering objects from manifest (Array)', { id, objectCount: manifest.objects.length });
              for (const objDef of manifest.objects) {
-                const fqn = this._registry.registerObject(objDef, id, namespace, 'own');
+                const fqn = this._registry.registerObject(stampObjectPackage(objDef, id, version), id, namespace, 'own');
                 this.logger.debug('Registered Object', { fqn, from: id });
              }
           } else {
@@ -7339,7 +7371,7 @@ export class ObjectQL implements IObjectQLEngine {
              for (const [name, objDef] of Object.entries(manifest.objects) as [string, ServiceObject][]) {
                 // Ensure name in definition matches key
                 objDef.name = name;
-                const fqn = this._registry.registerObject(objDef, id, namespace, 'own');
+                const fqn = this._registry.registerObject(stampObjectPackage(objDef, id, version), id, namespace, 'own');
                 this.logger.debug('Registered Object', { fqn, from: id });
              }
           }
@@ -7362,7 +7394,7 @@ export class ObjectQL implements IObjectQLEngine {
                   indexes: ext.indexes,
               };
               // Register as extension (namespace is undefined since we're targeting by FQN)
-              this._registry.registerObject(extDef, id, undefined, 'extend', priority);
+              this._registry.registerObject(stampPackage(extDef, id, version), id, undefined, 'extend', priority);
               this.logger.debug('Registered Object Extension', { target: targetFqn, priority, from: id });
           }
       }
@@ -7376,7 +7408,7 @@ export class ObjectQL implements IObjectQLEngine {
               const appName = app.name || app.id;
               if (appName) {
                   const resolved = namespace ? this.resolveNavObjectNames(app, namespace) : app;
-                  this._registry.registerApp(resolved, id);
+                  this._registry.registerApp(stampPackage(resolved, id, version), id);
                   this.logger.debug('Registered App', { app: appName, from: id });
               }
           }
@@ -7386,7 +7418,7 @@ export class ObjectQL implements IObjectQLEngine {
       //    This handles the case where the manifest IS the app definition (legacy/simple packages)
       if (manifest.name && manifest.navigation && !manifest.apps?.length) {
           const resolved = namespace ? this.resolveNavObjectNames(manifest, namespace) : manifest;
-          this._registry.registerApp(resolved, id);
+          this._registry.registerApp(stampPackage(resolved, id, version), id);
           this.logger.debug('Registered manifest-as-app', { app: manifest.name, from: id });
       }
 
@@ -7407,7 +7439,7 @@ export class ObjectQL implements IObjectQLEngine {
       // 5. Register all other metadata types generically — the SAME seam the
       //    nested-plugin path uses (`registerMetadataCollections`), so the two
       //    entry points cannot answer differently for one collection (#7163).
-      this.registerMetadataCollections(manifest, id, 'manifest');
+      this.registerMetadataCollections(manifest, id, 'manifest', version);
 
       // 6. Register seed data as metadata (keyed by target object name)
       const seedData = (manifest as any).data;
@@ -7415,7 +7447,7 @@ export class ObjectQL implements IObjectQLEngine {
           this.logger.debug('Registering seed data datasets', { id, count: seedData.length });
           for (const dataset of seedData) {
               if (dataset.object) {
-                  this._registry.registerItem('data', dataset, 'object' as any, id);
+                  this._registry.registerItem('data', stampPackage(dataset, id, version), 'object' as any, id);
               }
           }
       }
@@ -7446,7 +7478,7 @@ export class ObjectQL implements IObjectQLEngine {
               if (plugin && typeof plugin === 'object') {
                   const pluginName = plugin.name || plugin.id || 'unnamed-plugin';
                   this.logger.debug('Registering nested plugin', { pluginName, parentId: id });
-                  this.registerPlugin(plugin, id, namespace);
+                  this.registerPlugin(plugin, id, namespace, version);
               }
           }
       }
@@ -7486,7 +7518,8 @@ export class ObjectQL implements IObjectQLEngine {
    * @param parentId - The parent package ID (for ownership tracking)
    * @param parentNamespace - The parent package's namespace (for FQN resolution)
    */
-  private registerPlugin(plugin: any, parentId: string, parentNamespace?: string) {
+  private registerPlugin(plugin: any, parentId: string, parentNamespace?: string, parentVersion?: string) {
+      // `parentVersion` is the owning package's version, stamped like `parentId`.
       const pluginName = plugin.name || plugin.id || 'unnamed';
       const pluginNamespace = plugin.namespace || parentNamespace;
 
@@ -7501,7 +7534,7 @@ export class ObjectQL implements IObjectQLEngine {
               if (Array.isArray(plugin.objects)) {
                   this.logger.debug('Registering plugin objects (Array)', { pluginName, count: plugin.objects.length });
                   for (const objDef of plugin.objects) {
-                      const fqn = this._registry.registerObject(objDef, ownerId, pluginNamespace, 'own');
+                      const fqn = this._registry.registerObject(stampObjectPackage(objDef, ownerId, parentVersion), ownerId, pluginNamespace, 'own');
                       this.logger.debug('Registered Object', { fqn, from: pluginName });
                   }
               } else {
@@ -7511,7 +7544,7 @@ export class ObjectQL implements IObjectQLEngine {
                   this.logger.debug('Registering plugin objects (Map)', { pluginName, count: entries.length });
                   for (const [name, objDef] of entries) {
                       objDef.name = name;
-                      const fqn = this._registry.registerObject(objDef, ownerId, pluginNamespace, 'own');
+                      const fqn = this._registry.registerObject(stampObjectPackage(objDef, ownerId, parentVersion), ownerId, pluginNamespace, 'own');
                       this.logger.debug('Registered Object', { fqn, from: pluginName });
                   }
               }
@@ -7524,7 +7557,7 @@ export class ObjectQL implements IObjectQLEngine {
       if (plugin.name && plugin.navigation) {
           try {
               const resolved = pluginNamespace ? this.resolveNavObjectNames(plugin, pluginNamespace) : plugin;
-              this._registry.registerApp(resolved, ownerId);
+              this._registry.registerApp(stampPackage(resolved, ownerId, parentVersion), ownerId);
               this.logger.debug('Registered plugin-as-app', { app: plugin.name, from: pluginName });
           } catch (err: any) {
               this.logger.warn('Failed to register plugin as app', { pluginName, error: err.message });
@@ -7540,7 +7573,7 @@ export class ObjectQL implements IObjectQLEngine {
       // list is no longer copied here to be patched one name at a time; the
       // aggregated-view expansion, #7163, for why the loop BODY is no longer
       // copied here either).
-      this.registerMetadataCollections(plugin, ownerId, 'nested plugin');
+      this.registerMetadataCollections(plugin, ownerId, 'nested plugin', parentVersion);
   }
 
   /**
@@ -7585,7 +7618,8 @@ export class ObjectQL implements IObjectQLEngine {
    * @param ownerId  The owning package id — stamped as ADR-0010 provenance.
    * @param sourceLabel Human-readable source name for the `debug` line.
    */
-  private registerMetadataCollections(source: any, ownerId: string, sourceLabel: string) {
+  private registerMetadataCollections(source: any, ownerId: string, sourceLabel: string, ownerVersion?: string) {
+      // `ownerVersion` is the owning package's version, stamped like `ownerId`.
       for (const key of METADATA_ARRAY_KEYS) {
           const items = (source as any)?.[key];
           if (!Array.isArray(items) || items.length === 0) continue;
@@ -7682,7 +7716,7 @@ export class ObjectQL implements IObjectQLEngine {
                   err.httpStatus = 422;
                   throw err;
               }
-              this._registry.registerItem(pluralToSingular(key), toRegister, 'name' as any, ownerId);
+              this._registry.registerItem(pluralToSingular(key), stampPackage(toRegister, ownerId, ownerVersion), 'name' as any, ownerId);
               // "Object has-many View" (ADR-0017): a `defineView` document
               // aggregates an object's views. Register the container under the
               // bare <object> key (above, back-compat) AND expand it into
@@ -7694,7 +7728,7 @@ export class ObjectQL implements IObjectQLEngine {
                       for (const w of vi._diagnostics?.warnings ?? []) {
                           this.logger.warn(`View expansion warning for '${vi.name}': ${w.message}`, { from: ownerId });
                       }
-                      this._registry.registerItem('view', vi, 'name' as any, ownerId);
+                      this._registry.registerItem('view', stampPackage(vi, ownerId, ownerVersion), 'name' as any, ownerId);
                   }
               }
           }
@@ -7737,7 +7771,7 @@ export class ObjectQL implements IObjectQLEngine {
                   continue;
               }
               const toRegister = body.name === itemName ? body : { ...body, name: itemName };
-              this._registry.registerItem('view', toRegister, 'name' as any, ownerId);
+              this._registry.registerItem('view', stampPackage(toRegister, ownerId, ownerVersion), 'name' as any, ownerId);
           }
       }
   }
@@ -12605,8 +12639,31 @@ export class ObjectQL implements IObjectQLEngine {
     if (raw != null && schema?.fields) {
       const requestedFields = (ast as any).searchFields
         ?? (typeof raw === 'object' ? raw?.fields : undefined);
+      // [#22646] A `search` never scans an `internal: true` column. The flag's
+      // promise ("the value is never returned on a generic data exit") is a
+      // withhold on the read path (the row strip) and a refusal everywhere the
+      // value would be revealed by evaluation; `$search` is such a position —
+      // a cross-field `$icontains` that confirms a guessed prefix of a withheld
+      // credential, matching the row only when the guess is right. The field is
+      // dropped from the set the expansion resolves over (a WITHHOLD, like the
+      // auto-default's `hidden`/credential-type exclusions one layer down), so
+      // the default set never scans it, for every verb that reaches here
+      // (`find` / `findOne` / `aggregate`, and `searchAll` through them). An
+      // EXPLICIT `$searchFields` naming one is refused loudly at the generic
+      // data door instead (`assertSearchFieldsAreSearchable`,
+      // `@objectstack/metadata-protocol`), the #4254 posture — an unhonoured
+      // narrowing must be a 400, not a silent widening. A direct engine caller
+      // naming one has it intersected away here, the engine's existing tolerant
+      // posture for an unknown requested search field.
+      const internalFields = collectInternalReadFields(schema);
+      const scanFields = internalFields.length === 0
+        ? (schema.fields as any)
+        : Object.fromEntries(
+            Object.entries(schema.fields as Record<string, unknown>)
+              .filter(([name]) => !internalFields.includes(name)),
+          );
       const searchFilter = expandSearchToFilter(raw, {
-        fields: schema.fields as any,
+        fields: scanFields,
         searchableFields: (schema as any).searchableFields,
         requestedFields,
         // [ADR-0079] `nameField` is the canonical primary-title pointer;
@@ -18711,6 +18768,16 @@ export class ObjectQL implements IObjectQLEngine {
    * Only the two output-bearing positions on `EngineAggregateOptions` carry
    * field names: `aggregations[].field` (skip COUNT(*) — undefined or '*') and
    * `groupBy[]` (a string, or a `{ field }` bucket object).
+   *
+   * The refusal carries the ADR-0112 envelope — `INVALID_FIELD` / 400, located
+   * at the object and the field(s) named. It used to be a bare `Error` with no
+   * `code` or `status`, so a 400-class author refusal reached the data door
+   * 500-shaped (`INTERNAL_ERROR`, an undeclared fault). The code matches the
+   * analytics door's own refusal of an `internal: true` member and the engine's
+   * structured-JSON group-by refusal: the verdict is about the NAME being a
+   * field that is never returned on a generic data exit, which `INVALID_FIELD`
+   * is the catalog member for. The envelope now binds the `secret` / `password`
+   * case too, which shared the bare `Error`.
    */
   private rejectCredentialAggregation(object: string, query: EngineAggregateOptions): void {
     const schema = this._registry.getObject(object);
@@ -18733,13 +18800,23 @@ export class ObjectQL implements IObjectQLEngine {
 
     const hit = protectedFields.filter((f) => referenced.has(f));
     if (hit.length > 0) {
-      throw new Error(
+      const err = new Error(
         `Cannot aggregate credential field(s) ${hit.map((f) => `"${object}.${f}"`).join(', ')}: `
           + 'secret/password fields are masked on read and `internal: true` fields are omitted '
           + 'outright, so the value never leaves the engine on the generic data path; aggregating '
           + 'them (group-by, min/max, array_agg, …) would surface it. '
           + 'Refusing (fail-closed) — see ADR-0100.',
-      );
+      ) as Error & { code?: string; status?: number; httpStatus?: number; field?: string; fields?: string[]; object?: string };
+      // ADR-0112 envelope, the same number under D5's two spellings — `status`
+      // for the HTTP doors, `httpStatus` for a consumer holding the thrown
+      // error (the CLI `--json` envelope).
+      err.code = StandardErrorCode.enum.INVALID_FIELD;
+      err.status = 400;
+      err.httpStatus = 400;
+      err.field = hit[0];
+      err.fields = hit;
+      err.object = object;
+      throw err;
     }
   }
 

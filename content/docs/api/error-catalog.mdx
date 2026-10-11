@@ -147,6 +147,13 @@ searchable set gets its own message, and so does a value with the wrong shape â€
 an array entry that is not a string, or a value that is itself neither a
 comma-separated string nor an array of field names), `groupBy`, and
 `aggregations[].field`.
+The same code also refuses a field that DOES exist but is declared `internal: true`,
+when a read names it in a position that would evaluate its stored value: a filter
+(including a condition on a related object reached through a lookup, and an
+aggregation's own `filter`), a sort, a `groupBy`, an `aggregations[].field`, a
+`searchFields` entry, or an `expand` entry's own filter or sort at any depth. Such a
+field is never returned on a generic read, so it cannot be queried by either â€” the
+refusal names the object that declares it. Query by another field.
 Off the request path the same code answers `backfillSummaryNulls`'s
 `recomputeUndefinedOnEmpty` (`os migrate summary-nulls
 --recompute-undefined-on-empty object.field`) when an entry is not a roll-up

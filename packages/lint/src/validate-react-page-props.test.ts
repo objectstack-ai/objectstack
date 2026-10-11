@@ -532,8 +532,11 @@ describe('validateReactPageProps — <ListView> searchableFields (#4329)', () =>
     expect(f[0].rule).toBe(SEARCHABLE_FIELD_UNPROVISIONED);
     expect(f[0].severity).toBe('warning');
     expect(f[0].path).toBe('pages[0].source › searchableFields[1]');
-    expect(f[0].message).toContain('external object (ADR-0015)');
-    expect(f[0].message).toContain('$searchFields');
+    // [#22161] The shared one-clause anchor verdict and the narrowing's
+    // consequence; ADR-0015 and the `$searchFields` echo are the id's
+    // `os explain` entry.
+    expect(f[0].message).toContain("injected column with no storage on external object 'ext_account'");
+    expect(f[0].message).toContain("the list's toolbar search scans an empty column");
   });
 
   it('flags a dotted path — search cannot resolve the traversal', () => {

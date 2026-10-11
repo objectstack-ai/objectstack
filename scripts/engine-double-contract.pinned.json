@@ -507,6 +507,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.data-door-internal-field-positions.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.data-door-stored-content-hash.test.ts",
       "verb": "findOne",
       "pinned": 2
@@ -675,6 +680,11 @@
       "file": "packages/metadata-protocol/src/protocol.dropped-fields.test.ts",
       "verb": "update",
       "pinned": 3
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.expand-target-exposure.test.ts",
+      "verb": "findOne",
+      "pinned": 1
     },
     {
       "file": "packages/metadata-protocol/src/protocol.flow-by-name-shipped-name.test.ts",

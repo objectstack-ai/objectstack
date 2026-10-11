@@ -8,10 +8,12 @@
  *
  * A value slot is a config position whose authored value BECOMES a value: the
  * expression ledger's `value` role (`assignment.assignments.*`,
- * `create_record.fields.*`, `update_record.fields.*` —
- * `FLOW_NODE_EXPRESSION_PATHS`), plus the two legacy `assignment` shapes the
- * executor still reads (the `assignments: [{ variable, value }]` array and the
- * bare `{ <variable>: <value> }` config). Until this retirement every string
+ * `create_record.fields.*`, `update_record.fields.*`, and the three maps a
+ * node hands to a callee — `subflow.input.*`, `map.input.*`,
+ * `script.inputs.*` — `FLOW_NODE_EXPRESSION_PATHS`), plus the two legacy
+ * `assignment` shapes the executor still reads (the
+ * `assignments: [{ variable, value }]` array and the bare
+ * `{ <variable>: <value> }` config). Until this retirement every string
  * there ran through `{token}` interpolation, and since #19938 the same slots
  * also evaluate a CEL value envelope — two dialects for one job, with two
  * function sets and two meanings of `/`. This module is the ONE judge of the
@@ -90,6 +92,29 @@
  * builds the WHOLE value as one envelope, a CEL map or list literal holding
  * the string's CEL spelling at its place; a legacy shape's remedy moves the
  * node's assignments into the canonical map, where an envelope evaluates.
+ *
+ * ## A callee's input — the guarded form SUPPLIES `null`
+ *
+ * Three value slots hand their map to a callee as its inputs: a `subflow`'s
+ * and a `map`'s `input` (the child flow's input variables — each item's child,
+ * for a `map`) and a `script`'s `inputs` (the registered function's `input`).
+ * There a whole token that resolved to nothing handed the callee NOTHING —
+ * the template wrote `undefined` — and the child flow then seeded the
+ * variable from its `defaultValue` (`AutomationEngine.seedDeclaredVariables`
+ * applies the default only when the supplied value is `undefined`). The
+ * guarded form the remedy names hands `null` instead, and a supplied `null` is
+ * a value: it wins over the default. So at a top-level value of those maps,
+ * where the remedy names a guard or a run-user read, the refusal adds the
+ * callee sentence: write the child variable's default in the guard's `null`
+ * branch to keep it, or leave the key out where the value is never meant to
+ * be supplied — and, for a function, that it is handed `null` where it was
+ * handed `undefined`. A `$User` path that never resolved handed nothing in
+ * every run, so there the callee sentence says the default applied every
+ * time, and leaving the key out keeps exactly that. The positions are the
+ * ledger's (`CALLEE_INPUT_SLOTS`, keyed by the entry), so the sentence
+ * reaches the build doors through {@link flowNodeValueTemplateRefusals}; the
+ * executor's contract parse, which judges a value with no position, names the
+ * remedy without it.
  *
  * ## The token grammar is the interpolator's
  *
@@ -436,6 +461,55 @@ export interface FlowNodeValueTemplateRefusal {
   readonly source: string;
 }
 
+/**
+ * Who receives a value slot's map, for the slots that hand it to a callee —
+ * keyed by the ledger entry (`<nodeType> <path>`), so the sentence follows
+ * the ledger's declaration rather than a second list of node types (see the
+ * module docblock, "A callee's input").
+ */
+type Callee = 'child-flow' | 'item-flow' | 'function';
+
+const CALLEE_INPUT_SLOTS: Readonly<Record<string, Callee>> = {
+  'subflow input.*': 'child-flow',
+  'map input.*': 'item-flow',
+  'script inputs.*': 'function',
+};
+
+/**
+ * The callee sentence for a refused TOP-LEVEL value of a callee's input map
+ * — what the remedy's guarded form, or a run-user read, changes for the
+ * callee — or `undefined` where the remedy hands the callee nothing new: a
+ * date macro (never absent), text with holes (a string), braces that are
+ * neither a path nor an expression.
+ *
+ * Measured through the engine (`callee-input-value-slots.test.ts` in
+ * `service-automation`): a whole token that resolved to nothing handed the
+ * child `undefined`, so `seedDeclaredVariables` seeded the child variable
+ * from its `defaultValue`; an envelope's `null` is a supplied value and the
+ * default does not apply; a function was handed `undefined` and is handed
+ * `null`.
+ */
+function calleeSentence(callee: Callee, mapKey: string, key: string, token: Token): string | undefined {
+  const flow = callee === 'child-flow' ? 'the child flow' : callee === 'item-flow' ? 'each item\'s child flow' : undefined;
+  const neverResolved = token.kind === 'user' && !isRunUserIdToken(token.inner);
+  const handsNull = token.kind === 'path' || token.kind === 'expression' || (token.kind === 'user' && !neverResolved);
+  if (!handsNull && !neverResolved) return undefined;
+  if (flow === undefined) {
+    return neverResolved
+      ? `\`${mapKey}.${key}\` is the function's \`input.${key}\`, which the template handed \`undefined\` in every run: `
+        + `leaving the key out of \`${mapKey}\` hands it nothing, as the template did.`
+      : `\`${mapKey}.${key}\` is the function's \`input.${key}\`: where the template handed \`undefined\`, the guarded `
+        + 'form hands `null`.';
+  }
+  return neverResolved
+    ? `\`${mapKey}.${key}\` is ${flow}'s input variable \`${key}\`, which the template handed nothing in every run, so `
+      + `the child seeded \`${key}\` from its \`defaultValue\`: leaving the key out of \`${mapKey}\` keeps exactly that.`
+    : `\`${mapKey}.${key}\` is ${flow}'s input variable \`${key}\`. Where the template handed nothing, the child seeded `
+      + `\`${key}\` from its \`defaultValue\`; the guarded form hands \`null\`, a supplied value, which wins over that `
+      + 'default. To keep the default, write it in the guard\'s `null` branch; leave the key out of '
+      + `\`${mapKey}\` only where the value is never meant to be supplied.`;
+}
+
 function joinPath(prefix: string, inner: readonly (string | number)[]): string {
   let out = prefix;
   for (const segment of inner) out += typeof segment === 'number' ? `[${segment}]` : (out ? `.${segment}` : segment);
@@ -457,15 +531,41 @@ function joinPath(prefix: string, inner: readonly (string | number)[]): string {
  * there is refused like anywhere else, so the legacy shapes are no way around
  * the retirement — and its remedy moves the node's assignments into the
  * canonical map, the one shape whose values an envelope computes.
+ *
+ * At a top-level value of a map the node hands to a callee (`subflow.input`,
+ * `map.input`, `script.inputs`), a remedy that names a guard or a run-user
+ * read ends with the callee sentence: what the callee is handed instead of
+ * nothing (see the module docblock).
  */
 export function flowNodeValueTemplateRefusals(nodeType: string, config: unknown): FlowNodeValueTemplateRefusal[] {
   const out: FlowNodeValueTemplateRefusal[] = [];
-  const judge = (path: string, label: string, value: unknown, envelopeIsLiteral = false): void => {
+  const judge = (
+    path: string,
+    label: string,
+    value: unknown,
+    envelopeIsLiteral = false,
+    callee?: (refusal: ValueSlotTemplateRefusal) => string | undefined,
+  ): void => {
     for (const refusal of valueSlotTemplateRefusals(value, { envelopeIsLiteral })) {
-      out.push({ path: joinPath(path, refusal.path), label, message: refusal.message, source: refusal.source });
+      const sentence = callee?.(refusal);
+      const message = sentence === undefined ? refusal.message : `${refusal.message} ${sentence}`;
+      out.push({ path: joinPath(path, refusal.path), label, message, source: refusal.source });
     }
   };
-  for (const found of resolveFlowNodeValueSlots(nodeType, config)) judge(found.path, found.entry.label, found.value);
+  for (const found of resolveFlowNodeValueSlots(nodeType, config)) {
+    const receiver = CALLEE_INPUT_SLOTS[`${found.entry.nodeType} ${found.entry.path}`];
+    // The map's own key (`input.<key>`) — the entry's path ends in its `*`.
+    const mapKey = found.entry.path.slice(0, -2);
+    const key = found.path.slice(found.entry.path.length - 1);
+    const callee = receiver === undefined
+      ? undefined
+      : (refusal: ValueSlotTemplateRefusal): string | undefined => {
+        if (refusal.path.length > 0) return undefined;
+        const whole = wholeTokenOf(refusal.source, tokensOf(refusal.source));
+        return whole === undefined ? undefined : calleeSentence(receiver, mapKey, key, whole);
+      };
+    judge(found.path, found.entry.label, found.value, false, callee);
+  }
   if (nodeType === 'assignment' && config !== null && typeof config === 'object' && !Array.isArray(config)) {
     const raw = (config as Record<string, unknown>).assignments;
     if (Array.isArray(raw)) {

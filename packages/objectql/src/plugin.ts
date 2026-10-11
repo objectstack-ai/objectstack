@@ -11,6 +11,7 @@ import { resolveArtifactPackageOrder, artifactPackageId, readDeploymentOrgScopin
 import { unclaimedTopLevel } from '@objectstack/metadata';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { StorageNameMapping } from '@objectstack/spec/system';
+import { applyProtection } from '@objectstack/spec/shared';
 // [#21777] The ONE "is this schema the remote's?" predicate, shared with `ObjectQL.syncSchemas`.
 import { isFederatedObject } from './federated-object.js';
 // [#22070] The builtin audit stamps are wrapped like a bound hook but registered in code.
@@ -104,13 +105,15 @@ function hasLoadMetaFromDb(service: unknown): service is ProtocolWithDbRestore {
  */
 function unclaimedTopLevelObjects(
   stack: unknown,
-): { ownerId: string | undefined; objects: ServiceObject[] } | undefined {
+): { ownerId: string | undefined; ownerVersion: string | undefined; objects: ServiceObject[] } | undefined {
   const residual = unclaimedTopLevel(stack);
   if (!residual) return undefined;
   const objects = residual.items
     .filter((entry) => entry.type === 'object')
     .map((entry) => entry.item as ServiceObject);
-  return objects.length > 0 ? { ownerId: residual.ownerId, objects } : undefined;
+  return objects.length > 0
+    ? { ownerId: residual.ownerId, ownerVersion: residual.ownerVersion, objects }
+    : undefined;
 }
 
 /**
@@ -2307,7 +2310,7 @@ export class ObjectQLPlugin implements Plugin {
    */
   private registerUnclaimedTopLevelObjects(
     ctx: PluginContext,
-    residual: { ownerId: string | undefined; objects: ServiceObject[] },
+    residual: { ownerId: string | undefined; ownerVersion: string | undefined; objects: ServiceObject[] },
     bodies: unknown[],
   ): void {
     const ql = this.ql;
@@ -2325,7 +2328,14 @@ export class ObjectQLPlugin implements Plugin {
         continue;
       }
       try {
-        ql.registry.registerObject(object, residual.ownerId, undefined, 'own');
+        // The metadata door stamps the residual with `(ownerId, ownerVersion)`. The
+        // registry's own stamp knows the id only and keeps a key already set, so
+        // the version is stamped here first — on a shallow copy, leaving the
+        // artifact's own object as the registry leaves it.
+        const stamped = residual.ownerVersion === undefined
+          ? object
+          : applyProtection({ ...object } as any, { packageId: residual.ownerId, packageVersion: residual.ownerVersion }) as ServiceObject;
+        ql.registry.registerObject(stamped, residual.ownerId, undefined, 'own');
       } catch (e) {
         if (!(e instanceof ObjectOwnershipConflictError)) throw e;
         unserved.push(`'${object.name}' (package '${e.existingPackageId}' already owns that name)`);

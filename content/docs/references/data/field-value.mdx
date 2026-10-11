@@ -143,7 +143,7 @@ Type: `string`
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | The sys_file id the record holds |
-| **metadataRefused** | `true` | ✅ | The reader was refused the file's metadata (no read on sys_file): name, size and type are withheld. Distinct from an empty field, which holds no file at all. |
+| **metadataRefused** | `true` | ✅ | The reader was refused the file's metadata (no read on sys_file, and the record being read does not own the file or its download verdict did not allow it): name, size and type are withheld. Distinct from an empty field, which holds no file at all. |
 
 
 ---

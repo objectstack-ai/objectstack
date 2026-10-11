@@ -105,8 +105,8 @@ const result = ApprovalDecision.parse(data);
 | :--- | :--- | :--- | :--- |
 | **key** | `string` | ✅ | Output key (the flow variable name under the node id) |
 | **label** | `string` | optional | Field label in the decision dialog |
-| **type** | `Enum<'text' \| 'user' \| 'department' \| 'position' \| 'team'>` | optional | Decision-dialog input widget (default 'text') |
-| **multiple** | `boolean` | optional | Collect multiple values (id array) |
+| **type** | `Enum<'text' \| 'user' \| 'department' \| 'position' \| 'team'>` | optional | Decision-dialog input widget (default 'text'). The user, department and team pickers commit record ids; the position picker commits position machine names |
+| **multiple** | `boolean` | optional | Collect multiple values (an array of what the picker commits) |
 | **required** | `boolean` | optional | Approver must supply this output to approve |
 
 ### Nested Shape: `ApprovalNodeConfig.escalation`
@@ -150,8 +150,8 @@ Approval step approver type. `manager` is resolved from the directory rather tha
 | :--- | :--- | :--- | :--- |
 | **key** | `string` | ✅ | Output key (the flow variable name under the node id) |
 | **label** | `string` | optional | Field label in the decision dialog |
-| **type** | `Enum<'text' \| 'user' \| 'department' \| 'position' \| 'team'>` | optional | Decision-dialog input widget (default 'text') |
-| **multiple** | `boolean` | optional | Collect multiple values (id array) |
+| **type** | `Enum<'text' \| 'user' \| 'department' \| 'position' \| 'team'>` | optional | Decision-dialog input widget (default 'text'). The user, department and team pickers commit record ids; the position picker commits position machine names |
+| **multiple** | `boolean` | optional | Collect multiple values (an array of what the picker commits) |
 | **required** | `boolean` | optional | Approver must supply this output to approve |
 
 

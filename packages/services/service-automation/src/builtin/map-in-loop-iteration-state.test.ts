@@ -128,7 +128,7 @@ function setup(): Harness {
                                     flowName: 'cell_flow',
                                     collection: '{cells}',
                                     iteratorVariable: 'cell',
-                                    input: { row: '{row}', cell: '{cell}' },
+                                    input: { row: { dialect: 'cel', source: 'row' }, cell: { dialect: 'cel', source: 'cell' } },
                                     outputVariable: 'cellResults',
                                 },
                             },
@@ -280,7 +280,7 @@ describe('#15616 — the progress state still survives a durable pause (the half
                     id: 'per_cell', type: 'map', label: 'For each cell',
                     config: {
                         flowName: 'cell_flow', collection: '{cells}', iteratorVariable: 'cell',
-                        input: { cell: '{cell}' }, outputVariable: 'cellResults',
+                        input: { cell: { dialect: 'cel', source: 'cell' } }, outputVariable: 'cellResults',
                     },
                 },
                 { id: 'af', type: 'after', label: 'After' },

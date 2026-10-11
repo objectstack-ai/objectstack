@@ -2,10 +2,19 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * build-migration-registry — concatenate `src/migrations/entries/` into the
- * marked regions of `src/migrations/registry.ts` (#7297, the registry half of
- * #6957's ruling).
+ * build-migration-registry — write `src/migrations/registry.ts` from two
+ * committed sources: the hand-written skeleton `src/migrations/registry.ts.template`
+ * and the per-entry files under `src/migrations/entries/`, which it concatenates
+ * into the skeleton's marked regions (#7297, the registry half of #6957's ruling).
  *
+ * `registry.ts` itself is GENERATED WHOLE and git-ignored (#22554). It is never
+ * committed, never merged and never compared against a committed copy: this
+ * generator writes it on `pnpm install` (the package's `prepare`), as the first
+ * step of `build`, and as the turbo prerequisite of `typecheck` and `test`
+ * (`turbo.json`, which declares the file as the task's output so the cache
+ * restores it). Its `--self-test` runs inside every one of those generations.
+ *
+
  * ## The failure this exists for
  *
  * `registry.ts` carried three hand-authored APPEND tables — each protocol
@@ -36,11 +45,23 @@
  * > rejected — the review diff of `spec-changes.json` / the upgrade guide is
  * > worth the laps it costs.
  *
+ * Its Option-B clause is SUPERSEDED, on the maintainer's own re-opening, by two
+ * later rulings: #22449 B′ (comment 6078203801, 2026-10-09: the two publish-time
+ * projections, `spec-changes.json` and the upgrade guide, leave git and are
+ * generated at publish) and #22554 B (comment 6092692730, 2026-10-10: this
+ * registry is generated at build and leaves git, its path unchanged). The rule
+ * the second one completes, verbatim: "a generated aggregate is never committed;
+ * one that source code imports is generated at build inside its package (as
+ * `gen:schema` already is), one that only ships is generated at publish (B′,
+ * #22449); CI checks that generation succeeds and no longer compares a committed
+ * copy." The review diff #6957 paid for survives for this registry as the entry
+ * file itself: one reviewed file per entry, the only source of each region.
+ *
  * `scripts/adr-anchors/` (#7301) is the pilot this mirrors. It differs in one
  * forced way, and the difference is worth naming because it bounds what this
  * generator can promise:
  *
- * ## Why the concatenation is COMMITTED here and was in-memory there
+ * ## Why the concatenation is a FILE here and was in-memory there
  *
  * `scripts/adr-anchors.mjs` assembles its shards with `readdirSync` at read
  * time, so no aggregate is checked in at all. That option does not exist for
@@ -52,24 +73,25 @@
  * bundled library needs a STATIC module graph, and a static graph over N
  * entries needs one file that names all N.
  *
- * So the concatenation lands where it already was: inside `registry.ts`,
- * between markers. That choice is what keeps this change's blast radius at
- * zero for every existing consumer — `check-adr-0087-registration.mjs` still
- * reads every `id:` line out of `LEDGER_SOURCES`, `composeSpecChanges` still
- * folds the same objects, the public API is byte-identical, and the review diff
- * the ruling explicitly paid for is exactly the diff it was before.
+ * So the concatenation is a real module file, `registry.ts`, written between
+ * the template's markers — at build time, never committed. The path is the one
+ * the file always had, so every importer (the `./migrations` entry, the scripts,
+ * the tests) is unchanged, `composeSpecChanges` folds the same objects, and the
+ * public API is byte-identical. `check-adr-0087-registration.mjs` reads the ids
+ * of a rev from the template and the entry files that rev's generation reads.
  *
- * ⚠️ **What this therefore does NOT claim.** The AUTHORED surface is now
+ * ⚠️ **What this therefore does NOT claim.** The AUTHORED surface is
  * conflict-free by construction: two cards retiring different things write
  * different files and merge clean; two cards editing the SAME entry write the
  * same filename and git reports an add/add conflict, which is correct and must
- * stay true. The generated region is a different story — two entries whose ids
- * sort ADJACENTLY insert at the same anchor and still conflict textually. What
- * changed there is the class of the failure, not its existence: the region is
- * generated from files git merged as a set, `--check` fails if it does not
- * match them, and the only correct resolution is `gen:migration-registry`. A
- * resolution that DROPS an entry is now caught by this gate instead of landing
- * silently, which is the defect #6957 measured.
+ * stay true. The generated regions no longer merge at all — git never sees
+ * `registry.ts` — so two entries whose ids sort adjacently no longer meet at one
+ * anchor, and a resolution can no longer drop an entry from a region (the defect
+ * #6957 measured). What still merges as TEXT is the template: the hand-written
+ * skeleton outside the markers (this file's header, each step's `rationale` and
+ * `conversionIds`, the tables' doc comments). Step 18's rationale is shaped for
+ * that merge (#20535): fragments kept sorted by key, so two retirements insert
+ * at different lines. That half is a human's to resolve, as it always was.
  *
  * ## Two structural properties, both enforced below
  *
@@ -86,18 +108,26 @@
  * index.
  *
  * Usage:
- *   pnpm --filter @objectstack/spec gen:migration-registry
- *   pnpm --filter @objectstack/spec check:migration-registry     # --self-test && --check
+ *   pnpm --filter @objectstack/spec gen:migration-registry   # self-test, then write registry.ts
+ *   tsx scripts/build-migration-registry.ts --self-test       # the self-test alone
  */
 
-import { readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-/** `src/migrations/registry.ts`, the file whose marked regions this writes. */
+/** `src/migrations/registry.ts`, the generated (git-ignored) file this writes whole. */
 export const REGISTRY_PATH = 'src/migrations/registry.ts';
+
+/**
+ * The committed, hand-written skeleton `registry.ts` is rendered from: every line
+ * outside the `<os-generated …>` markers, with each region left empty. Not a `.ts`
+ * file on purpose: no tsc program compiles it, and nothing can import it and
+ * receive empty tables in place of the real ones.
+ */
+export const TEMPLATE_PATH = 'src/migrations/registry.ts.template';
 
 /** The per-entry source root. Repo-relative to the package. */
 export const ENTRIES_DIR = 'src/migrations/entries';
@@ -255,8 +285,17 @@ export function loadEntries(kind: Kind, root = pkgRoot): { entries: Entry[]; err
   // Sorted by id. Duplicates cannot occur — the name is a function of the id and
   // a directory cannot hold two files with one name — which is why nothing here
   // checks for them.
-  entries.sort((a, b) => (a.major - b.major) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  entries.sort(compareEntries);
   return { entries, errors };
+}
+
+/**
+ * The emitted order: by major, then by id in code-unit order — never by locale,
+ * so two machines can never disagree on it. Exported so `--self-test` drives the
+ * same comparator the generator sorts with.
+ */
+export function compareEntries(a: Pick<Entry, 'major' | 'id'>, b: Pick<Entry, 'major' | 'id'>): number {
+  return (a.major - b.major) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
 
 /** The emitted body of one marked region, indented for its site (4 spaces). */
@@ -274,8 +313,8 @@ export function renderRegion(entries: Entry[]): string[] {
 const closeMarker = (kind: Kind, major: number) => `    // </os-generated ${kind}:${major}>`;
 
 /**
- * Splice every marked region of `registry.ts`. Pure over the file text, so the
- * self-test drives it without touching the tree.
+ * Splice every marked region of the template, giving the text of `registry.ts`.
+ * Pure over the text, so the self-test drives it without touching the tree.
  *
  * A region present in the file with no entries on disk is emitted EMPTY rather
  * than removed — an empty region is a real state (a freshly opened step, or
@@ -297,13 +336,13 @@ export function renderRegistry(source: string, byKind: Record<Kind, Entry[]>): {
     const kind = m[1] as Kind;
     const major = Number(m[2]);
     if (!KINDS.some((k) => k.kind === kind)) {
-      errors.push(`${REGISTRY_PATH}:${i + 1}: unknown generated region kind \`${kind}\`.`);
+      errors.push(`${TEMPLATE_PATH}:${i + 1}: unknown generated region kind \`${kind}\`.`);
       out.push(lines[i]);
       continue;
     }
     const close = lines.indexOf(closeMarker(kind, major), i + 1);
     if (close < 0) {
-      errors.push(`${REGISTRY_PATH}:${i + 1}: region \`${kind}:${major}\` is never closed.`);
+      errors.push(`${TEMPLATE_PATH}:${i + 1}: region \`${kind}:${major}\` is never closed.`);
       out.push(lines[i]);
       continue;
     }
@@ -318,7 +357,7 @@ export function renderRegistry(source: string, byKind: Record<Kind, Entry[]>): {
     for (const e of byKind[kind]) {
       if (!seen.has(`${kind}:${e.major}`)) {
         errors.push(
-          `${e.file}: registers under protocol major ${e.major}, but ${REGISTRY_PATH} has no ` +
+          `${e.file}: registers under protocol major ${e.major}, but ${TEMPLATE_PATH} has no ` +
             `\`<os-generated ${kind}:${e.major}>\` region. Add the region (and, for a semantic entry, ` +
             'the migration step that owns it) before the entry can be concatenated.',
         );
@@ -423,6 +462,28 @@ function selfTest(): string[] {
     failures.push('unclosed region: expected an error, got ' + JSON.stringify(unclosed.errors));
   }
 
+  // Ordering: by major first, then by id in code-unit order. `B` < `a` and
+  // `Z` < `_` in code units, and a locale compare would answer both the other
+  // way, so these two pairs are the cases a machine-dependent sort gets wrong.
+  const ordered = [
+    { major: 18, id: 'a' },
+    { major: 17, id: 'z' },
+    { major: 17, id: 'a' },
+    { major: 17, id: 'B' },
+    { major: 17, id: '_x' },
+    { major: 17, id: 'Zz' },
+  ].sort(compareEntries);
+  eq('ordering', ordered.map((e) => `${e.major}.${e.id}`), ['17.B', '17.Zz', '17._x', '17.a', '17.z', '18.a']);
+
+  // Determinism: the same template and entries render the same bytes, and the
+  // output is a fixed point — rendering it again changes nothing. Generation is
+  // the only way `registry.ts` comes to exist, on every machine and in every CI
+  // job, so two runs that disagreed would be two different registries.
+  const byKind = { semantic: [], 'retired-key': [okKey.entry!], 'retired-def': [] };
+  const once = renderRegistry(doc, byKind).text;
+  eq('deterministic', renderRegistry(doc, byKind).text, once);
+  eq('fixed point', renderRegistry(once, byKind).text, once);
+
   return failures;
 }
 
@@ -436,23 +497,31 @@ function selfTest(): string[] {
 // must therefore run nothing: write mode rewrites `registry.ts`. Spelled as
 // `check-generated.ts` spells it, realpath on BOTH sides — node resolves
 // symlinks for the module graph but leaves `argv[1]` as typed, and a guard that
-// compared the two raw would turn `check:migration-registry` into exit 0 with
-// no output. `build-migration-registry-entry.test.ts` pins both directions.
+// compared the two raw would turn `gen:migration-registry` into exit 0 with no
+// output and no file. `build-migration-registry-entry.test.ts` pins both directions.
+//
+// Every generation runs the self-test first: a run that wrote `registry.ts` is a
+// run whose splicing, ordering and determinism were just proven, so no separate
+// gate has to remember to. `--self-test` alone stops after it.
 
 function main(argv: readonly string[]): void {
-  if (argv.includes('--self-test')) {
-    const failures = selfTest();
-    if (failures.length) {
-      console.error('build-migration-registry --self-test FAILED:\n' + failures.map((f) => `  - ${f}`).join('\n'));
-      process.exit(1);
-    }
-    console.log('build-migration-registry --self-test: ok');
-    if (argv.length === 1) process.exit(0);
+  const failures = selfTest();
+  if (failures.length) {
+    console.error('build-migration-registry --self-test FAILED:\n' + failures.map((f) => `  - ${f}`).join('\n'));
+    process.exit(1);
   }
+  console.log('build-migration-registry --self-test: ok');
+  if (argv.includes('--self-test')) process.exit(0);
 
-  const check = argv.includes('--check');
+  const templatePath = join(pkgRoot, TEMPLATE_PATH);
   const registryPath = join(pkgRoot, REGISTRY_PATH);
-  const source = readFileSync(registryPath, 'utf8');
+  let template: string;
+  try {
+    template = readFileSync(templatePath, 'utf8');
+  } catch (e) {
+    console.error(`build-migration-registry: cannot read ${TEMPLATE_PATH} — ${(e as Error).message}`);
+    process.exit(1);
+  }
 
   const byKind = {} as Record<Kind, Entry[]>;
   const errors: string[] = [];
@@ -462,7 +531,7 @@ function main(argv: readonly string[]): void {
     errors.push(...loaded.errors);
   }
 
-  const { text, errors: spliceErrors } = renderRegistry(source, byKind);
+  const { text, errors: spliceErrors } = renderRegistry(template, byKind);
   errors.push(...spliceErrors);
 
   if (errors.length) {
@@ -472,22 +541,18 @@ function main(argv: readonly string[]): void {
   }
 
   const counts = KINDS.map(({ kind }) => `${byKind[kind].length} ${kind}`).join(', ');
-
-  if (check) {
-    if (text !== source) {
-      console.error(
-        `✗ ${REGISTRY_PATH} is stale — its generated regions do not match ${ENTRIES_DIR}/.\n\n` +
-          '  Run:  pnpm --filter @objectstack/spec gen:migration-registry\n\n' +
-          '  If you reached this after resolving a merge conflict INSIDE a marked region: do not\n' +
-          '  hand-merge it. The entry files are the source and git merged them as a set; the only\n' +
-          '  correct resolution is to regenerate. This gate exists because a resolution that drops\n' +
-          "  one side's entry produces no other error anywhere (#6957).",
-      );
-      process.exit(1);
-    }
+  // Written only when the bytes differ, so an unchanged registry keeps its mtime
+  // and a watcher or an incremental tsc does not see a change that is not one.
+  // Written by RENAME, never in place: every tsc, vitest worker and generator that
+  // imports this module may be reading it while a parallel task regenerates it,
+  // and a truncate-then-write would hand one of them half a file.
+  const current = existsSync(registryPath) ? readFileSync(registryPath, 'utf8') : null;
+  if (current === text) {
     console.log(`✓ ${REGISTRY_PATH} is current (${counts})`);
   } else {
-    if (text !== source) writeFileSync(registryPath, text);
+    const staged = `${registryPath}.${process.pid}.tmp`;
+    writeFileSync(staged, text);
+    renameSync(staged, registryPath);
     console.log(`✓ wrote ${REGISTRY_PATH} (${counts})`);
   }
 }

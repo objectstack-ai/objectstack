@@ -13,7 +13,11 @@
  * The judge lives in `flow-cel-root-scope.ts`; these pins drive it through
  * `validateStackExpressions`, the pass `objectstack validate` runs. The runtime
  * publish gate runs the same pass and this one judgment stands down there (the
- * last block below).
+ * S block below).
+ *
+ * #22677: `record` is no longer bound on every run — it is the record the run
+ * was handed (#22642), bound where an entrance hands the flow one or the flow
+ * binds the name (the last block below).
  */
 
 import { describe, expect, it } from 'vitest';
@@ -33,6 +37,8 @@ function flowStack(opts: {
   variables?: AnyRec[];
   middle?: AnyRec[];
   objectName?: string;
+  /** The start node's `config.triggerType` — a `record-*` token is the record trigger that hands the run a row. */
+  triggerType?: string;
   objects?: AnyRec[];
 }): AnyRec {
   return {
@@ -48,6 +54,7 @@ function flowStack(opts: {
           type: 'start',
           config: {
             ...(opts.objectName ? { objectName: opts.objectName } : {}),
+            ...(opts.triggerType ? { triggerType: opts.triggerType } : {}),
             ...(opts.startCondition !== undefined ? { condition: opts.startCondition } : {}),
           },
         },
@@ -172,11 +179,12 @@ describe('controls — one per binding kind the run has', () => {
     ['a trigger field, read bare', { edgeCondition: 'status == "open" && amount > 5', objectName: 'acct' }],
     ['a field of another object the stack declares (an action, a subflow parent or a map item can hand its record in)', { edgeCondition: 'region == "eu"', objectName: 'acct', objects: [...OBJECTS, { name: 'branch', fields: { region: { type: 'text' } } }] }],
     ['a registry-injected column', { edgeCondition: 'owner_id != null', objectName: 'acct' }],
-    ['the engine roots', { edgeCondition: 'record != null && previous == null && vars.x == null && current_user != null' }],
+    ['the engine roots', { edgeCondition: 'previous == null && vars.x == null && current_user != null' }],
+    ['`record`, on a flow a record trigger hands one (#22677)', { edgeCondition: 'record != null && record.status == "open"', objectName: 'acct', triggerType: 'record-after-update' }],
     ['a `$` variable through `vars` (a `$` name has no CEL spelling)', { edgeCondition: 'vars["$record"] != null' }],
     ['a comprehension macro variable', { edgeCondition: '[1, 2].exists(user, user > 1) && [1].map(x, x > 0, x + 1).size() == 1' }],
     ['a `cel.bind` variable', { edgeCondition: 'cel.bind(user, 2, user > 1)' }],
-    ['a CEL type name', { edgeCondition: 'type(record) == map && int("1") == 1' }],
+    ['a CEL type name', { edgeCondition: 'type(vars) == map && int("1") == 1' }],
   ])('%s', (_kind, opts) => {
     expect(rootFindings(flowStack(opts))).toEqual([]);
   });
@@ -233,8 +241,9 @@ describe('the wider family — any root nothing binds (rides the same judge)', (
     expect(found[0]!.message).toBe(
       '`foo` is not bound in this flow\'s expression scope, so the run fails with `Unknown variable: foo`: no variable, '
       + '`outputVariable`, iterator, index or error variable, `assignment` target, node id or screen field of this flow is '
-      + 'named `foo`, no object in the stack declares a field `foo`, and the engine binds only `record`, `previous`, '
-      + '`vars` and `current_user`. Declare `foo` as a flow variable or bind it with a node, or correct the name.',
+      + 'named `foo`, no object in the stack declares a field `foo`, and the engine binds only `previous`, `vars` and '
+      + '`current_user` on every run, and `record` when an entrance hands the run one. Declare `foo` as a flow variable '
+      + 'or bind it with a node, or correct the name.',
     );
   });
 
@@ -398,5 +407,111 @@ describe('the runtime publish gate (S)', () => {
     const scope = flowCelRootScope({ nodes: [] }, [], undefined, new Map(), perWriteSnapshotEntrance());
     expect(scope.provable).toBe(false);
     expect(scope.openedBy).toContain('per-write snapshot');
+  });
+});
+
+/**
+ * #22677 — `record` is the record the run was handed (#22642): `seedRunVariables`
+ * binds `context.record` and `celScope` binds no `record` of its own. So the
+ * build door binds it only where an entrance the stack declares hands the flow a
+ * record, or the flow binds a variable named `record`; otherwise `record.X` is
+ * refused. The runtime publish gate's stand-down (S) covers it until #22636.
+ */
+describe('`record` — bound only where an entrance hands the flow a record (#22677)', () => {
+  const READ = 'record.status == "open"';
+  const RECORD_TRIGGER = { objectName: 'acct', triggerType: 'record-after-update' };
+  const RECORD_HEAD = /^`record` is not bound in this flow's expression scope, so the run fails with `Unknown variable: record`/;
+  /** `f`'s refusals of `record` — another flow's findings and other roots are not this pin's. */
+  const recordRefusals = (stack: AnyRec) =>
+    rootFindings(stack).filter((i) => i.where.startsWith("flow 'f'") && RECORD_HEAD.test(i.message));
+  /** A second flow `g` whose `node` names `f`; `start` is its start config, `variables` its declarations. */
+  const parent = (opts: { name?: string; start?: AnyRec; type?: string; variables?: AnyRec[]; node: AnyRec }): AnyRec => ({
+    name: opts.name ?? 'g',
+    label: 'G',
+    type: opts.type ?? 'autolaunched',
+    ...(opts.variables ? { variables: opts.variables } : {}),
+    nodes: [
+      { id: 'start', type: 'start', config: opts.start ?? {} },
+      opts.node,
+      { id: 'done', type: 'end', config: {} },
+    ],
+    edges: [{ id: 'p1', source: 'start', target: opts.node.id }, { id: 'p2', source: opts.node.id, target: 'done' }],
+  });
+  const calls = (child: string): AnyRec => ({ id: 'call', type: 'subflow', config: { flowName: child } });
+  const withFlows = (stack: AnyRec, ...flows: AnyRec[]): AnyRec => ({ ...stack, flows: [...(stack.flows as AnyRec[]), ...flows] });
+
+  it('`validate` refuses `record.X` on a flow no entrance hands a record, with the `vars` remedy', () => {
+    const found = errorsOf(flowStack({ edgeCondition: READ }));
+    expect(found).toHaveLength(1);
+    expect(found[0]!.where).toBe("flow 'f' · edge 'e1' (start→done) condition");
+    expect(found[0]!.message).toMatch(RECORD_HEAD);
+    expect(found[0]!.message).toContain('(`record.status` → `status`) or through `vars` (`vars.status`)');
+  });
+
+  it('a start config.objectName alone is no entrance — with no `record-*` trigger nothing hands the run a row', () => {
+    expect(recordRefusals(flowStack({ edgeCondition: READ, objectName: 'acct' }))).toHaveLength(1);
+  });
+
+  it('control: a record-triggered flow passes', () => {
+    expect(recordRefusals(flowStack({ edgeCondition: READ, ...RECORD_TRIGGER }))).toEqual([]);
+    expect(validateStackExpressions(flowStack({ edgeCondition: READ, ...RECORD_TRIGGER }))).toEqual([]);
+  });
+
+  it('control: a `subflow` child of a record-handing parent passes, to a fixpoint', () => {
+    expect(recordRefusals(withFlows(flowStack({ edgeCondition: READ }), parent({ start: RECORD_TRIGGER, node: calls('f') })))).toEqual([]);
+    // Two levels: g (record trigger) → h → f.
+    expect(recordRefusals(withFlows(
+      flowStack({ edgeCondition: READ }),
+      parent({ start: RECORD_TRIGGER, node: calls('h') }),
+      parent({ name: 'h', node: calls('f') }),
+    ))).toEqual([]);
+  });
+
+  it('RED CONTROL — a `subflow` child of a parent no entrance hands a record is refused', () => {
+    expect(recordRefusals(withFlows(flowStack({ edgeCondition: READ }), parent({ node: calls('f') })))).toHaveLength(1);
+  });
+
+  it('a parent\'s own `record` VARIABLE is not handed on — the child gets its context, not its variables', () => {
+    const declares = parent({ variables: [{ name: 'record', type: 'object' }], node: calls('f') });
+    expect(recordRefusals(withFlows(flowStack({ edgeCondition: READ }), declares))).toHaveLength(1);
+  });
+
+  it.each<[string, (stack: AnyRec) => AnyRec]>([
+    ['a time-relative sweep', (stack) => {
+      ((((stack.flows as AnyRec[])[0]!.nodes as AnyRec[])[0]) as AnyRec).config = { timeRelative: { object: 'acct', dateField: 'due', withinDays: 7 } };
+      return stack;
+    }],
+    ['an action on a declared object', (stack) => ({ ...stack, actions: [{ name: 'go', label: 'Go', type: 'flow', target: 'f', objectName: 'acct' }] })],
+    ['an object-less action (it hands an empty record, still a record)', (stack) => ({ ...stack, actions: [{ name: 'go', label: 'Go', type: 'flow', target: 'f' }] })],
+    ['a `map` node with a declared itemObject', (stack) => withFlows(stack, parent({ node: { id: 'each', type: 'map', config: { collection: '{rows}', flowName: 'f', itemObject: 'acct' } } }))],
+    ['a declared `record` variable', (stack) => ({ ...stack, flows: [{ ...(stack.flows as AnyRec[])[0]!, variables: [{ name: 'record', type: 'object' }] }] })],
+  ])('control: %s', (_entrance, give) => {
+    expect(recordRefusals(give(flowStack({ edgeCondition: READ })))).toEqual([]);
+  });
+
+  it('the reader binds `record` per entrance, and the inbound hook\'s too (that flow also stands down)', () => {
+    const fieldIndex = new Map([['acct', ['status']]]);
+    const flow = (name: string, start: AnyRec, type = 'autolaunched'): AnyRec => ({ name, type, nodes: [{ id: 'start', type: 'start', config: start }] });
+    const entrances = flowCelEntrances({
+      flows: [flow('trig', RECORD_TRIGGER), flow('hook', {}, 'api'), flow('bare', { objectName: 'acct' }), flow('act', {})],
+      actions: [{ name: 'go', type: 'flow', target: 'act' }],
+    }, fieldIndex);
+    expect(entrances.get('trig')).toEqual({ bound: ['record'] });
+    expect(entrances.get('hook')?.bound).toEqual(['record']);
+    expect(entrances.get('act')).toEqual({ bound: ['record', 'id'] });
+    expect(entrances.has('bare')).toBe(false);
+  });
+
+  it('the runtime publish gate does not refuse `record.X` on a flow write, while `validate` refuses it on the same flow', () => {
+    const written = {
+      name: 'f',
+      label: 'F',
+      type: 'autolaunched',
+      nodes: [{ id: 'start', type: 'start', config: {} }, { id: 'done', type: 'end', config: {} }],
+      edges: [{ id: 'e1', source: 'start', target: 'done', condition: READ }],
+    };
+    const result = runRuntimeAuthoringRules({ type: 'flow', item: written, context: { objects: OBJECTS } });
+    expect(result.errors.filter((f) => / is not bound in /.test(f.message))).toEqual([]);
+    expect(recordRefusals({ objects: OBJECTS, flows: [written] })).toHaveLength(1);
   });
 });

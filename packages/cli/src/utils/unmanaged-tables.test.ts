@@ -39,6 +39,7 @@ import {
   selectUnmanagedTables,
   type UnmanagedTablesReport,
 } from './unmanaged-tables.js';
+import type { SchemaMigrationComposition } from './schema-migration-plugins.js';
 
 /** `normalizeRows`' sqlite limb — a bare row array. Kept local so the unit tests hold no driver. */
 const normalize = (result: unknown): Record<string, unknown>[] =>
@@ -53,12 +54,19 @@ function fakeDriver(opts: {
   managed?: string[] | null;
   client?: string | null;
   answer?: unknown | (() => unknown);
+  /** The database file its config names — how a failure on one of several databases is told apart. */
+  filename?: string;
 }): unknown {
   const driver: Record<string, unknown> = {};
   if (opts.managed !== null) {
     driver.managedObjectFields = new Map((opts.managed ?? []).map((t) => [t, {}]));
   }
-  if (opts.client !== null) driver.config = { client: opts.client ?? 'better-sqlite3' };
+  if (opts.client !== null) {
+    driver.config = {
+      client: opts.client ?? 'better-sqlite3',
+      ...(opts.filename ? { connection: { filename: opts.filename } } : {}),
+    };
+  }
   if (opts.answer !== undefined) {
     driver.execute = async () =>
       typeof opts.answer === 'function' ? (opts.answer as () => unknown)() : opts.answer;
@@ -69,18 +77,21 @@ function fakeDriver(opts: {
 /** Catalog rows in the sqlite shape the sweep's own SELECT produces. */
 const rows = (...names: string[]) => names.map((name) => ({ table_name: name }));
 
-/** A composition that mirrors the deployment — the premise the sweep requires. */
-const MIRRORED = { hostConfigLoaded: true, hostConfigPath: '/app/objectstack.config.ts' };
+/** What the sweep reads off the composition. */
+type Premise = Pick<SchemaMigrationComposition, 'servedBoot' | 'hostConfigPath'>;
+
+/** A composition that mirrors the served boot — the premise the sweep requires. */
+const MIRRORED: Premise = { servedBoot: { mirrored: true }, hostConfigPath: '/app/objectstack.config.ts' };
 
 async function sweep(opts: {
   managed?: string[] | null;
   declared?: Array<{ name: string }>;
   client?: string | null;
   answer?: unknown | (() => unknown);
-  composition?: { hostConfigLoaded: boolean; hostConfigPath: string | null };
+  composition?: Premise;
 }): Promise<UnmanagedTablesReport> {
   return collectUnmanagedTables({
-    driver: fakeDriver(opts),
+    drivers: [fakeDriver(opts)],
     declaredObjects: opts.declared ?? [],
     composition: opts.composition ?? MIRRORED,
     normalize,
@@ -262,29 +273,44 @@ describe('collectUnmanagedTables — every no-answer path is unreadable, not emp
     expect(report).toMatchObject({ status: 'read', tables: [{ table: 'sys_scim_provider' }] });
   });
 
-  it('is unreadable when no host config was loaded — the declaration set is knowingly partial', async () => {
-    // Measured: with a compiled artifact and NO config, the composed set is the
-    // artifact plus the platform FLOOR — ten objects, of which the `sys_*` half
-    // is `sys_metadata` + its four siblings, `sys_migration`,
-    // `sys_migration_journal`, `sys_metadata_activation`, `sys_secret`. A
-    // database carrying the other ~40 platform tables would have every one of
-    // them reported. That is the cry-wolf shape, and it is UNMEASURED, not
-    // false.
-    const noConfig = await sweep({
-      managed: ['sys_metadata'],
-      answer: rows('sys_user', 'sys_session', 'sys_account'),
-      composition: { hostConfigLoaded: false, hostConfigPath: null },
+  it('[#22580] runs on a project with a compiled artifact and NO host config once the composition mirrors the served boot', async () => {
+    // Measured on `main` before this card: such a project composes the served
+    // platform (75 objects, every one examined), yet the sweep was withheld
+    // with a reason claiming the set was the artifact plus the platform floor.
+    // `hostConfigPath: null` is the trap: a gate keyed on the host config, or
+    // on `hostConfigLoaded` (false here too), turns this case unreadable.
+    const report = await sweep({
+      managed: ['sys_user'],
+      declared: [{ name: 'sys_secret' }],
+      answer: rows('sys_user', 'sys_secret', 'sys_scim_provider'),
+      composition: { servedBoot: { mirrored: true }, hostConfigPath: null },
     });
-    expect(noConfig.status).toBe('unreadable');
-    expect((noConfig as { detail: string }).detail).toContain('no host config');
+    expect(report).toMatchObject({ status: 'read', tables: [{ table: 'sys_scim_provider' }] });
+  });
 
-    const brokenConfig = await sweep({
-      managed: ['sys_metadata'],
-      answer: rows('sys_user'),
-      composition: { hostConfigLoaded: false, hostConfigPath: '/app/objectstack.config.ts' },
-    });
-    expect(brokenConfig.status).toBe('unreadable');
-    expect((brokenConfig as { detail: string }).detail).toContain('/app/objectstack.config.ts');
+  it('[#22580] is unreadable when the composition does not mirror the served boot, stating the reason it recorded', async () => {
+    // Every reason the composition can record, against a database that WOULD
+    // produce findings — so `unreadable` is the gate, not an empty catalog.
+    const reasons = ['not-composed', 'nothing-to-compose', 'config-unloadable', 'stack-only'] as const;
+    const details = new Map<string, string>();
+    for (const reason of reasons) {
+      const report = await sweep({
+        managed: ['sys_metadata'],
+        answer: rows('sys_user', 'sys_session', 'sys_account'),
+        composition: {
+          servedBoot: { mirrored: false, reason },
+          hostConfigPath: reason === 'config-unloadable' ? '/app/objectstack.config.ts' : null,
+        },
+      });
+      expect(report.status, reason).toBe('unreadable');
+      details.set(reason, (report as { detail: string }).detail);
+    }
+    // One reason, one statement: none of them is another's text.
+    expect(new Set(details.values()).size).toBe(reasons.length);
+    // Each names its own subject — the config that did not load, or the
+    // absence of both a config and an artifact (not an artifact it never had).
+    expect(details.get('config-unloadable')).toContain('/app/objectstack.config.ts');
+    expect(details.get('nothing-to-compose')).toContain('neither a host config nor a compiled artifact');
   });
 
   it('is unreadable when the managed map cannot be read', async () => {
@@ -332,6 +358,66 @@ describe('collectUnmanagedTables — every no-answer path is unreadable, not emp
   it('reads an EMPTY catalog as a real answer, not as unreadable', async () => {
     const report = await sweep({ managed: [], answer: [] });
     expect(report).toMatchObject({ status: 'read', physicalTables: 0, tables: [] });
+  });
+
+  it('is unreadable when the plan holds no driver at all', async () => {
+    const report = await collectUnmanagedTables({ drivers: [], declaredObjects: [], composition: MIRRORED, normalize });
+    expect(report.status).toBe('unreadable');
+  });
+});
+
+/**
+ * [#22580] Every database the plan covers. The plan diffs the primary and,
+ * where the serving boot keeps one, the `telemetry` sibling; a `read` answer
+ * over the primary alone was a claim about a database never looked at.
+ */
+describe('collectUnmanagedTables — every planned database, or an answer about none', () => {
+  const primary = (answer: unknown) => fakeDriver({
+    managed: ['sys_user'], filename: '/srv/app/boot.db', answer,
+  });
+  const sibling = (answer: unknown) => fakeDriver({
+    managed: ['sys_audit_log'], filename: '/srv/app/boot.telemetry.db', answer,
+  });
+
+  it('reports an orphan stranded in the SECOND database, and counts both catalogs', async () => {
+    const report = await collectUnmanagedTables({
+      drivers: [primary(rows('sys_user', 'contacts')), sibling(rows('sys_audit_log', 'sys_retired_event'))],
+      declaredObjects: [],
+      composition: MIRRORED,
+      normalize,
+    });
+    expect(report).toMatchObject({ status: 'read', physicalTables: 4, tables: [{ table: 'sys_retired_event' }] });
+  });
+
+  it('judges each catalog against every planned managed set — a table is never foreign to its own database', async () => {
+    // Each database holds the other's managed name too. Judged against its own
+    // managed set alone, each would report the other's table.
+    const report = await collectUnmanagedTables({
+      drivers: [primary(rows('sys_user', 'sys_audit_log')), sibling(rows('sys_audit_log', 'sys_user'))],
+      declaredObjects: [],
+      composition: MIRRORED,
+      normalize,
+    });
+    expect(report).toMatchObject({ status: 'read', physicalTables: 4, tables: [] });
+  });
+
+  it('one database that cannot be read makes the whole report unreadable, naming that database', async () => {
+    const report = await collectUnmanagedTables({
+      drivers: [primary(rows('sys_user', 'sys_scim_provider')), sibling(null)],
+      declaredObjects: [],
+      composition: MIRRORED,
+      normalize,
+    });
+    // ⛔ Not `read` over the primary's orphan: that answer would claim the
+    // sibling too, which was never read.
+    expect(report.status).toBe('unreadable');
+    expect((report as { detail: string }).detail).toContain('/srv/app/boot.telemetry.db');
+    expect((report as { detail: string }).detail).toContain('no result set');
+  });
+
+  it('a rotation shard present in two databases is one name in the finding', () => {
+    expect(selectUnmanagedTables(['sys_gone__r20260801', 'sys_gone__r20260801'], new Set()))
+      .toEqual([{ table: 'sys_gone', rotationShards: ['sys_gone__r20260801'] }]);
   });
 });
 

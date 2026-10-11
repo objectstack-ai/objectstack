@@ -84,7 +84,7 @@ function setup(childNodes: Array<{ id: string; type: string }>, captured: unknow
       { id: 'ps', type: 'start', label: 'Start' },
       {
         id: 'do_map', type: 'map', label: 'For each',
-        config: { flowName: 'child_flow', collection: '{items}', iteratorVariable: 'item', input: { val: '{item}' }, outputVariable: 'mapped' },
+        config: { flowName: 'child_flow', collection: '{items}', iteratorVariable: 'item', input: { val: { dialect: 'cel', source: 'item' } }, outputVariable: 'mapped' },
       },
       { id: 'chk', type: 'mapcheck', label: 'Check' },
       { id: 'pe', type: 'end', label: 'End' },
@@ -221,7 +221,7 @@ describe('map config `flow` alias (#4045)', () => {
         { id: 'ps', type: 'start', label: 'Start' },
         {
           id: 'do_map', type: 'map', label: 'For each',
-          config: { flow: 'child_flow', collection: '{items}', iteratorVariable: 'item', input: { val: '{item}' }, outputVariable: 'mapped' },
+          config: { flow: 'child_flow', collection: '{items}', iteratorVariable: 'item', input: { val: { dialect: 'cel', source: 'item' } }, outputVariable: 'mapped' },
         },
         { id: 'chk', type: 'mapcheck', label: 'Check' },
         { id: 'pe', type: 'end', label: 'End' },

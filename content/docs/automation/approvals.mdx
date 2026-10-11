@@ -333,9 +333,10 @@ decision, and `decision` / `requestId` are reserved.
 
 A declaration can also be **typed** — `{ key: 'next_reviewers', type: 'user',
 multiple: true }` — which renders a multi-select user picker in the decision
-dialog instead of free text (`department` / `position` / `team` render the
-matching system-object picker; picker values are record ids, `multiple`
-collects an id array). The type shapes only the input widget; the whitelist
+dialog instead of free text (`department` / `team` render the matching
+system-object picker and commit record ids; `position` renders a picker over
+the position registry and commits position machine names; `multiple` collects
+an array of them). The type shapes only the input widget; the whitelist
 still works by `key`, so bare strings and typed declarations mix freely.
 
 Add **`required: true`** when the next step cannot run without it — the very

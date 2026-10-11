@@ -1180,7 +1180,10 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // 668 since the object form offers `enable.approvalsVisibleToReaders`,
       // the per-object opt-in for the read-only record-reader approval tier —
       // one new row label, authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(668);
+      // 669 since the position form offers `permissionSets` (ADR-0131 D3/D4),
+      // the sets a position distributes — one new row label, authored in all
+      // three locales.
+      expect(translated.length, `${locale} positive control`).toBe(669);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

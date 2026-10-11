@@ -49,14 +49,21 @@
  *
  * ## What a declaration here does NOT carry
  *
- * Only identity and display: `name`, `label`, `description` — what
- * `PositionSchema` declares and what the rows have always been stamped with.
- * Activation (`active`), the default flag (`is_default`) and provenance
- * (`managed_by`) stay on the catalog ROW; the six bind no permission set in
- * their definition (the binding stays on its junction rows until the position
- * definition can carry it). The sources of truth behind the identity names —
- * `sys_member.role` for the `org_*` trio, the unscoped `admin_full_access`
- * grant for `platform_admin` — are untouched: these remain a projection.
+ * Identity and display: `name`, `label`, `description` — what the rows have
+ * always been stamped with. Activation (`active`), the default flag
+ * (`is_default`) and provenance (`managed_by`) stay on the catalog ROW. The
+ * sources of truth behind the identity names — `sys_member.role` for the
+ * `org_*` trio, the unscoped `admin_full_access` grant for `platform_admin` —
+ * are untouched: these remain a projection.
+ *
+ * ## The one binding a declaration here carries: `everyone`'s baseline
+ *
+ * [ADR-0090 D5, ADR-0131 D3/D4] The `everyone` anchor distributes the
+ * deployment's baseline sets — the app's `isDefault` set composed with the
+ * platform's `member_default` — in its definition's `permissionSets`, which
+ * the authorization resolver reads. The plugin declares it at `kernel:ready`
+ * ({@link declareEveryoneBaseline}), once the stack's declared capabilities
+ * the high-privilege check reads are in; no other built-in names a set.
  */
 
 import {
@@ -135,4 +142,20 @@ export function registerBuiltinPositions(registry: unknown, packageId: string): 
     target.registerItem('position', { ...declaration }, 'name', packageId);
   }
   return securityBuiltinPositions.length;
+}
+
+/**
+ * [ADR-0090 D5, ADR-0131 D3/D4] Declare the `everyone` anchor again, owned by
+ * `packageId`, now naming `sets` — the deployment's baseline — in its
+ * `permissionSets` (module doc). The same package re-registering its own item
+ * replaces it.
+ *
+ * @returns whether it was declared — `false` when `registry` cannot register.
+ */
+export function declareEveryoneBaseline(registry: unknown, packageId: string, sets: readonly string[]): boolean {
+  const target = registry as Partial<BuiltinPositionRegistry> | null | undefined;
+  if (!target || typeof target.registerItem !== 'function') return false;
+  const everyone = securityBuiltinPositions.find((p) => p.name === EVERYONE_POSITION)!;
+  target.registerItem('position', { ...everyone, permissionSets: [...sets] }, 'name', packageId);
+  return true;
 }

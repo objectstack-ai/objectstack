@@ -9,9 +9,23 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  validateActionDispatchContract,
+  validateActionDispatchContract as validateActionDispatchContractUnrecorded,
   ACTION_DISPATCH_CONTRACT_MISMATCH,
 } from './validate-action-dispatch-contract.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Each finding is one verdict sentence; the reasoning it used to carry
+// is the id's `os explain` entry. Every call below records what it fired, and
+// the last cases in this file hold each recorded verdict to one line of at most
+// 200 characters — so the pin covers every firing variant this suite exercises,
+// not a chosen few. Run the whole file: those cases read what the cases above
+// fired.
+const fired: Array<{ rule: string; message: string }> = [];
+const validateActionDispatchContract: typeof validateActionDispatchContractUnrecorded = (...args) => {
+  const findings = validateActionDispatchContractUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 /**
  * The showcase's own pair, reduced: two actions against ONE endpoint, written
@@ -282,5 +296,53 @@ describe('validateActionDispatchContract — absence counts as disagreement (the
     expect(
       validateActionDispatchContract(disarmStack({ task: [RECALC_AGGREGATE], global: [RECALC_UNDECLARED] })),
     ).toEqual([]);
+  });
+});
+
+describe('[#22161] one-line verdicts — action-dispatch-contract-mismatch', () => {
+  it('every verdict the cases above fired is one line of at most 200 characters', () => {
+    // The coverage control first: the id fired, so the shape assertion below
+    // cannot pass over an empty record.
+    expect([...new Set(fired.map((f) => f.rule))]).toEqual([ACTION_DISPATCH_CONTRACT_MISMATCH]);
+    for (const f of fired) {
+      expect(f.message, f.rule).not.toContain('\n');
+      expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('reads as one sentence in both directions', () => {
+    const [toPerRow] = validateActionDispatchContract(
+      stack([AGGREGATE], { bulkActions: ['recalc_selection'] }),
+    );
+    expect(toPerRow!.message).toBe(
+      'action "recalc_selection" declares execution: \'aggregate\', wired as execution: \'perRecord\' ' +
+        '(one call per row: `recordId`, no `_selectedIds`), so its body takes its single-record branch',
+    );
+    const [toAggregate] = validateActionDispatchContract(
+      stack([PER_RECORD], {
+        bulkActionDefs: [{ name: 'recalc_estimate', operation: 'custom', execution: 'aggregate' }],
+      }),
+    );
+    expect(toAggregate!.message).toBe(
+      'action "recalc_estimate" declares execution: \'perRecord\', wired as execution: \'aggregate\' ' +
+        '(one call: `_selectedIds`, no `recordId`), so its body finds no `recordId` and throws',
+    );
+  });
+
+  it('`os explain` carries what the verdict no longer says', () => {
+    const entry = explainRule(ACTION_DISPATCH_CONTRACT_MISMATCH);
+    expect(entry, 'no `os explain action-dispatch-contract-mismatch` entry').toBeDefined();
+    const text = entry!.paragraphs.join('\n');
+    for (const fact of [
+      'ONCE PER selected row',
+      '`params._selectedIds`',
+      '"nothing selected"',
+      'ADR-0104',
+      'strict params gate',
+      'action-bulk-dispatch-contract-undeclared',
+      '`action-name-undefined`',
+    ]) {
+      expect(text, `explanation names ${fact}`).toContain(fact);
+    }
   });
 });

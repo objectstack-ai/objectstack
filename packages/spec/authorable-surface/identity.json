@@ -55,6 +55,7 @@
     "identity/Position:description",
     "identity/Position:label",
     "identity/Position:name",
+    "identity/Position:permissionSets",
     "identity/Position:protection",
     "identity/SCIMAddress:country",
     "identity/SCIMAddress:formatted",

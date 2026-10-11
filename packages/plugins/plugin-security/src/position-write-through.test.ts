@@ -150,7 +150,10 @@ async function boot(opts: { posture?: 'single' | 'isolated'; door?: boolean; led
     ? null
     : new ObjectStackProtocolImplementation(engine as never, () => new Map(), undefined);
   const metadata = {
-    get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
+    get: async (type: string, name: string) =>
+      type === 'permission'
+        ? ([...defaultPermissionSets, QA_ADMIN] as Array<{ name?: string }>).find((s) => s?.name === name) ?? null
+        : engine.getSchema(name) ?? null,
     list: async (type: string) => (type === 'position' ? [] : [...defaultPermissionSets, QA_ADMIN]),
   };
   const services: Record<string, unknown> = {
@@ -246,7 +249,12 @@ describe('[ADR-0131 D3] position write-through under single — a Setup position
     expect(await b.catalogResolves('regional_lead')).toBe(true);
   });
 
-  it('a user assigned to a Setup-created position is granted exactly what the row-only position granted', async () => {
+  // [ADR-0131 D3/D4] The resolver reads a position's sets from its definition's
+  // `permissionSets`, never from the junction: the binding Setup makes as a
+  // `sys_position_permission_set` row grants nothing, with the write-through or
+  // without it. Setup moves onto the definition with C9 and the write-through's
+  // retirement; until then this is the measured gap the release note names.
+  it('a user assigned to a Setup-created position is granted the same with or without the write-through — and a junction binding grants nothing', async () => {
     const grantsThrough = async (door: boolean) => {
       const b = await boot({ door });
       await b.engine.insert('sys_user', {
@@ -276,7 +284,26 @@ describe('[ADR-0131 D3] position write-through under single — a Setup position
     expect(before.defined).toBe(0);
     expect(after.defined).toBe(1);
     expect(after.grants).toEqual(before.grants);
-    expect(after.grants).toMatchObject({ positions: expect.arrayContaining(['report_reader']), permissions: ['pw_reports'] });
+    expect(after.grants).toMatchObject({ positions: expect.arrayContaining(['report_reader']) });
+    expect((after.grants as any).permissions).not.toContain('pw_reports');
+  });
+
+  // [ADR-0131 D3/D4] `permissionSets` has no row column: a Setup edit of the
+  // row saves the definition again, and must carry the binding the metadata
+  // door declared rather than clear it.
+  it('a row edit keeps the `permissionSets` the stored definition names, and a rename carries them to the new name', async () => {
+    const b = await boot();
+    const created: any = await create(b, { name: 'night_lead', label: 'Night lead' });
+    await (b.protocol as any).saveMetaItem({
+      type: 'position', name: 'night_lead', item: { name: 'night_lead', label: 'Night lead', permissionSets: ['night_tools'] },
+    });
+    expect((await b.envRows('night_lead')).map((r) => r.body.permissionSets)).toEqual([['night_tools']]);
+    await patch(b, created.id, { label: 'Night supervisor' });
+    expect((await b.envRows('night_lead')).map((r) => r.body)).toEqual([
+      { name: 'night_lead', label: 'Night supervisor', delegatable: false, permissionSets: ['night_tools'] },
+    ]);
+    await patch(b, created.id, { name: 'night_supervisor' });
+    expect((await b.envRows('night_supervisor')).map((r) => r.body.permissionSets)).toEqual([['night_tools']]);
   });
 
   it('an edit keeps the row and the definition agreeing; a deactivation and is_default stay on the row', async () => {
@@ -617,6 +644,21 @@ describe('[ADR-0131 D3] controls — what the write-through leaves exactly as it
     expect((await b.rows('plant_lead')).map((r) => r.organization_id)).toEqual([ORG]);
     expect(saves).not.toHaveBeenCalled();
     expect(await b.envRows('plant_lead')).toEqual([]);
+  });
+
+  // [ADR-0131 D3, #15196 Q3 = A] The promotion path the release note names:
+  // under a wall an organization's Setup position is a row with no definition,
+  // so it grants nothing; the metadata door takes an environment definition
+  // under the same name, and that definition is what the catalog then serves.
+  it('a walled posture: an organization\'s row-only position is promoted by an environment definition saved at the metadata door', async () => {
+    const b = await boot({ posture: 'isolated' });
+    await create(b, { name: 'plant_auditor', label: 'Plant auditor' });
+    expect(await b.catalogResolves('plant_auditor')).toBe(false);
+    await (b.protocol as any).saveMetaItem({
+      type: 'position', name: 'plant_auditor', item: { name: 'plant_auditor', label: 'Plant auditor', permissionSets: ['plant_tools'] },
+    });
+    expect((await b.envRows('plant_auditor')).map((r) => r.body.permissionSets)).toEqual([['plant_tools']]);
+    expect(await b.catalogResolves('plant_auditor')).toBe(true);
   });
 
   it('a system write is never translated', async () => {

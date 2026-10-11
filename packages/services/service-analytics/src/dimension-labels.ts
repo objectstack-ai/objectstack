@@ -300,6 +300,40 @@ export function withLabelFetchCache(deps: DimensionLabelDeps): DimensionLabelDep
   };
 }
 
+/**
+ * [#22661] Wrap a {@link DimensionLabelDeps} so `fetchRecordLabels` reads only
+ * a TARGET object the dataset door serves — `serves` is the door's label face
+ * (`servesLabelTarget`, `api-exposure-door.ts`), the spec's one exposure
+ * decision. A target it does not serve answers an EMPTY map without being
+ * read, which both label passes already take as "no label": the display pass
+ * leaves the stored id in the row, and the sort-key pass sorts by it — the
+ * same answer a target the reader's row scope hides gets (#3602).
+ *
+ * Applied once, where the service takes the configured resolver, so every
+ * pass that reads labels — today the display pass and the sort-key pass —
+ * goes through it; nothing here caches, so the per-request
+ * {@link withLabelFetchCache} wraps this, not the other way round.
+ */
+export function withServedLabelTargets(
+  deps: DimensionLabelDeps,
+  serves: (targetObject: string) => boolean,
+): DimensionLabelDeps {
+  return {
+    getObjectFields: (objectName) => deps.getObjectFields(objectName),
+    async fetchRecordLabels(targetObject, ids, scope, context) {
+      if (!serves(targetObject)) return new Map();
+      return deps.fetchRecordLabels(targetObject, ids, scope, context);
+    },
+    // A select option's label is the BASE object's own metadata, not a read of
+    // a second object, so it passes straight through (and, as in
+    // `withLabelFetchCache`, is never dropped by the wrapper).
+    translateSelectOptions: deps.translateSelectOptions
+      ? (objectName, fieldName, options, locale) =>
+          deps.translateSelectOptions!(objectName, fieldName, options, locale)
+      : undefined,
+  };
+}
+
 /** Date-dimension granularity (mirrors the dataset `dateGranularity` enum). */
 export type DateGranularity = 'day' | 'week' | 'month' | 'quarter' | 'year';
 

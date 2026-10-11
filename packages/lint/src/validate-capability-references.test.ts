@@ -90,6 +90,75 @@ describe('validateCapabilityReferences (ADR-0066 ⑨)', () => {
     expect(findings.every((f) => f.severity === 'warning')).toBe(true);
   });
 
+  // [#22639] The `/meta` read gate serves a list view or a dashboard only to a
+  // caller holding EVERY capability its `requiredPermissions` names, so a typo
+  // there hides it from everyone. Every door the key is declared at resolves.
+  describe('list views and dashboards — the audience gate the /meta read gate enforces', () => {
+    const GRANTED = { permissions: [{ name: 'clm_legal', systemPermissions: ['clm_legal_workbench.view'] }] };
+
+    it('warns on a typo at every list view and dashboard position, each at its own path', () => {
+      const findings = validateCapabilityReferences({
+        ...GRANTED,
+        objects: [{
+          name: 'clm_contract',
+          listViews: {
+            mine: { type: 'grid', columns: ['name'] },
+            legal: { type: 'grid', columns: ['name'], requiredPermissions: ['clm_legal_workbnch.view'] },
+          },
+        }],
+        views: [
+          {
+            object: 'clm_contract',
+            list: { type: 'grid', columns: ['name'], requiredPermissions: ['clm_legl_workbench.view'] },
+            listViews: { queue: { type: 'grid', columns: ['name'], requiredPermissions: ['clm_queue.view'] } },
+          },
+          {
+            name: 'clm_contract.saved', object: 'clm_contract', viewKind: 'list',
+            config: { type: 'grid', columns: ['name'], requiredPermissions: ['clm_saved.view'] },
+          },
+          { name: 'clm_contract.overlay', object: 'clm_contract', viewKind: 'list', type: 'grid', requiredPermissions: ['clm_overlay.view'] },
+        ],
+        dashboards: [{ name: 'legal_board', label: 'Legal', widgets: [], requiredPermissions: ['clm_board.view'] }],
+      });
+      const byPath = (a: string[], b: string[]) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0);
+      expect(findings.map((f) => [f.where, f.path]).sort(byPath)).toEqual([
+        ['dashboard "legal_board"', 'dashboards[0].requiredPermissions'],
+        ['list view "clm_contract.legal"', 'objects[0].listViews.legal.requiredPermissions'],
+        ['list view "clm_contract"', 'views[0].list.requiredPermissions'],
+        ['list view "clm_contract.queue"', 'views[0].listViews.queue.requiredPermissions'],
+        ['view "clm_contract.saved"', 'views[1].config.requiredPermissions'],
+        ['view "clm_contract.overlay"', 'views[2].requiredPermissions'],
+      ]);
+      expect(findings.every((f) => f.rule === CAPABILITY_REFERENCE_UNKNOWN && f.severity === 'warning')).toBe(true);
+    });
+
+    it('passes a granted capability at every one of those positions — the lit control is a stack that still warns', () => {
+      const gate = ['clm_legal_workbench.view'];
+      const findings = validateCapabilityReferences({
+        ...GRANTED,
+        objects: [{ name: 'clm_contract', listViews: { legal: { type: 'grid', requiredPermissions: gate } } }],
+        views: [
+          { object: 'clm_contract', list: { type: 'grid', requiredPermissions: gate }, listViews: { q: { requiredPermissions: gate } } },
+          { name: 'clm_contract.saved', viewKind: 'list', config: { requiredPermissions: gate } },
+          { name: 'clm_contract.overlay', viewKind: 'list', requiredPermissions: gate },
+        ],
+        dashboards: [
+          { name: 'legal_board', requiredPermissions: gate },
+          // Lit control: the one unresolved reference in this stack.
+          { name: 'ops_board', requiredPermissions: ['ops_bord.view'] },
+        ],
+      });
+      expect(findings.map((f) => f.path)).toEqual(['dashboards[1].requiredPermissions']);
+    });
+
+    it('a view or a dashboard with no requiredPermissions resolves nothing', () => {
+      expect(validateCapabilityReferences({
+        views: [{ object: 'clm_contract', list: { type: 'grid' }, listViews: { all: { type: 'grid' } } }],
+        dashboards: [{ name: 'ops', widgets: [] }],
+      })).toEqual([]);
+    });
+  });
+
   it('does NOT flag systemPermissions itself (the declaration side)', () => {
     // A package introduces a new capability by GRANTING it — never a warning.
     const findings = validateCapabilityReferences({

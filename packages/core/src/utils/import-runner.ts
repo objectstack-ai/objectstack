@@ -8,7 +8,7 @@ import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { CreateDataRequest, FindDataRequest, UpdateDataRequest, ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult } from './bulk-write.js';
-import { isUniqueViolationError, uniqueViolationColumn, isEngineDuplicateRecordEnvelope, mapDataError } from '@objectstack/types';
+import { isUniqueViolationError, uniqueViolationColumn, isEngineDuplicateRecordEnvelope, mapDataError, sandboxBusinessMessage, isSandboxOrigin } from '@objectstack/types';
 
 /**
  * import-runner — the shared row-processing core for bulk import.
@@ -442,18 +442,54 @@ export function sanitizeRowError(raw: unknown): string {
  * the row: the door's `hint`, `object` and `developerMessage` are not keys of
  * `ImportRowResultSchema`. A finding on the thrown error still wins over the
  * door, as it does for `code` above.
+ *
+ * ## A sandboxed hook's refusal reads in the hook's words (#22694)
+ *
+ * A QuickJS hook body that refuses a row throws a `SandboxError` whose
+ * `.message` is the `hook '<name>' threw: Error: <sentence>` debug wrapper,
+ * written for the server log, and whose `.innerMessage` is the sentence the
+ * author addressed to the caller. The row used to be built from `.message`,
+ * so an import answered the wrapper where `POST /data/:object`, `/createMany`
+ * and every other door answer the sentence. The sentence is read through
+ * {@link sandboxBusinessMessage}, the one read those doors make (#11588) —
+ * ⛔ never a pattern-strip of the wrapper off `.message`, which would also
+ * rewrite a plain error whose own text happens to contain `threw:`.
+ *
+ * The sentence is taken whole, as the create door answers it, and is NOT
+ * passed through {@link sanitizeRowError}. That function cleans DRIVER text,
+ * and an author's sentence fed to it is paraphrased: one that opens with an
+ * SQL verb ("Update the cost centre first.") reads as a leaked statement and
+ * comes back as the generic database sentence. A `code` the body declared
+ * still rides, read from the error as it always was.
+ *
+ * ## A sandboxed body the door answers as a fault reads as that fault (#22718)
+ *
+ * Two sandboxed failures are not refusals, and the create door withholds
+ * their text: a body that CRASHED (`TypeError: boom`, which
+ * {@link sandboxBusinessMessage} declines) answers `500 INTERNAL_ERROR`, and a
+ * refusal that declared a 5xx status answers that status with its prose
+ * withheld. The row used to relay both: the crash as the wrapper through
+ * {@link sanitizeRowError}, the declared 5xx as the body's prose. So for a
+ * sandboxed error the door answers with a 5xx, the row's text is the door's
+ * own sentence. Which errors are faults and what their sentence is are both
+ * `mapDataError`'s verdict, ⛔ never a second withholding rule here. The row's
+ * `code` is unchanged, so it still reads as a failed row with a fault code.
+ * Every other error keeps its row text: driver text is still cleaned by
+ * {@link sanitizeRowError}, which is the import's own reading of it.
  */
 function toFailedResult(rowNo: number, err: unknown, objectName: string): ImportRowResult {
   const e = err as { code?: unknown; message?: unknown; fields?: unknown; field?: unknown } | null | undefined;
   const first = firstFinding(e?.fields);
+  const door = mapDataError(err, objectName);
   if (first === undefined) {
-    const adopted = adoptDoorVerdict(rowNo, mapDataError(err, objectName).body);
+    const adopted = adoptDoorVerdict(rowNo, door.body);
     if (adopted !== undefined) return adopted;
   }
   const thrownCode = isEngineDuplicateRecordEnvelope(e) ? 'UNIQUE_VIOLATION' : e?.code;
   const code = first?.code ?? thrownCode ?? 'IMPORT_ROW_FAILED';
   const field = first?.field != null && first.field !== '' ? first.field : e?.field;
-  const message = sanitizeRowError(e?.message);
+  const sandboxFault = isSandboxOrigin(err) && door.status >= 500 ? String(door.body.error) : undefined;
+  const message = sandboxFault ?? sandboxBusinessMessage(err) ?? sanitizeRowError(e?.message);
   return {
     row: rowNo, ok: false, action: 'failed', error: message, code: String(code),
     ...(field != null && field !== '' ? { field: String(field) } : {}),
