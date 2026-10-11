@@ -114,10 +114,12 @@ export function validateCapabilityReferences(stack: AnyRec): CapabilityRefFindin
       rule: CAPABILITY_REFERENCE_UNKNOWN,
       where,
       path,
+      // [#22161] One verdict sentence; the four sources of the known set, the
+      // positions walked and why it only warns is
+      // `os explain capability-reference-unknown`.
       message:
-        `requiredPermissions references capability "${cap}" which is registered ` +
-        `nowhere — no built-in capability, no permission set in this package grants ` +
-        `it via systemPermissions, and no sys_capability seed declares it`,
+        `requiredPermissions names capability "${cap}", which no built-in, \`defineCapability\`, ` +
+        `\`systemPermissions\` grant or \`sys_capability\` seed provides, so this gate fails closed`,
       hint,
     });
   };

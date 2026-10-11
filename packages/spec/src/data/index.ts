@@ -40,6 +40,12 @@ export * from './filter-verdict';
 // diagnostic without re-disclosing policy. Fail direction is CLOSED by
 // declaration: unmarked or ambiguous withholds, exactly like `'policy'`.
 export * from './filter-subtree-provenance';
+// [ADR-0139 D1] `ReadableIds` — the one branded comparand value meaning "the
+// ids of object X this caller may read", placed as the comparand of `$in`. No
+// operator, so no request can spell it; its brand is a `Symbol.for` key on the
+// provenance mark's device, so a copy that crossed JSON or a structured clone
+// arrives unbranded and the comparand-shape door refuses it as a non-list.
+export * from './readable-ids';
 // [#8371] The FILTER axis' dotted-path verdict — ONE head-type classification
 // consumed by both doors (metadata-protocol's ingress gate and objectql's
 // engine seam), so the two cannot drift into answering one spelling two ways.

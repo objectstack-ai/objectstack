@@ -145,8 +145,8 @@ const result = FlowRegionSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **collection** | `string \| any[]` | ✅ | Template/variable resolving to the array to iterate (an inline array is accepted) |
-| **iteratorVariable** | `string` | optional (default: `"item"`) | Loop variable holding the current item |
-| **indexVariable** | `string` | optional | Optional loop variable holding the current index |
+| **iteratorVariable** | `string` | optional (default: `"item"`) | Loop variable holding the current item — a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}` |
+| **indexVariable** | `string` | optional | Optional loop variable holding the current index — a name without a leading `$` (the `$` names are the flow engine's own) |
 | **maxIterations** | `integer` | optional | Hard cap on iterations (clamped to the engine ceiling) |
 | **body** | `{ nodes: object[]; edges?: object[] }` | optional | Loop body region (omit for legacy flat-graph loops) |
 

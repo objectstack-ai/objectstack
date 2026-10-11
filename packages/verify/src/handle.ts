@@ -58,9 +58,28 @@
 //     `@objectstack/core`'s `resolveAuthzContext`), the exact resolver every
 //     dispatcher request goes through. The handle never assembles an
 //     `ExecutionContext` by hand.
+//   observeWrites                        → the engine's own middleware chain
+//     (`registerMiddleware`, a member of the `IObjectQLEngine` contract).
+//     [#22301] One global middleware, registered on the first call and kept
+//     for the life of the stack, that passes every operation straight on and,
+//     while an observation is open, records each insert / update / delete it
+//     sees and what the engine answered it. It changes no payload, no answer
+//     and no error, so it re-derives nothing: what it can see is fixed by
+//     where it sits, after the write gates the boot registered.
+//     `handle.observe-writes.test.ts` pins it, and that boundary.
 //   metadata                             → the engine's `SchemaRegistry`.
 //   tenancy                              → the `tenancy` service AuthPlugin
 //     registered at boot.
+//   the lowered-body door                → NOT a method here. [#22301] What a
+//     deployment runs for a hook or an action is the `body` `objectstack
+//     build` lowered its function to, in the runtime's QuickJS sandbox. Which
+//     of the two runs is decided by the app the boot mounts, so the door is a
+//     boot option, `bootStack(config, { artifact })`: the compiled artifact is
+//     mounted as the app, and every door above then runs its bodies. The
+//     handle lowers nothing and runs no sandbox of its own.
+//     `harness.artifact-door.test.ts` pins the door, and
+//     `packages/qa/dogfood/test/lowered-body-door.dogfood.test.ts` pins a
+//     handler the build's real lowering turns into a body that refuses.
 //
 // ⛔ Design rule (hotcrm#1579 step 5a): if a method needs a semantic the
 // kernel does not expose, that is a kernel gap to FILE — never a semantic to
@@ -73,7 +92,7 @@ import { SEED_WRITE_EXECUTION_CONTEXT, type ExecutionContext } from '@objectstac
 import type { ValidateDataResponse } from '@objectstack/spec/api';
 import type { AutomationResult } from '@objectstack/spec/contracts';
 import type { ServiceObject } from '@objectstack/spec/data';
-import { resolveEngineUpdateDispatch, type ObjectQL } from '@objectstack/objectql';
+import { resolveEngineUpdateDispatch, type ObjectQL, type OperationContext } from '@objectstack/objectql';
 import type { TenancyService } from '@objectstack/plugin-auth';
 import type { AutomationEngine } from '@objectstack/service-automation';
 
@@ -155,6 +174,59 @@ export type FlowRun = AutomationResult & { flowName: string };
 export interface FlowRunRef {
   flowName: string;
   runId?: string;
+}
+
+/**
+ * [#22301] What the engine answered one observed write: `pending` until it
+ * answers, then `resolved` with the result as it left the engine's executor
+ * (before the outer write gates' post-phase, such as field-level masking), or
+ * `refused` with the error the engine threw, unchanged, and that error's own
+ * `code` (`undefined` when it carries none: the handle names no code itself).
+ */
+export type ObservedWriteOutcome =
+  | { status: 'pending' }
+  | { status: 'resolved'; result: unknown }
+  | { status: 'refused'; code: string | undefined; error: unknown };
+
+/** [#22301] One write the booted engine received while an observation was open. */
+export interface ObservedWrite {
+  /** The object written, as the engine resolved its name. */
+  readonly object: string;
+  readonly operation: 'insert' | 'update' | 'delete';
+  /**
+   * The payload (one row, or the rows of a batch insert), copied when the
+   * write reached the observer: what the write gates handed on, their own
+   * fills (an `owner_id`) included, the field defaults and the hooks' changes
+   * not yet. `undefined` for a delete.
+   */
+  readonly data: EngineRow | EngineRow[] | undefined;
+  /** The selection an update or a delete was handed (`where`); `undefined` for an insert. */
+  readonly where: EngineRow | undefined;
+  /** `true` for a predicate write (`multi: true`). */
+  readonly multi: boolean;
+  /** The execution context the write carried (`isSystem`, `userId`, …). */
+  readonly context: ExecutionContext | undefined;
+  /** What the engine answered, set in place when it does. */
+  readonly outcome: ObservedWriteOutcome;
+}
+
+/** [#22301] The live observation `observeWrites` hands the function it runs. */
+export interface WriteObservation {
+  /** Every write observed so far, in the order each reached the engine. Grows while the observation is open. */
+  readonly writes: readonly ObservedWrite[];
+  /**
+   * Resolve with the first observed write `match` accepts, once the engine
+   * has answered it (`resolved` or `refused`): a write already observed, or
+   * one that reaches the engine later while the observation is open. This is
+   * how a test waits for an `async: true` hook's write, which reaches the
+   * engine after the write that fired it has returned.
+   *
+   * Rejects when no write `match` accepts has been answered within
+   * `timeoutMs` (default 2000), naming every write observed, and when the
+   * observation closes first. A `match` that throws rejects with its error;
+   * the engine's write never sees it.
+   */
+  settled(match: (write: ObservedWrite) => boolean, opts?: { timeoutMs?: number }): Promise<ObservedWrite>;
 }
 
 export interface VerifyHandle {
@@ -343,6 +415,58 @@ export interface VerifyHandle {
    */
   rows(object: string, where?: EngineRow, opts?: Partial<AsUser>): Promise<EngineRow[]>;
 
+  /**
+   * [#22301] Observe the writes the booted engine receives while `fn` runs,
+   * and what the engine answered each one. That includes the writes a hook
+   * hands the engine through `ctx.api`, a refused one included, which leaves
+   * no row for `rows` to find. Resolves, once `fn` has settled, with every
+   * write observed ({@link ObservedWrite}), in the order each reached the
+   * engine. `fn` is handed the live observation ({@link WriteObservation}),
+   * so it can also wait for a write that lands after the call that fired it
+   * has returned.
+   *
+   * The observer is one middleware on the engine's own chain
+   * (`registerMiddleware`, a global registration), added on the first call
+   * and kept for the life of the stack. It passes every operation straight
+   * on: it changes no payload, no answer and no error. So what it sees is
+   * fixed by where it sits, after the write gates the boot registered:
+   *
+   * - **Seen:** every insert, update and delete those gates let through, from
+   *   any door (`hooks.run`, `seed`, a flow, a route, a hook's `ctx.api`), and
+   *   every refusal the engine raises past them, such as a declared
+   *   validation rule (`VALIDATION_FAILED`), a hook's throw, or a unique
+   *   conflict (`DUPLICATE_RECORD`).
+   * - **Not seen:** a write a gate refuses (the permission check among them)
+   *   never reaches the observer and leaves no entry. Its refusal still
+   *   reaches whoever made the write: a hook that does not swallow it fails
+   *   the write that fired it. Nor is a write the engine refuses before its
+   *   chain (to an external datasource, or across drivers inside a
+   *   transaction).
+   *
+   * An outcome is the engine's answer to that one call, not a statement
+   * about stored rows: a write an `after*` hook refuses was refused after the
+   * driver wrote, and its row can stay. Read rows back with `rows`.
+   *
+   * The window is time, not cause: a write the stack makes for its own
+   * reasons while `fn` runs (a sign-in's key rotation, another test's write
+   * on a shared stack) is observed too. Filter by `object`.
+   *
+   * An `async: true` hook's write reaches the engine after the write that
+   * fired it has returned: wait for it inside `fn` with
+   * `observation.settled(match)`. A hook that writes nothing leaves nothing
+   * to observe, because the engine keeps no record of a fire-and-forget run.
+   *
+   * To stage a refusal of a hook's write, arrange one the engine makes
+   * itself: seed the row that already holds a unique value the hook will
+   * write, or set up the state a declared validation rule refuses. The handle
+   * has no switch that refuses a write in the engine's place.
+   *
+   * A `fn` that is not a function is refused before anything is observed
+   * (`INVALID_REQUEST` / `400`). A rejection of `fn` is rethrown unchanged
+   * once the observation has closed.
+   */
+  observeWrites(fn: (observation: WriteObservation) => unknown): Promise<ObservedWrite[]>;
+
   /** The booted `SchemaRegistry`, read through its own accessors. */
   metadata: {
     /** One registered object (system columns injected), or `undefined`. */
@@ -387,6 +511,33 @@ const SYSTEM_CONTEXT: ExecutionContext = { isSystem: true } as ExecutionContext;
  */
 function callShapeRefusal(message: string): Error & { code: string; status: number; statusCode: number } {
   return Object.assign(new Error(message), { code: 'INVALID_REQUEST', status: 400, statusCode: 400 });
+}
+
+/** [#22301] How long `WriteObservation.settled` waits when the caller names no `timeoutMs`. */
+const SETTLED_DEFAULT_TIMEOUT_MS = 2_000;
+
+/** [#22301] The three operations `observeWrites` records; every other operation passes unrecorded. */
+function isObservedOperation(operation: OperationContext['operation']): operation is ObservedWrite['operation'] {
+  return operation === 'insert' || operation === 'update' || operation === 'delete';
+}
+
+/** [#22301] A row copied on entry, so a later change to the engine's payload cannot rewrite the record. */
+function copyRow(row: unknown): unknown {
+  return row !== null && typeof row === 'object' && !Array.isArray(row) ? { ...(row as EngineRow) } : row;
+}
+
+/** [#22301] The error's own `code`, when it carries a string one; the handle names none itself. */
+function ownCode(error: unknown): string | undefined {
+  const code = (error as { code?: unknown } | null | undefined)?.code;
+  return typeof code === 'string' ? code : undefined;
+}
+
+/** [#22301] `insert sys_x (refused VALIDATION_FAILED)`: one observed write, for a message. */
+function describeWrite(write: ObservedWrite): string {
+  const { outcome } = write;
+  const answered =
+    outcome.status === 'refused' ? `refused${outcome.code ? ` ${outcome.code}` : ''}` : outcome.status;
+  return `${write.operation} ${write.object} (${answered})`;
 }
 
 /** `true` when `opts` names the system principal; refuses a call that names two callers. */
@@ -481,6 +632,60 @@ export async function createHandle(kernel: ObjectKernel, origin: string): Promis
       throw new Error(`verify: hooks.run(..., '${operation}', input) addresses the row by input.id — none given`);
     }
     return id;
+  };
+
+  // [#22301] `observeWrites`. One record per write is shared by every open
+  // observation, and each observation is told when one is added or answered.
+  type MutableWrite = { -readonly [K in keyof ObservedWrite]: ObservedWrite[K] };
+  interface ObservationSink {
+    add(write: ObservedWrite): void;
+    answered(): void;
+  }
+  const openObservations = new Set<ObservationSink>();
+  let observer: Promise<void> | undefined;
+
+  // The one observer middleware, registered on the first observation and
+  // kept: the engine has no way to take a middleware back, and with no
+  // observation open it is `return next()`. Global (no `object`), so it is
+  // keyed to no object and `hasObjectMiddleware` answers as before.
+  const installObserver = (): Promise<void> => {
+    observer ??= engine().then(
+      (ql) => {
+        ql.registerMiddleware(async (opCtx: OperationContext, next: () => Promise<void>) => {
+          const operation = opCtx.operation;
+          if (openObservations.size === 0 || !isObservedOperation(operation)) return next();
+          const data = opCtx.data;
+          const write: MutableWrite = {
+            object: opCtx.object,
+            operation,
+            data: (Array.isArray(data) ? data.map(copyRow) : copyRow(data)) as ObservedWrite['data'],
+            where: opCtx.options?.where === undefined ? undefined : (copyRow(opCtx.options.where) as EngineRow),
+            multi: opCtx.options?.multi === true,
+            context: opCtx.context,
+            outcome: { status: 'pending' },
+          };
+          // The observations open when the write arrived are the ones told
+          // about its answer, even one that closes before the engine answers.
+          const told = [...openObservations];
+          for (const sink of told) sink.add(write);
+          try {
+            await next();
+            write.outcome = { status: 'resolved', result: opCtx.result };
+          } catch (error) {
+            write.outcome = { status: 'refused', code: ownCode(error), error };
+            throw error;
+          } finally {
+            for (const sink of told) sink.answered();
+          }
+        });
+      },
+      (error: unknown) => {
+        // Not memoised: a later call asks the kernel again.
+        observer = undefined;
+        throw error;
+      },
+    );
+    return observer;
   };
 
   return {
@@ -603,6 +808,97 @@ export async function createHandle(kernel: ObjectKernel, origin: string): Promis
       const ql = await engine();
       const found = await ql.find(object, where ? { where } : {}, { context });
       return Array.isArray(found) ? found : [];
+    },
+
+    async observeWrites(fn) {
+      if (typeof fn !== 'function') {
+        throw callShapeRefusal('verify: observeWrites(fn) takes the function to run while the observation is open');
+      }
+      await installObserver();
+
+      const writes: ObservedWrite[] = [];
+      let open = true;
+      // Each pending `settled` call: re-checked whenever a write is added or
+      // answered, and failed when the observation closes first.
+      const waiters = new Set<{ check(): void; fail(error: Error): void }>();
+      const recheck = () => {
+        for (const waiter of [...waiters]) waiter.check();
+      };
+      const sink: ObservationSink = {
+        add(write) {
+          writes.push(write);
+          recheck();
+        },
+        answered: recheck,
+      };
+
+      const observation: WriteObservation = {
+        writes,
+        settled(match, opts) {
+          const timeoutMs = opts?.timeoutMs ?? SETTLED_DEFAULT_TIMEOUT_MS;
+          if (typeof match !== 'function') {
+            return Promise.reject(callShapeRefusal('verify: settled(match) takes a function that picks the write to wait for'));
+          }
+          if (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+            return Promise.reject(callShapeRefusal('verify: settled(match, { timeoutMs }) takes a positive number of milliseconds'));
+          }
+          if (!open) {
+            return Promise.reject(new Error('verify: settled() was called after its observeWrites observation closed'));
+          }
+          return new Promise<ObservedWrite>((resolve, reject) => {
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            const waiter = {
+              check() {
+                // `match` is the caller's code, run when the engine adds or
+                // answers a write: a throw from it rejects this wait and never
+                // reaches the engine's write.
+                let hit: ObservedWrite | undefined;
+                try {
+                  hit = writes.find((w) => match(w));
+                } catch (error) {
+                  waiter.fail(error as Error);
+                  return;
+                }
+                if (hit && hit.outcome.status !== 'pending') {
+                  done();
+                  resolve(hit);
+                }
+              },
+              fail(error: Error) {
+                done();
+                reject(error);
+              },
+            };
+            const done = () => {
+              if (timer !== undefined) clearTimeout(timer);
+              waiters.delete(waiter);
+            };
+            waiters.add(waiter);
+            timer = setTimeout(() => {
+              const seen = writes.map(describeWrite);
+              waiter.fail(
+                new Error(
+                  `verify: settled() found no answered write its match accepts within ${timeoutMs}ms; ` +
+                    (seen.length > 0 ? `observed: ${seen.join(', ')}` : 'no write was observed'),
+                ),
+              );
+            }, timeoutMs);
+            waiter.check();
+          });
+        },
+      };
+
+      openObservations.add(sink);
+      try {
+        await fn(observation);
+      } finally {
+        open = false;
+        openObservations.delete(sink);
+        for (const waiter of [...waiters]) {
+          waiter.fail(new Error('verify: the observeWrites observation closed before settled() found its write'));
+        }
+      }
+      return [...writes];
     },
 
     metadata: {

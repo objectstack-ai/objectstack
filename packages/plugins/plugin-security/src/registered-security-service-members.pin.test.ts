@@ -16,7 +16,8 @@
  * overlay discard the REST route calls, and the ownership-floor alternate seam
  * `service-storage` calls at boot. A contract reader could not see that either
  * seam existed, what it refused, or that a caller must feature-detect it. Both
- * are declared now; this pin keeps the next one from going undeclared.
+ * were declared (the overlay discard has since retired with its route); this
+ * pin keeps the next one from going undeclared.
  *
  * ## How the declared list stays equal to the interface
  *
@@ -47,7 +48,6 @@ import { describe, it, expect, vi } from 'vitest';
 import type { ISecurityService } from '@objectstack/spec/contracts';
 
 import { SecurityPlugin } from './security-plugin.js';
-import { discardPermissionSetOverlay } from './permission-set-overlay-discard.js';
 import { OwnershipFloorAlternates } from './ownership-floor-alternates.js';
 
 /** `optional` exactly when the interface declares the member with `?`. */
@@ -77,7 +77,6 @@ const DECLARED_MEMBERS = {
   listAudienceBindingSuggestions: 'required',
   confirmAudienceBindingSuggestion: 'required',
   dismissAudienceBindingSuggestion: 'required',
-  discardPermissionSetOverlay: 'optional',
   contributeOwnershipFloorAlternates: 'optional',
 } as const satisfies DeclaredOptionality;
 
@@ -196,18 +195,15 @@ describe('the registered `security` service serves only what ISecurityService de
     }
   });
 
-  it('the two extension members are served with the signatures the contract declares (compile-time)', () => {
-    // The `Object.assign` half is not typed against the contract, so these two
-    // witnesses are: each is the contract's member type, implemented by
-    // delegating to the function the registered member delegates to. A
+  it('the extension member is served with the signature the contract declares (compile-time)', () => {
+    // The `Object.assign` half is not typed against the contract, so this
+    // witness is: the contract's member type, implemented by delegating to
+    // the function the registered member delegates to. A
     // parameter the contract hands over that the implementation cannot take,
     // or a result the implementation returns that the contract does not
     // promise, stops this file compiling. Never invoked.
-    const discard: NonNullable<ISecurityService['discardPermissionSetOverlay']> = (callerContext, id) =>
-      discardPermissionSetOverlay(null as never, callerContext, id);
     const contribute: NonNullable<ISecurityService['contributeOwnershipFloorAlternates']> = (plugin, alternates) =>
       new OwnershipFloorAlternates().contribute(plugin, alternates);
-    expect(typeof discard).toBe('function');
     expect(typeof contribute).toBe('function');
   });
 });

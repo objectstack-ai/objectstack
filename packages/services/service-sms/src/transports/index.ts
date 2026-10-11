@@ -2,8 +2,8 @@
 
 import type { ISmsTransport } from '@objectstack/spec/contracts';
 import { LogSmsTransport } from '../sms-service.js';
-import { AliyunSmsTransport } from './aliyun.js';
-import { TwilioSmsTransport } from './twilio.js';
+import { AliyunSmsTransport, type AliyunSmsTransportOptions } from './aliyun.js';
+import { TwilioSmsTransport, type TwilioSmsTransportOptions } from './twilio.js';
 
 export { AliyunSmsTransport, type AliyunSmsTransportOptions } from './aliyun.js';
 export { TwilioSmsTransport, type TwilioSmsTransportOptions } from './twilio.js';
@@ -39,6 +39,64 @@ export type SmsProviderTag = (typeof SMS_TRANSPORT_PROVIDERS)[number];
 export function isSmsTransportProvider(value: unknown): value is SmsProviderTag {
   return typeof value === 'string'
     && (SMS_TRANSPORT_PROVIDERS as readonly string[]).includes(value);
+}
+
+/** A provider tag whose transport delivers, so it takes credentials. */
+export type SmsDeliveringProvider = Exclude<SmsProviderTag, 'log'>;
+
+/**
+ * Every setting a delivering provider's transport is built from: keyed by its
+ * `sms` settings-namespace key, valued by the transport option it fills.
+ *
+ * This is the ONE table both configuration faces read, so one `OS_SMS_*`
+ * variable means one thing on both:
+ *
+ *   - the settings face, at `kernel:ready`: `SmsServicePlugin` translates the
+ *     namespace snapshot through it, and `SettingsService` has already resolved
+ *     each key's env override (`OS_SMS_` + the key, upper-cased) into that
+ *     snapshot;
+ *   - the constructor face, at boot: `resolveSmsCapabilityArg` reads the same
+ *     variables into `providerOptions`, env over `config.sms.providerOptions`
+ *     per credential, as the mail resolver does.
+ *
+ * `capability-arg.config-parity.contract.test.ts` holds each row equal to the
+ * keys the `sms` settings manifest declares for that provider, and the two
+ * faces equal to each other.
+ */
+export const SMS_PROVIDER_SETTING_KEYS = {
+  aliyun: {
+    aliyun_access_key_id: 'accessKeyId',
+    aliyun_access_key_secret: 'accessKeySecret',
+    aliyun_sign_name: 'signName',
+    aliyun_template_code: 'defaultTemplateCode',
+  },
+  twilio: {
+    twilio_account_sid: 'accountSid',
+    twilio_auth_token: 'authToken',
+    twilio_from_number: 'from',
+    twilio_messaging_service_sid: 'messagingServiceSid',
+  },
+} as const satisfies {
+  aliyun: Record<string, keyof AliyunSmsTransportOptions>;
+  twilio: Record<string, keyof TwilioSmsTransportOptions>;
+} & Record<SmsDeliveringProvider, Record<string, string>>;
+
+/**
+ * Read one provider's settings into transport options through
+ * {@link SMS_PROVIDER_SETTING_KEYS}. `read` answers a setting key's raw value;
+ * a value that is not a non-blank string is absent, and a present one is
+ * trimmed.
+ */
+export function smsProviderOptionsFrom(
+  provider: SmsDeliveringProvider,
+  read: (settingKey: string) => unknown,
+): Record<string, string> {
+  const options: Record<string, string> = {};
+  for (const [settingKey, option] of Object.entries(SMS_PROVIDER_SETTING_KEYS[provider])) {
+    const raw = read(settingKey);
+    if (typeof raw === 'string' && raw.trim().length > 0) options[option] = raw.trim();
+  }
+  return options;
 }
 
 export interface MakeSmsTransportOptions {

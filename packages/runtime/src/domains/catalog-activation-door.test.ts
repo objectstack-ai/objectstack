@@ -17,7 +17,7 @@
 //     does not honour would be a switch that switches nothing.
 
 import { describe, it, expect } from 'vitest';
-import { resolveUserAuthzGrants } from '@objectstack/core';
+import { resolveUserAuthzGrants, securityCatalogReaderOf } from '@objectstack/core';
 import { assertEngineUpdateDispatch } from '@objectstack/objectql';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
@@ -29,10 +29,14 @@ const USER = 'u_holder';
 const POSITION = 'sales_rep';
 const SET = 'sales_access';
 const DIRECT_SET = 'report_reader';
+/** A position and a set the ENVIRONMENT authored: no `_packageId` on either (#22621 → A). */
+const ENV_POSITION = 'env_auditor';
+const ENV_SET = 'env_audit_access';
 
 const CATALOG: TestSecurityCatalog = {
     positions: [
         { name: POSITION, permissionSets: [SET], _packageId: 'crm' },
+        { name: ENV_POSITION, permissionSets: [ENV_SET] },
         // The audience anchors are DECLARED here so a refusal of them cannot be
         // a 404 in disguise: the lookup would find them.
         { name: 'everyone', permissionSets: [] },
@@ -41,6 +45,7 @@ const CATALOG: TestSecurityCatalog = {
     permissions: [
         { name: SET, systemPermissions: ['cap_sales'] },
         { name: DIRECT_SET, systemPermissions: ['cap_reports'] },
+        { name: ENV_SET, systemPermissions: ['cap_audit'] },
         { name: 'admin_full_access', systemPermissions: ['manage_metadata'] },
     ],
 };
@@ -61,7 +66,10 @@ function makeEngine(opts: EngineOptions = {}) {
     const tables: Record<string, Row[]> = {
         sys_user: [{ id: USER }],
         sys_member: [],
-        sys_user_position: [{ user_id: USER, position: POSITION, organization_id: null }],
+        sys_user_position: [
+            { user_id: USER, position: POSITION, organization_id: null },
+            { user_id: USER, position: ENV_POSITION, organization_id: null },
+        ],
         sys_user_permission_set: [
             { user_id: USER, permission_set_id: 'ps_direct', permission_set: DIRECT_SET, organization_id: null },
         ],
@@ -416,6 +424,24 @@ describe('the catalog activation door — contract', () => {
         expect(h.tables[LEDGER]).toEqual([]);
     });
 
+    // [ADR-0112] The code and the status say the same thing. The ledger's
+    // record validation refuses a write with `VALIDATION_FAILED` and no status
+    // of its own; the door used to keep that code under its 503 default, a pair
+    // that contradicts itself (a client input refusal served as an outage).
+    it('a record validation refusal on the ledger is 400 VALIDATION_FAILED — code and status agree', async () => {
+        const refusal = Object.assign(new Error('Package is required'), {
+            code: 'VALIDATION_FAILED',
+            fields: [{ field: 'package_id', code: 'required', message: 'Package is required' }],
+        });
+        const h = boot('single', { writeError: refusal });
+
+        const res = await flip(h, TENANT_ADMIN(), `/_activation/position/${POSITION}`);
+
+        expect(statusOf(res)).toBe(400);
+        expect(codeOf(res)).toBe('VALIDATION_FAILED');
+        expect(h.tables[LEDGER]).toEqual([]);
+    });
+
     it('a store failure is 503 SERVICE_UNAVAILABLE, never a 200', async () => {
         const h = boot('single', { writeError: new Error('connection reset') });
 
@@ -433,6 +459,78 @@ describe('the catalog activation door — contract', () => {
         // No `security` service in this composition: the existing 503, not this door.
         expect(statusOf(res)).toBe(503);
         expect(messageOf(res)).toBe('Security service not available');
+    });
+});
+
+// [#22621 → A] Under `single` the administrator switches every position and
+// permission set from the same Setup page, the environment's own included. No
+// package ships those, and the row says so with no package value — never a
+// placeholder — while the resolver honours it exactly like a packaged one.
+describe('the catalog activation door — an environment-authored item', () => {
+    it('anti-vacuity: the catalog holds both items, and neither names a package', async () => {
+        const h = boot('single');
+        const reader = securityCatalogReaderOf(h.engine);
+
+        const position = await reader!.resolve('position', ENV_POSITION);
+        const set = await reader!.resolve('permission', ENV_SET);
+
+        expect(position?.name).toBe(ENV_POSITION);
+        expect(set?.name).toBe(ENV_SET);
+        expect(position?.packageId).toBeUndefined();
+        expect(set?.packageId).toBeUndefined();
+        // CONTROL: the packaged position beside them does name its package.
+        expect((await reader!.resolve('position', POSITION))?.packageId).toBe('crm');
+    });
+
+    for (const [type, name] of [['position', ENV_POSITION], ['permission', ENV_SET]] as const) {
+        it(`\`${type}\`: switches off and back on, one row with NO package`, async () => {
+            const h = boot('single');
+
+            const off = await flip(h, TENANT_ADMIN(), `/_activation/${type}/${name}`, { enabled: false });
+            expect(statusOf(off)).toBe(200);
+            expect(off.response?.body?.data).toEqual({ type, name, enabled: false });
+            expect(h.writes[0]).toEqual({
+                op: 'insert',
+                data: { metadata_type: type, name, package_id: null, active: false },
+            });
+
+            const on = await flip(h, TENANT_ADMIN(), `/_activation/${type}/${name}`, { enabled: true });
+            expect(statusOf(on)).toBe(200);
+            expect(h.tables[LEDGER]).toHaveLength(1);
+            expect(h.tables[LEDGER][0]).toEqual(expect.objectContaining({ package_id: null, active: true }));
+        });
+    }
+
+    it('the resolver honours its row: the position switched off stops granting, back on grants again', async () => {
+        const h = boot('single');
+
+        const before = await grantsOf(h);
+        expect(before.positions).toContain(ENV_POSITION);
+        expect(before.permissions).toContain(ENV_SET);
+        expect(before.systemPermissions).toContain('cap_audit');
+
+        expect(statusOf(await flip(h, TENANT_ADMIN(), `/_activation/position/${ENV_POSITION}`, { enabled: false }))).toBe(200);
+        const off = await grantsOf(h);
+        expect(off.positions).not.toContain(ENV_POSITION);
+        expect(off.permissions).not.toContain(ENV_SET);
+        expect(off.systemPermissions).not.toContain('cap_audit');
+        // Only that position: the packaged one still grants.
+        expect(off.positions).toContain(POSITION);
+
+        expect(statusOf(await flip(h, TENANT_ADMIN(), `/_activation/position/${ENV_POSITION}`, { enabled: true }))).toBe(200);
+        const on = await grantsOf(h);
+        expect(on.positions).toContain(ENV_POSITION);
+        expect(on.permissions).toContain(ENV_SET);
+    });
+
+    it('the resolver honours its row: the set switched off stops granting while its position stays held', async () => {
+        const h = boot('single');
+
+        expect(statusOf(await flip(h, TENANT_ADMIN(), `/_activation/permission/${ENV_SET}`, { enabled: false }))).toBe(200);
+        const off = await grantsOf(h);
+        expect(off.positions).toContain(ENV_POSITION);
+        expect(off.permissions).not.toContain(ENV_SET);
+        expect(off.systemPermissions).not.toContain('cap_audit');
     });
 });
 

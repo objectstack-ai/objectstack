@@ -48,6 +48,17 @@
  *    is kept. Dropped, not masked, for the precedent's reasons: the contract
  *    publishes WHICH fields are masked, not the masked value, and dropping
  *    discloses strictly less.
+ *  - `metadata.kind` ({@link ACTIVITY_KIND_KEY}, ADR-0052 §5): on a row the
+ *    mirror wrote, the kind is DERIVED from parent fields, so it is judged like
+ *    a text. The mirror stamps `'milestone'` when a declared `activityMilestones`
+ *    entry fired, which is the fact that a watched field entered its declared
+ *    value; the declaration names the watched fields, and a reader not served
+ *    one of them is served the row without the kind. A reader served them keeps
+ *    it: it is a classification, and every key of it is one the reader may
+ *    read anyway. A kind on a row someone else wrote is the author's, served as
+ *    written, like its text. [#22786] On a read through the middleware such a
+ *    milestone row does not reach that reader at all (see below); dropping the
+ *    kind is the column half of the same answer.
  *  - The declaration itself is bookkeeping and is never served to a reader: it
  *    names fields, and which field names a reader may see is the metadata
  *    plane's question, not this one's.
@@ -97,6 +108,28 @@
  * judged, so the read is answered from the judged rows alone
  * (`{ id: { $in: KEPT } }`), and a warn says so.
  *
+ * ## A fired milestone is withheld as a row from a reader not served its watched fields (#22786)
+ *
+ * A fired milestone's row speaks about its watched fields in columns the
+ * key-by-key narrowing does not reach: its `type` is the declaration's, and
+ * its summary is the declaration's sentence. Both say that a watched field
+ * entered its declared value. So the same pre-scan, by the same answer,
+ * withholds that row as a ROW from a reader not served every field a declared
+ * milestone watches — the list the mirror declares the row's `metadata.kind`
+ * from ({@link ActivityTextSources.kind}). One judgement per row
+ * (`isWithheldRow`), one pre-scan, one WHERE:
+ *
+ *  - The row is withheld exactly when the redaction would drop its kind. A
+ *    reader served every watched field is served the row with its kind; a
+ *    reader withheld only fields no milestone watches is served it too.
+ *  - A declaration with no readable list is of unknown provenance and is judged
+ *    as the text precedent judges one: served only to a reader not restricted
+ *    on the parent.
+ *  - A `kind` on a row the mirror did not write is the author's: not judged.
+ *  - Rows written before the mirror declared the list carry no kind, so nothing
+ *    on them says a milestone fired; they are judged by the rules above them,
+ *    and age out with the object's retention, like the earlier shape's text.
+ *
  * ## Fail closed
  *
  * An unexpected failure strips every value-bearing column from the rows of the
@@ -142,10 +175,30 @@ const SYSTEM_CTX = { isSystem: true } as const;
  */
 export const ACTIVITY_TEXT_SOURCES_KEY = 'text_sources';
 
+/**
+ * [#22771] The `metadata` key a row's DOMAIN kind rides in. ADR-0052 §5: "`type`
+ * stays domain-NEUTRAL … Domain kind rides in `metadata.kind`." So a fired
+ * milestone keeps the `type` its declaration names (`completed`, or `updated`
+ * when it names none) and says what it is here, which is how a reader tells a
+ * "Case resolved" milestone from a finished task. Written by `audit-writers.ts`,
+ * judged here: one name, imported by both halves.
+ */
+export const ACTIVITY_KIND_KEY = 'kind';
+
+/** [#22771] The kind the CRUD mirror stamps on a row a declared `activityMilestones` entry fired (ADR-0052 §5b.2). */
+export const ACTIVITY_MILESTONE_KIND = 'milestone';
+
 /** The declaration's shape. */
 export interface ActivityTextSources {
   summary: string[];
   record_label: string[];
+  /**
+   * [#22771] The parent fields `metadata.kind` was derived from, present only
+   * beside a kind the mirror stamped. For a milestone it is every field a
+   * declared milestone watches, not only the one that fired: the kind says
+   * that SOME milestone fired, which is a fact about all of them.
+   */
+  kind?: string[];
 }
 
 /** The text columns a declaration covers. */
@@ -197,6 +250,20 @@ function textProvenance(metadata: Record<string, unknown> | null): Record<TextCo
   return earlierMirrorShape ? { summary: 'unknown', record_label: 'unknown' } : null;
 }
 
+/**
+ * [#22771] Where a row's `metadata.kind` came from, read the way
+ * {@link textProvenance} reads its text:
+ *  - a field list — the mirror's declaration;
+ *  - `'unknown'` — a mirror row whose declaration names no list for it;
+ *  - `null` — no kind, or a row the mirror did not write: served as written.
+ */
+function kindProvenance(metadata: Record<string, unknown> | null): string[] | 'unknown' | null {
+  if (!metadata || !(ACTIVITY_KIND_KEY in metadata) || !(ACTIVITY_TEXT_SOURCES_KEY in metadata)) return null;
+  const declared = metadata[ACTIVITY_TEXT_SOURCES_KEY];
+  const list = isRecord(declared) ? declared[ACTIVITY_KIND_KEY] : undefined;
+  return Array.isArray(list) && list.every((f) => typeof f === 'string') ? (list as string[]) : 'unknown';
+}
+
 /** Drop every value-bearing column — the fail-closed answer for one row. */
 function stripValueBearing(row: Record<string, unknown>): void {
   for (const col of VALUE_BEARING_COLUMNS) delete row[col];
@@ -208,11 +275,55 @@ const REDACTION_SEAM = 'activity field redaction';
 /** One read's served-unmasked answer, per parent object. */
 type ServedFor = (object: string) => Promise<string[] | undefined>;
 
+/**
+ * One read's answer to "is this reader served fewer fields of `object` than the
+ * system is?", per parent object: how a value of UNKNOWN provenance is judged.
+ * No full answer to compare against reads as restricted (closed).
+ */
+type RestrictedFor = (object: string, served: ReadonlySet<string>) => Promise<boolean>;
+
+/** {@link RestrictedFor} for ONE read: one system read per parent object, never one per row. */
+function restrictedPerRead(security: ActivityFieldVisibilitySource | undefined): RestrictedFor {
+  const restricted = new Map<string, Promise<boolean>>();
+  return (object, served) => {
+    let p = restricted.get(object);
+    if (!p) {
+      p = (async () => {
+        let all: string[] | undefined;
+        try {
+          all = await security!.getReadableFields(object, SYSTEM_CTX as never);
+        } catch {
+          all = undefined;
+        }
+        // No full answer to compare against: unknown provenance stays closed.
+        if (!Array.isArray(all)) return true;
+        return all.some((f) => !served.has(String(f)));
+      })();
+      restricted.set(object, p);
+    }
+    return p;
+  };
+}
+
+/**
+ * Whether a value composed from `sources` is served to a reader served
+ * `served`: every source served, or, for `'unknown'` provenance, a reader not
+ * restricted on the parent. The ONE answer both the row rule and the column
+ * redaction judge a declared value by.
+ */
+async function sourcesServed(
+  sources: string[] | 'unknown',
+  served: ReadonlySet<string>,
+  restricted: () => Promise<boolean>,
+): Promise<boolean> {
+  return sources === 'unknown' ? !(await restricted()) : sources.every((f) => served.has(f));
+}
+
 /** The engine slice the withheld-update rule's pre-scan needs. */
 export type ActivityRedactionEngine = ActivityMiddlewareEngine & Pick<CommentAccessEngine, 'find'>;
 
 /** The columns the withheld-update pre-scan reads: the row, its parent object
- * and its stored change. */
+ * and its stored change (with, [#22786], a milestone's kind and its declaration). */
 const WITHHELD_SCAN_COLUMNS = ['id', 'object_name', 'metadata'] as const;
 
 /** No real row matches it: the withheld-update rule's fail-closed answer. */
@@ -237,11 +348,54 @@ export function isWithheldOnlyUpdate(metadata: Record<string, unknown> | null, s
 }
 
 /**
- * [#21388] The WHERE that withholds, from one read, every update row whose
- * stored change is withheld whole from the reader `servedFor` answers for:
+ * [#22786] Whether an activity row is a fired milestone, as the CRUD mirror
+ * declared it, whose watched fields are not all served to this reader. The
+ * watched fields are the list the mirror declares the row's
+ * `metadata.kind` from ({@link kindProvenance}), judged by the same answer
+ * the redaction serves that kind by, so the row is withheld exactly when the
+ * redaction would drop its kind. False for a row with no milestone kind and
+ * for a kind on a row the mirror did not write (the author's, served as
+ * written). `restricted` answers for a declaration with no readable list.
+ * Exported for direct testing.
+ */
+export async function isWithheldMilestone(
+  metadata: Record<string, unknown> | null,
+  served: ReadonlySet<string>,
+  restricted: () => Promise<boolean>,
+): Promise<boolean> {
+  if (!metadata || metadata[ACTIVITY_KIND_KEY] !== ACTIVITY_MILESTONE_KIND) return false;
+  const watched = kindProvenance(metadata);
+  if (watched === null) return false;
+  return !(await sourcesServed(watched, served, restricted));
+}
+
+/**
+ * [#21388, #22786] The ONE withheld-row judgement the pre-scan makes: a row
+ * whose very presence speaks about a field this reader is not served, which
+ * narrowing its columns cannot take back. Either an update whose every
+ * recorded change is withheld ({@link isWithheldOnlyUpdate}), or a fired
+ * milestone whose watched fields are not all served
+ * ({@link isWithheldMilestone}). Exported for direct testing.
+ */
+export async function isWithheldRow(
+  metadata: Record<string, unknown> | null,
+  served: ReadonlySet<string>,
+  restricted: () => Promise<boolean>,
+): Promise<boolean> {
+  return isWithheldOnlyUpdate(metadata, served) || (await isWithheldMilestone(metadata, served, restricted));
+}
+
+/** No full answer is the closed answer: see {@link RestrictedFor}. */
+const RESTRICTED_CLOSED: RestrictedFor = async () => true;
+
+/**
+ * [#21388] The WHERE that withholds, from one read, every row
+ * {@link isWithheldRow} withholds from the reader `servedFor` answers for:
  * `null` when the read withholds nothing, `{ id: { $nin: WITHHELD } }` when the
  * pre-scan saw every row the read can touch, and `{ id: { $in: KEPT } }` when
  * it reached its bound (fail closed: an unjudged row is never served).
+ * [#22786] `restrictedFor` is the read's answer for a declaration of unknown
+ * provenance; without one, such a row is judged restricted (closed).
  * Exported for direct testing.
  */
 export async function computeWithheldUpdateFilter(
@@ -249,6 +403,7 @@ export async function computeWithheldUpdateFilter(
   ast: Record<string, unknown>,
   servedFor: ServedFor,
   logger: ActivityRedactionLogger,
+  restrictedFor: RestrictedFor = RESTRICTED_CLOSED,
 ): Promise<unknown | null> {
   // The rows the read would touch, under SYSTEM context (the reader may not be
   // served their change; that is what is being decided). The caller's own
@@ -275,7 +430,9 @@ export async function computeWithheldUpdateFilter(
         servedSets.set(object, answer === undefined ? undefined : new Set(answer.map(String)));
       }
       const served = servedSets.get(object);
-      isWithheld = served !== undefined && isWithheldOnlyUpdate(parseMetadata(row.metadata), served);
+      isWithheld =
+        served !== undefined &&
+        (await isWithheldRow(parseMetadata(row.metadata), served, () => restrictedFor(object, served)));
     }
     const id = row.id;
     const usable = (typeof id === 'string' || typeof id === 'number') && String(id) !== '';
@@ -312,31 +469,15 @@ export async function redactActivityRows(
   /** The read's own answer, when the caller already holds one: the middleware
    * shares it with the withheld-update rule, so both judge by ONE answer. */
   served?: ServedFor,
+  /** [#22786] Likewise the read's answer for unknown provenance. */
+  restricted?: RestrictedFor,
 ): Promise<void> {
   const list = (Array.isArray(rows) ? rows : rows ? [rows] : []) as unknown[];
   if (list.length === 0) return;
   // One answer per parent object per read, never one per row.
   const servedFor = served ?? servedFieldsPerRead(security, context, logger, REDACTION_SEAM);
-  const restricted = new Map<string, Promise<boolean>>();
   /** Is this reader served fewer fields of `object` than the system is? */
-  const restrictedOn = (object: string, servedSet: Set<string>) => {
-    let p = restricted.get(object);
-    if (!p) {
-      p = (async () => {
-        let all: string[] | undefined;
-        try {
-          all = await security!.getReadableFields(object, SYSTEM_CTX as never);
-        } catch {
-          all = undefined;
-        }
-        // No full answer to compare against: unknown provenance stays closed.
-        if (!Array.isArray(all)) return true;
-        return all.some((f) => !servedSet.has(String(f)));
-      })();
-      restricted.set(object, p);
-    }
-    return p;
-  };
+  const restrictedOn = restricted ?? restrictedPerRead(security);
 
   for (const item of list) {
     if (!isRecord(item)) continue;
@@ -355,12 +496,20 @@ export async function redactActivityRows(
 
     const metadata = 'metadata' in row ? parseMetadata(row.metadata) : null;
     const provenance = textProvenance(metadata);
+    const kindSources = kindProvenance(metadata);
+    /** Whether a value composed from `sources` is served to this reader. */
+    const servedWhole = (sources: string[] | 'unknown') =>
+      sourcesServed(sources, servedSet, () => restrictedOn(object, servedSet));
 
     if (metadata) {
       let changed = false;
       for (const side of ['old', 'new'] as const) {
         const snapshot = metadata[side];
         if (isRecord(snapshot) && dropUnservedKeys(snapshot, servedSet)) changed = true;
+      }
+      if (kindSources !== null && !(await servedWhole(kindSources))) {
+        delete metadata[ACTIVITY_KIND_KEY];
+        changed = true;
       }
       if (ACTIVITY_TEXT_SOURCES_KEY in metadata) {
         delete metadata[ACTIVITY_TEXT_SOURCES_KEY];
@@ -372,12 +521,7 @@ export async function redactActivityRows(
     if (!provenance) continue;
     for (const col of TEXT_COLUMNS) {
       if (!(col in row)) continue;
-      const sources = provenance[col];
-      const servedWhole =
-        sources === 'unknown'
-          ? !(await restrictedOn(object, servedSet))
-          : sources.every((f) => servedSet.has(f));
-      if (!servedWhole) delete row[col];
+      if (!(await servedWhole(provenance[col]))) delete row[col];
     }
   }
 }
@@ -395,8 +539,9 @@ const JUDGED_BY = ['object_name', 'metadata'] as const;
  * Inert on an engine without the middleware seam; `AuditPlugin` says so.
  *
  * [#21388] Before the read runs, the same middleware withholds every update row
- * whose stored change is withheld whole from this reader, as a WHERE on all
- * four reads (`computeWithheldUpdateFilter`). `AuditPlugin` registers it after
+ * whose stored change is withheld whole from this reader, and [#22786] every
+ * fired milestone row whose watched fields it is not all served, as a WHERE on
+ * all four reads (`computeWithheldUpdateFilter`). `AuditPlugin` registers it after
  * the read gate, so the gate's parent filter is already in the WHERE its
  * pre-scan reads.
  */
@@ -412,9 +557,10 @@ export function installActivityFieldRedaction(
       const security = getSecurity();
       // One answer per read, shared by the row rule and the redaction below.
       const servedFor = servedFieldsPerRead(security, ctx.context, logger, REDACTION_SEAM);
+      const restrictedFor = restrictedPerRead(security);
       if (security && ctx.ast && PARENT_GATE_READ_OPS.has(ctx.operation)) {
         try {
-          const filter = await computeWithheldUpdateFilter(engine, ctx.ast, servedFor, logger);
+          const filter = await computeWithheldUpdateFilter(engine, ctx.ast, servedFor, logger, restrictedFor);
           if (filter) andIntoWhere(ctx, filter);
         } catch (err) {
           // A pre-scan failure must never fall open into the timing leak.
@@ -430,7 +576,7 @@ export function installActivityFieldRedaction(
       await next();
       const list = (Array.isArray(ctx.result) ? ctx.result : ctx.result ? [ctx.result] : []) as unknown[];
       try {
-        await redactActivityRows(list, security, ctx.context, logger, servedFor);
+        await redactActivityRows(list, security, ctx.context, logger, servedFor, restrictedFor);
       } catch (err) {
         // A redaction failure must never fall open into a leak.
         logger.warn(

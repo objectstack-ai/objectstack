@@ -76,9 +76,9 @@ await stack.stop();
 
 Every `VerifyStack` carries it; nothing extra to boot. Each method is a thin
 facade over a door the kernel wired at boot — the ObjectQL engine's own write,
-dry-run and read calls, the runtime's `/automation` and `/actions` routes
-driven in-process, the automation engine's condition evaluator, the
-`SchemaRegistry`, the `tenancy` service — with **zero
+dry-run and read calls and its middleware chain, the runtime's `/automation`
+and `/actions` routes driven in-process, the automation engine's condition
+evaluator, the `SchemaRegistry`, the `tenancy` service — with **zero
 re-implemented semantics**: the handle assembles no execution context, orders
 no hooks, evaluates no permission. What the engine does is what you assert on.
 
@@ -137,6 +137,16 @@ expect(await stack.automation.evaluateCondition(
 const [acc] = await stack.seed('crm_account', [{ name: 'Globex' }]);
 const mine = await stack.rows('crm_opportunity', { crm_account: acc.id }, { as: rep });
 
+// What a hook handed the engine: every write the engine receives while the
+// function runs, and what it answered. A hook's write the engine refused
+// leaves no row; here it is, refused, with the engine's own error.
+const writes = await stack.observeWrites(async (observation) => {
+  await stack.hooks.run('crm_lead', 'insert', { last_name: 'Ada', company: 'Globex' }, { as: rep });
+  // An `async: true` hook writes after the triggering write has returned.
+  await observation.settled((w) => w.object === 'crm_task');
+});
+const refused = writes.filter((w) => w.outcome.status === 'refused');
+
 // What the boot actually holds.
 stack.metadata.object('crm_opportunity')?.fields;      // system columns injected
 stack.metadata.items('permission');                    // the registry's singular names
@@ -164,10 +174,64 @@ await stack.stop();
   touched, with `INVALID_REQUEST` / `400` (a caller named twice, or a
   `hooks.updateWhere` the engine would write by id). Assert on `code` (and
   `status` / `statusCode`), never on a message alone.
+- `observeWrites(fn)` records each insert, update and delete the engine
+  receives while `fn` runs (`object`, `operation`, `data`, `where`, `multi`,
+  `context`) and what the engine answered (`pending`, then `resolved` with its
+  result or `refused` with its error and that error's own `code`). It is one
+  middleware on the engine's own chain that passes everything on unchanged,
+  so it sits after the write gates the boot registered: a write a gate refuses
+  (the permission check among them) never reaches it and leaves no entry,
+  while every refusal past the gates (a validation rule, a hook's throw, a
+  unique conflict) is recorded. An outcome is the engine's answer to that call,
+  not a statement about stored rows: read those back with `rows`. The window is
+  time, not cause, so filter by `object`. `observation.settled(match)` waits
+  for a write that lands later, such as an `async: true` hook's (default
+  timeout 2000 ms). To stage a refusal of a hook's write, arrange one the
+  engine makes itself: seed the row that already holds a unique value, or set
+  up the state a declared validation rule refuses. The handle has no switch
+  that refuses a write in the engine's place.
 - Many files, one boot: `bootStackOnce(config, opts?)` memoises `bootStack` per
   `(config, opts)` object identity for the life of the process. Share it from
   one module, under vitest `isolate: false`, and never `stop()` a stack other
   files still use.
+
+### What the build ships: boot the compiled artifact
+
+`objectstack build` lowers each inline hook `handler` and action `target` it
+can into a metadata-only `body`, and a deployment runs that body in the
+runtime's QuickJS sandbox, against the sandbox's `ctx`. A source boot runs the
+function in-process instead. To test what ships, boot the artifact:
+
+```ts
+// After `objectstack build` (the handle lowers nothing; build first).
+const shipped = await bootStack(myApp, { artifact: 'dist/objectstack.json' });
+
+// Every door now runs the lowered body. A handler that passes in-process can
+// refuse here: a body meets the sandbox's `ctx`, which has no
+// `ctx.dispatch.scope`, for one.
+await expect(shipped.hooks.run('crm_lead', 'insert', { last_name: 'Ada' }, { system: true }))
+  .rejects.toMatchObject({ name: 'SandboxError' });
+```
+
+- The artifact is read by the runtime's own artifact loader and mounted as the
+  app, in place of `config`; the rest of the stack is still composed from
+  `config` (its `requires`, its `plugins`, its default profile), as
+  `objectstack serve <config>` composes it. A relative path resolves against
+  `hostRoot`.
+- A refused body answers as the body-only path answers: the handle rejects with
+  the sandbox's `SandboxError`, which carries a `code` and `status` the body
+  declared on its throw; a body that crashes (a `TypeError`) has none, and REST
+  answers it `500` `INTERNAL_ERROR`.
+- A callable the build could not lower is bundled into
+  `objectstack-runtime.*.mjs`, which a local artifact boot merges, so it runs
+  in-process here as under `objectstack start`. `objectstack build
+  --strict-body` refuses it at build time instead, and its artifact is
+  body-only.
+- Refused before anything boots: an artifact that cannot be loaded
+  (`RESOURCE_NOT_FOUND` / 404; the boot never falls back to the source), one
+  built from another app (`RESOURCE_CONFLICT` / 409), and a configuration
+  carrying `onEnable`, which no artifact carries (`INVALID_REQUEST` / 400). A
+  stale artifact boots stale bodies: build before the run.
 
 ## Verdicts
 
@@ -221,7 +285,7 @@ run" must never read like "nothing to find".
 
 - `bootStack(config, opts?)` → `VerifyStack` (`api` / `raw` / `signIn` / `signUp` / `apiAs` / `stop`, plus the handle:
   `hooks.run` / `hooks.updateWhere` / `validate` / `flows.run` / `flows.resume` / `actions.run` /
-  `automation.evaluateCondition` / `seed` / `rows` / `metadata` / `tenancy` / `contextFor`).
+  `automation.evaluateCondition` / `seed` / `rows` / `observeWrites` / `metadata` / `tenancy` / `contextFor`).
 - `bootStackOnce(config, opts?)` → the same, memoised per `(config, opts)` identity for the process.
 - `deriveCrudCases(config)` → the auto-derived round-trip cases (write one, read one, assert) for every object.
 - `runCrudVerification(stack, token, config)` → `VerifyReport`; `formatReport(report)` for a log summary.
@@ -232,7 +296,8 @@ for owner-scoped fixtures), `multiTenant` (also what decides the posture
 `tenancy()` reports), `automation` (register the automation service so
 `flows.*` and `automation.evaluateCondition` have something to drive; an app
 that declares `requires: ['automation']` gets it without this), `orgContext`,
-`databaseFile`, `extraPlugins`.
+`databaseFile`, `extraPlugins`, `artifact` (boot the compiled artifact as the
+app, so hooks and actions run their lowered `body`).
 
 ## Known limitations
 

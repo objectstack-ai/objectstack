@@ -242,35 +242,6 @@ export type DelegationNarrowing =
     };
 
 /**
- * What {@link ISecurityService.discardPermissionSetOverlay} resolves with.
- *
- * The minimal contract shape. The reference implementation's own result type
- * (`PermissionSetOverlayDiscardResult` in `@objectstack/plugin-security`) is
- * plugin-internal and is assignable to this one; it types the row loosely.
- */
-export interface PermissionSetOverlayDiscardResult {
-  /**
-   * The `sys_permission_set` row as stored once the overlay is gone and the row
-   * has been re-projected from the declared artifact. The column set is owned
-   * by the implementation's backing object rather than this contract, so it
-   * stays open, as {@link AudienceBindingSuggestion} does.
-   */
-  permissionSet: Record<string, unknown>;
-  /**
-   * The object grants the row carries NOW, read back after the re-projection.
-   *
-   * ⚠️ Not always a healed count. When the store refuses the re-projection
-   * write, the row keeps its pre-discard grants and this number equals the
-   * pre-discard count. The call still resolves, because the overlay deletion did
-   * land; the implementation reports the refused write on its audit log, not
-   * here.
-   */
-  healedObjectGrantCount: number;
-  /** How many overlay rows were deleted. At least 1 on any call that resolves. */
-  overlaysDiscarded: number;
-}
-
-/**
  * One alternate match a plugin contributes to the platform's row-level write
  * ownership floor, through
  * {@link ISecurityService.contributeOwnershipFloorAlternates}.
@@ -1070,48 +1041,6 @@ export interface ISecurityService {
     callerContext: SecurityContext,
     id: string,
   ): Promise<{ suggestion: AudienceBindingSuggestion }>;
-
-  /**
-   * [ADR-0094] Discard the stale environment-wide `sys_metadata` overlay that
-   * shadows a PACKAGE-DECLARED permission set, then re-project the
-   * `sys_permission_set` row from the declared artifact before resolving. This
-   * is the audited operator action behind the set's "Discard Overlay" Setup
-   * action (`POST …/security/permission-sets/:id/discard-overlay`). `id` is the
-   * `sys_permission_set` row id, looked up in the caller's organization.
-   *
-   * One set at a time, and never a provenance change: it removes the overlay
-   * and lets the row converge to its artifact. It does not touch `managed_by`
-   * or `package_id`.
-   *
-   * **Refuses by throwing.** Each refusal carries a registered `code` and an
-   * HTTP status, which the REST route serves as they are:
-   * - `PERMISSION_DENIED` (403): the caller is not an authenticated tenant-level
-   *   administrator (a system context bypasses this check), OR no installed
-   *   package currently declares the set. That second refusal protects an
-   *   environment-authored set: discarding its overlay would destroy that work
-   *   with no trace and no way back.
-   * - `NOT_FOUND` (404): no `sys_permission_set` row has this id.
-   * - `INVALID_STATE` (409): the set has no active environment-wide overlay to
-   *   discard.
-   * `NOT_FOUND` and `INVALID_STATE` are listed for this emitter under
-   * `ERROR_CODE_LEDGER['@objectstack/plugin-security']`. Any other throw is an
-   * unexpected fault (a failed overlay delete is rethrown as it is).
-   *
-   * A refused re-projection write is NOT a refusal: the overlay is already gone,
-   * so the call resolves. See
-   * {@link PermissionSetOverlayDiscardResult.healedObjectGrantCount}.
-   *
-   * **OPTIONAL, and absence is a defined state, not a bug.** A security service
-   * without this action omits it. Callers feature-detect
-   * (`typeof svc.discardPermissionSetOverlay === 'function'`), and the REST route
-   * answers `501 NOT_IMPLEMENTED` when the method is absent. Declaring it
-   * optional makes that degradation a property of the type: the unguarded call
-   * does not compile.
-   */
-  discardPermissionSetOverlay?(
-    callerContext: SecurityContext,
-    id: string,
-  ): Promise<PermissionSetOverlayDiscardResult>;
 
   /**
    * Contribute alternate matches to the platform's row-level write ownership

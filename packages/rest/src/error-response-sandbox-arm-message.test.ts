@@ -205,6 +205,21 @@ const ARMS: readonly Arm[] = [
         code: 'PERMISSION_DENIED',
         keeps: { object: 'account' },
     },
+    {
+        // [#22737] The exposure arm fires for an object other than the route's.
+        arm: 'OBJECT_API_DISABLED',
+        declares: { code: 'OBJECT_API_DISABLED', status: 404, object: 'contact' },
+        status: 404,
+        code: 'OBJECT_API_DISABLED',
+        keeps: { object: 'contact' },
+    },
+    {
+        arm: 'OBJECT_API_METHOD_NOT_ALLOWED',
+        declares: { code: 'OBJECT_API_METHOD_NOT_ALLOWED', status: 405, object: 'contact', allowed: ['get'] },
+        status: 405,
+        code: 'OBJECT_API_METHOD_NOT_ALLOWED',
+        keeps: { object: 'contact', allowed: ['get'] },
+    },
 ];
 
 describe('#14704 · the single `/data` door never ships the QuickJS wrapper out of a declared-code arm', () => {
@@ -354,9 +369,10 @@ describe('#14704 · the single `/data` door never ships the QuickJS wrapper out 
          * mechanically, so the next arm added to the shared classification is
          * either covered above or excused here BY NAME.
          *
-         * Measured re-derivation on this tree: fourteen declared-code literals
-         * sit above the unwrap door — eleven reachable by a sandboxed producer
-         * (the {@link ARMS} rows; `METADATA_CONFLICT` joined in #22114) and
+         * Measured re-derivation on this tree: sixteen declared-code literals
+         * sit above the unwrap door — thirteen reachable by a sandboxed producer
+         * (the {@link ARMS} rows; `METADATA_CONFLICT` joined in #22114, the two
+         * exposure codes in #22737) and
          * three that are not, each for a reason the source states in the arm
          * itself.
          */

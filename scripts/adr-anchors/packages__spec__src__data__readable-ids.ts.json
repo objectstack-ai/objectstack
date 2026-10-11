@@ -1,0 +1,7 @@
+{
+  "file": "packages/spec/src/data/readable-ids.ts",
+  "adrs": [
+    "ADR-0139"
+  ],
+  "invariant": "ReadableIds is ADR-0139 D1's one branded comparand leaf, and every property of its brand is a fail-closed choice: a Symbol.for key, defined non-enumerable, non-writable and non-configurable, on a frozen value. That is what makes JSON, a structured clone, a serializing wire and an object spread all produce an UNBRANDED copy, which the comparand-shape door refuses as a non-list comparand. Do not make the brand enumerable or a string key, do not unfreeze the value, and do not add a filter operator that spells the leaf: any of those lets a request, or a copy that crossed a wire, carry a leaf the engine would treat as composed by the platform."
+}

@@ -1,6 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual } from 'node:crypto';
+import { HTTP_SIGNATURE_TOLERANCE_SECONDS, verifyHttpSignature } from '@objectstack/core';
+import type { HttpSignatureVerdict } from '@objectstack/core';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 
 /**
@@ -76,6 +78,45 @@ interface ArmedHook {
     secret: HookSecret;
     queue: string;
     callback: (ctx: AutomationContext) => Promise<void>;
+    /**
+     * Whether this arming has already logged that it accepted a body-only
+     * signature. The deprecation line is said once per armed hook, never once
+     * per post, so a sender that keeps posting cannot flood the log with it.
+     */
+    bodyOnlyDeprecationLogged: boolean;
+}
+
+/**
+ * Why an inbound post did not verify. Recorded in the server log only, ⛔ never
+ * sent: every one of these gets the same answer ({@link unverifiedPostAnswer}),
+ * so an operator can still tell a misconfigured sender's wrong URL from its
+ * wrong secret while the sender cannot. The `signature-*` kinds carry
+ * `verifyHttpSignature`'s own `reason`, the one vocabulary for them.
+ */
+type UnverifiedPostCause =
+    | 'unknown-flow'
+    | 'wrong-hook-id'
+    | `signature-${Extract<HttpSignatureVerdict, { valid: false }>['reason']}`;
+
+const UNVERIFIED_POST_CAUSE_TEXT: Readonly<Record<UnverifiedPostCause, string>> = {
+    'unknown-flow': 'no hook is armed for the flow it names',
+    'wrong-hook-id': 'the hook id it names is not the one its flow is armed with',
+    'signature-absent': 'it carries no x-objectstack-signature',
+    'signature-malformed': 'its x-objectstack-signature has neither accepted form',
+    'signature-mismatch': "its x-objectstack-signature is not the hook secret's HMAC of the body it carries",
+    'signature-outside-window':
+        `its timestamped x-objectstack-signature verified, with a timestamp more than ` +
+        `${HTTP_SIGNATURE_TOLERANCE_SECONDS}s from this server's clock (a replay, or a sender clock that is wrong)`,
+};
+
+/**
+ * The ONE answer every inbound post that does not verify gets: an unknown
+ * flow, a wrong hook id, an absent signature and a bad one alike. One status
+ * and one body, so the answer does not tell an armed flow name from an unarmed
+ * one. A fresh object per call, so no caller can alter the next answer.
+ */
+function unverifiedPostAnswer(): { status: number; body: Record<string, unknown> } {
+    return { status: 401, body: { success: false, error: { code: 'INVALID_SIGNATURE', message: 'Signature verification failed.' } } };
 }
 
 /** The trimmed, non-blank string `value` holds, else `undefined`. */
@@ -92,14 +133,25 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 /**
- * GitHub/Stripe-style HMAC verification: the sender computes
- * `sha256=<hex hmac of the raw body>` with the shared per-flow secret and
- * sends it as `x-objectstack-signature`.
+ * GitHub/Stripe-style HMAC verification of `x-objectstack-signature` against
+ * the shared per-flow secret, through `@objectstack/core`'s
+ * `verifyHttpSignature` — the one definition of the scheme every ObjectStack
+ * sender signs with, so this receiver holds no copy of the signed material.
+ * Two forms verify:
+ *
+ *  - `t=<unix seconds>,v1=<hex>`, the HMAC of `<t>.<raw body>`: the timestamp
+ *    is signed, and a `t` more than `HTTP_SIGNATURE_TOLERANCE_SECONDS` (five
+ *    minutes) from this clock is refused, so a captured post stops verifying.
+ *  - `sha256=<hex>`, the HMAC of the raw body alone. Still accepted, so no
+ *    existing sender breaks, and deprecated: it signs no time, so a captured
+ *    post verifies forever. {@link ApiTrigger.handleRequest} logs it once per
+ *    armed hook.
+ *
+ * A value that claims the timestamped form is judged by it alone, and every
+ * refusal is the same `false`.
  */
 export function verifySignature(secret: string, rawBody: string, header: string | undefined): boolean {
-    if (!header) return false;
-    const expected = 'sha256=' + createHmac('sha256', secret).update(rawBody, 'utf8').digest('hex');
-    return safeEqual(expected, header.trim());
+    return verifyHttpSignature(rawBody, secret, header).valid;
 }
 
 /**
@@ -112,8 +164,12 @@ export function verifySignature(secret: string, rawBody: string, header: string 
  * flow in-band:
  *
  *   POST /api/v1/automation/hooks/:flowName/:hookId
- *     → 404 unknown flow / wrong hookId
- *     → 401 missing/bad HMAC signature
+ *     → 401 INVALID_SIGNATURE — every post that does not verify, one answer:
+ *           an unknown flow, a wrong hookId, a missing or bad HMAC signature
+ *           (a timestamped one outside its window included — see
+ *           {@link verifySignature}). The cause goes to the server log only.
+ *     → 503 the armed hook's secret cannot be read (the one residual: it
+ *           answers a post naming that flow and its hookId, signed or not)
  *     → 400 non-JSON body
  *     → 202 { accepted, messageId } — queued; a consumer executes the flow
  *
@@ -173,7 +229,9 @@ export class ApiTrigger implements FlowTrigger {
         const queue = `${QUEUE_PREFIX}:${binding.flowName}`;
 
         const secret: HookSecret = resolve ? { kind: 'resolved', resolve } : { kind: 'literal', secret: literal! };
-        const hook: ArmedHook = { flowName: binding.flowName, hookId, secret, queue, callback };
+        const hook: ArmedHook = {
+            flowName: binding.flowName, hookId, secret, queue, callback, bodyOnlyDeprecationLogged: false,
+        };
         this.hooks.set(binding.flowName, hook);
 
         const q = this.getQueue();
@@ -223,14 +281,20 @@ export class ApiTrigger implements FlowTrigger {
         idempotencyKey?: string;
     }): Promise<{ status: number; body: Record<string, unknown> }> {
         const hook = this.hooks.get(input.flowName);
-        // Unknown flow and wrong hookId answer identically — no oracle for
-        // probing which flows exist.
-        if (!hook || !safeEqual(hook.hookId, input.hookId)) {
-            return { status: 404, body: { success: false, error: { code: 'RESOURCE_NOT_FOUND', message: 'No such hook.' } } };
-        }
+        // An unknown flow, a wrong hookId, and (below) an absent or bad
+        // signature all get the one unverified-post answer, so the answer
+        // (status and body) does not tell an armed flow name from an unarmed
+        // one; the cause goes to the log only. The claim is about the answer,
+        // and nothing else. The hook is matched before its secret is read, so
+        // the secret-unavailable 503 below, the one residual, answers only a
+        // post that names an armed flow AND its hookId.
+        if (!hook) return this.refuseUnverified('unknown-flow', input.flowName);
+        if (!safeEqual(hook.hookId, input.hookId)) return this.refuseUnverified('wrong-hook-id', hook.flowName);
         // The secret, read now: a rotation applies to the next post. One that
         // cannot be read is the deployment's fault, not the sender's, and is
         // never read as "no secret" — the post is refused without verifying.
+        // A 5xx on purpose: a sender retries it, and the fault lasts only
+        // while the secret cannot be read.
         let secret: string | undefined;
         try {
             secret = hook.secret.kind === 'literal' ? hook.secret.secret : usableSecret(await hook.secret.resolve());
@@ -244,8 +308,18 @@ export class ApiTrigger implements FlowTrigger {
                 body: { success: false, error: { code: 'SERVICE_UNAVAILABLE', message: 'The hook secret is unavailable.' } },
             };
         }
-        if (!verifySignature(secret, input.rawBody, input.signatureHeader)) {
-            return { status: 401, body: { success: false, error: { code: 'INVALID_SIGNATURE', message: 'Signature verification failed.' } } };
+        const verdict = verifyHttpSignature(input.rawBody, secret, input.signatureHeader);
+        if (!verdict.valid) return this.refuseUnverified(`signature-${verdict.reason}`, hook.flowName);
+        if (verdict.scheme === 'body-only' && !hook.bodyOnlyDeprecationLogged) {
+            hook.bodyOnlyDeprecationLogged = true;
+            this.logger.warn(
+                `[trigger-api] flow '${hook.flowName}' hook '${hook.hookId}' accepted a post signed with the deprecated ` +
+                    `body-only x-objectstack-signature (sha256=<hex HMAC-SHA256 of the raw body>). It signs no time, so a ` +
+                    `captured post can be replayed and still verify. Sign with the timestamped form instead: ` +
+                    `t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>">, refused once t is more than ` +
+                    `${HTTP_SIGNATURE_TOLERANCE_SECONDS}s from this server's clock (@objectstack/core signHttpBodyAt). ` +
+                    `Logged once per armed hook.`,
+            );
         }
 
         let payload: Record<string, unknown>;
@@ -272,5 +346,20 @@ export class ApiTrigger implements FlowTrigger {
             this.logger.warn(`[trigger-api] enqueue failed for '${hook.queue}': ${err?.message ?? err}`);
             return { status: 503, body: { success: false, error: { code: 'ENQUEUE_FAILED', message: 'Could not enqueue the trigger message.' } } };
         }
+    }
+
+    /**
+     * Refuse a post that did not verify: log its real cause, then answer
+     * {@link unverifiedPostAnswer}, the same for every cause. The line names
+     * the cause and the flow name the post carried, as structured fields, and
+     * ⛔ never the secret, the signature value or the body.
+     */
+    private refuseUnverified(cause: UnverifiedPostCause, flowName: string): { status: number; body: Record<string, unknown> } {
+        this.logger.warn(
+            `[trigger-api] refused an inbound post (${cause}): ${UNVERIFIED_POST_CAUSE_TEXT[cause]}. ` +
+                `The sender got the one answer every unverified post gets; this line is the only record of the cause.`,
+            { cause, flowName },
+        );
+        return unverifiedPostAnswer();
     }
 }

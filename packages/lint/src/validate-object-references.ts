@@ -238,11 +238,12 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
         rule: OBJECT_REFERENCE_UNREGISTERED_PLATFORM,
         where,
         path,
+        // [#22161] One verdict sentence; the resolution ladder, where the
+        // registry comes from and why this rung only advises is
+        // `os explain object-reference-unregistered-platform`.
         message:
-          `${subject} "${name}" carries a platform namespace prefix, but no platform ` +
-          `package, official plugin, or cloud runtime object registers that name — ` +
-          `and this stack does not define it either. If nothing provides it at runtime ` +
-          `the reference resolves to nothing and fails silently.` +
+          `${subject} "${name}" has a platform prefix, but no known package registers it and ` +
+          `this stack does not define it, so it likely resolves to nothing.` +
           suggestName(name, PLATFORM_NAMES),
         hint:
           `Check the spelling against the object the providing package actually registers ` +

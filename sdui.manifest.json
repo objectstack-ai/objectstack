@@ -2098,11 +2098,6 @@
       "namespace": "element",
       "inputs": [
         {
-          "name": "object",
-          "type": "string",
-          "description": "NOT READ (objectui#11880): the aggregate runs over the object the node-level `dataSource.object` names, and a node without one shows the \"no object named\" notice. `@objectstack/spec` retires this flat key in v18 (objectstack#11509)."
-        },
-        {
           "name": "aggregate",
           "type": "enum",
           "required": true,
@@ -2118,11 +2113,6 @@
           "name": "field",
           "type": "string",
           "description": "Measure field (required for every aggregate except count)"
-        },
-        {
-          "name": "filter",
-          "type": "array",
-          "description": "NOT READ (objectui#11880): the aggregate is scoped by the node-level `dataSource.filter`, AND-combined with the filter of the saved view its `view` names. This flat key is not combined with it and never applies; `@objectstack/spec` retires it in v18 (objectstack#11509)."
         },
         {
           "name": "format",
@@ -2243,12 +2233,6 @@
       "namespace": "element",
       "inputs": [
         {
-          "name": "object",
-          "type": "string",
-          "required": true,
-          "description": "Object whose records the list repeats over; a node-level `dataSource.object` wins"
-        },
-        {
           "name": "titleField",
           "type": "string"
         },
@@ -2256,22 +2240,6 @@
           "name": "fields",
           "type": "array",
           "description": "Fields shown after the title on each line, in order: a bare field name, or `{ field }`"
-        },
-        {
-          "name": "filter",
-          "type": "array",
-          "of": "object",
-          "description": "Filter rules `[{ field, operator, value }]`. A string `value` may be a context token such as `{current_user_id}`, resolved before the query"
-        },
-        {
-          "name": "sort",
-          "type": "array",
-          "of": "object",
-          "description": "Sort order `[{ field, order }]`, applied in list order"
-        },
-        {
-          "name": "limit",
-          "type": "number"
         },
         {
           "name": "emptyText",
