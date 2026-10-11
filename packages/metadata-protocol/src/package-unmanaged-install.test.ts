@@ -80,8 +80,10 @@ function makeEngine(opts: { artifacts?: Array<{ type: string; name: string; pack
     const engine: any = {
         async syncObjectSchema(name: any) { ddl.push(`sync ${typeof name === 'string' ? name : name?.name}`); },
         async dropObjectSchema(name: any) { ddl.push(`drop ${typeof name === 'string' ? name : name?.name}`); },
-        async find(t: string, q?: { where?: Record<string, unknown> }) {
-            return table(t).filter((r) => matches(r, q?.where));
+        async find(t: string, q?: { where?: Record<string, unknown>; limit?: number }) {
+            const rows = table(t).filter((r) => matches(r, q?.where));
+            // The caller's bound, after the filter, by presence — as the engine applies it.
+            return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
         },
         async findOne(t: string, q: { where: Record<string, unknown> }) {
             assertEngineFindOnePredicate(t, q);
