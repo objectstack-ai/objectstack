@@ -17,11 +17,11 @@
  * Each hook is driven on both boots, the source configuration (the handler,
  * in-process) and its artifact (the body, in the runtime's QuickJS sandbox):
  *
- *  - `lbd_stash` writes to `ctx.dispatch.scope`, the cross-phase scratch the
- *    hook contract names (`HookContextSchema.dispatch`). The sandbox hands a
- *    body `ctx.dispatch` as `{ mode, index }`, without `scope`, so the body
- *    throws a TypeError and the write is refused. The handler passes. This is
- *    the divergence.
+ *  - `lbd_param` names its parameter `hookCtx` rather than `ctx`. The lowering
+ *    ships the handler's BODY and drops its parameter list, and the sandbox
+ *    runs a body with `ctx` bound, so the body's `hookCtx` is unbound: it
+ *    throws a ReferenceError and the write is refused. The handler passes.
+ *    This is the divergence.
  *  - `lbd_refuse` refuses a short name with a declared `VALIDATION_FAILED` /
  *    400. Both boots refuse. In-process the caller gets the handler's own
  *    error; on the body-only path it gets a `SandboxError` that carries the
@@ -30,8 +30,22 @@
  *    the control.
  *
  * Measured before the door (`origin/main` a8f24b092c): `bootStack` always
- * mounted the source configuration, so the first hook passed every handle
+ * mounted the source configuration, so a divergent hook passed every handle
  * test while the artifact it ships refuses every insert.
+ *
+ * #22810 moved the divergence. It was `lbd_stash`, a handler writing
+ * `ctx.dispatch.scope`, which the sandbox does not marshal by declared
+ * contract (`HookContextSchema.dispatch`): the body met `{ mode, index }` and
+ * threw a TypeError. The build now refuses to lower that handler, so it never
+ * becomes a body and cannot diverge at this door; `lbd_stash` stays, re-pointed
+ * at the refusal (the lowering bundles it and ships no body; in-process it still
+ * stashes). It is kept OUT of the booted artifact: this stand-in writes no
+ * runtime module, so a bundled handler would have nothing to resolve against
+ * here, where a real `objectstack build` ships it in the `.mjs` and it runs
+ * in-process. `lbd_param` is the next real divergence measured, reported as a
+ * finding with #22810 rather than fixed there. When the lowering stops shipping
+ * it, move this pin again, to the next real divergence or onto that refusal;
+ * ⛔ never delete it.
  */
 
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -40,9 +54,10 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { defineStack } from '@objectstack/spec';
-import { writeBuildShapedArtifact, type BuildShapedArtifact } from './build-shaped-artifact.js';
+import { buildShapedArtifact, writeBuildShapedArtifact, type BuildShapedArtifact } from './build-shaped-artifact.js';
 
 type HookCtx = { input: Record<string, unknown>; dispatch: { scope: Record<string, unknown> } };
+type HookRow = Record<string, unknown>;
 
 const text = (name: string, label: string) => ({ name, type: 'text', label });
 const object = (name: string) => ({
@@ -53,19 +68,35 @@ const object = (name: string) => ({
   fields: { name: { ...text('name', 'Name'), required: true }, note: text('note', 'Note') },
 });
 
-/** The configuration, BUILT AGAIN on each call: each boot, and the build, gets its own. */
-const buildApp = (): Record<string, unknown> =>
+/**
+ * The configuration, BUILT AGAIN on each call: each boot, and the build, gets
+ * its own. `withStash` adds `lbd_stash`, which only the source boot and the
+ * refusal pin carry (see the header for why the booted artifact does not).
+ */
+const buildApp = ({ withStash = false }: { withStash?: boolean } = {}): Record<string, unknown> =>
   defineStack({
     manifest: { id: 'com.example.lowered-body-door', name: 'Lowered Body Door', namespace: 'lbd', version: '1.0.0', type: 'app' },
-    objects: [object('lbd_stash_note'), object('lbd_refuse_note'), object('lbd_derive_note')],
+    objects: [object('lbd_stash_note'), object('lbd_param_note'), object('lbd_refuse_note'), object('lbd_derive_note')],
     hooks: [
+      ...(withStash
+        ? [
+            {
+              name: 'lbd_stash',
+              object: 'lbd_stash_note',
+              events: ['beforeInsert'],
+              handler: async (ctx: HookCtx) => {
+                ctx.dispatch.scope.stashed = ctx.input.name;
+                ctx.input.note = 'stashed';
+              },
+            },
+          ]
+        : []),
       {
-        name: 'lbd_stash',
-        object: 'lbd_stash_note',
+        name: 'lbd_param',
+        object: 'lbd_param_note',
         events: ['beforeInsert'],
-        handler: async (ctx: HookCtx) => {
-          ctx.dispatch.scope.stashed = ctx.input.name;
-          ctx.input.note = 'stashed';
+        handler: async (hookCtx: HookCtx) => {
+          hookCtx.input.note = 'named:' + String(hookCtx.input.name);
         },
       },
       {
@@ -91,6 +122,7 @@ const buildApp = (): Record<string, unknown> =>
 
 let tempDir: string;
 let built: BuildShapedArtifact;
+let stashBuild: BuildShapedArtifact;
 let source: VerifyStack;
 let lowered: VerifyStack;
 let sourceToken: string;
@@ -100,7 +132,8 @@ beforeAll(async () => {
   tempDir = mkdtempSync(join(tmpdir(), 'dogfood-lowered-body-door-'));
   const artifactPath = join(tempDir, 'objectstack.json');
   built = writeBuildShapedArtifact(buildApp(), artifactPath);
-  source = await bootStack(buildApp());
+  stashBuild = buildShapedArtifact(buildApp({ withStash: true }));
+  source = await bootStack(buildApp({ withStash: true }));
   lowered = await bootStack(buildApp(), { artifact: artifactPath });
   sourceToken = await source.signIn();
   loweredToken = await lowered.signIn();
@@ -125,39 +158,66 @@ const rejection = async (call: Promise<unknown>): Promise<Record<string, unknown
 const insert = (stack: VerifyStack, object: string, name: string) =>
   stack.hooks.run(object, 'insert', { name }, { system: true });
 
+const hookNamed = (artifact: BuildShapedArtifact, name: string): HookRow | undefined =>
+  ((artifact.artifact.hooks ?? []) as HookRow[]).find((h) => h.name === name);
+
 describe('the artifact under test is what the build lowers', () => {
   it('every hook reaches the artifact as a body the real lowering extracted from its handler', () => {
-    const hooks = (built.artifact.hooks ?? []) as Array<Record<string, unknown>>;
-    expect(hooks.map((h) => h.name).sort()).toEqual(['lbd_derive', 'lbd_refuse', 'lbd_stash']);
+    const hooks = (built.artifact.hooks ?? []) as HookRow[];
+    expect(hooks.map((h) => h.name).sort()).toEqual(['lbd_derive', 'lbd_param', 'lbd_refuse']);
     for (const hook of hooks) {
       expect((hook.body as { source?: unknown } | undefined)?.source, `${String(hook.name)} lowered`).toEqual(
         expect.any(String),
       );
     }
-    expect(built.refs).toEqual(['lbd_derive', 'lbd_refuse', 'lbd_stash']);
+    expect(built.refs).toEqual(['lbd_derive', 'lbd_param', 'lbd_refuse']);
+  });
+
+  it("the divergent body still names the handler's own parameter, which the body is not handed", () => {
+    expect(String((hookNamed(built, 'lbd_param')?.body as { source?: unknown }).source)).toContain('hookCtx.input');
   });
 });
 
 describe('the divergence: a handler that passes in-process and refuses once lowered', () => {
-  it('in-process, the handler stashes on `ctx.dispatch.scope` and the insert is stored', async () => {
-    const row = await insert(source, 'lbd_stash_note', 'alpha');
-    expect(row.note).toBe('stashed');
+  it('in-process, the handler writes through its own parameter and the insert is stored', async () => {
+    const row = await insert(source, 'lbd_param_note', 'alpha');
+    expect(row.note).toBe('named:alpha');
   });
 
-  it('lowered, the body meets a `ctx.dispatch` without `scope`: a TypeError, and the insert is refused', async () => {
-    const e = await rejection(insert(lowered, 'lbd_stash_note', 'alpha'));
+  it('lowered, the body names a parameter the sandbox does not bind: a ReferenceError, and the insert is refused', async () => {
+    const e = await rejection(insert(lowered, 'lbd_param_note', 'alpha'));
     expect(e.name).toBe('SandboxError');
-    expect(String(e.message)).toMatch(/^hook 'lbd_stash' threw: TypeError/);
+    expect(String(e.message)).toMatch(/^hook 'lbd_param' threw: ReferenceError/);
     expect(e.code).toBeUndefined();
-    expect(await lowered.rows('lbd_stash_note')).toEqual([]);
+    expect(await lowered.rows('lbd_param_note')).toEqual([]);
   });
 
   it('over REST: created in-process, a 500 once lowered', async () => {
-    const ok = await source.apiAs(sourceToken, 'POST', '/data/lbd_stash_note', { name: 'beta' });
+    const ok = await source.apiAs(sourceToken, 'POST', '/data/lbd_param_note', { name: 'beta' });
     expect(ok.status).toBeLessThan(300);
-    const refused = await lowered.apiAs(loweredToken, 'POST', '/data/lbd_stash_note', { name: 'beta' });
+    const refused = await lowered.apiAs(loweredToken, 'POST', '/data/lbd_param_note', { name: 'beta' });
     expect(refused.status).toBe(500);
     expect(await refused.json()).toMatchObject({ code: 'INTERNAL_ERROR' });
+  });
+});
+
+describe('the former divergence, `ctx.dispatch.scope`, is refused at lowering (#22810)', () => {
+  it('the lowering bundles `lbd_stash` and ships no body for it, while the other hooks still lower', () => {
+    const stash = hookNamed(stashBuild, 'lbd_stash');
+    expect(stash?.body).toBeUndefined();
+    expect(stash?.handler).toBe('lbd_stash');
+    expect(typeof stashBuild.functions.lbd_stash).toBe('function');
+    for (const name of ['lbd_param', 'lbd_refuse', 'lbd_derive']) {
+      expect((hookNamed(stashBuild, name)?.body as { source?: unknown } | undefined)?.source, `${name} lowered`).toEqual(
+        expect.any(String),
+      );
+    }
+  });
+
+  it('in-process, the same handler still stashes on `ctx.dispatch.scope` and the insert is stored', async () => {
+    expect((await insert(source, 'lbd_stash_note', 'alpha')).note).toBe('stashed');
+    const ok = await source.apiAs(sourceToken, 'POST', '/data/lbd_stash_note', { name: 'beta' });
+    expect(ok.status).toBeLessThan(300);
   });
 });
 
