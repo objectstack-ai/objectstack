@@ -137,11 +137,12 @@ function walkValues(
       rule: FLOW_FILTER_TOKEN_UNKNOWN,
       where,
       path,
+      // [#22161] One verdict sentence; the two vocabularies, why a miss stops
+      // the node and what is not judged are `os explain flow-filter-token-unknown`.
       message:
-        `Filter value "${node}" calls '${verdict.name}', which is not a function in the flow `
-        + `template dialect and is not a filter placeholder either. The node does not query with `
-        + `an unresolved condition — the template evaluator raises a guard refusal, so this node `
-        + `cannot run at all.`,
+        `Filter value "${node}" calls '${verdict.name}', which neither the flow template dialect `
+        + `nor the filter placeholders define, so the evaluator raises a guard refusal and this `
+        + `node cannot run`,
       hint: hintFor(verdict.name),
     });
     return;

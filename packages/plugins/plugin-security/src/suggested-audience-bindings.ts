@@ -439,7 +439,7 @@ export function collectDeclaredSuggestions(
  * was checked against could belong to a different tenant entirely.
  *
  * Scoping it does not cost the stock deployment its anchor: measured, the
- * `everyone` row `bootstrapBuiltinRoles` seeds with a bare system context
+ * `everyone` row the retired built-in seeder wrote with a bare system context
  * (`organization_id` NULL) IS visible under `{ isSystem: true, tenantId: X }`,
  * because ADR-0120 D3's platform bucket expands the tenant predicate to
  * `organization_id = :tenant OR organization_id IS NULL`. What the scope

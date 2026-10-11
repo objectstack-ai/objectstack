@@ -42,8 +42,6 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveUserAuthzGrants } from '@objectstack/core';
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
-import { bootstrapBuiltinRoles } from './bootstrap-builtin-positions.js';
-import { bootstrapDeclaredPositions } from './bootstrap-declared-positions.js';
 import { bootstrapDeclaredPermissions } from './bootstrap-declared-permissions.js';
 import { SysPosition } from './objects/sys-position.object.js';
 import { SysPermissionSet } from './objects/sys-permission-set.object.js';
@@ -65,10 +63,9 @@ afterEach(async () => {
 });
 
 /**
- * One declared position and one packaged permission set to seed. The by-name
- * read and the disabled-package question are the members the security catalog
- * read adds to `listItems` — the declared-positions seeder reads through it
- * (ADR-0131 C2 S2b), with {@link NO_METADATA_POSITIONS} as its metadata service.
+ * One declared position and one packaged permission set. [ADR-0131 D2] The
+ * position is declared and gets no row: no boot seeder writes `sys_position`
+ * any more, which case 1 holds as a census beside the permission set's rows.
  */
 const STUB_REGISTRY = {
   listItems: (type: string) => {
@@ -79,7 +76,6 @@ const STUB_REGISTRY = {
   getItem: (type: string, name: string) => STUB_REGISTRY.listItems(type).find((item) => item.name === name),
   isPackageDisabled: () => false,
 };
-const NO_METADATA_POSITIONS = { get: async () => undefined, list: async () => [] };
 
 /** A logger that records what the seeders said, so a LOUD guard can be asserted. */
 function recordingLogger() {
@@ -137,7 +133,7 @@ async function boot(): Promise<ObjectQL> {
  * the PRODUCER's own dispatch predicate (#4550 / #5480 / #6277) rather than a
  * hand-mirrored guard, because a seam that merely forwards is exactly the shape
  * that reads as "not a double" and then admits a call the real engine would
- * reject. `delete` is not declared at all — none of the three seeders deletes,
+ * reject. `delete` is not declared at all — the seeder does not delete,
  * and a verb no caller exercises would be a contract this seam does not have to
  * make.
  */
@@ -159,12 +155,14 @@ async function stored(engine: ObjectQL, table: string): Promise<any[]> {
   return driver.knex(table).select('*');
 }
 
-/** Run the three catalog seeders for one organization (walled), or none (single). */
+/**
+ * Run the catalog seeder for one organization (walled), or none (single).
+ * [ADR-0131 D2] The two position seeders are retired; the permission-set
+ * seeder is the one left here.
+ */
 async function seedCatalog(engine: ObjectQL, logger: any, organizationId?: string): Promise<void> {
   const ql = withRegistry(engine);
-  await bootstrapDeclaredPositions(ql, NO_METADATA_POSITIONS, { logger, organizationId });
   await bootstrapDeclaredPermissions(ql, null, { logger, organizationId });
-  await bootstrapBuiltinRoles(ql, { logger, organizationId });
 }
 
 const orgOf = (r: any): string | null => (r.organization_id ?? null);
@@ -178,17 +176,16 @@ describe('[#10103] per-organization RBAC catalog materialization', () => {
     const positions = await stored(engine, 'sys_position');
     const sets = await stored(engine, 'sys_permission_set');
 
+    // [ADR-0131 D2] No position row at all — the declared `sales_manager` and
+    // the six built-ins are registry items, written to no table.
+    expect(positions).toEqual([]);
+
     // The inversion of the shipped behaviour: no row belongs to nobody.
-    expect(positions.filter((r) => orgOf(r) === null)).toEqual([]);
     expect(sets.filter((r) => orgOf(r) === null)).toEqual([]);
 
     // Stated per organization so a failure names the tenant that lost its
     // catalog rather than printing a set diff.
     for (const org of ORGS) {
-      const names = positions.filter((r) => orgOf(r) === org).map((r) => r.name).sort();
-      expect(names).toEqual([
-        'everyone', 'guest', 'org_admin', 'org_member', 'org_owner', 'platform_admin', 'sales_manager',
-      ]);
       expect(sets.filter((r) => orgOf(r) === org).map((r) => r.name)).toEqual(['sales_readonly']);
     }
   });
@@ -201,14 +198,12 @@ describe('[#10103] per-organization RBAC catalog materialization', () => {
     // The AST plugin-security's Layer 0 AND-composes for `isolated`: a strict
     // `organization_id = <active org>`, over which the driver adds its own
     // predicate. This is the exact read that returned nothing.
-    const walled = await (engine as any).find('sys_position', {
+    const walled = await (engine as any).find('sys_permission_set', {
       where: { organization_id: ORG_JIA },
       context: { isSystem: true, tenantId: ORG_JIA },
     });
     const names = (walled as any[]).map((r) => r.name).sort();
-    expect(names).toContain('everyone');
-    expect(names).toContain('sales_manager');
-    expect(names).toHaveLength(7);
+    expect(names).toEqual(['sales_readonly']);
 
     // And the wall still walls: org_yi's copies are not in org_jia's read.
     for (const row of walled as any[]) expect(orgOf(row)).toBe(ORG_JIA);
@@ -222,10 +217,10 @@ describe('[#10103] per-organization RBAC catalog materialization', () => {
     // shipped behaviour, writing the rows every deployment that booted the old
     // code carries.
     await seedCatalog(engine, logger, undefined);
-    const before = await stored(engine, 'sys_position');
+    const before = await stored(engine, 'sys_permission_set');
     expect(before.every((r) => orgOf(r) === null)).toBe(true);
-    const everyoneBefore = before.filter((r) => r.name === 'everyone');
-    expect(everyoneBefore).toHaveLength(1);
+    const setBefore = before.filter((r) => r.name === 'sales_readonly');
+    expect(setBefore).toHaveLength(1);
 
     warns.length = 0;
     for (const org of ORGS) await seedCatalog(engine, logger, org);
@@ -234,15 +229,15 @@ describe('[#10103] per-organization RBAC catalog materialization', () => {
     // the organization-less row through the driver's compatibility arm, reads
     // the name as already represented, takes the update branch and creates
     // nothing — leaving the deployment as broken as before while reporting
-    // success. Each organization now has its OWN `everyone`.
-    const after = await stored(engine, 'sys_position');
-    const everyoneAfter = after.filter((r) => r.name === 'everyone');
+    // success. Each organization now has its OWN `sales_readonly`.
+    const after = await stored(engine, 'sys_permission_set');
+    const setAfter = after.filter((r) => r.name === 'sales_readonly');
     // Sorted with `null` spelled explicitly rather than left to the default
     // comparator, which stringifies and orders `null` first.
-    expect(everyoneAfter.map(orgOf).sort((a, b) => `${a}`.localeCompare(`${b}`)))
+    expect(setAfter.map(orgOf).sort((a, b) => `${a}`.localeCompare(`${b}`)))
       .toEqual([ORG_JIA, ORG_YI, null].sort((a, b) => `${a}`.localeCompare(`${b}`)));
-    expect(everyoneAfter.filter((r) => orgOf(r) === ORG_JIA)).toHaveLength(1);
-    expect(everyoneAfter.filter((r) => orgOf(r) === ORG_YI)).toHaveLength(1);
+    expect(setAfter.filter((r) => orgOf(r) === ORG_JIA)).toHaveLength(1);
+    expect(setAfter.filter((r) => orgOf(r) === ORG_YI)).toHaveLength(1);
 
     // (b) LOUD. Named rows, named remedy — this is what stands in place of the
     // reap, so a warning that merely counted would not discharge it.
@@ -252,8 +247,7 @@ describe('[#10103] per-organization RBAC catalog materialization', () => {
       const forOrg = guard.filter((w) => w.meta?.organization === org);
       expect(forOrg.length).toBeGreaterThan(0);
       const names = forOrg.flatMap((w) => w.meta?.names ?? []);
-      expect(names).toContain('everyone');
-      expect(names).toContain('sales_manager');
+      expect(names).toContain('sales_readonly');
     }
     // The remedy is spelled out, and the reason nothing is deleted with it.
     const text = guard.map((w) => w.message).join(' ');
@@ -263,7 +257,7 @@ describe('[#10103] per-organization RBAC catalog materialization', () => {
 
     // (c) and nothing was reaped — the organization-less row that grants point
     // at is still there, which is why the guard is a warning and not a delete.
-    expect(everyoneAfter.filter((r) => orgOf(r) === null)).toHaveLength(1);
+    expect(setAfter.filter((r) => orgOf(r) === null)).toHaveLength(1);
   });
 
   it('4. `single`-posture carve-out: exactly ONE organization-less pass, no copies, and NO warning', async () => {
@@ -273,9 +267,9 @@ describe('[#10103] per-organization RBAC catalog materialization', () => {
     await seedCatalog(engine, logger, undefined);
     await seedCatalog(engine, logger, undefined); // idempotent re-run, as at boot
 
-    const positions = await stored(engine, 'sys_position');
-    expect(positions.every((r) => orgOf(r) === null)).toBe(true);
-    expect(positions.filter((r) => r.name === 'everyone')).toHaveLength(1);
+    const sets = await stored(engine, 'sys_permission_set');
+    expect(sets.every((r) => orgOf(r) === null)).toBe(true);
+    expect(sets.filter((r) => r.name === 'sales_readonly')).toHaveLength(1);
     // An organization-less row is the CORRECT shape here, so the guard that
     // calls it invalid state must stay silent.
     expect(warns.filter((w) => w.message.includes('pre-fix organization-less'))).toEqual([]);
@@ -302,8 +296,14 @@ describe('[#10103] per-organization RBAC catalog materialization', () => {
 
   it('6. the cross-organization grant bleed is closed: the REAL resolver collects no organization’s junction binding', async () => {
     const engine = await boot();
-    const { logger } = recordingLogger();
-    for (const org of ORGS) await seedCatalog(engine, logger, org);
+    // [ADR-0131 D2] No boot seeder writes `everyone` rows any more; an existing
+    // database still holds the per-organization copies the retired seeder
+    // wrote, and that is what an admin's junction row points at.
+    for (const org of ORGS) {
+      await (engine as any).insert('sys_position',
+        { id: `pos_everyone_${org}`, name: 'everyone', label: 'Everyone', managed_by: 'platform' },
+        { context: { isSystem: true, tenantId: org } });
+    }
 
     const positions = await stored(engine, 'sys_position');
     const everyoneOf = (org: string) => positions.find((r) => r.name === 'everyone' && orgOf(r) === org);

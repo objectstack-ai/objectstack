@@ -68,30 +68,27 @@ export interface FlowCredentialLiteralFinding {
   hint: string;
 }
 
-/** Why the value is exposed — the same sentence for all three positions. */
-const SERVED =
-  'A flow definition is served, as authored, to every member who can read flows, so this value is ' +
-  'readable by all of them';
+/**
+ * [#22161] Who can read the value — the one clause all three positions share.
+ * Why the read path cannot withhold it is `os explain flow-credential-literal`.
+ */
+const SERVED = 'readable by every member who can read flows';
 
 /**
- * The route, in the MESSAGE and not only in the hint: `os validate` and `os lint`
- * print `where: message` on their text faces and leave the hint to `--json`, so
- * a route stated only in the hint never reaches the author who reads the terminal.
+ * The route, short, in the VERDICT as well as in the hint: `os validate` and
+ * `os build` print the hint as their `fix:` line, but `os lint`'s text face
+ * prints it only under `--fix`, so a route stated only in the hint misses the
+ * author who runs `os lint`.
  *
- * Routed BY SHAPE, to a variant `ConnectorInstanceAuthSchema` really has
- * (`none` / `bearer` / `api-key` / `basic`): a header credential goes to
- * `bearer` or a header `api-key`, a query-string key to `api-key` with
+ * The hint carries the route BY SHAPE, to a variant `ConnectorInstanceAuthSchema`
+ * really has (`none` / `bearer` / `api-key` / `basic`): a header credential goes
+ * to `bearer` or a header `api-key`, a query-string key to `api-key` with
  * `paramName`. ⛔ No variant carries a secret in a url PATH, so no text here
  * may promise that `credentialRef` can hold one — an author cannot follow it.
  * (This rule does not judge url paths; it judges query parameters only.)
  */
-const STEER_HEADER =
-  "; move it to a declarative connector whose `auth` is `bearer` or `api-key` (a header), with " +
-  '`auth.credentialRef` naming the secret, called from a `connector_action` node.';
-const STEER_QUERY =
-  "; move it to a declarative connector whose `auth` is `api-key` with `paramName` (the query parameter), " +
-  'with `auth.credentialRef` naming the secret, called from a `connector_action` node.';
-const STEER_INPUT = "; drop it from `input` — the connector authenticates through its own `auth.credentialRef`.";
+const STEER_CONNECTOR = "move it to a connector's `auth.credentialRef`";
+const STEER_INPUT = 'drop it: the connector authenticates through `auth.credentialRef`';
 
 /** Where `credentialRef` resolves — stated once, in every hint. */
 const RESOLVES =
@@ -172,7 +169,10 @@ export function lintFlowCredentialLiterals(stack: AnyRec): FlowCredentialLiteral
           rule: FLOW_CREDENTIAL_LITERAL,
           where,
           path: entryPath,
-          message: `${what} holds a literal value that reads as a credential. ${SERVED}${steer}`,
+          // [#22161] One verdict sentence; the three positions, the route by
+          // auth variant and why it only warns are
+          // `os explain flow-credential-literal`.
+          message: `${what} holds a credential-shaped literal, ${SERVED}; ${steer}`,
           hint: `${route}${NOT_A_GATE}`,
         });
       };
@@ -182,13 +182,13 @@ export function lintFlowCredentialLiterals(stack: AnyRec): FlowCredentialLiteral
         if (isRec(headers)) {
           for (const [name, value] of Object.entries(headers)) {
             if (!isCredentialShapedLiteral(name, value)) continue;
-            report(`${path}.config.headers${keySegment(name)}`, `header '${name}'`, STEER_HEADER, HEADER_ROUTE);
+            report(`${path}.config.headers${keySegment(name)}`, `header '${name}'`, STEER_CONNECTOR, HEADER_ROUTE);
           }
         }
         if (typeof url === 'string') {
           for (const [name, value] of queryParameters(url)) {
             if (!isCredentialShapedLiteral(name, value)) continue;
-            report(`${path}.config.url`, `the url's query parameter '${name}'`, STEER_QUERY, QUERY_ROUTE);
+            report(`${path}.config.url`, `url query parameter '${name}'`, STEER_CONNECTOR, QUERY_ROUTE);
           }
         }
       }

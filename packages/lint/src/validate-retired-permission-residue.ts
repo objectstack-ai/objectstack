@@ -138,10 +138,12 @@ export function validateRetiredPermissionResidue(stack: AnyRec): RetiredPermissi
           severity: 'warning',
           where: `permission set '${setName}' · object '${objectName}'`,
           path: `permissions[${i}].objects.${objectName}.${key}`,
+          // [#22161] One verdict sentence; why the parse accepts the residue
+          // in silence and which channels miss it are
+          // `os explain permission-retired-lifecycle-residue`.
           message:
             `sets \`${key}: ${JSON.stringify(residue)}\`, the retired default of a key removed in ` +
-            '@objectstack/spec 17 (ADR-0049). It is accepted as inert residue and silently stripped ' +
-            'on parse, so it grants nothing and nothing reports it — this line has no effect.',
+            '@objectstack/spec 17, which the parse strips in silence, so this line grants nothing',
           hint,
         });
       }
