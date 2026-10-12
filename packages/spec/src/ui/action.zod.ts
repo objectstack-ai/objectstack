@@ -1364,7 +1364,13 @@ const actionObject = () => strictObject({
    *
    * Liveness: the ledger row was `planned` until the console reader landed,
    * and it is `live` from the pin this repo builds against (`.objectui-sha` =
-   * `9646e2ed2`, re-read there 2026-10-12:
+   * `7578323a5`, re-read there 2026-10-12:
+   * `ActionRunner.composeSuccessMessage`, in `core/src/actions/ActionRunner.ts`, is
+   * byte-identical in body to `9646e2ed2` and MOVED down by 11, `1498` -> `1509`
+   * (objectui#12191, objectui `334f0cff9`: the runner admits `mailto:` through one
+   * navigation-target answer, its eleven import lines added above it; every other
+   * hunk lies below the reader), and the four action renderers
+   * are byte-identical (`git diff --quiet`). At `9646e2ed2`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
    * `088e0f705`, re-read there 2026-10-12:
@@ -1404,7 +1410,7 @@ const actionObject = () => strictObject({
    * `ab1879721`, where it was read 2026-10-03, so the anchor below held
    * unmoved). The reader is objectui#11344 (objectui
    * `c476be0e0`): `ActionRunner.composeSuccessMessage`
-   * (`core/src/actions/ActionRunner.ts:1498`) picks `outcomeMessages[outcome]`
+   * (`core/src/actions/ActionRunner.ts:1509`) picks `outcomeMessages[outcome]`
    * off the handler's return value, falls back to `successMessage` and then to
    * the runner's default text, and fills `${result.*}` in whichever it shows.
    * The four action renderers forward the key to the runner (`action:bar`

@@ -20,12 +20,12 @@
  *
  * The second type is `dashboard`, converted by the major-18 retired entry
  * `dashboard-refresh-interval-to-refresh-interval-seconds` (retiredAfter
- * 17.3.0). It sits beside `emailTemplates`, the card's own type. That type has
- * no conversion on this tree: its `category` / `isSystem` retirement is a
- * separate change. So its legs below assert the contract (the registry
- * holds the conversion's OUTPUT, and that output passes the email loader's own
- * parse). That contract has no retired key to bite on here, and it does the
- * day a retirement of that type lands.
+ * 17.3.0). It sits beside `emailTemplates`, the card's own type. Its legs
+ * below assert the contract (the registry holds the conversion's OUTPUT, and
+ * that output passes the email loader's own parse). The fixture template
+ * authors no retired key: the `category` / `isSystem` retirement (#22876)
+ * converts those two, and its tree-scoped absence pin keeps them out of
+ * authored literals.
  *
  * Out of scope, on purpose: the PARSE axis. The door strict-parses (schema
  * defaults, ADR-0122 transforms), and the registry copy does not. So the item
@@ -59,15 +59,20 @@ const STAMPS = { _packageId: APP_ID, _packageVersion: '1.0.0', _provenance: 'pac
 
 /** A dashboard carrying the retired `refreshInterval` spelling. */
 const RETIRED_DASHBOARD = { name: 'ops_board', label: 'Ops Board', widgets: [], refreshInterval: 300 };
-/** What a 17.x parse emitted for an email template: both defaulted keys present. */
+/**
+ * An email template in the artifact. It no longer carries the `category` /
+ * `isSystem` defaults a 17.x parse emitted: #22876 retires both keys, and its
+ * tree-scoped absence pin refuses an email-template literal that authors
+ * either one outside the retirement kit. The legs below still assert the
+ * contract for this type; the conversion of those two keys is pinned by that
+ * retirement's own tests.
+ */
 const EMAIL_TEMPLATE = {
     name: 'probe.welcome',
     label: 'Welcome',
     locale: 'en-US',
     subject: 'Welcome',
     bodyHtml: '<p>Hi</p>',
-    category: 'custom',
-    isSystem: false,
 };
 
 /**

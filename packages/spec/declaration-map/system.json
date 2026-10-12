@@ -145,8 +145,6 @@
     "EmailServiceConfig": "system/EmailServiceConfig",
     "EmailServiceConfigSchema": "system/EmailServiceConfig",
     "EmailTemplateDefinition": "system/EmailTemplateDefinition",
-    "EmailTemplateDefinitionCategory": "system/EmailTemplateDefinitionCategory",
-    "EmailTemplateDefinitionCategorySchema": "system/EmailTemplateDefinitionCategory",
     "EmailTemplateDefinitionSchema": "system/EmailTemplateDefinition",
     "EmailTemplateDefinitionVariable": "system/EmailTemplateDefinitionVariable",
     "EmailTemplateDefinitionVariableSchema": "system/EmailTemplateDefinitionVariable",

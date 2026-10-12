@@ -79,7 +79,6 @@ export const DcPermissionSet: PermissionSet = {
 export const DcEmail: EmailTemplateDefinition = {
   name: 'dc.welcome',
   label: 'DC Welcome',
-  category: 'marketing',
   locale: 'en-US',
   subject: 'Welcome {{contact.first_name}}',
   bodyHtml: '<p>Hi {{contact.first_name}}, welcome.</p>',
