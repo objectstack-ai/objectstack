@@ -784,80 +784,102 @@ os package install ./dist/objectstack.json
 
 ## Plugin Testing
 
-<Callout type="warn">
-The `@objectstack/testing` package and its `createTestContext()` /
-`createTestEnvironment()` helpers shown below are **proposed** — there is no
-such published package today. The snippets illustrate the intended test
-ergonomics for the plugin spec, not a shipping API.
-</Callout>
+Test a plugin the way it runs: boot a real stack that loads it, drive the
+engine, and assert on what the engine did. `@objectstack/verify` ships the
+harness for this, and unlike the manifest snippets above, the code in this
+section is the shipped API.
 
-### Unit Tests
-
-```typescript
-// tests/triggers/account_validation.test.ts
-import { createTestContext } from '@objectstack/testing';
-import accountValidation from '../../src/triggers/account_validation';
-
-describe('Account Validation Trigger', () => {
-  it('should reject negative revenue', async () => {
-    const context = createTestContext();
-    const record = { annual_revenue: -1000 };
-    
-    await expect(
-      accountValidation.execute({ record, context })
-    ).rejects.toThrow('Annual revenue cannot be negative');
-  });
-  
-  it('should generate account number', async () => {
-    const context = createTestContext();
-    const record = { name: 'Acme Corp' };
-    
-    const result = await accountValidation.execute({ record, context });
-    
-    expect(result.account_number).toMatch(/^ACC-\d{6}$/);
-  });
-});
+```bash
+pnpm add -D @objectstack/verify vitest
 ```
 
-### Integration Tests
+`bootStack(config, options?)` boots a configuration in-process: the real kernel
+with ObjectQL, the bound hook chain, validation, the security middleware,
+sharing and the REST dispatcher, on an in-memory database, with no server
+process and no port. The stack it returns carries an **in-process handle**.
+Each handle method passes the call to the door the kernel wired at boot (the
+engine's own write, dry-run and read calls, or the runtime's `/automation` and
+`/actions` routes driven without HTTP) and returns what that door returned. A
+test never builds its own `ctx`, never orders hooks by hand and never copies a
+permission check, so it keeps telling the truth when the engine changes.
+
+### Booting the stack
 
 ```typescript
-// tests/integration/crm_workflow.test.ts
-import { createTestEnvironment } from '@objectstack/testing';
+// test/crm.test.ts
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { bootStack, type VerifyStack } from '@objectstack/verify';
+import config from '../objectstack.config';
 
-describe('CRM Workflow', () => {
-  let env;
-  
+describe('CRM plugin', () => {
+  let stack: VerifyStack;
+  let admin: string;
+  let rep: string;
+
   beforeAll(async () => {
-    env = await createTestEnvironment({
-      plugins: ['@mycompany/crm'],
-    });
+    stack = await bootStack(config);
+    admin = await stack.signIn();                 // the dev admin the stack seeds
+    rep = await stack.signUp('rep@example.com');  // a fresh member: the default profile only
   });
-  
-  it('should create account with contacts', async () => {
-    // Create account
-    const account = await env.objectQL.create('account', {
-      name: 'Test Corp',
-      industry: 'technology',
-    });
-    
-    // Create contact
-    const contact = await env.objectQL.create('contact', {
-      first_name: 'John',
-      last_name: 'Doe',
-      account: account.id,
-    });
-    
-    // Verify relationship
-    const accountWithContacts = await env.objectQL.findById('account', account.id, {
-      include: ['contacts'],
-    });
-    
-    expect(accountWithContacts.contacts).toHaveLength(1);
-    expect(accountWithContacts.contacts[0].id).toBe(contact.id);
+
+  afterAll(async () => {
+    await stack.stop();
+  });
+
+  it('refuses negative revenue', async () => {
+    // One real write: before* hooks, validation, the driver, after* hooks,
+    // and the permission check the caller is subject to.
+    await expect(
+      stack.hooks.run('crm_account', 'insert', { name: 'Acme Corp', annual_revenue: -1000 }, { as: admin }),
+    ).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+  });
+
+  it('numbers a new account', async () => {
+    const account = await stack.hooks.run('crm_account', 'insert', { name: 'Acme Corp' }, { as: admin });
+    expect(account.account_number).toMatch(/^ACC-\d{6}$/);
+  });
+
+  it('keeps accounts away from a member without a grant', async () => {
+    await expect(stack.rows('crm_account', {}, { as: rep }))
+      .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
   });
 });
 ```
+
+Assert on a refusal's `code` (and its status), never on its message alone.
+A refusal from `hooks.run`, `validate` or `rows` is the engine's own error,
+rethrown unchanged; one from `flows.*` or `actions.run` is the route's error
+envelope (`code`, `status`, `details`), which `isVerifyRefusal(e)` recognises.
+
+### What the handle drives
+
+| Method | Door it drives |
+|:---|:---|
+| `hooks.run(object, operation, input, { as })` | One `'insert'`, `'update'` or `'delete'` through the engine, hooks, validation and permission checks included. `update` and `delete` address the row by `input.id`. |
+| `validate(object, record, { as, mode? })` | The engine's validation pass without writing; resolves `{ valid, results }`. Hooks do not run. |
+| `flows.run(name, params, { as })` / `flows.resume(run, input, { as })` | A flow through the runtime's automation route. Boot with `{ automation: true }` so the automation service is there to drive. |
+| `actions.run(object, action, { as, recordId?, params? })` | A declared action through its route, param contract and permission gate included. |
+| `seed(object, rows)` | Fixture rows written as the system, the way a stack's `data` is seeded: hooks and validation run, record-change flows do not. |
+| `rows(object, where?, { as? })` | A read through the engine, as the system by default or as `as` under that caller's grants and row-level security. |
+| `metadata` · `tenancy()` · `contextFor(token)` | The booted registry, the tenancy posture, and the execution context the platform resolves for a caller. |
+
+`as` is always a bearer token from `signIn()` or `signUp()` on the same stack.
+
+### A runtime plugin
+
+A plugin class (see [Runtime Contract](#runtime-contract)) boots with the stack
+through `extraPlugins`, so its `init` and `start` run against the real kernel,
+and the services it registers resolve from `stack.kernel`:
+
+```typescript
+const stack = await bootStack(config, { extraPlugins: [new CRMPlugin()] });
+const crm = stack.kernel.getService<CRMService>('crm');
+```
+
+A pure helper with no engine behind it needs no harness: test it with plain
+vitest. Many test files can share one boot through `bootStackOnce(config)`,
+under vitest's `isolate: false`. The `@objectstack/verify` README documents
+every method and boot option.
 
 ## Plugin Development Workflow
 

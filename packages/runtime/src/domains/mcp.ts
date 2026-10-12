@@ -381,10 +381,10 @@ export type McpMergedMetadataRead = Pick<MetadataProtocol, 'getMetaItems'>;
  *    "Degradation log levels", a failure handed to the CALLER is not a
  *    degradation at all — the requester was told — so this branch logs nothing.
  *
- * `organizationId` is deliberately NOT threaded: `skill` is declared
- * `allowOrgOverride: false`, so the runtime write path lands its rows env-wide
- * and `getMetaItems` reads env-wide rows unconditionally. Passing the active
- * org would ask for a per-org overlay this type has no write channel for.
+ * `organizationId` is deliberately NOT threaded: every metadata write lands
+ * env-wide (ADR-0131 D6), and `getMetaItems` reads env-wide rows
+ * unconditionally. Passing the active org would ask for a per-organization
+ * overlay no metadata type has a write channel for.
  */
 async function readMergedSkillRows(
     deps: DomainHandlerDeps,

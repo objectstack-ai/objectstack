@@ -42,6 +42,7 @@ import {
 } from './grant-permission-set-name.js';
 import { runOneTimeGrantPermissionSetNameBackfill } from './grant-permission-set-name-backfill.js';
 import { createPositionWriteThrough } from './position-write-through.js';
+import { createWalledCatalogDataDoorRefusal, WALLED_CATALOG_OBJECT_TYPES } from './walled-catalog-data-door.js';
 import { runOneTimePositionEnvironmentBackfill } from './position-environment-backfill.js';
 import { reportCatalogReferences } from './catalog-reference-report.js';
 import {
@@ -2480,7 +2481,7 @@ export class SecurityPlugin implements Plugin {
       // ADR-0094 write-through, which TRANSLATES them into a metadata write.
       // Whether that write is ACCEPTED is ADR-0005's call, not this gate's,
       // and since ADR-0094 D5-R (commit ee58392e1 rolled `permission` back to
-      // `allowOrgOverride: false`) a CODE-DECLARED set is refused there with
+      // `allowEnvironmentOverlay: false`) a CODE-DECLARED set is refused there with
       // 403 `NOT_OVERRIDABLE` — the 2026-07-14 "customize / reset via an env
       // overlay" direction this comment used to state is RETIRED.
       // Placed BEFORE the principal-less refusal and the CRUD check so the
@@ -4357,6 +4358,21 @@ export class SecurityPlugin implements Plugin {
         '[security] the ObjectQL engine exposes no hook registry — a sys_user_permission_set write naming a ' +
           'permission set the security catalog does not hold is NOT refused',
       );
+    }
+
+    // [ADR-0131 D3] Under a wall the security catalog is the platform
+    // operator's: a non-system write on `sys_position`, `sys_permission_set` or
+    // `sys_capability` by anyone below the `PLATFORM_ADMIN` rung is refused
+    // `403 PERMISSION_DENIED`, with the metadata door's own verdict and
+    // sentence. Registered AFTER the security middleware (a caller who may not
+    // write the table keeps its CRUD refusal) and BEFORE the permission-set
+    // write-through below (a refused write is never translated into a metadata
+    // save). Inert under `single`. See `walled-catalog-data-door.ts`.
+    {
+      const walledCatalogDataDoor = createWalledCatalogDataDoorRefusal({ getPosture: () => this.tenancyPosture });
+      for (const object of Object.keys(WALLED_CATALOG_OBJECT_TYPES)) {
+        ql.registerMiddleware(walledCatalogDataDoor, { object });
+      }
     }
 
     // [ADR-0094] Data-door write-through: every non-system CRUD write on
@@ -7199,7 +7215,7 @@ export class SecurityPlugin implements Plugin {
     // refused HERE: the write-through middleware (which runs after this gate
     // + the delegated-admin gate + the CRUD checks) translates them into a
     // metadata write, and the refusal is LEFT TO THAT PRODUCER. Since commit
-    // ee58392e1 rolled `permission` back to `allowOrgOverride: false`, a
+    // ee58392e1 rolled `permission` back to `allowEnvironmentOverlay: false`, a
     // CODE-DECLARED (artifact-backed) set is refused there with 403
     // `NOT_OVERRIDABLE`; a `sys_metadata`-backed set rides
     // `allowRuntimeCreate` and still lands. The 2026-07-14 "customize / reset

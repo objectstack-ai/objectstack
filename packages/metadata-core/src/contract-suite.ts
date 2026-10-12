@@ -43,7 +43,7 @@ export interface ContractSuiteOptions {
    * invariants is a statement about a particular type. It exists because an
    * implementation may sit behind a **write-authorization door** keyed on the
    * type — `SysMetadataRepository.assertAllowed()` refuses any type whose
-   * registry entry lacks `allowOrgOverride` — so a hard-coded fixture type
+   * registry entry lacks `allowEnvironmentOverlay` — so a hard-coded fixture type
    * decides which implementations can be held to the table at all. Naming the
    * two types here is what keeps that ONE table, instead of carving a second
    * one for the engine-backed implementation to be measured against.

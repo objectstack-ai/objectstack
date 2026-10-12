@@ -58,7 +58,7 @@ Writes to the governed tables (`sys_user_position`,
 | Tenant admins pass through | The superuser wildcard reaches the ordinary CRUD/RLS checks — delegation constrains *delegates*, not HQ |
 | Subtree anchoring | Assignments a delegate creates must be anchored (`sys_user_position.business_unit_id`) inside their subtree, and the target user must sit inside it |
 | Allowlist, no self-escalation | Every set reached by the write — bound to the assigned position, or granted directly — must be on `assignablePermissionSets`. Granting an un-allowlisted set is refused **for anyone, including the delegate themselves** |
-| Action flags | `manageAssignments` / `manageBindings` / `authorEnvironmentSets` gate their table classes independently; re-composing a position (`manageBindings`) additionally requires every current holder to sit inside the subtree |
+| Action flags | `manageAssignments` / `manageBindings` / `authorEnvironmentSets` gate their table classes independently; re-composing a position (`manageBindings`) additionally requires every current holder to sit inside the subtree. Under a `group` or `isolated` tenancy posture `authorEnvironmentSets` admits nothing at the data door: the platform operator authors the security catalog there (ADR-0131 D3). It still applies under `single` |
 | Strict containment | Granting or authoring a set that itself carries an `adminScope` requires a held scope that **strictly contains** it — handing your own exact scope to a peer is refused (no lateral propagation) |
 | Single-row writes | Delegates write single rows by id only — a broad filter-write cannot be boundary-checked |
 | Audit stamp | Every assignment a delegate creates is `granted_by`-stamped automatically |

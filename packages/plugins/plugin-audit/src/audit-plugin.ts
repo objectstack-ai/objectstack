@@ -139,6 +139,48 @@ function createHostLocaleReader(
 }
 
 /**
+ * [#22913] What is lost when one of this plugin's objects has no storage — the
+ * CONSEQUENCE half of {@link provisionFailureLine}, said concretely per object.
+ * `sys_audit_log` / `sys_activity` are written as a side effect of audited
+ * writes, so their loss is invisible to the writer; a comment or a reaction is
+ * written by its own request, which fails.
+ */
+function lostWithoutStorage(objectName: string): string {
+  switch (objectName) {
+    case 'sys_audit_log':
+      return 'Audited writes keep succeeding, but the `sys_audit_log` rows that record who did what, and the ' +
+        '`sys_activity` rows written after them, cannot land, and nothing retries them.';
+    case 'sys_activity':
+      return "Audited writes keep succeeding, but their `sys_activity` rows (a record's activity timeline and the " +
+        'recent-activity feed) cannot land, and nothing retries them.';
+    case 'sys_comment':
+      return 'Every comment write fails until it exists.';
+    case 'sys_comment_reaction':
+      return 'Every comment reaction write fails until it exists.';
+    default:
+      return 'Every write to it fails until it exists.';
+  }
+}
+
+/**
+ * [#22913] The ONE line `provisionSystemTables` prints when an object's DDL
+ * throws — at `error`, carrying both halves AGENTS.md "Degradation log levels"
+ * asks of a durability degradation: ① the consequence, and that the deployment
+ * keeps looking healthy; ② the fix. Both remedies named were measured to create
+ * the missing storage once the driver fault is gone.
+ */
+function provisionFailureLine(objectName: string): string {
+  return (
+    `AuditPlugin: could not provision ${objectName} storage — its storage was NOT created. ` +
+    `${lostWithoutStorage(objectName)} The boot still completes and the deployment keeps looking healthy. ` +
+    "Fix: resolve the driver's refusal (in this record's meta), then restart, since this provisioning runs on " +
+    `every boot, or run \`os migrate apply\`, which creates the missing storage (\`os migrate plan\` lists it as ` +
+    `\`create_table:${objectName}\`). If the boot log also carries \`Schema sync FAILED for object ` +
+    `'${objectName}'\`, that is the same refusal.`
+  );
+}
+
+/**
  * AuditPlugin
  *
  * Registers the sys_audit_log / sys_activity / sys_comment / sys_comment_reaction
@@ -472,19 +514,33 @@ export class AuditPlugin implements Plugin {
   /**
    * Provision the physical tables for this plugin's system objects up-front.
    *
-   * sys_audit_log / sys_activity / sys_comment are otherwise lazy-created on
-   * first WRITE (the SQL driver issues DDL when the first row is inserted). A
-   * freshly provisioned env that READS one first — the home page's recent-
-   * activity feed queries sys_activity before any mutation has happened — hits
-   * SQLite "no such table", which the engine logs as a `Find operation failed`
-   * ERROR on every load. The UI degrades to an empty feed, but the log is noisy
-   * and can mask real errors. Creating the tables at kernel:ready (once the
-   * engine + registry are ready) makes a new env consistent from the start.
+   * A freshly provisioned env that READS one of these tables before anything
+   * created it — the home page's recent-activity feed queries sys_activity
+   * before any mutation has happened — hits SQLite "no such table", which the
+   * engine logs as a `Find operation failed` ERROR on every load. Creating the
+   * tables at kernel:ready (once the engine + registry are ready) makes a new
+   * env consistent from the start. A WRITE does not create a missing table
+   * either: the SQL driver's insert fails with the same "no such table".
    *
    * `syncObjectSchema` is idempotent — the SQL driver only creates a table when
    * it is absent (and alters to add columns) — so this is safe on every boot,
    * and a no-op for objects whose table already exists. Per-object failures are
    * isolated so one bad object can't block the rest.
+   *
+   * ## Why a failed provision is an `error` (#22913)
+   *
+   * When an object's DDL throws here, the boot still completes and the
+   * deployment serves as healthy, but the table does not exist. For
+   * `sys_audit_log` / `sys_activity` the loss is invisible: they are written as
+   * a SIDE EFFECT of audited writes, which keep succeeding while their audit
+   * rows have nowhere to land. That is the durability class AGENTS.md
+   * "Degradation log levels" sends to `error`, with the consequence and the
+   * fix in the first line. Both remedies the line names were measured to
+   * create a missing table once the driver fault is gone: a restart (this
+   * method runs on every boot) and `os migrate apply` (`os migrate plan` lists
+   * it as `create_table`). `OS_SKIP_SCHEMA_SYNC` is NOT named: this method
+   * issues its DDL whether or not that flag is set, so the flag cannot make
+   * this failure deliberate.
    *
    * ## Why this method reports where each table landed (#4887)
    *
@@ -542,7 +598,16 @@ export class AuditPlugin implements Plugin {
       try {
         await sync.call(engine, obj.name);
       } catch (err) {
-        ctx.logger.warn(`AuditPlugin: could not provision ${obj.name} storage — ${(err as Error)?.message ?? err}`);
+        // A DURABILITY degradation, so `error` (AGENTS.md "Degradation log
+        // levels"; see "Why a failed provision is an `error`" above). Once per
+        // object per boot, never per write. The boot is deliberately NOT failed:
+        // refusing to boot is a separate policy call. The driver's refusal goes
+        // in meta, not in the message: a multi-line driver error would split the
+        // record, and only its first fragment would carry the level.
+        ctx.logger.error(provisionFailureLine(obj.name), undefined, {
+          object: obj.name,
+          error: (err as Error)?.message ?? String(err),
+        });
         continue;
       }
       if (typeof resolveDriver !== 'function') continue;

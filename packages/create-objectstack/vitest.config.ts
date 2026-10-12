@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -29,6 +29,14 @@ export default defineConfig({
     // Enforced repo-wide by scripts/check-console-intercept-disarm.mjs.
     disableConsoleIntercept: true,
     include: ['test/**/*.test.ts', 'src/**/*.test.ts'],
+    // `src/templates/` is PAYLOAD: copied byte-for-byte into a scaffolded
+    // project and never compiled here (tsconfig.json excludes it too). The
+    // blank template ships its own `note.test.ts`, which boots THAT project's
+    // stack through `@objectstack/verify` — a dependency of the scaffolded
+    // project, not of this package. It runs where it lands: the Scaffold E2E
+    // workflow scaffolds a project, installs it from the registry and runs
+    // its `test` script.
+    exclude: [...configDefaults.exclude, 'src/templates/**'],
     environment: 'node',
   },
 });

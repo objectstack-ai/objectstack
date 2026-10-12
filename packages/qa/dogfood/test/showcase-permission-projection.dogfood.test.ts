@@ -9,7 +9,7 @@
 //      the record is re-derived by the AWAITED projector — consistent on the
 //      very next read, no race.
 //   2. [commit ee58392e1 inverted this pin] A data-door edit of a CODE-DECLARED set is
-//      REFUSED — `permission` rolled back to `allowOrgOverride: false`
+//      REFUSED — `permission` rolled back to `allowEnvironmentOverlay: false`
 //      (ADR-0005 security row: "Authorization correctness; overlays would
 //      create silent privilege drift"), so overriding an artifact-backed set
 //      answers 403 `not_overridable` instead of minting an overlay. The
@@ -104,7 +104,7 @@ describe('sys_permission_set pure projection (ADR-0094)', () => {
   it('editing a declared set through the data door is refused — no overlay is minted', async () => {
     // member_default is a platform-declared set (an artifact baseline
     // exists), so the write-through's `saveMetaItem` hits the ADR-0005 type
-    // gate: `permission` is no longer `allowOrgOverride` (commit ee58392e1, the
+    // gate: `permission` is no longer `allowEnvironmentOverlay` (commit ee58392e1, the
     // security row's "silent privilege drift"). The refusal must be LOUD —
     // an error status, not a 2xx that quietly skipped the metadata write —
     // and must leave no overlay behind (#6190's phantom-write shape is the
@@ -152,7 +152,7 @@ describe('sys_permission_set pure projection (ADR-0094)', () => {
     const baseline = layeredBefore?.code ?? null;
     expect(baseline, 'the packaged declaration is the code layer').toBeTruthy();
 
-    // Commit ee58392e1 — `permission` rolled back to `allowOrgOverride: false`
+    // Commit ee58392e1 — `permission` rolled back to `allowEnvironmentOverlay: false`
     // (ADR-0005 security row). The overlay ADR-0094's 2026-07-14 direction
     // used here is exactly the per-org shadowing of a code-shipped
     // authorization contract the ADR forbids, so the save refuses LOUDLY at

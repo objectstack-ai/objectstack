@@ -15,6 +15,7 @@ import {
     // every other rejection stays loud. ⛔ The two wirings themselves are NOT
     // the helper's — see `computeExecCtx`.
     classifyAdmissionTenancyPosture,
+    effectiveTenancyPosture,
     // The registry's "never registered" brand, asked directly by the public
     // form doors' tenancy read (see `registerFormEndpoints`).
     isServiceNotRegisteredError,
@@ -72,6 +73,9 @@ import {
     // environment-wide and every read resolves environment → code.
     metaWriteCapabilityVerdict,
     type MetaWriteCapabilityVerdict,
+    // [ADR-0131 D3] The walled catalog refusal the same four doors ask next.
+    isSecurityCatalogType,
+    walledCatalogWriteVerdict,
     // Which form candidates the anonymous form doors serve — the one rule the
     // metadata protocol also judges organization-scoped `view` writes by.
     anonymousFormIntakeCandidates,
@@ -3622,6 +3626,33 @@ export class RestServer {
     private static readonly STORED_VERSION_DOOR_POLICY: MetaReadGatePolicy = metaReadGate.STORED_VERSION_DOOR_POLICY;
 
     /**
+     * [ADR-0131 D3] The walled catalog refusal for one `/meta` item write: the
+     * shared `walledCatalogWriteVerdict` (`@objectstack/metadata-core`), asked
+     * by this transport's four write doors (save, reset, publish, rollback)
+     * after {@link metaSaveVerdict}'s capability gate. A type outside the
+     * security catalog is admitted without reading the posture. The posture is
+     * read through {@link resolveAnonymousFormTenancy}, the wiring that mirrors
+     * `resolveProtocol`, so the posture judged and the protocol that writes
+     * always come from the same kernel; a `tenancy` service that is registered
+     * and cannot answer raises `AuthzStoreUnavailableError` (the door's 503),
+     * never a permit.
+     */
+    private async walledCatalogRefusal(
+        type: string,
+        ctx: any,
+        environmentId: string | undefined,
+        req: any,
+    ): Promise<MetaWriteCapabilityVerdict> {
+        if (!isSecurityCatalogType(type)) return { allowed: true };
+        return walledCatalogWriteVerdict({
+            type,
+            tenancyPosture: effectiveTenancyPosture(await this.resolveAnonymousFormTenancy(environmentId, req)),
+            isSystem: ctx?.isSystem === true,
+            callerPosture: ctx?.posture,
+        });
+    }
+
+    /**
      * [#12702 · #20156] May this caller SAVE `:type/:name`? The admission of
      * `PUT /meta/:type/:name`, spelled ONCE: that door asks it, and so does the
      * stored-version read doors' author exemption (ruling 5856774816, item 1:
@@ -6933,6 +6964,25 @@ export class RestServer {
                             return;
                         }
                     }
+                    // [ADR-0131 D3] The walled catalog refusal, after the
+                    // capability gate and before the protocol is resolved: under
+                    // `isolated` / `group` the security catalog is shared by every
+                    // organization, so only the platform operator rung (or the
+                    // engine itself) writes it. Inert under `single`, and no
+                    // posture is read for any other type. See
+                    // {@link walledCatalogRefusal}.
+                    {
+                        const walled = await this.walledCatalogRefusal(req.params.type, ctx, environmentId, req);
+                        if (!walled.allowed) {
+                            res.status(403).json({
+                                error: {
+                                    code: 'FORBIDDEN',
+                                    message: walled.message,
+                                },
+                            });
+                            return;
+                        }
+                    }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!p.saveMetaItem) {
                         // [#7035] ADR-0112 envelope: the semantic code lives at
@@ -7025,8 +7075,10 @@ export class RestServer {
                     // door admits lands environment-wide (`organization_id`
                     // NULL), its audit row included, whatever the caller's
                     // active organization. Until this stage the door threaded
-                    // the active organization for the five types the registry
-                    // declared `allowOrgOverride`; a single-posture Studio save
+                    // the active organization for the five types whose registry
+                    // flag opened an overlay (then spelled `allowOrgOverride`,
+                    // `allowEnvironmentOverlay` since 18, which decides no
+                    // organization); a single-posture Studio save
                     // of those types therefore sits under the Default
                     // Organization, and is not served again until ADR-0131 C7
                     // promotes it to the environment layer.
@@ -7126,6 +7178,25 @@ export class RestServer {
                                 error: {
                                     code: 'FORBIDDEN',
                                     message: verdict.message,
+                                },
+                            });
+                            return;
+                        }
+                    }
+                    // [ADR-0131 D3] The walled catalog refusal, after the
+                    // capability gate and before the protocol is resolved: under
+                    // `isolated` / `group` the security catalog is shared by every
+                    // organization, so only the platform operator rung (or the
+                    // engine itself) writes it. Inert under `single`, and no
+                    // posture is read for any other type. See
+                    // {@link walledCatalogRefusal}.
+                    {
+                        const walled = await this.walledCatalogRefusal(req.params.type, ctx, environmentId, req);
+                        if (!walled.allowed) {
+                            res.status(403).json({
+                                error: {
+                                    code: 'FORBIDDEN',
+                                    message: walled.message,
                                 },
                             });
                             return;
@@ -7567,6 +7638,25 @@ export class RestServer {
                             return;
                         }
                     }
+                    // [ADR-0131 D3] The walled catalog refusal, after the
+                    // capability gate and before the protocol is resolved: under
+                    // `isolated` / `group` the security catalog is shared by every
+                    // organization, so only the platform operator rung (or the
+                    // engine itself) writes it. Inert under `single`, and no
+                    // posture is read for any other type. See
+                    // {@link walledCatalogRefusal}.
+                    {
+                        const walled = await this.walledCatalogRefusal(req.params.type, ctx, environmentId, req);
+                        if (!walled.allowed) {
+                            res.status(403).json({
+                                error: {
+                                    code: 'FORBIDDEN',
+                                    message: walled.message,
+                                },
+                            });
+                            return;
+                        }
+                    }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!p.publishMetaItem) {
                         res.status(501).json({
@@ -7724,6 +7814,25 @@ export class RestServer {
                                 error: {
                                     code: 'FORBIDDEN',
                                     message: verdict.message,
+                                },
+                            });
+                            return;
+                        }
+                    }
+                    // [ADR-0131 D3] The walled catalog refusal, after the
+                    // capability gate and before the protocol is resolved: under
+                    // `isolated` / `group` the security catalog is shared by every
+                    // organization, so only the platform operator rung (or the
+                    // engine itself) writes it. Inert under `single`, and no
+                    // posture is read for any other type. See
+                    // {@link walledCatalogRefusal}.
+                    {
+                        const walled = await this.walledCatalogRefusal(req.params.type, ctx, environmentId, req);
+                        if (!walled.allowed) {
+                            res.status(403).json({
+                                error: {
+                                    code: 'FORBIDDEN',
+                                    message: walled.message,
                                 },
                             });
                             return;

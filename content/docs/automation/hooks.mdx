@@ -296,7 +296,7 @@ Four ordinary operations put a write inside such a unit:
 
 | Operation | What is inside the transaction |
 | :--- | :--- |
-| Any write to an object with a blocking `after*` hook whose `onError` is `abort` (the default) | The write and every `after*` hook it dispatches, so that hook's abort rolls the row back. Not opened on an object outside the default datasource, or on a driver with no transactions: there the row stays stored after an abort |
+| Any write to an object with an `after*` hook that can abort it: a blocking one whose `onError` is `abort` (the default), or one carrying a `condition`, whatever its `onError` and `async` (a condition that cannot be evaluated aborts the write) | The write and every `after*` hook it dispatches, so that hook's abort rolls the row back. Not opened on an object outside the default datasource, or on a driver with no transactions: there the row stays stored after an abort |
 | A by-id `delete()` that cascades to dependent records | Each **cascaded child's** `afterDelete`. The parent's own `afterDelete` runs after that unit closes, unless the row above opened one around the whole delete |
 | `batchData` / `deleteManyData` with `atomic: true` | Every member's `after*` — the batch aborts and rolls back on the first failure |
 | Any write you wrapped yourself in `ctx.api.transaction(...)` or `engine.transaction(...)` | Everything in the callback |

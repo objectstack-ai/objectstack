@@ -436,10 +436,11 @@ fields:
   (ADR-0126 §6 wall 3: an upgrade rewrites the packaged BASE; a tenant's
   choices live separately and are never merged into it).
 
-  What Acme Corp actually customizes at runtime is a real, declared shape: a
-  per-org **overlay write on the `view` metadata type**
-  (`allowOrgOverride: true` on its `DEFAULT_METADATA_TYPE_REGISTRY` entry,
-  ADR-0005) — the org's own `FormView` document, authored with the same shape
+  What Acme Corp actually customizes at runtime is a real, declared shape: an
+  environment **overlay write on the `view` metadata type**
+  (`allowEnvironmentOverlay: true` on its `DEFAULT_METADATA_TYPE_REGISTRY`
+  entry, ADR-0005; environment-wide since ADR-0131 D6) — the deployment's own
+  `FormView` document, authored with the same shape
   Layer 1 and the Server Response above already use, not a diff against the
   base. The merged layout below reflects only what Layers 1 and 3 (both real,
   declared shapes) actually produce.
