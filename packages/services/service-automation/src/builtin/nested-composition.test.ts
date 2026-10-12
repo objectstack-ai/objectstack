@@ -68,7 +68,7 @@ describe('nested control-flow composition (ADR-0031)', () => {
         {
           id: 'outer_loop', type: 'loop', label: 'For each',
           config: {
-            collection: '{items}', iteratorVariable: 'cur',
+            collection: { dialect: 'cel', source: 'items' }, iteratorVariable: 'cur',
             body: {
               nodes: [{
                 id: 'inner_par', type: 'parallel', label: 'Fan',
@@ -127,7 +127,7 @@ describe('nested control-flow composition (ADR-0031)', () => {
               nodes: [{
                 id: 'tc_loop', type: 'loop', label: 'Loop',
                 config: {
-                  collection: '{items}', iteratorVariable: 'cur',
+                  collection: { dialect: 'cel', source: 'items' }, iteratorVariable: 'cur',
                   body: { nodes: [{ id: 'leaf', type: 'collect', label: 'L', config: { tag: 'L' } }], edges: [] },
                 },
               }],
@@ -167,7 +167,7 @@ describe('nested control-flow composition (ADR-0031)', () => {
         {
           id: 'outer_loop', type: 'loop', label: 'For each',
           config: {
-            collection: '{items}', iteratorVariable: 'cur',
+            collection: { dialect: 'cel', source: 'items' }, iteratorVariable: 'cur',
             body: { nodes: [{ id: 'leaf', type: 'collect', label: 'Z', config: { tag: 'Z' } }], edges: [] },
           },
         },

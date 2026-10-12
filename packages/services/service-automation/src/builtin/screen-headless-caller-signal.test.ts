@@ -332,7 +332,7 @@ describe('a subflow / map child does not inherit the parent\'s callerParamKeys (
                 { id: 'start', type: 'start', label: 'Start' },
                 {
                     id: 'each', type: 'map', label: 'For each',
-                    config: { flowName: 'child_notes', collection: '{items}', iteratorVariable: 'item', input: { notes: 'row' } },
+                    config: { flowName: 'child_notes', collection: { dialect: 'cel', source: 'items' }, iteratorVariable: 'item', input: { notes: 'row' } },
                 },
                 { id: 'end', type: 'end', label: 'End' },
             ],

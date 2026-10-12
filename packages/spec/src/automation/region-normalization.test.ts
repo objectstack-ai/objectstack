@@ -65,7 +65,7 @@ const flowWith = (containerNode: Record<string, unknown>) => FlowSchema.parse({
 });
 
 const loopWith = (body: unknown, id = 'loop') => ({
-  id, type: LOOP_NODE_TYPE, label: 'Loop', config: { collection: '{rows}', iteratorVariable: 'row', body },
+  id, type: LOOP_NODE_TYPE, label: 'Loop', config: { collection: { dialect: 'cel', source: 'rows' }, iteratorVariable: 'row', body },
 });
 
 describe('FlowSchema.parse canonicalizes regions with no second call', () => {
@@ -164,8 +164,8 @@ describe('FlowSchema.parse canonicalizes regions with no second call', () => {
   });
 
   it('ignores a legacy flat-graph loop (no body)', () => {
-    const flow = flowWith({ id: 'loop', type: LOOP_NODE_TYPE, label: 'Loop', config: { collection: '{rows}' } });
-    expect((flow.nodes[1]!.config as any)).toEqual({ collection: '{rows}' });
+    const flow = flowWith({ id: 'loop', type: LOOP_NODE_TYPE, label: 'Loop', config: { collection: { dialect: 'cel', source: 'rows' } } });
+    expect((flow.nodes[1]!.config as any)).toEqual({ collection: { dialect: 'cel', source: 'rows' } });
   });
 
   it('terminates on a self-referential region instead of recursing forever', () => {
@@ -176,7 +176,7 @@ describe('FlowSchema.parse canonicalizes regions with no second call', () => {
     const selfRegion: { nodes: unknown[]; edges: unknown[] } = { nodes: [], edges: [] };
     selfRegion.nodes.push({
       id: 'l', type: LOOP_NODE_TYPE, label: 'L',
-      config: { collection: '{r}', iteratorVariable: 'r', body: selfRegion },
+      config: { collection: { dialect: 'cel', source: 'r' }, iteratorVariable: 'r', body: selfRegion },
     });
 
     // #16134 — a flow has one node-id space, and the self-reference makes `l`
@@ -284,7 +284,7 @@ describe('collectFlowGraphs — every region is walked, not only the top level',
   it('terminates on a self-referential region instead of recursing forever', () => {
     // Hand-built flows are objects, not parsed JSON, so a cycle is reachable.
     const selfRegion: { nodes: unknown[]; edges: unknown[] } = { nodes: [], edges: [] };
-    selfRegion.nodes.push({ id: 'l', type: LOOP_NODE_TYPE, label: 'L', config: { collection: '{r}', body: selfRegion } });
+    selfRegion.nodes.push({ id: 'l', type: LOOP_NODE_TYPE, label: 'L', config: { collection: { dialect: 'cel', source: 'r' }, body: selfRegion } });
     const graphs = collectFlowGraphs({ nodes: selfRegion.nodes as never, edges: [] });
     // It descended (so the walk is real) and it stopped (so the ceiling holds).
     expect(graphs.length).toBeGreaterThan(1);
@@ -512,7 +512,7 @@ describe('collectFlowGraphs — every region is walked, not only the top level',
       const graphs = collectFlowGraphs({
         nodes: [
           { id: 'start', type: 'start', config: {} },
-          { id: 'lp', type: LOOP_NODE_TYPE, config: { collection: 'x', body: { nodes: [], edges: [null] } } },
+          { id: 'lp', type: LOOP_NODE_TYPE, config: { collection: { dialect: 'cel', source: 'x' }, body: { nodes: [], edges: [null] } } },
         ] as never,
         edges: [],
       });

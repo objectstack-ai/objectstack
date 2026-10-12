@@ -722,8 +722,11 @@ describe('validateRlsPredicateEnforceability — the messages name the COST, not
     expect(why).toMatch(/unresolved-variable` for it in EVERY position/);
     expect(why).toMatch(/disappears for every holder of the permission set/);
     expect(why).not.toMatch(/fail-OPEN/);
-    expect(f.hint).toMatch(/IRlsMembershipResolver/);
-    expect(f.hint).toMatch(/never compared with `==`/);
+    // [#22161] The one-line `fix:` names the `in` route and refuses `==`; how an
+    // app stages the set is the explanation's.
+    expect(f.hint).toMatch(/test an app-staged membership set with `in`, never `==`/);
+    expect(why).toMatch(/IRlsMembershipResolver/);
+    expect(why).toMatch(/never compared with `==`/);
   });
 
   it('names the WRITE consequence on a `check` clause, not the read one', () => {
@@ -1256,7 +1259,7 @@ describe('[#22161] one-line verdicts — the five ids', () => {
 // [#22161] Slice 11: the `fix:` line. The three ids this slice converted name
 // their remedy in one line; what the hints enumerated is each id's `os explain`
 // entry. (`rls-predicate-unknown-user-variable` and `rls-predicate-unparseable`
-// keep their longer hints: a later slice's.)
+// are slice 12's, in the block below.)
 describe('[#22161] one-line fixes — rls-predicate-unenforceable, -over-budget, -unknown-field', () => {
   const ONE_LINE_FIX_IDS: readonly string[] = [
     RLS_PREDICATE_UNENFORCEABLE,
@@ -1299,6 +1302,55 @@ describe('[#22161] one-line fixes — rls-predicate-unenforceable, -over-budget,
       [RLS_PREDICATE_UNKNOWN_FIELD]: ['RENAMED', 'RLS cannot join to it (ADR-0055)', 'the verdict\'s "Did you mean"'],
     };
     for (const rule of ONE_LINE_FIX_IDS) {
+      for (const fact of facts[rule]) expect(explanationOf(rule), `${rule} explanation names ${fact}`).toContain(fact);
+    }
+  });
+});
+
+// [#22161] Slice 12: the `fix:` line of the other two ids. Both name only
+// fixed text (and, for the variable, the nearest kernel key), so no author
+// text can lengthen them; the bridge's reach, the subquery route, what each
+// kernel key holds and how an app stages a membership set are the explanations'.
+describe('[#22161] one-line fixes — rls-predicate-unparseable, -unknown-user-variable', () => {
+  const SLICE_12_IDS: readonly string[] = [RLS_PREDICATE_UNPARSEABLE, RLS_PREDICATE_UNKNOWN_USER_VARIABLE];
+
+  it('every `fix:` line of the two ids the cases above fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => SLICE_12_IDS.includes(f.rule));
+    // Coverage control: both ids fired, the variable id with and without a nearest key.
+    expect([...new Set(converted.map((f) => f.rule))].sort()).toEqual([...SLICE_12_IDS].sort());
+    const variable = converted.filter((f) => f.rule === RLS_PREDICATE_UNKNOWN_USER_VARIABLE).map((f) => f.hint);
+    expect(variable.some((h) => h.endsWith('never `==`.'))).toBe(true);
+    expect(variable.some((h) => h.includes('Did you mean'))).toBe(true);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('the variable `fix:` line stays inside 200 whatever kernel key it suggests', () => {
+    // The line holds no author text but the suggestion, so the bound is a
+    // property of the key set: the longest key is the worst case.
+    const longest = [...RESERVED_RLS_MEMBERSHIP_KEYS].sort((a, b) => b.length - a.length)[0]!;
+    const [f] = validateRlsPredicateEnforceability(siteWith('using', `owner_id == current_user.${longest}x`));
+    expect(f.rule).toBe(RLS_PREDICATE_UNKNOWN_USER_VARIABLE);
+    expect(f.hint).toContain(`Did you mean "${longest}"?`);
+    expect(f.hint.length).toBeLessThanOrEqual(200);
+  });
+
+  it('`os explain` carries what the `fix:` lines no longer say', () => {
+    const facts: Record<string, readonly string[]> = {
+      [RLS_PREDICATE_UNPARSEABLE]: [
+        'rather than SQL `AND` / `OR`',
+        'A subquery has no CEL spelling at all: RLS cannot join (ADR-0055)',
+        '(`FIELD in current_user.KEY`, ADR-0105 D11)',
+      ],
+      [RLS_PREDICATE_UNKNOWN_USER_VARIABLE]: [
+        '`current_user.organization_id` is the tenant',
+        '`ExecutionContext.rlsMembership`',
+        'never as scalars',
+      ],
+    };
+    for (const rule of SLICE_12_IDS) {
       for (const fact of facts[rule]) expect(explanationOf(rule), `${rule} explanation names ${fact}`).toContain(fact);
     }
   });

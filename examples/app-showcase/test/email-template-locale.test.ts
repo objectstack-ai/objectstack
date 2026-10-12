@@ -13,61 +13,36 @@
 // send still worked — by falling through to rung 3, the arbitrary-looking
 // "lowest tag in the bundle" — which is exactly why the defect was latent.
 //
-// So these assertions run the DECLARED templates through the real boot path:
-// the canonical schema parse, the real `mapTemplateToRow` projection into
-// `sys_email_template` columns, and the real `createSysEmailTemplateLoader`.
-// Nothing here inspects the source literal's strings; every verdict is a
-// resolution. The composition of rungs 1-3 itself is plugin-email's own
-// contract and is pinned there (`template-locale-resolution.test.ts`).
+// So these assertions run the DECLARED templates through the real read path:
+// the registry loader plugin-email resolves every send through
+// (`createRegistryEmailTemplateLoader`, ADR-0131 D6/D10), over the templates
+// as the manifest decomposition registers them — the declared documents
+// themselves — with the canonical schema parse it applies. Nothing here
+// inspects the source literal's strings; every verdict is a resolution. The
+// composition of rungs 1-3 itself is plugin-email's own contract and is
+// pinned there (`template-locale-resolution.test.ts`).
 
 import { describe, it, expect } from 'vitest';
 import { EmailTemplateDefinitionSchema } from '@objectstack/spec/system';
 import {
-  createSysEmailTemplateLoader,
-  mapTemplateToRow,
-  EMAIL_TEMPLATE_OBJECT,
+  createRegistryEmailTemplateLoader,
   DEFAULT_TEMPLATE_LOCALE,
 } from '@objectstack/plugin-email';
 import { allEmails, TaskDoneEmail } from '../src/system/emails/index.js';
 
-type Row = Record<string, unknown> & { id: string };
-
-/** What the boot seeder writes: schema parse, then the shared column mapping. */
-function materialize(templates: readonly unknown[]): Row[] {
-  return templates.map((t, i) => ({
-    id: `row-${i}`,
-    ...mapTemplateToRow(EmailTemplateDefinitionSchema.parse(t) as never),
-  }));
-}
-
 /**
- * A driver-ish engine over the materialized rows — filters by `where`, honours
- * `orderBy`, then `limit`. Mirrors the fake plugin-email's own resolution
- * suite uses, so the loader is exercised the way a real store exercises it.
+ * The registry as the manifest decomposition leaves it: each declared
+ * `emailTemplates:` entry registered as-is under the `email_template` type.
+ * The loader reads nothing else for an app's own declarations.
  */
-function engine(rows: Row[]) {
-  return {
-    async find(object: string, query: Record<string, unknown>) {
-      expect(object).toBe(EMAIL_TEMPLATE_OBJECT);
-      const where = (query.where ?? {}) as Record<string, unknown>;
-      let out = rows.filter((r) => Object.entries(where).every(([k, v]) => r[k] === v));
-      const orderBy = query.orderBy as Array<{ field: string; order?: string }> | undefined;
-      if (Array.isArray(orderBy)) {
-        out = [...out].sort((a, b) => {
-          for (const { field, order } of orderBy) {
-            const av = String(a[field] ?? '');
-            const bv = String(b[field] ?? '');
-            if (av !== bv) return (av < bv ? -1 : 1) * (order === 'desc' ? -1 : 1);
-          }
-          return 0;
-        });
-      }
-      return typeof query.limit === 'number' ? out.slice(0, query.limit) : out;
+const loader = () => createRegistryEmailTemplateLoader({
+  registry: {
+    listItems: (type: string) => {
+      expect(type).toBe('email_template');
+      return allEmails.map((t) => ({ ...t, _packageId: 'com.example.showcase' }));
     },
-  };
-}
-
-const loader = () => createSysEmailTemplateLoader(engine(materialize(allEmails)) as never);
+  },
+});
 
 describe('showcase email templates — declared tags the send ladder can actually reach', () => {
   it('resolves `showcase_task_done_email` for an explicit en-US send', async () => {

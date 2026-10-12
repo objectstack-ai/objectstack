@@ -59,8 +59,8 @@ const VALID: Readonly<Record<string, Config>> = {
   screen: { title: 'T', fields: [{ name: 'a', type: 'select', options: [{ label: 'A', value: 'a' }] }] },
   script: MEASURED,
   subflow: SUBFLOW,
-  map: { collection: '{rows}', flowName: 'child_flow', input: { id: { dialect: 'cel', source: 'item.id' } } },
-  loop: { collection: '{rows}', body: { nodes: [], edges: [] } },
+  map: { collection: { dialect: 'cel', source: 'rows' }, flowName: 'child_flow', input: { id: { dialect: 'cel', source: 'item.id' } } },
+  loop: { collection: { dialect: 'cel', source: 'rows' }, body: { nodes: [], edges: [] } },
   parallel: { branches: [{ name: 'a', nodes: [], edges: [] }, { name: 'b', nodes: [], edges: [] }] },
   try_catch: { try: { nodes: [], edges: [] }, retry: { maxRetries: 1, backoffMs: 10 } },
 };
@@ -145,7 +145,7 @@ describe('the measured node: refused at save, with its location', () => {
 
   it('a node inside an ADR-0031 region body is refused at the path the author wrote', () => {
     const body = { nodes: [{ id: 'inner', type: 'script', label: 'Inner', config: { function: 'f', bogusKey: 1 } }], edges: [] };
-    expect(issuesOf(flowWith('loop', { collection: '{rows}', body })).map(({ path }) => path))
+    expect(issuesOf(flowWith('loop', { collection: { dialect: 'cel', source: 'rows' }, body })).map(({ path }) => path))
       .toEqual(['nodes.1.config.body.nodes.0.config.bogusKey']);
   });
 });
@@ -257,8 +257,8 @@ describe('what stays as it was (lit controls)', () => {
   it('CONTROL: a key at or under a region slot is the region\'s, never the container\'s', () => {
     const node = { id: 'inner', type: 'assignment', label: 'A', config: { assignments: { a: 1 } } };
     for (const [type, config] of [
-      ['loop', { collection: '{rows}', body: { nodes: [node], edges: [], bogusKey: 1 } }],
-      ['loop', { collection: '{rows}', body: { nodes: [{ ...node, bogusKey: 1 }], edges: [] } }],
+      ['loop', { collection: { dialect: 'cel', source: 'rows' }, body: { nodes: [node], edges: [], bogusKey: 1 } }],
+      ['loop', { collection: { dialect: 'cel', source: 'rows' }, body: { nodes: [{ ...node, bogusKey: 1 }], edges: [] } }],
       ['parallel', { branches: [{ name: 'a', nodes: [node], edges: [], bogusKey: 1 }, { name: 'b', nodes: [node], edges: [] }] }],
     ] as const) {
       // The region contract refuses it — `validateControlFlow` names it at registration.
@@ -273,7 +273,7 @@ describe('what stays as it was (lit controls)', () => {
       ['create_record', { objectName: 'task', fields: { title: 'X', any_field: 1 } }],
       ['http', { url: 'https://example.test/hook', headers: { 'X-Anything': 'y' } }],
       ['screen', { objectName: 'task', defaults: { anything: 1 } }],
-      ['map', { collection: '{rows}', flowName: 'child_flow', input: { anything: 1 } }],
+      ['map', { collection: { dialect: 'cel', source: 'rows' }, flowName: 'child_flow', input: { anything: 1 } }],
     ] as const) {
       expect(flowNodeConfigRefusals(type, config), type).toEqual([]);
     }

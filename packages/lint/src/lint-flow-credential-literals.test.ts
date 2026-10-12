@@ -436,7 +436,7 @@ describe('[#22161] one-line verdicts — flow-credential-literal', () => {
         {
           name: 'regions',
           nodes: [
-            { id: 'loop', type: 'loop', config: { collection: '{items}', body: { nodes: [call('in_loop')], edges: [] } } },
+            { id: 'loop', type: 'loop', config: { collection: { dialect: 'cel', source: 'items' }, body: { nodes: [call('in_loop')], edges: [] } } },
             {
               id: 'par',
               type: 'parallel',

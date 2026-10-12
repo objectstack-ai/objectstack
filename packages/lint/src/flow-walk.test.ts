@@ -69,7 +69,7 @@ describe('walkFlowNodes', () => {
 
   it('reaches a loop body', () => {
     const flow = {
-      nodes: [{ id: 'each', type: 'loop', config: { collection: '{items}', body: { nodes: [node('inner')], edges: [] } } }],
+      nodes: [{ id: 'each', type: 'loop', config: { collection: { dialect: 'cel', source: 'items' }, body: { nodes: [node('inner')], edges: [] } } }],
     };
     const walked = walkFlowNodes(flow, 'flows[0]');
     expect(walked.map((w) => w.path)).toEqual(['flows[0].nodes[0]', 'flows[0].nodes[0].config.body.nodes[0]']);
@@ -113,7 +113,7 @@ describe('walkFlowNodes', () => {
                 {
                   id: 'inner',
                   type: 'loop',
-                  config: { collection: '{x}', body: { nodes: [node('deep')], edges: [] } },
+                  config: { collection: { dialect: 'cel', source: 'x' }, body: { nodes: [node('deep')], edges: [] } },
                 },
               ],
               edges: [],
@@ -136,7 +136,7 @@ describe('walkFlowNodes', () => {
         {
           id: 'each',
           type: 'loop',
-          config: { collection: '{items}', maxIterations: 10, body: { nodes: [node('inner')], edges: [] } },
+          config: { collection: { dialect: 'cel', source: 'items' }, maxIterations: 10, body: { nodes: [node('inner')], edges: [] } },
         },
       ],
     };

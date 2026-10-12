@@ -43,6 +43,24 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * Existing databases keep the two columns as unmanaged leftovers; there is no
  * migration (same disposition as #2755).
  *
+ * ## Retired: `reactions` (maintainer ruling A on #22505, as amended; #22573)
+ *
+ * `reactions` stored every emoji reaction on the comment's own row as one JSON
+ * map, so a member reacting to another member's comment had to update a row
+ * the author-only edit rule reserves for its author, and two members reacting
+ * at once overwrote each other. A reaction is now its reactor's own record,
+ * `sys_comment_reaction` (comment, emoji, user), and the column retires with
+ * NOTHING in its place on the comment row: no stored aggregate and no
+ * computed-on-read block. A reader that shows reactions reads the
+ * `sys_comment_reaction` rows of the comments on screen (`comment_id` `$in`
+ * their ids) and groups them by emoji. Reactions stored in the column are not
+ * converted into records; the D3 record is the semantic entry
+ * `sys-comment-reactions-column-retired`. An existing database keeps the
+ * physical column and its values (schema sync is additive): the boot drift
+ * report names it orphaned, the data door neither returns nor accepts it
+ * (`400 INVALID_FIELD` on a write that names it), and
+ * `os migrate apply --allow-destructive` drops it.
+ *
  * @namespace sys
  */
 export const SysComment = ObjectSchema.create({
@@ -122,12 +140,9 @@ export const SysComment = ObjectSchema.create({
       group: 'Body',
     }),
 
-    reactions: Field.textarea({
-      label: 'Reactions',
-      required: false,
-      description: 'JSON object mapping each emoji to the list of user ids who reacted',
-      group: 'Body',
-    }),
+    // No `reactions` field: an emoji reaction is its reactor's own
+    // `sys_comment_reaction` row (#22566), and nothing about reactions is
+    // stored or computed on the comment row (#22573).
 
     // ── Lifecycle ────────────────────────────────────────────────
     is_edited: Field.boolean({

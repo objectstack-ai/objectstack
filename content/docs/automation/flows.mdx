@@ -232,8 +232,10 @@ once per item with the item variable bound) and a `script` node's `inputs` (the
 registered function's `input`). Those maps — `assignments`, `fields`, `input`,
 `inputs` — are the flow's **value slots**, and so are a `screen` node's three
 positions that hand a value to the client: an object form's `defaults` (each
-field's prefill), a field's `defaultValue`, and an object form's `recordId`.
-Each value takes a CEL value envelope or a literal. Only a slot's top-level
+field's prefill), a field's `defaultValue`, and an object form's `recordId`,
+and the list a `loop` (with a `body`) and a `map` iterate, their `collection`.
+Each value takes a CEL value envelope or a literal — a `collection`'s literal is
+an inline array, never a string. Only a slot's top-level
 value is an expression — an object nested inside a JSON value or an array is
 data, whatever keys it carries.
 
@@ -317,10 +319,23 @@ nothing there; the guarded form serves `null`:
   save. Where the record may be absent, route around the screen with a
   `decision` on the value instead of guarding the id.
 
+**A `loop`'s or a `map`'s collection: the list must be one.** `collection` is
+the list the node iterates: an envelope that evaluates to a list —
+`collection: { dialect: 'cel', source: 'tasks' }` — or the items written as an
+inline array, iterated as written (its strings are data, never interpolated).
+Anything the envelope evaluates to but a list fails the node, `null` included,
+as a token that resolved to nothing did; to iterate nothing where the list may
+be absent, guard it to answer `[]`: `has(vars.tasks) ? vars.tasks : []`. A
+string is refused there whatever it holds, a variable's **bare name** included
+(`collection: 'tasks'`): the contract declared that spelling, but the structured
+`loop` and `map` never read one — the interpolator handed the name back, and
+every run failed at the node. A `loop` with no `body` is the legacy flat-graph
+form, which still reads `collection` as a bare variable name, unjudged.
+
 **Where an envelope is data, the remedy names none there.** An envelope
 evaluates only as the top-level value of a value slot — `fields`,
-`assignments`, a callee's `input` / `inputs`, or a screen's `defaults`,
-`defaultValue` or `recordId`. Inside an object or list value, and in the two legacy `assignment` shapes
+`assignments`, a callee's `input` / `inputs`, a screen's `defaults`,
+`defaultValue` or `recordId`, or a `collection`. Inside an object or list value, and in the two legacy `assignment` shapes
 (an `assignments: [{ variable, value }]` array, variables as the config's own
 keys), it is stored as the object it spells — so the refusal there names what
 does evaluate:
@@ -769,7 +784,7 @@ Runs its `body` region once per item of a collection, binding the current item
   type: 'loop',
   label: 'For each task',
   config: {
-    collection: '{tasks}',        // template/variable resolving to an array
+    collection: { dialect: 'cel', source: 'tasks' }, // the list: a CEL value envelope, or an inline array
     iteratorVariable: 'task',     // current item, visible inside the body
     indexVariable: 'i',           // optional zero-based index
     maxIterations: 500,           // hard cap (clamped to the engine ceiling)
@@ -792,7 +807,9 @@ Runs its `body` region once per item of a collection, binding the current item
 ```
 
 A `loop` node with **no `body`** keeps the legacy flat-graph behavior — the
-container is additive.
+container is additive. Only the structured form reads `collection` as a value
+slot (see *A `loop`'s or a `map`'s collection* above); the legacy form reads it
+as a bare variable name.
 
 #### Per-iteration containment: `loop { try_catch { … } }`
 
@@ -813,7 +830,7 @@ processed, and the run completes.
   type: 'loop',
   label: 'For each breached case',
   config: {
-    collection: '{cases}',
+    collection: { dialect: 'cel', source: 'cases' },
     iteratorVariable: 'currentCase',
     body: {
       nodes: [
@@ -1243,7 +1260,7 @@ the map waits for that item's decision, then moves to the next.
   type: 'map',
   label: 'Sign off each task',
   config: {
-    collection: '{items}',          // array (e.g. the release's tasks)
+    collection: { dialect: 'cel', source: 'items' }, // the list (e.g. the release's tasks)
     iteratorVariable: 'task',
     flowName: 'one_task_signoff',    // the per-item subflow (it may pause)
     itemObject: 'showcase_task',     // when an item is a record, it becomes the child's `$record`

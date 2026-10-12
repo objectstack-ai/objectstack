@@ -320,13 +320,15 @@ export function validateRuleSchemaFormats(stack: unknown): RuleSchemaFormatFindi
       message:
         `\`format: '${use.name}'\` is not a registered format, so ajv drops the keyword and the rule ` +
         `enforces it on no record: every write is ACCEPTED`,
+      // [#22161] One remedy line: the nearest registered name, the spelling
+      // rule, and `pattern` for a constraint no format covers. The registered
+      // names themselves (the default `ajv-formats` set, written out and held
+      // to `registeredFormatNames()` by this rule's test) are
+      // `os explain validation-rule-json-schema-unknown-format`.
       hint:
         (suggestion ? `Did you mean \`format: '${suggestion}'\`? ` : '') +
-        `The registered names are: ${registered.join(', ')} — the default \`ajv-formats\` set, the one ` +
-        `\`rule-validator.ts\` registers so that a \`format\` is enforced on every write. Names are ` +
-        `case-sensitive and hyphenated ` +
-        `(\`date-time\`, not \`datetime\`). If you meant a constraint ajv has no format for, express it ` +
-        `with \`pattern\` instead — a regex is enforced, an unknown format name is not.`,
+        'Use a registered name (case-sensitive and hyphenated: `date-time`, not `datetime`), or express the ' +
+        'constraint with `pattern`, which is enforced',
     });
   }
 

@@ -322,7 +322,7 @@ describe('#9380 the kernel:ready platform migrations, on the boots that reach th
     // WRITE modes boot without `deferSchemaDdl` — `--apply` of `os migrate
     // meta --stored`, `summary-nulls`, `value-shapes`, `recorded-by`,
     // `files-to-references` and `audit-metadata-bodies`, `os migrate resume
-    // --run`, `os secret orphans --delete`, `os meta resync --yes`. (Every
+    // --run`, `os secret orphans --delete`. (Every
     // no-write mode boots deferred since #21391.) Each writes only what the
     // operator confirmed; if the arming were gated on deferral instead of on
     // being a one-shot boot, every one of them would also repair rows the

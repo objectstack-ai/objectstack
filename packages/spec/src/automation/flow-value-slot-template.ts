@@ -10,8 +10,9 @@
  * expression ledger's `value` role (`assignment.assignments.*`,
  * `create_record.fields.*`, `update_record.fields.*`, the three maps a node
  * hands to a callee — `subflow.input.*`, `map.input.*`, `script.inputs.*` —
- * and a `screen`'s three positions that hand a value to the client —
- * `defaults.*`, `fields[].defaultValue`, `recordId` —
+ * a `screen`'s three positions that hand a value to the client —
+ * `defaults.*`, `fields[].defaultValue`, `recordId` — and the list a `loop`
+ * and a `map` iterate, their `collection` —
  * `FLOW_NODE_EXPRESSION_PATHS`), plus the two legacy
  * `assignment` shapes the executor still reads (the
  * `assignments: [{ variable, value }]` array and the bare
@@ -43,7 +44,13 @@
  *    its guarded form writes `null`;
  *  - a date macro with an offset the template read as 0 — a variable it did
  *    not find, a value that is not a number, text that is neither — or a
- *    fraction, which the two engines truncate at different places.
+ *    fraction, which the two engines truncate at different places;
+ *  - a `loop` or `map` `collection` (#19939): an absent variable fails the node
+ *    either way, but as a returned failure under the template (the step's
+ *    `NODE_FAILURE`, "did not resolve to an array") and as an evaluation fault
+ *    under CEL (`EXECUTION_ERROR`, naming the variable) — and a variable's bare
+ *    name there, which the structured `loop` and `map` never read (every run
+ *    failed at the node), would iterate under an envelope.
  *
  * So no spelling is converted: each is refused with its remedy, and the author
  * judges the absent case the template used to decide silently. Only a token
@@ -144,6 +151,22 @@
  * A `$User` path that never resolved served nothing in every run, and the
  * sentence says leaving the value out keeps exactly that.
  *
+ * ## A `loop`'s or a `map`'s collection — the list must be one
+ *
+ * A `collection` is the list the node iterates (`COLLECTION_SLOTS`, keyed by
+ * the ledger entry). Its literal is an inline array, iterated AS WRITTEN: the
+ * executors never interpolated one, so its strings are data, and this judge
+ * reads only the value itself — a string carrying a token. The remedy is the
+ * collection's own ({@link ValueSlotTemplateOptions.collection}): the value
+ * must evaluate to a list, and anything else fails the node, as a whole token
+ * that resolved to nothing did under the template, so a guard answers `[]` —
+ * iterating nothing — rather than `null`, which fails the node too. Any other
+ * token never computed a list (the template wrote text or a single value
+ * there), so every run failed at the node, and the refusal says so rather
+ * than spelling a concatenation or a date no list can be. A token-free
+ * string is a variable's bare name or no list at all; the collection's
+ * contract refuses it (`FlowCollectionSlotSchema`), not this judge.
+ *
  * ## The token grammar is the interpolator's
  *
  * Which `{…}` the interpolator substitutes, and how it dispatches a token, is
@@ -220,11 +243,11 @@ type Write = (source: string) => string;
  * claims (`celHeadReadsThroughVars` in the token module) is selected off
  * `vars` like any other (`has(vars.list) && has(vars.list.tags)`).
  */
-function guardOf(path: string): string | undefined {
+function guardOf(path: string, fallback = 'null'): string | undefined {
   const segments = path.split('.');
   if (segments[0]!.startsWith('$') || segments.some((s) => /^\d+$/.test(s) || CEL_KEYWORDS.has(s))) return undefined;
   const steps = segments.map((_, at) => `vars.${segments.slice(0, at + 1).join('.')}`);
-  return `${steps.map((step) => `has(${step})`).join(' && ')} ? ${steps[steps.length - 1]} : null`;
+  return `${steps.map((step) => `has(${step})`).join(' && ')} ? ${steps[steps.length - 1]} : ${fallback}`;
 }
 
 const ABSENT_SENTENCE =
@@ -412,6 +435,32 @@ function literalPositionLead(
   return sentences.join(' ');
 }
 
+/**
+ * The remedy for a `{…}` token at a `loop`'s or a `map`'s `collection` (see the
+ * module docblock): a whole variable path is that path in an envelope, with a
+ * guard answering `[]` where the list may be absent; any other token never
+ * computed a list.
+ */
+function collectionRemedy(value: string, tokens: readonly Token[]): string {
+  const whole = wholeTokenOf(value, tokens);
+  if (whole?.kind !== 'path') {
+    return (
+      `\`${value}\` never computed a list: the template wrote text or a single value here, so every run failed at `
+      + 'this node. Name the list in a CEL value envelope, `{ dialect: \'cel\', source: \'…\' }`, or write the items '
+      + 'as an inline array.'
+    );
+  }
+  const guard = guardOf(whole.inner, '[]');
+  return (
+    `Write \`${whole.text}\` as ${envelopeOf(celPath(whole.inner))}. \`collection\` must evaluate to a list, and `
+    + 'anything else fails the node — an absent variable or key included, which CEL refuses where the token '
+    + 'resolved to nothing and failed the node as well'
+    + (guard === undefined
+      ? '.'
+      : `. Where the list may be absent, a guard answering \`[]\` iterates nothing instead: \`${guard}\`.`)
+  );
+}
+
 /** One refused string inside a value slot's value. */
 export interface ValueSlotTemplateRefusal {
   /** Where the string sits inside the value — `[]` for the value itself, `['meta', 'note']`, `[0]`. */
@@ -434,6 +483,15 @@ export interface ValueSlotTemplateOptions {
    * expression, judged by the envelope rule and not here.
    */
   readonly envelopeIsLiteral?: boolean;
+  /**
+   * [#19939] The position is a `loop`'s or a `map`'s `collection`, the list
+   * the node iterates, whose literal is an inline array iterated AS WRITTEN —
+   * never interpolated — so only the value itself is judged: a string
+   * carrying a `{…}` token is refused with the collection's remedy (see the
+   * module docblock), and an array, a token-free string and every other value
+   * are left to the collection's contract. Default `false`.
+   */
+  readonly collection?: boolean;
 }
 
 /**
@@ -453,6 +511,12 @@ export function valueSlotTemplateRefusals(
   value: unknown,
   options: ValueSlotTemplateOptions = {},
 ): ValueSlotTemplateRefusal[] {
+  if (options.collection === true) {
+    if (typeof value !== 'string') return [];
+    const tokens = tokensOf(value);
+    if (tokens.length === 0) return [];
+    return [{ path: [], message: `${VALUE_SLOT_TEMPLATE_REFUSAL} ${collectionRemedy(value, tokens)}`, source: value }];
+  }
   const legacy = options.envelopeIsLiteral === true;
   if (!legacy && isExpressionEnvelopeShaped(value)) return [];
   const out: ValueSlotTemplateRefusal[] = [];
@@ -570,6 +634,14 @@ const SCREEN_VALUE_SLOTS: Readonly<Record<string, ScreenSlot>> = {
 };
 
 /**
+ * The ledger entries (`<nodeType> <path>`) that are a node's COLLECTION — the
+ * list a `loop` or a `map` iterates (#19939; see the module docblock, "A
+ * `loop`'s or a `map`'s collection") — judged with
+ * {@link ValueSlotTemplateOptions.collection}.
+ */
+const COLLECTION_SLOTS: ReadonlySet<string> = new Set(['loop collection', 'map collection']);
+
+/**
  * The screen sentence for a refused TOP-LEVEL value of one of a `screen`'s
  * value slots, located at `at` (`defaults.account`, `fields[0].defaultValue`,
  * `recordId`) — what the client is served where the template served nothing —
@@ -647,7 +719,9 @@ function joinPath(prefix: string, inner: readonly (string | number)[]): string {
  * read ends with the callee sentence: what the callee is handed instead of
  * nothing (see the module docblock). At a top-level value of a `screen`'s value
  * slots (`defaults.*`, `fields[].defaultValue`, `recordId`) it ends with the
- * screen sentence: what the client is served instead of nothing.
+ * screen sentence: what the client is served instead of nothing. At a `loop`'s
+ * (with a `body`) or a `map`'s `collection` only the value itself is judged,
+ * with the collection's remedy: the list it must evaluate to.
  */
 export function flowNodeValueTemplateRefusals(nodeType: string, config: unknown): FlowNodeValueTemplateRefusal[] {
   const out: FlowNodeValueTemplateRefusal[] = [];
@@ -655,10 +729,10 @@ export function flowNodeValueTemplateRefusals(nodeType: string, config: unknown)
     path: string,
     label: string,
     value: unknown,
-    envelopeIsLiteral = false,
+    options: ValueSlotTemplateOptions = {},
     callee?: (refusal: ValueSlotTemplateRefusal) => string | undefined,
   ): void => {
-    for (const refusal of valueSlotTemplateRefusals(value, { envelopeIsLiteral })) {
+    for (const refusal of valueSlotTemplateRefusals(value, options)) {
       const sentence = callee?.(refusal);
       const message = sentence === undefined ? refusal.message : `${refusal.message} ${sentence}`;
       out.push({ path: joinPath(path, refusal.path), label, message, source: refusal.source });
@@ -666,6 +740,10 @@ export function flowNodeValueTemplateRefusals(nodeType: string, config: unknown)
   };
   for (const found of resolveFlowNodeValueSlots(nodeType, config)) {
     const entryKey = `${found.entry.nodeType} ${found.entry.path}`;
+    if (COLLECTION_SLOTS.has(entryKey)) {
+      judge(found.path, found.entry.label, found.value, { collection: true });
+      continue;
+    }
     const receiver = CALLEE_INPUT_SLOTS[entryKey];
     const screenSlot = SCREEN_VALUE_SLOTS[entryKey];
     // The map's own key (`input.<key>`) — a callee entry's path ends in its `*`.
@@ -683,18 +761,20 @@ export function flowNodeValueTemplateRefusals(nodeType: string, config: unknown)
         const whole = wholeTokenOf(refusal.source, tokensOf(refusal.source));
         return whole === undefined ? undefined : sentenceFor(whole);
       };
-    judge(found.path, found.entry.label, found.value, false, sentence);
+    judge(found.path, found.entry.label, found.value, {}, sentence);
   }
   if (nodeType === 'assignment' && config !== null && typeof config === 'object' && !Array.isArray(config)) {
     const raw = (config as Record<string, unknown>).assignments;
     if (Array.isArray(raw)) {
       raw.forEach((item, index) => {
         if (item !== null && typeof item === 'object' && !Array.isArray(item)) {
-          judge(`assignments[${index}].value`, 'assignment value', (item as Record<string, unknown>).value, true);
+          judge(`assignments[${index}].value`, 'assignment value', (item as Record<string, unknown>).value, { envelopeIsLiteral: true });
         }
       });
     } else if (!(raw !== null && typeof raw === 'object')) {
-      for (const [key, value] of Object.entries(config as Record<string, unknown>)) judge(key, 'assignment value', value, true);
+      for (const [key, value] of Object.entries(config as Record<string, unknown>)) {
+        judge(key, 'assignment value', value, { envelopeIsLiteral: true });
+      }
     }
   }
   return out;

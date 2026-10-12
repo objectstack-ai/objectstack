@@ -61,7 +61,10 @@ describe('lowerCallables', () => {
     expect((out2.lowered.functions as any[])[0].handler).toBe('my_arr_fn');
   });
 
-  it('disambiguates colliding names with a numeric suffix', () => {
+  it('a `functions` key equal to a hook name keeps its name and code; the hook\'s internal ref takes the suffix', () => {
+    // Before: the hook kept `dup`, the authored key was re-keyed to `dup__2`
+    // (which the runtime module never served), and the hook's ref resolved to
+    // the `functions` entry's code at load.
     const f1 = () => 1;
     const f2 = () => 2;
     const out = lowerCallables({
@@ -71,8 +74,61 @@ describe('lowerCallables', () => {
       functions: { dup: f2 },
     });
     expect(out.count).toBe(2);
-    expect(out.functions.dup).toBe(f1);
-    expect(out.functions.dup__2).toBe(f2);
+    expect(out.functions.dup).toBe(f2);
+    expect(out.functions.dup__2).toBe(f1);
+    expect(out.lowered.functions).toEqual({ dup: 'dup' });
+    expect((out.lowered.hooks as any[])[0].handler).toBe('dup__2');
+    expect((out.lowered.hooks as any[])[0].name).toBe('dup');
+  });
+
+  it('a `functions` key sharing its function with a hook keeps its name; the hook re-uses it', () => {
+    // Before: the key was re-keyed to the hook's ref and the authored name was gone.
+    const shared = () => 1;
+    const out = lowerCallables({
+      hooks: [{ name: 'tidy_hook', handler: shared, events: ['beforeInsert'], object: 'x' }],
+      functions: { score: shared },
+    });
+    expect(out.count).toBe(1);
+    expect(out.functions).toEqual({ score: shared });
+    expect(out.lowered.functions).toEqual({ score: 'score' });
+    expect((out.lowered.hooks as any[])[0].handler).toBe('score');
+  });
+
+  it('two `functions` keys bound to one function are two refs, each under its own name', () => {
+    const shared = () => 1;
+    const map = lowerCallables({ functions: { a: shared, b: { handler: shared, effect: 'writes' } } });
+    expect(map.count).toBe(2);
+    expect(map.lowered.functions).toEqual({ a: 'a', b: { handler: 'b', effect: 'writes' } });
+    const arr = lowerCallables({ functions: [{ name: 'a', handler: shared }, { name: 'b', handler: shared }] });
+    expect(arr.lowered.functions).toEqual([{ name: 'a', handler: 'a' }, { name: 'b', handler: 'b' }]);
+    expect(Object.keys(arr.functions)).toEqual(['a', 'b']);
+  });
+
+  it('a `functions` key that carries no callable still owns its name: a hook named like it takes the suffix', () => {
+    const fn = () => 1;
+    const out = lowerCallables({
+      hooks: [{ name: 'legacy', handler: fn, events: ['beforeInsert'], object: 'x' }],
+      functions: { legacy: 'legacy' },
+    });
+    expect((out.lowered.hooks as any[])[0].handler).toBe('legacy__2');
+    expect(out.lowered.functions).toEqual({ legacy: 'legacy' });
+    expect(out.functions).toEqual({ legacy__2: fn });
+  });
+
+  it('[ADR-0130 D4] both walks of a contested name agree: the package body ships the refs the top level does', () => {
+    const hookFn = () => 1;
+    const entry = () => 2;
+    const body = {
+      hooks: [{ name: 'dup', handler: hookFn, events: ['beforeInsert'], object: 'x' }],
+      functions: { dup: entry },
+    };
+    const out = lowerCallables({ ...body, packages: [{ manifest: { id: 'p.orders', ...body } }] });
+    const pkg = (out.lowered.packages as any[])[0].manifest;
+    expect(out.functions).toEqual({ dup__2: hookFn, dup: entry });
+    expect((out.lowered.hooks as any[])[0].handler).toBe('dup__2');
+    expect(pkg.hooks[0].handler).toBe('dup__2');
+    expect(out.lowered.functions).toEqual({ dup: 'dup' });
+    expect(pkg.functions).toEqual({ dup: 'dup' });
   });
 
   // #1876 — a handler referencing a module-scope helper must NOT be lowered to a

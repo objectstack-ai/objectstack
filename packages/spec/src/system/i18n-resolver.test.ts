@@ -4235,7 +4235,7 @@ describe('translateFlow — screens inside ADR-0031 regions', () => {
         type: 'loop',
         label: 'Loop',
         config: {
-          collection: '{items}',
+          collection: { dialect: 'cel', source: 'items' },
           body: {
             nodes: [
               {
@@ -4285,7 +4285,7 @@ describe('translateFlow — screens inside ADR-0031 regions', () => {
                 type: 'loop',
                 label: 'Inner Loop',
                 config: {
-                  collection: '{rows}',
+                  collection: { dialect: 'cel', source: 'rows' },
                   body: {
                     nodes: [
                       { id: 'deep_screen', type: 'screen', label: 'Deep', config: { title: 'Deep' } },
@@ -4377,7 +4377,7 @@ describe('translateFlow — screens inside ADR-0031 regions', () => {
     const doc: any = {
       name: 'nested_regions',
       label: 'Nested Regions',
-      nodes: [{ id: 'the_loop', type: 'loop', label: 'Loop', config: { collection: '{i}', body: 'not a region' } }],
+      nodes: [{ id: 'the_loop', type: 'loop', label: 'Loop', config: { collection: { dialect: 'cel', source: 'i' }, body: 'not a region' } }],
     };
     const out: any = translateFlow(doc, bundle, { locale: 'zh-CN' });
     expect(out.nodes[0]).toBe(doc.nodes[0]);

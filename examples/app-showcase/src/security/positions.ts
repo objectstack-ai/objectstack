@@ -10,10 +10,9 @@
  * (ADR-0090 D3; the old `parent` field on positions never existed at runtime).
  *
  * Each position names the permission sets it distributes in `permissionSets`
- * (ADR-0131 D3/D4): the authorization resolver reads them from here, by name.
- * `src/security/bind-position-sets.ts` still writes the same bindings as
- * `sys_position_permission_set` rows, for the readers that have not moved off
- * the junction yet; `test/inert-wirings.test.ts` holds the two equal.
+ * (ADR-0131 D3/D4): the authorization resolver reads them from here, by name,
+ * and no binding row is written for them. `test/inert-wirings.test.ts` pins
+ * the declared pairs.
  *
  * Two positions are BUILT-IN and never declared by an app: `everyone`
  * (implicitly held by every authenticated member — the tenant baseline,

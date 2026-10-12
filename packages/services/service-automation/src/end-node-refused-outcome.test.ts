@@ -417,7 +417,7 @@ describe('#15788 — the region boundary, made loud', () => {
                     {
                         id: 'sweep', type: 'loop', label: 'Sweep',
                         config: {
-                            collection: '{items}',
+                            collection: { dialect: 'cel', source: 'items' },
                             iteratorVariable: 'item',
                             body: {
                                 nodes: [{ id: 'nope', type: 'end', label: 'Nope', config: { outcome: 'refused', message: REFUSAL_TEMPLATE } }],

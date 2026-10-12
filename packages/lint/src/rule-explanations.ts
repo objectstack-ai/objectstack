@@ -31,8 +31,10 @@
  * reads) is written out here — `rule-explanations.test.ts` holds each key to a
  * rule id constant some rule file exports (or to an id in the completeness
  * predicate's `FUNCTIONAL_COMPLETENESS_RULES`, whose rules live in
- * `@objectstack/spec`) and each such list to the rule's own constant, so
- * neither can drift from the rule it explains.
+ * `@objectstack/spec`, or to its exact list of the ids `@objectstack/cli`
+ * produces, which the CLI's own test fires from their producers because the
+ * CLI depends on this package) and each such list to the rule's own constant,
+ * so neither can drift from the rule it explains.
  *
  * Adding an entry: key it by the rule's id, write `covers` so that it
  * completes the sentence "`os explain <id>` for …", and move the long text out
@@ -1042,7 +1044,11 @@ const HOOK_API_UPDATE_READONLY_WHEN_FIELD_EXPLANATION: RuleExplanation = {
     HOOK_API_CALLER_PAYLOAD,
     ...READONLY_WHEN_STRIP,
     'Neither `runAs: \'system\'` nor `ctx.api.sudo()` helps: a system context does not waive the ' +
-      'conditional lock, and `sudo()` is not marshalled into the sandbox in any case.',
+      'conditional lock, and `sudo()` is not marshalled into the sandbox in any case (calling it from a ' +
+      'body is a TypeError at run time).',
+    'So derive the value in a `beforeUpdate` hook on the record\'s own object, or make sure the call only ' +
+      'targets records whose `readonlyWhen` predicate is FALSE; otherwise drop the field from the ' +
+      'payload. The warning never blocks a build.',
   ],
 };
 
@@ -1152,6 +1158,10 @@ const RLS_PREDICATE_UNPARSEABLE_EXPLANATION: RuleExplanation = {
     'An RLS predicate is CEL (ADR-0058 D1). Before parsing, a legacy SQL bridge rewrites the historic subset ' +
       'it covers — a bare `=` to `==` and `IN` to `in`, never inside a quoted literal — and everything else must ' +
       'already be CEL: SQL `AND` / `OR` / `LIKE`, a subquery or a stray operator does not parse.',
+    'So combine with `&&` / `||` rather than SQL `AND` / `OR`, negate with `!`, and use `startsWith` / ' +
+      '`endsWith` / `contains` rather than `LIKE`. A subquery has no CEL spelling at all: RLS cannot join ' +
+      '(ADR-0055), so pre-resolve the set into a membership key the runtime exposes ' +
+      '(`FIELD in current_user.KEY`, ADR-0105 D11) or denormalise the value onto this object.',
     RLS_UNCOMPILABLE_DROP,
     RLS_DROPPED_USING,
     RLS_DROPPED_CHECK,
@@ -1309,6 +1319,11 @@ const RLS_PREDICATE_UNKNOWN_USER_VARIABLE_EXPLANATION: RuleExplanation = {
       'the runtime stages as ARRAYS and which are therefore usable only as `field in current_user.KEY`. A key ' +
       'outside that list in a scalar position — compared with `==` / `!=` / `<` / `>` or handed to a string ' +
       'method — can therefore never be supplied by any request.',
+    'Of the kernel keys, `current_user.organization_id` is the tenant, `current_user.id` the acting user ' +
+      'and `current_user.email` their unique address. A key meant as an app-resolved set must be staged ' +
+      'into `ExecutionContext.rlsMembership` by an `IRlsMembershipResolver` that DECLARES it, and can then ' +
+      'only be tested with `in` (`FIELD in current_user.KEY`), never compared with `==`: the runtime stages ' +
+      'membership sets as arrays and never as scalars.',
     'The compiler answers `unresolved-variable` for it in EVERY position — including under `!` and in a ' +
       'trailing `||` arm — so `RLSCompiler` DROPS the policy at request time, and one WARN line is the only ' +
       'signal.',
@@ -1650,9 +1665,16 @@ const VALIDATION_RULE_JSON_SCHEMA_UNKNOWN_FORMAT_EXPLANATION: RuleExplanation = 
       'the write path and at the publish gate alike. The schema compiles, the rule ships and runs on every ' +
       'write, its other keywords (`type`, `required`) are enforced, and this constraint is enforced on no ' +
       'record, ever. The record is ACCEPTED, the silent direction, so nothing downstream reports the gap.',
-    'The registered names are read off a live instance of that ajv, never written down, so the rule ' +
-      'follows `ajv-formats` across an upgrade. Names are case-sensitive and hyphenated (`date-time`, not ' +
-      '`datetime`); the `fix:` line names the nearest registered one and lists them all.',
+    'The rule\'s registered names are read off a live instance of that ajv, never a list written into the ' +
+      'rule, so it follows `ajv-formats` across an upgrade. Names are case-sensitive and hyphenated ' +
+      '(`date-time`, not `datetime`); the `fix:` line names the nearest registered one.',
+    // Held equal to `registeredFormatNames()` by `validate-rule-schema-formats.test.ts`.
+    'The registered names (the default `ajv-formats` set, the one `rule-validator.ts` registers so that a ' +
+      '`format` is enforced on every write): binary, byte, date, date-time, double, duration, email, float, ' +
+      'hostname, int32, int64, ipv4, ipv6, iso-date-time, iso-time, json-pointer, json-pointer-uri-fragment, ' +
+      'password, regex, relative-json-pointer, time, uri, uri-reference, uri-template, url, uuid.',
+    'If you meant a constraint ajv has no format for, express it with `pattern` instead: a regex is ' +
+      'enforced, an unknown format name is not.',
     'Only positions JSON Schema defines as subschemas are walked (`properties`, `items`, `$defs`, ' +
       '`allOf` / `anyOf` / `oneOf`, `if` / `then` / `else` and the rest), because those are the places ' +
       'ajv applies the keyword; a `format` inside `default`, `const`, `enum` or `examples` is data. A ' +
@@ -1699,6 +1721,9 @@ const MEASURE_AGGREGATE_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
       'boolean, toggle; `avg`: number, currency, percent, rating, slider, progress, summary, boolean, ' +
       'toggle; `min` and `max`: number, currency, percent, rating, slider, progress, summary, date, ' +
       'datetime, time, boolean, toggle.',
+    'So the fix is a field of an accepted type, or an aggregate the field\'s declaration accepts. A ' +
+      'quantity that must be added up or averaged has to be STORED as a numeric field (a computed ' +
+      'column) and aggregated as one.',
     JSON_STORED_COLUMN,
     'The per-type row cannot see `multiple: true`, so `count_distinct` over a multi-capable field ' +
       'flagged that way is refused by the declaration: the value is a list stored as JSON, and ' +
@@ -1726,6 +1751,10 @@ const DIMENSION_JSON_STORED_FIELD_REFUSED_EXPLANATION: RuleExplanation = {
       'JSON value is no group key the SQL dialects share: one groups each serialized value apart, another ' +
       'refuses the statement. Every report, dashboard or query that selects the dimension gets that ' +
       'refusal instead of an answer, and no selection of it is served as a group.',
+    'For a structured-JSON column, store the part of the document you group on in a field of its own ' +
+      'and point the dimension at that field. For a multi-value field, filter by one member instead of ' +
+      'grouping: a record query on the field\'s object with `where { FIELD: { $contains: VALUE } }` ' +
+      'counts or lists the records that hold VALUE, one query per member.',
     JSON_STORED_COLUMN,
     ANALYTICS_MEMBER_WALK,
   ],
@@ -2004,9 +2033,11 @@ const PREDICATE_PATH_UNRESOLVED_EXPLANATION: RuleExplanation = {
   covers: 'how a predicate path is resolved, and where it stops',
   paragraphs: [
     PREDICATE_FAIL_OPEN,
-    'A `data.`-rooted path is walked segment by segment through the target schema; the first segment ' +
-      'the schema does not declare at that point is the verdict. The syntax rules cannot see this: ' +
-      '`data.tpye == \'formula\'` parses, is rooted, and is rooted on the right root.',
+    'Every reference must resolve against the schema the form edits. A `data.`-rooted path is walked ' +
+      'segment by segment through that schema; the first segment it does not declare at that point is the ' +
+      'verdict, and the `fix:` line names the nearest declared key, or up to twelve of the keys declared ' +
+      'there. The syntax rules cannot see this: `data.tpye == \'formula\'` parses, is rooted, and is ' +
+      'rooted on the right root.',
     PREDICATE_FORM_SCOPE,
     'Where the walk stops — a missed catch, never a false error: a scope that is not key-bearing (a ' +
       'record map\'s values, `unknown`, `any`, an array reached by `.`), below which nothing is ' +
@@ -2021,9 +2052,9 @@ const PREDICATE_PATH_UNROOTED_EXPLANATION: RuleExplanation = {
   covers: 'why a bare schema key in a form predicate never matches',
   paragraphs: [
     'A metadata-editing form binds the row under edit as `data`, at every depth — inside a repeater ' +
-      '`data` is the ROW, still spelled `data` — and never flattens its values to top level. A bare ' +
-      'identifier that IS a key of the edited schema is that key with its root dropped: it resolves ' +
-      'to nothing.',
+      '`data` is the ROW, still spelled `data`: there is no implicit row scope — and never flattens its ' +
+      'values to top level. A bare identifier that IS a key of the edited schema is that key with its ' +
+      'root dropped: it resolves to nothing.',
     PREDICATE_FAIL_OPEN,
     'Narrower than `visibility-bare-identifier` on purpose: the schema-key membership makes the ' +
       'verdict unambiguous, and it reaches an identifier CEL itself declares, such as `type`, which ' +
@@ -2050,10 +2081,13 @@ const PREDICATE_RHS_PATH_SHAPED_EXPLANATION: RuleExplanation = {
       'breaks when this surface moves to the real CEL evaluator, where a bare `active` is an ' +
       'undeclared reference.',
     'The bare word also reads as a `data.` root someone dropped, so the finding carries both ' +
-      'readings and the `fix:` line names both spellings. Adding the root in place (`== data.active`) ' +
-      'is not one of them: it is a path on the right, this id\'s error arm. For that one position ' +
-      '`visibility-bare-identifier` and `predicate-path-unrooted` stand down, so the author gets one ' +
-      'prescription rather than three contradicting ones.',
+      'readings and the `fix:` line names both spellings: quote the word (`== \'active\'`), which is ' +
+      'what the surface renders today and so changes no behaviour, or move the field to the LEFT with a ' +
+      'literal on the right (`data.active == \'yes\'`). Adding the root in place (`== data.active`) ' +
+      'is not one of them: it is a path on the right, this id\'s error arm, parsed as the literal string ' +
+      '"data.active" and so FALSE on every row. There is no spelling that compares two paths here. For ' +
+      'that one position `visibility-bare-identifier` and `predicate-path-unrooted` stand down, so the ' +
+      'author gets one prescription rather than three contradicting ones.',
     'The right-hand grammar is the console\'s own path-shaped-literal pattern, so the producer and the ' +
       'renderer refuse and warn about the same set; `true`, `false`, `null`, numbers and quoted strings ' +
       'are literals and never reported. The check asks about a POSITION, not a resolution, so it runs ' +
@@ -2645,6 +2679,11 @@ const FILTER_EMPTY_NODE_EXPLANATION: RuleExplanation = {
       'branches that survive, which is why the runtime absorbs). As a branch of `$and` it is the ' +
       'AND identity and contributes no condition, indistinguishable from a branch whose condition ' +
       'was lost in an edit. An error: no reading of the literal behaves as written.',
+    'To express "no filter", DELETE the key — an absent `filter` and a filter that reduces to TRUE run ' +
+      'identically, and only the absent key says so to the next reader (and to the next AI author that ' +
+      'copies this metadata). If you really do want a predicate that selects nothing, ' +
+      '`{ <field>: { $in: [] } }` is the declared spelling for it (an empty `$in` list matches nothing, on ' +
+      'every backend). Otherwise delete the empty branch, or write the condition it was meant to carry.',
     EMPTY_FILTER_SCOPE,
   ],
 };
@@ -2960,31 +2999,73 @@ const OBJECT_FIELD_REF_UNKNOWN_EXPLANATION: RuleExplanation = {
 
 // ── Object-name references (`validate-object-references.ts`) ────────────────
 
+/** The sites judged — both object-reference ids. */
+const OBJECT_REFERENCE_SITES =
+  'Judged: the object names no other rule resolves, each a plain string the schema ships as ' +
+  'written: a `lookup`, `master_detail` or `user` field\'s `reference`; a view container\'s own ' +
+  '`object`; an action param\'s `reference` and `objectOverride`; a dashboard global filter\'s ' +
+  '`optionsFrom.object`; a dataset\'s base `object`; and a nav entry\'s `requiresObject`, with ' +
+  'the `objectName` of an entry that carries one. Interpolated names (`${…}`) resolve at render ' +
+  'time and are skipped.';
+
+/** The resolution ladder — both object-reference ids. Held to `PLATFORM_OBJECT_PREFIXES` by the rule's test. */
+const OBJECT_REFERENCE_LADDER =
+  'Each name climbs one ladder: it resolves when this stack, or a package in the same artifact ' +
+  '(`packages[]`, ADR-0130 D4), defines it, or when it is a known platform object ' +
+  '(`PLATFORM_PROVIDED_OBJECT_NAMES` in `@objectstack/spec/system`, the objects the platform\'s ' +
+  'packages, official plugins and cloud runtime register). An unresolved name with no platform ' +
+  'prefix is `object-reference-unknown`, an error. An unresolved name WITH a platform prefix ' +
+  '(`sys_`, `cloud_`, `ai_`) is `object-reference-unregistered-platform`: no package we know of ' +
+  'registers it, but a third-party package still might, so a warning is the honest ceiling.';
+
+/** What a miss costs, per site — both object-reference ids. Held to the rule's sites by its test. */
+const OBJECT_REFERENCE_MISS_COST =
+  'What a miss costs, per site. A relationship field: the record picker has no object to query, ' +
+  '`$expand` has nothing to resolve, and the form renders a relationship control that can never ' +
+  'resolve a value. A view container: the runtime indexes a container\'s views by this key ' +
+  '(`getViewsByObject()` / `GET /meta/view?object=`), so none of its views appears for any object. An ' +
+  'action param\'s `reference`: the picker degrades to a raw record-id text input. Its ' +
+  '`objectOverride`: the param inherits its type and options from a field on that object, so it is ' +
+  'left untyped. A dashboard filter\'s options source: the dropdown renders an always-empty filter. A ' +
+  'dataset\'s base object: a dataset is the FROM of every report and dashboard widget bound to it ' +
+  '(ADR-0021), so every one of them queries nothing. A nav entry\'s `requiresObject`: the entry is ' +
+  'hidden unless the object is registered, so a typo hides it for good, and it suppresses the nav ' +
+  'cross-reference check that would have caught the target; the gated `objectName` is exempt from ' +
+  'the build-time check, so it is verified only here.';
+
+const OBJECT_REFERENCE_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'object-reference-unknown',
+  covers: 'how an object name resolves, and what a miss costs',
+  paragraphs: [
+    // The sites are held to the rule by its test, each fired.
+    OBJECT_REFERENCE_SITES,
+    OBJECT_REFERENCE_LADDER,
+    'An error: a stack\'s own objects are namespace-prefixed and present, so an unprefixed name that ' +
+      'resolves nowhere has no legitimate elsewhere. Nothing reports the miss at run time.',
+    OBJECT_REFERENCE_MISS_COST,
+    'To fix it, point the reference at an object this stack or its artifact defines, or at a platform ' +
+      'object by its full name (the platform user object is `sys_user`, not `user`). The verdict names ' +
+      'the nearest defined object when one is close; a view container written with an object\'s short ' +
+      'name in a namespaced package is told the prefixed spelling.',
+  ],
+};
+
 const OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION: RuleExplanation = {
   rule: 'object-reference-unregistered-platform',
   covers: 'how an object name resolves, and why this rung only warns',
   paragraphs: [
     // The sites are held to the rule by its test, each fired.
-    'Judged: the object names no other rule resolves, each a plain string the schema ships as ' +
-      'written: a `lookup`, `master_detail` or `user` field\'s `reference`; a view container\'s own ' +
-      '`object`; an action param\'s `reference` and `objectOverride`; a dashboard global filter\'s ' +
-      '`optionsFrom.object`; a dataset\'s base `object`; and a nav entry\'s `requiresObject`, with ' +
-      'the `objectName` of an entry that carries one. Interpolated names (`${…}`) resolve at render ' +
-      'time and are skipped.',
+    OBJECT_REFERENCE_SITES,
     // The prefixes are held to `PLATFORM_OBJECT_PREFIXES` by the rule's test.
-    'Each name climbs one ladder: it resolves when this stack, or a package in the same artifact ' +
-      '(`packages[]`, ADR-0130 D4), defines it, or when it is a known platform object ' +
-      '(`PLATFORM_PROVIDED_OBJECT_NAMES` in `@objectstack/spec/system`, the objects the platform\'s ' +
-      'packages, official plugins and cloud runtime register). An unresolved name with no platform ' +
-      'prefix is `object-reference-unknown`, an error. An unresolved name WITH a platform prefix ' +
-      '(`sys_`, `cloud_`, `ai_`) is this rule: no package we know of registers it, but a ' +
-      'third-party package still might, so a warning is the honest ceiling.',
+    OBJECT_REFERENCE_LADDER,
     'If nothing provides the name at run time, the reference resolves to nothing and fails ' +
-      'silently: a record picker with no object to query, a view container whose views are never ' +
-      'found, a filter dropdown that stays empty, a dataset whose reports query nothing, a nav entry ' +
-      'hidden for good. A guess by prefix alone cannot tell `sys_user` (real) from ' +
-      '`sys_approval_process` (removed when approval became a flow node, ADR-0019), which is why the ' +
-      'ladder reads the registry.',
+      'silently, at a cost each site spells out below. A guess by prefix alone cannot tell `sys_user` ' +
+      '(real) from `sys_approval_process` (removed when approval became a flow node, ADR-0019), which is ' +
+      'why the ladder reads the registry.',
+    OBJECT_REFERENCE_MISS_COST,
+    'So check the spelling against the object the providing package registers (the approval request ' +
+      'object is `sys_approval_request`); if a third-party package genuinely provides the name, the ' +
+      'warning is expected.',
   ],
 };
 
@@ -3036,13 +3117,21 @@ const ACTION_NAME_UNDEFINED_EXPLANATION: RuleExplanation = {
       'without a word, and the header draws no button, with only a browser-console warning. An ' +
       'error: there is no cross-package escape to soften it with, and an action another installed ' +
       'package contributes is the one legitimate miss.',
+    'To fix a miss, define the action — a `stack.actions` entry or an entry of the object\'s `actions` — ' +
+      'placed where the surface looks for it, or remove the reference. A `page:header` draws only actions ' +
+      'placed at `record_header` or `record_more`, so a header action needs one of the two in its ' +
+      '`locations`; the selection bar and an alert\'s call-to-action place an action by name, with no ' +
+      '`locations` entry.',
     // The drawn locations are held to the rule by its test, over every location.
     'A `record:related_list` is the exception, and resolves the way its renderer does: against the ' +
       'RELATED object\'s own actions (written on it, or a `stack.actions` entry bound to it by ' +
       '`objectName`), never the page\'s object or a global action, and only an action placed at a ' +
       'location the list draws (`list_toolbar` as a header button, `list_item` and `record_related` ' +
       'as a row-menu item): naming it in `actions` is not a placement. An id that misses either test ' +
-      'draws no button, only a refusal notice above the list. A related object this stack does not ' +
+      'draws no button, only a refusal notice above the list. So define the action on the related ' +
+      'object (in its `actions`, or in `stack.actions` with `objectName` naming it) with one of those ' +
+      'locations, or name one of the related object\'s own actions; ignore the error only if another ' +
+      'installed package binds the action to that object. A related object this stack does not ' +
       'define is not judged: its actions live in another package.',
     'Not judged elsewhere: whether a view\'s action belongs to the view\'s own object, and whether ' +
       'it declares the location the surface filters on. Both are real but distinct questions, and ' +
@@ -3209,12 +3298,19 @@ const AI_SKILL_TOOL_UNRESOLVED_EXPLANATION: RuleExplanation = {
       'of that universe starts with its prefix.',
     // The headless paths are held to the rule by its test, each one materialising.
     'An action materialises as a tool only when it opts in, `ai.exposed: true` with an ' +
-      '`ai.description` (ADR-0011), and has a headless path: a declarative `operation: \'update\'`, ' +
-      'a `script` action with a target or a body, or an `api` or `flow` action with a target. A ' +
-      '`url`, `modal` or `form` action is UI-only and stays human-driven by design. Naming ' +
+      '`ai.description` (ADR-0011) of at least 40 characters, which the model reads, and has a headless ' +
+      'path: a declarative `operation: \'update\'`, a `script` action with a target or a body, or an ' +
+      '`api` or `flow` action with a target. A `url`, `modal` or `form` action is UI-only and stays ' +
+      'human-driven by design: that is a legitimate answer, not a gap, and the skill\'s instructions can ' +
+      'recommend the UI action instead. Naming ' +
       '`action_<name>` for an action that exists but never materialises is its own verdict with its ' +
       'own fix (opt it in, or drop the reference), because it is a different mistake from naming a ' +
       'tool that exists nowhere.',
+    // Held equal to `PLATFORM_TOOL_FAMILY_PREFIXES` by the rule's test.
+    'Family prefixes materialised by the runtime: action_. A materialised tool needs no tool record ' +
+      '(the ADR-0109 default path), so backing a name means declaring the action, or referencing a ' +
+      'platform tool by its registered name; otherwise remove the name and the instructions that mention ' +
+      'it. Ignore the warning only if a runtime plugin outside the platform registry provides the name.',
     'The runtime drops an unresolved name without a word, so the skill\'s instructions promise a ' +
       'capability the agent cannot call, and the assistant improvises or fails when asked to use it. ' +
       'A warning, not an error (ADR-0078\'s advisory-first ratchet): a runtime plugin outside the ' +
@@ -3281,13 +3377,37 @@ const MANAGED_API_METHOD_UNAFFORDABLE_EXPLANATION: RuleExplanation = {
 
 // ── Organization-axis red lines (`validate-org-axis-red-lines.ts`) ─────────
 
+/** What ADR-0105 D6 protects — both org-axis ids. */
+const ORG_AXIS_RED_LINES =
+  'ADR-0105 makes the organization tree a reporting and grouping dimension, never a permission ' +
+  'hierarchy, and D6 draws two red lines to keep it so: no permission inheritance along the ' +
+  'organization tree (`org-axis-permission-inheritance`), and business-unit trees stay inside one ' +
+  'organization (`org-axis-cross-org-bu-grant`).';
+
+const ORG_AXIS_PERMISSION_INHERITANCE_EXPLANATION: RuleExplanation = {
+  rule: 'org-axis-permission-inheritance',
+  covers: 'why access never walks the organization tree',
+  paragraphs: [
+    ORG_AXIS_RED_LINES,
+    'An RLS policy (`using` or `check`) or a sharing rule (`condition` or `sharedWith`) that reads ' +
+      '`parent_organization_id` builds a second permission hierarchy beside the business-unit tree. It ' +
+      'would not grant what it appears to either: a Layer-1 policy cannot widen the engine\'s Layer 0 ' +
+      'wall, which it sits behind.',
+    'Cross-organization visibility comes from MEMBERSHIP: under the `group` tenancy posture the Layer 0 ' +
+      'wall is `organization_id IN accessible_org_ids`, so a user who should see several organizations is ' +
+      'made a member of each (ADR-0105 D2). For a hierarchy INSIDE one organization, use the business-unit ' +
+      'tree: `unit_and_subordinates` sharing, or a depth scope anchored on `sys_user_position`.',
+    'An error: it mirrors a real enforcement property, the Layer 0 wall\'s independence, so the failure ' +
+      'moves from a rule that silently grants nothing to an authoring fix.',
+  ],
+};
+
 const ORG_AXIS_CROSS_ORG_BU_GRANT_EXPLANATION: RuleExplanation = {
   rule: 'org-axis-cross-org-bu-grant',
   covers: 'why business-unit trees stay inside one organization',
   paragraphs: [
-    'ADR-0105 makes the organization tree a reporting and grouping dimension, never a permission ' +
-      'hierarchy, and D6 draws two red lines to keep it so. This is the second (the first is ' +
-      '`org-axis-permission-inheritance`): business-unit trees stay inside one organization. ' +
+    ORG_AXIS_RED_LINES,
+    'This is the second line: business-unit trees stay inside one organization. ' +
       '`sys_business_unit` is org-scoped, and every business-unit mechanism (`unit_and_subordinates` ' +
       'sharing, `adminScope` delegation, depth scopes) resolves within one organization.',
     // The recipients and both opt-out spellings are held to the rule by its test.
@@ -3397,6 +3517,186 @@ const SEMANTIC_ROLE_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
       '`stageField`, and this rule asks only about the storage behind a name that resolves. A ' +
       'warning, like the other semantic-role rules: every consumer degrades to an empty value and ' +
       'nothing breaks.',
+  ],
+};
+
+// ── Rule ids `@objectstack/cli` produces ────────────────────────────────────
+// The CLI's own checks, which `os explain` reads from this one table. The CLI
+// depends on this package, so their id constants cannot be imported here:
+// `rule-explanations.test.ts` lists these ids, and the CLI's
+// `test/explain-rule-id.test.ts` fires each one from its producer.
+
+// `packages/cli/src/lint/hook-body-lowering.ts` (`os lint`).
+
+const HOOK_BODY_NOT_LOWERABLE_EXPLANATION: RuleExplanation = {
+  rule: 'hook-body/not-lowerable',
+  covers: 'what lowering needs and how to bundle on purpose',
+  paragraphs: [
+    'A hook handler or an action `target` written as an inline function is lowered by `os build` ' +
+      'into a metadata-only `body`, which the runtime evaluates in a sandbox with no module scope. When ' +
+      'the function names something that sandbox does not have, the extractor refuses it and the build ' +
+      'ships the function through the bundled runtime module instead, and still exits 0.',
+    'The handler keeps working, so behaviour does not change; the deployment shape does: the app is ' +
+      'no longer shippable as pure metadata. This rule is the `error` that says so, so a gate that runs ' +
+      '`os lint` can fail on it, while `os build` keeps accepting the bundle.',
+    'The remedy depends on the name, and the `fix:` line names the one that applies. A module-scope ' +
+      'const, helper or import can be inlined into the handler or reached through `ctx`. A global the ' +
+      'Node host provides and the sandbox does not, such as `Intl`, cannot be inlined at all: keep the ' +
+      'check in a string handler ref, or move it to a validation rule.',
+    'If a bundled closure is what you want, say so and this rule stays silent: give the hook an ' +
+      'explicit `body`, or move the function into the top-level `functions:` map and reference it by ' +
+      'name (`handler: \'fn_name\'`). Neither is lowered to a metadata body.',
+    'The rule calls the extractor `os build` calls, on the same input, so it reports exactly the ' +
+      'handlers the build bundles; `os build --strict-body` makes each one a build failure.',
+  ],
+};
+
+const HOOK_BODY_BUNDLED_FALLBACK_EXPLANATION: RuleExplanation = {
+  rule: 'hook-body/bundled-fallback',
+  covers: 'what the sandbox cannot run',
+  paragraphs: [
+    'Some constructs can never run in the sandbox a metadata-only body is evaluated in: network, ' +
+      'module and process access, dynamic code, a member only the in-process host provides (such as ' +
+      '`sudo()`, a repository\'s `create()` or `ctx.submitted`), or a hook parameter list the build ' +
+      'cannot rebind to `ctx`. A handler that uses one is refused by the ' +
+      'extractor and shipped through the bundled runtime module, where it runs in-process.',
+    'That is the designed fallback, so this rule is a `warning`, never an error: writing such a ' +
+      'construct is choosing a bundled closure. The app is not pure metadata while the handler is ' +
+      'bundled.',
+    'The verdict quotes the first clause of the extractor\'s refusal. `os build` prints the whole ' +
+      'refusal line for every bundled handler, with the remedy it names, and `os build --strict-body` ' +
+      'prints the full diagnostic and makes a missing body fatal.',
+    'To ship the handler as metadata instead, remove the construct the refusal names; a network call ' +
+      'becomes a Connector recipe. To keep the bundle, nothing is required.',
+  ],
+};
+
+const HOOK_BODY_UNPARSEABLE_EXPLANATION: RuleExplanation = {
+  rule: 'hook-body/unparseable',
+  covers: 'what an unparseable handler means',
+  paragraphs: [
+    'The extractor found no function body it could judge: the handler\'s source text is not a single ' +
+      'arrow function or named function expression it can parse. This is a limit of the instrument, ' +
+      'not a verdict about the handler: it does not mean a bundled closure was chosen, and whether the ' +
+      'body could ship as pure metadata is undetermined.',
+    '`os build` still ships the handler through the bundled runtime module, so it keeps working. ' +
+      'Rewriting it as a single arrow function or named function expression lets the extractor judge it.',
+    'It is reported under its own rule, never as `hook-body/bundled-fallback`, whose verdict asserts ' +
+      'that the body uses something the sandbox cannot provide.',
+  ],
+};
+
+const HOOK_BODY_EXTRACTION_FAILED_EXPLANATION: RuleExplanation = {
+  rule: 'hook-body/extraction-failed',
+  covers: 'what an extractor failure means',
+  paragraphs: [
+    'The extraction instrument itself threw while reading the handler, with an error that is not one ' +
+      'of its refusals. Like `hook-body/unparseable`, this is not a verdict about the handler: nothing ' +
+      'is known about whether its body could ship as pure metadata.',
+    '`os build` still ships the handler through the bundled runtime module. The verdict quotes the ' +
+      'first line of the thrown error, and `os build --strict-body` prints it whole; an extractor that ' +
+      'throws on an ordinary handler is a defect in the instrument.',
+    'It is kept apart from `hook-body/unparseable` on purpose: a broken instrument and a limited ' +
+      'instrument are different events.',
+  ],
+};
+
+// `packages/cli/src/utils/collect-docs.ts` (`os build`, `os validate`, `os lint`).
+
+const DOCS_UNCOLLECTED_DIRECTORY_EXPLANATION: RuleExplanation = {
+  rule: 'docs/uncollected-directory',
+  covers: 'where package docs are read from',
+  paragraphs: [
+    'Package docs are collected from `src/docs/*.md` (ADR-0046 §3.2) and, in an artifact that declares ' +
+      '`packages[]`, from the `docs/` directory inside whichever directory under `src/` a package ' +
+      'answers to, at no fixed depth (ADR-0130 D4). Markdown files in a `docs/` directory that neither ' +
+      'reads are not ' +
+      'collected: they are absent from the artifact\'s `docs[]` and from every book that includes ' +
+      'them, while the build still succeeds. This warning names them, because a build that keeps none ' +
+      'of an author\'s docs and says nothing is the defect.',
+    'A directory answers to a package when its name is the package\'s `id` or the last dot-separated ' +
+      'segment of that `id`. Neither the package\'s display `name` nor its `namespace` resolves one: ' +
+      'packages of one artifact may share a namespace (ADR-0130 D1).',
+    'The collector never guesses. A directory that names no package, one that names more than one, ' +
+      'and a package that answers to more than one docs directory are each reported and collected from ' +
+      'nowhere.',
+    'To fix it, keep one docs directory per package and name it after the package (two packages need ' +
+      'distinct ids, and their last segments must differ too); or move the files into `src/docs/` — doc ' +
+      'names carry the package namespace prefix, so packages do not collide there; or declare the docs ' +
+      'inline as `defineStack({ docs })` on the package that owns them; or delete them if they are not ' +
+      'package docs. A stack with no `packages[]` reads `src/docs/` only.',
+  ],
+};
+
+const DOCS_DUPLICATE_NAME_EXPLANATION: RuleExplanation = {
+  rule: 'docs/duplicate-name',
+  covers: 'why a doc name may appear once',
+  paragraphs: [
+    'Within one package, inline `defineStack({ docs })` entries and `src/docs/*.md` files share one ' +
+      'set of doc names, and a name may appear in it once.',
+    'Across the packages of one artifact the same name is refused too, as authoring hygiene: doc names ' +
+      'carry the package namespace prefix, but packages of one artifact may share a namespace ' +
+      '(ADR-0130 D1), so the prefix does not keep two packages\' docs apart. The runtime keys a packaged ' +
+      'doc by package and name (ADR-0048), so this is a refusal of the authored artifact, not of a ' +
+      'registration collision.',
+    'To fix it, rename one of the two docs, and its `src/docs/*.md` file with it.',
+  ],
+};
+
+const DOCS_NAV_TARGET_EXPLANATION: RuleExplanation = {
+  rule: 'docs/nav-target',
+  covers: 'what a doc navigation item can open',
+  paragraphs: [
+    'A navigation item of `type: \'doc\'` opens a book (`book`) or a single page (`doc`) of this ' +
+      'package, and one whose target names nothing the package has is refused. It is judged in app ' +
+      '`navigation`, `areas[].navigation` and `manifest.navigationContributions`, during the docs ' +
+      'step, because that is where the docs read from `src/docs/*.md` join the artifact.',
+    '`book` resolves against the books declared in `books`, on the stack and on each package body, ' +
+      'and against a package id, which opens that package\'s implicit book. `doc` resolves against the ' +
+      'docs the package carries: the filename stem of a `src/docs/*.md` file, or an entry declared in ' +
+      '`docs`. The item and app are named by the finding\'s path.',
+    'The verdict names the nearest existing name when one is close. To fix it, correct the name, or ' +
+      'open the other kind of target: remove `doc` and open the whole book with `book`, or remove ' +
+      '`book` and open a single page with `doc`.',
+  ],
+};
+
+const DOCS_FRONTMATTER_TAGS_EXPLANATION: RuleExplanation = {
+  rule: 'docs/frontmatter-tags',
+  covers: 'how doc tags are read',
+  paragraphs: [
+    'A doc\'s frontmatter `tags:` is what a book group\'s `include: { tag }` matches. The reader ' +
+      'understands two YAML spellings and no others: an inline list (`tags: [tutorial, beginner]`) or a ' +
+      'block of `- item` lines under `tags:`. Anything else under the key, such as a bare scalar, an ' +
+      'unterminated inline list, a key with nothing under it, nested or mapping items, a block scalar or ' +
+      'a quoted item containing a comma, is reported instead of half-read, and the doc is collected ' +
+      'without tags.',
+    'Tags belong to the doc, not to one translation, so they are read from the base file only: a ' +
+      'locale variant (`NAME.LOCALE.md`) that declares `tags:` is reported and its tags are not ' +
+      'collected. Move them to the base file.',
+    'Reported, never dropped: a tag that silently fails to parse leaves a book group rendering empty ' +
+      'with nothing saying why.',
+  ],
+};
+
+// `packages/cli/src/utils/picklist-references.ts` (`os build`, `os validate`).
+
+const PICKLIST_REFERENCE_UNVERIFIED_EXPLANATION: RuleExplanation = {
+  rule: 'picklist-reference-unverified',
+  covers: 'why a picklist reference is not judged',
+  paragraphs: [
+    'A field\'s `picklist` and a picklist extension\'s `extend` name a shared option list. `os ' +
+      'validate` and `os build` resolve the name against every picklist the stack declares (every ' +
+      '`packages[]` body\'s `picklists`, or the top-level `picklists`) and refuse one that resolves ' +
+      'nowhere, as `picklist-reference-unknown`.',
+    'When the package that declares the reference depends on a package this stack does not carry, the ' +
+      'list could live there, and this command cannot read it: `manifest.dependencies` maps package ids ' +
+      'to version ranges the installer resolves, and nothing maps such an id to a file the CLI could ' +
+      'open. So the reference gets this notice instead of a refusal: it is not judged, and the notice ' +
+      'never gates a run, not even under `--strict`.',
+    'If one of the named dependencies declares the list, nothing is wrong. Otherwise declare the list ' +
+      'in this stack, or correct the name. A reference saved at runtime through Studio or the REST ' +
+      'metadata API is not judged here.',
   ],
 };
 
@@ -3520,6 +3820,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [NAV_OBJECT_UNSERVABLE_EXPLANATION.rule]: NAV_OBJECT_UNSERVABLE_EXPLANATION,
   [NAV_TARGET_UNRESOLVED_EXPLANATION.rule]: NAV_TARGET_UNRESOLVED_EXPLANATION,
   [OBJECT_FIELD_REF_UNKNOWN_EXPLANATION.rule]: OBJECT_FIELD_REF_UNKNOWN_EXPLANATION,
+  [OBJECT_REFERENCE_UNKNOWN_EXPLANATION.rule]: OBJECT_REFERENCE_UNKNOWN_EXPLANATION,
   [OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION.rule]: OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION,
   [CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION.rule]: CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION,
   [ACTION_NAME_UNDEFINED_EXPLANATION.rule]: ACTION_NAME_UNDEFINED_EXPLANATION,
@@ -3531,11 +3832,21 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [AI_SKILL_TOOL_UNRESOLVED_EXPLANATION.rule]: AI_SKILL_TOOL_UNRESOLVED_EXPLANATION,
   [FLOW_FILTER_TOKEN_UNKNOWN_EXPLANATION.rule]: FLOW_FILTER_TOKEN_UNKNOWN_EXPLANATION,
   [MANAGED_API_METHOD_UNAFFORDABLE_EXPLANATION.rule]: MANAGED_API_METHOD_UNAFFORDABLE_EXPLANATION,
+  [ORG_AXIS_PERMISSION_INHERITANCE_EXPLANATION.rule]: ORG_AXIS_PERMISSION_INHERITANCE_EXPLANATION,
   [ORG_AXIS_CROSS_ORG_BU_GRANT_EXPLANATION.rule]: ORG_AXIS_CROSS_ORG_BU_GRANT_EXPLANATION,
   [PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION.rule]: PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION,
   [SEED_INSERT_MODE_DUPLICATES_ON_REPLAY_EXPLANATION.rule]: SEED_INSERT_MODE_DUPLICATES_ON_REPLAY_EXPLANATION,
   [SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION.rule]: SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION,
   [SEMANTIC_ROLE_FIELD_UNPROVISIONED_EXPLANATION.rule]: SEMANTIC_ROLE_FIELD_UNPROVISIONED_EXPLANATION,
+  [HOOK_BODY_NOT_LOWERABLE_EXPLANATION.rule]: HOOK_BODY_NOT_LOWERABLE_EXPLANATION,
+  [HOOK_BODY_BUNDLED_FALLBACK_EXPLANATION.rule]: HOOK_BODY_BUNDLED_FALLBACK_EXPLANATION,
+  [HOOK_BODY_UNPARSEABLE_EXPLANATION.rule]: HOOK_BODY_UNPARSEABLE_EXPLANATION,
+  [HOOK_BODY_EXTRACTION_FAILED_EXPLANATION.rule]: HOOK_BODY_EXTRACTION_FAILED_EXPLANATION,
+  [DOCS_UNCOLLECTED_DIRECTORY_EXPLANATION.rule]: DOCS_UNCOLLECTED_DIRECTORY_EXPLANATION,
+  [DOCS_DUPLICATE_NAME_EXPLANATION.rule]: DOCS_DUPLICATE_NAME_EXPLANATION,
+  [DOCS_NAV_TARGET_EXPLANATION.rule]: DOCS_NAV_TARGET_EXPLANATION,
+  [DOCS_FRONTMATTER_TAGS_EXPLANATION.rule]: DOCS_FRONTMATTER_TAGS_EXPLANATION,
+  [PICKLIST_REFERENCE_UNVERIFIED_EXPLANATION.rule]: PICKLIST_REFERENCE_UNVERIFIED_EXPLANATION,
 });
 
 /** The explanation for `rule`, or `undefined` when the rule has none. Exact id match. */

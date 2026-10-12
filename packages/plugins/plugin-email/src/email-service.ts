@@ -463,25 +463,28 @@ function newId(): string {
 export const DEFAULT_TEMPLATE_LOCALE = 'en-US';
 
 /**
- * Loader for sys_email_template rows. Injected by EmailServicePlugin
- * on `kernel:ready`. Returns the row `(name, locale)` resolves to under
- * the exact rule below — there is no "best match" and no language-subtag
- * folding — or `null` when none exists / inactive.
+ * Template loader. EmailServicePlugin injects the registry loader
+ * (`createRegistryEmailTemplateLoader`) on `kernel:ready`. Returns the
+ * template `(name, locale)` resolves to under the exact rule below — there is
+ * no "best match" and no language-subtag folding — or `null` when none exists.
+ * An inactive template is returned; the service refuses it (`TEMPLATE_INACTIVE`).
  *
  * `locale` set → an EXACT match for that locale, or `null`; the en-US fallback
  * lives in {@link EmailService.sendTemplate}'s ladder rather than in the
  * loader, so a replacement loader cannot relocate the documented default.
  * `locale` undefined → the loader's own deterministic best answer for the name
- * (see `createSysEmailTemplateLoader`), which `sendTemplate` consults only as a
- * last resort, when the bundle carries no en-US row at all.
+ * (see `createRegistryEmailTemplateLoader`), which `sendTemplate` consults only
+ * as a last resort, when the bundle carries no en-US member at all.
  */
 export interface TemplateLoader {
   load(name: string, locale: string | undefined): Promise<EmailTemplateRow | null>;
 }
 
 /**
- * Row shape returned by the loader — mirrors sys_email_template
- * columns relevant to rendering.
+ * What the loader answers: the render input of one resolved `email_template`
+ * definition, spelled as the `sys_email_template` columns were — the shape
+ * the renderer has always read. No row backs it any more; the registry
+ * loader projects the definition into it.
  */
 export interface EmailTemplateRow {
   name: string;
@@ -1394,7 +1397,7 @@ export class EmailService implements IEmailService {
   }
 
   /**
-   * Render a named template from sys_email_template WITHOUT sending —
+   * Render a named `email_template` WITHOUT sending —
    * `IEmailService.renderTemplate` (#9225). Strictly render-only: the shared
    * resolver above never touches the transport, the queue, persistence or
    * the outbox; it only resolves `(name, locale)` per the documented ladder,
@@ -1407,7 +1410,7 @@ export class EmailService implements IEmailService {
   }
 
   /**
-   * Render a named template from sys_email_template and deliver via
+   * Render a named `email_template` and deliver via
    * send(). Looks up `(name, locale)` then falls back to
    * `(name, {@link DEFAULT_TEMPLATE_LOCALE})` — the shared
    * {@link resolveAndRenderTemplate} ladder.

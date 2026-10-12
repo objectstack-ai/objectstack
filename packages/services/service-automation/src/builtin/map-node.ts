@@ -6,9 +6,8 @@ import type { MapConfigParsed } from '@objectstack/spec/automation';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { AutomationEngine } from '../engine.js';
 import { refuseNode } from '../guard-refusal.js';
-import { interpolate } from './template.js';
 import { parseNodeConfig } from './parse-config.js';
-import { resolveValueSlotMap } from './value-slot-map.js';
+import { collectionNotAList, resolveCollectionSlot, resolveValueSlotMap } from './value-slot-map.js';
 
 /** Hard cap on map fan-out — turns a runaway collection into a clean error. */
 const MAX_MAP_ITEMS = 10_000;
@@ -71,9 +70,11 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
       configSchema: {
         type: 'object',
         properties: {
-          // interpolate() single-brace `{items}` template, not bare CEL — same
-          // marker + rationale as loop.collection.
-          collection: { type: 'string', title: 'Collection', description: 'Expression resolving to the array to process, one item at a time.', xExpression: 'template' },
+          // [#19939] A `value` slot whose literal is a list — the same marker
+          // and rationale as `loop.collection`. The marker rides here, not on
+          // `MapConfigSchema.collection` (which the ratchet also reads, through
+          // `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`), so one channel declares it.
+          collection: { title: 'Collection', description: 'The list to process, one item at a time: a CEL value envelope evaluated to a list in the run\'s scope (e.g. { dialect: \'cel\', source: \'items\' }), or an inline array of the items.', xExpression: 'value' },
           flowName: { type: 'string', title: 'Per-item flow', description: 'Subflow run for each item — it may pause (e.g. an approval).', xRef: { kind: 'flow' } },
           iteratorVariable: { type: 'string', title: 'Item variable' },
           // Declared in #4045 — both read by the executor, neither offered by
@@ -95,9 +96,8 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
       // graduated into the ADR-0087 D2 conversion layer as
       // 'flow-node-map-flow-alias' (#4045), rewritten at load — including the
       // `registerFlow` rehydration seam — so the parse sees only the canonical
-      // key (PD #12: no consumer-side fallbacks). Parsed BEFORE interpolation;
-      // `collection` legally arrives as a template string OR an inline array
-      // (the contract is the union).
+      // key (PD #12: no consumer-side fallbacks). `collection` arrives as a CEL
+      // value envelope or an inline array (#19939: a string is refused here).
       const parsed = parseNodeConfig<MapConfigParsed>('map', node.id, MapConfigSchema, node.config);
       if (!parsed.ok) return parsed.refusal;
       const cfg = parsed.config;
@@ -112,17 +112,16 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
       const indexVariable = cfg.indexVariable || undefined;
       const outVar = cfg.outputVariable || undefined;
 
-      // Resolve the collection (template / bare var / already-an-array).
-      const rawCollection = cfg.collection;
-      let collection: unknown;
-      if (Array.isArray(rawCollection)) {
-        collection = rawCollection;
-      } else if (typeof rawCollection === 'string') {
-        collection = interpolate(rawCollection, variables, context ?? ({} as AutomationContext));
-        if (collection == null && variables.has(rawCollection)) collection = variables.get(rawCollection);
-      }
+      // [#19939] The collection is a `value` slot whose literal is a list (the
+      // contract a `loop` shares): a CEL value envelope evaluated in the run's
+      // scope — on every entry, a re-entry after a paused item included, as
+      // the template was — or an inline array, iterated as written. A string
+      // never reaches here: a bare variable name, which this executor never
+      // read (the interpolator handed the name back and the node failed), is
+      // refused by the parse above with a `{token}`.
+      const collection = resolveCollectionSlot(engine, cfg.collection, variables, context ?? ({} as AutomationContext));
       if (!Array.isArray(collection)) {
-        return { success: false, error: `map '${node.id}': collection '${String(rawCollection)}' did not resolve to an array` };
+        return { success: false, error: `map '${node.id}': ${collectionNotAList(cfg.collection, collection)}` };
       }
       if (collection.length > MAX_MAP_ITEMS) {
         return { success: false, error: `map '${node.id}': collection length ${collection.length} exceeds the ${MAX_MAP_ITEMS} cap` };
