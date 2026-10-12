@@ -35,10 +35,14 @@
  * The window is decided PER ENTRY: a registry entry E is replayed when
  *
  *     floor < runtime   OR   floor ≤ E.retiredAfter
+ *                       OR   (floor = M.0.0  AND  E.toMajor = M)
  *
  * where `retiredAfter` is the version the registry stamps on every retired
  * entry — the last published spec whose authoring surface still accepted the
- * old shape (`MetadataConversion`, `@objectstack/spec`). Spelled out:
+ * old shape (`MetadataConversion`, `@objectstack/spec`) — and `toMajor` is the
+ * protocol major whose conversion step the entry belongs to
+ * (`CONVERSIONS_BY_MAJOR[M]`, the step `objectstack migrate meta --from M-1`
+ * replays). Spelled out:
  *
  * - **`floor < runtime`** → the artifact predates this runtime's authoring
  *   surface. Replay the full conversion chain (retired entries included)
@@ -59,6 +63,32 @@
  *   later returns to the spec (the roadmap-M2 shape: `allowRestore`/`allowPurge`
  *   come back with the lifecycle operations they gate), artifacts authored
  *   against that surface are never stripped by history.
+ * - **`floor` = M.0.0, at or above the runtime label** → every retired entry
+ *   of the conversion step INTO protocol M replays as well (verdict
+ *   `'converted-major-step'`). M.0.0 is what a bare `^M` range reads as, and
+ *   it is the floor every build made during M's prerelease declares: the
+ *   protocol constant moves to M when the prerelease opens (ruling record
+ *   6049734955, Q1 → B), while the package label still names the last release
+ *   of M-1 and every retirement landing in the prerelease is stamped at or below
+ *   that label. So a prerelease-built `^M` artifact may predate any retirement in
+ *   step M, and the per-entry comparison above can never say so: M.0.0 sits
+ *   above every stamp of the M-1 line. Nor can the artifact: `os build`
+ *   writes the parsed stack plus its docs and an optional `runtimeModule`,
+ *   with no field naming the spec or CLI that built it, so no reading of the
+ *   artifact tells "built before this entry" from "built after it". What makes
+ *   the replay safe instead is that a conversion only rewrites the shape it
+ *   positively recognizes: every retired entry of the step comes back by
+ *   reference over a definition that lacks its old shape (pinned over each
+ *   step-18 entry's own fixture pair in this module's test), so an artifact
+ *   built after a retirement is unchanged and one built before it boots. The
+ *   same holds at M.0.0 GA (label M.0.0, floor equal), where a prerelease-built
+ *   artifact still declares that floor; from M.0.1 on the label half above
+ *   replays the whole chain for it anyway. ⚠️ The M2 caveat: an entry whose old
+ *   shape becomes legal again cannot be protected for a bare-major floor by
+ *   this half — nor by the label half, which strips it for the same artifact on
+ *   the next release — so the change that re-legalizes a retired key decides
+ *   that entry's fate at this door, where the default-flip refusal below
+ *   ({@link DEFAULT_FLIPS_NOT_REPLAYED_HERE}) is the existing mechanism.
  * - **No declared range** → replay the full chain. Same posture as the
  *   protocol handshake (which grandfathers range-less packages with a warning,
  *   ADR-0087 "never false-reject") and as the stored-row pass (whose rows
@@ -109,8 +139,9 @@
  * - Not a second conversion table: the ADR-0087 registry in
  *   `@objectstack/spec` stays the single authority on *what* converts — and,
  *   through each retired entry's `retiredAfter`, on *since when* it stopped
- *   being authorable; this module only decides *whether the retired window
- *   opens* for one artifact, reading those facts off the registry per entry.
+ *   being authorable, and through its `toMajor`, on *which step* it belongs
+ *   to; this module only decides *whether the retired window opens* for one
+ *   artifact, reading those facts off the registry per entry.
  * - Not a validator: like `applyConversions` itself, this never throws and
  *   never gates. Gating stays at the caller's schema parse.
  * - Not the flow-specific seam: flows convert here too (context-less, exactly
@@ -178,11 +209,19 @@ export type ArtifactForwardConversionVerdict =
    * those entries replayed (see the module doc's per-entry rule).
    */
   | 'converted-retired-after'
+  /**
+   * Declared floor is `M.0.0` — the first release of protocol major M, the
+   * floor every build from M's prerelease declares — at or above the runtime
+   * spec's label: every retired entry of the conversion step into M replayed,
+   * beside any the per-entry rule opens (see the module doc).
+   */
+  | 'converted-major-step'
   /** No declared range — treated as old data at rest, full chain replayed. */
   | 'converted-undeclared'
   /**
-   * Declared floor is current-or-newer, and newer than every retirement's
-   * `retiredAfter` — nothing replayed, the strict parse decides.
+   * Declared floor is current-or-newer, newer than every retirement's
+   * `retiredAfter`, and not the first release of a major whose conversion step
+   * carries retired entries — nothing replayed, the strict parse decides.
    */
   | 'authored-current'
   /** Runtime spec version unresolvable — nothing replayed (see module doc). */
@@ -219,11 +258,14 @@ export interface ArtifactForwardConversionResult<T> {
   /** Every notice the replay emitted (empty when nothing converted). */
   notices: ArtifactConversionNotice[];
   /**
-   * Under `'converted-retired-after'` only: the retirements this runtime
-   * enforces past the artifact's floor, which the per-entry half of the window
-   * replayed — each with the `retiredAfter` the floor is at or below. Empty for
-   * every other verdict: the label half replays the whole chain on one reason
-   * for all of it, and a closed window replays nothing.
+   * Under `'converted-retired-after'` and `'converted-major-step'` only: the
+   * retirements this runtime enforces past the artifact's floor, which the
+   * per-entry half of the window replayed — each with the `retiredAfter` the
+   * floor is at or below. The entries the major-step half opens are NOT listed
+   * here (their `retiredAfter` is below the floor; one reason, the floor, opens
+   * all of them). Empty for every other verdict: the label half replays the
+   * whole chain on one reason for all of it, and a closed window replays
+   * nothing.
    */
   replayedRetirements: ArtifactReplayedRetirement[];
 }
@@ -358,31 +400,46 @@ const DEFAULT_FLIPS_NOT_REPLAYED_HERE: readonly string[] = [
 ];
 
 /**
- * The per-entry half of the window, for a floor at or above the runtime label.
+ * The window for a floor at or above the runtime label, decided per entry.
  * `closed` is the ids the door must NOT replay — {@link DEFAULT_FLIPS_NOT_REPLAYED_HERE}
  * (read first, whatever an entry's version says), every live entry, and every
- * retired entry whose `retiredAfter` the floor exceeds; `opened` is the rest,
- * each a retirement this runtime enforces past the floor. `null` when nothing
- * opens, i.e. the floor predates no retirement the runtime enforces.
+ * retired entry the floor postdates. Two halves open the rest:
  *
- * A `retiredAfter` this cannot read closes its entry: the strict parse and its
+ * - `opened` — the per-entry half: each retirement whose `retiredAfter` the
+ *   floor is at or below, i.e. one this runtime enforces past the floor.
+ * - `majorStep` — for a floor of `M.0.0` only: every other retired entry whose
+ *   `toMajor` is M, the step a prerelease build of M may have run only in part
+ *   (see the module doc). Read AFTER the per-entry half, so an entry both open
+ *   is reported once, with its `retiredAfter`.
+ *
+ * `null` when nothing opens, i.e. the floor postdates every retirement the
+ * runtime enforces. A `retiredAfter` this cannot read leaves its entry to the
+ * major-step half alone, and closed outside it: the strict parse and its
  * tombstone stay the authority, which is the loud direction.
  */
 function idsTheFloorPostdates(
   floor: [number, number, number],
-): { closed: string[]; opened: ArtifactReplayedRetirement[] } | null {
+): { closed: string[]; opened: ArtifactReplayedRetirement[]; majorStep: string[] } | null {
   const closed = [...DEFAULT_FLIPS_NOT_REPLAYED_HERE];
   const opened: ArtifactReplayedRetirement[] = [];
+  const majorStep: string[] = [];
+  const firstReleaseOfMajor = floor[1] === 0 && floor[2] === 0;
   for (const conversion of ALL_CONVERSIONS) {
     if (DEFAULT_FLIPS_NOT_REPLAYED_HERE.includes(conversion.id)) continue;
-    const retiredAfter = conversion.retiredFromLoadPath === true ? parseVersion(conversion.retiredAfter) : null;
+    if (conversion.retiredFromLoadPath !== true) {
+      closed.push(conversion.id);
+      continue;
+    }
+    const retiredAfter = parseVersion(conversion.retiredAfter);
     if (retiredAfter && compareTriples(floor, retiredAfter) <= 0) {
       opened.push({ conversionId: conversion.id, retiredAfter: retiredAfter.join('.') });
+    } else if (firstReleaseOfMajor && conversion.toMajor === floor[0]) {
+      majorStep.push(conversion.id);
     } else {
       closed.push(conversion.id);
     }
   }
-  return opened.length > 0 ? { closed, opened } : null;
+  return opened.length > 0 || majorStep.length > 0 ? { closed, opened, majorStep } : null;
 }
 
 /**
@@ -431,13 +488,14 @@ export function applyArtifactForwardConversions<T>(
     if (perEntry === null) {
       return { definition, verdict: 'authored-current', authoredFloor, runtimeSpecVersion, notices: [], replayedRetirements: [] };
     }
-    verdict = 'converted-retired-after';
+    verdict = perEntry.majorStep.length > 0 ? 'converted-major-step' : 'converted-retired-after';
     replayedRetirements = perEntry.opened;
-    // The per-entry half of the window: every entry the floor does NOT predate
-    // stays with the strict parse. Each id's reason is the same, read off the
-    // registry rather than written here — the floor is at or above the runtime
-    // label AND above the entry's own `retiredAfter` (or the entry is live, and
-    // a live entry has no retirement for the floor to predate).
+    // Every entry the floor postdates stays with the strict parse. Each id's
+    // reason is the same, read off the registry rather than written here — the
+    // floor is at or above the runtime label AND above the entry's own
+    // `retiredAfter`, and it is not `M.0.0` for the entry's own step M (or the
+    // entry is live, and a live entry has no retirement for the floor to
+    // predate).
     excludeConversionIds = perEntry.closed;
   }
 
