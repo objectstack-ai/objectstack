@@ -157,7 +157,7 @@ describe('`read.url` — same-origin API path only; every cross-origin class is 
     // A `.regex()` projects exactly; a refinement would be dropped from the
     // published file, and a validator reading `json-schema/` would accept a
     // URL the parse refuses.
-    const json = z.toJSONSchema(ElementApiDataSourceSchema) as {
+    const json = z.toJSONSchema(ElementApiDataSourceSchema) as unknown as {
       properties: { read: { properties: Record<string, { pattern?: string }> } };
     };
     const pattern = json.properties.read.properties.url.pattern;
@@ -174,7 +174,7 @@ describe('`read.url` — same-origin API path only; every cross-origin class is 
 
 describe('no credential in metadata — the console\'s signed-in fetch is reused', () => {
   it('the read block declares `url` and `method` and nothing else; the binding declares no credential key', () => {
-    const json = z.toJSONSchema(ElementApiDataSourceSchema) as {
+    const json = z.toJSONSchema(ElementApiDataSourceSchema) as unknown as {
       properties: Record<string, { properties?: Record<string, unknown>; additionalProperties?: unknown }>;
       additionalProperties?: unknown;
     };
@@ -189,7 +189,7 @@ describe('no credential in metadata — the console\'s signed-in fetch is reused
     ['credentials', { credentials: 'include' }],
     ['token', { token: 'x' }],
     ['apiKey', { apiKey: 'x' }],
-  ])('a `%s` key on the read block is refused, with the reuse prescription', (key, extra) => {
+  ])('a `%s` key on the read block is refused, with the reuse prescription', (_key, extra) => {
     const r = apiComponent({ url: '/api/v1/cloud/home', ...extra });
     expect(r.success).toBe(false);
     const at = issuesAt(r, 'dataSource.read');
@@ -231,7 +231,7 @@ describe('the API arm is closed', () => {
     ['object', { object: 'account' }],
     ['write', { write: { url: '/api/x' } }],
     ['url', { url: '/api/x' }],
-  ])('refuses a top-level `%s` on the API binding', (key, extra) => {
+  ])('refuses a top-level `%s` on the API binding', (_key, extra) => {
     const r = ElementApiDataSourceSchema.safeParse({ provider: 'api', read: { url: '/api/x' }, ...extra });
     expect(r.success).toBe(false);
     expect(issuesAt(r, '').map((i) => i.code)).toEqual(['unrecognized_keys']);
