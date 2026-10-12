@@ -21,7 +21,11 @@ import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
 
 const SENTINELS = ['door-header-sentinel', 'door-url-sentinel', 'door-input-sentinel'] as const;
 
-/** One flow, three served positions. `literal: false` is the same flow with `{var}` templates. */
+/**
+ * One flow, three served positions. `literal: false` is the same flow with templates:
+ * a `{{ var }}` hole at the http `url` and header — text slots, where a single-brace
+ * token is refused at this door since #19939 — and a `{var}` token at the connector input.
+ */
 const credentialFlow = (literal: boolean) => ({
   name: literal ? 'door_cred_lit' : 'door_cred_dark',
   label: 'Door credential probe',
@@ -36,10 +40,10 @@ const credentialFlow = (literal: boolean) => ({
       config: {
         url: literal
           ? `https://example.invalid/hook?api_key=${SENTINELS[1]}`
-          : 'https://example.invalid/hook?api_key={api_token}',
+          : 'https://example.invalid/hook?api_key={{ api_token }}',
         method: 'POST',
         headers: {
-          Authorization: literal ? `Bearer ${SENTINELS[0]}` : 'Bearer {api_token}',
+          Authorization: literal ? `Bearer ${SENTINELS[0]}` : 'Bearer {{ api_token }}',
           'X-Trace-Label': 'plain-value',
         },
       },
@@ -104,7 +108,7 @@ describe('the save door carries flow-credential-literal as an advisory', () => {
     for (const sentinel of SENTINELS) expect(wire.includes(sentinel), sentinel).toBe(false);
   });
 
-  it('DARK — the same flow with `{var}` templates draws no such advisory', () => {
+  it('DARK — the same flow with templated values draws no such advisory', () => {
     const verdict = save(credentialFlow(false));
     expect(verdict.error).toBeNull();
     expect(ofRule(verdict.advisories)).toEqual([]);

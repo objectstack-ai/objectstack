@@ -178,7 +178,7 @@ describe('validateFlowTemplatePaths', () => {
           type: 'record_change',
           nodes: [
             { id: 'start', type: 'start', config: { objectName: 'crm_lead', triggerType: 'record-after-create' } },
-            { id: 'h1', type: 'http', http: { url: 'https://x.test/{record.full_naem}', method: 'GET' } },
+            { id: 'h1', type: 'http', http: { url: 'https://x.test/{{ record.full_naem }}', method: 'GET' } },
           ],
         },
       ],
@@ -427,9 +427,16 @@ describe('validateFlowTemplatePaths', () => {
   // unreachable on the shape a real hand-off flow has: `body` is a region slot
   // on `loop`, so the region-stripped view a recursive scan must read deleted
   // `config.body` from EVERY node — including the `http` node whose request
-  // payload it is. The `http` executor interpolates its raw config wholesale,
-  // so a `{record.<typo>}` there renders an empty value into an outbound
+  // payload it is. The `http` executor interpolated its raw config wholesale,
+  // so a `{record.<typo>}` there rendered an empty value into an outbound
   // request on every run, silently, at authoring time and at run time alike.
+  //
+  // [#19939] Since the http `body` became a value slot, no template reaches
+  // it: its own judge refuses a `{…}` token and a `{{ }}` hole alike, at every
+  // build door. So the hand-off's templated payload rides a text slot here — an
+  // `X-Billing-Amount` header, rendered per run with `{{ }}` holes, where an
+  // unresolved path still renders a blank — and the pin that the region view
+  // keeps an http node's own `config.body` is `flow-walk.test.ts`'s.
   //
   // Four pins, one fixture, matching the four injections the report measured.
   // The two filter pins are NEGATIVE CONTROLS: they pass before this fix and
@@ -438,9 +445,9 @@ describe('validateFlowTemplatePaths', () => {
   // every assertion below reads the findings array, never a pass/fail verdict.
   describe('outside a node filter', () => {
     const CLEAN_FILTER = '{record.crm_account}';
-    const CLEAN_PAYLOAD = '{record.company}';
+    const CLEAN_PAYLOAD = '{{ record.company }}';
 
-    /** A billing hand-off: a filter-guarded read, then an http POST payload. */
+    /** A billing hand-off: a filter-guarded read, then an http POST carrying the amount in a header. */
     const handoff = (filterId: string, payloadAmount: string) => ({
       objects: [LEAD_OBJECT],
       flows: [
@@ -462,7 +469,7 @@ describe('validateFlowTemplatePaths', () => {
               config: {
                 url: 'https://billing.example/handoff',
                 method: 'POST',
-                body: { amount: payloadAmount },
+                headers: { 'X-Billing-Amount': payloadAmount },
               },
             },
           ],
@@ -487,7 +494,7 @@ describe('validateFlowTemplatePaths', () => {
     });
 
     it('warns on an unknown field in a payload outside any filter', () => {
-      const findings = validateFlowTemplatePaths(handoff(CLEAN_FILTER, '{record.amount_nope}'));
+      const findings = validateFlowTemplatePaths(handoff(CLEAN_FILTER, '{{ record.amount_nope }}'));
       expect(findings).toHaveLength(1);
       expect(findings[0].rule).toBe(FLOW_TEMPLATE_UNKNOWN_FIELD);
       expect(findings[0].severity).toBe('warning');
@@ -497,7 +504,7 @@ describe('validateFlowTemplatePaths', () => {
     });
 
     it('warns on a lookup traversal in a payload outside any filter', () => {
-      const findings = validateFlowTemplatePaths(handoff(CLEAN_FILTER, '{record.crm_account.name}'));
+      const findings = validateFlowTemplatePaths(handoff(CLEAN_FILTER, '{{ record.crm_account.name }}'));
       expect(findings).toHaveLength(1);
       expect(findings[0].rule).toBe(FLOW_TEMPLATE_LOOKUP_TRAVERSAL);
       expect(findings[0].severity).toBe('warning');
@@ -557,7 +564,7 @@ describe('validateFlowTemplatePaths', () => {
                         id: 'post',
                         type: 'http',
                         label: 'Hand off',
-                        config: { url: 'https://billing.example/handoff', body: { amount: '{record.amount_nope}' } },
+                        config: { url: 'https://billing.example/handoff', headers: { 'X-Billing-Amount': '{{ record.amount_nope }}' } },
                       },
                     ],
                     edges: [],

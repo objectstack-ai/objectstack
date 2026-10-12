@@ -71,6 +71,9 @@ describe('isCredentialShapedLiteral — R2, the value', () => {
 
 describe('isCredentialShapedLiteral — what is NOT a literal credential', () => {
   it('a `{…}` template is resolved per run, so it is not a literal — whichever arm would match', () => {
+    // [#19939] An http header is a text slot: its hole is `{{ api_token }}`. The
+    // 17.x single-brace token, refused there now, still reads as a template here.
+    expect(isCredentialShapedLiteral('Authorization', 'Bearer {{ api_token }}')).toBe(false);
     expect(isCredentialShapedLiteral('Authorization', 'Bearer {api_token}')).toBe(false);
     expect(isCredentialShapedLiteral('X-Auth-Token', '{run_token}')).toBe(false);
     expect(isCredentialShapedLiteral('X-Custom', 'Bearer {$User.id}')).toBe(false);

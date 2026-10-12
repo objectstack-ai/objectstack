@@ -532,6 +532,7 @@ export {
   PAGE_FIELD_UNKNOWN,
   PAGE_FIELD_UNPROVISIONED,
   PAGE_SECTION_GROUP_UNKNOWN,
+  PAGE_SECTION_COUNT_NOT_MULTI_VALUE,
 } from './validate-page-field-bindings.js';
 export type { PageFieldFinding, PageFieldSeverity } from './validate-page-field-bindings.js';
 

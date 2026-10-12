@@ -811,3 +811,198 @@ describe('HttpConfigSchema — an unknown key is refused, not stripped', () => {
       .toContain('`body` IS canonical on an `http` node');
   });
 });
+
+describe('HttpConfigSchema — the text slots, the body value slot and the literals (#19939)', () => {
+  const CEL = (source: string) => ({ dialect: 'cel', source });
+  const base = { url: 'https://api.example.test/v1/hook' };
+
+  /** The issues at exactly `path`. */
+  function issuesAtPath(value: unknown, path: ReadonlyArray<string | number>): ReadonlyArray<{ code: string; message: string; params?: unknown }> {
+    const result = HttpConfigSchema.safeParse(value);
+    if (result.success) return [];
+    return result.error.issues
+      .filter((i) => JSON.stringify(i.path) === JSON.stringify(path))
+      .map((i) => ({ code: i.code, message: i.message, params: (i as { params?: unknown }).params }));
+  }
+
+  /** Each TEXT slot: the config holding `value` there, and the path a refusal names. */
+  const TEXT_SLOTS: ReadonlyArray<[string, (value: unknown) => Record<string, unknown>, ReadonlyArray<string | number>]> = [
+    ['url', (value) => ({ url: value }), ['url']],
+    ['a headers value', (value) => ({ ...base, headers: { 'X-Ref': value } }), ['headers', 'X-Ref']],
+  ];
+
+  /** Each typed LITERAL: the config holding `value` there, its literal value, and how a refusal names it. */
+  const LITERALS: ReadonlyArray<[string, (value: unknown) => Record<string, unknown>, unknown, string]> = [
+    ['method', (value) => ({ ...base, method: value }), 'POST', '`method` is the request method (`GET`, `POST`, …), a literal the executor reads as written:'],
+    ['durable', (value) => ({ ...base, durable: value }), true, '`durable` is whether the call goes through the durable outbox, `true` or `false`, a literal the executor reads as written:'],
+    ['timeoutMs', (value) => ({ ...base, timeoutMs: value }), 5000, '`timeoutMs` is the per-request timeout in milliseconds, a number, a literal the executor reads as written:'],
+  ];
+
+  it.each(TEXT_SLOTS)('%s (a text slot): a `{{ }}` hole and a plain text parse', (_label, configOf) => {
+    expect(HttpConfigSchema.safeParse(configOf('https://api.example.test/v1/orders/{{ record.id }}')).success).toBe(true);
+    expect(HttpConfigSchema.safeParse(configOf('https://api.example.test/v1/orders')).success).toBe(true);
+  });
+
+  it.each(TEXT_SLOTS)('%s (a text slot): a single-brace token is refused at its own path with its hole spelling', (_label, configOf, path) => {
+    const issues = issuesAtPath(configOf('https://api.example.test/v1/orders/{record.id}'), path);
+    expect(issues.map((i) => i.code)).toEqual(['custom']);
+    expect(issues[0]!.message.startsWith(TEXT_SLOT_TEMPLATE_REFUSAL)).toBe(true);
+    expect(issues[0]!.message).toContain('`https://api.example.test/v1/orders/{{ record.id }}`');
+  });
+
+  it.each(TEXT_SLOTS)('%s (a text slot): a hole over a `$` root the engine does not bind is refused', (_label, configOf, path) => {
+    const issues = issuesAtPath(configOf('https://api.example.test/{{ $User.Id }}'), path);
+    expect(issues.map((i) => i.code)).toEqual(['custom']);
+    expect(issues[0]!.message).toContain('may name a `$` variable only when the flow engine binds it');
+  });
+
+  it('headers: a token written as the whole map is refused with the map\'s remedy, beside its type', () => {
+    const issues = issuesAtPath({ ...base, headers: '{headers}' }, ['headers']);
+    expect(issues.map((i) => i.code).sort()).toEqual(['custom', 'invalid_type']);
+    const custom = issues.find((i) => i.code === 'custom')!;
+    expect(custom.message).toContain('`headers` is a map of header name to text, read as written');
+    expect(custom.message).toContain("{ 'X-Request-Id': '{{ $runId }}' }");
+  });
+
+  it('body (a value slot): a CEL value envelope, a literal object, a literal string and a nested envelope (data) parse', () => {
+    for (const body of [
+      CEL("{'id': record.id, 'text': dyn('Done: ' + record.title)}"),
+      { id: 'r1', lines: ['a', 'b'], n: 3 },
+      'hello',
+      { inner: CEL('x') },
+    ]) {
+      expect(HttpConfigSchema.safeParse({ ...base, body }).success, JSON.stringify(body)).toBe(true);
+    }
+  });
+
+  it('body (a value slot): a whole `{…}` token is refused with its envelope; a nested one names the whole-value envelope', () => {
+    const whole = issuesAtPath({ ...base, body: '{payload}' }, ['body']);
+    expect(whole.map((i) => i.code)).toEqual(['custom']);
+    expect(whole[0]!.message.startsWith(VALUE_SLOT_TEMPLATE_REFUSAL)).toBe(true);
+    expect(whole[0]!.message).toContain("Write `{payload}` as { dialect: 'cel', source: 'payload' }.");
+    const nested = issuesAtPath({ ...base, body: { id: '{record.id}', status: 'done' } }, ['body', 'id']);
+    expect(nested.map((i) => i.code)).toEqual(['custom']);
+    expect(nested[0]!.message.startsWith(VALUE_SLOT_TEMPLATE_REFUSAL)).toBe(true);
+    expect(nested[0]!.message).toContain('Compute the whole value as one CEL envelope that builds it');
+    expect(nested[0]!.message).toContain("{'id': record.id}");
+  });
+
+  it('body (a value slot): a malformed envelope is refused, leading with the value-envelope sentence', () => {
+    const result = HttpConfigSchema.safeParse({ ...base, body: { dialect: 'template', source: 'x' } });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.some((i) => i.message.startsWith(VALUE_ENVELOPE_REFUSAL))).toBe(true);
+  });
+
+  it.each(LITERALS)('%s (a literal): its value parses, written as it is', (_label, configOf, literal) => {
+    expect(HttpConfigSchema.safeParse(configOf(literal)).success).toBe(true);
+  });
+
+  it.each(LITERALS)('%s (a literal): a `{…}` token is refused at its own path with the literal remedy, marked read-as-written', (label, configOf, _literal, lead) => {
+    const issues = issuesAtPath(configOf('{record.verb}'), [label]);
+    const custom = issues.filter((i) => i.code === 'custom');
+    expect(custom).toHaveLength(1);
+    expect(custom[0]!.message.startsWith(lead)).toBe(true);
+    expect(custom[0]!.message).toContain('a single-brace token is not resolved here; write the value. Read as written, `{record.verb}`');
+    expect(custom[0]!.params).toEqual({ readAsWritten: true });
+    // Not the value slots' remedy: nothing evaluates here, so no envelope is offered.
+    expect(custom[0]!.message).not.toContain(VALUE_SLOT_TEMPLATE_REFUSAL);
+    expect(custom[0]!.message).not.toContain("dialect: 'cel'");
+    // A typed literal refuses the string by its type too; `method` takes strings.
+    expect(issues.map((i) => i.code).sort()).toEqual(label === 'method' ? ['custom'] : ['custom', 'invalid_type']);
+  });
+
+  it.each(LITERALS)('%s (a literal): a CEL value envelope is refused — nothing evaluates it', (label, configOf, _literal, lead) => {
+    const issues = issuesAtPath(configOf(CEL('record.verb')), [label]);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.message).toBe(`${lead} a CEL value envelope is not evaluated here; write the value.`);
+  });
+
+  it('signingSecret (a literal): a secret parses; a token is refused without echoing the value, and so is an envelope', () => {
+    expect(HttpConfigSchema.safeParse({ ...base, signingSecret: 's3cret' }).success).toBe(true);
+    expect(HttpConfigSchema.safeParse({ ...base, signingSecret: '' }).success).toBe(true);
+    const issues = issuesAtPath({ ...base, signingSecret: 'ab{signing_key}cd' }, ['signingSecret']);
+    expect(issues.map((i) => i.code)).toEqual(['custom']);
+    expect(issues[0]!.message).toContain('`signingSecret` is the HMAC-SHA256 secret that signs the request, read as written');
+    expect(issues[0]!.message).toContain("or `''` to send unsigned on purpose");
+    expect(issues[0]!.message).not.toContain('signing_key');
+    // Unmarked: the build doors leave this key to the run (the credential store may hold the secret).
+    expect(issues[0]!.params).toBeUndefined();
+    const envelope = issuesAtPath({ ...base, signingSecret: CEL('vars.k') }, ['signingSecret']);
+    expect(envelope).toHaveLength(1);
+    expect(envelope[0]!.message).toContain('a CEL value envelope is not evaluated here');
+  });
+
+  it('the build doors: a literal\'s token and envelope are refused in the contract\'s words — the run reads them as written', () => {
+    for (const [label, configOf, , lead] of LITERALS) {
+      for (const value of ['{record.verb}', CEL('record.verb')]) {
+        const refusals = flowNodeConfigRefusals('http', configOf(value));
+        expect(refusals.map((r) => [r.code, r.path]), `${label} ${JSON.stringify(value)}`).toEqual([['node-config-refused-by-contract', label]]);
+        expect(refusals[0]!.message).toContain(`refused at \`${label}\` by the http contract: ${lead}`);
+      }
+    }
+    const headers = flowNodeConfigRefusals('http', { ...base, headers: '{headers}' });
+    expect(headers.map((r) => [r.code, r.path])).toEqual([['node-config-refused-by-contract', 'headers']]);
+    expect(headers[0]!.message).toContain('`headers` is a map of header name to text');
+    // …and `FlowSchema.parse`, which reports through the same judge.
+    const flow = {
+      name: 'f', label: 'F', type: 'autolaunched',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'n', type: 'http', label: 'N', config: { ...base, timeoutMs: '{t}' } },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [{ id: 'e1', source: 'start', target: 'n' }, { id: 'e2', source: 'n', target: 'end' }],
+    };
+    const parsed = FlowSchema.safeParse(flow);
+    expect(parsed.success).toBe(false);
+    expect(parsed.error!.issues.some((i) => i.message.includes(LITERALS[2]![3]))).toBe(true);
+    // CONTROL: the literals as written pass every door.
+    expect(flowNodeConfigRefusals('http', { ...base, method: 'POST', durable: true, timeoutMs: 5000, signingSecret: 's' })).toEqual([]);
+  });
+
+  it('the build doors leave the text slots, the body and the signing secret to their own judges', () => {
+    // A token in a text slot or the body is the text-slot / value-slot judge's,
+    // at `registerFlow` and `objectstack validate` — never reported twice here.
+    expect(flowNodeConfigRefusals('http', { url: '/x/{record.id}' })).toEqual([]);
+    expect(flowNodeConfigRefusals('http', { ...base, headers: { 'X-Ref': '{record.id}' } })).toEqual([]);
+    expect(flowNodeConfigRefusals('http', { ...base, body: { id: '{record.id}' } })).toEqual([]);
+    // `signingSecret` is run-resolved: the credential store may hold what the
+    // run signs with, so its refusal is the executor's parse alone.
+    expect(flowNodeConfigRefusals('http', { ...base, signingSecret: '{k}' })).toEqual([]);
+    expect(HttpConfigSchema.safeParse({ ...base, signingSecret: '{k}' }).success).toBe(false);
+  });
+
+  it('declares the body to the expression ledger through the spec Zod channel; the text slots and literals carry no marker', () => {
+    type Node = { properties?: Record<string, Node>; additionalProperties?: Node; anyOf?: Node[]; type?: string; xExpression?: string };
+    for (const json of [
+      z.toJSONSchema(HttpConfigSchema, { target: 'draft-2020-12', io: 'input', unrepresentable: 'any' }) as Node,
+      getSchemalessNodeConfigJsonSchemas().http as Node,
+    ]) {
+      expect(json.properties?.body?.xExpression).toBe('value');
+      for (const key of ['url', 'headers', 'method', 'durable', 'timeoutMs', 'signingSecret']) {
+        expect(json.properties?.[key]?.xExpression, key).toBeUndefined();
+        expect(json.properties?.[key]?.anyOf, key).toBeUndefined();
+      }
+      // The 17.x published shapes of the text slots and the literals stand.
+      expect(json.properties?.url?.type).toBe('string');
+      expect(json.properties?.headers?.type).toBe('object');
+      expect(json.properties?.method?.type).toBe('string');
+      expect(json.properties?.durable?.type).toBe('boolean');
+      expect(json.properties?.timeoutMs?.type).toBe('number');
+      expect(json.properties?.signingSecret?.type).toBe('string');
+    }
+  });
+
+  it('says in each describe what the key takes, and that a `{…}` token is refused', () => {
+    const shape = (HttpConfigSchema as unknown as { shape: Record<string, { description?: string }> }).shape;
+    for (const key of ['url', 'headers'] as const) {
+      expect(shape[key]!.description, key).toContain('`{{ }}` holes');
+      expect(shape[key]!.description, key).toContain('single-brace `{token}` is refused');
+    }
+    expect(shape.body!.description).toContain('CEL value envelope');
+    expect(shape.body!.description).toMatch(/template token in a string of a literal is refused/);
+    for (const key of ['method', 'durable', 'timeoutMs', 'signingSecret'] as const) {
+      expect(shape[key]!.description, key).toContain('read as written');
+    }
+  });
+});
