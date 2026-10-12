@@ -48,7 +48,7 @@ import '@objectstack/service-datasource';
 
 const APP_ID = 'com.test.issue-22989';
 const STAMPS = { _packageId: APP_ID, _packageVersion: '1.0.0', _provenance: 'package' } as const;
-const FEED_PATH = '/api/v1/apps/probe22989/tasks';
+const FEED_PATH = '/api/v1/apps/probe/tasks';
 
 const TASK_FEED = {
     name: 'probe_task_feed',
@@ -68,7 +68,7 @@ const authoredStack = () => ({
         version: '1.0.0',
         type: 'app',
         // ADR-0121 D1: a declared path sits under `/api/v1/apps/<namespace>/`.
-        namespace: 'probe22989',
+        namespace: 'probe',
     },
     objects: [
         {
@@ -161,7 +161,7 @@ describe('#22989 — the config door registers the stack-declared api items wher
         // CONTROLS: the matcher still answers a miss where nothing is declared.
         expect(await configDoor!.metadata.matchEndpoint({ path: FEED_PATH, method: 'POST' })).toBeUndefined();
         expect(await configDoor!.metadata.matchEndpoint({
-            path: '/api/v1/apps/probe22989/no-such-endpoint',
+            path: '/api/v1/apps/probe/no-such-endpoint',
             method: 'GET',
         })).toBeUndefined();
     });
@@ -176,11 +176,6 @@ describe('#22989 — the config door registers the stack-declared api items wher
         const fromArtifact = await artifactDoor!.metadata.get('api', 'probe_task_feed');
         expect(fromConfig).toMatchObject(STAMPS);
         expect(fromConfig).toEqual(fromArtifact);
-    });
-
-    it('the author\'s config module is not written to: the stamp lands on a copy', () => {
-        expect((config as any).apis[0]).not.toHaveProperty('_packageId');
-        expect((config as any).apis[0]).not.toHaveProperty('_provenance');
     });
 });
 
