@@ -10,7 +10,9 @@
  * A text slot is a config position whose rendered value is definitionally
  * text for a person to read: a `notify` node's `title` and `message`, a
  * `screen` node's `title` and `description`, and a refusing `end` node's
- * `message` ({@link FLOW_NODE_TEXT_SLOTS}). Until 18 the flow interpolator
+ * `message` ({@link FLOW_NODE_TEXT_SLOTS}) — and, since #19939, a `notify`
+ * node's `actionUrl`, the link a person follows from the notification, text
+ * with holes (`/crm_case/{{ record.id }}`). Until 18 the flow interpolator
  * rendered them with its single-brace `{token}` dialect while the spec already
  * typed the notify pair as `template` slots — the dialect whose delimiter §3
  * fixes as `{{ }}`. They now render through the formula template engine:
@@ -41,10 +43,10 @@
  *  - a `Date` value (what a CEL `now()` / `today()` assignment stores):
  *    the interpolator wrote it JSON-quoted (`"2026-10-08T09:30:00.000Z"`,
  *    quotes included), the engine writes the ISO text;
- *  - in a screen `title` / `description` or an `end` `message`, a slot that
- *    is ONE token holding an object, an array or a `Date`: the interpolator
- *    wrote `String(value)` (`[object Object]`, `a,b`, the locale date), the
- *    engine writes JSON or the ISO text;
+ *  - in a screen `title` / `description`, an `end` `message` or a notify
+ *    `actionUrl`, a slot that is ONE token holding an object, an array or a
+ *    `Date`: the interpolator wrote `String(value)` (`[object Object]`, `a,b`,
+ *    the locale date), the engine writes JSON or the ISO text;
  *  - a `$`-named variable (`{$error.message}`) had no `{{ }}` spelling at all
  *    until the engine's hole grammar admitted `$` in a name (this card).
  *
@@ -163,20 +165,24 @@ export interface FlowNodeTextSlot {
  * Every flow node text slot — the positions the template engine renders.
  *
  * Measured from the executors, not assumed: these are the keys whose rendered
- * value is only ever used as text (`notify-node.ts` stringifies `title` /
- * `message`; `screen-nodes.ts` and the engine's `end` handling render through
- * one text renderer). Every OTHER string the flow interpolator reads keeps its
+ * value is only ever used as text (`notify-node.ts` renders `title`,
+ * `message` and, since #19939, `actionUrl` — the 17.x executor stringified
+ * it, `String(…)`, so a whole token never handed a typed value on;
+ * `screen-nodes.ts` and the engine's `end` handling render through one text
+ * renderer). Every OTHER string the flow interpolator reads keeps its
  * single-brace dialect: a value-like position whose single token hands its
- * resolved value over with its TYPE (`recipients`, `actionUrl`, `sourceId`,
- * `payload`, `templateData`, `http`, a `filter`) is not a text template, and
- * the value slots (`fields.*`, `assignments.*`, the callee maps
+ * resolved value over with its TYPE (`http`, a `filter`) is not a text
+ * template, and the value slots (`fields.*`, `assignments.*`, the callee maps
  * `subflow.input.*`, `map.input.*`, `script.inputs.*`, a screen's
- * `defaults.*`, field `defaultValue` and `recordId`, and the `loop` / `map`
- * `collection`) are CEL's (#19939).
+ * `defaults.*`, field `defaultValue` and `recordId`, the `loop` / `map`
+ * `collection`, and a notify node's `recipients`, `templateData.*` and
+ * `sourceId`) are CEL's (#19939), and a notify node's `sourceObject`,
+ * `actorId` and `payload` are literals, read as written (#19939).
  */
 export const FLOW_NODE_TEXT_SLOTS: readonly FlowNodeTextSlot[] = [
   { nodeType: 'notify', key: 'title', label: 'notify title' },
   { nodeType: 'notify', key: 'message', label: 'notify message' },
+  { nodeType: 'notify', key: 'actionUrl', label: 'notify actionUrl' },
   { nodeType: 'screen', key: 'title', label: 'screen title' },
   { nodeType: 'screen', key: 'description', label: 'screen description' },
   { nodeType: 'end', key: 'message', label: 'end message' },

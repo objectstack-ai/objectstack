@@ -24,10 +24,13 @@ import { NotifyConfigSchema } from './io-node-config.zod';
 import { tmpl } from '../shared/expression.zod';
 
 describe('FLOW_NODE_TEXT_SLOTS — where the `{{ }}` text slots are', () => {
-  it('names exactly the five slots whose rendered value is only ever text', () => {
+  it('names exactly the six slots whose rendered value is only ever text', () => {
+    // [#19939] `notify.actionUrl` joined: the link a person follows, text with
+    // holes (`/crm_case/{{ record.id }}`), which the 17.x executor stringified.
     expect(FLOW_NODE_TEXT_SLOTS.map((s) => `${s.nodeType}.${s.key}`)).toEqual([
       'notify.title',
       'notify.message',
+      'notify.actionUrl',
       'screen.title',
       'screen.description',
       'end.message',
@@ -235,15 +238,17 @@ describe('textSlotTemplateRefusal — a `{{ }}` hole over a `$` root the engine 
 });
 
 describe('flowNodeTextSlotSources — the text slots one node config carries', () => {
-  it('reads the notify pair as a bare string or a template envelope, and nothing else on the node', () => {
+  it('reads the notify pair as a bare string or a template envelope, its link as a string, and nothing else on the node', () => {
     expect(flowNodeTextSlotSources('notify', {
       recipients: ['{record.owner}'],
       sourceId: '{record.id}',
       title: 'Hi {record.name}',
       message: tmpl`Bye {{ record.name }}`,
+      actionUrl: '/crm_case/{record.id}',
     })).toEqual([
       { path: 'title', label: 'notify title', source: 'Hi {record.name}' },
       { path: 'message', label: 'notify message', source: 'Bye {{ record.name }}' },
+      { path: 'actionUrl', label: 'notify actionUrl', source: '/crm_case/{record.id}' },
     ]);
   });
 

@@ -109,15 +109,25 @@ describe('`objectstack validate` — a flow text slot reads `{{ }}` holes (#2211
     }
   });
 
-  it('passes holes, formatters and a `$`-named variable — and every single-brace slot that is not text', () => {
+  it('passes holes, formatters and a `$`-named variable — and every value slot written as its envelope', () => {
+    // [#19939] The notify value slots take a CEL envelope, and `actionUrl` is a
+    // text slot with `{{ }}` holes.
+    // (This fixture flow binds no `record`, which the value-slot pass would
+    // refuse as an unbound root, so the envelopes compute from literals.)
     expect(validate('notify', {
-      recipients: ['{record.owner}'],
+      recipients: ['team:ops', { dialect: 'cel', source: "'user_' + '1'" }],
       sourceObject: 'deal',
-      sourceId: '{record.id}',
-      actionUrl: '/deal/{record.id}',
+      sourceId: { dialect: 'cel', source: "'d_' + '1'" },
+      actionUrl: '/deal/{{ record.id }}',
       title: 'Deal {{ record.name }} won: {{ record.amount | currency }}',
       message: 'Failed: {{ $error.message }}',
     })).toEqual([]);
+    // …and a single-brace token at the link is refused like one in the title.
+    const link = validate('notify', { recipients: ['u1'], title: 'T', actionUrl: '/deal/{record.id}' });
+    expect(link).toHaveLength(1);
+    expect(link[0]!.where).toContain("node 'w' (notify) notify actionUrl at config.actionUrl");
+    expect(link[0]!.message.startsWith(TEXT_SLOT_TEMPLATE_REFUSAL)).toBe(true);
+    expect(link[0]!.message).toContain('`/deal/{{ record.id }}`');
     // [#19939] A screen's `recordId` is a value slot now: its id is a CEL envelope.
     expect(validate('screen', { objectName: 'deal', mode: 'edit', recordId: { dialect: 'cel', source: 'record.id' }, title: 'Edit {{ record.name }}' })).toEqual([]);
   });

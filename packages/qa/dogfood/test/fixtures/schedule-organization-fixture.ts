@@ -163,7 +163,7 @@ export function declaringTimeRelativeFlow(organizationId: string, recipientId: s
           message: '{{ record.name }} is due.',
           channels: ['inbox'],
           sourceObject: 'sched_org_target',
-          sourceId: '{record.id}',
+          sourceId: { dialect: 'cel', source: 'record.id' },
         },
       },
       {
