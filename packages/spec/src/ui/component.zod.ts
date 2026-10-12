@@ -3418,9 +3418,15 @@ export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
  * `action:icon`, `element:definition-list`, `element:repeater`
  * (`core/src/registry/public-blocks.ts:117-122` at the pin this repo builds
  * against, `.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
- * `e5311165a`, re-read there 2026-10-12:
+ * `public-blocks.ts`, `auto-trigger.ts`, `static-params.ts`, `ui/button.tsx`,
+ * the four `action-*.tsx` renderers, `basic/data-list.tsx` and
+ * `previews/block-config.ts` are byte-identical across the hop from
+ * `e5311165a` (`git diff --quiet`), so their anchors held unmoved; and
+ * `data-objectstack/src/index.ts` changed (+33 at `:5335`, objectui#12175,
+ * objectui `088e0f705`: the adapter's `listMetadataItems`, which the
+ * registry-name pickers read) below both cited reads, which left
+ * `serializeOrderBy` `869-895` and the `translateFilterArray` arm `5066-5077`
+ * unmoved. At `e5311165a`, re-read there 2026-10-12:
  * `public-blocks.ts`, `auto-trigger.ts`, `static-params.ts`, `ui/button.tsx`,
  * the four `action-*.tsx` renderers, `basic/data-list.tsx` and
  * `previews/block-config.ts` are byte-identical across the hop from

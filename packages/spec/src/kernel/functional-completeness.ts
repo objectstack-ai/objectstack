@@ -299,9 +299,14 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   record, on every object — and the author is told at render time as well
  *   as here. Both reads hold at the pin this repo builds against
  *   (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
- * `e5311165a`, re-read there 2026-10-12:
+ * on the hop off `e5311165a` `ObjectCalendar.tsx` and `ListView.tsx` are
+ * byte-identical (`git diff --quiet`), so `getCalendarConfig` `:311`, the
+ * `if (!calendarConfig)` arm `:1354` with its `tt(…)` lines `:1361-1362` and
+ * the `case 'calendar'` at `3813` did not move; and the `en` / `zh` / `de`
+ * packs changed (objectui#12175's `fields.registryRef` keys, +4 each, so
+ * `en.ts` `:945` -> `:949`, `zh.ts` `:721` -> `:725`, `de.ts` `:701` ->
+ * `:705`) but not their `calendar.configRequired` strings. At `e5311165a`,
+ * re-read there 2026-10-12:
  * on the hop off `499799502` `ObjectCalendar.tsx` and `ListView.tsx` are
  * byte-identical (`git diff --quiet`), so `getCalendarConfig` `:311`, the
  * `if (!calendarConfig)` arm `:1354` with its `tt(…)` lines `:1361-1362` and
