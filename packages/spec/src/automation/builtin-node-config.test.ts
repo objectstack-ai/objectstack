@@ -583,8 +583,11 @@ describe('assignment value contract — a CEL envelope beside literals; the `{to
     // #19938 — the CRUD write map joined through the same channel; #19939 —
     // the `map` node's per-item `input` map, then the `screen`'s prefill and
     // record id, then the `notify` node's computed values, then the `http`
-    // node's body.
-    expect(Object.keys(LEDGER_DECLARED_NODE_CONFIG_SCHEMAS)).toEqual(['assignment', 'create_record', 'update_record', 'map', 'screen', 'notify', 'http']);
+    // node's body, then (stage S6) the CRUD filter operands — `update_record`
+    // was here already, so `get_record` and `delete_record` join.
+    expect(Object.keys(LEDGER_DECLARED_NODE_CONFIG_SCHEMAS)).toEqual([
+      'assignment', 'create_record', 'update_record', 'map', 'screen', 'notify', 'http', 'get_record', 'delete_record',
+    ]);
     expect(Object.keys(SCHEMALESS_NODE_CONFIG_SCHEMAS).sort()).toEqual(['decision', 'script', 'subflow']);
     const projected = getSchemalessNodeConfigJsonSchemas().assignment as
       { properties?: Record<string, { additionalProperties?: Record<string, unknown> }> };
@@ -844,7 +847,7 @@ describe('CRUD `fields` value contract — the CEL value envelope beside literal
   const PRICE_ENVELOPE = { dialect: 'cel', source: 'round(price * 100) / 100.0' };
   const configs = [
     ['create_record', CreateRecordConfigSchema, (fields: unknown) => ({ objectName: 'quote', fields })],
-    ['update_record', UpdateRecordConfigSchema, (fields: unknown) => ({ objectName: 'quote', filter: { id: '{quoteId}' }, fields })],
+    ['update_record', UpdateRecordConfigSchema, (fields: unknown) => ({ objectName: 'quote', filter: { id: { dialect: 'cel', source: 'quoteId' } }, fields })],
   ] as const;
 
   it.each(configs)('%s: accepts a valid CEL value envelope as a field value, stored verbatim', (_type, schema, wrap) => {
@@ -910,8 +913,86 @@ describe('CRUD `fields` value contract — the CEL value envelope beside literal
     const projected = getSchemalessNodeConfigJsonSchemas()[type] as
       { properties?: Record<string, { additionalProperties?: Record<string, unknown> }> };
     expect(projected.properties?.fields?.additionalProperties?.xExpression).toBe('value');
-    // `update_record.filter` is a match map, not a value slot — no marker.
+    // [#19939, stage S6] RE-JUDGED IN PLACE: `update_record.filter` carried no
+    // marker as a match map. Its OPERANDS are value slots since S6, declared
+    // once on `filter` itself (the ledger entry's `filterOperands` makes the
+    // walks emit each operand) — never on its map value, a second slot.
     expect(projected.properties?.filter?.additionalProperties?.xExpression).toBeUndefined();
+    expect((projected.properties?.filter as { xExpression?: string } | undefined)?.xExpression)
+      .toBe(type === 'update_record' ? 'value' : undefined);
+  });
+});
+
+/**
+ * [#19939, stage S6] A `get_record` / `update_record` / `delete_record` node's
+ * `filter` is a match condition whose OPERANDS are value slots (Fork R17 → A):
+ * a CEL value envelope evaluated before the query, a query placeholder the
+ * query engine resolves, or a literal. A flow `{…}` token at an operand is
+ * refused, located at the operand, with its CEL spelling.
+ */
+describe('CRUD `filter` operands — value slots; the query placeholders stay (#19939, S6)', () => {
+  const ENV = { dialect: 'cel', source: 'record.id' };
+  const contracts = [
+    ['get_record', GetRecordConfigSchema],
+    ['update_record', UpdateRecordConfigSchema],
+    ['delete_record', DeleteRecordConfigSchema],
+  ] as const;
+  const issuesOf = (schema: Parseable, filter: unknown) => {
+    const result = schema.safeParse({ objectName: 'deal', filter });
+    return result.success ? [] : (result.error!.issues as ReadonlyArray<{ code: string; path: PropertyKey[]; message: string }>);
+  };
+
+  it.each(contracts.flatMap(([type, schema]) => [
+    [type, schema, 'a field\'s value', { id: '{record.id}' }, 'filter.id'],
+    [type, schema, 'an operator\'s comparand', { amount: { $gt: '{record.amount}' } }, 'filter.amount.$gt'],
+    [type, schema, 'an `$in` element', { id: { $in: ['r1', '{record.id}'] } }, 'filter.id.$in.1'],
+    [type, schema, 'a `$or` member\'s value', { $or: [{ status: 'open' }, { owner: '{record.owner}' }] }, 'filter.$or.1.owner'],
+    [type, schema, 'a nested relation\'s value', { account: { industry: '{record.industry}' } }, 'filter.account.industry'],
+  ] as const))('%s REFUSES a flow token at %s — code `custom`, at the operand, with its envelope', (_type, schema, _where, filter, path) => {
+    const issues = issuesOf(schema, filter);
+    expect(issues.map((i) => [i.code, ['filter', ...i.path.slice(1)].join('.')])).toEqual([['custom', path]]);
+    expect(issues[0]!.message.startsWith(VALUE_SLOT_TEMPLATE_REFUSAL)).toBe(true);
+    expect(issues[0]!.message).toContain('an operand envelope is evaluated before the query');
+    expect(issues[0]!.message).toContain('An operand that evaluates to `null` refuses the node');
+  });
+
+  it.each(contracts)('%s ACCEPTS an envelope at every operand position, stored verbatim', (_type, schema) => {
+    const filter = {
+      id: ENV, amount: { $gt: ENV }, ref: { $in: [ENV, 'r2'] }, $or: [{ owner: ENV }], account: { industry: ENV },
+    };
+    const result = schema.safeParse({ objectName: 'deal', filter });
+    expect(result.success).toBe(true);
+    expect((result.data as { filter: unknown }).filter).toEqual(filter);
+  });
+
+  it.each(contracts)('%s ACCEPTS a literal and hands a query placeholder on untouched, at any depth', (_type, schema) => {
+    const filter = {
+      status: 'open',
+      owner_id: '{current_user_id}',
+      org: '${current_org_id}',
+      due: { $lt: '{today}', $gte: '{30_days_ago}' },
+      $and: [{ closed_at: { $between: ['{last_month_start}', '{last_month_end}'] } }],
+      note: { $contains: 'quarterly review' },
+      n: { $gte: 3 }, flag: true, gone: null,
+    };
+    const result = schema.safeParse({ objectName: 'deal', filter });
+    expect(result.success).toBe(true);
+    expect((result.data as { filter: unknown }).filter).toEqual(filter);
+  });
+
+  it.each(contracts)('%s REFUSES a malformed envelope at an operand — led by the slot-neutral sentence, at its source', (_type, schema) => {
+    const issues = issuesOf(schema, { owner: { $eq: { dialect: 'cel', source: '   ' } } });
+    expect(issues.map((i) => [i.code, ['filter', ...i.path.slice(1)].join('.')])).toEqual([['custom', 'filter.owner.$eq.source']]);
+    expect(issues[0]!.message.startsWith(VALUE_ENVELOPE_REFUSAL)).toBe(true);
+  });
+
+  it.each(contracts)('%s declares the operands to the expression ledger on `filter`, once', (type, schema) => {
+    const direct = z.toJSONSchema(schema, { target: 'draft-2020-12', io: 'input', unrepresentable: 'any' }) as
+      { properties?: Record<string, { xExpression?: string; additionalProperties?: Record<string, unknown> }> };
+    expect(direct.properties?.filter?.xExpression).toBe('value');
+    expect(direct.properties?.filter?.additionalProperties?.xExpression).toBeUndefined();
+    const projected = getSchemalessNodeConfigJsonSchemas()[type] as typeof direct;
+    expect(projected.properties?.filter?.xExpression).toBe('value');
   });
 });
 

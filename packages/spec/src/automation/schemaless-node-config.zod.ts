@@ -694,12 +694,12 @@ export const LEDGER_DECLARED_NODE_CONFIG_SCHEMAS = {
   assignment: AssignmentConfigSchema,
   create_record: CreateRecordConfigSchema,
   update_record: UpdateRecordConfigSchema,
-  get_record: GetRecordConfigSchema,
-  delete_record: DeleteRecordConfigSchema,
   map: MapConfigSchema,
   screen: ScreenConfigSchema,
   notify: NotifyConfigSchema,
   http: HttpConfigSchema,
+  get_record: GetRecordConfigSchema,
+  delete_record: DeleteRecordConfigSchema,
 } as const satisfies Record<string, z.ZodType>;
 
 /** Node types whose expression slots reach the ledger through {@link LEDGER_DECLARED_NODE_CONFIG_SCHEMAS}. */
