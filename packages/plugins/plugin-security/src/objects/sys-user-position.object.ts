@@ -85,6 +85,10 @@ export const SysUserPosition = ObjectSchema.create({
       label: 'Position',
       required: true,
       maxLength: 100,
+      // [ADR-0131 D4, #15204 B2] Picked, not typed: the form lists the
+      // positions the security catalog serves and stores the chosen NAME.
+      // Falls back to a text input where the widget is not registered.
+      widget: 'position-ref',
       description: 'Position machine name (references sys_position.name).',
     }),
 
