@@ -35,6 +35,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { aiJsonSchemaSlot } from '../shared/ai-json-schema-slot';
 import { ACTION_TARGET_ALIASES } from './action-target-aliases';
+import { navigationTargetRefusal } from './navigation-target';
 
 /**
  * Semantic near-misses — a different **word** for the same intent, usually
@@ -1036,8 +1037,16 @@ const actionObject = () => strictObject({
    *   (window.origin), `ctx.recordId`, `ctx.user.id`, `ctx.org.id`, etc.
    * Renderers MUST `encodeURIComponent` interpolated values before
    * substituting them into URL query positions.
+   *
+   * **The url scheme set** (`type: 'url'` only): `target` is an `http://` or
+   * `https://` URL, a `mailto:` address, an in-app path that starts with `/`
+   * or `./`, or a template that opens with `${` (judged after interpolation,
+   * at the click). Every other scheme, a protocol-relative `//host`, a `/`
+   * followed by a backslash, a tab / line feed / carriage return anywhere, and
+   * a bare relative target are refused at parse — the same set the console's
+   * action runner opens (`navigation-target.ts`).
    */
-  target: z.string().optional().describe('URL, Script Name, Flow ID, or API Endpoint. Supports ${param.X} and ${ctx.X} interpolation.'),
+  target: z.string().optional().describe("URL, Script Name, Flow ID, or API Endpoint. Supports ${param.X} and ${ctx.X} interpolation. For type:'url': an http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ — every other scheme and a protocol-relative //host are refused."),
 
   /**
    * For `type:'url'` — where to open `target`. A simple, declarative new-tab
@@ -2013,6 +2022,24 @@ function refuseInertOutcomeMessages(
   }
 }
 
+/**
+ * The scheme set of a `type: 'url'` action's `target`, enforced at both
+ * url-action doors — {@link ActionSchema} and {@link InlineActionSchema}, where
+ * the legacy `to` / `type: 'navigation'` spellings have already been folded onto
+ * `target` / `url`. The grammar is `navigation-target.ts`'s, the one the
+ * console's action runner applies at the click; this only scopes it to the url
+ * route. `target` on every other type names a script, flow, page, endpoint or
+ * form and is not a navigation target, so it is untouched. An empty `target` is
+ * left to the target-required rule, which already names it.
+ */
+function refuseUnopenableUrlTarget(subject: string) {
+  return (data: { type?: string; target?: string }, ctx: z.core.$RefinementCtx): void => {
+    if (data.type !== 'url' || typeof data.target !== 'string' || data.target === '') return;
+    const refusal = navigationTargetRefusal(data.target, subject);
+    if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: ['target'], message: refusal });
+  };
+}
+
 export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
   // Require `target` for types that reference an external resource
   if (TARGET_REQUIRED_TYPES.has(data.type) && !data.target) {
@@ -2022,7 +2049,7 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
 }, {
   message: "Action 'target' is required when type is 'url', 'flow', 'modal', 'api', or 'form'.",
   path: ['target'],
-}).refine((data) => {
+}).superRefine(refuseUnopenableUrlTarget("A `type: 'url'` action's `target`")).refine((data) => {
   // A `script` action must be *executable*: it needs either an inline `body`
   // (the runtime invokes it in the sandbox) or a `target` naming a registered
   // bundle function. With neither, AppPlugin registers no engine handler and
@@ -2377,7 +2404,9 @@ export const InlineActionSchema = lazySchema(() => z.preprocess(
   }, {
     message: "Inline action 'target' is required when type is 'url', 'flow', 'modal', 'api', or 'form' (`to` is accepted as a legacy spelling).",
     path: ['target'],
-  }),
+  }).superRefine(refuseUnopenableUrlTarget(
+    "An inline `type: 'url'` action's `target` (or its legacy spelling `to`)",
+  )),
 ));
 
 /**
