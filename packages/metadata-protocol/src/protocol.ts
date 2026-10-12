@@ -937,6 +937,79 @@ function runtimeHookWithoutBodyRefusal(
     return err;
 }
 
+/** The author-facing lock block (ADR-0010 Phase 4.3), as the spec mounts it on a metadata item. */
+const PROTECTION_BLOCK_KEY = 'protection';
+
+/**
+ * [ADR-0010 §3.5 and Phase 4.3] The save door's refusal of a `protection`
+ * block — the package author's lock declaration, which this door cannot
+ * honour.
+ *
+ * ADR-0010 states one door for the block. Phase 4.3 calls it the public
+ * author surface "that translates into the private `_lock` envelope at load
+ * time": the loader "calls `applyProtection(item, { packageId })` to translate
+ * the block … and strips the public `protection` block so it never leaks into
+ * the overlay row". An item this door writes is authored in the environment,
+ * and §3.5 states what a lock means for one: "Tenant `org` artifacts ignore
+ * L3 / L4 entirely (the tenant owns them in full, can also delete them)". So
+ * the block has no translation here, and translating it anyway would open a
+ * lock door ADR-0010 does not state. Stored verbatim, which is what this door
+ * did before, the block was served back as `protection.lock: 'full'` while the
+ * item read `lock: 'none'` and every edit and delete succeeded: a body telling
+ * its reader the item is protected when it is not.
+ *
+ * Asked only on a type whose schema declares the block, read structurally by
+ * {@link overlaySchemaDeclaredKey} (the unmanaged import asks the same
+ * question). On any other type the schema's own verdict stands: an
+ * unrecognized key, refused by the parse.
+ *
+ * Every writer through this door is judged, as for
+ * {@link runtimeHookWithoutBodyRefusal}: the REST and dispatcher saves, in
+ * draft and in publish mode, and the two server-stated re-savers
+ * (`migrateStoredMetadata`, `duplicatePackage`), which record this refusal as
+ * the row's failure. The unmanaged import strips a block it can parse before
+ * the body reaches this door (`stripUnmanagedImportLock`). A row stored before
+ * this rule keeps its bytes.
+ *
+ * `VALIDATION_ERROR` / 400, the envelope of the door's other content refusals
+ * (`savedItemNameRefusal`, the hook refusal above). No code is minted. It is
+ * located twice: the message names the key, and `issues[]` carries it as a
+ * path, the shape the Studio designer keys on. Every present value is refused,
+ * a malformed block included, because the block is not accepted here at all:
+ * judging its value first would ask an author to repair a block they then have
+ * to delete. The message prescribes first and explains second, because a 4xx
+ * message crosses the REST boundary bounded at 500 characters with its TAIL
+ * truncated.
+ *
+ * ⛔ The prescription names the package loader's door, never a `_lock*` key:
+ * those are the runtime's private envelope, never authored
+ * (`shared/protection.zod.ts`).
+ */
+function protectionBlockRefusal(
+    type: string,
+    item: unknown,
+    saveName: string,
+): (Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] }) | undefined {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
+    if (!Object.prototype.hasOwnProperty.call(item, PROTECTION_BLOCK_KEY)) return undefined;
+    if ((item as Record<string, unknown>)[PROTECTION_BLOCK_KEY] === undefined) return undefined;
+    if (overlaySchemaDeclaredKey(type, PROTECTION_BLOCK_KEY) === undefined) return undefined;
+    const err = new Error(
+        `Remove the \`protection\` block from ${type} '${saveName}' and send it again. Nothing was written. `
+        + 'This door does not translate the block, so it would lock nothing: an item saved through the metadata API '
+        + 'is authored in this environment (ADR-0010 §3.5). To lock an item, declare `protection` on it in a code '
+        + "package's source, where the package loader translates it into the item's lock (ADR-0010 Phase 4.3).",
+    ) as Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] };
+    err.code = 'VALIDATION_ERROR';
+    err.status = 400;
+    err.issues = [{
+        path: PROTECTION_BLOCK_KEY,
+        message: "Not accepted through the metadata API: only a code package's loader translates `protection` into a lock.",
+        code: 'custom',
+    }];
+    return err;
+}
+
 /**
  * One entry of the `422 INVALID_METADATA` envelope's `issues[]` — the shape
  * Studio's designer keys on to highlight the offending form control.
@@ -20543,6 +20616,19 @@ export class ObjectStackProtocolImplementation implements
                     request.name, layer.packageId, layer.ownerPackageId,
                 );
             }
+        }
+
+        // [ADR-0010 §3.5, Phase 4.3] A `protection` block is refused, on every
+        // type that declares one: only a code package's loader translates it
+        // into a lock, and this door writes environment-authored items, so it
+        // was stored verbatim and served as a lock that bound nothing. Asked
+        // after the authorization refusals above (a locked item still answers
+        // `ITEM_LOCKED`, a sealed one `NOT_OVERRIDABLE`) and before every gate
+        // that reads or reshapes the body, so the block is judged as authored
+        // and a refused save costs no read. See {@link protectionBlockRefusal}.
+        {
+            const protectionRefusal = protectionBlockRefusal(singularType, request.item, request.name);
+            if (protectionRefusal) throw protectionRefusal;
         }
 
         // Phase 3a-destructive: for `object` writes, diff against the

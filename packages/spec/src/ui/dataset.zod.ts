@@ -531,9 +531,10 @@ export const DatasetSchema = lazySchema(() => strictObject({
   measures: z.array(DatasetMeasureSchema).describe('Aggregatable values'),
 
   /**
-   * ADR-0010 — package-author protection envelope; the loader translates this
-   * into the private `_lock` envelope at registration and strips it before
-   * persistence.
+   * ADR-0010 — package-author protection envelope, declared in a code package's
+   * source; the loader translates this into the private `_lock` envelope at
+   * registration and strips it. The metadata API's save door does not translate
+   * it and refuses it (`400 VALIDATION_ERROR`), so that door never stores it.
    */
   protection: ProtectionSchema.optional().describe(
     'Package author protection block — lock policy for this dataset.',
