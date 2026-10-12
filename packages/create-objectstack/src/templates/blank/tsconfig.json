@@ -11,5 +11,5 @@
     "noEmit": true,
     "isolatedModules": true
   },
-  "include": ["*.ts", "src/**/*"]
+  "include": ["objectstack.config.ts", "src/**/*"]
 }
