@@ -61,20 +61,7 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // `revoked` on ONE key. The multi-select surface this rule protects does not
   // exist for API keys, and the shape a future one would take does not need
   // `bulk` either — both read off the console build this release pins
-  // (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
-  // in `packages/plugin-grid`, on the hop off `499799502`, `ObjectGrid.tsx`
-  // changed again (27 insertions, 11 deletions: objectui#12143's grouped-pager
-  // button names and objectui#12110 item 1's column-label override), none of it
-  // inside the selection block, which only MOVED by +16: `ObjectGrid.tsx:4997-5024`
-  // here (`4981-5008` at `499799502`), still hashing to
-  // `c88443302d40c2db739ddb235470bafa29056e2e` (hash-object of the block),
-  // re-READ with the same reading below; neither hunk touches the bulk defs or
-  // their verdicts, so the `delete` verdict line MOVED `:1787` -> `:1793` and the
-  // promoted def's params `:5165-5184` -> `:5181-5200` (called at `:5200` ->
-  // `:5216`), each byte-identical. `hooks/useBulkExecutor.ts` is byte-identical
-  // to `499799502` and its `:298-303` still hashes to
-  // `01083348330f10a201cdf1078b4c21c236402b6a`. At `499799502`, re-read there
-  // 2026-10-11:
+  // (`.objectui-sha` = `499799502`, re-read there 2026-10-11:
   // in `packages/plugin-grid`, on the hop off `0df67f237`, `ObjectGrid.tsx`
   // changed again (89 insertions, 44 deletions: objectui#12081 item 3's
   // whole-set footer and objectui#12082 leg A), none of it inside the
