@@ -554,9 +554,13 @@ describe('seeded notify recipients resolve to a real user (#7746)', () => {
       if (typeof object !== 'string') continue;
       // Stringify the WHOLE flow: notify nodes also live nested inside branch
       // bodies (`showcase_project_escalation`), which a top-level scan misses.
+      // [#19939] A recipient is a CEL value envelope now (one, or a list of
+      // them), so the field is the trigger record's DIRECT field its source
+      // reads (`has(record.assignee) ? record.assignee : null`); a hop
+      // (`record.account.owner`) or a call is not a field of this object.
       const json = JSON.stringify(flow);
-      for (const [, group] of json.matchAll(/"recipients":\s*(\[[^\]]*\]|"[^"]*")/g)) {
-        for (const [, field] of group.matchAll(/\{record\.(\w+)\}/g)) {
+      for (const [, group] of json.matchAll(/"recipients":\s*(\[[^\]]*\]|"[^"]*"|\{[^}]*\})/g)) {
+        for (const [, field] of group.matchAll(/\brecord\.(\w+)(?![\w.(])/g)) {
           if (!byObject.has(object)) byObject.set(object, new Set());
           byObject.get(object)!.add(field);
         }

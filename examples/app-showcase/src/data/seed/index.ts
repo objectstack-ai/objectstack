@@ -23,7 +23,8 @@ import { ADMIN_EMAIL, PHONE_DEMO_USER, AUDITOR_DEMO_USER } from '../../security/
  *
  * `showcase_task.assignee` and `showcase_project.owner` are `Field.text`, but
  * they are not free text: the notify nodes in `automation/flows` read them as
- * RECIPIENTS (`recipients: ['{record.assignee}']`, `['{record.owner}']`). An
+ * RECIPIENTS (a `recipients` entry evaluating `record.assignee` or
+ * `record.owner`). An
  * email-shaped recipient is resolved against `sys_user`, and on a MISS the
  * resolver keeps it VERBATIM as the recipient id — so a made-up address does
  * not fail loudly, it persists a `sys_inbox_message` whose `user_id` is a

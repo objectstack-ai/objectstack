@@ -3,7 +3,7 @@
   "measured": {
     "zod": "4.4.3",
     "publishedSchemasWithDroppedRefinements": 226,
-    "droppedRefinementSites": 708,
+    "droppedRefinementSites": 711,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -528,7 +528,10 @@
     },
     "automation/NotifyConfig": {
       "sites": [
-        ""
+        "",
+        "recipients",
+        "sourceId",
+        "templateData.valueType"
       ]
     },
     "automation/ParallelBranch": {

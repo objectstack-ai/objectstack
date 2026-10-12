@@ -390,16 +390,16 @@ function viewSuppliesBinding(view: AnyRec, predicate: VisualizationPredicate): b
   return predicate.viewBlocks.some((key) => isRec(view[key]) || (!!options && isRec(options[key])));
 }
 
-/** What the derivation looked for, in the author's vocabulary. */
+/**
+ * The field the `fix:` line asks for, in the author's vocabulary: the TYPE half
+ * of the derivation. [#22161] The NAME fallback the renderer also tries is
+ * `os explain page/visualization-without-binding`, which writes the whole
+ * derivation out; a field of the named type is the remedy that always binds.
+ */
 function describeSearch(predicate: VisualizationPredicate): string {
-  const types = `a field typed ${predicate.types.join(' / ')}`;
-  const byName =
-    predicate.namePattern === null
-      ? ''
-      : `, then a field whose NAME matches /${predicate.namePattern}/i`;
   return predicate.visualization === 'gantt'
     ? `two distinct fields typed ${predicate.types.join(' / ')} (a start and an end)`
-    : `${types}${byName}`;
+    : `a field typed ${predicate.types.join(' / ')}`;
 }
 
 export function validatePageVisualizationBindings(stack: AnyRec): PageVisualizationFinding[] {
@@ -474,12 +474,12 @@ export function validatePageVisualizationBindings(stack: AnyRec): PageVisualizat
             ? `view "${sourceView}" has no \`${predicate.viewBlocks[0]}:\` block`
             : 'no `sourceView` supplies it')
           + (leading ? ', so every visitor lands on its refusal screen' : ', so the switcher SILENTLY drops it'),
+        // [#22161] One remedy line, the three routes. Why `sourceView` is the
+        // one channel on this door, and the name fallback the derivation also
+        // tries, are `os explain page/visualization-without-binding`.
         hint:
-          `An interface page has no per-visualization binding key of its own — \`sourceView\` is the `
-          + `one schema-legal channel. Point this page at a "${objectName}" list view that declares a `
-          + `\`${predicate.viewBlocks[0]}:\` block (\`interfaceConfig.sourceView: '<view_key>'\`), give `
-          + `"${objectName}" a field the derivation can find (${describeSearch(predicate)}), or drop `
-          + `'${viz}' from \`appearance.allowedVisualizations\`.`,
+          `Point \`sourceView\` at a list view with a \`${predicate.viewBlocks[0]}:\` block, give `
+          + `"${objectName}" ${describeSearch(predicate)}, or drop '${viz}' from the whitelist`,
       });
     }
   }

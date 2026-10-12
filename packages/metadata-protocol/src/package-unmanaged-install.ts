@@ -9,7 +9,9 @@
  * it upgrades, and nothing it ships may be edited. UNMANAGED (the spelling
  * ruled on the D6 execution card, 2026-10-11): every metadata item is copied
  * ONCE into the environment ledger, becomes this environment's own metadata,
- * is fully editable, and never follows an upgrade. The orchestration —
+ * which the next save edits (an item shipped with an authored `_lock` keeps
+ * that lock as written today, and a follow-up on #15213 strips it per
+ * #22971's ruling A), and never follows an upgrade. The orchestration —
  * reading the store, minting the base, writing each item through
  * `saveMetaItem`, deleting the base when a write fails — is
  * `ObjectStackProtocolImplementation.importUnmanagedPackage` (`protocol.ts`).
@@ -38,116 +40,44 @@
  *  - the artifact envelope (`packages`, a nested `manifest`), because one
  *    import copies one package.
  *
- * ## What is deliberately NOT this verb's — and is not dropped
+ * ## Translations are copied; seeds and deployment configuration are not
  *
- * Two kinds of key are left to the caller, on purpose, because a managed
- * install leaves them out of the manifest service too:
- *
- *  - `data` (seed datasets) and `translations` (i18n bundles) are SIDE EFFECTS
- *    the install door applies after registering the package, in either mode —
- *    `marketplace-install-local-plugin.ts` step 5 runs the seeds and loads the
- *    bundles. Seeds are data, never metadata items (the artifact loader says
- *    so beside its collection map), so a copy of the metadata cannot carry
- *    them; the door that calls this verb decides their fate;
+ *  - `translations` (i18n bundles) are COPIED, converted: each locale of each
+ *    bundle becomes one `translation` item named `<namespace>_<locale>` (the
+ *    locale lower-cased, its hyphens underscored — `crm_zh_cn`), the bundles
+ *    that declare one locale deep-merged in declaration order, as the i18n
+ *    service merges bundles. A managed install's bundles reload at every boot
+ *    because its install-ledger entry is replayed; an unmanaged install has no
+ *    ledger entry, so its bundles live where environment translations live —
+ *    in the environment ledger, reloaded at every boot by the
+ *    authored-translation sync;
+ *  - `data` (seed datasets) is data, never a metadata item (the artifact loader
+ *    says so beside its collection map), so a copy of the metadata cannot carry
+ *    it; the install door that calls this verb states what it did with it;
  *  - deployment configuration (`i18n`, `requires`, `datasourceMapping`, `api`,
  *    …) is read by the BOOT of the stack that declares it, never by an install
  *    of a package, in either mode.
  *
- * Every other key is refused as unrecognised: a key added to the stack later
- * is refused here, loudly, until it is classified — never silently skipped.
+ * The classification of every key is spec's
+ * ({@link UNMANAGED_INSTALL_KEY_DISPOSITIONS}, `@objectstack/spec/kernel`), the
+ * one table `defineStack` also reads to refuse a package that permits
+ * `unmanaged` while carrying what this import refuses. Every key it does not
+ * classify is refused as unrecognised: a key added to the stack later is
+ * refused here, loudly, until it is classified — never silently skipped.
  */
 
-import { ManifestSchema, manifestIdRefusal, deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
+import {
+    ManifestSchema,
+    manifestIdRefusal,
+    deriveNamespaceFromPackageId,
+    UNMANAGED_INSTALL_KEY_DISPOSITIONS,
+    unmanagedInstallValueCarries,
+} from '@objectstack/spec/kernel';
 import { METADATA_ITEM_NAME_PATTERN, PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { ASSEMBLED_VIEW_ITEMS_KEY, expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec/ui';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { resolveTenancyPosture } from '@objectstack/types';
 import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
-
-/**
- * How the import treats one top-level key of a package body that is NOT a
- * metadata collection. Collections are read off {@link UNMANAGED_IMPORT_COLLECTIONS}.
- *
- *  - `identity`  — describes the package; carried onto the new base's manifest.
- *  - `base`      — read to mint the base and never carried as written: `id` is
- *                  replaced by the target id, `namespace` is kept, `scope` is
- *                  stripped because the base is a WRITABLE package.
- *  - `code`      — refused: code, or a descriptor of a code-bearing artifact.
- *  - `uncopyable`— refused: package content the environment ledger has no row for.
- *  - `envelope`  — refused: it describes an artifact, not one package.
- *  - `door`      — not this verb's: a side effect the install door applies.
- *  - `deployment`— not this verb's: deployment configuration no install applies.
- */
-export type UnmanagedImportKeyDisposition =
-    | 'identity'
-    | 'base'
-    | 'code'
-    | 'uncopyable'
-    | 'envelope'
-    | 'door'
-    | 'deployment';
-
-/**
- * Every non-collection key a flattened package body may carry, classified.
- * The union of `ManifestSchema`'s live keys and the stack definition's
- * non-collection keys; `package-unmanaged-install.test.ts` holds it total
- * against both schemas, so a key either schema gains reddens a test instead of
- * being refused at a door with no reason on record.
- */
-export const UNMANAGED_IMPORT_KEY_DISPOSITIONS: Readonly<Record<string, UnmanagedImportKeyDisposition>> = {
-    // ── The package's identity ──
-    id: 'base',
-    namespace: 'base',
-    scope: 'base',
-    name: 'identity',
-    version: 'identity',
-    type: 'identity',
-    description: 'identity',
-    // An object with no `datasource` routes to its package's default, so a
-    // base that dropped this would move every such object to `default`.
-    defaultDatasource: 'identity',
-    dependencies: 'identity',
-    engines: 'identity',
-    engine: 'identity',
-
-    // ── Code, and the descriptors of a code-bearing plugin artifact ──
-    functions: 'code',
-    onEnable: 'code',
-    plugins: 'code',
-    devPlugins: 'code',
-    runtimeModule: 'code',
-    main: 'code',
-    runtime: 'code',
-    packaging: 'code',
-    integrity: 'code',
-
-    // ── Content the environment ledger has no row for ──
-    objectExtensions: 'uncopyable',
-    picklistExtensions: 'uncopyable',
-    navigationContributions: 'uncopyable',
-    contributes: 'uncopyable',
-
-    // ── The artifact, not one package ──
-    packages: 'envelope',
-    manifest: 'envelope',
-
-    // ── The install door's side effects, in either mode ──
-    data: 'door',
-    translations: 'door',
-
-    // ── Deployment configuration: read by a stack's boot, by no install ──
-    i18n: 'deployment',
-    datasourceMapping: 'deployment',
-    api: 'deployment',
-    server: 'deployment',
-    appName: 'deployment',
-    email: 'deployment',
-    sms: 'deployment',
-    requires: 'deployment',
-    tiers: 'deployment',
-    devHint: 'deployment',
-    devLogins: 'deployment',
-};
 
 /**
  * Every collection the import copies: manifest key → metadata type. The
@@ -310,7 +240,13 @@ export function planUnmanagedImport(
             }
             continue;
         }
-        const disposition = UNMANAGED_IMPORT_KEY_DISPOSITIONS[key];
+        const disposition = UNMANAGED_INSTALL_KEY_DISPOSITIONS[key];
+        // A refusing key that carries nothing — `functions: {}`, `plugins: []` —
+        // has nothing to refuse: a refusal names content, never a spelling.
+        if ((disposition === 'code' || disposition === 'uncopyable' || disposition === 'envelope')
+            && !unmanagedInstallValueCarries(value)) {
+            continue;
+        }
         switch (disposition) {
             case 'identity':
                 identity[key] = value;
@@ -331,6 +267,17 @@ export function planUnmanagedImport(
                         ? 'a release artifact carrying several packages — import each package body on its own'
                         : 'a nested manifest — flatten the bundle (its manifest fields beside its collections) first',
                 });
+                break;
+            case 'converted':
+                // Copied as `translation` items — refused whole if that type
+                // ever stops being one the save door may create.
+                if (unmanagedInstallValueCarries(value) && !options.isRuntimeCreatable(TRANSLATION_TYPE)) {
+                    findings.push({
+                        key,
+                        reason: `copied as '${TRANSLATION_TYPE}' items, and the metadata-type registry declares `
+                            + `'${TRANSLATION_TYPE}' runtime-uncreatable`,
+                    });
+                }
                 break;
             case 'base':
             case 'door':
@@ -368,7 +315,7 @@ export function planUnmanagedImport(
         );
     }
 
-    const items = enumerateItems(manifest, options.loadOrderOf);
+    const items = enumerateItems(manifest, options.loadOrderOf, namespace);
     const sourceVersion = stringKey(manifest, 'version');
     const baseManifest: Record<string, unknown> = {
         ...identity,
@@ -386,19 +333,106 @@ export function planUnmanagedImport(
     };
 }
 
+/** The metadata type a `translations` bundle's locales are copied as. */
+const TRANSLATION_TYPE = 'translation';
+
+/** A plain `{ … }` object — the shape a bundle, and each group in it, takes. */
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Merge `later` into `earlier`, later winning per leaf — the merge the i18n
+ * service applies when two bundles declare one locale, so the copied item
+ * resolves exactly as the two bundles did. Arrays and scalars replace.
+ */
+function mergeTranslationData(earlier: Record<string, unknown>, later: Record<string, unknown>): Record<string, unknown> {
+    const out: Record<string, unknown> = { ...earlier };
+    for (const [key, value] of Object.entries(later)) {
+        const prior = out[key];
+        out[key] = isPlainRecord(prior) && isPlainRecord(value) ? mergeTranslationData(prior, value) : value;
+    }
+    return out;
+}
+
+/**
+ * The item name a locale's translations are copied under: the package's
+ * namespace, then the locale lower-cased with its hyphens underscored
+ * (`crm` + `zh-CN` → `crm_zh_cn`) — a name the save door's grammar admits, and
+ * one that no other package's copy of the same locale can take.
+ */
+export function unmanagedTranslationItemName(namespace: string, locale: string): string {
+    return `${namespace}_${locale.toLowerCase().replace(/-/g, '_')}`;
+}
+
+/**
+ * The `translations` bundles as `translation` items — one per locale, the
+ * bundles that declare a locale merged in declaration order. Each item is the
+ * locale's groups as the bundle declares them, plus `name` and `locale`: the
+ * `translation` metadata type's item shape, which takes the same groups as a
+ * bundle entry. Problems are reported, never skipped.
+ */
+function translationItems(
+    value: unknown,
+    namespace: string,
+    problems: string[],
+): Array<{ name: string; locale: string; body: Record<string, unknown> }> {
+    if (!Array.isArray(value)) {
+        problems.push('`translations` is not an array of translation bundles');
+        return [];
+    }
+    const byLocale = new Map<string, Record<string, unknown>>();
+    value.forEach((bundle: unknown, index) => {
+        if (!isPlainRecord(bundle)) {
+            problems.push(`\`translations[${index}]\` is not a translation bundle (a map of locale to translations)`);
+            return;
+        }
+        for (const [locale, data] of Object.entries(bundle)) {
+            if (!isPlainRecord(data)) {
+                problems.push(`\`translations[${index}].${locale}\` is not a locale's translation data`);
+                continue;
+            }
+            const prior = byLocale.get(locale);
+            byLocale.set(locale, prior ? mergeTranslationData(prior, data) : data);
+        }
+    });
+    return [...byLocale].map(([locale, data]) => {
+        const name = unmanagedTranslationItemName(namespace, locale);
+        return { name, locale, body: { ...data, name, locale } };
+    });
+}
+
 /**
  * Every item of every collection, named the way the artifact loader names it
- * (a `defineView` container takes the object it binds), validated, and sorted
- * into write order. Refuses a collection that is not an array, an item that is
- * not an object or has no name, a name the save door's grammar refuses, and two
+ * (a `defineView` container takes the object it binds), plus the `translation`
+ * items the `translations` bundles convert into — validated, and sorted into
+ * write order. Refuses a collection that is not an array, an item that is not
+ * an object or has no name, a name the save door's grammar refuses, and two
  * items claiming one name.
  */
 function enumerateItems(
     manifest: Record<string, unknown>,
     loadOrderOf: (type: string) => number,
+    namespace: string,
 ): UnmanagedImportItem[] {
     const items: Array<UnmanagedImportItem & { rank: [number, number, number] }> = [];
     const problems: string[] = [];
+    if (unmanagedInstallValueCarries(manifest.translations)) {
+        translationItems(manifest.translations, namespace, problems).forEach(({ name, body }, index) => {
+            if (!METADATA_ITEM_NAME_PATTERN.test(name)) {
+                problems.push(`\`translations\` locale '${String(body.locale)}' names the item ${JSON.stringify(name)}, which is not a legal metadata item name`);
+                return;
+            }
+            items.push({
+                type: TRANSLATION_TYPE,
+                name,
+                key: 'translations',
+                body,
+                expands: [],
+                rank: [loadOrderOf(TRANSLATION_TYPE), UNMANAGED_IMPORT_COLLECTIONS.length, index],
+            });
+        });
+    }
     UNMANAGED_IMPORT_COLLECTIONS.forEach(([key, type], keyIndex) => {
         const value = manifest[key];
         if (value === undefined) return;

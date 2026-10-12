@@ -16,7 +16,7 @@ import { explainRule } from './rule-explanations.js';
 // not a chosen few. Run the whole file: that case reads what the cases above
 // fired.
 const SHORTENED_RULE_IDS: readonly string[] = [FLOW_UPDATE_READONLY_FIELD, FLOW_UPDATE_READONLY_WHEN_FIELD];
-const firedShortened: Array<{ rule: string; message: string }> = [];
+const firedShortened: Array<{ rule: string; message: string; hint: string }> = [];
 const validateReadonlyFlowWrites: typeof validateReadonlyFlowWritesUnrecorded = (...args) => {
   const findings = validateReadonlyFlowWritesUnrecorded(...args);
   for (const f of findings) if (SHORTENED_RULE_IDS.includes(f.rule)) firedShortened.push(f);
@@ -186,7 +186,10 @@ describe('validateReadonlyFlowWrites', () => {
     // in `engine-readonly-when-derived-writes.test.ts`, and the strict-mode
     // sibling's "covers readonlyWhen too - the arm a trusted (isSystem) caller
     // can still hit".
-    expect(finding.hint).toContain('Elevation is not a workaround here');
+    // [#22161] The `fix:` line refuses elevation in one clause; the slogan and
+    // its reasons are the explanation's, one command away.
+    const why = explanationOf(FLOW_UPDATE_READONLY_WHEN_FIELD);
+    expect(why).toContain('elevation is no workaround');
     expect(finding.hint).toContain('NOT waived by a system context');
     expect(finding.hint).not.toMatch(/run the flow runAs:'system'/);
 
@@ -196,7 +199,7 @@ describe('validateReadonlyFlowWrites', () => {
     // REPORT: a hook-derived value on a TRUE readonlyWhen field now LANDS").
     expect(finding.hint).toContain('readonlyWhen predicate is FALSE');
     expect(finding.hint).toContain('beforeUpdate hook');
-    expect(finding.hint).toContain('does land, even on a locked record');
+    expect(why).toContain('does land, even on a locked record');
 
     // The static-`readonly` sibling hint keeps recommending runAs:'system',
     // because for THAT strip elevation really is the intended channel. The two
@@ -698,5 +701,44 @@ describe('[#22161] one-line verdicts — the rule ids this file shortened', () =
     expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
     const text = explanation!.paragraphs.join('\n');
     for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
+});
+
+// [#22161] Slice 13: the `fix:` line. The static id names its routes in one
+// line per verb (runAs:'system', the create-time beforeInsert stamp, removing
+// the field); the readonlyWhen id names its two routes and the refusal of
+// elevation. Why each route works, the drop-the-field alternative and that the
+// warning never blocks a build are the ids' explanations.
+describe('[#22161] one-line fixes — the rule ids this file shortened', () => {
+  it('every `fix:` line the cases above fired for those ids is one line of at most 200 characters', () => {
+    const converted = firedShortened;
+    // Coverage control: both ids fired, and the static id on both verbs.
+    expect([...new Set(converted.map((f) => f.rule))].sort()).toEqual([...SHORTENED_RULE_IDS].sort());
+    for (const verb of ['create_record', 'update_record']) {
+      expect(converted.some((f) => f.rule === FLOW_UPDATE_READONLY_FIELD && f.hint.includes(verb)), verb).toBe(true);
+    }
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  const MOVED_FROM_FIX: Record<string, readonly string[]> = {
+    [FLOW_UPDATE_READONLY_FIELD]: [
+      'governs the end-user and API surface, not trusted system writers',
+      'Seeding a readonly column at create time is a SYSTEM act',
+      "hook-assigned key is the hook's write, not a caller-supplied one, and survives the strip",
+    ],
+    [FLOW_UPDATE_READONLY_WHEN_FIELD]: [
+      'elevation is no workaround',
+      'does land, even on a locked record',
+      'remove the field from the `update_record` node',
+      'The warning never blocks a build',
+    ],
+  };
+
+  it.each([...SHORTENED_RULE_IDS])('`os explain %s` carries what its `fix:` line no longer says', (rule) => {
+    const text = explanationOf(rule);
+    for (const fact of MOVED_FROM_FIX[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
   });
 });

@@ -503,13 +503,12 @@ function anchorFindings(
       message:
         `anchor object "${object}" declares sharingModel 'controlled_by_parent', so its access is derived ` +
         'from its master and the grant is refused (SHARING_NOT_ENABLED)',
+      // [#22161] One remedy line; that the detail rows follow the master, and
+      // that a baseline of its own is a different decision, are the
+      // `os explain` entry's.
       hint:
-        `Move the rule onto the MASTER object` +
-        (master ? ` — "${object}" derives from "${master}" through its master_detail field, so share ` +
-          `"${master}" and the detail rows follow` : `, and share that instead; the detail rows follow`) +
-        `. If "${object}" is meant to carry a record-level baseline of its own, that is a different ` +
-        `decision: change its sharingModel to 'private' (owner + shares) or 'public_read', and this ` +
-        `rule becomes enforceable where it stands.`,
+        `Move the rule onto the master object${master ? ` "${master}"` : ''}, or give "${object}" a ` +
+        `sharingModel of its own ('private' or 'public_read') so the rule enforces where it stands`,
     }];
   }
 
@@ -534,13 +533,12 @@ function anchorFindings(
     message:
       `anchor object "${object}" ${declared}, so the grant is refused (SHARING_NOT_ENABLED) and the rule ` +
       'restricts nothing',
+    // [#22161] One remedy line naming both honest fixes; how to tell which
+    // half is wrong, and why re-homing the rule fixes nothing, are the
+    // `os explain` entry's.
     hint:
-      `Decide which half is wrong. If the ACCESS is right — everyone should read and write these ` +
-      `records — the rule is dead metadata: delete it (ADR-0049 enforce-or-remove). If the RULE is ` +
-      `right — only the named audience should reach these records — then "${object}"'s OWD is the ` +
-      `defect: set sharingModel: 'private' (owner + shares) or 'public_read', and this rule starts ` +
-      `enforcing. Do NOT re-home the rule onto another public object; that moves the inertness ` +
-      `instead of removing it.`,
+      `If everyone should reach these records, delete it; if only its audience should, set "${object}"'s ` +
+      `sharingModel: 'private' or 'public_read'`,
   }];
 }
 

@@ -28,14 +28,13 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
-import { ObjectStackDefinitionSchema } from '@objectstack/spec';
 import { ImportUnmanagedPackageResponseSchema } from '@objectstack/spec/api';
-import { DEFAULT_METADATA_TYPE_REGISTRY, ManifestSchema } from '@objectstack/spec/kernel';
+import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { resolveThrownHttpError } from '@objectstack/types';
 import {
     UNMANAGED_IMPORT_COLLECTIONS,
-    UNMANAGED_IMPORT_KEY_DISPOSITIONS,
     planUnmanagedImport,
+    unmanagedTranslationItemName,
 } from './package-unmanaged-install.js';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
@@ -175,8 +174,9 @@ function crmBody(extra: Record<string, unknown> = {}): Record<string, unknown> {
             viewKind: 'list',
             columns: [{ field: 'title', label: 'Title' }],
         }],
-        // Not this verb's: the door applies seeds and bundles, in either mode.
+        // Not this verb's: seeds are data, and the door states what it did with them.
         data: [{ object: 'crm_lead', records: [{ title: 'First' }] }],
+        // An empty bundle list converts into no `translation` item.
         translations: [],
         i18n: { defaultLocale: 'en' },
         ...extra,
@@ -214,30 +214,10 @@ afterEach(() => {
     resetEnvWritableMetadataTypes();
 });
 
-describe('the key classification is total against both schemas a package body is read with', () => {
-    const collections = new Set(UNMANAGED_IMPORT_COLLECTIONS.map(([key]) => key));
-    // A key retired with a tombstone (ADR-0049) is refused as unrecognised,
-    // never classified: its declaration says nothing reads it.
-    const tombstoned = (schema: any) => /^\[REMOVED\]/.test(String(schema?.description ?? ''));
-
-    it('classifies every live ManifestSchema key', () => {
-        const missing = Object.entries(ManifestSchema.shape)
-            .filter(([key, schema]) => !collections.has(key) && !tombstoned(schema) && !(key in UNMANAGED_IMPORT_KEY_DISPOSITIONS))
-            .map(([key]) => key);
-        expect(missing).toEqual([]);
-    });
-
-    it('classifies every stack-definition key', () => {
-        const shape = (ObjectStackDefinitionSchema as any).shape as Record<string, unknown>;
-        const missing = Object.keys(shape).filter((key) => !collections.has(key) && !(key in UNMANAGED_IMPORT_KEY_DISPOSITIONS));
-        expect(missing).toEqual([]);
-    });
-
-    it('classifies nothing neither schema declares — a stale row is a lie about a key', () => {
-        const declared = new Set([...Object.keys(ManifestSchema.shape), ...Object.keys((ObjectStackDefinitionSchema as any).shape)]);
-        expect(Object.keys(UNMANAGED_IMPORT_KEY_DISPOSITIONS).filter((key) => !declared.has(key))).toEqual([]);
-    });
-});
+// The key classification's totality against `ManifestSchema` and the stack
+// definition is held in spec, beside both schemas and the table itself
+// (`packages/spec/src/kernel/unmanaged-install.test.ts`), so the PR that adds a
+// key to either schema is the one that reddens.
 
 describe('planUnmanagedImport — what the body alone answers', () => {
     it('plans a NEW base: `<id>-copy`, the SOURCE namespace kept, no scope, the identity carried', () => {
@@ -309,6 +289,58 @@ describe('planUnmanagedImport — what the body alone answers', () => {
         });
     }
 
+    it('reads `installModes` and writes it nowhere — the door judges it; the base makes no promise about how it installs', () => {
+        const p = plan(crmBody({ installModes: ['managed', 'unmanaged'] }));
+        expect(p.baseManifest).not.toHaveProperty('installModes');
+        expect(p.items.map((i) => i.key)).not.toContain('installModes');
+    });
+
+    it('an empty code container carries no code — `functions: {}` and `plugins: []` refuse nothing', () => {
+        const p = plan(crmBody({ functions: {}, plugins: [], objectExtensions: [] }));
+        expect(p.items.map((i) => `${i.type}/${i.name}`)).toEqual(['object/crm_lead', 'view/crm_lead_open']);
+    });
+
+    it('copies `translations` as one `translation` item per locale, named `<namespace>_<locale>`, bundles merged in order', () => {
+        const p = plan(crmBody({
+            translations: [
+                {
+                    en: { objects: { crm_lead: { label: 'Lead', fields: { title: { label: 'Title' } } } } },
+                    'zh-CN': { objects: { crm_lead: { label: '线索', fields: { title: { label: '标题' } } } } },
+                },
+                // A second bundle on one locale: merged leaf by leaf, the later winning.
+                { 'zh-CN': { objects: { crm_lead: { fields: { title: { label: '主题' } } } }, messages: { saved: '已保存' } } },
+            ],
+        }));
+        const translations = p.items.filter((i) => i.type === 'translation');
+        expect(translations.map((i) => i.name)).toEqual(['crm_en', 'crm_zh_cn']);
+        expect(translations.every((i) => i.key === 'translations')).toBe(true);
+        expect(translations.find((i) => i.name === 'crm_zh_cn')!.body).toEqual({
+            name: 'crm_zh_cn',
+            locale: 'zh-CN',
+            objects: { crm_lead: { label: '线索', fields: { title: { label: '主题' } } } },
+            messages: { saved: '已保存' },
+        });
+        // After every collection whose items it may name: registry loadOrder.
+        expect(p.items.map((i) => i.type).indexOf('translation')).toBeGreaterThan(p.items.map((i) => i.type).indexOf('object'));
+    });
+
+    it('names the translation item after the namespace and the locale, in the save door\'s grammar', () => {
+        expect(unmanagedTranslationItemName('crm', 'zh-CN')).toBe('crm_zh_cn');
+        expect(unmanagedTranslationItemName('crm', 'en')).toBe('crm_en');
+        expect(unmanagedTranslationItemName('crm', 'zh-Hant-TW')).toBe('crm_zh_hant_tw');
+    });
+
+    it('refuses a `translations` that is not a list of bundles — INVALID_REQUEST / 400, before anything is written', () => {
+        for (const translations of [{ en: {} }, ['en'], [{ en: 'Lead' }]]) {
+            let err: any;
+            try { plan(crmBody({ translations })); } catch (e) { err = e; }
+            const envelope = resolveThrownHttpError(err);
+            expect(envelope.status).toBe(400);
+            expect(envelope.code).toBe('INVALID_REQUEST');
+            expect(err.message).toContain('`translations');
+        }
+    });
+
     it('refuses a target equal to the source, and one the id declaration refuses — 400, no code minted', () => {
         for (const targetPackageId of ['com.example.crm', 'not-a-reverse-domain-id']) {
             let err: any;
@@ -357,6 +389,21 @@ describe('importUnmanagedPackage — the verb', () => {
         expect(packages.get('com.example.crm-copy')?.manifest).toMatchObject({ id: 'com.example.crm-copy', namespace: 'crm' });
         expect(packages.get('com.example.crm-copy')?.manifest).not.toHaveProperty('scope');
         expect(packages.has('com.example.crm')).toBe(false);
+    });
+
+    it('copies the translation bundles into the base as `translation` rows — environment translations, reloaded at every boot', async () => {
+        const { protocol, table } = makeProtocol();
+        const result = await protocol.importUnmanagedPackage({
+            manifest: crmBody({
+                translations: [{ 'zh-CN': { objects: { crm_lead: { label: '线索' } } } }],
+            }),
+        });
+        expect(result.copied).toContainEqual({ type: 'translation', name: 'crm_zh_cn' });
+        const row = table('sys_metadata').find((r) => r.type === 'translation' && r.name === 'crm_zh_cn' && r.state === 'active');
+        expect(row).toBeDefined();
+        expect({ package_id: row!.package_id, organization_id: row!.organization_id ?? null })
+            .toEqual({ package_id: 'com.example.crm-copy', organization_id: null });
+        expect(JSON.parse(row!.metadata)).toMatchObject({ locale: 'zh-CN', objects: { crm_lead: { label: '线索' } } });
     });
 
     it('creates the copied object\'s table through the save door', async () => {

@@ -197,7 +197,8 @@ interface TemplateRef {
  *    `builtin/template.ts`, `interpolate`): a token whose body is a plain
  *    dotted path;
  *  - a `{{ ... }}` hole — the formula template engine's grammar, which the
- *    text slots render since #22110 (a notify `title` / `message`, a screen
+ *    text slots render since #22110 (a notify `title` / `message` and, since
+ *    #19939, its `actionUrl`, a screen
  *    `title` / `description`, an `end` `message`): a path with an optional
  *    `| formatter[:arg]`, whose segments may be bracket-indexed
  *    (`{{ rows[0].subject }}`). The path before the pipe, with each `[i]`

@@ -123,7 +123,8 @@ describe('notify (baseline node)', () => {
                 message: 'Congrats on {{ dealName }}',
                 channels: ['inbox', 'email'],
                 severity: 'info',
-                actionUrl: '/opps/{dealId}',
+                // [#19939] A text slot: `{{ }}` holes, like `title`.
+                actionUrl: '/opps/{{ dealId }}',
             }));
 
             const result = await engine.execute('notify_flow', {
@@ -146,14 +147,15 @@ describe('notify (baseline node)', () => {
             expect(result.output).toMatchObject({ 'notify.delivered': 2 });
         });
 
-        it('forwards a click-through target via sourceObject/sourceId, interpolating the id (#2675)', async () => {
+        it('forwards a click-through target via sourceObject/sourceId, evaluating the id (#2675)', async () => {
             engine.registerFlow('notify_flow', notifyFlow({
                 recipients: ['user_1'],
                 title: 'Quote {{ dealName }} approved',
                 message: 'Fill in the line items',
                 channels: ['inbox'],
                 sourceObject: 'mtc_quotation',
-                sourceId: '{dealId}',
+                // [#19939] A value slot: a CEL value envelope, evaluated per run.
+                sourceId: { dialect: 'cel', source: 'dealId' },
             }));
 
             const result = await engine.execute('notify_flow', {
@@ -172,11 +174,12 @@ describe('notify (baseline node)', () => {
         // `flow-node-notify-config-aliases`, which lifts it. Verified by disabling
         // the lift: `source` comes back `undefined` and this test fails.
         it('accepts the nested source:{object,id} form and forwards actorId', async () => {
+            // [#19939] `actorId` is a literal, read as written.
             engine.registerFlow('notify_flow', notifyFlow({
                 recipients: ['user_1'],
                 title: 'Assigned to you',
-                source: { object: 'opportunity', id: '{dealId}' },
-                actorId: '{dealName}',
+                source: { object: 'opportunity', id: { dialect: 'cel', source: 'dealId' } },
+                actorId: 'user_boss',
             }));
 
             const result = await engine.execute('notify_flow', {
@@ -212,7 +215,7 @@ describe('notify (baseline node)', () => {
             engine.registerFlow('notify_flow', notifyFlow({
                 recipients: ['user_1'],
                 title: 'Heads up',
-                url: '/opps/{dealId}',
+                url: '/opps/{{ dealId }}',
             }));
 
             const result = await engine.execute('notify_flow', {
@@ -246,13 +249,15 @@ describe('notify (baseline node)', () => {
         });
 
         // ── #9205 — the localizable content path: template references ────────
-        it('emits the template reference + interpolated templateData instead of inline content', async () => {
+        it('emits the template reference + evaluated templateData instead of inline content', async () => {
             engine.registerFlow('notify_flow', notifyFlow({
                 topic: 'deal.won',
                 recipients: ['user_1'],
                 channels: ['inbox', 'email'],
                 template: 'crm.large_deal_won',
-                templateData: { dealName: '{dealName}', dealUrl: '/opps/{dealId}' },
+                // [#19939] Each value a value slot: a CEL value envelope evaluated
+                // per run, or a literal.
+                templateData: { dealName: { dialect: 'cel', source: 'dealName' }, dealUrl: { dialect: 'cel', source: "'/opps/' + dealId" }, kind: 'won' },
             }));
 
             const result = await engine.execute('notify_flow', {
@@ -263,11 +268,11 @@ describe('notify (baseline node)', () => {
             expect(messaging.emitted).toHaveLength(1);
             const payload = messaging.emitted[0].payload;
             // The reference rides RAW (a static metadata cross-reference); its
-            // render context is interpolated per run — that pair is what the
+            // render context is evaluated per run — that pair is what the
             // email channel resolves at delivery time, against one locale for the
             // whole notification (`payload.locale`, else the deployment default).
             expect(payload.template).toBe('crm.large_deal_won');
-            expect(payload.templateData).toEqual({ dealName: 'Acme', dealUrl: '/opps/42' });
+            expect(payload.templateData).toEqual({ dealName: 'Acme', dealUrl: '/opps/42', kind: 'won' });
             // No inline content keys on this path: a channel without template
             // support falls back to the topic, the honest degraded rendering —
             // not an empty string masquerading as content.
@@ -303,15 +308,20 @@ describe('notify (baseline node)', () => {
             expect(result.error).toContain('recipient');
         });
 
-        // ── framework#3582 — unresolved recipient templates ──────────────────
-        // `{record.owner.manager}` walks `.manager` on a scalar foreign-key id
-        // and resolves to nothing. `String(undefined)` used to make that the
-        // six-character audience member "undefined": the emit succeeded, the
-        // notification addressed nobody, and nothing anywhere said so.
-        it('never sends the literal "undefined" as an audience member', async () => {
+        // ── framework#3582 — a recipient that resolves to nothing ─────────────
+        // `{record.owner.manager}` walked `.manager` on a scalar foreign-key id
+        // and resolved to nothing, and `String(undefined)` once made that the
+        // six-character audience member "undefined". Since #19939 a recipient
+        // is a CEL value envelope: the unguarded hop fails the run, naming it,
+        // and the guarded one evaluates to `null`, which adds no recipient —
+        // never a phantom audience member.
+        const GUARDED_HOP = 'has(vars.record) && has(vars.record.owner) && has(vars.record.owner.manager) '
+            + '? vars.record.owner.manager : null';
+
+        it('never sends a phantom audience member: a recipient that evaluates to `null` is dropped', async () => {
             engine.registerFlow('notify_flow', notifyFlow({
                 title: 'Escalated',
-                recipients: ['user_1', '{record.owner.manager}'],
+                recipients: ['user_1', { dialect: 'cel', source: GUARDED_HOP }],
             }));
 
             const result = await engine.execute('notify_flow', {
@@ -322,10 +332,10 @@ describe('notify (baseline node)', () => {
             expect(messaging.emitted[0].audience).toEqual(['user_1']);
         });
 
-        it('fails the step, naming the template, when every recipient resolves to nothing', async () => {
+        it('fails the step, naming the expression, when every recipient evaluates to nothing', async () => {
             engine.registerFlow('notify_flow', notifyFlow({
                 title: 'Escalated',
-                recipients: ['{record.owner.manager}'],
+                recipients: [{ dialect: 'cel', source: GUARDED_HOP }],
             }));
 
             const result = await engine.execute('notify_flow', {
@@ -333,15 +343,30 @@ describe('notify (baseline node)', () => {
             } as any);
 
             expect(result.success).toBe(false);
-            expect(result.error).toContain('{record.owner.manager}');
-            expect(result.error).toContain('expand');
+            expect(result.error).toContain('every recipient value expression evaluated to nothing');
+            expect(result.error).toContain(`\`${GUARDED_HOP}\``);
+            expect(messaging.emitted).toHaveLength(0);
+        });
+
+        it('an unguarded hop on a scalar id fails the run, naming the position and the missing key', async () => {
+            engine.registerFlow('notify_flow', notifyFlow({
+                title: 'Escalated',
+                recipients: [{ dialect: 'cel', source: 'record.owner.manager' }],
+            }));
+
+            const result = await engine.execute('notify_flow', {
+                record: { id: 'case_1', owner: 'usr_7' },
+            } as any);
+
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('recipients[0]: value expression failed to evaluate as CEL: No such key: manager');
             expect(messaging.emitted).toHaveLength(0);
         });
 
         it('resolves a recipient hop when the start node expanded the relation (#3475)', async () => {
             engine.registerFlow('notify_flow', notifyFlow({
                 title: 'Escalated',
-                recipients: ['{record.owner.manager}'],
+                recipients: [{ dialect: 'cel', source: 'record.owner.manager' }],
             }));
 
             // An expanded relation arrives on the record as a nested object.
