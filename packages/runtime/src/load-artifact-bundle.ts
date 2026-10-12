@@ -30,7 +30,50 @@ import { readFile } from 'node:fs/promises';
 import { resolve as resolvePath, isAbsolute, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import { applyArtifactForwardConversions } from '@objectstack/metadata-core';
+
 import { resolveArtifactCollections } from './artifact-collections.js';
+
+/**
+ * The ADR-0087 D2 forward conversion at the runtime's artifact load (#23027):
+ * one call of `applyArtifactForwardConversions`, under the window the artifact's
+ * own `engines.protocol` opens, over the definition and every
+ * `packages[i].manifest` body.
+ *
+ * A loaded artifact is data at rest. Every runtime reader of a multi-package
+ * one parses each package body strictly: `resolveArtifactPackageOrder` gates
+ * each entry, reached through `resolveArtifactCollections`
+ * (`createStandaloneStack`'s surfaced stack, `AppPlugin`'s `collections`,
+ * `mergeRuntimeModule`) and through the `manifest` service's `register()`. So
+ * an artifact built before a retirement was refused by the first of those
+ * readers, before the metadata door's own conversion could run. Converting the
+ * bundle once, where it is read from disk, gives every reader the same
+ * converted bytes. ⛔ Never a conversion per reader: that is N copies of one
+ * policy, and the readers could then disagree about which artifacts load.
+ *
+ * The one other place on the boot path that reads an artifact FILE,
+ * `readConfigDeclaredDefault` (`resolve-project-database.ts`), calls this same
+ * function on what it read.
+ *
+ * Silent by design. On an artifact boot `createStandaloneStack` composes
+ * `MetadataPlugin` with `artifactSource` naming this same file, and its door
+ * converts the raw file again and prints the one operator summary per
+ * conversion. A line here as well would name each conversion twice per boot.
+ * Converting before the protocol handshake changes no verdict: the handshake
+ * reads `manifest.engines`, which no conversion rewrites.
+ *
+ * An envelope that was not unwrapped (`{ schemaVersion, metadata }`) has its
+ * `metadata` converted, the position the metadata door converts. Copy-on-write:
+ * the input comes back by reference when nothing converted.
+ */
+export function convertArtifactAtLoad(bundle: any): any {
+    if (bundle === null || typeof bundle !== 'object' || Array.isArray(bundle)) return bundle;
+    if (bundle.schemaVersion != null && bundle.metadata !== undefined) {
+        const metadata = applyArtifactForwardConversions(bundle.metadata).definition;
+        return metadata === bundle.metadata ? bundle : { ...bundle, metadata };
+    }
+    return applyArtifactForwardConversions(bundle).definition;
+}
 
 export interface LoadArtifactBundleOptions {
     /** Optional log tag for warnings (defaults to `[loadArtifactBundle]`). */
@@ -127,6 +170,10 @@ export async function loadArtifactBundle(
         console.warn(`${tag} artifact read FAILED: path='${absArtifactPath}' error=${err?.message ?? err}`);
         return null;
     }
+
+    // [#23027] Converted HERE, once, before `mergeRuntimeModule` and before any
+    // reader is handed the bundle — see `convertArtifactAtLoad`.
+    bundle = convertArtifactAtLoad(bundle);
 
     if (isUrl) {
         // Remote artifacts cannot dynamic-import a sibling ESM runtime module

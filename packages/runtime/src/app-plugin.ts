@@ -498,11 +498,13 @@ export class AppPlugin implements Plugin {
         // served the artifact door's converted copy of it, and what handed the
         // email loader a template it refuses to send.
         //
-        // A bundle carrying `packages[]` is handed over as authored, as before:
-        // the `manifest` service registers its package BODIES, which no
-        // conversion reaches (the ADR-0087 pass walks the definition's own
-        // collections, at the artifact door too), and `forwardConverted` would
-        // resolve `packages[]` here, ahead of the `manifest` service (#15292).
+        // A bundle carrying `packages[]` is handed over as it arrived, as before:
+        // `forwardConverted` would resolve `packages[]` here, ahead of the
+        // `manifest` service (#15292). Its package BODIES are already converted
+        // when the bundle came through `loadArtifactBundle`, which runs the
+        // ADR-0087 pass once over every body at load (#23027); a bundle handed
+        // to this plugin by any other route reaches the `manifest` service as
+        // authored.
         const servicePayload = (this.bundle as { packages?: unknown }).packages === undefined
             ? this.forwardConverted(ctx).definition
             : this.bundle.manifest
