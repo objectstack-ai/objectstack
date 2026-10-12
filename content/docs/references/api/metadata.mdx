@@ -796,7 +796,7 @@ Metadata query with filtering, sorting, and pagination
 | **label** | `string` | ✅ | Display label |
 | **description** | `string` | optional | Description |
 | **filePatterns** | `string[]` | ✅ | File glob patterns |
-| **supportsOverlay** | `boolean` | ✅ | Overlay support |
+| **supportsOverlay** | `boolean` | ✅ | Whether a stored overlay row of an item a managed package ships may be removed through the ordinary delete door without the type's environment-overlay permission: the removal removes no managed definition, and changes what is served for permission alone; it opens no save and it decides no read |
 | **domain** | `string` | ✅ | Protocol domain |
 | **actions** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; objectName?: string; … }[]` | optional | Declarative type-level actions (buttons) the metadata-admin UI renders for this type |
 

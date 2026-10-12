@@ -11,9 +11,9 @@ import { resetEnvWritableMetadataTypes } from '@objectstack/metadata-protocol';
  * Validates that:
  *   • `getMetaTypes()` returns enriched `entries` alongside the legacy
  *     `types` array (back-compat preserved).
- *   • Registry metadata (label, domain, allowOrgOverride, …) flows through
+ *   • Registry metadata (label, domain, allowEnvironmentOverlay, …) flows through
  *     from DEFAULT_METADATA_TYPE_REGISTRY.
- *   • `OS_METADATA_WRITABLE` env var elevates `allowOrgOverride`
+ *   • `OS_METADATA_WRITABLE` env var elevates `allowEnvironmentOverlay`
  *     at runtime, and tags the entry with `overrideSource: 'env'`.
  *   • The env-elevated set is also honoured by the saveMetaItem 403 gate.
  */
@@ -34,7 +34,7 @@ describe('ObjectStackProtocolImplementation - getMetaTypes rich response', () =>
         // Register control types so getMetaTypes() includes them in `entries`
         // (getMetaTypes only returns types present in getRegisteredTypes()).
         // `hook`/`seed`/`external_catalog` are registry-default
-        // `allowOrgOverride: false` — used by the OS_METADATA_WRITABLE tests.
+        // `allowEnvironmentOverlay: false` — used by the OS_METADATA_WRITABLE tests.
         // (`validation` used to stand here; #4509 retired the kind.)
         registry.registerItem('hook', { name: 'audit_stamp' }, 'name');
         registry.registerItem('seed', { name: 'demo_rows' }, 'name');
@@ -79,22 +79,22 @@ describe('ObjectStackProtocolImplementation - getMetaTypes rich response', () =>
         expect(objectEntry).toBeDefined();
         expect(objectEntry.label).toBe('Object');
         expect(objectEntry.domain).toBe('data');
-        // object reverted to allowOrgOverride:false on 2026-05-29 — packaged
+        // object reverted to allowEnvironmentOverlay:false on 2026-05-29 — packaged
         // objects are LOCKED at runtime; tenants must create new objects.
-        expect(objectEntry.allowOrgOverride).toBe(false);
+        expect(objectEntry.allowEnvironmentOverlay).toBe(false);
         expect(objectEntry.allowRuntimeCreate).toBe(true);
         expect(objectEntry.overrideSource).toBe('registry');
         expect(objectEntry.supportsOverlay).toBe(false);
 
         const viewEntry = result.entries.find((e: any) => e.type === 'view');
         expect(viewEntry).toBeDefined();
-        expect(viewEntry.allowOrgOverride).toBe(true);
+        expect(viewEntry.allowEnvironmentOverlay).toBe(true);
         expect(viewEntry.domain).toBe('ui');
     });
 
-    it('honours OS_METADATA_WRITABLE to elevate allowOrgOverride', async () => {
+    it('honours OS_METADATA_WRITABLE to elevate allowEnvironmentOverlay', async () => {
         // Use `hook` and `seed` — both are registry-default
-        // `allowOrgOverride: false` (ADR-0088 retired the former code-only
+        // `allowEnvironmentOverlay: false` (ADR-0088 retired the former code-only
         // placeholder kinds this test used to lean on, and #4509 retired
         // `validation`, which stood here until then).
         process.env.OS_METADATA_WRITABLE = 'hook,seed';
@@ -102,15 +102,71 @@ describe('ObjectStackProtocolImplementation - getMetaTypes rich response', () =>
 
         const result: any = await protocol.getMetaTypes();
         const hookEntry = result.entries.find((e: any) => e.type === 'hook');
-        expect(hookEntry.allowOrgOverride).toBe(true);
+        expect(hookEntry.allowEnvironmentOverlay).toBe(true);
         expect(hookEntry.overrideSource).toBe('env');
 
         // Types not listed AND not writable in the registry default retain
-        // `allowOrgOverride: false`. `external_catalog` is one such type —
-        // runtime-created by the Sync wizard, never org-overridable.
+        // `allowEnvironmentOverlay: false`. `external_catalog` is one such type —
+        // runtime-created by the Sync wizard, never overlay-enabled.
         const catalogEntry = result.entries.find((e: any) => e.type === 'external_catalog');
-        expect(catalogEntry.allowOrgOverride).toBe(false);
+        expect(catalogEntry.allowEnvironmentOverlay).toBe(false);
         expect(catalogEntry.overrideSource).toBe('registry');
+    });
+
+    // ── [ADR-0131 C5] ONE wire spelling, on BOTH writer arms ────────────────
+    //
+    // `getMetaTypes` has two arms: a registry type's entry SPREADS the
+    // registry row (which carries `allowEnvironmentOverlay` at the registry
+    // value) and then writes the hatch-elevated value; a runtime-registered
+    // type with no registry row gets a SYNTHESISED entry. `allowOrgOverride`,
+    // the spelling retired in 18, must be on neither: renaming only the spec
+    // would leave the registry arm carrying BOTH names (the new one from the
+    // spread, unelevated; the old one from the elevation line), and the
+    // synthesised arm the old one alone — and no type, gate or consumer
+    // reads a wire field it does not expect, so nothing else goes red. The
+    // elevation must land on the new key, on both arms.
+    it('carries allowEnvironmentOverlay and never allowOrgOverride on both arms, elevated by the hatch', async () => {
+        // `theme` is a runtime-registered kind with no registry row — the
+        // synthesised arm. `hook` is a registry row at `false` — the spread arm.
+        registry.registerItem('theme', { name: 'dark' }, 'name');
+        process.env.OS_METADATA_WRITABLE = 'hook,theme';
+        ObjectStackProtocolImplementation.resetEnvWritableCache();
+        resetEnvWritableMetadataTypes();
+
+        const result: any = await protocol.getMetaTypes();
+        const byType = (t: string) => result.entries.find((e: any) => e.type === t);
+        const view = byType('view');
+        const hook = byType('hook');
+        const theme = byType('theme');
+        const object = byType('object');
+        // Control: each arm is really present, so the absences below are not vacuous.
+        expect(theme, 'the synthesised arm is in the listing').toBeDefined();
+        expect(theme.filePatterns).toEqual([]);
+        expect(hook, 'the registry arm is in the listing').toBeDefined();
+
+        // The registry value, on the registry arm.
+        expect(view).toMatchObject({ allowEnvironmentOverlay: true, overrideSource: 'registry' });
+        expect(object).toMatchObject({ allowEnvironmentOverlay: false, overrideSource: 'registry' });
+        // The hatch elevation lands on the NEW key, on both arms.
+        expect(hook).toMatchObject({ allowEnvironmentOverlay: true, overrideSource: 'env' });
+        expect(theme).toMatchObject({ allowEnvironmentOverlay: true, overrideSource: 'env' });
+        // And the retired spelling is on no entry at all.
+        for (const entry of [view, hook, theme, object]) {
+            expect(entry).not.toHaveProperty('allowOrgOverride');
+        }
+        expect(result.entries.filter((e: any) => 'allowOrgOverride' in e)).toEqual([]);
+    });
+
+    it('a registry-less runtime type the hatch does not name carries allowEnvironmentOverlay false', async () => {
+        registry.registerItem('theme', { name: 'dark' }, 'name');
+        delete process.env.OS_METADATA_WRITABLE;
+        ObjectStackProtocolImplementation.resetEnvWritableCache();
+        resetEnvWritableMetadataTypes();
+
+        const result: any = await protocol.getMetaTypes();
+        const theme = result.entries.find((e: any) => e.type === 'theme');
+        expect(theme).toMatchObject({ allowEnvironmentOverlay: false, overrideSource: 'registry' });
+        expect(theme).not.toHaveProperty('allowOrgOverride');
     });
 
     it('saveMetaItem honours the env-elevated allow list', async () => {

@@ -381,8 +381,8 @@ describe('publishMetaItem carries the runtime authoring gate\'s advisories (#917
      * becomes a 422 — a refusal wearing an advisory's clothes, which would
      * make this case pass for the wrong reason.
      *
-     * Env-wide (`org: null`), not org-scoped: the registry declares
-     * `allowOrgOverride: false` for `flow`, so an org-scoped draft is refused
+     * Env-wide (`org: null`), not org-scoped: the protocol refuses every
+     * org-scoped write (ADR-0131 D6), so an org-scoped draft is refused
      * 403 NOT_OVERRIDABLE long before the authoring gate runs.
      */
     const advisoryFlow = () => ({

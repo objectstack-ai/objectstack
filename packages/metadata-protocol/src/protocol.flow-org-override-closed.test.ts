@@ -3,7 +3,7 @@
 /**
  * #6283 — `flow` is not per-org overridable, and the WRITE PATH says so.
  *
- * The registry row for `flow` carried `allowOrgOverride: true` from commit
+ * The registry row for `flow` carried `allowEnvironmentOverlay: true` from commit
  * ba252da0b (recorded, unreviewed, in #6191) while
  * `docs/adr/0005-metadata-customization-overlay.md:57` said — and had always
  * said — the opposite:
@@ -26,7 +26,7 @@
  * ---------------------------------------------------------------------------
  * What the flag does and does NOT close — measured, not assumed
  * ---------------------------------------------------------------------------
- * `allowOrgOverride` governs ONE of the two tiers ADR-0005's extension
+ * `allowEnvironmentOverlay` governs ONE of the two tiers ADR-0005's extension
  * defines, and this file pins both sides so the boundary is not mistaken for
  * an oversight later:
  *
@@ -57,7 +57,7 @@
  * Reverse verification, direction predicted BEFORE running
  * ---------------------------------------------------------------------------
  * Ordinary red, with a deliberately green half — predicted, then measured.
- * Restoring `allowOrgOverride: true` on the `flow` registry row turns the two
+ * Restoring `allowEnvironmentOverlay: true` on the `flow` registry row turns the two
  * declaration pins AND the two refusal cases red, and leaves the
  * runtime-create case and the `view` control green, because neither reads that
  * flag. Predicted 4 red / 2 green; measured 4 red / 2 green, and the refusal
@@ -174,7 +174,7 @@ const FLOW = {
     edges: [{ id: 'e1', source: 'start', target: 'end' }],
 };
 
-/** The control specimen: still `allowOrgOverride: true`, untouched by #6283. */
+/** The control specimen: still `allowEnvironmentOverlay: true`, untouched by #6283. */
 const VIEW = {
     name: 'overdue_grid',
     label: 'Overdue',
@@ -185,19 +185,19 @@ const VIEW = {
 
 const entry = (type: string) => DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === type);
 
-describe('#6283 — flow: allowOrgOverride rolled back to false', () => {
+describe('#6283 — flow: allowEnvironmentOverlay rolled back to false', () => {
     // ── the declaration ───────────────────────────────────────────────────
 
     it('the registry declares flow non-overridable, and the row no longer contradicts itself', () => {
         // Both halves of the ADR-0005 verdict in one assertion. The pairing is
         // the point: `supportsOverlay: false` says the LOADER cannot merge a
-        // per-org flow overlay, so `allowOrgOverride: true` had been granting
+        // flow overlay, so the flag's `true` (then spelled `allowOrgOverride`) had been granting
         // permission for a write nothing could ever read back — the phantom
         // #6190 measured. `allowRuntimeCreate` stays true on purpose; see the
         // two-tier case below.
         expect(entry('flow')).toMatchObject({
             supportsOverlay: false,
-            allowOrgOverride: false,
+            allowEnvironmentOverlay: false,
             allowRuntimeCreate: true,
         });
     });
@@ -209,7 +209,7 @@ describe('#6283 — flow: allowOrgOverride rolled back to false', () => {
         // cases below go red rather than this one — which is why they, not
         // this, are the acceptance criterion.
         const derived = new Set(
-            DEFAULT_METADATA_TYPE_REGISTRY.filter((e) => e.allowOrgOverride).map((e) => e.type),
+            DEFAULT_METADATA_TYPE_REGISTRY.filter((e) => e.allowEnvironmentOverlay).map((e) => e.type),
         );
         expect(derived.has('flow')).toBe(false);
     });

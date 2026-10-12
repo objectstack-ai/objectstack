@@ -157,7 +157,7 @@ export type MetadataEvent = z.infer<typeof MetadataEventSchema>;
  *
  * - `override-artifact`: the write targets an item that ships from a code
  *   package (an artifact). Only permitted when the type opts into
- *   per-org overlay writes via `allowOrgOverride: true`.
+ *   environment overlays of packaged items via `allowEnvironmentOverlay: true`.
  * - `runtime-only`: the write targets a brand-new item OR an item that
  *   exists only in `sys_metadata` (no artifact backing). Permitted for
  *   types that opt into runtime creation via `allowRuntimeCreate: true`,

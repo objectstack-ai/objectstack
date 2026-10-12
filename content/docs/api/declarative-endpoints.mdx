@@ -280,7 +280,7 @@ PUT /api/v1/meta/api/acme_lead_feed   →  403  {"code":"NOT_CREATABLE"}
 ```
 
 The `api` metadata type is registered with `allowRuntimeCreate: false` and
-`allowOrgOverride: false`, and that refusal runs **before any body validation** — so a
+`allowEnvironmentOverlay: false`, and that refusal runs **before any body validation** — so a
 perfectly valid endpoint body gets the same `403`, in `?mode=draft` as well as direct
 writes. There is no per-organization overlay of an endpoint either.
 

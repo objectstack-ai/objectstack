@@ -8,11 +8,12 @@
  *
  * ## Why this file exists (#22340, stage S1)
  *
- * The registry flag that opens these writes, `allowOrgOverride`, is about to
- * change twice: #15206 rewrites the write doors and deletes the per-organization
- * overlay path that also reads it, and #22340 then renames the flag to say what
- * it will mean, "may an environment overlay this packaged item". Neither change
- * may lose an environment overlay, and before this file that was checkable for
+ * The registry flag that opens these writes changed twice: #15206 rewrote the
+ * write doors and deleted the per-organization overlay path that also read it,
+ * and #22340 then renamed the flag from `allowOrgOverride` to
+ * `allowEnvironmentOverlay`, to say what it means: "may an environment overlay
+ * this packaged item". Neither change may lose an environment overlay, and
+ * before this file that was checkable for
  * part of the population only. So every case here is the ENVIRONMENT path and
  * nothing else: no `organizationId` reaches any call, the protocol has no
  * organization of its own, and the item is one a code package ships. The
@@ -309,7 +310,7 @@ afterEach(() => {
 describe('the five overlay-enabled types keep their environment overlay of a packaged item', () => {
     it('the registry opens an overlay on exactly these five types', () => {
         const flagged = DEFAULT_METADATA_TYPE_REGISTRY
-            .filter((entry) => entry.allowOrgOverride === true)
+            .filter((entry) => entry.allowEnvironmentOverlay === true)
             .map((entry) => entry.type)
             .sort();
         expect(flagged).toEqual([...OVERLAY_ENABLED].sort());
@@ -357,6 +358,8 @@ describe('the five overlay-enabled types keep their environment overlay of a pac
         const result: any = await protocol.getMetaTypes();
         const entry = result?.entries?.find((e: any) => e.type === type);
 
-        expect(entry).toMatchObject({ allowOrgOverride: true, overrideSource: 'registry' });
+        expect(entry).toMatchObject({ allowEnvironmentOverlay: true, overrideSource: 'registry' });
+        // One wire spelling: the retired name rides along on no entry.
+        expect(entry).not.toHaveProperty('allowOrgOverride');
     });
 });

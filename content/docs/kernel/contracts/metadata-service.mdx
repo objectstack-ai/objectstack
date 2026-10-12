@@ -310,11 +310,11 @@ const validation = await metadataService.validate('object', definition);
 The optional `getOverlay` / `saveOverlay` / `removeOverlay` / `getEffective`
 members and their `MetadataOverlay` record were removed in #13135 (ADR-0049
 enforce-or-remove): they belonged to a paper customization protocol no route
-ever served, and ADR-0126 supersedes it on the record. Org-scoped
+ever served, and ADR-0126 supersedes it on the record. Environment
 customization is [ADR-0005's metadata overlay](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0005-metadata-customization-overlay.md)
-— opt-in per type via `allowOrgOverride`, written through the REST meta write
-doors, and read back through the layered read (`code` / `overlay` /
-`effective`).
+— opt-in per type via `allowEnvironmentOverlay`, written environment-wide
+through the metadata write doors (ADR-0131 D6), and read back through the
+layered read (`code` / `overlay` / `effective`).
 
 ---
 
@@ -404,7 +404,7 @@ const dashboard = await metadataService.get('dashboard', 'sales_overview');
 ### Environment Customization
 
 View customization rides ADR-0005's metadata overlay (opt-in per type via
-`allowOrgOverride`, `view` among the overlay types): a write through the
+`allowEnvironmentOverlay`, `view` among the overlay types): a write through the
 `/meta` doors stores a `sys_metadata` row, and the layered read returns
 `code` / `overlay` / `effective` for it. Since ADR-0131 D6 the per-organization
 overlay axis is retired: the doors carry no organization, so the overlay is

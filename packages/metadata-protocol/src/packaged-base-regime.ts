@@ -404,7 +404,7 @@ export function managedItemSealedSentence(type: string, name: string, operation:
     if (regime !== undefined) return regime;
     return `Metadata item '${singular}/${name}' is provided by a managed package and is sealed `
         + (operation === 'delete' ? 'against removal' : 'against in-place edits')
-        + `: its type takes no environment overlay (allowOrgOverride=false), and OS_METADATA_WRITABLE does not `
+        + `: its type takes no environment overlay (allowEnvironmentOverlay=false), and OS_METADATA_WRITABLE does not `
         + `open a managed item. `
         + (operation === 'delete' ? '' : 'Edit the source artifact and redeploy. ')
         + `See ${MANAGED_SEAL_ADR}.`;

@@ -21,7 +21,7 @@
  *
  * ## Why the object here is RUNTIME-CREATED, and why this file is in objectql
  *
- * Type `object` carries `allowOrgOverride: false`, so a save over an
+ * Type `object` carries `allowEnvironmentOverlay: false`, so a save over an
  * artifact-backed object is (correctly) refused with `NOT_OVERRIDABLE` and a
  * test written that way would only measure the refusal. The write door that IS
  * open by default is the runtime-created path (`allowRuntimeCreate` — the
