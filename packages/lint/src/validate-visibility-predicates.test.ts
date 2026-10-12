@@ -31,7 +31,7 @@ const SHORTENED_RULE_IDS: readonly string[] = [
   VISIBILITY_PREDICATE_UNKNOWN_FUNCTION,
   VISIBILITY_BARE_IDENTIFIER,
 ];
-const firedShortened: Array<{ rule: string; message: string }> = [];
+const firedShortened: Array<{ rule: string; message: string; hint: string }> = [];
 const validateVisibilityPredicates: typeof validateVisibilityPredicatesUnrecorded = (...args) => {
   const findings = validateVisibilityPredicatesUnrecorded(...args);
   for (const f of findings) if (SHORTENED_RULE_IDS.includes(f.rule)) firedShortened.push(f);
@@ -1776,5 +1776,46 @@ describe('[#22161] one-line verdicts — the rule ids this file shortened', () =
     expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
     const text = explanation!.paragraphs.join('\n');
     for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
+});
+
+// [#22161] Slice 14: the `fix:` line of the three error ids this slice took.
+// Each names its remedy in one line; the other-language spellings CEL does not
+// parse, why re-spelling cannot fix an unregistered name, and which namespaces
+// each surface binds are the explanations'. The unknown-function line still
+// says NAME fault and still offers no suggestion (the cases above pin both).
+describe('[#22161] one-line fixes — syntax, unknown function, bare identifier', () => {
+  const FIX_IDS: readonly string[] = [
+    VISIBILITY_PREDICATE_SYNTAX,
+    VISIBILITY_PREDICATE_UNKNOWN_FUNCTION,
+    VISIBILITY_BARE_IDENTIFIER,
+  ];
+
+  it('every `fix:` line the cases above fired for the three ids is one line of at most 200 characters', () => {
+    const converted = firedShortened.filter((f) => FIX_IDS.includes(f.rule));
+    // Coverage control: every arm fired — the syntax line with and without a
+    // recognised spelling, the unknown function, and the bare identifier both
+    // bare and through an unbound namespace, on both layers.
+    expect([...new Set(converted.map((f) => f.rule))].sort()).toEqual([...FIX_IDS].sort());
+    expect(converted.some((f) => f.hint.includes('is not a CEL operator'))).toBe(true);
+    expect(converted.some((f) => f.hint.startsWith('Visibility predicates are bare CEL'))).toBe(true);
+    expect(converted.some((f) => f.hint.startsWith('Root the path at a namespace'))).toBe(true);
+    expect(converted.some((f) => f.hint.startsWith('Write `record.'))).toBe(true);
+    expect(converted.some((f) => f.hint.startsWith('Write `data.'))).toBe(true);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  const MOVED_FROM_FIX: Record<string, readonly string[]> = {
+    [VISIBILITY_PREDICATE_SYNTAX]: ['`==` (not `===`)', '`&&` (not `and`)', '`!` (not `not`)'],
+    [VISIBILITY_PREDICATE_UNKNOWN_FUNCTION]: ['re-spelling the predicate will not fix it', '`introspectScope`'],
+    [VISIBILITY_BARE_IDENTIFIER]: ['`record` and `current_user`', '`page.VAR`', '`data` on a metadata-editing form'],
+  };
+
+  it.each([...FIX_IDS])('`os explain %s` carries what its `fix:` line no longer says', (rule) => {
+    const text = explainRule(rule)!.paragraphs.join('\n');
+    for (const fact of MOVED_FROM_FIX[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
   });
 });

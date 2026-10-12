@@ -27,7 +27,7 @@ const SHORTENED_RULE_IDS: readonly string[] = [
   HOOK_BODY_WRITE_UNKNOWN_FIELD,
   HOOK_BODY_SOURCE_UNPARSEABLE,
 ];
-const firedShortened: Array<{ rule: string; message: string }> = [];
+const firedShortened: Array<{ rule: string; message: string; hint: string }> = [];
 const validateHookBodyWrites: typeof validateHookBodyWritesUnrecorded = (...args) => {
   const findings = validateHookBodyWritesUnrecorded(...args);
   for (const f of findings) if (SHORTENED_RULE_IDS.includes(f.rule)) firedShortened.push(f);
@@ -787,5 +787,35 @@ describe('[#22161] one-line verdicts — the rule ids this file shortened', () =
     expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
     const text = explanation!.paragraphs.join('\n');
     for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
+});
+
+// [#22161] Slice 14: the `fix:` line of the three ids. Each names its remedy in
+// one line; which write shapes are checked and that the warning never blocks a
+// build, how to vouch for or opt out of an unprovisioned anchor, and what a
+// partially recovered tree leaves unchecked are the explanations'.
+describe('[#22161] one-line fixes — the rule ids this file shortened', () => {
+  it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {
+    // Coverage control: every id fired, the unknown-field line with and
+    // without a suggestion.
+    expect([...new Set(firedShortened.map((f) => f.rule))].sort()).toEqual([...SHORTENED_RULE_IDS].sort());
+    const unknown = firedShortened.filter((f) => f.rule === HOOK_BODY_WRITE_UNKNOWN_FIELD);
+    expect(unknown.some((f) => f.hint.startsWith('Did you mean'))).toBe(true);
+    expect(unknown.some((f) => f.hint.startsWith('Fix the field name'))).toBe(true);
+    for (const f of firedShortened) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  const MOVED_FROM_FIX: Record<string, readonly string[]> = {
+    [HOOK_BODY_WRITE_UNPROVISIONED_ANCHOR]: ['`columnMap`', "`ownership: 'none'`", '`systemFields: { audit: false }`'],
+    [HOOK_BODY_WRITE_UNKNOWN_FIELD]: ['`HOOK_BODY_WRITE_PATTERNS`', 'a computed key, a spread', 'never blocks a build'],
+    [HOOK_BODY_SOURCE_UNPARSEABLE]: ['never executed', 'partially recovered'],
+  };
+
+  it.each([...SHORTENED_RULE_IDS])('`os explain %s` carries what its `fix:` line no longer says', (rule) => {
+    const text = explanationOf(rule);
+    for (const fact of MOVED_FROM_FIX[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
   });
 });

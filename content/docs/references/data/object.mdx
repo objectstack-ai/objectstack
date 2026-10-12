@@ -410,7 +410,7 @@ const result = ApiMethod.parse(data);
 | **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
 | **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
-| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string }` | optional | Empty state configuration when no records found |
+| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string; link?: object }` | optional | Empty state configuration when no records found |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
 | **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |

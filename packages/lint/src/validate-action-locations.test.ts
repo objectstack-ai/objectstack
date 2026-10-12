@@ -1,7 +1,22 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { validateActionLocations, ACTION_NO_PLACEMENT } from './validate-action-locations.js';
+import { ACTION_LOCATIONS } from '@objectstack/spec/ui';
+import {
+  validateActionLocations as validateActionLocationsUnrecorded,
+  ACTION_NO_PLACEMENT,
+} from './validate-action-locations.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Every call below records what it fired, and the last cases in this
+// file hold each recorded `fix:` line to one line of at most 200 characters.
+// Run the whole file: those cases read what the cases above fired.
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
+const validateActionLocations: typeof validateActionLocationsUnrecorded = (...args) => {
+  const findings = validateActionLocationsUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 /** A stack whose single action declares a real placement. */
 const placed = () => ({
@@ -161,5 +176,36 @@ describe('validateActionLocations', () => {
     it('returns nothing for a null stack', () => {
       expect(validateActionLocations(null as unknown as Record<string, unknown>)).toEqual([]);
     });
+  });
+});
+
+// [#22161] Slice 14: the `fix:` line names the three ways out in one line; the
+// location vocabulary, name placement, what the headless shape keeps and why it
+// is a warning are `os explain action-no-placement`, an entry this id gains.
+describe('[#22161] one-line fix — action-no-placement', () => {
+  it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === ACTION_NO_PLACEMENT);
+    // Coverage control: the id fired.
+    expect(converted.length).toBeGreaterThan(0);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('`os explain action-no-placement` carries what the `fix:` line no longer says', () => {
+    const entry = explainRule(ACTION_NO_PLACEMENT);
+    expect(entry, 'no `os explain action-no-placement` entry').toBeDefined();
+    const text = entry!.paragraphs.join('\n');
+    for (const fact of ['`bulkActionDefs`', '`rowActions`', 'REST, MCP and AI', 'never reported', 'ADR-0110 D3', 'another installed package']) {
+      expect(text, `explanation names ${fact}`).toContain(fact);
+    }
+  });
+
+  it('the explanation\'s location list is the spec\'s own', () => {
+    // The explanation module imports nothing, so the vocabulary it writes out
+    // is held to `ACTION_LOCATIONS` here.
+    const text = explainRule(ACTION_NO_PLACEMENT)!.paragraphs.join('\n');
+    expect(text).toContain(`The locations an action can declare: ${ACTION_LOCATIONS.map((l) => `\`${l}\``).join(', ')}.`);
   });
 });

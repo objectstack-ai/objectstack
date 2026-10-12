@@ -171,3 +171,14 @@ export const PARSE_FAILURE_HINT =
   'The source is parsed (never executed) so it can be checked. A source with syntax errors is only ' +
   'partially recovered, so the checks that follow may have skipped real problems — fix the syntax ' +
   'error and re-run to get a verdict that covers the whole source.';
+
+/**
+ * [#22161] The ONE-LINE form of {@link PARSE_FAILURE_HINT}, for a rule whose
+ * `fix:` line is one remedy: the same instruction, and the rule's `os explain`
+ * entry (`rule-explanations.ts`) carries what a partially recovered tree means
+ * for the checks. A caller still on the long hint converges here when its
+ * `fix:` line is shortened. Not on the root barrel: no caller outside this
+ * package needs it.
+ */
+export const PARSE_FAILURE_FIX =
+  'Fix the syntax error and re-run: until the source parses, the checks cover only what the parser recovered';

@@ -64,7 +64,7 @@ import {
   type ImportMappingTargetHead,
 } from '@objectstack/spec/data';
 
-import { listNames, packagesOf, recordsOf, suggestName } from './object-graph.js';
+import { packagesOf, recordsOf, suggestName } from './object-graph.js';
 
 /**
  * A `fieldMapping[].target` the mapping cannot write on its object: it names no
@@ -193,11 +193,13 @@ export function validateMappingTargetFields(stack: AnyRec): MappingTargetFieldFi
           ? dottedVerdict(miss.head, miss.target)
           : `Target "${miss.target}" names no field of "${objectName}", so the import endpoint refuses ` +
             `this mapping (INVALID_FIELD) and it imports nothing.` + suggestName(miss.target, known),
+        // [#22161] One remedy line. The compound parts stay on it (ruling on
+        // #20149, item 3); the roster of addressable names is not echoed, since
+        // the verdict's "Did you mean" names the near miss, and what a target
+        // may name is `os explain mapping-target-field-unknown`.
         hint:
-          `Point the target at a field "${objectName}" declares, or at a column the platform provisions ` +
-          `on it` +
-          (compoundParts ? `, or at a declared part of a compound field as field.part (${compoundParts})` : '') +
-          `. Addressable names: ${listNames(known)}.`,
+          `Point the target at a field "${objectName}" declares or provisions` +
+          (compoundParts ? `, or at a part as field.part (${compoundParts})` : ''),
       });
     }
   }
