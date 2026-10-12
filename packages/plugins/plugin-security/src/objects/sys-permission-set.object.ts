@@ -280,8 +280,9 @@ export const SysPermissionSet = ObjectSchema.create({
     // constrained `select` so the value is a labelled, i18n-able badge.
     // Back-compat: legacy env rows carry 'user' (== admin). No runtime path
     // branches on 'user' (every read keys on 'package' / 'platform', both
-    // unchanged), so those rows stay semantically correct; the boot normalizer
-    // (`normalizeManagedByVocab`) rewrites them to 'admin' idempotently.
+    // unchanged), so those rows stay semantically correct. The boot normalizer
+    // that rewrote them to 'admin' (`normalizeManagedByVocab`) retired with
+    // ADR-0131 C3 stage 6b-2, so such rows keep 'user'.
     managed_by: Field.select({
       label: 'Managed By',
       required: false,

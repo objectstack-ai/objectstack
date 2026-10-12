@@ -2847,10 +2847,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *   - `service-automation` re-syncs its flows from the protocol
      *     (`resyncFlowsFromProtocol`, the `kernel:ready` bind's own
      *     `registerFlow`), so the package's record-change flows fire;
-     *   - `plugin-security` re-runs its declared-permission seeding (the
-     *     `kernel:ready` pass's own `bootstrapDeclaredPermissions`), so the
-     *     package's permission sets are projected into `sys_permission_set`
-     *     and can be granted.
+     *   - `plugin-security` re-ran its declared-permission seeding here until
+     *     ADR-0131 C3 stage 6b-2 retired it. A package's permission sets are
+     *     now served by the security catalog from the registry as soon as the
+     *     install registers them, so nothing re-runs for them.
      *
      * Before this, a hot install left both until the next restart: the
      * restart's rehydrate registers the package ahead of those sweeps, a hot

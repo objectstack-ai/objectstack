@@ -224,12 +224,13 @@ one of two doors, each writing only what it owns:
 - **Package door** (studio `/studio/:packageId/access`) — a package's own set is
   **metadata**, so edits are saved as a **draft** stamped with the `packageId`
   (`saveMetaItem` `mode:'draft'`) and go live with the package's atomic
-  **Publish**, exactly like Data and Interfaces. On publish, a registered
-  materializer (`registerPublishMaterializer`) projects the published body into
-  `sys_permission_set` as `managedBy:'package'` + `packageId`, reusing the same
-  upsert as the boot seeder (`upsertPackagePermissionSet`). Enforcement is
-  unaffected while a set is still a draft (drafts never enter the active
-  resolve).
+  **Publish**, exactly like Data and Interfaces. On publish, the security
+  catalog serves the published body from the registry, owned by the package
+  (ADR-0131 D3); no `sys_permission_set` row is written. The landed publish
+  fires `onMetadataMutation`, which runs the audience-binding suggestion
+  reconcile and re-derives the `everyone` anchor's accepted package defaults.
+  Enforcement is unaffected while a set is still a draft (drafts never enter
+  the active resolve).
 - **Environment-admin door** (`metadata-admin`) — the cross-package all-objects
   matrix plus subject **assignment** (`sys_user_permission_set`), edited
   **live** (config); the sets a position distributes are its definition's
