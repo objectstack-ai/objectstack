@@ -19,6 +19,7 @@ import { describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 
 import { ComponentPropsMap, RecordDetailsProps, SECTION_HEADING_COUNT_HOLE } from './component.zod';
+import { ObjectTranslationDataSchema } from '../system/translation.zod';
 
 const parse = (section: Record<string, unknown>) =>
   ComponentPropsMap['record:details'].safeParse({ sections: [section] });
@@ -155,5 +156,16 @@ describe('SECTION_HEADING_COUNT_HOLE — the one grammar the judge and the rende
     for (const s of ['{count}', '${count}', '{{ counts }}', '{{ count | number }}', 'count']) {
       expect(SECTION_HEADING_COUNT_HOLE.test(s), s).toBe(false);
     }
+  });
+});
+
+describe('the i18n leg — a translated section heading carries the same hole', () => {
+  it('stores `objects.OBJECT._sections.NAME.label` with the `{{ count }}` hole verbatim', () => {
+    const label = '{{ count }} 项功能需要更高套餐 · 查看';
+    const r = ObjectTranslationDataSchema.safeParse({ _sections: { plan_gap: { label } } });
+    expect(r.success).toBe(true);
+    const sections = r.success ? (r.data as { _sections?: Record<string, { label?: string }> })._sections : undefined;
+    expect(sections?.plan_gap?.label).toBe(label);
+    expect(SECTION_HEADING_COUNT_HOLE.test(sections?.plan_gap?.label ?? '')).toBe(true);
   });
 });
