@@ -2017,11 +2017,13 @@ export const BUNDLE_MEMBER_MAX_LENGTH = 100;
  * well-formed member with nothing stored or shipped is not refused here: each
  * door answers it as it answers an absent item.
  *
- * Refuses, with a located 400 `VALIDATION_ERROR` (the code the REST door's
- * recognition and arity refusals answer on the same routes, so one route
- * keeps one dialect), a selector on a type whose identity is its name alone,
- * and a value that cannot name a member: not a string, blank, or longer than
- * {@link BUNDLE_MEMBER_MAX_LENGTH}. ⛔ A blank selector is never read as
+ * Refuses, with a located 400 `VALIDATION_ERROR` — the code the REST door's
+ * recognition refusal answers for a misspelled selector on the same routes —
+ * a selector on a type whose identity is its name alone, and a value that
+ * cannot name a member: not a string, blank, or longer than
+ * {@link BUNDLE_MEMBER_MAX_LENGTH}. The message names the parameter. The REST
+ * door renders it through its one error door (`handleRouteError`), as it
+ * renders every refusal this protocol raises. ⛔ A blank selector is never read as
  * absent: `?member=` asked for something, and answering the canonical member
  * for it would be a guess.
  */
@@ -17383,19 +17385,13 @@ export class ObjectStackProtocolImplementation implements
      * Look up an item from the artifact registry across both the requested
      * type and its singular/plural twin. Returns `undefined` when the
      * registry is unavailable or the item is not artifact-backed.
+     *
+     * [#22877] `member` — for a type whose identity is a pair, the ONE bundle
+     * member whose artifact to answer, as its discriminator value; omitted,
+     * the bundle's artifact canonical-first. A registry without the parameter
+     * ignores it, so a caller that needs the member checks the answer.
      */
-    private lookupArtifactItem(
-        type: string,
-        name: string,
-        currentPackageId?: string,
-        /**
-         * [#22877] For a type whose identity is a pair, the ONE bundle member
-         * whose artifact to answer, as its discriminator value; omitted, the
-         * bundle's artifact canonical-first. A registry without the parameter
-         * ignores it, so a caller that needs the member checks the answer.
-         */
-        member?: string,
-    ): unknown {
+    private lookupArtifactItem(type: string, name: string, currentPackageId?: string, member?: string): unknown {
         const registry = (this.engine as any)?.registry;
         if (!registry) return undefined;
         const singular = PLURAL_TO_SINGULAR[type] ?? type;
