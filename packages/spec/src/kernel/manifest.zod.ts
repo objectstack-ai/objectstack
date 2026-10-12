@@ -422,7 +422,7 @@ export const INSTALL_MODES = ['managed', 'unmanaged'] as const;
 
 /** One install mode — see {@link INSTALL_MODES}. */
 export const InstallModeSchema = z.enum(INSTALL_MODES)
-  .describe('Install mode: managed (registered as code, upgradeable, sealed) | unmanaged (copied once into the environment, editable, no upgrade)');
+  .describe('Install mode: managed (registered as code, upgradeable, sealed) | unmanaged (copied once into the environment as its own metadata, no upgrade)');
 
 export type InstallMode = z.input<typeof InstallModeSchema>;
 

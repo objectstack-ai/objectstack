@@ -9,7 +9,8 @@
  * it upgrades, and nothing it ships may be edited. UNMANAGED (the spelling
  * ruled on the D6 execution card, 2026-10-11): every metadata item is copied
  * ONCE into the environment ledger, becomes this environment's own metadata,
- * is fully editable, and never follows an upgrade. The orchestration —
+ * which the next save edits (an item shipped with an authored `_lock` keeps
+ * that lock), and never follows an upgrade. The orchestration —
  * reading the store, minting the base, writing each item through
  * `saveMetaItem`, deleting the base when a write fails — is
  * `ObjectStackProtocolImplementation.importUnmanagedPackage` (`protocol.ts`).
@@ -47,7 +48,7 @@
  *    service merges bundles. A managed install's bundles reload at every boot
  *    because its install-ledger entry is replayed; an unmanaged install has no
  *    ledger entry, so its bundles live where environment translations live —
- *    in the environment ledger, editable, reloaded at every boot by the
+ *    in the environment ledger, reloaded at every boot by the
  *    authored-translation sync;
  *  - `data` (seed datasets) is data, never a metadata item (the artifact loader
  *    says so beside its collection map), so a copy of the metadata cannot carry

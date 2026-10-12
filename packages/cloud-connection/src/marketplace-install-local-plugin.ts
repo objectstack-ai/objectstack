@@ -1384,7 +1384,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     code: 'RESOURCE_CONFLICT',
                     message: `Package '${manifestId}' cannot be installed managed: its namespace '${copyBase.namespace}' is held by `
                         + `the environment base '${copyBase.base}' — an unmanaged install of this package, or a base authored `
-                        + 'in this environment — whose items are this environment\'s own, editable metadata. A managed '
+                        + 'in this environment — whose items are this environment\'s own metadata. A managed '
                         + 'install would hand that namespace to the package and stop serving them. Keep the copy (it follows '
                         + `no upgrade), or uninstall the base '${copyBase.base}' first; its items go with it.`,
                     details: { namespace: copyBase.namespace, base: copyBase.base },
@@ -2203,7 +2203,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * [ADR-0131 D6] The `unmanaged` install: the package's metadata copied
      * ONCE into a new writable base by the protocol's
      * `importUnmanagedPackage` — every item through the save door a Studio
-     * edit takes, `organization_id` NULL, editable from its first byte, and
+     * edit takes, `organization_id` NULL, the environment's own metadata from
+     * its first byte, and
      * all or nothing (a write failure deletes the base).
      *
      * What this door does around the verb, and why:

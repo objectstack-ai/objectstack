@@ -24395,7 +24395,8 @@ export class ObjectStackProtocolImplementation implements
      * the environment ledger, through {@link saveMetaItem} — the same save
      * door a Studio edit takes — so every copied item is environment metadata
      * from its first byte: owned by the base, `organization_id` NULL, served
-     * `_provenance: 'org'`, editable by the next save, and followed by no
+     * `_provenance: 'org'`, edited by the next save (an item shipped with an
+     * authored `_lock` keeps that lock), and followed by no
      * upgrade. The managed mode is the package install; this verb is what that
      * install's manifest service is to it, and no more (see
      * `package-unmanaged-install.ts` for what is copied, what is refused, and

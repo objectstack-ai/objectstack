@@ -34,8 +34,8 @@
  *  - `converted`  — copied as items of a metadata type after a mechanical
  *                   conversion: each locale of a `translations` bundle becomes
  *                   one `translation` item, so the bundles live in the
- *                   environment ledger beside the rest of the copy, editable,
- *                   and reload at every boot the way environment translations do.
+ *                   environment ledger beside the rest of the copy, and reload
+ *                   at every boot the way environment translations do.
  *  - `code`       — refused: code, or a descriptor of a code-bearing artifact.
  *  - `uncopyable` — refused: package content the environment ledger has no row for.
  *  - `envelope`   — refused: it describes an artifact, not one package.

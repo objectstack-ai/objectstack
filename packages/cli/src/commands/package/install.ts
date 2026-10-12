@@ -21,7 +21,8 @@
  *     code and stays the authority: it upgrades, and nothing it ships is
  *     edited in place.
  *   unmanaged — the package's metadata is copied ONCE into the environment as
- *     a new writable base: every item editable, followed by no upgrade, and
+ *     a new writable base: the environment's own metadata, followed by no
+ *     upgrade, and
  *     refused by a runtime whose tenancy posture walls organizations. Only for
  *     a package whose manifest's `installModes` permits it.
  *
@@ -50,7 +51,7 @@ export default class PackageInstall extends Command {
     '$ os package install com.acme.crm',
     '$ os package install com.acme.crm --version 1.2.0 --runtime http://localhost:3000',
     '$ os package install ./dist/objectstack.json                     # air-gapped, no catalog',
-    '$ os package install ./dist/objectstack.json --install-mode unmanaged   # copy into the environment, editable',
+    '$ os package install ./dist/objectstack.json --install-mode unmanaged   # copy into the environment as its own metadata',
     '$ OS_RUNTIME_EMAIL=admin@local.test OS_RUNTIME_PASSWORD=… os package install com.acme.crm',
   ];
 
@@ -103,7 +104,7 @@ export default class PackageInstall extends Command {
     'install-mode': Flags.string({
       description:
         "How to install: 'managed' (default — registered as code, upgradeable) or 'unmanaged' (copied once into the "
-        + "environment as editable metadata, no upgrade; the package's `installModes` must permit it, and a runtime "
+        + "environment as its own metadata, no upgrade; the package's `installModes` must permit it, and a runtime "
         + 'that walls organizations refuses it)',
       options: [...INSTALL_MODES],
     }),
