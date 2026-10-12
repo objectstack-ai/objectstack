@@ -42,7 +42,8 @@
 //       install of the same artifact on the same boot answers 200;
 //     - the lock control: that MANAGED install keeps the package's locks, in
 //       both spellings — the dashboard is served `full` with its reason, and
-//       the dataset is served locked with the reason its `protection` gave.
+//       the dataset carries the `_lock` its `protection` block was translated
+//       into, with the block's reason.
 //
 // Boots fixture stacks of its own, so it stays out of `SHARED_SHOWCASE`.
 
@@ -466,10 +467,11 @@ describe('dogfood: the unmanaged install mode on `isolated` — P2 (ADR-0131 D6)
       lock: 'full', lockReason: DASHBOARD_LOCK_REASON, editable: false, deletable: false,
     });
     expect(managedLockedDataset.status, JSON.stringify(managedLockedDataset.body)).toBe(200);
-    // The envelope's `lock` reports the verdicts in force, and a managed item
-    // is sealed besides; the package's reason on it is the block's lock binding.
-    expect(managedLockedDataset.body?.data ?? managedLockedDataset.body).toMatchObject({
-      lockReason: DATASET_LOCK_REASON, editable: false,
+    // The managed loader translated the `protection` block into the served
+    // item's `_lock` envelope — the lock it binds, with the block's reason.
+    expect(servedItem(managedLockedDataset)).toMatchObject({
+      _lock: 'no-overlay', _lockReason: DATASET_LOCK_REASON, _lockSource: 'package',
     });
+    expect(servedItem(managedLockedDataset)).not.toHaveProperty('protection');
   });
 });
