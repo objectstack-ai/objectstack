@@ -168,10 +168,13 @@ describe('execute-time config parse (#4277)', () => {
     expect(result.error).toContain('config.title');
   });
 
-  it('string slots parse RAW templates — a `{token}` recipient and a `{{ }}` title pass', async () => {
+  it('slots parse RAW — a CEL value envelope recipient and a `{{ }}` title pass', async () => {
+    // [#19939] `recipients` is a value slot: a `{token}` there is refused now,
+    // and its envelope is what the parse accepts, raw, for the executor to
+    // evaluate.
     const engine = engineWith();
     engine.registerFlow('f', flowWith('notify', {
-      recipients: '{who}', title: 'Hi {{ who }}',
+      recipients: { dialect: 'cel', source: 'who' }, title: 'Hi {{ who }}',
     }, { variables: [{ name: 'who', type: 'text', isInput: true }] }));
 
     // No messaging service wired → the node degrades to a skipped success;

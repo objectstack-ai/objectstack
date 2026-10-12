@@ -41,6 +41,8 @@ import type { ISecurityService } from './security-service';
 import type { IShareLinkService } from './share-link-service';
 import type { IHttpServer } from './http-server';
 import type { IObjectQLEngine } from './objectql-engine';
+import type { IWebhookService } from './webhook-service';
+import type { ITriggerApiService } from './trigger-api-service';
 
 /**
  * The evidenced slot → contract bindings.
@@ -173,6 +175,28 @@ export interface ServiceSlotContracts extends CoreServiceContracts {
      * release boundary once none remain.
      */
     'http-server': IHttpServer;
+    /**
+     * {@link IWebhookService}, registered by `@objectstack/plugin-webhooks`:
+     * `WebhookOutboxPlugin` registers its service under `webhooks`, typed as
+     * this contract, once its redelivery veto is installed, and leaves the slot
+     * empty otherwise.
+     *
+     * [#22848] Every member is optional, so a reader still probes for the one
+     * it calls (`handleRedeliver`); the entry types the probe instead of
+     * leaving the slot `unknown`.
+     */
+    webhooks: IWebhookService;
+    /**
+     * {@link ITriggerApiService}, registered by `@objectstack/trigger-api`:
+     * `ApiTriggerPlugin` registers its service under `trigger-api`, typed as
+     * this contract, wherever it installs the `api` trigger, and leaves the
+     * slot empty otherwise.
+     *
+     * [#22848] Every member is optional, so a reader still probes for the one
+     * it calls (`handleInboundHook`); the entry types the probe instead of
+     * leaving the slot `unknown`.
+     */
+    'trigger-api': ITriggerApiService;
 }
 
 /**

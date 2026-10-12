@@ -11,9 +11,10 @@
  * `create_record.fields.*`, `update_record.fields.*`, the three maps a node
  * hands to a callee — `subflow.input.*`, `map.input.*`, `script.inputs.*` —
  * a `screen`'s three positions that hand a value to the client —
- * `defaults.*`, `fields[].defaultValue`, `recordId` — and the list a `loop`
- * and a `map` iterate, their `collection` —
- * `FLOW_NODE_EXPRESSION_PATHS`), plus the two legacy
+ * `defaults.*`, `fields[].defaultValue`, `recordId` — the list a `loop`
+ * and a `map` iterate, their `collection` — and a `notify` node's computed
+ * values — `recipients` (each entry of a list), `templateData.*` and
+ * `sourceId` — `FLOW_NODE_EXPRESSION_PATHS`), plus the two legacy
  * `assignment` shapes the executor still reads (the
  * `assignments: [{ variable, value }]` array and the bare
  * `{ <variable>: <value> }` config). Until this retirement every string
@@ -166,6 +167,18 @@
  * than spelling a concatenation or a date no list can be. A token-free
  * string is a variable's bare name or no list at all; the collection's
  * contract refuses it (`FlowCollectionSlotSchema`), not this judge.
+ *
+ * ## A `notify` node's recipients — dropped when `null`, flattened when a list
+ *
+ * `recipients` is one value or a list of them (the ledger's `eachElement`), so
+ * this judge reads each entry of a list at its own index (`recipients[1]`), as
+ * a top-level value, where an envelope evaluates. At such a position a refused
+ * whole token's remedy ends with the recipient sentence (`RECIPIENT_SLOTS`):
+ * an envelope that evaluates to `null` or a blank string adds no recipient, as
+ * the template dropped a token that resolved to nothing, and one that
+ * evaluates to a list adds each of its recipients — the template handed a
+ * whole token holding a list, written as a list entry, on as ONE recipient
+ * joined with commas.
  *
  * ## The token grammar is the interpolator's
  *
@@ -642,6 +655,38 @@ const SCREEN_VALUE_SLOTS: Readonly<Record<string, ScreenSlot>> = {
 const COLLECTION_SLOTS: ReadonlySet<string> = new Set(['loop collection', 'map collection']);
 
 /**
+ * [#19939] The ledger entries (`<nodeType> <path>`) that name who a `notify`
+ * node's notification goes to — `recipients`, judged per element of a list
+ * (the ledger's `eachElement`) — whose refusal ends with
+ * {@link recipientSentence}.
+ */
+const RECIPIENT_SLOTS: ReadonlySet<string> = new Set(['notify recipients']);
+
+/**
+ * The recipient sentence for a refused TOP-LEVEL value at a `notify`
+ * `recipients` position, located at `at` (`recipients`, `recipients[1]`) —
+ * what the guarded form's `null`, and a list, do there — or `undefined` where
+ * the remedy changes nothing there ({@link absentCaseOf}).
+ *
+ * Measured through the engine (`notify-value-slots.test.ts` in
+ * `service-automation`): a whole token that resolved to nothing was dropped
+ * from the audience, and so is an envelope's `null` or blank string; a whole
+ * token holding a list, written as a list ENTRY, was handed on as ONE
+ * recipient joined with commas (`'u1,u2'`), where an entry that evaluates to a
+ * list adds each of its recipients.
+ */
+function recipientSentence(at: string, token: Token): string | undefined {
+  const absent = absentCaseOf(token);
+  if (absent === undefined) return undefined;
+  return absent === 'never-resolved'
+    ? `\`${at}\` names who the notification goes to, and the template dropped it from the audience in every run: `
+      + 'leaving it out keeps exactly that.'
+    : `\`${at}\` names who the notification goes to: an envelope there that evaluates to \`null\` or a blank string `
+      + 'adds no recipient, as a token that resolved to nothing did, and one that evaluates to a list adds each of '
+      + 'its recipients.';
+}
+
+/**
  * The screen sentence for a refused TOP-LEVEL value of one of a `screen`'s
  * value slots, located at `at` (`defaults.account`, `fields[0].defaultValue`,
  * `recordId`) — what the client is served where the template served nothing —
@@ -721,7 +766,9 @@ function joinPath(prefix: string, inner: readonly (string | number)[]): string {
  * slots (`defaults.*`, `fields[].defaultValue`, `recordId`) it ends with the
  * screen sentence: what the client is served instead of nothing. At a `loop`'s
  * (with a `body`) or a `map`'s `collection` only the value itself is judged,
- * with the collection's remedy: the list it must evaluate to.
+ * with the collection's remedy: the list it must evaluate to. At a `notify`
+ * node's `recipients` — the value, or each entry of a list — it ends with the
+ * recipient sentence: what `null` and a list add to the audience.
  */
 export function flowNodeValueTemplateRefusals(nodeType: string, config: unknown): FlowNodeValueTemplateRefusal[] {
   const out: FlowNodeValueTemplateRefusal[] = [];
@@ -753,7 +800,9 @@ export function flowNodeValueTemplateRefusals(nodeType: string, config: unknown)
       ? (whole: Token): string | undefined => calleeSentence(receiver, mapKey, key, whole)
       : screenSlot !== undefined
         ? (whole: Token): string | undefined => screenSentence(screenSlot, found.path, whole)
-        : undefined;
+        : RECIPIENT_SLOTS.has(entryKey)
+          ? (whole: Token): string | undefined => recipientSentence(found.path, whole)
+          : undefined;
     const sentence = sentenceFor === undefined
       ? undefined
       : (refusal: ValueSlotTemplateRefusal): string | undefined => {
