@@ -159,8 +159,8 @@ const result = DiscardPackageDraftsResponseSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **type** | `string` | ✅ | Metadata type of the copied item. |
 | **name** | `string` | ✅ | Name of the copied item. |
-| **lock** | `Enum<'no-overlay' \| 'no-delete' \| 'full'>` | ✅ | The `_lock` the package shipped on the item. The copy carries no lock. |
-| **reason** | `string` | optional | The `_lockReason` the package gave, verbatim. Absent when it gave none. |
+| **lock** | `Enum<'no-overlay' \| 'no-delete' \| 'full'>` | ✅ | The lock the package shipped on the item — its `protection` block's `lock`, else its `_lock`. The copy carries no lock. |
+| **reason** | `string` | optional | The reason the package gave for that lock, verbatim. Absent when it gave none. |
 
 
 ---
