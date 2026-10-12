@@ -90,4 +90,45 @@ describe('claimOrgSeedOwnership', () => {
     await claimOrgSeedOwnership(ql, ORG, OWNER);
     expect(await claimOrgSeedOwnership(ql, ORG, OWNER)).toEqual([]);
   });
+
+  // ── [#23008] the claim's write dispatches no metadata-bound automation ────
+
+  it('every claim write runs as isSystem with skipAutomations; the read stays a plain system read', async () => {
+    // Re-owning a seed row is attribution, not a user event, so the write runs
+    // with metadata-bound automation off: no app hook, no record-change flow,
+    // hence no approval and no notification. Code-registered hooks (audit,
+    // sharing) still run — the real-engine half of this pin is
+    // `claim-org-seed-ownership-dispatch.pin.test.ts`; this half pins that
+    // EVERY write this function issues carries the flag, across objects.
+    const schemas = [
+      { name: 'crm_lead', fields: [{ name: 'owner_id' }, { name: 'organization_id' }] },
+      { name: 'crm_deal', fields: [{ name: 'owner_id' }, { name: 'organization_id' }] },
+    ];
+    const { ql, updates } = makeQL(schemas, {
+      crm_lead: [
+        { id: 'l1', organization_id: ORG, owner_id: null },
+        { id: 'l2', organization_id: ORG, owner_id: null },
+      ],
+      crm_deal: [{ id: 'd1', organization_id: ORG, owner_id: null }],
+    });
+
+    expect(await claimOrgSeedOwnership(ql, ORG, OWNER)).toEqual([
+      { object: 'crm_lead', count: 2 },
+      { object: 'crm_deal', count: 1 },
+    ]);
+    expect(updates).toHaveLength(3);
+
+    const writeContexts = ql.update.mock.calls.map((call: any[]) => call[2]?.context);
+    expect(writeContexts).toHaveLength(3);
+    for (const context of writeContexts) {
+      expect(context).toEqual({ isSystem: true, skipAutomations: true });
+    }
+    // The read stays a plain system read: a read starts no record-change flow,
+    // and the flag would also switch off an app's read-filter hooks.
+    const readContexts = ql.find.mock.calls.map((call: any[]) => call[2]?.context);
+    expect(readContexts).toHaveLength(2);
+    for (const context of readContexts) {
+      expect(context).toEqual({ isSystem: true });
+    }
+  });
 });
