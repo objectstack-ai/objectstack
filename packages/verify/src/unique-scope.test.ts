@@ -215,6 +215,20 @@ describe('runUniqueScopeProofs — a single-posture boot (the untenanted install
     });
     expect(formatUniqueScopeReport(report)).toContain('8 proven, 0 CONTRADICTED, 0 FAILED');
   });
+
+  it('names a field whose only door the run does not ask, instead of counting it', async () => {
+    const account = source.objects[0]!;
+    const systemOnly = { ...source, objects: [{ ...account, fields: { number: account.fields.number, stamped: account.fields.stamped } }] };
+    const restOnly = await runUniqueScopeProofs(stack, await stack.signIn(), systemOnly, { doors: ['rest'] });
+    for (const field of ['number', 'stamped']) {
+      expect(resultFor(restOnly, 'uqs_account', field)).toMatchObject({
+        status: 'inconclusive',
+        probes: [],
+        reason: expect.stringMatching(/^probed through the system door only \(.*\), which this run does not ask$/),
+      });
+    }
+    expect(restOnly.summary).toMatchObject({ proven: 0, inconclusive: 2, probes: 0, hardFailures: 0 });
+  });
 });
 
 describe('runUniqueScopeProofs — a walled boot (two organizations)', () => {

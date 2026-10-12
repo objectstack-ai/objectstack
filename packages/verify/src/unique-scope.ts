@@ -693,6 +693,11 @@ export async function runUniqueScopeProofs(
       results.push({ ...head, status: 'not-derivable', reason: c.notDerivable, probes: [] });
       continue;
     }
+    if (!c.doors.some((d) => doors.includes(d))) {
+      const why = c.restExcluded ? ` (${c.restExcluded})` : '';
+      results.push({ ...head, status: 'inconclusive', reason: `probed through the ${c.doors.join(' and ')} door only${why}, which this run does not ask`, probes: [] });
+      continue;
+    }
     const source = valueSource(c.type, c.field, objectDefs.get(c.object)?.fields?.[c.field], c.object, crud.get(c.object));
     // Probe values draw on the fixtures' counter, so no probe value equals a fixture's.
     const fresh = async (w: Writer): Promise<{ value?: unknown; reason?: string }> => {
