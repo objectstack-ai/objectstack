@@ -130,7 +130,8 @@ export type {
 // stack declares `controlled_by_parent`, a principal's edit, delete or create
 // of a detail is admitted exactly when it holds that verb on the detail's
 // object AND can edit the master (measured, never re-derived), asked of the
-// engine through the REST door as verifier and declared-position personas.
+// engine's own write as the persona, signed in: verifier and declared-position
+// personas.
 export {
   deriveParentWriteReachCases,
   runParentWriteReachProofs,
