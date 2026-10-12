@@ -59,6 +59,15 @@ export default defineConfig({
         find: /^@objectstack\/objectql$/,
         replacement: path.resolve(__dirname, '../objectql/src/index.ts'),
       },
+      // [#15204 6b-2, ADR-0090 D5] The install-local uninstall captures the
+      // package's permission-set names through `captureUninstallDeclared`, so
+      // every suite that imports the plugin judges THIS checkout's capture, not
+      // a `metadata-protocol/dist` that may be behind it. Anchored like the
+      // entries above, though the package exports only `.` today.
+      {
+        find: /^@objectstack\/metadata-protocol$/,
+        replacement: path.resolve(__dirname, '../metadata-protocol/src/index.ts'),
+      },
     ],
   },
   // Discovery is untouched — but this file is NOT "the alias and nothing else".
