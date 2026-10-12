@@ -117,7 +117,9 @@ import { flowBoundVariableNameSchema } from './flow-bound-variable-name';
 import {
   AssignmentConfigSchema,
   CreateRecordConfigSchema,
+  DeleteRecordConfigSchema,
   FlowValueSlotSchema,
+  GetRecordConfigSchema,
   MapConfigSchema,
   ScreenConfigSchema,
   UpdateRecordConfigSchema,
@@ -652,7 +654,8 @@ export type SchemalessNodeType = keyof typeof SCHEMALESS_NODE_CONFIG_SCHEMAS;
  * Node types that DO publish a descriptor `configSchema` and still declare an
  * expression slot through a spec Zod, because the descriptor cannot carry the
  * marker (#14149; the CRUD pair since #19938; `map`, `screen`, `notify` and
- * `http` since #19939).
+ * `http` since #19939, and the other two CRUD nodes, `get_record` and
+ * `delete_record`, since #19939's filter operands).
  *
  * Each of these descriptors declares its map as `additionalProperties: true`
  * — `assignment`'s `assignments`, `create_record` / `update_record`'s
@@ -672,7 +675,11 @@ export type SchemalessNodeType = keyof typeof SCHEMALESS_NODE_CONFIG_SCHEMAS;
  * recipients picker and text inputs), so their markers ride
  * `NotifyConfigSchema`. `http`'s one value slot, `body`, is offered by its
  * descriptor as an untyped input with no marker, so its marker rides
- * `HttpConfigSchema`.
+ * `HttpConfigSchema`. The three CRUD nodes that match rows —
+ * `get_record`, `update_record`, `delete_record` — offer `filter` as an open
+ * map (`additionalProperties: true`) with no marker, so the marker on its
+ * operands rides the contract's `filter` itself (one ledger entry each, whose
+ * `filterOperands` flag makes the walks emit each operand).
  * `map`'s other expression slot, `collection`, keeps arriving through its
  * descriptor (`xExpression: 'value'` since #19939 made it a value slot; it
  * was `'template'`), and so does `screen`'s
@@ -681,12 +688,14 @@ export type SchemalessNodeType = keyof typeof SCHEMALESS_NODE_CONFIG_SCHEMAS;
  * from {@link SCHEMALESS_NODE_CONFIG_SCHEMAS} on purpose: that map means
  * "publishes no descriptor", its other readers (`metadata-protocol`'s
  * reference-site attribution) walk it for that reason, and none of these
- * seven is a member of that class.
+ * nine is a member of that class.
  */
 export const LEDGER_DECLARED_NODE_CONFIG_SCHEMAS = {
   assignment: AssignmentConfigSchema,
   create_record: CreateRecordConfigSchema,
   update_record: UpdateRecordConfigSchema,
+  get_record: GetRecordConfigSchema,
+  delete_record: DeleteRecordConfigSchema,
   map: MapConfigSchema,
   screen: ScreenConfigSchema,
   notify: NotifyConfigSchema,

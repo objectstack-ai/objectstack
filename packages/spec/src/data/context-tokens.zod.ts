@@ -227,10 +227,13 @@ export const CONTEXT_TOKEN_WRAPPED_RE = DATE_MACRO_WRAPPED_RE;
  * braces (`'acme {x} deal'`) is untouched, as are `{a}{b}` and `{{x}}`, which
  * are not one wrapped token.
  *
- * The flow template engine's filter position already used exactly this shape
- * (`interpolateFilter` in `@objectstack/service-automation`, #3810) to decide
- * "is this string one whole token?" before consulting the vocabulary — this
- * aligns the platform diagnostic with the recognition rule that surface had.
+ * A flow CRUD node's filter operand reads exactly this shape too
+ * (`classifyFlowFilterOperandString` in `@objectstack/spec/automation`): a
+ * value that is one whole wrapped token the server resolves is a query
+ * placeholder, handed to the query untouched, and every other `{…}` token
+ * there is the retired flow template dialect, refused. (The 17.x flow executor
+ * used this shape to decide "is this string one whole token?" before
+ * consulting the vocabulary; this diagnostic aligned with it.)
  */
 export const FILTER_TOKEN_WRAPPED_RE = /^\$?\{([^{}]+)\}$/;
 
@@ -319,12 +322,13 @@ export const CONTEXT_TOKEN_SUGGESTIONS: Readonly<Record<string, ContextToken | R
  * It is deliberately narrower than {@link classifyFilterToken} too. The
  * record-context tokens ({@link RECORD_CONTEXT_TOKENS}) are NOT members,
  * because this predicate answers "can the server resolve it?", and no server
- * position has a record in context. Its one consumer is such a position: the
- * flow template engine's filter hand-off (`interpolateFilter` in
- * `@objectstack/service-automation`) passes a token it cannot resolve on to
- * ObjectQL only when this predicate says ObjectQL can. A flow addresses its
- * own record as `{record.id}`, so an unset `{record_id}` there stays the flow's
- * own unresolved-variable refusal.
+ * position has a record in context. Its one consumer is such a position: a
+ * flow CRUD node's filter operand (`classifyFlowFilterOperandString` in
+ * `@objectstack/spec/automation`) hands a whole wrapped token on to the query
+ * engine untouched only when this predicate says the query engine resolves
+ * it, and refuses every other `{…}` token there as the retired flow template
+ * dialect — `{record_id}` included, which no server path resolves (a flow
+ * computes its own record's id with a CEL value envelope, `record.id`).
  */
 export function isKnownFilterToken(token: string): boolean {
   return isContextToken(token) || isDateMacroToken(token);

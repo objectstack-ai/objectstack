@@ -979,7 +979,7 @@ export const FlowEdgeSchema = lazySchema(() => strictObject(
  *     { id: "start", type: "start", label: "Start", position: {x: 0, y: 0} },
  *     { id: "check_amount", type: "decision", label: "Check Amount", position: {x: 0, y: 100} },
  *     { id: "auto_approve", type: "update_record", label: "Auto Approve", position: {x: -100, y: 200},
- *       config: { objectName: "order", filter: { id: "{record.id}" }, fields: { status: "approved" } } },
+ *       config: { objectName: "order", filter: { id: { dialect: "cel", source: "record.id" } }, fields: { status: "approved" } } },
  *     { id: "submit_for_approval", type: "connector_action", label: "Submit", position: {x: 100, y: 200},
  *       connectorConfig: { connectorId: "approvals_desk", actionId: "submit", input: { orderId: "{record.id}" } } }
  *   ],
