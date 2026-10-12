@@ -174,10 +174,12 @@ describe('#17081 — the claim and the route are the platform\'s own declaration
   });
 
   it('"grant it a permission set" is a surface the sys_user page really offers', () => {
+    // [#15204 B2] The grant is the Permission Sets list's "New" (the host's
+    // create on `sys_user_permission_set`), so the pin is that list, by title.
     const page = JSON.stringify(SysUserDetailPage);
-    expect(page).toContain('sys_user_permission_set');
-    expect(page).toContain('Grant permission set');
+    expect(page).toContain('"objectName":"sys_user_permission_set"');
+    expect(page).toContain('"en":"Permission Sets"');
     // Fabricated control: the same haystack does not answer to an invented name.
-    expect(page).not.toContain('Grant fabricated permission set');
+    expect(page).not.toContain('"objectName":"sys_user_fabricated_grant"');
   });
 });
