@@ -2031,7 +2031,7 @@ export class SysMetadataRepository implements MetadataRepository {
    * kernel (`environmentId === undefined`) skips the protocol's own two-tier
    * block entirely and lands here instead. That made it the second of the two
    * refusal points #6960 measured: on an environment carrying an overlay row
-   * authored BEFORE commit ee58392e1 rolled `allowEnvironmentOverlay` back to
+   * authored BEFORE commit ee58392e1 rolled `allowOrgOverride` back to
    * `false`, the row kept merging overlay-wins at read time while the ordinary
    * "Reset to package default" answered 403 — the removal reachable only
    * through `OS_METADATA_WRITABLE`. Maintainer ruling, 2026-08-10: the delete
