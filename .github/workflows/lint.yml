@@ -7020,78 +7020,24 @@ jobs:
       # Examples and the downstream contract keep their dedicated steps below —
       # they are distinct gates, not bulk coverage.
       #
-      # ── WHICH PACKAGES, PER EVENT (#23017) ──────────────────────────────────
-      # Those three filters are the UNIVERSE. `schedule`, `push`,
-      # `workflow_dispatch` and any other event type-check all of it, as before:
-      # that is the full battery (#22998). `pull_request` and `merge_group`
-      # type-check only the packages their diff affects, plus every package
-      # that depends on one, intersected with the universe.
-      #
-      # Why selection and not the cache alone, measured on the jobs API and the
-      # turbo logs: the restore step above ALREADY reaches main's seed on every
-      # event — its bare `-turbo-typecheck-` restore key matches the newest
-      # main-push save, and PR run 38239402273 replayed 138 of 139 tasks from it
-      # (`Type check workspace packages` 19 s). What defeats the seed is hash
-      # churn, not the key: every `typecheck` hash includes the `build` hash of
-      # its dependency closure, and nearly every package depends on
-      # @objectstack/spec, so one spec commit between the seed and the run moves
-      # nearly every hash. The SAME PR's merge group, 38242582445, built on a
-      # main that had since gained two commits touching packages/spec (2acff873,
-      # c7d60378), replayed 0 of 74 `typecheck` tasks (`Cached: 64 cached, 139
-      # total`, all of them `build`; 8m31s).
-      # The queue builds each entry on entries that have not reached main yet,
-      # so its seed is behind by construction. Over 210 PR and queue runs
-      # (2026-10-11T20:38Z to 2026-10-12T11:30Z) the step's median was 479 s on
-      # `pull_request` and 510 s on `merge_group`.
-      #
-      # The selection is ci.yml Test Core's own, `scripts/ci/select-shard-
-      # packages.sh`, called with the same event fields, so both jobs read one
-      # rule for where a diff starts: merge-base(origin/<base>, HEAD) on a pull
-      # request, the group's `base_sha` in the queue, the full list (with a
-      # `::warning::`) whenever either cannot be resolved. It also unions in
-      # the packages whose tests read the changed files across a package
-      # boundary (`check-cross-package-test-inputs.mjs --union-into`, whose
-      # gate holds every such test declared): their typecheck programs compile
-      # those same test files, so a diff that reaches a package only through
-      # such an import (lint's and cli's tests import examples/app-showcase,
-      # which no `^build` edge reaches) still schedules that package, as the
-      # full run did. It is a SUPERSET for tsc — it also names files tests only
-      # read from disk, so the repo-wide scans of spec, core, types, objectql
-      # and runtime put those five on most package diffs (each replays in
-      # seconds when its own hash is in the restored seed) — and that is the
-      # price of not keeping a second, tsc-only declaration that nothing would
-      # hold honest.
-      #
-      # ⛔ ROOT-LEVEL CHANGES MEAN EVERYTHING IS AFFECTED. `turbo ls --affected`
-      # handles some root files and not others. Measured on turbo 2.11.5 at
-      # edecd448, one file changed per probe: `tsconfig.json`, `tsup.config.ts`
-      # (the globalDependencies) and `turbo.json` select all 81 packages, but
-      # root `package.json`, `pnpm-workspace.yaml`, `.npmrc` and a change to
-      # the ROOT importer's `typescript` version in `pnpm-lock.yaml` select
-      # ZERO. So this step does not delegate the rule: a changed file at the
-      # repository root (a path with no `/`) type-checks the whole universe,
-      # Markdown excepted — no tsc program reads a root `*.md`, and AGENTS.md
-      # alone was 2 of the last 30 commits on main at edecd448.
-      # So does a changed file under `scripts/` that some package's own
-      # package.json scripts run (`scripts/check-test-typecheck.mts` is run by
-      # the `typecheck` of 72 of the universe's 76 packages at edecd448), found
-      # by the `git grep` below rather than listed, because a file the packages'
-      # typecheck executes is part of their typecheck definition, as
-      # `turbo.json` is.
-      #
-      # An EMPTY selection is an honest green — a docs, workflow or tooling
-      # diff affects no package — and is said so in the log. ⛔ It must exit
-      # here: `turbo run typecheck` with no `--filter` runs the WHOLE workspace,
-      # examples included. Every other doubt (no changed-file list, a failed
-      # union) falls back to the whole universe, never to a narrower set.
-      #
-      # What this does not change, and the cache never promised: `typecheck`'s
-      # turbo inputs are package-local. A package scheduled through the union
-      # or the root rule still replays a cached green when its own hash is in
-      # the restored seed, on every event, `schedule` included — the full run
-      # before this step selected anything behaved the same way. Selection
-      # decides which packages run; the cache still decides which of those
-      # execute.
+      # ── WHICH PACKAGES, PER EVENT (#23017) ──
+      # The three filters are the UNIVERSE. `schedule`, `push`,
+      # `workflow_dispatch` and any other event type-check all of it (the full
+      # battery, #22998). `pull_request` / `merge_group` type-check what their
+      # diff affects, plus dependents, through ci.yml Test Core's selector
+      # (same diff base, same cross-package test union, same fall-back to the
+      # full list), intersected with the universe. Not the cache alone: the
+      # restore above already reaches main's seed, but nearly every package
+      # depends on spec, so one spec commit between seed and run moves nearly
+      # every typecheck hash (PR run 38239402273 replayed 138 of 139 tasks; its
+      # merge group 38242582445, 0 of 74 typecheck tasks).
+      # ⛔ A changed repo-root file (Markdown excepted), or a `scripts/` file a
+      # package.json script runs, means the whole universe: `turbo ls
+      # --affected` selects ZERO packages for a root package.json,
+      # pnpm-workspace.yaml, .npmrc or root-importer lockfile change (turbo
+      # 2.11.5). ⛔ An empty selection exits here: `turbo run typecheck` with no
+      # `--filter` runs the whole workspace. Selection decides which packages
+      # run; the package-local turbo cache still decides which execute.
       - name: Type check workspace packages
         env:
           OS_SHARD_EVENT_NAME: ${{ github.event_name }}
