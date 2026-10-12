@@ -9,8 +9,11 @@ import {
   PAGE_FIELD_UNKNOWN,
   PAGE_FIELD_UNPROVISIONED,
   PAGE_SECTION_GROUP_UNKNOWN,
+  PAGE_SECTION_COUNT_NOT_MULTI_VALUE,
+  componentSectionCountRefs,
 } from './validate-page-field-bindings.js';
 import { indexUnprovisionedAnchors } from './system-fields.js';
+import { validateReferenceIntegrity } from './reference-integrity-suite.js';
 
 const baseStack = () => ({
   objects: [
@@ -217,6 +220,107 @@ describe('validatePageFieldBindings — dangling `section.group` (#13855)', () =
       .toEqual([{ key: 'a', path: 'P.sections[0].group' }]);
     // Unregistered component types stay skipped, silently, exactly as for fields.
     expect(componentSectionGroupRefs('record:line_items', { sections: [{ group: 'a' }] }, 'P')).toBeNull();
+  });
+});
+
+describe('validatePageFieldBindings — the field a section heading counts (#23013)', () => {
+  /** `baseStack()` plus multi-value fields on `crm_lead`. */
+  const countStack = () => {
+    const stack = baseStack();
+    Object.assign((stack.objects[0] as { fields: Record<string, unknown> }).fields, {
+      tags: { type: 'tags' },
+      capabilities_not_on_plan: { type: 'multiselect', options: [{ label: 'SSO', value: 'sso' }] },
+      watchers: { type: 'user', multiple: true },
+      regions: { type: 'select', multiple: true, options: [{ label: 'EU', value: 'eu' }] },
+    });
+    return stack;
+  };
+
+  /** One counted section; `fields` lists the counted field like a real page does. */
+  const countedPage = (field: string) => pageWith([{
+    type: 'record:details',
+    properties: {
+      sections: [{ name: 'plan_gap', label: '{{ count }} items', fields: [field], count: { field } }],
+    },
+  }]);
+  const COUNT_PATH = 'pages[0].regions[0].components[0].properties.sections[0].count.field';
+
+  it('is clean on every multi-value shape: an option-list type, and a multi-capable type with `multiple: true`', () => {
+    for (const field of ['tags', 'capabilities_not_on_plan', 'watchers', 'regions']) {
+      expect(validatePageFieldBindings({ ...countStack(), pages: [countedPage(field)] }), field).toEqual([]);
+    }
+  });
+
+  it('GATES on a counted field the object does not declare — reusing `page-field-unknown`', () => {
+    const findings = validatePageFieldBindings({
+      ...countStack(),
+      pages: [pageWith([{
+        type: 'record:details',
+        properties: { sections: [{ label: '{{ count }} items', fields: ['tags'], count: { field: 'capabilitie' } }] },
+      }])],
+    });
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [PAGE_FIELD_UNKNOWN, 'error', COUNT_PATH],
+    ]);
+    expect(findings[0].message).toContain('"capabilitie"');
+  });
+
+  it('GATES on a counted field that holds one value, naming its type', () => {
+    for (const [field, type] of [['status', 'select'], ['name', 'text'], ['account', 'lookup']] as const) {
+      const findings = validatePageFieldBindings({ ...countStack(), pages: [countedPage(field)] });
+      expect(findings.map((f) => [f.rule, f.severity, f.path]), field).toEqual([
+        [PAGE_SECTION_COUNT_NOT_MULTI_VALUE, 'error', COUNT_PATH],
+      ]);
+      expect(findings[0].message, field).toContain(`\`${type}\``);
+    }
+  });
+
+  it('judges a registry-injected column by its own definition: `created_at` is single-valued', () => {
+    const findings = validatePageFieldBindings({
+      ...countStack(),
+      pages: [pageWith([{
+        type: 'record:details',
+        properties: { sections: [{ label: '{{ count }} items', fields: ['tags'], count: { field: 'created_at' } }] },
+      }])],
+    });
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [PAGE_SECTION_COUNT_NOT_MULTI_VALUE, 'error', COUNT_PATH],
+    ]);
+  });
+
+  it('keeps the severity split: a section `fields[]` miss advises while the counted miss gates', () => {
+    const findings = validatePageFieldBindings({
+      ...countStack(),
+      pages: [pageWith([{
+        type: 'record:details',
+        properties: { sections: [{ label: '{{ count }} items', fields: ['ghost'], count: { field: 'ghost' } }] },
+      }])],
+    });
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [PAGE_FIELD_UNKNOWN, 'warning', 'pages[0].regions[0].components[0].properties.sections[0].fields[0]'],
+      [PAGE_FIELD_UNKNOWN, 'error', COUNT_PATH],
+    ]);
+  });
+
+  it('says nothing about an object this stack does not define', () => {
+    const findings = validatePageFieldBindings({
+      ...countStack(),
+      pages: [{ ...countedPage('anything'), object: 'other_pkg__thing' }],
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('survives off-spec input: a non-object `count`, a non-string `field`, a section that is not an object', () => {
+    const refs = componentSectionCountRefs('record:details', {
+      sections: ['overview', { count: 'tags' }, { count: { field: 7 } }, { count: { field: 'tags' } }],
+    }, 'p');
+    expect(refs).toEqual([{ name: 'tags', path: 'p.sections[3].count.field' }]);
+  });
+
+  it('reaches the gating reference-integrity suite every CLI command runs', () => {
+    const findings = validateReferenceIntegrity({ ...countStack(), pages: [countedPage('status')] });
+    expect(findings.filter((f) => f.rule === PAGE_SECTION_COUNT_NOT_MULTI_VALUE).map((f) => f.severity))
+      .toEqual(['error']);
   });
 });
 
