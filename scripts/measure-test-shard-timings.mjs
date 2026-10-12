@@ -87,6 +87,10 @@
 //   node scripts/measure-test-shard-timings.mjs --run <id> <summary.json>... \
 //     --run <id> <summary.json>... [--merge-into <dataset>] [--out <path>] \
 //     [--spread-out <path>]
+//   node scripts/measure-test-shard-timings.mjs --diff --prior <dataset> \
+//     --refreshed <dataset> [--captures <dir>] [--out <path>]
+//       the refresh PR's regression section (#22949 ruling E): see
+//       "The refresh diff" below
 //   node scripts/measure-test-shard-timings.mjs --self-test
 
 import { createHash } from 'node:crypto';
