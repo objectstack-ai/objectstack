@@ -1297,9 +1297,19 @@
         "outputSchema"
       ]
     },
+    "ui/ActionButtonProps": {
+      "sites": [
+        ""
+      ]
+    },
     "ui/ActionGroupProps": {
       "sites": [
         "actions.element"
+      ]
+    },
+    "ui/ActionIconProps": {
+      "sites": [
+        ""
       ]
     },
     "ui/ActionMenuProps": {
