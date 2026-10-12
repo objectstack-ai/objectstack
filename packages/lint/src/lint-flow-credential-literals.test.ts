@@ -31,6 +31,8 @@ import {
   FLOW_CREDENTIAL_LITERAL,
   lintFlowCredentialLiterals as lintFlowCredentialLiteralsUnrecorded,
 } from './lint-flow-credential-literals.js';
+import { ConnectorInstanceAuthSchema } from '@objectstack/spec/integration';
+
 import { explainRule } from './rule-explanations.js';
 import { runRuntimeAuthoringRules, runtimeAuthoringRulesFor } from './runtime-gate.js';
 import * as barrel from './index.js';
@@ -41,7 +43,7 @@ import * as barrel from './index.js';
 // verdict to one line of at most 200 characters — every firing variant this
 // suite exercises, not a chosen few. Run the whole file: those cases read what
 // the cases above fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const lintFlowCredentialLiterals: typeof lintFlowCredentialLiteralsUnrecorded = (...args) => {
   const findings = lintFlowCredentialLiteralsUnrecorded(...args);
   fired.push(...findings);
@@ -472,5 +474,57 @@ describe('[#22161] one-line verdicts — flow-credential-literal', () => {
       expect(f.message, f.rule).not.toContain('\n');
       expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
     }
+  });
+});
+
+// [#22161] Slice 13: the `fix:` line. Each position's hint is one remedy line:
+// the auth variant that holds the credential and the node that calls the
+// connector. Where `credentialRef` resolves, the connector's `provider`, the
+// Basic variant, that a template draws nothing and that nothing is refused are
+// the explanation's.
+describe('[#22161] one-line fixes — flow-credential-literal', () => {
+  it('every `fix:` line the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === FLOW_CREDENTIAL_LITERAL);
+    // Coverage control: all three positions fired, each with its own route.
+    for (const opening of ['header ', 'url query parameter ', 'connector input ']) {
+      expect(converted.some((f) => f.message.startsWith(opening)), opening).toBe(true);
+    }
+    expect(new Set(converted.map((f) => f.hint)).size).toBe(3);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('`os explain` carries what the `fix:` line no longer says', () => {
+    const text = explainRule(FLOW_CREDENTIAL_LITERAL)!.paragraphs.join('\n');
+    for (const fact of [
+      'resolved at boot (an environment variable in the open tier)',
+      "names a `provider` ('rest' for a plain HTTP API)",
+      "`auth: { type: 'basic', username, credentialRef }`",
+      'A `{variable}` template is not a literal and draws nothing',
+      'nothing is refused',
+      'content/docs/automation/connectors.mdx',
+    ]) {
+      expect(text, `explanation names ${fact}`).toContain(fact);
+    }
+  });
+
+  it('every auth variant the `fix:` lines and the explanation name is one the connector auth schema accepts', () => {
+    // The explanation module imports nothing, so the variants it and the
+    // `fix:` lines spell out are held to the spec's schema here.
+    for (const auth of [
+      { type: 'bearer', credentialRef: 'PROBE_REF' },
+      { type: 'api-key', headerName: 'X-Api-Key', credentialRef: 'PROBE_REF' },
+      { type: 'api-key', paramName: 'api_key', credentialRef: 'PROBE_REF' },
+      { type: 'basic', username: 'probe', credentialRef: 'PROBE_REF' },
+    ]) {
+      expect(ConnectorInstanceAuthSchema.safeParse(auth).success, JSON.stringify(auth)).toBe(true);
+    }
+    // The connector-input line offers every secret-bearing variant by name.
+    const input = lintFlowCredentialLiteralsUnrecorded(controlStack()).find((f) =>
+      f.message.startsWith('connector input '),
+    )!;
+    expect(input.hint).toContain("type: 'bearer' | 'api-key' | 'basic', credentialRef");
   });
 });
