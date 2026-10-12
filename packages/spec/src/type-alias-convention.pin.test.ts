@@ -215,7 +215,6 @@ import type * as M125 from './system/deploy-bundle.zod.js';
 import type * as M126 from './system/disaster-recovery.zod.js';
 import type * as M127 from './system/doc.zod.js';
 import type * as M128 from './system/email-config.zod.js';
-import type * as M129 from './system/email-template.zod.js';
 import type * as M130 from './system/encryption.zod.js';
 import type * as M131 from './system/environment-artifact.zod.js';
 import type * as M132 from './system/http-server.zod.js';
@@ -1271,7 +1270,6 @@ export type Iso_system_emailConfig__EmailAddressConfigSchema = Assert<Eq< z.inpu
 export type Iso_system_emailConfig__EmailProviderSchema = Assert<Eq< z.input< typeof M128.EmailProviderSchema >, z.infer< typeof M128.EmailProviderSchema > >>;
 
 // system/email-template.zod.ts
-export type Iso_system_emailTemplate__EmailTemplateDefinitionCategorySchema = Assert<Eq< z.input< typeof M129.EmailTemplateDefinitionCategorySchema >, z.infer< typeof M129.EmailTemplateDefinitionCategorySchema > >>;
 
 // system/encryption.zod.ts
 export type Iso_system_encryption__EncryptionAlgorithmSchema = Assert<Eq< z.input< typeof M130.EncryptionAlgorithmSchema >, z.infer< typeof M130.EncryptionAlgorithmSchema > >>;
