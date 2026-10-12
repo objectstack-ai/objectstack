@@ -181,6 +181,10 @@ describe('HttpDispatcher', () => {
                 // remedy clause, pinned in
                 // `domains/meta-save-destructive-remedy.test.ts`.
                 writeFace: 'meta-dispatch',
+                // [#23086] The admitted caller's user id, as `RestServer`'s
+                // twin records it; rows are pinned in
+                // `domains/meta-save-actor.test.ts`.
+                actor: 'u1',
             });
             expect(result.response?.body).toEqual({
                 success: true,
