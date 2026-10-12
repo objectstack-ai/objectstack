@@ -10171,6 +10171,21 @@ export class ObjectStackProtocolImplementation implements
         //    necessary. Without this, project-kernel callers of
         //    `GET /api/v1/meta/object/<name>` 404 even though the object is
         //    registered and visible via the list endpoint.
+        // [#22877] A bundled type's bare name addresses its CANONICAL member
+        // (ruling A, Q2 i: no member named means the canonical one). Step 1
+        // read only the canonical member's stored row; when there is none, the
+        // canonical member is the code layer's. The registry's bare-name read
+        // below answers its overlay tier first, which would hand back a
+        // non-canonical member's hydrated overlay (a template customized in
+        // `zh-CN` only) for a read that named no member. It still answers a
+        // bundle that ships no canonical member at all.
+        if (item === undefined) {
+            const disc = ITEM_KEY_DISCRIMINATORS[request.type];
+            const artifact = disc ? this.lookupArtifactItem(request.type, request.name, request.packageId) : undefined;
+            if (disc && artifact !== undefined && itemDiscriminator(request.type, artifact) === disc.canonical) {
+                item = artifact;
+            }
+        }
         if (item === undefined) {
             item = this.engine.registry.getItem(request.type, request.name, request.packageId);
             if (item === undefined) {
