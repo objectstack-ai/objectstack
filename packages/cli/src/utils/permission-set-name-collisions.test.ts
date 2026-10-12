@@ -122,8 +122,8 @@ const ordersStack = (permissions: Set_[]) => ({
  * each package through `defineStack` first, which `composeStacks` requires of
  * every input (#20367 ruling B).
  */
-const artifact = (stacks: unknown[]): AnyRec =>
-  composeStacks(stacks.map((s) => defineStack(s as never)), { manifest: 'preserve' }) as unknown as AnyRec;
+const artifact = (stacks: unknown[], options?: { strict?: boolean }): AnyRec =>
+  composeStacks(stacks.map((s) => defineStack(s as never, options)), { manifest: 'preserve' }) as unknown as AnyRec;
 
 /** The two-package artifact, with the Module package's set name as the variable. */
 const twoPackages = (ordersName: string) =>
@@ -140,8 +140,8 @@ const twoPackages = (ordersName: string) =>
  * would silently see an artifact with no declarations — reporting nothing,
  * which is indistinguishable from a clean stack.
  */
-const parsedArtifact = (stacks: unknown[]): AnyRec => {
-  const normalized = normalizeStackInput(artifact(stacks) as Record<string, unknown>, {
+const parsedArtifact = (stacks: unknown[], options?: { strict?: boolean }): AnyRec => {
+  const normalized = normalizeStackInput(artifact(stacks, options) as Record<string, unknown>, {
     onConversionNotice: () => {},
   });
   const result = ObjectStackDefinitionSchema.safeParse(normalized);
@@ -222,7 +222,13 @@ describe('#18024 — `os build` reports a permission-set name another package in
     // of the package's own row, not a refusal — so a compile door that reported
     // it would be announcing a drop that never happens. ⛔ The door consults
     // the shipped predicate; it does not compare names and stop.
-    const parsed = parsedArtifact([coreStack([coreSet(SHARED_NAME), coreSet(SHARED_NAME)])]);
+    //
+    // `strict: false`, because strict `defineStack` now refuses this package at
+    // authoring (#22934: two entries of one collection under one name), so the
+    // shape reaches this door only from a non-strict stack or an artifact built
+    // before that refusal — which is exactly when the door must still not
+    // misreport it as a cross-package collision.
+    const parsed = parsedArtifact([coreStack([coreSet(SHARED_NAME), coreSet(SHARED_NAME)])], { strict: false });
     expect(collectPermissionSetDeclarations(parsed)).toEqual([
       { name: SHARED_NAME, declaredBy: CORE_ID },
       { name: SHARED_NAME, declaredBy: CORE_ID },
