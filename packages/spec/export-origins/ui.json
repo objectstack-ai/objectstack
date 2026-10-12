@@ -152,6 +152,8 @@
     "DocNavItemSchema": "src/ui/app.zod.ts#DocNavItemSchema (const)",
     "EXPRESSION_BINDABLE_TEXT_KEYS": "src/ui/expression-bindable-text-keys.zod.ts#EXPRESSION_BINDABLE_TEXT_KEYS (const)",
     "EXPRESSION_BINDABLE_TEXT_KEYS_BY_COMPONENT": "src/ui/expression-bindable-text-keys.zod.ts#EXPRESSION_BINDABLE_TEXT_KEYS_BY_COMPONENT (const)",
+    "ElementApiDataSource": "src/ui/page.zod.ts#ElementApiDataSource (type)",
+    "ElementApiDataSourceSchema": "src/ui/page.zod.ts#ElementApiDataSourceSchema (const)",
     "ElementButtonPropsSchema": "src/ui/component.zod.ts#ElementButtonPropsSchema (const)",
     "ElementDataSource": "src/ui/page.zod.ts#ElementDataSource (type)",
     "ElementDataSourceParsed": "src/ui/page.zod.ts#ElementDataSourceParsed (type)",

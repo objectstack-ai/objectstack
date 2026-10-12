@@ -227,6 +227,9 @@ const NOT_A_STAND_IN = {
   runDeleteBehaviorProofs: 'same `VerifyStack` handle as runCrudVerification.',
   formatDeleteBehaviorReport:
     'formats a `DeleteBehaviorReport` this package produced; presentation, not conformance.',
+  runUniqueScopeProofs: 'same `VerifyStack` handle as runCrudVerification.',
+  formatUniqueScopeReport:
+    'formats a `UniqueScopeReport` this package produced; presentation, not conformance.',
   fillRelationalRefs:
     'takes one `CrudCase` derived by `deriveCrudCases` — a data record this package built, with no ' +
     'external implementer.',
