@@ -490,7 +490,7 @@ function storedRowTypes(
 ): () => Promise<unknown[]> {
     return async () => {
         if (typeof qlService?.find !== 'function') return [];
-        const rows = await qlService.find('sys_metadata', { where, context: { isSystem: true } } as any);
+        const rows = await qlService.find('sys_metadata', { where, context: { isSystem: true } });
         return (Array.isArray(rows) ? rows : [])
             .filter((row) => row && typeof row === 'object' && keep(row as Record<string, unknown>))
             .map((row) => (row as { type?: unknown }).type);
@@ -507,7 +507,7 @@ async function readCommitRow(
     commitId: string,
 ): Promise<Record<string, unknown> | undefined> {
     if (typeof qlService?.find !== 'function') return undefined;
-    const rows = await qlService.find('sys_metadata_commit', { where: { id: commitId }, context: { isSystem: true } } as any);
+    const rows = await qlService.find('sys_metadata_commit', { where: { id: commitId }, context: { isSystem: true } });
     const row = Array.isArray(rows) ? rows[0] : undefined;
     return row && typeof row === 'object' ? (row as Record<string, unknown>) : undefined;
 }
