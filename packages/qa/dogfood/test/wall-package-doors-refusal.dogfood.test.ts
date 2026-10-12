@@ -14,17 +14,21 @@
 //     undid the operator's published change: `200`, and B's member lost it;
 //   - `POST /packages/:id/duplicate` copied the set, under the same name, into
 //     A's own package, and `GET /meta` then served A's copy;
-//   - `POST /packages/:id/revert` discarded the operator's pending draft;
+//   - `POST /packages/:id/revert` discarded the operator's pending draft
+//     (`POST /packages/:id/discard-drafts` is the same discard, by a second door);
 //   - `POST /packages/:id/adopt-orphans` moved the environment's catalog rows
 //     into A's package.
 //
 // Pinned here, under each walled posture: every one of those answers
 // `403 PERMISSION_DENIED`, nothing moves, and B's resolution stays. The commit
 // revert is judged by the commit's own items, whatever package the URL names.
-// CONTROLS: A runs every one of these doors on its own catalog-free package as
-// before, and the platform operator runs them on the catalog-carrying one.
-// And under `single` (CONTROL): the same `manage_metadata` holder runs them on
-// the operator's package as before.
+// CONTROLS: A runs publish-drafts, discard-drafts, revert, rollback, commit
+// revert and duplicate on its own catalog-free package as before. Not
+// adopt-orphans: that verb reads the environment's orphans, not A's package,
+// and this environment carries the operator's catalog orphan. The platform
+// operator runs every door on the catalog-carrying package, adopt-orphans
+// included. And under `single` (CONTROL): the same `manage_metadata` holder
+// runs every door on the operator's package as before.
 //
 // The boot is `multiTenant: 'posture-only'`: a real, non-degraded walled
 // posture. The harness declares the seeded admin as `OS_PLATFORM_OWNER_EMAIL`,
@@ -199,6 +203,14 @@ for (const posture of ['isolated', 'group'] as const) {
       expect(await rowsOf(h, { package_id: OP_PKG, type: 'permission', name: OP_SET, state: 'draft' })).toHaveLength(1);
     });
 
+    it('discard-drafts: A discarding the operator\'s pending catalog draft is refused, and the draft stays', async () => {
+      const drafted = await call(h.stack, h.operator, 'PUT', `/meta/permission/${OP_SET}?package=${OP_PKG}&mode=draft`,
+        set(OP_SET, ['manage_users', 'manage_metadata']));
+      expect(drafted.status, await drafted.clone().text()).toBe(200);
+      await refused(await call(h.stack, h.tokA, 'POST', `/packages/${OP_PKG}/discard-drafts`, {}));
+      expect(await rowsOf(h, { package_id: OP_PKG, type: 'permission', name: OP_SET, state: 'draft' })).toHaveLength(1);
+    });
+
     it('rollback: A rolling the operator\'s package back past a catalog commit is refused, and B keeps `manage_users`', async () => {
       const before = await bSnapshot();
       await refused(await call(h.stack, h.tokA, 'POST', `/packages/${OP_PKG}/rollback`, { commitId: h.c1 }));
@@ -232,7 +244,7 @@ for (const posture of ['isolated', 'group'] as const) {
       expect(env.map((r) => r.package_id ?? null)).not.toContain('com.w3.a.adopt');
     });
 
-    it('CONTROL: A runs every one of these doors on its own catalog-free package as before', async () => {
+    it('CONTROL: A runs every door but adopt-orphans on its own catalog-free package as before', async () => {
       const pkg = 'com.w3.a.free';
       const dash = 'w3_free_dash';
       const ok = async (res: Response) => expect(res.status, await res.clone().text()).toBe(200);
@@ -247,6 +259,9 @@ for (const posture of ['isolated', 'group'] as const) {
       await ok(await call(h.stack, h.tokA, 'POST', `/packages/${pkg}/rollback`, { commitId: first }));
       await ok(await call(h.stack, h.tokA, 'PUT', `/meta/dashboard/${dash}?package=${pkg}&mode=draft`, dashboard(dash, 'v3')));
       await ok(await call(h.stack, h.tokA, 'POST', `/packages/${pkg}/revert`, {}));
+      await ok(await call(h.stack, h.tokA, 'PUT', `/meta/dashboard/${dash}?package=${pkg}&mode=draft`, dashboard(dash, 'v4')));
+      await ok(await call(h.stack, h.tokA, 'POST', `/packages/${pkg}/discard-drafts`, {}));
+      expect(await rowsOf(h, { package_id: pkg, state: 'draft' })).toHaveLength(0);
       await ok(await call(h.stack, h.tokA, 'POST', `/packages/${pkg}/duplicate`, { targetPackageId: 'com.w3.a.free.copy' }));
     });
 
@@ -254,6 +269,9 @@ for (const posture of ['isolated', 'group'] as const) {
       const ok = async (res: Response) => expect(res.status, await res.clone().text()).toBe(200);
       await ok(await call(h.stack, h.operator, 'POST', `/packages/${OP_PKG}/duplicate`, { targetPackageId: 'com.w3.op.copy' }));
       await ok(await call(h.stack, h.operator, 'POST', `/packages/${OP_PKG}/revert`, {}));
+      await ok(await call(h.stack, h.operator, 'PUT', `/meta/permission/${OP_SET}?package=${OP_PKG}&mode=draft`, set(OP_SET, ['manage_metadata'])));
+      await ok(await call(h.stack, h.operator, 'POST', `/packages/${OP_PKG}/discard-drafts`, {}));
+      expect(await rowsOf(h, { package_id: OP_PKG, type: 'permission', name: OP_SET, state: 'draft' })).toHaveLength(0);
       await ok(await call(h.stack, h.operator, 'POST', `/packages/${OP_PKG}/commits/${h.c2}/revert`, {}));
       expect((await bGrants()).systemPermissions).not.toContain('manage_users');
       await ok(await call(h.stack, h.operator, 'PUT', `/meta/permission/${OP_SET}?package=${OP_PKG}&mode=draft`, set(OP_SET, ['manage_users'])));
@@ -289,6 +307,8 @@ describe('[ADR-0131 D3 · #15204 W3] single (CONTROL): the refusal is inert', ()
     await ok(await call(h.stack, h.tokA, 'POST', `/packages/${OP_PKG}/rollback`, { commitId: h.c1 }));
     await ok(await call(h.stack, h.tokA, 'POST', `/packages/${OP_PKG}/commits/${h.c1}/revert`, {}));
     await ok(await call(h.stack, h.tokA, 'POST', `/packages/${OP_PKG}/revert`, {}));
+    await ok(await call(h.stack, h.operator, 'PUT', `/meta/permission/${OP_SET}?package=${OP_PKG}&mode=draft`, set(OP_SET, ['manage_metadata'])));
+    await ok(await call(h.stack, h.tokA, 'POST', `/packages/${OP_PKG}/discard-drafts`, {}));
     expect((await call(h.stack, h.tokA, 'POST', '/packages', { id: 'com.w3.a.adopt', name: 'adopt', version: '1.0.0', type: 'app' })).status).toBe(201);
     await ok(await call(h.stack, h.tokA, 'POST', '/packages/com.w3.a.adopt/adopt-orphans', {}));
   });

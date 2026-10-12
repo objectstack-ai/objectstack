@@ -1866,6 +1866,13 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         if (parts.length === 2 && parts[1] === 'discard-drafts' && m === 'POST') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
+            // [#15204 W3] ADR-0131 D3: discarding a catalog draft is the
+            // operator's under a wall. The drafts this verb discards.
+            const walled = await refuseWalledCatalogPackageWrite(
+                deps, _context, `Discarding the drafts of package "${id}"`,
+                storedRowTypes(qlService, { package_id: id, state: 'draft' }),
+            );
+            if (walled) return walled;
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.discardPackageDrafts === 'function') {
                 try {
@@ -2101,10 +2108,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [#15204 W3] ADR-0131 D3: a duplicate copies the source's items
             // into a new package, and a copied catalog item is a catalog
             // creation (its name is not re-namespaced), the operator's under
-            // a wall. The source's stored rows.
+            // a wall. The rows `duplicatePackage` copies: active, environment-wide.
             const walled = await refuseWalledCatalogPackageWrite(
                 deps, _context, `Duplicating package "${id}"`,
-                storedRowTypes(qlService, { package_id: id }),
+                storedRowTypes(qlService, { package_id: id, state: 'active', organization_id: null }),
             );
             if (walled) return walled;
             try {
