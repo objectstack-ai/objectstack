@@ -569,21 +569,30 @@ describe('importUnmanagedPackage — the verb', () => {
         expect(Object.keys(JSON.parse(objectRow!.metadata).fields)).toEqual(['title', 'source']);
     });
 
-    it('copies a LOCKED item without its lock, names each lock dropped, and the next save and delete act on the copy', async () => {
-        const { protocol, table } = makeProtocol();
+    it('names each lock it dropped, in write order, with the package\'s reason verbatim — under the answer\'s declaration', async () => {
+        const { protocol } = makeProtocol();
         const result = await protocol.importUnmanagedPackage({ manifest: lockedCrmBody() });
-
         expect(ImportUnmanagedPackageResponseSchema.parse(result)).toEqual(result);
         expect(result.strippedLocks).toEqual([
             { type: 'view', name: 'crm_lead_open', lock: 'full', reason: VIEW_LOCK_REASON },
             { type: 'app', name: 'crm', lock: 'no-delete' },
         ]);
-        const lockKeys = table('sys_metadata')
-            .filter((r) => r.package_id === 'com.example.crm-copy')
-            .flatMap((r) => Object.keys(JSON.parse(r.metadata)).filter((key) => /^_lock(Reason|Source)?$/.test(key)).map((key) => `${r.type}/${r.name}.${key}`));
-        expect(lockKeys).toEqual([]);
+    });
 
-        // The `full` view: the next save edits it.
+    it('writes no copied row with a lock key', async () => {
+        const { protocol, table } = makeProtocol();
+        await protocol.importUnmanagedPackage({ manifest: lockedCrmBody() });
+        const rows = table('sys_metadata').filter((r) => r.package_id === 'com.example.crm-copy');
+        expect(rows.map((r) => `${r.type}/${r.name}`).sort()).toEqual(['app/crm', 'object/crm_lead', 'view/crm_lead_open']);
+        const lockKeys = rows.flatMap((r) => Object.keys(JSON.parse(r.metadata))
+            .filter((key) => key === '_lock' || key === '_lockReason' || key === '_lockSource')
+            .map((key) => `${r.type}/${r.name}.${key}`));
+        expect(lockKeys).toEqual([]);
+    });
+
+    it('the next save edits the copy of the item the package locked `full` — the save door admits it', async () => {
+        const { protocol, table } = makeProtocol();
+        await protocol.importUnmanagedPackage({ manifest: lockedCrmBody() });
         const edited = await protocol.saveMetaItem({
             type: 'view',
             name: 'crm_lead_open',
@@ -599,8 +608,11 @@ describe('importUnmanagedPackage — the verb', () => {
         expect(edited.success).toBe(true);
         const row = table('sys_metadata').find((r) => r.type === 'view' && r.name === 'crm_lead_open' && r.state === 'active');
         expect(JSON.parse(row!.metadata).label).toBe('Open leads (edited)');
+    });
 
-        // The `no-delete` app: the copy deletes.
+    it('the copy of the item the package locked `no-delete` deletes', async () => {
+        const { protocol } = makeProtocol();
+        await protocol.importUnmanagedPackage({ manifest: lockedCrmBody() });
         const removed = await protocol.deleteMetaItem({ type: 'app', name: 'crm' });
         expect(removed.success).toBe(true);
     });
