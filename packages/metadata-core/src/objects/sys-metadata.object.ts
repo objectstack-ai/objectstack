@@ -93,6 +93,27 @@ export const SysMetadataObject = ObjectSchema.create({
       defaultValue: 'platform',
     }),
 
+    /**
+     * The bundle member this row overlays, for a metadata type whose identity
+     * is a pair (`ITEM_KEY_DISCRIMINATORS` in `../item-key-discriminators.ts`,
+     * today `email_template`'s `(name, locale)`).
+     *
+     * NULL is the type's CANONICAL member, which is also every row of a type
+     * whose identity is `name` alone — so those rows never carry a value and
+     * stay byte-identical. A non-canonical member stores the value the body
+     * declares (`itemDiscriminator`), so two locales of one template are two
+     * rows. Written by the overlay repository from the body, never authored;
+     * part of the overlay uniqueness key below and of the runtime index
+     * (`metadata-protocol`'s `migrations/overlay-index.ts`).
+     */
+    bundle_member: Field.text({
+      label: 'Bundle Member',
+      required: false,
+      maxLength: 100,
+      description:
+        'Bundle member (e.g. the locale of an email template) this overlay row customizes. Null = the canonical member.',
+    }),
+
     /** JSON payload — the actual metadata configuration */
     metadata: Field.textarea({
       label: 'Metadata',
@@ -200,11 +221,13 @@ export const SysMetadataObject = ObjectSchema.create({
 
   indexes: [
     // ADR-0005 (revised 2026-05) + ADR-0048: overlay uniqueness is scoped by
-    // (type, name, organization_id, package_id). `package_id` is part of the
-    // discriminator so two installed packages shipping the same `type`/`name`
-    // each get their OWN customization row (a package-less / global overlay
-    // uses NULL). environment_id is deprecated and not part of the
-    // discriminator.
+    // (type, name, organization_id, package_id, bundle_member). `package_id` is
+    // part of the discriminator so two installed packages shipping the same
+    // `type`/`name` each get their OWN customization row (a package-less /
+    // global overlay uses NULL). `bundle_member` is the bundled type's member
+    // (#22877): two locales of one email template are two overlay rows; NULL
+    // is the canonical member and every undiscriminated type's row.
+    // environment_id is deprecated and not part of the discriminator.
     //
     // ⚠️ The active-row restriction is NOT declared here, and never was in any
     // effective sense: this entry carried `partial: "state = 'active'"` until
@@ -217,15 +240,16 @@ export const SysMetadataObject = ObjectSchema.create({
     // What actually delivers active-row scoping is the runtime layer:
     // `protocol.ts ensureOverlayIndex` issues a DROP-then-CREATE migration for
     // `CREATE UNIQUE INDEX … ON sys_metadata (type, name, organization_id,
-    // COALESCE(package_id,'')) WHERE state = 'active'` — which additionally
-    // fixes NULL-distinctness for package-less rows, something this
-    // declaration could not express either. This entry is therefore the
+    // COALESCE(package_id,''), COALESCE(bundle_member,'')) WHERE state =
+    // 'active'` — which additionally fixes NULL-distinctness for package-less
+    // rows and canonical members, something this declaration could not
+    // express either. This entry is therefore the
     // coarser fallback that a driver without that runtime migration gets: it
     // still prevents duplicate ACTIVE overlays, at the cost of also colliding
     // with archived/reset rows.
     {
       name: 'idx_sys_metadata_overlay_active',
-      fields: ['type', 'name', 'organization_id', 'package_id'],
+      fields: ['type', 'name', 'organization_id', 'package_id', 'bundle_member'],
       unique: 'global',
     },
     { name: 'idx_sys_metadata_org_type', fields: ['organization_id', 'type'] },
