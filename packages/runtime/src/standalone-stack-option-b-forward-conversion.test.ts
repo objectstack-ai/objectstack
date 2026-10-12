@@ -223,7 +223,8 @@ describe('[#23027] the runtime\'s artifact load converts every package body once
             datasources: [{ name: 'ob_db', label: 'OB DB', driver: 'sqlite', config: { filename: './ob.db' } }],
             datasourceMapping: [{ default: true, datasource: 'ob_db' }],
         };
-        for (const refresh of [{ refreshInterval: 300 }, { refreshIntervalSeconds: 300 }]) {
+        const refreshes: Record<string, number>[] = [{ refreshInterval: 300 }, { refreshIntervalSeconds: 300 }];
+        for (const refresh of refreshes) {
             const { dir, artifactPath } = writeArtifact('db', optionB('^18', { ...declared, dashboards: [dashboard('ob_overview', refresh)] }));
             const resolved = resolveProjectDatabaseUrl({ artifactPath, projectRoot: dir, env: {} });
             expect([resolved.source, resolved.url, resolved.datasourceName], JSON.stringify(refresh))
