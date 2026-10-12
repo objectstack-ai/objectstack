@@ -247,17 +247,28 @@ export class AppPlugin implements Plugin {
 
     /**
      * [#22994] The ONE ADR-0087 forward conversion this boot runs over its
-     * definition, and the copy every registrar in this plugin takes — the
-     * `manifest` service's decomposition in `init()` (so the ObjectQL
-     * registry, which `GET /meta/<type>` lists and every reader of the
-     * flattened list — the email loader among them — reads as its code layer)
-     * and the security block in `start()`.
+     * definition, and the copy every reader in this plugin takes:
+     *
+     *  - the `manifest` service's decomposition in `init()` (so the ObjectQL
+     *    registry, which `GET /meta/<type>` lists and every reader of the
+     *    flattened list — the email loader among them — reads as its code
+     *    layer);
+     *  - the security registrar in `start()`;
+     *  - job scheduling (`scheduleAppArtifactJobs`, #23029);
+     *  - the datasource readers, through {@link convertedCollection} (#23029):
+     *    the code-defined registration and its owners, the reserved-name
+     *    check and `connectDeclared`'s input;
+     *  - the declared `apis` endpoints ({@link registerDeclaredApiEndpoints});
+     *  - the hook binder (`bindAppArtifactHandlers`, #23090);
+     *  - `loadTranslations` (#23090): the stack's own list through
+     *    {@link convertedCollection}, a lifted `manifest.translations` list
+     *    off the copy.
      *
      * The input is `{ ...manifest, ...collections }`, the definition the
      * security block has converted since #12844, and for a bundle carrying no
      * `packages[]` it is byte for byte the payload `init()` has always
-     * registered. So the registry and the security registrar read one
-     * conversion of one input, and neither reader converts again. The door's
+     * registered. So every reader above reads one conversion of one input,
+     * and none of them converts again. The door's
      * own policy function decides the window, as at the artifact door: the
      * same bytes, the same verdict.
      *
