@@ -38,6 +38,8 @@
 import { describe, it, expect } from 'vitest';
 
 import { ManifestSchema, PluginEnginesSchema } from './manifest.zod';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { PROTOCOL_MAJOR } from './protocol-version';
 import { ArtifactPackageSchema, ObjectStackDefinitionSchema } from '../stack.zod';
 import { formatZodError } from '../shared/error-map.zod';
@@ -110,6 +112,11 @@ describe("unknown keys inside `manifest:` are refused at parse (the silent-drop 
     expect(issue.message).toContain(`protocol: '^${PROTOCOL_MAJOR}'`);
     expect(issue.message).not.toContain(`protocol: '^${PROTOCOL_MAJOR - 1}'`);
     expect(issue.message).not.toContain('Did you mean');
+    // The surface it points at for the OTHER meaning is a file that exists:
+    // the marketplace template manifest, since the cloud subpath retired.
+    expect(issue.message).toContain('`marketplace/template-manifest.zod.ts`');
+    expect(issue.message).not.toContain('cloud/template-manifest');
+    expect(existsSync(fileURLToPath(new URL('../marketplace/template-manifest.zod.ts', import.meta.url)))).toBe(true);
   });
 });
 

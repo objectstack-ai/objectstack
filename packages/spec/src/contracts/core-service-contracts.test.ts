@@ -6,7 +6,7 @@
 // widening to `any` — the difference between "no contract written yet" and
 // "checked", which is the distinction this whole line of work exists to make.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, expectTypeOf } from 'vitest';
 import { CoreServiceName } from '../system/core-services.zod';
 import type {
     CoreServiceContracts, CoreServiceContract, ServiceSlotContracts, ServiceSlotContract,
@@ -19,6 +19,8 @@ import type { IHttpServer } from './http-server';
 import type { IObjectQLEngine } from './objectql-engine';
 import type { ISecurityService } from './security-service';
 import type { IShareLinkService } from './share-link-service';
+import type { IWebhookService } from './webhook-service';
+import type { ITriggerApiService } from './trigger-api-service';
 
 /** Compile-time assertion helper: fails to typecheck unless `T` is exactly `true`. */
 type Expect<T extends true> = T;
@@ -110,10 +112,39 @@ describe('slot → contract ledger beyond the enum', () => {
         expect(true).toBe(true);
     });
 
+    it('types the webhooks and trigger-api slots through the member a reader probes', () => {
+        // [#22848] Both contracts declare every member optional, so a reader
+        // resolves the slot and probes for the one member it calls. This
+        // lookup has the runtime's keyed signature (`DomainHandlerDeps`'s
+        // `resolveService` and `getRequestKernelService` take
+        // `K extends keyof ServiceSlotContracts` and answer
+        // `ServiceSlotContract<K> | undefined`); spec cannot import the
+        // runtime, so it restates the one signature the map feeds.
+        const getService = <K extends keyof ServiceSlotContracts>(_name: K): ServiceSlotContract<K> | undefined =>
+            undefined;
+
+        expectTypeOf(getService('webhooks')).toEqualTypeOf<IWebhookService | undefined>();
+        expectTypeOf(getService('webhooks')?.handleRedeliver).toEqualTypeOf<IWebhookService['handleRedeliver']>();
+        expectTypeOf(getService('trigger-api')).toEqualTypeOf<ITriggerApiService | undefined>();
+        expectTypeOf(getService('trigger-api')?.handleInboundHook)
+            .toEqualTypeOf<ITriggerApiService['handleInboundHook']>();
+
+        // CONTROL: the same lookup resolves the slots that were already
+        // mapped exactly as before.
+        expectTypeOf(getService('http.server')).toEqualTypeOf<IHttpServer | undefined>();
+        expectTypeOf(getService('security')).toEqualTypeOf<ISecurityService | undefined>();
+        expectTypeOf(getService('data')).toEqualTypeOf<IDataEngine | undefined>();
+        expect(getService('webhooks')).toBeUndefined();
+    });
+
     it('holds exactly the non-core slots whose contract is written', () => {
-        const extra: Array<Exclude<keyof ServiceSlotContracts, keyof CoreServiceContracts>> = [
-            'security', 'shareLinks', 'objectql', 'http.server', 'http-server',
-        ];
+        const extra = [
+            'security', 'shareLinks', 'objectql', 'http.server', 'http-server', 'webhooks', 'trigger-api',
+        ] as const;
+        // Exact, not merely a subset: a key added to or dropped from the
+        // non-core ledger without this list changing is a type error here.
+        expectTypeOf<Exclude<keyof ServiceSlotContracts, keyof CoreServiceContracts>>()
+            .toEqualTypeOf<(typeof extra)[number]>();
         const slots = new Set<string>(CoreServiceName.options);
         for (const key of extra) {
             // The point of the split: these are deliberately NOT enum members.
@@ -121,7 +152,7 @@ describe('slot → contract ledger beyond the enum', () => {
             // into `CoreServiceContracts` and this assertion is what catches it.
             expect(slots.has(key), `'${key}' is a CoreServiceName — move its entry into CoreServiceContracts`).toBe(false);
         }
-        expect(extra).toHaveLength(5);
+        expect(extra).toHaveLength(7);
     });
 
     it('still resolves a slot with no written contract to unknown', () => {

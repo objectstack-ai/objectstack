@@ -1986,15 +1986,17 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'flow-text-slot-single-brace-refused',
     order: 89,
     text:
-      'It executes ADR-0032 Decision 3 in the flow TEXT slots — a `notify` node\'s `title` and `message`, '
-      + 'a `screen` node\'s `title` and `description`, a refusing `end` node\'s `message`: they render '
+      'It executes ADR-0032 Decision 3 in the flow TEXT slots — a `notify` node\'s `title`, `message` and '
+      + 'link (`actionUrl`), a `screen` node\'s `title` and `description`, a refusing `end` node\'s `message`: '
+      + 'they render '
       + 'through the formula template engine, so their placeholders are `{{ }}` holes, a variable path with '
       + 'an optional formatter (the engine\'s hole grammar now admits a `$`-named variable, so '
       + '`{{ $error.message }}` is a hole). A single-brace `{…}` token there is refused — by the node contract, '
       + '`registerFlow` and `objectstack validate` alike — with the hole spelling of each path token, or, for '
       + 'arithmetic, a function, a date macro or a run-user path, the `assignment` that computes it into a '
       + 'variable. No D2 conversion exists: the 17.x interpolator and the engine render a `Date` differently '
-      + '(JSON-quoted against ISO text), and a whole-slot object differently in a screen or `end` text, so '
+      + '(JSON-quoted against ISO text), and a whole-slot object differently in a screen or `end` text or a '
+      + 'notify link, so '
       + 'the rewrite is the author\'s to check. Every other flow string keeps the single-brace dialect. Its '
       + 'D3 record is the semantic entry `flow-text-slot-single-brace-refused`.',
   },

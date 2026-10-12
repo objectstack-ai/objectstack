@@ -123,7 +123,9 @@ Get package details.
 
 ### `DELETE /packages/:id`
 
-Uninstall a package.
+Uninstall a package. Under a `group` or `isolated` tenancy posture, a package
+holding positions or permission sets is the platform operator's to delete: any
+other caller is refused `403 PERMISSION_DENIED` (ADR-0131 D3).
 
 ### `PATCH /packages/:id/enable`
 

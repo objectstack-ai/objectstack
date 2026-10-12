@@ -66,14 +66,18 @@ export const TaskCompletedFlow = defineFlow({
       config: {
         // A field ON the record — deliberately, so this flow stays the simple
         // specimen. The flow record carries `project` as a scalar id, so
-        // `{record.project.owner}` would resolve to an empty string unless the
-        // start node declared `expand: ['project']`; the sibling
+        // `record.project.owner` would not resolve unless the start node
+        // declared `expand: ['project']`; the sibling
         // `showcase_task_done_notify_owner` is where that hop is demonstrated.
-        recipients: '{record.assignee}',
+        // A CEL value envelope, evaluated per run. `assignee` is optional and
+        // CEL refuses an absent key, so it is guarded: an unset assignee
+        // evaluates to `null`, which adds no recipient, and the node — left
+        // with none — fails as it did when the template resolved to nothing.
+        recipients: { dialect: 'cel', source: 'has(record.assignee) ? record.assignee : null' },
         title: '✅ Task done: {{ record.title }}',
         message: '{{ summary }}',
         sourceObject: 'showcase_task',
-        sourceId: '{record.id}',
+        sourceId: { dialect: 'cel', source: 'record.id' },
       },
     },
     { id: 'end', type: 'end', label: 'End' },
@@ -169,12 +173,12 @@ export const TaskAssignedNotifyFlow = defineFlow({
       label: 'Notify Assignee',
       config: {
         topic: 'task.assigned',
-        recipients: ['{record.assignee}'],
+        recipients: [{ dialect: 'cel', source: 'has(record.assignee) ? record.assignee : null' }],
         channels: ['inbox'],
         severity: 'info',
         title: 'New task assigned: {{ record.title }}',
         message: 'You have been assigned "{{ record.title }}".',
-        actionUrl: '/showcase_task/{record.id}',
+        actionUrl: '/showcase_task/{{ record.id }}',
       },
     },
     { id: 'end', type: 'end', label: 'End' },
@@ -649,12 +653,12 @@ export const TaskFollowUpFlow = defineFlow({
       label: 'Remind Assignee',
       config: {
         topic: 'task.followup',
-        recipients: ['{record.assignee}'],
+        recipients: [{ dialect: 'cel', source: 'has(record.assignee) ? record.assignee : null' }],
         channels: ['inbox'],
         severity: 'info',
         title: 'Follow up on: {{ record.title }}',
         message: 'This task has been open for a while — please update its status.',
-        actionUrl: '/showcase_task/{record.id}',
+        actionUrl: '/showcase_task/{{ record.id }}',
       },
     },
     { id: 'end', type: 'end', label: 'End' },
@@ -689,7 +693,7 @@ export const NotifyOwnerSubflow = defineFlow({
       label: 'Notify Owner',
       config: {
         topic: 'project.notice',
-        recipients: ['{ownerId}'],
+        recipients: [{ dialect: 'cel', source: 'ownerId' }],
         channels: ['inbox'],
         severity: 'info',
         title: 'Project update',
@@ -866,12 +870,12 @@ export const ProjectClosureFlow = defineFlow({
       label: 'Notify Owner of Decision',
       config: {
         topic: 'project.closure',
-        recipients: ['{record.owner}'],
+        recipients: [{ dialect: 'cel', source: 'has(record.owner) ? record.owner : null' }],
         channels: ['inbox'],
         severity: 'info',
         title: 'Closure sign-off: {{ record.name }}',
         message: 'Closure sign-off decision for "{{ record.name }}": {{ signoffResult.decision }}.',
-        actionUrl: '/showcase_project/{record.id}',
+        actionUrl: '/showcase_project/{{ record.id }}',
       },
     },
     { id: 'end', type: 'end', label: 'End' },
@@ -942,10 +946,10 @@ export const BatchRemindersFlow = defineFlow({
                       type: 'notify',
                       label: 'Send Reminder',
                       config: {
-                        recipients: '{task.owner}',
+                        recipients: { dialect: 'cel', source: 'has(task.owner) ? task.owner : null' },
                         title: 'Reminder ({{ taskIndex }}): {{ task.title }}',
                         sourceObject: 'showcase_task',
-                        sourceId: '{task.id}',
+                        sourceId: { dialect: 'cel', source: 'task.id' },
                       },
                     },
                   ],
@@ -1019,10 +1023,10 @@ export const FanOutNotifyFlow = defineFlow({
                 type: 'notify',
                 label: 'Notify Owner',
                 config: {
-                  recipients: '{record.assignee}',
+                  recipients: { dialect: 'cel', source: 'has(record.assignee) ? record.assignee : null' },
                   title: '✅ Done: {{ record.title }}',
                   sourceObject: 'showcase_task',
-                  sourceId: '{record.id}',
+                  sourceId: { dialect: 'cel', source: 'record.id' },
                 },
               },
             ],
@@ -1141,10 +1145,10 @@ export const NestedFanOutRemindersFlow = defineFlow({
                         type: 'notify',
                         label: 'Notify Owner',
                         config: {
-                          recipients: '{task.owner}',
+                          recipients: { dialect: 'cel', source: 'has(task.owner) ? task.owner : null' },
                           title: 'Overdue ({{ taskIndex }}): {{ task.title }}',
                           sourceObject: 'showcase_task',
-                          sourceId: '{task.id}',
+                          sourceId: { dialect: 'cel', source: 'task.id' },
                         },
                       },
                     ],
@@ -1158,10 +1162,10 @@ export const NestedFanOutRemindersFlow = defineFlow({
                         type: 'notify',
                         label: 'Notify Watcher',
                         config: {
-                          recipients: '{task.watcher}',
+                          recipients: { dialect: 'cel', source: 'has(task.watcher) ? task.watcher : null' },
                           title: 'Watching ({{ taskIndex }}): {{ task.title }}',
                           sourceObject: 'showcase_task',
-                          sourceId: '{task.id}',
+                          sourceId: { dialect: 'cel', source: 'task.id' },
                         },
                       },
                     ],
@@ -1334,7 +1338,7 @@ export const InvoiceDualSignoffFlow = defineFlow({
       label: 'Notify: Cleared',
       config: {
         topic: 'invoice.signoff',
-        // The INVOICE's own owner, not `{record.account.owner}` (#7381).
+        // The INVOICE's own owner, not `record.account.owner` (#7381).
         // `showcase_account` has no `owner` field at all — its people-ish keys
         // are `billing_email` and the injected `owner_id` — so that hop resolved
         // to nothing however the relation was hydrated, and the notify node
@@ -1342,15 +1346,15 @@ export const InvoiceDualSignoffFlow = defineFlow({
         // instead of delivering this message. `showcase_invoice.owner` is the
         // seeded rep (the same RLS anchor the contributor permission set uses),
         // which is who "your invoice cleared sign-off" is addressed to anyway.
-        recipients: ['{record.owner}'],
+        recipients: [{ dialect: 'cel', source: 'has(record.owner) ? record.owner : null' }],
         channels: ['inbox'],
         severity: 'info',
-        // The expanded relation is read HERE — `{record.account.name}` is what
+        // The expanded relation is read HERE — `{{ record.account.name }}` is what
         // makes the start node's `expand: ['account']` live rather than inert,
         // and it is the hydration path this kitchen-sink flow exists to teach.
         title: 'Invoice cleared: {{ record.name }}',
         message: 'Invoice "{{ record.name }}" for {{ record.account.name }} passed finance + legal sign-off and is on its way.',
-        actionUrl: '/showcase_invoice/{record.id}',
+        actionUrl: '/showcase_invoice/{{ record.id }}',
       },
     },
     {
@@ -1417,12 +1421,12 @@ export const ProjectEscalationFlow = defineFlow({
         branches: [
           {
             name: 'Owner',
-            nodes: [{ id: 'alert_owner', type: 'notify', label: 'Alert Owner', config: { recipients: '{record.owner}', title: '🔴 Critical: {{ record.name }}', severity: 'critical', sourceObject: 'showcase_project', sourceId: '{record.id}' } }],
+            nodes: [{ id: 'alert_owner', type: 'notify', label: 'Alert Owner', config: { recipients: { dialect: 'cel', source: 'has(record.owner) ? record.owner : null' }, title: '🔴 Critical: {{ record.name }}', severity: 'critical', sourceObject: 'showcase_project', sourceId: { dialect: 'cel', source: 'record.id' } } }],
             edges: [],
           },
           {
             name: 'Exec',
-            nodes: [{ id: 'alert_exec', type: 'notify', label: 'Alert Exec', config: { recipients: 'exec@example.com', title: '🔴 Critical project: {{ record.name }}', severity: 'critical', sourceObject: 'showcase_project', sourceId: '{record.id}' } }],
+            nodes: [{ id: 'alert_exec', type: 'notify', label: 'Alert Exec', config: { recipients: 'exec@example.com', title: '🔴 Critical project: {{ record.name }}', severity: 'critical', sourceObject: 'showcase_project', sourceId: { dialect: 'cel', source: 'record.id' } } }],
             edges: [],
           },
         ],
@@ -1450,13 +1454,13 @@ export const ProjectEscalationFlow = defineFlow({
       id: 'notify_normal',
       type: 'notify',
       label: 'Notify Owner',
-      config: { topic: 'project.escalation', recipients: ['{record.owner}'], channels: ['inbox'], severity: 'info', title: 'Project needs attention: {{ record.name }}', message: 'Health dropped to red — please review.' },
+      config: { topic: 'project.escalation', recipients: [{ dialect: 'cel', source: 'has(record.owner) ? record.owner : null' }], channels: ['inbox'], severity: 'info', title: 'Project needs attention: {{ record.name }}', message: 'Health dropped to red — please review.' },
     },
     {
       id: 'converge',
       type: 'notify',
       label: 'Escalation Handled',
-      config: { topic: 'project.escalation', recipients: ['{record.owner}'], channels: ['inbox'], severity: 'info', title: 'Escalation handled: {{ record.name }}', message: 'The red-health escalation has been processed.' },
+      config: { topic: 'project.escalation', recipients: [{ dialect: 'cel', source: 'has(record.owner) ? record.owner : null' }], channels: ['inbox'], severity: 'info', title: 'Escalation handled: {{ record.name }}', message: 'The red-health escalation has been processed.' },
     },
     { id: 'end', type: 'end', label: 'End' },
   ],
@@ -1889,7 +1893,7 @@ export const TaskDueReminderFlow = defineFlow({
         // The contract's required audience — this node used to omit it, so
         // every sweep run FAILED here ("at least one recipient is required")
         // and the #1874 demo never delivered (surfaced by #4277's parse).
-        recipients: ['{record.assignee}'],
+        recipients: [{ dialect: 'cel', source: 'has(record.assignee) ? record.assignee : null' }],
         channels: ['inbox'],
         severity: 'warning',
         title: 'Task due soon: {{ record.title }}',
@@ -1943,11 +1947,16 @@ export const UrgentTaskAlertFlow = defineFlow({
       label: 'Notify Assignee',
       config: {
         topic: 'task.urgent',
-        // Notify the assignee; fall back to whoever raised the priority
-        // (`{$User.Id}` = the triggering user) so an as-yet-unassigned urgent task
-        // still pings someone. Empty recipients are dropped, so the fallback only
-        // applies when `assignee` is unset.
-        recipients: ['{record.assignee}', '{$User.Id}'],
+        // Notify the assignee and whoever raised the priority (`current_user`,
+        // the triggering user) so an as-yet-unassigned urgent task still pings
+        // someone. Each entry is a CEL value envelope; one that evaluates to
+        // `null` is dropped — an unset `assignee`, and `current_user` under a
+        // system write, which has no user — so the node fails only when both
+        // are absent.
+        recipients: [
+          { dialect: 'cel', source: 'has(record.assignee) ? record.assignee : null' },
+          { dialect: 'cel', source: 'current_user != null ? current_user.id : null' },
+        ],
         channels: ['inbox'],
         severity: 'warning',
         title: 'Urgent task: {{ record.title }}',

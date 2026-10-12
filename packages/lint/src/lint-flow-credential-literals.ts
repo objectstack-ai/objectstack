@@ -90,32 +90,24 @@ const SERVED = 'readable by every member who can read flows';
 const STEER_CONNECTOR = "move it to a connector's `auth.credentialRef`";
 const STEER_INPUT = 'drop it: the connector authenticates through `auth.credentialRef`';
 
-/** Where `credentialRef` resolves — stated once, in every hint. */
-const RESOLVES =
-  ' `credentialRef` names a secrets-layer reference that is resolved at boot (an environment variable in ' +
-  'the open tier), so the secret never lands in metadata.';
-
+/**
+ * [#22161] One remedy line per position: the auth variant that holds the
+ * credential and the node that calls the connector. Where `credentialRef`
+ * resolves, the connector's `provider`, the Basic variant, that a `{variable}`
+ * template draws nothing, that nothing is refused and the connector guide are
+ * `os explain flow-credential-literal`.
+ */
 const HEADER_ROUTE =
-  "Declare a `connectors:` entry with a `provider` (`'rest'` for a plain HTTP API) and " +
-  "`auth: { type: 'bearer', credentialRef }` for a bearer token, or " +
-  "`auth: { type: 'api-key', headerName, credentialRef }` for a key in a named header (a Basic pair is " +
-  "`auth: { type: 'basic', username, credentialRef }`), and call it from a `connector_action` node." +
-  RESOLVES;
+  "Declare a `connectors:` entry with `auth: { type: 'bearer', credentialRef }` (or " +
+  "`{ type: 'api-key', headerName, credentialRef }`) and call it from a `connector_action` node";
 
 const QUERY_ROUTE =
-  "Declare a `connectors:` entry with a `provider` (`'rest'` for a plain HTTP API) and " +
-  "`auth: { type: 'api-key', paramName, credentialRef }`, which sends the key as that query parameter, and " +
-  'call it from a `connector_action` node.' +
-  RESOLVES;
+  "Declare a `connectors:` entry with `auth: { type: 'api-key', paramName, credentialRef }`, which sends the " +
+  'key as that query parameter, and call it from a `connector_action` node';
 
 const INPUT_ROUTE =
-  'The connector authenticates through its own declaration: give its `connectors:` entry ' +
-  "`auth: { type: 'bearer' | 'api-key' | 'basic', credentialRef }` and drop the credential from `input`." +
-  RESOLVES;
-
-const NOT_A_GATE =
-  ' A `{variable}` template is not a literal and draws nothing. This is an advisory: nothing is ' +
-  'refused. See content/docs/automation/connectors.mdx.';
+  "Give the connector's `connectors:` entry `auth: { type: 'bearer' | 'api-key' | 'basic', credentialRef }` " +
+  'and drop the credential from `input`';
 
 /** A config-path segment for a map key: `.key` when it is an identifier, `["x-key"]` otherwise. */
 function keySegment(key: string): string {
@@ -173,7 +165,7 @@ export function lintFlowCredentialLiterals(stack: AnyRec): FlowCredentialLiteral
           // auth variant and why it only warns are
           // `os explain flow-credential-literal`.
           message: `${what} holds a credential-shaped literal, ${SERVED}; ${steer}`,
-          hint: `${route}${NOT_A_GATE}`,
+          hint: route,
         });
       };
 

@@ -46,6 +46,7 @@ const FORWARD_WINDOW_OPENED: Readonly<Record<ArtifactForwardConversionVerdict, b
     'converted-forward': true,
     'converted-undeclared': true,
     'converted-retired-after': true,
+    'converted-major-step': true,
     'authored-current': false,
     'runtime-version-unknown': false,
     'not-an-object': false,
@@ -57,10 +58,18 @@ const FORWARD_WINDOW_OPENED: Readonly<Record<ArtifactForwardConversionVerdict, b
  * label — `main` enforces retirements its label has not moved past — so
  * "predates this runtime's spec", printed beside a runtime version equal to
  * the floor, would read as a contradiction; that verdict says what actually
- * opened it instead.
+ * opened it instead. So does the major-step half, whose floor sits ABOVE a
+ * prerelease runtime's label: it names the floor as the first release of its
+ * protocol major, which a build from that major's prerelease declares too.
  */
 function artifactWindowClause(result: ArtifactForwardConversionResult<unknown>): string {
     const floor = result.authoredFloor ?? '<undeclared>';
+    if (result.verdict === 'converted-major-step') {
+        const major = floor.split('.')[0];
+        return `declares the first release of protocol ${major} (authored engines.protocol floor ${floor}), `
+            + `which a build from any ${major}.0.0 prerelease declares too, so it may predate retirements in the `
+            + `conversion step into protocol ${major} that this runtime enforces (runtime spec ${result.runtimeSpecVersion})`;
+    }
     if (result.verdict === 'converted-retired-after') {
         return `was built on a surface that still accepted shapes this runtime has since retired `
             + `(authored engines.protocol floor ${floor}, at or below the last release that accepted them; `

@@ -76,6 +76,8 @@ const SITES: ReadonlyArray<Site & { readonly noPackage: boolean; readonly dispos
         why: 'the list\'s envelope: each item\'s own package, the rule the by-name read shares' },
     { member: 'getMetaItem', args: 'request.type, request.name, request.packageId', noPackage: true, disposition: 'no',
         why: 'the shipped-flow arm: the served body IS this artifact, and the envelope is looked up at its own package' },
+    { member: 'getMetaItem', args: 'request.type, request.name, request.packageId', noPackage: true, disposition: 'no',
+        why: '[#22877] a bundled type\'s canonical member when no stored row of it exists: the served body IS this artifact, and the envelope is looked up at its own package' },
     { member: 'getMetaItemLayered', args: 'request.type, request.name, request.packageId', noPackage: true, disposition: 'no',
         why: 'the layered read\'s code LAYER: body and envelope are one artifact, and its provenance fields are read off that layer' },
     { member: 'packagedArtifactBase', args: 'type, name', noPackage: true, disposition: 'no',

@@ -4,6 +4,10 @@ import {
   MANIFEST_ID_PATTERN,
   MANIFEST_ID_EXAMPLES,
   manifestIdRefusal,
+  INSTALL_MODES,
+  DEFAULT_INSTALL_MODES,
+  InstallModeSchema,
+  resolveInstallModes,
   type ObjectStackManifest,
 } from './manifest.zod';
 import { PackageSchema } from '../marketplace/package.zod';
@@ -794,4 +798,57 @@ describe('manifest.namespace — the refusal states the rule the regex enforces'
       ).toBe(true);
     },
   );
+});
+
+/**
+ * [ADR-0131 D6] `installModes` — the install modes a package permits, spelled
+ * per the maintainer's ruling B on the D6 execution card (`unmanaged`). The
+ * key is optional with NO parse-time default (the stage-0 ACCEPT's Q9): absence
+ * survives a parse, and `resolveInstallModes` is the one reader of what it
+ * means.
+ */
+describe('ManifestSchema.installModes (ADR-0131 D6)', () => {
+  const legal = { id: 'com.example.modes', version: '1.0.0', type: 'app' as const, name: 'Modes' };
+
+  it('spells the two modes `managed` and `unmanaged`, and nothing else', () => {
+    expect([...INSTALL_MODES]).toEqual(['managed', 'unmanaged']);
+    expect(InstallModeSchema.options).toEqual(['managed', 'unmanaged']);
+    for (const retired of ['template', 'copy']) {
+      expect(InstallModeSchema.safeParse(retired).success, retired).toBe(false);
+    }
+  });
+
+  it('accepts each mode alone and both together — a copy-only package is legal', () => {
+    for (const installModes of [['managed'], ['unmanaged'], ['managed', 'unmanaged'], ['unmanaged', 'managed']]) {
+      const parsed = ManifestSchema.safeParse({ ...legal, installModes });
+      expect(parsed.success, JSON.stringify(installModes)).toBe(true);
+      expect(parsed.data?.installModes).toEqual(installModes);
+    }
+  });
+
+  it('has no parse-time default — an absent key stays absent, so no stored manifest changes by a byte', () => {
+    const parsed = ManifestSchema.parse(legal);
+    expect(parsed).not.toHaveProperty('installModes');
+  });
+
+  it('refuses an empty list and an unknown mode', () => {
+    const empty = ManifestSchema.safeParse({ ...legal, installModes: [] });
+    expect(empty.success).toBe(false);
+    expect(empty.error?.issues[0]?.message).toContain("omit the key for the default, ['managed']");
+
+    const unknown = ManifestSchema.safeParse({ ...legal, installModes: ['template'] });
+    expect(unknown.success).toBe(false);
+    expect(unknown.error?.issues[0]?.path).toEqual(['installModes', 0]);
+  });
+
+  it('resolveInstallModes: absent means managed only; a declared list is read as declared', () => {
+    expect(resolveInstallModes(undefined)).toEqual(['managed']);
+    expect(resolveInstallModes(null)).toEqual(['managed']);
+    expect(resolveInstallModes({})).toEqual(['managed']);
+    expect(resolveInstallModes(ManifestSchema.parse(legal))).toEqual(['managed']);
+    expect(resolveInstallModes({ installModes: ['unmanaged'] })).toEqual(['unmanaged']);
+    expect(resolveInstallModes({ installModes: ['managed', 'unmanaged'] })).toEqual(['managed', 'unmanaged']);
+    expect(resolveInstallModes(undefined)).toBe(DEFAULT_INSTALL_MODES);
+    expect(Object.isFrozen(DEFAULT_INSTALL_MODES)).toBe(true);
+  });
 });

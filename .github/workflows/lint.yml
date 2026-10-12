@@ -157,6 +157,12 @@ concurrency:
 # the majority of red runs at no cost to a green one (whose wall clock is the
 # sum of its steps, and so is order-independent) — ⛔ so do not re-sort them
 # back among their topical neighbours as tidying.
+#
+# Since #22991 those gates run in eight parallel lanes behind the
+# `Lint & Repo Gates` aggregate, and the rule holds PER LANE: each lane runs
+# its gates sequentially and aborts at its first red, every step kept the
+# relative order it had in the single job, and the two anchor gates still sit
+# immediately after the six setup steps, at the top of `lint-repo-tooling`.
 # ─────────────────────────────────────────────────────────────────────────────
 
 jobs:
@@ -173,46 +179,231 @@ jobs:
     # verbatim.
     #
     # It is not called `ESLint` any more because it never was only that: the
-    # `pnpm lint` step below is one of ~70 sequential gate steps, so a red here
-    # was routinely read as "a lint problem" when it was a repo gate — three
-    # mis-routed diagnoses on 2026-08-17 alone (#9258, PRs #9256/#9291).
-    name: Lint & Repo Gates
-    runs-on: ubuntu-latest
-    # ⭐ JOB WALL — measured, and the only wall this job has. No step in this
-    # workflow runs under `scripts/run-with-stall-guard.mjs` (if one ever does,
-    # `pnpm check:stall-guard-budget` holds its cap under this number), so a
-    # step that stops producing output — a build, an install, a network read
-    # that never answers — is ended by nothing else. Without the key GitHub's
-    # default is 360 minutes, and this is the longest REQUIRED check in every
-    # merge-queue group. The queue does not wait that long: ruleset 12119582
-    # (`main`) treats a required check that has not reported within 60 minutes
-    # (`check_response_timeout_minutes`) as failed and removes the entry — with
-    # no red check, and no `Merge Queue Triage` comment either (that workflow
-    # fires on a `failure` conclusion only, and it watches `CI`, not this
-    # workflow) — while the hung job holds a runner for up to five more hours,
-    # still `in_progress`. With the wall, a hung run ends `cancelled`, carrying
-    # GitHub's failure annotation "The job has exceeded the maximum execution
-    # time of …", before the queue's own window closes.
+    # `pnpm lint` step (now in the `lint-eslint` lane) was one of ~70 sequential
+    # gate steps when this was written, so a red here was routinely read as "a
+    # lint problem" when it was a repo gate — three mis-routed diagnoses on
+    # 2026-08-17 alone (#9258, PRs #9256/#9291).
     #
-    # Measured: p50 15.8 / p99 32.6 / max 32.7 minutes (n = 81); a docs-only
-    # change runs it in about 7–11, a code change in 25–33. The window, for
-    # every job in this file: the 100 most recent completed runs of this
-    # workflow, 2026-10-01T00:23Z → 03:24Z (96 runs read, 525 successful job
-    # rows), job `started_at` → `completed_at` from the jobs API.
+    # ── AN AGGREGATE SINCE #22991 (ruling 6120820653, letter D) ──────────────
+    # This job used to run every gate itself: 193 serial steps on one runner,
+    # p50 17.8 / p90 35.9 / max 38.5 minutes over the 70 successful runs read
+    # for #22991 (2026-10-12T04:40Z → 08:45Z, `pull_request` and
+    # `merge_group`, job and step timestamps from the jobs API), and the job
+    # the merge queue waited on in 13 of 25 groups. It now runs NO gate. The
+    # gates run in the eight `Lint · *` lanes below, in parallel, and this job
+    # is their aggregate: the shape `TypeScript Type Check` and its
+    # `Type Check · *` lanes have in this file. The required context is this
+    # job's NAME, so the name is kept byte-identical (AGENTS.md's merge-queue
+    # paragraph: a required context is matched by check-run name). The lanes
+    # carry new names and are advisory on their own; what blocks is this
+    # aggregate's verdict over them.
+    #
+    # ⛔ NO GATE WAS DROPPED, WEAKENED OR GIVEN A NEW COMMAND. Every gate step of
+    # the single job runs in exactly one lane, on the same events, with the
+    # same `run:`, the same `if:`, in the same relative order and with its
+    # comment block. ONE exception, the ruling's: `pnpm check:pm-dispatch-gates`
+    # runs its fast tier on `pull_request` and `merge_group` and both tiers on
+    # `schedule` and `push` (argued in `scripts/pm/check-dispatch-gates.mjs`'s
+    # header). What each lane repeats is the six setup steps, the gate-family
+    # selector where the lane carries a scoped step, and the unmeasured-tail
+    # reporter pair. Every lane keeps the single job's full-history checkout:
+    # which of the ~190 gates read history was not re-derived for this split,
+    # and a gate that loses its history degrades to "not verified" rather than
+    # going red.
+    #
+    # The lanes are independent. The only inter-step reads in the single job
+    # were `steps.gate-families.outputs.*` (nine `if:` lines, one step `id:`),
+    # and no step built, installed or generated a file a later step read, so no
+    # lane can miss an artifact another lane would have written. Each lane
+    # still runs its gates sequentially and stops at its first red, so the GATE
+    # ORDER note above `jobs:` holds per lane.
+    #
+    # THE CUT, from the per-step timestamps of those 70 runs (a lane's wall
+    # rebuilt per run: that run's own setup steps plus the lane's steps as they
+    # ran there, skipped ones at zero):
+    #
+    #   lane                      steps   p50    max   (minutes)
+    #   lint-eslint                   2   3.3    4.0
+    #   lint-repo-tooling            60   4.2    4.7
+    #   lint-docs-code               55   4.1    4.6
+    #   lint-ci-engine               58   3.9    4.4
+    #   lint-scoped-erasure           2   3.5    5.0
+    #   lint-scoped-slot-corpus       3   3.5    4.9
+    #   lint-scoped-tooling           3   1.1    4.4
+    #   lint-pm-dispatch-gates        1   1.1    5.1   fast tier, estimated
+    #
+    # The ruled budget is 5 minutes per lane at median, and a lane over budget
+    # SPLITS, it does not skip: that is why the nine path-scoped families sit
+    # in four lanes rather than one (the eight besides the PM self-test ran 9
+    # minutes together). These are predictions; the real numbers are the PR's
+    # own CI run and every run after it. Not taken, also ruled: per-family
+    # path scoping for the always-on gates, and input caches. Both need a
+    # declaration of what a gate reads, and a wrong declaration skips a gate
+    # silently.
+    name: Lint & Repo Gates
+    needs:
+      - lint-eslint
+      - lint-repo-tooling
+      - lint-docs-code
+      - lint-ci-engine
+      - lint-scoped-erasure
+      - lint-scoped-slot-corpus
+      - lint-scoped-tooling
+      - lint-pm-dispatch-gates
+    # ── ROSTER DECLARATION (#10490), the `typecheck` aggregate's discipline ──
+    # The lanes this required aggregate stands in for, named rather than
+    # counted. `node scripts/check-aggregator-roster.mjs` (statically, in
+    # `lint-ci-engine`) holds this list equal to `needs:` in both directions,
+    # and holds this job to declaring one at all, since it carries a required
+    # context; the verdict step below checks the same equality against
+    # `toJSON(needs)` at run time. A ninth lane added to this workflow and
+    # forgotten here would otherwise ride green as an ADVISORY check-run behind
+    # the required "Lint & Repo Gates" context. This aggregate has no
+    # non-member inputs: every job in `needs:` is a lane whose verdict it
+    # carries.
+    env:
+      OS_AGGREGATOR_MEMBERS: lint-eslint lint-repo-tooling lint-docs-code lint-ci-engine lint-scoped-erasure lint-scoped-slot-corpus lint-scoped-tooling lint-pm-dispatch-gates
+    # `always()` is load-bearing and must not become `success()` or the
+    # implicit bare condition: with those, a failed lane SKIPS this job, and a
+    # skipped required context is an absence, which reads as green in every
+    # checks list and never blocks the queue. The `typecheck` job carries the
+    # same contract and says so at length.
+    if: always()
+    runs-on: ubuntu-latest
+    # ⭐ JOB WALL — measured, and the rule for every job in this file. No step in
+    # this workflow runs under `scripts/run-with-stall-guard.mjs` (if one ever
+    # does, `pnpm check:stall-guard-budget` holds its cap under its job's
+    # number), so a step that stops producing output — a build, an install, a
+    # network read that never answers — is ended by nothing else. Without the
+    # key GitHub's default is 360 minutes, and this context is the longest
+    # REQUIRED check in every merge-queue group. The queue does not wait that
+    # long: ruleset 12119582 (`main`) treats a required check that has not
+    # reported within 60 minutes (`check_response_timeout_minutes`) as failed
+    # and removes the entry — with no red check, and no `Merge Queue Triage`
+    # comment either (that workflow fires on a `failure` conclusion only, and
+    # it watches `CI`, not this workflow) — while the hung job holds a runner
+    # for up to five more hours, still `in_progress`. With the wall, a hung run
+    # ends `cancelled`, carrying GitHub's failure annotation "The job has
+    # exceeded the maximum execution time of …", before the queue's own window
+    # closes.
+    #
+    # Measured, before #22991 split this job into lanes: p50 15.8 / p99 32.6 /
+    # max 32.7 minutes (n = 81); a docs-only change ran it in about 7–11, a
+    # code change in 25–33. The window, for every job in this file: the 100
+    # most recent completed runs of this workflow, 2026-10-01T00:23Z → 03:24Z
+    # (96 runs read, 525 successful job rows), job `started_at` →
+    # `completed_at` from the jobs API.
     #
     # The rule, for every job in this file: about 2× the measured maximum,
     # rounded to a 5-minute grain, never below 10 minutes, never above the
-    # queue's 60-minute window. Here the window binds, not 2× (2 × 32.7 =
-    # 65.4), and the cap is placed BELOW it, at 55: this job's clock starts
-    # only once a runner picks it up, after the queue's has started, so the
-    # five minutes are room for that pickup, and 55 still leaves 22 minutes
-    # (1.7×) over the measured maximum. Above 60 the stretch between the queue
-    # removing an entry and this check turning `cancelled` only grows, so when
-    # the measured maximum nears the wall the remedy is a faster job (or the
-    # queue's own setting, which is the maintainer's) — never a higher number
-    # here. Re-measure over a fresh window before changing any value in this
-    # file.
-    timeout-minutes: 55
+    # queue's 60-minute window. For the single job the window bound, not 2×
+    # (2 × 32.7 = 65.4), and the cap was placed BELOW it, at 55: a job's clock
+    # starts only once a runner picks it up, after the queue's has started, so
+    # the five minutes are room for that pickup. 55 stays the CAP every job in
+    # this file sits under, the lanes below included. Above 60 the stretch
+    # between the queue removing an entry and this check turning `cancelled`
+    # only grows, so when a measured maximum nears the wall the remedy is a
+    # faster job (or the queue's own setting, which is the maintainer's) —
+    # never a higher number here. Re-measure over a fresh window before
+    # changing any value in this file.
+    #
+    # THIS job's own wall, since #22991: 10, the rule's floor — it runs one
+    # sub-second verdict and no checkout, the `typecheck` aggregate's number.
+    # Its clock starts only after the last lane ends, so the queue's 60 minutes
+    # are spent by the slowest lane's wall plus this one; every lane sizes its
+    # own wall in its header.
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      # Fail-closed, and deliberately NOT a hand-written list of the lane names:
+      # the verdict iterates `toJSON(needs)`, so every job wired into `needs:`
+      # above is enforced, and the other half of that drift — a lane added to
+      # the workflow but never wired into `needs:` — is caught by comparing
+      # `needs:` against the declared ROSTER. A copy of the `typecheck`
+      # aggregate's verdict, not a shared module: that one runs with no
+      # checkout, and so does this. Anything that is not exactly `success`
+      # fails, `skipped` and `cancelled` included: a lane that never ran has
+      # not proved anything.
+      - name: Verify every lint lane succeeded
+        env:
+          OS_NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$OS_NEEDS" > "$RUNNER_TEMP/needs.json"
+          cat > "$RUNNER_TEMP/verify-lanes.mjs" <<'NODE'
+          import { readFileSync } from 'node:fs';
+
+          // The roster this aggregator declares, read from the job-level
+          // `OS_AGGREGATOR_MEMBERS` above rather than re-typed here -- one
+          // declaration, two readers (this step, and the static
+          // scripts/check-aggregator-roster.mjs in the lint-ci-engine lane).
+          const declared = (process.env.OS_AGGREGATOR_MEMBERS ?? '').trim().split(/\s+/).filter(Boolean);
+          const declaredSet = new Set(declared);
+
+          const needs = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/needs.json`, 'utf8'));
+          const ids = Object.keys(needs).sort();
+          let bad = 0;
+
+          // An empty declaration would make every comparison below trivially
+          // true. Refuse rather than report a green over an unread roster.
+          if (declared.length === 0) {
+            console.log(
+              '::error::this job declares no OS_AGGREGATOR_MEMBERS roster, so there is nothing to hold `needs:` to -- ' +
+                'refusing to report a pass (#4690).',
+            );
+            bad++;
+          }
+
+          for (const id of ids) {
+            const result = needs[id]?.result ?? '(no result reported)';
+            if (result === 'success') {
+              console.log(`  ok       ${id}`);
+              continue;
+            }
+            console.log(`::error::lint lane \`${id}\` concluded \`${result}\` -- expected \`success\`.`);
+            bad++;
+          }
+
+          for (const id of declared.filter((d) => !ids.includes(d))) {
+            console.log(
+              `::error::declared lane \`${id}\` is missing from this job's \`needs:\`, so its verdict is NOT aggregated -- ` +
+                `it publishes an advisory check-run and rides green behind a required context.`,
+            );
+            bad++;
+          }
+
+          for (const id of ids.filter((i) => !declaredSet.has(i))) {
+            console.log(
+              `::error::job \`${id}\` is in this job's \`needs:\` but not in the declared roster -- add it to ` +
+                `OS_AGGREGATOR_MEMBERS, or drop it from \`needs:\`.`,
+            );
+            bad++;
+          }
+
+          if (bad > 0) {
+            console.log(`check-lint-lanes: FAILED (${bad} problem(s) above).`);
+            process.exit(1);
+          }
+          console.log(`check-lint-lanes: OK (${ids.length} declared lane(s) succeeded: ${ids.join(', ')}).`);
+          NODE
+          node "$RUNNER_TEMP/verify-lanes.mjs"
+
+  lint-eslint:
+    # Lane 1 of 8 behind the required `Lint & Repo Gates` aggregate (#22991).
+    # The `lint` job above holds the contract, the cut and the roster: read it
+    # before moving a step between lanes. This lane: ESLint and the engine
+    # test-double contract gate, the two heaviest always-on gates, side by
+    # side. It also carries the unmeasured-tail reporter's full argument and
+    # the `actions: read` scope it needs, which every lane repeats.
+    name: Lint · ESLint
+    runs-on: ubuntu-latest
+    # JOB WALL = CHECKOUT BUDGET (20, on the checkout step) + BODY BUDGET, the
+    # scheme `typecheck-source-gates` argues for a full-history checkout. Body
+    # after the checkout, rebuilt per run from the 70 runs the `lint` job
+    # cites: max 3.3 minutes; 2 × 3.3 = 6.7, 10 on the floor. 20 + 10 = 30.
+    timeout-minutes: 30
     permissions:
       contents: read
       # ⭐ Read-only, and it buys exactly one thing: the LAST step of this job
@@ -222,31 +413,13 @@ jobs:
       # `scripts/report-unmeasured-gate-tail.mjs`. Nothing else in this job
       # reads it, and no step writes anything anywhere.
       actions: read
-      # ⭐ Added by #18224, for the issue-citation step far below: it resolves
-      # the numbers THIS change cites against the board. Read-only and one
-      # scope wide — no issue, comment, label or assignee is ever written. It
-      # is spelled even though this board is PUBLIC, because an explicit
-      # `permissions:` block sets every unnamed scope to `none`, and a BLOCKING
-      # gate whose transport depends on repository visibility is a gate that
-      # goes red on a settings change no file here can assert.
-      issues: read
-      # ⭐ AND `pull-requests`, which is NOT redundant with the row above —
-      # MEASURED, on run 35495222460 of `half-state-patrol.yml`, whose token
-      # carries `issues` and NOT this scope: its census reported 3,628
-      # unresolvable citation sites where a full-scope read of the same tree
-      # reported 2,168, and the difference is 1,460 — EXACTLY the
-      # `resolves-as-pull-request` tally. `GET /repos/{owner}/{repo}/issues`
-      # answers with the pull requests omitted, so every citation naming a PR
-      # number reads as a number the board never had. On THIS blocking step
-      # that is a false RED on a correct citation, and the frontier probe
-      # (`?per_page=1&sort=created&direction=desc`) is read from the same
-      # response — so an understated frontier turns later numbers into
-      # `never-issued` too. ⛔ Do not drop this row as tidying.
-      pull-requests: read
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        # CHECKOUT BUDGET: `typecheck-source-gates` sizes it; the `lint` job
+        # above says why every lane carries it.
+        timeout-minutes: 20
         with:
           # The slot-lookup ratchet compares the baseline against its state at
           # the merge base with main — the only way to see a file being ADDED
@@ -278,61 +451,149 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # ── Gate-family selection (#16496) ───────────────────────────────────
-      # After #16453 this job is the merge queue's critical path (median 1468 s
-      # over the ten merge-group runs measured for #16496; the PM dispatch-gates
-      # self-test alone 597 s), and none of its expensive steps read a
-      # merge group's file surface: a docs-only group paid the full battery.
-      # So on `merge_group` and `pull_request` the NINE scoped families below
-      # -- each step carrying `if: steps.gate-families.outputs.<id> != 'skip'`
-      # -- run only when the changed paths touch the files that family reads.
-      # (A tenth, `migration_registry` (#19753), retired with its gate in
-      # #22554: the registry it compared is no longer committed.)
-      # `push` on main and the scheduled full run keep the whole battery: the
-      # script runs everything for any event it does not scope.
+      # No "migration registry matches its entry files" step since #22554:
+      # `packages/spec/src/migrations/registry.ts` is git-ignored and generated
+      # whole from `registry.ts.template` + `entries/` by `gen:migration-registry`,
+      # which `pnpm install` above already ran (spec's `prepare`, self-test
+      # included). There is no committed copy left to compare, and an entry the
+      # generator refuses fails that install step, loudly, in every job.
+
+      # Enforces the no-restricted-imports guard against @objectstack/spec root
+      # namespace imports (the dormant rule was never run in CI). Syntactic
+      # only, so no build step needed.
+      - name: ESLint
+        run: pnpm lint
+
+      # Engine test-double contract gate (#4550, from #4434). A test double
+      # LOOSER than the implementation it replaces turns a green suite into no
+      # suite at all, silently, on exactly the paths a double was introduced
+      # for. #4434 is the worked example: DELETE /sharing/rules/:idOrName
+      # answered 500 for every rule and both address forms from the day it was
+      # written, while `deleteRule drops rule + all its grants` asserted success
+      # against a fake engine that accepted the one call shape ObjectQL.delete
+      # refuses. This holds every fake ObjectQL engine's `delete` to the real
+      # dispatch predicate — imported from @objectstack/objectql, not
+      # hand-mirrored, so it cannot drift — with the pre-existing fakes in a
+      # shrink-only, measured baseline. Static AST only, so it needs no build
+      # and belongs in this job. Runs its own --self-test first: the detector
+      # can be broken while every fake is fine, and a scan that quietly stops
+      # matching would report OK while reading nothing (#4868's family).
+      - name: Engine test-double contract gate
+        run: pnpm check:engine-double-contract
+
+      # ── NOT GATES. The two steps below judge nothing about the tree. ──────
       #
-      # #19498 added four of the nine (`entry_guard`,
-      # `declared_population_live`, `bare_root_worklist`,
-      # `self_test_workflow_commands`) and narrowed `pm_dispatch_gates`, on
-      # ruling #208 on #19491 (R4) and the maintainer's sentence quoted in the
-      # selector's header: the tooling's self-tests were 18.6 minutes of the
-      # 27.4-minute job a three-file `packages/spec` PR paid. ⛔ Product
-      # ratchets and censuses stay unconditional -- the tenancy and
-      # tenant-audit censuses, the engine gates and everything else here judge
-      # product code and are not in that ruling.
+      # ⭐ One red in this job is a LOWER BOUND on the number of problems in the
+      # tree, not a count — every gate behind the failing one never executed,
+      # and a gate that never executed produced no output, which is the same
+      # shape a passing gate has. The GATE ORDER note above `jobs:` already
+      # names this quantity ("the unmeasured tail") and is tuned to shrink it;
+      # until now nothing printed it. These steps print it.
       #
-      # ⭐ The invariant is FAIL-OPEN, and it holds at both layers. The script
-      # runs every family when the base cannot be resolved, the diff fails or
-      # is empty, a path is one it does not classify (a new top-level
-      # directory, an unlisted root file), or any change is a deletion, rename
-      # or type change; a family is skipped ONLY when every changed path is
-      # positively classified into a class that family's DECLARED read-set
-      # excludes. For the other four -- both ratchets, the corpus walk and the
-      # verify-lock self-test -- that read-set is what the family provably
-      # reads. For the five tooling self-tests it is the tool's OWN INPUTS,
-      # which is a weaker claim; it is argued where it is declared, in the
-      # selector's header.
-      # The `!= 'skip'` spelling means an ABSENT output -- the selector never
-      # ran, or wrote nothing -- also runs the step. Both halves are pinned by
-      # `scripts/ci/select-gate-families.selftest.sh` (`check:select-gate-
-      # families`, further down this job), which also reads THIS file and
-      # refuses any other `if:` spelling and any family the script does not
-      # decide. The per-family read-sets, and how each was measured, are in
-      # the script's header.
+      # ⛔ The fix is NOT to make the skipped gates run: that would undo the
+      # adjudicated fail-fast order. ⛔ Nor is it `continue-on-error`, which
+      # trades a red for silence. The job's conclusion is untouched.
       #
-      # The selection itself lives in scripts/ci/select-gate-families.sh:
-      # environment in, `$RUNNER_TEMP/gate-families.txt` + `$GITHUB_OUTPUT`
-      # out, and a ran/skipped table in the job summary (the seat reads it).
-      # This step only exports the event's fields, so the same script -- every
-      # branch of it -- runs locally and under its self-test.
-      - name: Select the gate families this run pays for
-        id: gate-families
+      # Measured before this was written, on run 34468505490 of this very
+      # workflow (job 102842713265, failed at step #55): the jobs API and the web
+      # UI DO mark the un-run steps `skipped` — 112 of them there — but they
+      # never count them, and they use that same word for a step its own `if:`
+      # turned off, so the one surface that says it cannot tell the two apart.
+      # The check-run `output` was null on title, summary and text alike, and the
+      # job log — what an API or agent reader gets — said nothing at all. So what
+      # is added here is a machine-readable COUNT, on all three surfaces.
+
+      # Offline, no token, no network: drives the reporter's judge() over
+      # recorded jobs-API shapes, and checks that the step below still hands
+      # itself its own name. Wired as a step because an unrun self-test is a
+      # phantom check. Sub-second.
+      #
+      # ⭐ `if: failure()` for the same reason the step below carries it, and it
+      # is the whole negative control: a green run of this job must be BYTE
+      # IDENTICAL to what it was before any of this existed. A self-test that
+      # ran unconditionally would print one line on every green run — one line
+      # is still new noise, and this change is not allowed to cost any. It is
+      # exercised on exactly the runs its subject is used on, which in this repo
+      # is not a rare event. ⛔ Do not "fix" this by dropping the condition.
+      # It fails LOUDLY: it is a separate step, so a broken reporter shows up as
+      # its own red step rather than as a missing paragraph.
+      - name: Unmeasured-gate-tail reporter self-test
+        if: failure()
+        run: node scripts/report-unmeasured-gate-tail.mjs --self-test
+      # Runs BECAUSE something failed. On a green head `failure()` is false, so
+      # it is skipped and contributes zero bytes to the log, the summary and the
+      # annotations — measured, not assumed. It always exits 0: the job is
+      # already failed when it runs, and a non-zero exit here would only add a
+      # second annotation pointing at the reporter instead of at the gate.
+      - name: Report how many gates never ran
+        if: failure()
         env:
-          OS_GATE_EVENT_NAME: ${{ github.event_name }}
-          OS_GATE_PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
-          OS_GATE_MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+          # ⚠️ Must equal this step's own `name:` above. The reporter subtracts
+          # it so that it does not list ITSELF among the steps that never ran —
+          # measured in run 34584689309, where it did exactly that, because the
+          # jobs API had not yet marked it `in_progress`. Drift between the two
+          # lines costs one extra, visibly silly line in the report; it cannot
+          # go wrong quietly.
+          OS_TAIL_REPORT_STEP: Report how many gates never ran
+        run: node scripts/report-unmeasured-gate-tail.mjs
+
+  lint-repo-tooling:
+    # Lane 2 of 8 behind `Lint & Repo Gates` (#22991; the `lint` job holds the
+    # cut). The always-on gates that ran from the top of the single job down
+    # to the two tenancy censuses: the docs and ADR anchors (still first, per
+    # the GATE ORDER note above `jobs:`), the `scripts/**` guards and
+    # shared-module self-tests, the PM tooling self-tests, the Claude hook
+    # guards, the docs authoring gates and both censuses.
+    name: Lint · repo & tooling gates
+    runs-on: ubuntu-latest
+    # JOB WALL = CHECKOUT BUDGET (20) + BODY BUDGET, `typecheck-source-gates`'
+    # scheme. Body after the checkout, rebuilt per run from the 70 runs the
+    # `lint` job cites: max 4.1 minutes; 2 × 4.1 = 8.1, 10 on the floor.
+    # 20 + 10 = 30.
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # The unmeasured-tail reporter at the end of this lane: `lint-eslint`
+      # argues the scope.
+      actions: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        # CHECKOUT BUDGET: `typecheck-source-gates` sizes it; the `lint` job
+        # above says why every lane carries it.
+        timeout-minutes: 20
+        with:
+          # The slot-lookup ratchet compares the baseline against its state at
+          # the merge base with main — the only way to see a file being ADDED
+          # to the grandfather list. A shallow clone has no merge base, and the
+          # check would degrade to "not verified" on every run.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Get pnpm store directory
+        shell: bash
         run: |
-          bash scripts/ci/select-gate-families.sh
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       # #7484 docs anchors: `lychee.toml` sets `include_fragments = "none"`, so
       # the `Check Documentation Links` job resolves a link's FILE and never its
@@ -399,57 +660,9 @@ jobs:
       - name: ADR anchors + number uniqueness (governed code names its decision)
         run: pnpm check:adr-anchors
 
-      # No "migration registry matches its entry files" step since #22554:
-      # `packages/spec/src/migrations/registry.ts` is git-ignored and generated
-      # whole from `registry.ts.template` + `entries/` by `gen:migration-registry`,
-      # which `pnpm install` above already ran (spec's `prepare`, self-test
-      # included). There is no committed copy left to compare, and an entry the
-      # generator refuses fails that install step, loudly, in every job.
-
-      # Enforces the no-restricted-imports guard against @objectstack/spec root
-      # namespace imports (the dormant rule was never run in CI). Syntactic
-      # only, so no build step needed.
-      - name: ESLint
-        run: pnpm lint
-
-      # Slot-lookup sweep ratchet (#4251). `pnpm lint` above bans erasing a
-      # service-lookup result to `any` across packages/, but the files still
-      # holding pre-existing sites are grandfathered by path — and an ignored
-      # file is ignored COMPLETELY, so new erasures added to one ride the old
-      # entry in silence. This re-measures those files with the grandfathering
-      # lifted and holds them to a per-file count, so the list can only shrink.
-      #
-      # Scoped (#16496): reads `packages/**/*.{ts,tsx,mts,cts}`, its baseline,
-      # `eslint.config.mjs` and the top-level `scripts/*.mjs` it imports; a
-      # group touching none of those skips it (selection step above).
-      - name: Slot-lookup ratchet
-        if: steps.gate-families.outputs.slot_lookup != 'skip'
-        run: pnpm check:slot-lookup
-
-      # Engine query-options erasure ratchet (#4918). The slot-lookup rule above
-      # protects the service LOOKUP; this one protects what you pass to the
-      # service you looked up. `IDataEngine.find/findOne/count/aggregate` declare
-      # their options as `EngineQueryOptions` & co., and for an internal caller
-      # `tsc` is the ONLY channel enforcing them — the protocol's ingress
-      # normalizer never sees a direct engine call, and the options schemas are
-      # not `.strict()`, so an unknown key is silently DROPPED. #4674 is the
-      # bill: two queries sorted by `direction` instead of `order`, both with a
-      # `limit`, so both returned the OLDEST rows — audit history that never
-      # showed recent changes, and a search that truncated away fresh records.
-      # #4720 restored those two sites and #4721 closed the external callers;
-      # this stops the shape regrowing internally. Same ratchet mechanism as
-      # slot-lookup for the non-test residual, plus one aggregate decrease-only
-      # number for test code (a test whose subject IS off-contract engine input
-      # must be able to build it). Runs its own --self-test first.
-      #
-      # Scoped (#16496): the same population and inputs as the slot-lookup
-      # ratchet above, with `scripts/query-options-erasure-baseline.json`.
-      - name: Engine query-options erasure ratchet
-        if: steps.gate-families.outputs.query_options_erasure != 'skip'
-        run: pnpm check:query-options-erasure
-
       # @objectstack/verify stand-in erasure guard (#6399). The third and
-      # narrowest member of the two above. `checkReadCoercion` /
+      # narrowest member of the slot-lookup and query-options erasure ratchets
+      # (in the scoped lanes since #22991). `checkReadCoercion` /
       # `checkDateBucketParity` take their driver STRUCTURALLY
       # (`CoercibleDriver` / `BucketableDriver`) so an out-of-tree driver —
       # cloud's driver-turso in remote mode — runs the identical contract
@@ -515,7 +728,9 @@ jobs:
         run: pnpm check:gitlink-declared
 
       # The first three of these are the shared modules the two `scripts/**`
-      # routing gates below DELEGATE their design arguments to (#10608). Both of
+      # routing gates DELEGATE their design arguments to (#10608) — the parse
+      # guard below, and the entry guard in `lint-scoped-slot-corpus` since
+      # #22991. Both of
       # those gates are
       # SPELLING gates by deliberate design — `check:entry-guard` enforces that
       # only `scripts/invoked-as.mjs` may read `process.argv[1]`, and
@@ -565,7 +780,7 @@ jobs:
       # rest of that remainder from here; that is a separate card.
       #
       # What runs here is the self-tests, not the modules' callers: for the first
-      # three the callers are the two gate steps below, which already run on
+      # three the callers are the two routing gates named above, which already run on
       # every PR; for `import-prerequisite` the callers are the 45 importing
       # gates, whose ordinary runs take the branch where the dependency IS
       # present and therefore observe none of what the self-test pins.
@@ -623,36 +838,6 @@ jobs:
           fi
           echo "scripts/ shared-module self-tests — all four ran and passed"
 
-      # Every `scripts/**` entry guard goes through ONE predicate (#10086).
-      # The hand-typed forms of "did node run me, or did someone import me?"
-      # had drifted into ELEVEN spellings across 33 files, and NINE were wrong
-      # in the same invisible direction: node resolves symlinks for the module
-      # graph but leaves `process.argv[1]` as the caller typed it, so a script
-      # reached through a symlink compared two different paths, answered false,
-      # and did NOTHING — exit 0, no output. The CI wrappers here hold the
-      # child's exit STATUS only, so an inert child read as a green gate; the
-      # governed-surface register (`scripts/pm/check-governed-merges.mjs`) was
-      # among the affected, where the inert run and its "NOT governed, ordinary
-      # queue landing applies" verdict are the SAME exit code.
-      # The sweep alone would not have held — nothing stopped a twelfth
-      # spelling. This gate is the part that closes the class: only
-      # `scripts/invoked-as.mjs` may read `process.argv[1]`, and that module's
-      # own self-test drives a real probe through a real symlink. Rationale and
-      # the rejected behavioural-sweep alternative: the gate script's header.
-      # Scans ~115 files, no spawns; ~0.2s of work, measured at 0.62 min as a
-      # step on run 35506407130.
-      #
-      # Scoped (#19498): its population is `scripts/**` — its own
-      # ROOT_DIR_WATCH_HINTS declaration, held against the root it really walks
-      # by its own self-test — so a group that changes no file under scripts/
-      # (and no root configuration) skips it. The selection step at the top of
-      # this job decides that, `push` on main and the hourly run keep it
-      # unconditional, and the ruling that authorizes moving a tooling
-      # self-test off the PR path is quoted in the selector's header.
-      - name: scripts/ entry guards go through one predicate
-        if: steps.gate-families.outputs.entry_guard != 'skip'
-        run: pnpm check:entry-guard
-
       # Every `scripts/**` TypeScript parse goes through ONE module (#10133 /
       # #10573), and this is the half that keeps it that way (#10574).
       # NONE of the three parser entry points throws on a source it cannot
@@ -670,7 +855,8 @@ jobs:
       # The #10573 sweep converted 32 call sites across 15 gates; it could not
       # stop the sixteenth being typed, and within the hour a new gate landed
       # with two raw calls in it — caught by this step, which is the whole
-      # argument for having it. Same shape as `check:entry-guard` above.
+      # argument for having it. Same shape as `check:entry-guard` (in
+      # `lint-scoped-slot-corpus` since #22991).
       # Also prints the parses OUTSIDE `scripts/**` (#10575) that it does not
       # govern, so its green line is read as a claim about `scripts/` and not
       # about the repository.
@@ -809,51 +995,6 @@ jobs:
       - name: shell scripts hold the bash 3.2 floor
         run: pnpm check:bash32-floor
 
-      # The comment-mask CORPUS sweep (#10640) — the other instrument for the
-      # module the two gates above delegate "is this span a comment, or code?"
-      # to. `js-comment-mask.mjs --self-test` pins the SHAPES someone wrote
-      # down; this parses every .{ts,tsx,mts,cts,js,mjs,cjs,jsx} file in the
-      # tree with @typescript-eslint/parser and diffs its comment ranges
-      # against the mask's, byte for byte. Neither subsumes the other, and that
-      # is measured in both directions on this tree rather than assumed:
-      # deleting the `{` counting inside `${...}` fails a pinned case and the
-      # sweep reads 0 disagreements over 4,741 files (the tree does not write
-      # that shape), while dropping `return` from REGEX_AFTER_KEYWORD passes all
-      # 23 pinned cases and the sweep names check-test-source-alias.mjs, where
-      # `return /(^|[^a-z])dist\//` is written today.
-      # The defect this would have caught shipped: 16 files disagreeing, 15 of
-      # them reading commented-out text as live code, 10,252 comment bytes in
-      # one file — and the instrument that found it lived in an agent's
-      # scratchpad, which is why re-deriving it was impossible until this file.
-      # WHY A HARD GATE ON EVERY PR, and not an on-demand flag: the sweep's
-      # verdict depends on the CORPUS as much as on the masker, so a PR that
-      # writes a shape the mask reads wrong turns ~20 source-scanning gates
-      # into liars on that file, on a PR that never touched the masker. That
-      # arrival is not detectable by any convention a human or an agent has to
-      # remember at the right moment — the failure mode this repo has already
-      # paid for at #4690 and again here.
-      # WHY A STEP AND NOT A JOB: a new job's `name:` is a required-context
-      # contract (scripts/check-required-contexts.mjs) that only a
-      # maintainer-present Settings change can enrol, and an unenrolled job is
-      # an advisory gate — #5617 verbatim. This job is already required.
-      # Invoked as `node` rather than `pnpm check:*`, same as the other
-      # `node scripts/…` steps in this lane: see the GATE INVOCATION IDIOM note
-      # at the top of this file.
-      # Runs its own comparator self-test first — 12 cases proving the
-      # comparison can still REPORT, because "0 files disagree" and "the
-      # comparison is broken" otherwise print the same line.
-      # Cost, measured on a contended 4-vCPU container: 4,741 files, 72 MB of
-      # source, 45–48 s, of which the parser is 45 s. The step prints CI's own
-      # number on every run.
-      #
-      # Scoped (#16496): the walk reads every `.ts .tsx .mts .cts .js .mjs
-      # .cjs .jsx` file in the tree, so a group that changes no file of those
-      # extensions (and no root configuration) skips it -- selection step at
-      # the top of this job.
-      - name: Comment mask agrees with a real parser over the whole corpus
-        if: steps.gate-families.outputs.comment_mask_corpus != 'skip'
-        run: node scripts/check-comment-mask-corpus.mjs
-
       # Stack-collection enumerations vs the schema (#6242). `stack.zod.ts`
       # decides which collections a stack may declare; eight other enumerations
       # of that same set are hand-maintained (the map-format list, the
@@ -970,86 +1111,9 @@ jobs:
       - name: PM label description cap
         run: pnpm check:pm-label-desc-cap
 
-      # PM dispatch-gates self-test (#8162). `scripts/pm/dispatch-gates.mjs`
-      # derives the "local gates for this card" line of every dispatch prompt,
-      # and carried a 61-case --self-test that NO job ran: it executed only when
-      # a human or an agent typed it. A break in the extraction functions landed
-      # green and surfaced later as a prompt naming the wrong gate families —
-      # output that reads as correct, produced by the one tool whose purpose is
-      # to stop gate lists being memory-shaped. Same family as the
-      # `Changeset-family gate self-tests` step above. Until #16496 this step
-      # was deliberately UNCONDITIONAL -- no `if:`, no label read, no paths
-      # filter -- on the argument that an exemption is what a self-test must
-      # not have, or the gap moves. That argument was about an exemption a
-      # PATH FILTER or a LABEL would grant: a paths: trigger or a label read
-      # skips the step on a card that never touched the paths someone once
-      # listed, with no reader of what the test actually reads. What runs
-      # here now is different in kind and was the maintainer's call (#16496,
-      # 「同意你的建议，你负责执行派发所有可行的优化」): the selection step at
-      # the top of this job classifies every changed path against a declared
-      # read-set for this step, and skips it when no changed path is in that
-      # set. Every doubt runs it, the self-test of the selector pins that, and
-      # `push` on main keeps it unconditional.
-      #
-      # ⚠️ Since #19498 that read-set is NARROWER than what the battery reads,
-      # and the gap is stated rather than papered over. The read-set is the
-      # tool's own inputs: every workflow and composite action, every gate
-      # source under `scripts/**` and a workspace package's own `scripts/`,
-      # every `package.json`, `.claude/**`, `skills/**`, `AGENTS.md`,
-      # `CLAUDE.md` and root configuration. The battery ALSO reads the CONTENT
-      # of every JS/TS and `.sh` file in the tree (the compound-anchor census
-      # of `function ...SelfTest...(` declarations and the exposed-scratch-dir
-      # sweep of every mkdtempSync/mkdirSync caller, with the nested
-      # `.gitignore` files it consults) and the tracked NAME set it sweeps —
-      # which is why, until #19498, any added file anywhere ran it. On PR
-      # #19314 this step alone was 11.8 minutes of a 27.4-minute job for a
-      # three-file `packages/spec` diff, and ruling #208 on #19491 (R4) took
-      # those whole-tree reads off the PR path on the maintainer's sentence,
-      # quoted in the selector's header. ⛔ A defect in that wider set can now
-      # first appear on `main`; the push-on-main and hourly full runs are what
-      # bound it, and widening the skip further is again a maintainer call.
-      #
-      # The gate runs the SELF-TEST only. The live derivation
-      # (`node scripts/pm/dispatch-gates.mjs <path>`) answers a question about a
-      # card's file surface, is print-only, and exits 0 on any completed run —
-      # there is no verdict in it for CI to hold, only a slow read of the whole
-      # workflow tree. Why the gate is its own file rather than pointing
-      # `check:pm-dispatch-gates` straight at the tool is measured and argued in
-      # `scripts/pm/check-dispatch-gates.mjs`'s header (the tool's self-test
-      # fixtures are path strings, and they become watch hints that fabricate
-      # MATCHED leads across most of the tree).
-      #
-      # ⛔ This paragraph deliberately carries NO cost figure (#12831). The line
-      # that used to close it — "Reads two files and walks packages/; ~0.3s" —
-      # described the 61-case self-test named at the top, and the part that grew
-      # since is exactly the part it denied: the live-tree cases run the same
-      # discovery the tool does (every workflow file, and then the source of
-      # every gate that discovery finds), build temporary git repositories and
-      # drive `changedPathsFromGit` against them, and sweep the tracked corpus.
-      # That is not "two files", and it is not a walk of packages/. The estimate
-      # went with the description rather than being refreshed: a replacement has
-      # to be read off a real CI run of THIS step, because a reading taken in an
-      # agent container is a reading of a contended box and not of a runner
-      # (#12528). A cost nobody re-measures ends up endorsing a decision it has
-      # no standing to endorse, which is what this one had become. No live
-      # counts stand here either, for the same reason — they rot the same way,
-      # and it is the SHAPE of the work, not its size, that the argument needs.
-      #
-      # ⛔ Cost was never what decided this step's conditionality, and the
-      # measured medians that motivated #16496 (597 s here, over ten
-      # merge-group runs) live in that card and its PR, not in this note.
-      # Losing the estimate is NOT an argument for a label read or a paths
-      # filter, and the read-set-scoped `if:` below is not one of those: it
-      # was a maintainer call (the first paragraph names it), and widening the
-      # skip -- any change to the classes the selector treats as inert for
-      # this family -- is again a maintainer call, taken in
-      # scripts/ci/select-gate-families.sh under its self-test.
-      - name: PM dispatch-gates self-test
-        if: steps.gate-families.outputs.pm_dispatch_gates != 'skip'
-        run: pnpm check:pm-dispatch-gates
-
       # Every ROOT_DIR_WATCH_HINTS declaration stays READABLE BY A TEXT SCANNER
-      # (#12762). The step above proves the extractor still works; this one
+      # (#12762). The PM dispatch-gates self-test (its own lane since #22991)
+      # proves the extractor still works; this one
       # proves it still has something to extract. `extractWatchHints` reads
       # source text, so a declaration rewritten from a literal into a mapped
       # expression over the gate's population constant contributes NO hint at
@@ -1067,34 +1131,6 @@ jobs:
       - name: ROOT_DIR_WATCH_HINTS declarations are literals
         run: pnpm check:watch-hint-literal
 
-      # The other half of the same failure (#13519). The step above holds that a
-      # declaration is still READABLE BY A TEXT SCANNER; this one holds that
-      # what it reads still names something. A family whose declared literals
-      # all reach zero tracked files prints as an ORDINARY SILENCE — byte for
-      # byte the output of a gate that declared nothing — so the derivation and
-      # the gate disagree about whether a population was declared and neither
-      # says so. Measured on the tree this landed against: two families, one of
-      # them a gate that sweeps every workflow file and appeared on no card that
-      # edited one. The rule is per-FAMILY, not per-literal: a gate may spell a
-      # slug or a sentinel path beside a live declaration, and only a whole
-      # declaration that reaches nothing is refused. No allowlist and no gate
-      # names — the stronger rule ("a gate that enumerates a directory must
-      # declare one") was implemented, measured at 86 findings over 114
-      # enumerating gate files, and refused as an allowlist with a verdict
-      # attached. Reads the derivation once over the tracked corpus; ~5s of
-      # work, measured at 0.40 min as a step on run 35506407130.
-      #
-      # Scoped (#19498): it imports `discoverFamilies` and `trackedFiles` from
-      # the dispatch derivation, so its inputs are the workflow tree, every
-      # gate source that discovery resolves, and the tracked NAME set — and
-      # only a name that DISAPPEARS can turn a live declaration dead, which is
-      # a structural change the selector already runs everything for. A group
-      # confined to product source, tests, docs or changesets skips it here and
-      # pays for it on `push` to main and on the hourly run.
-      - name: A declared gate population reaches the tree
-        if: steps.gate-families.outputs.declared_population_live != 'skip'
-        run: pnpm check:declared-population-live
-
       # ADR-0087 D4's per-release correctness gate (#17080). The REAL run needs
       # two published tarballs and npm, so it lives in the release lane and
       # cannot run on a PR; what runs here is its `--self-test`, which is
@@ -1107,42 +1143,12 @@ jobs:
       - name: Per-release spec-changes gate self-test
         run: pnpm check:release-spec-changes
 
-      # PM bare-root worklist self-test (#10840). The step above proves the
-      # dispatch derivation still WORKS; this one proves the recorded triage of
-      # the gates that derivation structurally cannot see is still true of the
-      # tree. A gate whose population is spelled as a bare single-segment word
-      # builds no watch hint at all — not a dead hint, not a silent verdict,
-      # nothing — so it is unnameable by any dispatch brief and leaves no residue
-      # saying so. The worklist enumerates that species and carries one recorded
-      # verdict per row; this step fails when a verdict outlives its row (the
-      # shrink) or when a new gate joins the species unjudged.
-      #
-      # ⛔ It runs the SELF-TEST only, never the sweep as a verdict: recognising
-      # this species needs a heuristic over constant NAMES, and #10705 refused to
-      # put one on the path that derives every PR's gate list. Nothing in
-      # `dispatch-gates.mjs` reads the worklist, and no verdict in it reaches a
-      # dispatch prompt.
-      #
-      # Reads the workflow tree and every gate source once; ~0.5s of work,
-      # measured at 0.32 min as a step on run 35506407130.
-      #
-      # ⚠️ This step WAS unconditional, on the reasoning that a self-test which
-      # can be skipped is the gap moving rather than closing. #19498 scopes it
-      # anyway, and the trade is explicit rather than reasoned away: it imports
-      # the same derivation as the two steps above, so its inputs are the
-      # workflow tree and the gate sources, and on a group touching neither the
-      # gap does move — to `push` on main and the hourly full run, which keep
-      # the whole battery. Gate weakening is a maintainer floor; the sentence
-      # that authorizes this one is quoted in the selector's header.
-      - name: PM bare-root worklist self-test
-        if: steps.gate-families.outputs.bare_root_worklist != 'skip'
-        run: node scripts/pm/bare-root-worklist.mjs --self-test
-
       # Part-of/closing-keyword guard self-test (#8476). The guard itself is a
       # PR-scoped blocking check in its own workflow — it needs a pull request
       # body to judge, which this job does not have — so what runs HERE is its
       # self-test, which is the half with a verdict independent of any PR.
-      # Unconditional, and not on the two steps above's borrowed reason — they
+      # Unconditional, and not on the borrowed reason of the declared-population
+      # and bare-root steps (the scoped lanes since #22991) — they
       # are scoped since #19498 and this one is not, because the cost that
       # bought that ruling is not here: this step is a tenth of a second, and a
       # self-test that runs only when someone remembers is a check whose
@@ -1894,103 +1900,6 @@ jobs:
           node scripts/check-self-test-wired.mjs --self-test
           node scripts/check-self-test-wired.mjs
 
-      # Self-test output vs. the runner's command parser (#11886). Sibling of
-      # the step above and sharing its population: that one asks whether CI RUNS
-      # each self-test, this one asks what each self-test PRINTS while it does.
-      #
-      # The defect it closes was live on every PR in this repo. A line of
-      # `scripts/pm/ci-failure.mjs`'s self-test prose named a workflow-command
-      # token literally, inside backticks, as documentation of what that tool
-      # anchors on. The runner does not know a token is being quoted: it parsed
-      # it and minted `annotation_level: failure` on a check run whose
-      # conclusion was SUCCESS. On `d63b01436` that artifact was the ONLY
-      # annotation the `Lint & Repo Gates` run carried. A failure-level
-      # annotation on a green required check is a claim that something failed,
-      # and a repo that mints one on every PR is teaching its readers to skim
-      # exactly the surface other gates report findings into.
-      #
-      # ⚠️ INVISIBLE TO EVERY LOCAL RUN, which is the whole reason it is a gate:
-      # the text is ordinary prose on disk and in a terminal, and only a runner
-      # transforms it. It was found by reading one job's annotations through the
-      # API, not by anything in this file.
-      #
-      # Two facts were measured on real runs and the gate's shape follows them:
-      # the legacy `##[...]` form is parsed ANYWHERE in a printed line (the
-      # measured token sat at column 18 and was still consumed), while the
-      # `::...::` form is parsed only at LINE START (two mid-sentence ones print
-      # on every PR from `check-prerelease-pin-watch` and mint nothing). So the
-      # first detector is unanchored and the second is anchored — flagging inert
-      # prose would be a false positive the next author would be right to delete.
-      #
-      # It RUNS the self-tests rather than reasoning about their source, because
-      # "is this token printed?" is only answerable by printing it. A static
-      # prefilter picks which ones to run — over-selecting freely, since the
-      # verdict never comes from it — which is what keeps this step at ~14 s
-      # instead of the ~4 min the whole population costs.
-      #
-      # Invoked as `node scripts/…` rather than through a `pnpm check:*` alias:
-      # see the GATE INVOCATION IDIOM note at the top of this file. Reads
-      # `scripts/` and `.github/workflows/` off disk and spawns the selected
-      # self-tests; no network. Measured at 0.48 min as a step on run
-      # 35506407130.
-      #
-      # Scoped (#19498): its declared population is
-      # `scripts/**/*.mjs`, `scripts/**/*.mts` and `scripts/**/*.sh`, and the
-      # rest of its read-set is the workflow tree and `.github/actions` it
-      # discovers the runnable self-tests from — so a group touching none of
-      # those skips it here and runs it on `push` to main and on the hourly
-      # full run.
-      - name: Self-test workflow-command gate
-        if: steps.gate-families.outputs.self_test_workflow_commands != 'skip'
-        run: |
-          node scripts/check-self-test-workflow-commands.mjs --self-test
-          node scripts/check-self-test-workflow-commands.mjs
-
-      # Verify-lock entry-point self-test (#9661). `scripts/pm/os-verify-lock.sh`
-      # is the ONE way an agent takes the container's shared heavy-verify lock,
-      # and it is the enforcement of a rule that used to live only in prose: the
-      # acquisition budget os-dev.md declares is now unrepresentable above its
-      # cap, grants are ordered by a ticket file, and every run reports how long
-      # it held. Measured before it existed, in one container: five live waiters,
-      # three of them 6x over the declared cap, and the compliant ones were the
-      # ones not verifying — a convention whose violators win is not a convention.
-      #
-      # Nothing in CI *uses* the lock (GitHub runners are one job per machine),
-      # so this step exists to keep the mechanism honest rather than to serialise
-      # anything: 48 cases over the budget clamp, ticket liveness (dead pid,
-      # REUSED pid, over-age), fd hygiene, exit-code passthrough, and real
-      # multi-process contention — queue timeout, legacy free-hand coexistence in
-      # both directions, and three staggered waiters acquiring in arrival order.
-      #
-      # Since #10289 it also guards the BASH 3.2 FLOOR and the bounded-refusal
-      # rule, which is why the count moved: `/usr/bin/env bash` is 3.2.57 on
-      # macOS, and a bash 4+/5+ construct there does not fail loudly — it makes
-      # the acquisition deadline unreachable and turns the wait into an unbounded
-      # spin that prints no VERDICT at all. So the suite now scans the
-      # acquisition path for 4+/5+ constructs, runs a real acquisition with
-      # EPOCHSECONDS/EPOCHREALTIME unset and mapfile disabled, and asserts that
-      # an unusable host (no `flock`) and a stopped clock each REFUSE with a
-      # verdict and a non-zero exit rather than waiting forever.
-      #
-      # It runs entirely on a private lock under a temp dir; it never touches
-      # /tmp/os-heavy-verify.lock, so a runner and an agent container behave the
-      # same. No network; median 100 s over the ten merge-group runs measured
-      # for #16496.
-      #
-      # Scoped (#16496): the suite reads the script itself (`$SELF`) and a
-      # private temp dir, and its case (h) runs the real entry point from the
-      # repo root, which routes through filter_preflight ->
-      # scripts/pnpm-filter-targets.mjs --preflight and so reads the top-level
-      # scripts/*.mjs helpers that imports, pnpm-workspace.yaml and every
-      # workspace package.json. A group touching none of those skips it. That
-      # is not the exemption the self-tests above refuse (a label or a paths
-      # filter with no reader behind it): the selection step at the top of
-      # this job runs this step on every doubt, and `push` on main keeps it
-      # unconditional.
-      - name: Verify-lock entry-point self-test
-        if: steps.gate-families.outputs.verify_lock != 'skip'
-        run: bash scripts/pm/os-verify-lock.sh --self-test
-
       # ci-failure self-test (#9898). Fifth member of the PM self-test family
       # above, and until now the odd one out: `scripts/pm/ci-failure.mjs` — the
       # one command from "a check is red" to "here is the failing assertion" —
@@ -2352,6 +2261,87 @@ jobs:
         run: |
           node scripts/check-platform-object-tenancy-census.mjs --self-test
           node scripts/check-platform-object-tenancy-census.mjs
+
+      # ── NOT GATES: the unmeasured-tail reporter pair, per lane (#22991). The
+      # reporter finds its own job by runner name, so each lane counts its own
+      # tail. Argued in full at the end of `lint-eslint`. ──────────────────────
+      - name: Unmeasured-gate-tail reporter self-test
+        if: failure()
+        run: node scripts/report-unmeasured-gate-tail.mjs --self-test
+
+      # Runs BECAUSE something failed. On a green head `failure()` is false, so
+      # it is skipped and contributes zero bytes to the log, the summary and the
+      # annotations — measured, not assumed. It always exits 0: the job is
+      # already failed when it runs, and a non-zero exit here would only add a
+      # second annotation pointing at the reporter instead of at the gate.
+      - name: Report how many gates never ran
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          # ⚠️ Must equal this step's own `name:` above. The reporter subtracts
+          # it so that it does not list ITSELF among the steps that never ran —
+          # measured in run 34584689309, where it did exactly that, because the
+          # jobs API had not yet marked it `in_progress`. Drift between the two
+          # lines costs one extra, visibly silly line in the report; it cannot
+          # go wrong quietly.
+          OS_TAIL_REPORT_STEP: Report how many gates never ran
+        run: node scripts/report-unmeasured-gate-tail.mjs
+
+  lint-docs-code:
+    # Lane 3 of 8 behind `Lint & Repo Gates` (#22991; the `lint` job holds the
+    # cut). The always-on gates that ran from the docs page gates through the
+    # changeset-family self-tests: the docs and teaching-corpus ratchets, the
+    # symbol anchors, and the product-code guards (CLI, error codes, routes,
+    # logging, the objectui pin).
+    name: Lint · docs & code guards
+    runs-on: ubuntu-latest
+    # JOB WALL = CHECKOUT BUDGET (20) + BODY BUDGET, `typecheck-source-gates`'
+    # scheme. Body after the checkout, rebuilt per run from the 70 runs the
+    # `lint` job cites: max 4.0 minutes; 2 × 4.0 = 8.0, 10 on the floor.
+    # 20 + 10 = 30.
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # The unmeasured-tail reporter at the end of this lane: `lint-eslint`
+      # argues the scope.
+      actions: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        # CHECKOUT BUDGET: `typecheck-source-gates` sizes it; the `lint` job
+        # above says why every lane carries it.
+        timeout-minutes: 20
+        with:
+          # The slot-lookup ratchet compares the baseline against its state at
+          # the merge base with main — the only way to see a file being ADDED
+          # to the grandfather list. A shallow clone has no merge base, and the
+          # check would degrade to "not verified" on every run.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       # #12236 one <h1> per doc page. `DocsTitle` renders the frontmatter `title`
       # as the page's <h1> unconditionally (apps/docs/app/[lang]/docs/[[...slug]]/
@@ -3607,6 +3597,110 @@ jobs:
       - name: Changeset-family gate self-tests
         run: pnpm check:changeset-gate-self-tests
 
+      # ── NOT GATES: the unmeasured-tail reporter pair, per lane (#22991). The
+      # reporter finds its own job by runner name, so each lane counts its own
+      # tail. Argued in full at the end of `lint-eslint`. ──────────────────────
+      - name: Unmeasured-gate-tail reporter self-test
+        if: failure()
+        run: node scripts/report-unmeasured-gate-tail.mjs --self-test
+
+      # Runs BECAUSE something failed. On a green head `failure()` is false, so
+      # it is skipped and contributes zero bytes to the log, the summary and the
+      # annotations — measured, not assumed. It always exits 0: the job is
+      # already failed when it runs, and a non-zero exit here would only add a
+      # second annotation pointing at the reporter instead of at the gate.
+      - name: Report how many gates never ran
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          # ⚠️ Must equal this step's own `name:` above. The reporter subtracts
+          # it so that it does not list ITSELF among the steps that never ran —
+          # measured in run 34584689309, where it did exactly that, because the
+          # jobs API had not yet marked it `in_progress`. Drift between the two
+          # lines costs one extra, visibly silly line in the report; it cannot
+          # go wrong quietly.
+          OS_TAIL_REPORT_STEP: Report how many gates never ran
+        run: node scripts/report-unmeasured-gate-tail.mjs
+
+  lint-ci-engine:
+    # Lane 4 of 8 behind `Lint & Repo Gates` (#22991; the `lint` job holds the
+    # cut). The always-on gates that ran from the lockstep guard to the end of
+    # the single job, less the engine test-double gate (in `lint-eslint`):
+    # the release and workflow contracts, the CI and test-infrastructure
+    # self-tests (the aggregator-roster and required-context pins among
+    # them), the engine and packaging gates, and the issue-citation gate,
+    # which is why this lane alone reads issues and pull requests.
+    name: Lint · CI, release & engine gates
+    runs-on: ubuntu-latest
+    # JOB WALL = CHECKOUT BUDGET (20) + BODY BUDGET, `typecheck-source-gates`'
+    # scheme. Body after the checkout, rebuilt per run from the 70 runs the
+    # `lint` job cites: max 3.8 minutes; 2 × 3.8 = 7.6, 10 on the floor.
+    # 20 + 10 = 30.
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # The unmeasured-tail reporter at the end of this lane: `lint-eslint`
+      # argues the scope.
+      actions: read
+      # ⭐ Added by #18224, for the issue-citation step far below: it resolves
+      # the numbers THIS change cites against the board. Read-only and one
+      # scope wide — no issue, comment, label or assignee is ever written. It
+      # is spelled even though this board is PUBLIC, because an explicit
+      # `permissions:` block sets every unnamed scope to `none`, and a BLOCKING
+      # gate whose transport depends on repository visibility is a gate that
+      # goes red on a settings change no file here can assert.
+      issues: read
+      # ⭐ AND `pull-requests`, which is NOT redundant with the row above —
+      # MEASURED, on run 35495222460 of `half-state-patrol.yml`, whose token
+      # carries `issues` and NOT this scope: its census reported 3,628
+      # unresolvable citation sites where a full-scope read of the same tree
+      # reported 2,168, and the difference is 1,460 — EXACTLY the
+      # `resolves-as-pull-request` tally. `GET /repos/{owner}/{repo}/issues`
+      # answers with the pull requests omitted, so every citation naming a PR
+      # number reads as a number the board never had. On THIS blocking step
+      # that is a false RED on a correct citation, and the frontier probe
+      # (`?per_page=1&sort=created&direction=desc`) is read from the same
+      # response — so an understated frontier turns later numbers into
+      # `never-issued` too. ⛔ Do not drop this row as tidying.
+      pull-requests: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        # CHECKOUT BUDGET: `typecheck-source-gates` sizes it; the `lint` job
+        # above says why every lane carries it.
+        timeout-minutes: 20
+        with:
+          # The slot-lookup ratchet compares the baseline against its state at
+          # the merge base with main — the only way to see a file being ADDED
+          # to the grandfather list. A shallow clone has no merge base, and the
+          # check would degrade to "not verified" on every run.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
       # Lockstep package-count guard (#17039). `.changeset/config.json`'s
       # `fixed` array is the one true count of packages one stray `major`
       # promotes; check-changeset-fixed.mjs (release/RC workflows) already
@@ -3615,7 +3709,8 @@ jobs:
       # content/docs/protocol/backward-compatibility.mdx and one header
       # comment in scripts/publish-smoke-pack.mjs — so all three drifted
       # silently (69 written, 70 true) the day a package joined the group.
-      # Full-repo state, not diff-shaped, so — unlike the self-tests above —
+      # Full-repo state, not diff-shaped, so — unlike the changeset-family
+      # self-tests (`lint-docs-code`) —
       # this runs its real check every time, unconditionally.
       - name: Lockstep package-count guard
         run: pnpm check:lockstep-package-count
@@ -4092,9 +4187,10 @@ jobs:
       - name: Gate-family selection self-test
         run: pnpm check:select-gate-families
 
-      # Aggregator roster gate (#10490). Three required contexts are aggregate
+      # Aggregator roster gate (#10490). Four required contexts are aggregate
       # jobs standing in for a set of real jobs — `Test Core` and `Dogfood
-      # Regression Gate` in ci.yml, `TypeScript Type Check` in this file — and
+      # Regression Gate` in ci.yml, `TypeScript Type Check` and, since #22991,
+      # `Lint & Repo Gates` in this file — and
       # each decides its verdict from what it lists in `needs:`. Nothing held
       # those rosters to anything. Add a lane to a workflow, forget the
       # `needs:` line, and the lane's check-run is ADVISORY (only the aggregate
@@ -4536,25 +4632,9 @@ jobs:
       - name: Manifest repository.directory guard
         run: pnpm check:manifest-repository-directory
 
-      # Engine test-double contract gate (#4550, from #4434). A test double
-      # LOOSER than the implementation it replaces turns a green suite into no
-      # suite at all, silently, on exactly the paths a double was introduced
-      # for. #4434 is the worked example: DELETE /sharing/rules/:idOrName
-      # answered 500 for every rule and both address forms from the day it was
-      # written, while `deleteRule drops rule + all its grants` asserted success
-      # against a fake engine that accepted the one call shape ObjectQL.delete
-      # refuses. This holds every fake ObjectQL engine's `delete` to the real
-      # dispatch predicate — imported from @objectstack/objectql, not
-      # hand-mirrored, so it cannot drift — with the pre-existing fakes in a
-      # shrink-only, measured baseline. Static AST only, so it needs no build
-      # and belongs in this job. Runs its own --self-test first: the detector
-      # can be broken while every fake is fine, and a scan that quietly stops
-      # matching would report OK while reading nothing (#4868's family).
-      - name: Engine test-double contract gate
-        run: pnpm check:engine-double-contract
-
       # WHERE-matcher conformance gate (#8494, from #7620). The read-side
-      # sibling of the gate above, and the half its header lists as not
+      # sibling of the engine test-double gate (in `lint-eslint` since #22991),
+      # and the half its header lists as not
       # covered. #7620 corrected sixteen in-memory `matches(row, where)`
       # doubles that short-circuited on `$or` and discarded every sibling
       # equality key — turning a conjunction into a different query while the
@@ -5077,42 +5157,789 @@ jobs:
       - name: Duration-shaped spec keys carry their unit in the key name
         run: pnpm --filter @objectstack/spec check:duration-unit-keys
 
-      # ── NOT GATES. The two steps below judge nothing about the tree. ──────
-      #
-      # ⭐ One red in this job is a LOWER BOUND on the number of problems in the
-      # tree, not a count — every gate behind the failing one never executed,
-      # and a gate that never executed produced no output, which is the same
-      # shape a passing gate has. The GATE ORDER note above `jobs:` already
-      # names this quantity ("the unmeasured tail") and is tuned to shrink it;
-      # until now nothing printed it. These steps print it.
-      #
-      # ⛔ The fix is NOT to make the skipped gates run: that would undo the
-      # adjudicated fail-fast order. ⛔ Nor is it `continue-on-error`, which
-      # trades a red for silence. The job's conclusion is untouched.
-      #
-      # Measured before this was written, on run 34468505490 of this very
-      # workflow (job 102842713265, failed at step #55): the jobs API and the web
-      # UI DO mark the un-run steps `skipped` — 112 of them there — but they
-      # never count them, and they use that same word for a step its own `if:`
-      # turned off, so the one surface that says it cannot tell the two apart.
-      # The check-run `output` was null on title, summary and text alike, and the
-      # job log — what an API or agent reader gets — said nothing at all. So what
-      # is added here is a machine-readable COUNT, on all three surfaces.
+      # ── NOT GATES: the unmeasured-tail reporter pair, per lane (#22991). The
+      # reporter finds its own job by runner name, so each lane counts its own
+      # tail. Argued in full at the end of `lint-eslint`. ──────────────────────
+      - name: Unmeasured-gate-tail reporter self-test
+        if: failure()
+        run: node scripts/report-unmeasured-gate-tail.mjs --self-test
 
-      # Offline, no token, no network: drives the reporter's judge() over
-      # recorded jobs-API shapes, and checks that the step below still hands
-      # itself its own name. Wired as a step because an unrun self-test is a
-      # phantom check. Sub-second.
+      # Runs BECAUSE something failed. On a green head `failure()` is false, so
+      # it is skipped and contributes zero bytes to the log, the summary and the
+      # annotations — measured, not assumed. It always exits 0: the job is
+      # already failed when it runs, and a non-zero exit here would only add a
+      # second annotation pointing at the reporter instead of at the gate.
+      - name: Report how many gates never ran
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          # ⚠️ Must equal this step's own `name:` above. The reporter subtracts
+          # it so that it does not list ITSELF among the steps that never ran —
+          # measured in run 34584689309, where it did exactly that, because the
+          # jobs API had not yet marked it `in_progress`. Drift between the two
+          # lines costs one extra, visibly silly line in the report; it cannot
+          # go wrong quietly.
+          OS_TAIL_REPORT_STEP: Report how many gates never ran
+        run: node scripts/report-unmeasured-gate-tail.mjs
+
+  lint-scoped-erasure:
+    # Lane 5 of 8 behind `Lint & Repo Gates` (#22991; the `lint` job holds the
+    # cut). Path-scoped families (#16496): the engine query-options erasure
+    # ratchet, the heaviest scoped gate, and the declared-population gate.
+    # Like every scoped lane it runs the gate-family selector first (its full
+    # argument is in this lane) and pays its setup even when the selector
+    # skips everything in it: about a minute of runner, not of wall.
+    name: Lint · scoped · query-options erasure
+    runs-on: ubuntu-latest
+    # JOB WALL = CHECKOUT BUDGET (20) + BODY BUDGET, `typecheck-source-gates`'
+    # scheme. Body after the checkout, rebuilt per run from the 70 runs the
+    # `lint` job cites: max 4.3 minutes; 2 × 4.3 = 8.7, 10 on the floor.
+    # 20 + 10 = 30.
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # The unmeasured-tail reporter at the end of this lane: `lint-eslint`
+      # argues the scope.
+      actions: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        # CHECKOUT BUDGET: `typecheck-source-gates` sizes it; the `lint` job
+        # above says why every lane carries it.
+        timeout-minutes: 20
+        with:
+          # The slot-lookup ratchet compares the baseline against its state at
+          # the merge base with main — the only way to see a file being ADDED
+          # to the grandfather list. A shallow clone has no merge base, and the
+          # check would degrade to "not verified" on every run.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # ── Gate-family selection (#16496) ───────────────────────────────────
+      # After #16453 this job is the merge queue's critical path (median 1468 s
+      # over the ten merge-group runs measured for #16496; the PM dispatch-gates
+      # self-test alone 597 s), and none of its expensive steps read a
+      # merge group's file surface: a docs-only group paid the full battery.
+      # So on `merge_group` and `pull_request` the NINE scoped families below
+      # -- each step carrying `if: steps.gate-families.outputs.<id> != 'skip'`
+      # -- run only when the changed paths touch the files that family reads.
+      # (A tenth, `migration_registry` (#19753), retired with its gate in
+      # #22554: the registry it compared is no longer committed.)
+      # `push` on main and the scheduled full run keep the whole battery: the
+      # script runs everything for any event it does not scope.
       #
-      # ⭐ `if: failure()` for the same reason the step below carries it, and it
-      # is the whole negative control: a green run of this job must be BYTE
-      # IDENTICAL to what it was before any of this existed. A self-test that
-      # ran unconditionally would print one line on every green run — one line
-      # is still new noise, and this change is not allowed to cost any. It is
-      # exercised on exactly the runs its subject is used on, which in this repo
-      # is not a rare event. ⛔ Do not "fix" this by dropping the condition.
-      # It fails LOUDLY: it is a separate step, so a broken reporter shows up as
-      # its own red step rather than as a missing paragraph.
+      # #19498 added four of the nine (`entry_guard`,
+      # `declared_population_live`, `bare_root_worklist`,
+      # `self_test_workflow_commands`) and narrowed `pm_dispatch_gates`, on
+      # ruling #208 on #19491 (R4) and the maintainer's sentence quoted in the
+      # selector's header: the tooling's self-tests were 18.6 minutes of the
+      # 27.4-minute job a three-file `packages/spec` PR paid. ⛔ Product
+      # ratchets and censuses stay unconditional -- the tenancy and
+      # tenant-audit censuses, the engine gates and everything else here judge
+      # product code and are not in that ruling.
+      #
+      # ⭐ The invariant is FAIL-OPEN, and it holds at both layers. The script
+      # runs every family when the base cannot be resolved, the diff fails or
+      # is empty, a path is one it does not classify (a new top-level
+      # directory, an unlisted root file), or any change is a deletion, rename
+      # or type change; a family is skipped ONLY when every changed path is
+      # positively classified into a class that family's DECLARED read-set
+      # excludes. For the other four -- both ratchets, the corpus walk and the
+      # verify-lock self-test -- that read-set is what the family provably
+      # reads. For the five tooling self-tests it is the tool's OWN INPUTS,
+      # which is a weaker claim; it is argued where it is declared, in the
+      # selector's header.
+      # The `!= 'skip'` spelling means an ABSENT output -- the selector never
+      # ran, or wrote nothing -- also runs the step. Both halves are pinned by
+      # `scripts/ci/select-gate-families.selftest.sh` (`check:select-gate-
+      # families`, further down this job), which also reads THIS file and
+      # refuses any other `if:` spelling and any family the script does not
+      # decide. The per-family read-sets, and how each was measured, are in
+      # the script's header.
+      #
+      # The selection itself lives in scripts/ci/select-gate-families.sh:
+      # environment in, `$RUNNER_TEMP/gate-families.txt` + `$GITHUB_OUTPUT`
+      # out, and a ran/skipped table in the job summary (the seat reads it).
+      # This step only exports the event's fields, so the same script -- every
+      # branch of it -- runs locally and under its self-test.
+      #
+      # Since #22991 the gates run in lanes, and this step runs once in EACH
+      # lane that carries a scoped step: a step `if:` can read only its own
+      # job's step outputs, so the nine `if:` lines below stay byte-identical
+      # and each lane selects for itself. The script reads only the diff and
+      # is idempotent, and it cost 0 s at the median (1 s p90) over the 70
+      # runs the `lint` job cites. A separate families job would instead put a
+      # second full-history checkout on the critical path of every scoped lane.
+      - name: Select the gate families this run pays for
+        id: gate-families
+        env:
+          OS_GATE_EVENT_NAME: ${{ github.event_name }}
+          OS_GATE_PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          OS_GATE_MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        run: |
+          bash scripts/ci/select-gate-families.sh
+
+      # Engine query-options erasure ratchet (#4918). The slot-lookup rule
+      # (`lint-scoped-slot-corpus` since #22991) protects the service LOOKUP; this one protects what you pass to the
+      # service you looked up. `IDataEngine.find/findOne/count/aggregate` declare
+      # their options as `EngineQueryOptions` & co., and for an internal caller
+      # `tsc` is the ONLY channel enforcing them — the protocol's ingress
+      # normalizer never sees a direct engine call, and the options schemas are
+      # not `.strict()`, so an unknown key is silently DROPPED. #4674 is the
+      # bill: two queries sorted by `direction` instead of `order`, both with a
+      # `limit`, so both returned the OLDEST rows — audit history that never
+      # showed recent changes, and a search that truncated away fresh records.
+      # #4720 restored those two sites and #4721 closed the external callers;
+      # this stops the shape regrowing internally. Same ratchet mechanism as
+      # slot-lookup for the non-test residual, plus one aggregate decrease-only
+      # number for test code (a test whose subject IS off-contract engine input
+      # must be able to build it). Runs its own --self-test first.
+      #
+      # Scoped (#16496): the same population and inputs as the slot-lookup
+      # ratchet, with `scripts/query-options-erasure-baseline.json`.
+      - name: Engine query-options erasure ratchet
+        if: steps.gate-families.outputs.query_options_erasure != 'skip'
+        run: pnpm check:query-options-erasure
+
+      # The other half of the same failure (#13519). The watch-hint literal step
+      # (`lint-repo-tooling` since #22991) holds that a
+      # declaration is still READABLE BY A TEXT SCANNER; this one holds that
+      # what it reads still names something. A family whose declared literals
+      # all reach zero tracked files prints as an ORDINARY SILENCE — byte for
+      # byte the output of a gate that declared nothing — so the derivation and
+      # the gate disagree about whether a population was declared and neither
+      # says so. Measured on the tree this landed against: two families, one of
+      # them a gate that sweeps every workflow file and appeared on no card that
+      # edited one. The rule is per-FAMILY, not per-literal: a gate may spell a
+      # slug or a sentinel path beside a live declaration, and only a whole
+      # declaration that reaches nothing is refused. No allowlist and no gate
+      # names — the stronger rule ("a gate that enumerates a directory must
+      # declare one") was implemented, measured at 86 findings over 114
+      # enumerating gate files, and refused as an allowlist with a verdict
+      # attached. Reads the derivation once over the tracked corpus; ~5s of
+      # work, measured at 0.40 min as a step on run 35506407130.
+      #
+      # Scoped (#19498): it imports `discoverFamilies` and `trackedFiles` from
+      # the dispatch derivation, so its inputs are the workflow tree, every
+      # gate source that discovery resolves, and the tracked NAME set — and
+      # only a name that DISAPPEARS can turn a live declaration dead, which is
+      # a structural change the selector already runs everything for. A group
+      # confined to product source, tests, docs or changesets skips it here and
+      # pays for it on `push` to main and on the hourly run.
+      - name: A declared gate population reaches the tree
+        if: steps.gate-families.outputs.declared_population_live != 'skip'
+        run: pnpm check:declared-population-live
+
+      # ── NOT GATES: the unmeasured-tail reporter pair, per lane (#22991). The
+      # reporter finds its own job by runner name, so each lane counts its own
+      # tail. Argued in full at the end of `lint-eslint`. ──────────────────────
+      - name: Unmeasured-gate-tail reporter self-test
+        if: failure()
+        run: node scripts/report-unmeasured-gate-tail.mjs --self-test
+
+      # Runs BECAUSE something failed. On a green head `failure()` is false, so
+      # it is skipped and contributes zero bytes to the log, the summary and the
+      # annotations — measured, not assumed. It always exits 0: the job is
+      # already failed when it runs, and a non-zero exit here would only add a
+      # second annotation pointing at the reporter instead of at the gate.
+      - name: Report how many gates never ran
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          # ⚠️ Must equal this step's own `name:` above. The reporter subtracts
+          # it so that it does not list ITSELF among the steps that never ran —
+          # measured in run 34584689309, where it did exactly that, because the
+          # jobs API had not yet marked it `in_progress`. Drift between the two
+          # lines costs one extra, visibly silly line in the report; it cannot
+          # go wrong quietly.
+          OS_TAIL_REPORT_STEP: Report how many gates never ran
+        run: node scripts/report-unmeasured-gate-tail.mjs
+
+  lint-scoped-slot-corpus:
+    # Lane 6 of 8 behind `Lint & Repo Gates` (#22991; the `lint` job holds the
+    # cut). Path-scoped families (#16496): the slot-lookup ratchet, the
+    # entry-guard sweep and the comment-mask corpus walk. The slot-lookup
+    # ratchet is the gate the checkout step's `fetch-depth: 0` note names.
+    name: Lint · scoped · slot lookup & corpus
+    runs-on: ubuntu-latest
+    # JOB WALL = CHECKOUT BUDGET (20) + BODY BUDGET, `typecheck-source-gates`'
+    # scheme. Body after the checkout, rebuilt per run from the 70 runs the
+    # `lint` job cites: max 4.3 minutes; 2 × 4.3 = 8.6, 10 on the floor.
+    # 20 + 10 = 30.
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # The unmeasured-tail reporter at the end of this lane: `lint-eslint`
+      # argues the scope.
+      actions: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        # CHECKOUT BUDGET: `typecheck-source-gates` sizes it; the `lint` job
+        # above says why every lane carries it.
+        timeout-minutes: 20
+        with:
+          # The slot-lookup ratchet compares the baseline against its state at
+          # the merge base with main — the only way to see a file being ADDED
+          # to the grandfather list. A shallow clone has no merge base, and the
+          # check would degrade to "not verified" on every run.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Gate-family selection (#16496) — the same step, once per lane that carries a
+      # scoped step: a step `if:` reads its OWN job's step outputs, so each such lane
+      # selects for itself. Argued in full in `lint-scoped-erasure`.
+      - name: Select the gate families this run pays for
+        id: gate-families
+        env:
+          OS_GATE_EVENT_NAME: ${{ github.event_name }}
+          OS_GATE_PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          OS_GATE_MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        run: |
+          bash scripts/ci/select-gate-families.sh
+
+      # Slot-lookup sweep ratchet (#4251). `pnpm lint` (`lint-eslint`) bans erasing a
+      # service-lookup result to `any` across packages/, but the files still
+      # holding pre-existing sites are grandfathered by path — and an ignored
+      # file is ignored COMPLETELY, so new erasures added to one ride the old
+      # entry in silence. This re-measures those files with the grandfathering
+      # lifted and holds them to a per-file count, so the list can only shrink.
+      #
+      # Scoped (#16496): reads `packages/**/*.{ts,tsx,mts,cts}`, its baseline,
+      # `eslint.config.mjs` and the top-level `scripts/*.mjs` it imports; a
+      # group touching none of those skips it (selection step above).
+      - name: Slot-lookup ratchet
+        if: steps.gate-families.outputs.slot_lookup != 'skip'
+        run: pnpm check:slot-lookup
+
+      # Every `scripts/**` entry guard goes through ONE predicate (#10086).
+      # The hand-typed forms of "did node run me, or did someone import me?"
+      # had drifted into ELEVEN spellings across 33 files, and NINE were wrong
+      # in the same invisible direction: node resolves symlinks for the module
+      # graph but leaves `process.argv[1]` as the caller typed it, so a script
+      # reached through a symlink compared two different paths, answered false,
+      # and did NOTHING — exit 0, no output. The CI wrappers here hold the
+      # child's exit STATUS only, so an inert child read as a green gate; the
+      # governed-surface register (`scripts/pm/check-governed-merges.mjs`) was
+      # among the affected, where the inert run and its "NOT governed, ordinary
+      # queue landing applies" verdict are the SAME exit code.
+      # The sweep alone would not have held — nothing stopped a twelfth
+      # spelling. This gate is the part that closes the class: only
+      # `scripts/invoked-as.mjs` may read `process.argv[1]`, and that module's
+      # own self-test drives a real probe through a real symlink. Rationale and
+      # the rejected behavioural-sweep alternative: the gate script's header.
+      # Scans ~115 files, no spawns; ~0.2s of work, measured at 0.62 min as a
+      # step on run 35506407130.
+      #
+      # Scoped (#19498): its population is `scripts/**` — its own
+      # ROOT_DIR_WATCH_HINTS declaration, held against the root it really walks
+      # by its own self-test — so a group that changes no file under scripts/
+      # (and no root configuration) skips it. The selection step at the top of
+      # this job decides that, `push` on main and the hourly run keep it
+      # unconditional, and the ruling that authorizes moving a tooling
+      # self-test off the PR path is quoted in the selector's header.
+      - name: scripts/ entry guards go through one predicate
+        if: steps.gate-families.outputs.entry_guard != 'skip'
+        run: pnpm check:entry-guard
+
+      # The comment-mask CORPUS sweep (#10640) — the other instrument for the
+      # module the entry and parse guards delegate "is this span a comment, or code?"
+      # to. `js-comment-mask.mjs --self-test` pins the SHAPES someone wrote
+      # down; this parses every .{ts,tsx,mts,cts,js,mjs,cjs,jsx} file in the
+      # tree with @typescript-eslint/parser and diffs its comment ranges
+      # against the mask's, byte for byte. Neither subsumes the other, and that
+      # is measured in both directions on this tree rather than assumed:
+      # deleting the `{` counting inside `${...}` fails a pinned case and the
+      # sweep reads 0 disagreements over 4,741 files (the tree does not write
+      # that shape), while dropping `return` from REGEX_AFTER_KEYWORD passes all
+      # 23 pinned cases and the sweep names check-test-source-alias.mjs, where
+      # `return /(^|[^a-z])dist\//` is written today.
+      # The defect this would have caught shipped: 16 files disagreeing, 15 of
+      # them reading commented-out text as live code, 10,252 comment bytes in
+      # one file — and the instrument that found it lived in an agent's
+      # scratchpad, which is why re-deriving it was impossible until this file.
+      # WHY A HARD GATE ON EVERY PR, and not an on-demand flag: the sweep's
+      # verdict depends on the CORPUS as much as on the masker, so a PR that
+      # writes a shape the mask reads wrong turns ~20 source-scanning gates
+      # into liars on that file, on a PR that never touched the masker. That
+      # arrival is not detectable by any convention a human or an agent has to
+      # remember at the right moment — the failure mode this repo has already
+      # paid for at #4690 and again here.
+      # WHY A STEP AND NOT A JOB: a new job's `name:` is a required-context
+      # contract (scripts/check-required-contexts.mjs) that only a
+      # maintainer-present Settings change can enrol, and an unenrolled job is
+      # an advisory gate — #5617 verbatim. This job is already required.
+      # Invoked as `node` rather than `pnpm check:*`, same as the other
+      # `node scripts/…` steps in this lane: see the GATE INVOCATION IDIOM note
+      # at the top of this file.
+      # Runs its own comparator self-test first — 12 cases proving the
+      # comparison can still REPORT, because "0 files disagree" and "the
+      # comparison is broken" otherwise print the same line.
+      # Cost, measured on a contended 4-vCPU container: 4,741 files, 72 MB of
+      # source, 45–48 s, of which the parser is 45 s. The step prints CI's own
+      # number on every run.
+      #
+      # Scoped (#16496): the walk reads every `.ts .tsx .mts .cts .js .mjs
+      # .cjs .jsx` file in the tree, so a group that changes no file of those
+      # extensions (and no root configuration) skips it -- selection step at
+      # the top of this job.
+      - name: Comment mask agrees with a real parser over the whole corpus
+        if: steps.gate-families.outputs.comment_mask_corpus != 'skip'
+        run: node scripts/check-comment-mask-corpus.mjs
+
+      # ── NOT GATES: the unmeasured-tail reporter pair, per lane (#22991). The
+      # reporter finds its own job by runner name, so each lane counts its own
+      # tail. Argued in full at the end of `lint-eslint`. ──────────────────────
+      - name: Unmeasured-gate-tail reporter self-test
+        if: failure()
+        run: node scripts/report-unmeasured-gate-tail.mjs --self-test
+
+      # Runs BECAUSE something failed. On a green head `failure()` is false, so
+      # it is skipped and contributes zero bytes to the log, the summary and the
+      # annotations — measured, not assumed. It always exits 0: the job is
+      # already failed when it runs, and a non-zero exit here would only add a
+      # second annotation pointing at the reporter instead of at the gate.
+      - name: Report how many gates never ran
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          # ⚠️ Must equal this step's own `name:` above. The reporter subtracts
+          # it so that it does not list ITSELF among the steps that never ran —
+          # measured in run 34584689309, where it did exactly that, because the
+          # jobs API had not yet marked it `in_progress`. Drift between the two
+          # lines costs one extra, visibly silly line in the report; it cannot
+          # go wrong quietly.
+          OS_TAIL_REPORT_STEP: Report how many gates never ran
+        run: node scripts/report-unmeasured-gate-tail.mjs
+
+  lint-scoped-tooling:
+    # Lane 7 of 8 behind `Lint & Repo Gates` (#22991; the `lint` job holds the
+    # cut). Path-scoped families (#16496): the PM bare-root worklist
+    # self-test, the self-test workflow-command gate and the verify-lock
+    # entry-point self-test.
+    name: Lint · scoped · tooling self-tests
+    runs-on: ubuntu-latest
+    # JOB WALL = CHECKOUT BUDGET (20) + BODY BUDGET, `typecheck-source-gates`'
+    # scheme. Body after the checkout, rebuilt per run from the 70 runs the
+    # `lint` job cites: max 3.7 minutes; 2 × 3.7 = 7.5, 10 on the floor.
+    # 20 + 10 = 30.
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # The unmeasured-tail reporter at the end of this lane: `lint-eslint`
+      # argues the scope.
+      actions: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        # CHECKOUT BUDGET: `typecheck-source-gates` sizes it; the `lint` job
+        # above says why every lane carries it.
+        timeout-minutes: 20
+        with:
+          # The slot-lookup ratchet compares the baseline against its state at
+          # the merge base with main — the only way to see a file being ADDED
+          # to the grandfather list. A shallow clone has no merge base, and the
+          # check would degrade to "not verified" on every run.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Gate-family selection (#16496) — the same step, once per lane that carries a
+      # scoped step: a step `if:` reads its OWN job's step outputs, so each such lane
+      # selects for itself. Argued in full in `lint-scoped-erasure`.
+      - name: Select the gate families this run pays for
+        id: gate-families
+        env:
+          OS_GATE_EVENT_NAME: ${{ github.event_name }}
+          OS_GATE_PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          OS_GATE_MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        run: |
+          bash scripts/ci/select-gate-families.sh
+
+      # PM bare-root worklist self-test (#10840). The PM dispatch-gates
+      # self-test proves the
+      # dispatch derivation still WORKS; this one proves the recorded triage of
+      # the gates that derivation structurally cannot see is still true of the
+      # tree. A gate whose population is spelled as a bare single-segment word
+      # builds no watch hint at all — not a dead hint, not a silent verdict,
+      # nothing — so it is unnameable by any dispatch brief and leaves no residue
+      # saying so. The worklist enumerates that species and carries one recorded
+      # verdict per row; this step fails when a verdict outlives its row (the
+      # shrink) or when a new gate joins the species unjudged.
+      #
+      # ⛔ It runs the SELF-TEST only, never the sweep as a verdict: recognising
+      # this species needs a heuristic over constant NAMES, and #10705 refused to
+      # put one on the path that derives every PR's gate list. Nothing in
+      # `dispatch-gates.mjs` reads the worklist, and no verdict in it reaches a
+      # dispatch prompt.
+      #
+      # Reads the workflow tree and every gate source once; ~0.5s of work,
+      # measured at 0.32 min as a step on run 35506407130.
+      #
+      # ⚠️ This step WAS unconditional, on the reasoning that a self-test which
+      # can be skipped is the gap moving rather than closing. #19498 scopes it
+      # anyway, and the trade is explicit rather than reasoned away: it imports
+      # the same derivation as the dispatch-gates and watch-hint literal steps, so its inputs are the
+      # workflow tree and the gate sources, and on a group touching neither the
+      # gap does move — to `push` on main and the hourly full run, which keep
+      # the whole battery. Gate weakening is a maintainer floor; the sentence
+      # that authorizes this one is quoted in the selector's header.
+      - name: PM bare-root worklist self-test
+        if: steps.gate-families.outputs.bare_root_worklist != 'skip'
+        run: node scripts/pm/bare-root-worklist.mjs --self-test
+
+      # Self-test output vs. the runner's command parser (#11886). Sibling of
+      # the self-test wiring gate (`lint-repo-tooling`) and sharing its
+      # population: that one asks whether CI RUNS
+      # each self-test, this one asks what each self-test PRINTS while it does.
+      #
+      # The defect it closes was live on every PR in this repo. A line of
+      # `scripts/pm/ci-failure.mjs`'s self-test prose named a workflow-command
+      # token literally, inside backticks, as documentation of what that tool
+      # anchors on. The runner does not know a token is being quoted: it parsed
+      # it and minted `annotation_level: failure` on a check run whose
+      # conclusion was SUCCESS. On `d63b01436` that artifact was the ONLY
+      # annotation the `Lint & Repo Gates` run carried. A failure-level
+      # annotation on a green required check is a claim that something failed,
+      # and a repo that mints one on every PR is teaching its readers to skim
+      # exactly the surface other gates report findings into.
+      #
+      # ⚠️ INVISIBLE TO EVERY LOCAL RUN, which is the whole reason it is a gate:
+      # the text is ordinary prose on disk and in a terminal, and only a runner
+      # transforms it. It was found by reading one job's annotations through the
+      # API, not by anything in this file.
+      #
+      # Two facts were measured on real runs and the gate's shape follows them:
+      # the legacy `##[...]` form is parsed ANYWHERE in a printed line (the
+      # measured token sat at column 18 and was still consumed), while the
+      # `::...::` form is parsed only at LINE START (two mid-sentence ones print
+      # on every PR from `check-prerelease-pin-watch` and mint nothing). So the
+      # first detector is unanchored and the second is anchored — flagging inert
+      # prose would be a false positive the next author would be right to delete.
+      #
+      # It RUNS the self-tests rather than reasoning about their source, because
+      # "is this token printed?" is only answerable by printing it. A static
+      # prefilter picks which ones to run — over-selecting freely, since the
+      # verdict never comes from it — which is what keeps this step at ~14 s
+      # instead of the ~4 min the whole population costs.
+      #
+      # Invoked as `node scripts/…` rather than through a `pnpm check:*` alias:
+      # see the GATE INVOCATION IDIOM note at the top of this file. Reads
+      # `scripts/` and `.github/workflows/` off disk and spawns the selected
+      # self-tests; no network. Measured at 0.48 min as a step on run
+      # 35506407130.
+      #
+      # Scoped (#19498): its declared population is
+      # `scripts/**/*.mjs`, `scripts/**/*.mts` and `scripts/**/*.sh`, and the
+      # rest of its read-set is the workflow tree and `.github/actions` it
+      # discovers the runnable self-tests from — so a group touching none of
+      # those skips it here and runs it on `push` to main and on the hourly
+      # full run.
+      - name: Self-test workflow-command gate
+        if: steps.gate-families.outputs.self_test_workflow_commands != 'skip'
+        run: |
+          node scripts/check-self-test-workflow-commands.mjs --self-test
+          node scripts/check-self-test-workflow-commands.mjs
+
+      # Verify-lock entry-point self-test (#9661). `scripts/pm/os-verify-lock.sh`
+      # is the ONE way an agent takes the container's shared heavy-verify lock,
+      # and it is the enforcement of a rule that used to live only in prose: the
+      # acquisition budget os-dev.md declares is now unrepresentable above its
+      # cap, grants are ordered by a ticket file, and every run reports how long
+      # it held. Measured before it existed, in one container: five live waiters,
+      # three of them 6x over the declared cap, and the compliant ones were the
+      # ones not verifying — a convention whose violators win is not a convention.
+      #
+      # Nothing in CI *uses* the lock (GitHub runners are one job per machine),
+      # so this step exists to keep the mechanism honest rather than to serialise
+      # anything: 48 cases over the budget clamp, ticket liveness (dead pid,
+      # REUSED pid, over-age), fd hygiene, exit-code passthrough, and real
+      # multi-process contention — queue timeout, legacy free-hand coexistence in
+      # both directions, and three staggered waiters acquiring in arrival order.
+      #
+      # Since #10289 it also guards the BASH 3.2 FLOOR and the bounded-refusal
+      # rule, which is why the count moved: `/usr/bin/env bash` is 3.2.57 on
+      # macOS, and a bash 4+/5+ construct there does not fail loudly — it makes
+      # the acquisition deadline unreachable and turns the wait into an unbounded
+      # spin that prints no VERDICT at all. So the suite now scans the
+      # acquisition path for 4+/5+ constructs, runs a real acquisition with
+      # EPOCHSECONDS/EPOCHREALTIME unset and mapfile disabled, and asserts that
+      # an unusable host (no `flock`) and a stopped clock each REFUSE with a
+      # verdict and a non-zero exit rather than waiting forever.
+      #
+      # It runs entirely on a private lock under a temp dir; it never touches
+      # /tmp/os-heavy-verify.lock, so a runner and an agent container behave the
+      # same. No network; median 100 s over the ten merge-group runs measured
+      # for #16496.
+      #
+      # Scoped (#16496): the suite reads the script itself (`$SELF`) and a
+      # private temp dir, and its case (h) runs the real entry point from the
+      # repo root, which routes through filter_preflight ->
+      # scripts/pnpm-filter-targets.mjs --preflight and so reads the top-level
+      # scripts/*.mjs helpers that imports, pnpm-workspace.yaml and every
+      # workspace package.json. A group touching none of those skips it. That
+      # is not the exemption the self-tests above refuse (a label or a paths
+      # filter with no reader behind it): the selection step at the top of
+      # this job runs this step on every doubt, and `push` on main keeps it
+      # unconditional.
+      - name: Verify-lock entry-point self-test
+        if: steps.gate-families.outputs.verify_lock != 'skip'
+        run: bash scripts/pm/os-verify-lock.sh --self-test
+
+      # ── NOT GATES: the unmeasured-tail reporter pair, per lane (#22991). The
+      # reporter finds its own job by runner name, so each lane counts its own
+      # tail. Argued in full at the end of `lint-eslint`. ──────────────────────
+      - name: Unmeasured-gate-tail reporter self-test
+        if: failure()
+        run: node scripts/report-unmeasured-gate-tail.mjs --self-test
+
+      # Runs BECAUSE something failed. On a green head `failure()` is false, so
+      # it is skipped and contributes zero bytes to the log, the summary and the
+      # annotations — measured, not assumed. It always exits 0: the job is
+      # already failed when it runs, and a non-zero exit here would only add a
+      # second annotation pointing at the reporter instead of at the gate.
+      - name: Report how many gates never ran
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          # ⚠️ Must equal this step's own `name:` above. The reporter subtracts
+          # it so that it does not list ITSELF among the steps that never ran —
+          # measured in run 34584689309, where it did exactly that, because the
+          # jobs API had not yet marked it `in_progress`. Drift between the two
+          # lines costs one extra, visibly silly line in the report; it cannot
+          # go wrong quietly.
+          OS_TAIL_REPORT_STEP: Report how many gates never ran
+        run: node scripts/report-unmeasured-gate-tail.mjs
+
+  lint-pm-dispatch-gates:
+    # Lane 8 of 8 behind `Lint & Repo Gates` (#22991; the `lint` job holds the
+    # cut). One path-scoped family, alone: the PM dispatch-gates self-test.
+    # On `pull_request` and `merge_group` it runs the battery's fast tier; on
+    # `schedule` and `push` both tiers, the slow tier's daily home under the
+    # ruling (`scripts/pm/check-dispatch-gates.mjs` decides, from the event).
+    name: Lint · PM dispatch-gates
+    runs-on: ubuntu-latest
+    # JOB WALL = CHECKOUT BUDGET (20) + BODY BUDGET, `typecheck-source-gates`'
+    # scheme. Body after the checkout, rebuilt per run from the 70 runs the
+    # `lint` job cites, where every run of this gate was BOTH tiers: max 15.5
+    # minutes; 2 × 15.5 = 31.0, 30 on the grain. 20 + 30 = 50, under the 55
+    # cap the `lint` job argues. Both tiers still run here on `schedule` and
+    # `push`, so the wall is sized for them, not for the fast tier.
+    timeout-minutes: 50
+    permissions:
+      contents: read
+      # The unmeasured-tail reporter at the end of this lane: `lint-eslint`
+      # argues the scope.
+      actions: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        # CHECKOUT BUDGET: `typecheck-source-gates` sizes it; the `lint` job
+        # above says why every lane carries it.
+        timeout-minutes: 20
+        with:
+          # The slot-lookup ratchet compares the baseline against its state at
+          # the merge base with main — the only way to see a file being ADDED
+          # to the grandfather list. A shallow clone has no merge base, and the
+          # check would degrade to "not verified" on every run.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Gate-family selection (#16496) — the same step, once per lane that carries a
+      # scoped step: a step `if:` reads its OWN job's step outputs, so each such lane
+      # selects for itself. Argued in full in `lint-scoped-erasure`.
+      - name: Select the gate families this run pays for
+        id: gate-families
+        env:
+          OS_GATE_EVENT_NAME: ${{ github.event_name }}
+          OS_GATE_PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          OS_GATE_MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        run: |
+          bash scripts/ci/select-gate-families.sh
+
+      # PM dispatch-gates self-test (#8162). `scripts/pm/dispatch-gates.mjs`
+      # derives the "local gates for this card" line of every dispatch prompt,
+      # and carried a 61-case --self-test that NO job ran: it executed only when
+      # a human or an agent typed it. A break in the extraction functions landed
+      # green and surfaced later as a prompt naming the wrong gate families —
+      # output that reads as correct, produced by the one tool whose purpose is
+      # to stop gate lists being memory-shaped. Same family as the
+      # `Changeset-family gate self-tests` step above. Until #16496 this step
+      # was deliberately UNCONDITIONAL -- no `if:`, no label read, no paths
+      # filter -- on the argument that an exemption is what a self-test must
+      # not have, or the gap moves. That argument was about an exemption a
+      # PATH FILTER or a LABEL would grant: a paths: trigger or a label read
+      # skips the step on a card that never touched the paths someone once
+      # listed, with no reader of what the test actually reads. What runs
+      # here now is different in kind and was the maintainer's call (#16496,
+      # 「同意你的建议，你负责执行派发所有可行的优化」): the selection step at
+      # the top of this job classifies every changed path against a declared
+      # read-set for this step, and skips it when no changed path is in that
+      # set. Every doubt runs it, the self-test of the selector pins that, and
+      # `push` on main keeps it unconditional.
+      #
+      # ⚠️ Since #19498 that read-set is NARROWER than what the battery reads,
+      # and the gap is stated rather than papered over. The read-set is the
+      # tool's own inputs: every workflow and composite action, every gate
+      # source under `scripts/**` and a workspace package's own `scripts/`,
+      # every `package.json`, `.claude/**`, `skills/**`, `AGENTS.md`,
+      # `CLAUDE.md` and root configuration. The battery ALSO reads the CONTENT
+      # of every JS/TS and `.sh` file in the tree (the compound-anchor census
+      # of `function ...SelfTest...(` declarations and the exposed-scratch-dir
+      # sweep of every mkdtempSync/mkdirSync caller, with the nested
+      # `.gitignore` files it consults) and the tracked NAME set it sweeps —
+      # which is why, until #19498, any added file anywhere ran it. On PR
+      # #19314 this step alone was 11.8 minutes of a 27.4-minute job for a
+      # three-file `packages/spec` diff, and ruling #208 on #19491 (R4) took
+      # those whole-tree reads off the PR path on the maintainer's sentence,
+      # quoted in the selector's header. ⛔ A defect in that wider set can now
+      # first appear on `main`; the push-on-main and hourly full runs are what
+      # bound it, and widening the skip further is again a maintainer call.
+      #
+      # ⚠️ Since #22991 the battery is TIERED by event, inside the gate rather
+      # than here: on `pull_request` and `merge_group` `pnpm check:pm-dispatch-gates`
+      # runs the fast tier; on `schedule`, `push` and any other event it runs
+      # both. Every case still runs at least hourly on the full run, and a
+      # slow-tier red is a red on `main`. The step below is unchanged; the
+      # decision and its argument live in `scripts/pm/check-dispatch-gates.mjs`.
+      #
+      # The gate runs the SELF-TEST only. The live derivation
+      # (`node scripts/pm/dispatch-gates.mjs <path>`) answers a question about a
+      # card's file surface, is print-only, and exits 0 on any completed run —
+      # there is no verdict in it for CI to hold, only a slow read of the whole
+      # workflow tree. Why the gate is its own file rather than pointing
+      # `check:pm-dispatch-gates` straight at the tool is measured and argued in
+      # `scripts/pm/check-dispatch-gates.mjs`'s header (the tool's self-test
+      # fixtures are path strings, and they become watch hints that fabricate
+      # MATCHED leads across most of the tree).
+      #
+      # ⛔ This paragraph deliberately carries NO cost figure (#12831). The line
+      # that used to close it — "Reads two files and walks packages/; ~0.3s" —
+      # described the 61-case self-test named at the top, and the part that grew
+      # since is exactly the part it denied: the live-tree cases run the same
+      # discovery the tool does (every workflow file, and then the source of
+      # every gate that discovery finds), build temporary git repositories and
+      # drive `changedPathsFromGit` against them, and sweep the tracked corpus.
+      # That is not "two files", and it is not a walk of packages/. The estimate
+      # went with the description rather than being refreshed: a replacement has
+      # to be read off a real CI run of THIS step, because a reading taken in an
+      # agent container is a reading of a contended box and not of a runner
+      # (#12528). A cost nobody re-measures ends up endorsing a decision it has
+      # no standing to endorse, which is what this one had become. No live
+      # counts stand here either, for the same reason — they rot the same way,
+      # and it is the SHAPE of the work, not its size, that the argument needs.
+      #
+      # ⛔ Cost was never what decided this step's conditionality, and the
+      # measured medians that motivated #16496 (597 s here, over ten
+      # merge-group runs) live in that card and its PR, not in this note.
+      # Losing the estimate is NOT an argument for a label read or a paths
+      # filter, and the read-set-scoped `if:` below is not one of those: it
+      # was a maintainer call (the first paragraph names it), and widening the
+      # skip -- any change to the classes the selector treats as inert for
+      # this family -- is again a maintainer call, taken in
+      # scripts/ci/select-gate-families.sh under its self-test.
+      - name: PM dispatch-gates self-test
+        if: steps.gate-families.outputs.pm_dispatch_gates != 'skip'
+        run: pnpm check:pm-dispatch-gates
+
+      # ── NOT GATES: the unmeasured-tail reporter pair, per lane (#22991). The
+      # reporter finds its own job by runner name, so each lane counts its own
+      # tail. Argued in full at the end of `lint-eslint`. ──────────────────────
       - name: Unmeasured-gate-tail reporter self-test
         if: failure()
         run: node scripts/report-unmeasured-gate-tail.mjs --self-test
@@ -7084,8 +7911,9 @@ jobs:
     # moment a lane moves, and cannot say WHICH lane went missing.
     #
     # Two things read this list, which is why it is real YAML and not a comment:
-    #   - `node scripts/check-aggregator-roster.mjs` (statically, in the lint
-    #     job) asserts it equals this job's `needs:` EXACTLY, in both
+    #   - `node scripts/check-aggregator-roster.mjs` (statically, in the
+    #     `lint-ci-engine` lane of `Lint & Repo Gates` since #22991) asserts it
+    #     equals this job's `needs:` EXACTLY, in both
     #     directions. A fifth lane added to this workflow and forgotten here
     #     would otherwise ride green as an ADVISORY check-run behind the
     #     required "TypeScript Type Check" context — a job that appears in the

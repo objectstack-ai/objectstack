@@ -82,6 +82,7 @@
 //   node scripts/check-skill-compatibility-version.mjs --fix        # derive both lines, then check
 //   node scripts/check-skill-compatibility-version.mjs --self-test
 
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
@@ -590,6 +591,58 @@ export function readSkillFiles(root = REPO_ROOT) {
   return { files, problems };
 }
 
+/**
+ * Every repo-relative path `--fix` may write, in the order the walk visits them.
+ *
+ * This is the export the post-version shape guard reads (`release.yml`'s
+ * `Validate the post-version tree`, `cut-rc.yml`'s release-file allowlist), on the
+ * terms of `stampedPaths()` in sync-template-versions.mjs and `syncedPaths()` in
+ * sync-release-index-currency.mjs: the root `version` script ends with this
+ * script's `--fix`, so the SKILL.md files it restamps are a version-time output,
+ * and a guard that restated them would be one more contract to drift. It is
+ * derived from `readSkillFiles()`, the walk `applyFix()` writes from, so the
+ * answer cannot name a different set than the one that gets written — the one
+ * justified EXEMPT file included, because the exemption covers its pin, never its
+ * `metadata.version` stamp.
+ *
+ * Zero skills THROWS rather than returning `[]`: an empty allowlist reads exactly
+ * like "nothing to admit" and means "the directory moved".
+ *
+ * @param {{ root?: string }} [options] checkout to walk; defaults to this one
+ * @returns {string[]} POSIX-separated, repo-relative `skills/NAME/SKILL.md` paths
+ */
+export function stampedSkillPaths({ root = REPO_ROOT } = {}) {
+  const { files } = readSkillFiles(root);
+  if (files.length === 0) {
+    throw new Error(
+      `check-skill-compatibility-version: no SKILL.md under ${SKILLS_DIR}/. The version pass stamps ` +
+        'every published skill, so this is a moved directory rather than an empty catalog — ' +
+        'refusing to report an empty stamped-path set.',
+    );
+  }
+  return files.map((f) => f.file);
+}
+
+/**
+ * The `--fix` leg: derive every scanned file and write the ones that moved under
+ * `root`. Returns the derived set (what the check then judges) and what was
+ * written, so the self-test can hold the written set against `stampedSkillPaths()`.
+ *
+ * @returns {{ files: { file: string, text: string }[], written: { file: string, changes: string[] }[] }}
+ */
+export function applyFix(scanned, pkgs, root = REPO_ROOT) {
+  const written = [];
+  const files = scanned.map(({ file, text }) => {
+    const { text: next, changes } = deriveFrontmatter(text, pkgs);
+    if (next !== text) {
+      writeFileSync(join(root, file), next);
+      written.push({ file, changes });
+    }
+    return { file, text: next };
+  });
+  return { files, written };
+}
+
 function readWorkspacePackages(root = REPO_ROOT) {
   const pkgs = new Map();
   const walk = (abs, depth) => {
@@ -698,6 +751,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '--fix rewrites a pin inside a folded `compatibility: >` block too': 1,
   '--fix invents no structure: a file with no metadata.version comes back unchanged, and the check names it': 1,
   '--fix leaves a pin naming a package the workspace lacks alone, for the check to refuse': 1,
+  'stampedSkillPaths() equals the set --fix writes on an all-stale fixture, in walk order': 1,
+  'a SKILL.md write outside stampedSkillPaths() stays unexpected under the guard\'s grep -vxF -f filter': 1,
+  'stampedSkillPaths() THROWS on a tree with no skills, never an empty list': 1,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -706,7 +762,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // the literal above, so the roster falls below this number; the table
 // cross-check in the floor block is the other half, and names WHICH label
 // collided.
-const SELF_TEST_BATTERY_FLOOR = 27;
+const SELF_TEST_BATTERY_FLOOR = 30;
 
 function selfTest() {
   console.log('check-skill-compatibility-version self-test\n');
@@ -725,6 +781,30 @@ function selfTest() {
   const exemptUpgrade = {
     file: 'skills/objectstack-upgrade/SKILL.md',
     text: fm('compatibility: >\n  Needs `@objectstack/spec` and `@objectstack/cli` at the TARGET major\n  (protocol 10 at the time of writing).'),
+  };
+
+  // A tree where every published SKILL.md is stale (a pin, a stamp, and the
+  // exempt file's stamp alone), beside a skill directory with no SKILL.md, a
+  // non-directory entry, and an internal SKILL.md the walk never reaches.
+  const STALE_TEXT = fm('compatibility: Requires @objectstack/spec 16.x (Zod v4 schemas)', '16.0.0');
+  const OUTSIDE_SKILL = '.claude/skills/internal/SKILL.md';
+  const withStaleFixture = (body) => {
+    const root = mkdtempSync(join(tmpdir(), 'skill-compat-stamped-'));
+    try {
+      const put = (rel, text) => {
+        mkdirSync(dirname(join(root, rel)), { recursive: true });
+        writeFileSync(join(root, rel), text);
+      };
+      put('skills/a/SKILL.md', STALE_TEXT);
+      put('skills/b/SKILL.md', fm('compatibility: Requires @objectstack/spec 17.x (Zod v4 schemas)', '17.0.0-rc.4'));
+      put(exemptUpgrade.file, exemptUpgrade.text.replace('"17.0.0-rc.5"', '"16.0.0"'));
+      put('skills/README.md', '# index\n');
+      mkdirSync(join(root, 'skills', 'no-skill-md'), { recursive: true });
+      put(OUTSIDE_SKILL, STALE_TEXT);
+      body(root);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   };
 
   const cases = [
@@ -997,6 +1077,62 @@ function selfTest() {
         if (text !== before || changes.length !== 0) throw new Error('an unknown package was rewritten');
       },
     },
+    // ── The post-version surface the shape guard reads ──────────────────────
+    {
+      label: 'stampedSkillPaths() equals the set --fix writes on an all-stale fixture, in walk order',
+      run: () => withStaleFixture((root) => {
+        const listed = stampedSkillPaths({ root });
+        const { written } = applyFix(readSkillFiles(root).files, PKGS, root);
+        const wrote = written.map((w) => w.file);
+        if (JSON.stringify(wrote) !== JSON.stringify(listed)) {
+          throw new Error(`--fix wrote ${JSON.stringify(wrote)}, the export lists ${JSON.stringify(listed)}`);
+        }
+        // The writes really landed under `root` and nowhere else: each listed file
+        // now passes the check, and the internal skill outside the walk is untouched.
+        if (runAllChecks(readSkillFiles(root).files, PKGS, EXEMPT).problems.length !== 0) {
+          throw new Error('the fixture is still stale after --fix, so the writes did not land under root');
+        }
+        if (readFileSync(join(root, OUTSIDE_SKILL), 'utf8') !== STALE_TEXT) {
+          throw new Error(`--fix wrote ${OUTSIDE_SKILL}, a SKILL.md outside the walk`);
+        }
+      }),
+    },
+    {
+      label: 'a SKILL.md write outside stampedSkillPaths() stays unexpected under the guard\'s grep -vxF -f filter',
+      run: () => withStaleFixture((root) => {
+        // The guard's own filter, spawned as the workflows spell it, over the
+        // list printed the way their resolve line prints it.
+        const listFile = join(root, 'skill-list.txt');
+        const movedFile = join(root, 'moved.txt');
+        const listed = stampedSkillPaths({ root });
+        writeFileSync(listFile, listed.map((p) => `${p}\n`).join(''));
+        const outside = [OUTSIDE_SKILL, 'skills/a/nested/SKILL.md', 'skills/no-skill-md/SKILL.md'];
+        writeFileSync(movedFile, [...listed, ...outside].map((p) => `${p}\n`).join(''));
+        const r = spawnSync('grep', ['-vxF', '-f', listFile, movedFile], { encoding: 'utf8' });
+        if (r.error) throw new Error(`could not spawn grep: ${r.error.message}`);
+        const unexpected = r.stdout.split('\n').filter(Boolean);
+        if (r.status !== 0 || JSON.stringify(unexpected) !== JSON.stringify(outside)) {
+          throw new Error(`grep exit ${r.status}, unexpected ${JSON.stringify(unexpected)}, wanted ${JSON.stringify(outside)}`);
+        }
+        // Control: the listed set alone is all admitted (exit 1, nothing selected).
+        writeFileSync(movedFile, listed.map((p) => `${p}\n`).join(''));
+        const c = spawnSync('grep', ['-vxF', '-f', listFile, movedFile], { encoding: 'utf8' });
+        if (c.status !== 1 || c.stdout !== '') throw new Error(`control: grep exit ${c.status}, output ${JSON.stringify(c.stdout)}`);
+      }),
+    },
+    {
+      label: 'stampedSkillPaths() THROWS on a tree with no skills, never an empty list',
+      run: () => {
+        const empty = mkdtempSync(join(tmpdir(), 'skill-compat-nolist-'));
+        try {
+          let threw = false;
+          try { stampedSkillPaths({ root: empty }); } catch (err) { threw = /no SKILL\.md under skills\//.test(err.message); }
+          if (!threw) throw new Error('an empty tree resolved without the refusal');
+        } finally {
+          rmSync(empty, { recursive: true, force: true });
+        }
+      },
+    },
   ];
   for (const c of derivationCases) {
     registerCase(c.label);
@@ -1177,19 +1313,12 @@ function main() {
   // write only the files that moved, then CHECK the result like any other run —
   // a derivation that leaves a file red (no stamp to rewrite, a pin naming no
   // package) is reported, never papered over.
-  const files = process.argv.includes('--fix')
-    ? scanned.map(({ file, text }) => {
-        const { text: next, changes } = deriveFrontmatter(text, pkgs);
-        if (next !== text) {
-          writeFileSync(join(REPO_ROOT, file), next);
-          console.log(`✎ ${file}: ${changes.join('; ')}`);
-        }
-        return { file, text: next };
-      })
-    : scanned;
+  let files = scanned;
   if (process.argv.includes('--fix')) {
-    const moved = files.filter((f, i) => f.text !== scanned[i].text).length;
-    console.log(`check-skill-compatibility-version --fix: ${moved} of ${files.length} SKILL.md file(s) rewritten.\n`);
+    const fixed = applyFix(scanned, pkgs);
+    for (const { file, changes } of fixed.written) console.log(`✎ ${file}: ${changes.join('; ')}`);
+    files = fixed.files;
+    console.log(`check-skill-compatibility-version --fix: ${fixed.written.length} of ${files.length} SKILL.md file(s) rewritten.\n`);
   }
 
   const { problems, results, pinCount } = runAllChecks(files, pkgs, EXEMPT);
