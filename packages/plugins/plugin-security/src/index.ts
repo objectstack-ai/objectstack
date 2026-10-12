@@ -135,8 +135,7 @@ export type { DelegatedAdminGateDeps } from './delegated-admin-gate.js';
 export {
   syncAudienceBindingSuggestions,
   reconcileAudienceBindingSuggestions,
-  reapOrganizationLessSuggestions,
-  listSuggestionOrganizationIds,
+  readAcceptedEveryoneSets,
   listAudienceBindingSuggestions,
   confirmAudienceBindingSuggestion,
   dismissAudienceBindingSuggestion,
@@ -148,7 +147,7 @@ export type {
   SuggestionListFilter,
   SuggestionSyncOutcome,
   SuggestionReconcileOutcome,
-  SuggestionReconcileScope,
+  WithheldAcceptance,
 } from './suggested-audience-bindings.js';
 // [field report — rc→GA declared≠enforced surfacing] "declared ≠ enforced"
 // per-set diagnostics (overlay_shadow / provenance_skip).

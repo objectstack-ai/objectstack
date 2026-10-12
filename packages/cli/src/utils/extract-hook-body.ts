@@ -88,9 +88,56 @@
  * Those names are now REPORTED (`FreeIdentifierResult.nodeOnly`) and refused
  * with prose that names the identifier and the remedy, which is NOT the
  * module-scope one: a host global cannot be inlined.
+ *
+ * The parameter list (#22837). {@link peelToBlockBody} keeps the handler's
+ * statements and drops its header, and the runtime runs a hook body as
+ * `(async (ctx) => { SOURCE })` (`packages/runtime/src/sandbox/quickjs-runner.ts`,
+ * the L2 wrapper): `ctx` is the ONLY name it binds. So a hook handler that named
+ * its parameter anything else — `hookCtx`, or a destructuring `({ input })` —
+ * lowered at exit 0, counted its own parameters as bound (the free-identifier
+ * pass reads the whole function), and threw `ReferenceError` on its first run:
+ * `500` over REST where the in-process handler answered `201`. Unlike a member
+ * the VM lacks, a parameter NAME can be supplied, so on the hook face the build
+ * re-emits the handler's one parameter as the body's first statement,
+ * `var <param> = ctx;` ({@link planHookParameterRebind}), and the author's code
+ * runs as written. What cannot be re-emitted faithfully — more than one
+ * parameter, a default value, a rest parameter, a handler that declares its own
+ * `ctx` — is refused, naming the parameter, the way the family below refuses a
+ * member. A handler whose parameter already IS `ctx` (or that takes none)
+ * lowers byte-identically to before: nothing is emitted for it.
+ *
+ * The action face is untouched by this: an action body runs as
+ * `(async (input, ctx) => { SOURCE })`, a different binding list, and its
+ * lowering is exactly what it was ({@link LoweringFace}).
+ *
+ * The body span (#22860). The statements are read off the same TypeScript
+ * parse of the handler as the parameter list — the block's own braces, or the
+ * arrow's expression — and never by counting braces through the text, which
+ * shipped a cut-off or wrong body at build exit 0 for a `}` in a string,
+ * template, regex or comment, a statement-level inner arrow, and a `function`
+ * handler with a pattern parameter. See {@link peelToBlockBody}. Both faces.
  */
 
-import { detectFreeIdentifiers } from './detect-free-identifiers.js';
+import { ts } from 'ts-morph';
+import { detectFreeIdentifiers, parseFunction } from './detect-free-identifiers.js';
+
+/**
+ * Which sandbox wrapper a lowered callable runs in — the binding list the
+ * runtime gives its body (`packages/runtime/src/sandbox/quickjs-runner.ts`):
+ *
+ *   `hook`    `(async (ctx) => { SOURCE })` — and an in-process hook handler is
+ *             called with exactly that one argument (`handler(ctx)`,
+ *             objectql's `hook-wrappers.ts`), so the handler's one parameter
+ *             IS the context and can be rebound to `ctx` faithfully.
+ *   `action`  `(async (input, ctx) => { SOURCE })` — two bindings, documented as
+ *             the authoring signature `(input, ctx)`. The parameter rebind does
+ *             NOT apply here: the action face's lowering is unchanged by it, and
+ *             so are the hook-context member refusals, which are measured
+ *             against the HOOK context.
+ *
+ * Internal: `extractHookBody` (the published entry) is the `hook` face.
+ */
+export type LoweringFace = 'hook' | 'action';
 
 /**
  * WHY a refusal carries a machine-readable kind (commit ada3834ad).
@@ -117,7 +164,11 @@ import { detectFreeIdentifiers } from './detect-free-identifiers.js';
  *                        the QuickJS sandbox does not have, so writing one IS
  *                        choosing a bundled closure. Falling back to the bundle
  *                        is the designed answer, not a degradation to report as
- *                        an error.
+ *                        an error. A hook handler whose PARAMETER LIST cannot be
+ *                        rebound to the sandbox's one `ctx` binding (#22837:
+ *                        two parameters, a default, a rest parameter) is refused
+ *                        under this kind too — the same "nothing in the VM can
+ *                        supply it" verdict, about a binding instead of a member.
  *   `unparseable`        the extractor could not find a body to peel. An
  *                        instrument limit, not an author verdict.
  *
@@ -220,7 +271,41 @@ const SUBMITTED_RX = new RegExp(
   ].join('|'),
 );
 
-const FORBIDDEN_PATTERNS: Array<{ rx: RegExp; reason: string }> = [
+/**
+ * A top-level HOOK-context member the body face does not carry, in the
+ * spellings {@link SUBMITTED_RX} reads, with the destructured limb anchored to
+ * a ROOT right-hand side (#22837).
+ *
+ * The three members this builds for were surfaced by the family's enumeration
+ * pin (`test/lowered-body-face-enumeration.test.ts`), which derives the
+ * in-process `HookContextSchema` members and the members `buildSandboxContext`
+ * marshals from their sources and fails on any member absent from the body that
+ * is neither refused here nor recorded there as a deliberate exception.
+ *
+ * Anchored where `submitted`'s destructured limb is not: `const { ql } = ctx`
+ * and the rebind's `var { input, ql } = ctx;` are refused, while a pattern read
+ * off a MEMBER (`const { transaction } = ctx.api`, the body's own transaction
+ * route) is not — the right-hand side must be a bare root. A root alias of a
+ * member (`const api = ctx.api; const { transaction } = api`) is over-refused,
+ * the safe direction the entries below already accept.
+ *
+ * `exemptCalls` is for a member whose NAME the body face legitimately CALLS
+ * through another receiver: `api.transaction(fn)` off a root alias of
+ * `ctx.api` is the body's transaction route and is not refused; a READ of
+ * `.transaction` off a root is.
+ */
+function hookContextMemberRx(member: string, { exemptCalls = false }: { exemptCalls?: boolean } = {}): RegExp {
+  const notCalled = exemptCalls ? String.raw`(?!\s*(?:\?\.\s*)?\()` : '';
+  return new RegExp(
+    [
+      String.raw`${ROOT_RECEIVER}\s*\??\.\s*${member}\b${notCalled}`,
+      String.raw`${ROOT_RECEIVER}\s*(?:\?\.)?\s*\[\s*(['"\x60])${member}\1\s*\]${notCalled}`,
+      String.raw`\{[^{}]*\b${member}\b[^{}]*\}\s*=\s*[A-Za-z_$][\w$]*(?![\w$]|\s*(?:\?\.|\.|\[))`,
+    ].join('|'),
+  );
+}
+
+const FORBIDDEN_PATTERNS: Array<{ rx: RegExp; reason: string; face?: LoweringFace }> = [
   { rx: /\bimport\s*[\(\*\{]/, reason: 'dynamic `import()` and ES imports are not allowed in hook/action bodies — declare a Connector recipe instead' },
   // Both spellings, one reason (#10678). A TypeScript config is loaded through
   // `bundle-require` -> esbuild, whose ESM interop shim rewrites a CommonJS
@@ -336,10 +421,11 @@ const FORBIDDEN_PATTERNS: Array<{ rx: RegExp; reason: string }> = [
   // safe direction — the handler is bundled and runs): a dispatch-naming body
   // that also reads `.scope` off a root-bound row, or spells `x.scope` inside a
   // string. Knowingly NOT caught: a computed key (`ctx.dispatch[k]`),
-  // `Reflect.get(ctx.dispatch, 'scope')`, a parenthesised or indexed receiver
-  // (`(ctx.dispatch).scope`), and a handler that destructures `dispatch` in its
-  // PARAMETER list — the lowering drops the parameter list entirely, so that
-  // handler fails once lowered whatever it touches.
+  // `Reflect.get(ctx.dispatch, 'scope')`, and a parenthesised or indexed
+  // receiver (`(ctx.dispatch).scope`). A handler that destructures `dispatch`
+  // in its PARAMETER list IS caught since #22837: the hook face re-emits that
+  // pattern as `var { dispatch: { scope } } = ctx;` ahead of the body, and this
+  // scan reads the rebound source.
   {
     rx: DISPATCH_SCOPE_RX,
     reason:
@@ -367,8 +453,9 @@ const FORBIDDEN_PATTERNS: Array<{ rx: RegExp; reason: string }> = [
   // Over-refused: `.submitted` off a root-bound row (`row.submitted`), a
   // destructured field of that name (`const { submitted } = ctx.input`), and
   // `x.submitted` inside a string. Knowingly NOT caught: computed keys,
-  // `Reflect.get`, a parenthesised receiver, and parameter-list destructuring
-  // (the same parameter-list gap as above).
+  // `Reflect.get`, and a parenthesised receiver. Parameter-list destructuring
+  // (`async ({ input, submitted }) => …`) is caught through the rebind, as
+  // above.
   {
     rx: SUBMITTED_RX,
     reason:
@@ -378,6 +465,51 @@ const FORBIDDEN_PATTERNS: Array<{ rx: RegExp; reason: string }> = [
       + 'derive a value from a read-only field, read the stored row on `ctx.previous`, which is the '
       + 'correct source either way. Alternatively leave this handler bundled so it runs in-process, '
       + 'where `ctx.submitted` carries the caller\'s submission on update',
+  },
+  // [#22837] The rest of the family, found by deriving it rather than by
+  // waiting for the next report: the members `HookContextSchema`
+  // (packages/spec/src/data/hook.zod.ts) declares, that objectql's engine sets
+  // on every hook-context assembly site, and that `buildSandboxContext`
+  // (runtime/src/sandbox/body-runner.ts) does not copy. Hook face only — they
+  // are measured against the HOOK context; the action face's lowering is
+  // unchanged.
+  //
+  // `provenance` is the silent half, like `submitted`: a guard on
+  // `ctx.provenance?.flowRunId` reads `undefined` once lowered and evaluates as
+  // if the write had no origin. ⛔ Marshalling it into the VM instead is a body
+  // contract decision (the body face is declared key by key), not a fix to make
+  // here — the same posture `dispatch.scope` records above.
+  {
+    rx: hookContextMemberRx('provenance'),
+    face: 'hook',
+    reason:
+      '`ctx.provenance` is not reachable from a sandboxed body — the VM\'s `ctx` is assembled key by key '
+      + 'and does not carry the write\'s provenance, so it reads `undefined` there: a guard written on '
+      + '`ctx.provenance.flowRunId` or `ctx.provenance.attributedUserId` evaluates as if the write had no '
+      + 'origin, and reaching into it is a TypeError at run time. A body has no equivalent today; leave '
+      + 'this handler bundled so it runs in-process, where `ctx.provenance` carries the server-stamped marks',
+  },
+  // `ql` and `transaction` are live host objects — the engine, a driver
+  // transaction handle — that a copy into the VM heap cannot carry, the
+  // `.sudo(` shape one level up: real in-process, absent from the body.
+  {
+    rx: hookContextMemberRx('ql'),
+    face: 'hook',
+    reason:
+      '`ctx.ql` is not reachable from a sandboxed body — the VM\'s `ctx` carries no engine handle (a live '
+      + 'engine cannot be copied into the sandbox), so a call through it is a TypeError at run time (and '
+      + 'under a hook\'s default `onError: \'abort\'` that aborts the triggering write). Reach other '
+      + 'objects through `ctx.api.object(name)`, which is the body\'s data channel. Alternatively leave '
+      + 'this handler bundled so it runs in-process, where `ctx.ql` exists',
+  },
+  {
+    rx: hookContextMemberRx('transaction', { exemptCalls: true }),
+    face: 'hook',
+    reason:
+      '`ctx.transaction` is not reachable from a sandboxed body — the VM\'s `ctx` carries no transaction '
+      + 'handle (a live driver handle cannot be copied into the sandbox), so it reads `undefined` there. '
+      + 'A body groups its writes with `ctx.api.transaction(fn)`, which is unaffected. Alternatively leave '
+      + 'this handler bundled so it runs in-process, where `ctx.transaction` exists',
   },
 ];
 
@@ -427,15 +559,39 @@ export interface ExtractedBody {
 }
 
 /**
- * Extract the body source from a callable. Throws on forbidden patterns.
+ * Extract the body source from a HOOK handler. Throws on forbidden patterns.
+ *
+ * The published entry (`@objectstack/cli/hook-body`) and the `hook` face of
+ * {@link extractLoweredBody}: what `os build` does to a `hooks[*].handler`, and
+ * what `os lint` judges it by.
  */
 export function extractHookBody(fn: (...a: unknown[]) => unknown, originLabel: string): ExtractedBody {
+  return extractLoweredBody(fn, originLabel, 'hook');
+}
+
+/**
+ * Extract the body source from a callable lowered for `face`. Throws on
+ * forbidden patterns.
+ *
+ * `lowerCallables` and `os lint` call this with the face of the slot the
+ * callable sits in — `hook` for `hooks[*].handler`, `action` for an action's
+ * `target` — so both judge a callable by the wrapper its body will really run
+ * in. Internal: the published entry is {@link extractHookBody}.
+ */
+export function extractLoweredBody(
+  fn: (...a: unknown[]) => unknown,
+  originLabel: string,
+  face: LoweringFace,
+): ExtractedBody {
   const raw = String(fn);
 
   // Strip leading function/arrow header and trailing closing brace so the
   // result is a pure block body suitable for `new Function('ctx', body)`.
-  const block = peelToBlockBody(raw);
-  if (!block) {
+  // [#22860] Read off the TypeScript parse of the handler, the same node the
+  // parameter rebind below reads, never off a scan of the text.
+  const parsed = parseFunction(raw);
+  const block = parsed ? peelToBlockBody(parsed) : null;
+  if (!parsed || !block) {
     throw new HookBodyExtractionError(
       'unparseable',
       originLabel,
@@ -444,14 +600,26 @@ export function extractHookBody(fn: (...a: unknown[]) => unknown, originLabel: s
     );
   }
 
+  // [#22837] The hook face binds `ctx` and nothing else, so the handler's own
+  // parameter is re-emitted as the body's first statement — or the handler is
+  // refused, naming the parameter, when that cannot be done faithfully. Every
+  // check below reads the REBOUND source, so a member destructured in the
+  // parameter list (`({ input, submitted })`) meets the same refusal as one
+  // destructured in the body.
+  const rebind = face === 'hook' ? planHookParameterRebind(parsed, raw, originLabel) : NO_REBIND;
+  const source = rebind.prologue === ''
+    ? block.source
+    : rebind.prologue + (/^\s/.test(block.source) ? '' : ' ') + block.source;
+
   // Reject any forbidden token before we ship the source as metadata.
-  for (const { rx, reason } of FORBIDDEN_PATTERNS) {
-    if (rx.test(block.source)) {
+  for (const { rx, reason, face: only } of FORBIDDEN_PATTERNS) {
+    if (only !== undefined && only !== face) continue;
+    if (rx.test(source)) {
       throw new HookBodyExtractionError(
         'forbidden-token',
         originLabel,
         `[hook-body-extract] ${originLabel}: ${reason}\n` +
-          `--- offending body source ---\n${block.source.slice(0, 400)}${block.source.length > 400 ? '…' : ''}`,
+          `--- offending body source ---\n${source.slice(0, 400)}${source.length > 400 ? '…' : ''}`,
       );
     }
   }
@@ -462,7 +630,8 @@ export function extractHookBody(fn: (...a: unknown[]) => unknown, originLabel: s
   // reference ships without its definition). Detect those free identifiers and
   // throw — the caller catches this and keeps the handler in the BUNDLED form,
   // where esbuild carries the real closure along. The whole `fn` source (params
-  // included) is analyzed so parameters are correctly in scope.
+  // included) is analyzed so parameters are correctly in scope — which, on the
+  // hook face, is now TRUE of the lowered body too: the rebind above binds them.
   const { free, nodeOnly, unparsed } = detectFreeIdentifiers(raw);
   if (!unparsed && free.length > 0) {
     throw new HookBodyExtractionError(
@@ -477,11 +646,14 @@ export function extractHookBody(fn: (...a: unknown[]) => unknown, originLabel: s
   // Infer capabilities from API surface usage.
   const inferred = new Set<ExtractedBody['capabilities'][number]>();
   for (const { rx, cap } of CAPABILITY_PATTERNS) {
-    if (rx.test(block.source)) inferred.add(cap);
+    if (rx.test(source)) inferred.add(cap);
   }
+  // [#22837] The ctx-anchored patterns above spell `ctx.`; a rebound body
+  // reaches the same members through the handler's own names.
+  for (const cap of reboundCapabilities(source, rebind)) inferred.add(cap);
 
   return {
-    source: block.source,
+    source,
     capabilities: [...inferred].sort(),
     isExpression: block.isExpression,
   };
@@ -560,88 +732,303 @@ function freeIdentifierRefusal(
   );
 }
 
+/**
+ * What the hook face prepends to a lowered body, and the names the rebound
+ * body reaches the context through (#22837).
+ */
+interface ParameterRebind {
+  /** `var <param> = ctx;` — or `''` when the parameter already is `ctx`, or there is none. */
+  prologue: string;
+  /** Names bound to the WHOLE context: an identifier parameter, an object-rest element. */
+  contextRoots: readonly string[];
+  /** Names bound to ONE capability-bearing member: `({ log: l })` binds `l` to `ctx.log`. */
+  memberLocals: Readonly<Record<'log' | 'crypto' | 'title', readonly string[]>>;
+}
+
+const NO_REBIND: ParameterRebind = { prologue: '', contextRoots: [], memberLocals: { log: [], crypto: [], title: [] } };
+
+/**
+ * The context members {@link CAPABILITY_PATTERNS} infers a token from. A
+ * destructuring parameter that reaches one of them must bind it to a plain
+ * name, which {@link reboundCapabilities} can follow; a nested pattern or a
+ * computed key under one of them could not be followed, and a body the build
+ * under-grants is refused by the sandbox at run time.
+ */
+const CAPABILITY_BEARING_MEMBERS: ReadonlySet<string> = new Set(['api', 'log', 'crypto', 'title']);
+
+/**
+ * A hook-face refusal that names the PARAMETER, in the family's wording: what
+ * the sandbox cannot supply, why that fails at run time, the remedy, and the
+ * bundled alternative.
+ */
+function parameterRefusal(originLabel: string, raw: string, reason: string): HookBodyExtractionError {
+  return new HookBodyExtractionError(
+    'forbidden-token',
+    originLabel,
+    `[hook-body-extract] ${originLabel}: ${reason}. Alternatively leave this handler bundled so it runs ` +
+      `in-process, where it receives the context under whatever parameter it declares\n` +
+      `--- offending handler source ---\n${raw.slice(0, 400)}${raw.length > 400 ? '…' : ''}`,
+  );
+}
+
+/**
+ * Plan the hook face's parameter rebind (#22837), or refuse the handler.
+ *
+ * The runtime runs a hook body as `(async (ctx) => { SOURCE })`, and objectql
+ * calls an in-process hook handler as `handler(ctx)` — one argument, the
+ * context. So a handler's ONE parameter is the context under the author's
+ * name, and re-emitting it as `var <param> = ctx;` ahead of the body runs the
+ * author's code as written. The parameter is read off the TypeScript parse of
+ * the handler ({@link parseFunction}, the function-node reading that
+ * {@link detectFreeIdentifiers} performs, so the free-identifier verdict and
+ * this rebind agree on what the parameter binds) — the same node
+ * {@link peelToBlockBody} reads the body off (#22860), so the prologue and the
+ * statements it precedes come from one reading of the handler.
+ *
+ * `var`, not `const`: a parameter is a mutable, function-scoped binding. A
+ * handler may reassign it (`input = { ...input }` off a `({ input })`), which a
+ * `const` would turn into a TypeError the in-process handler never throws, and a
+ * body may re-declare it with `var`, which a `let`/`const` would turn into a
+ * SyntaxError. `var` is the one spelling with a parameter's semantics.
+ *
+ * Refused, naming the parameter, is what cannot be re-emitted faithfully: more
+ * than one parameter (the second has nothing to bind to), a default value and a
+ * rest parameter (neither survives as a plain binding of `ctx`), a pattern that
+ * binds the name `ctx` itself, a body that declares `ctx` (or the parameter's
+ * own names) with `let` / `const` / `class` / `function` where the prologue
+ * would read it, and a destructured capability-bearing member the capability
+ * inference cannot follow. A handler whose parameter is `ctx`, or that takes
+ * none, gets no prologue: it lowers byte-identically to before.
+ */
+function planHookParameterRebind(
+  fn: ts.FunctionLikeDeclarationBase,
+  raw: string,
+  originLabel: string,
+): ParameterRebind {
+  const params = fn.parameters;
+  if (params.length === 0) return NO_REBIND;
+
+  if (params.length > 1) {
+    throw parameterRefusal(
+      originLabel,
+      raw,
+      `the handler takes ${params.length} parameters (${params.map((p) => `\`${p.getText()}\``).join(', ')}), and a ` +
+        `lowered hook body is run with exactly one binding, \`ctx\` — the context, which is also the only ` +
+        `argument an in-process hook handler is called with. The build rebinds the first parameter to it; the ` +
+        `others have nothing to bind to, so a body naming them throws a ReferenceError at run time. Take the ` +
+        `context as the one parameter (under any name, or as a destructuring pattern)`,
+    );
+  }
+
+  const [param] = params;
+  const text = param.getText();
+  if (param.dotDotDotToken) {
+    throw parameterRefusal(
+      originLabel,
+      raw,
+      `the rest parameter \`${text}\` cannot be rebound to the one binding a lowered hook body is run with, ` +
+        `\`ctx\`, so a body naming it throws a ReferenceError at run time. Take the context as the one ` +
+        `parameter (under any name, or as a destructuring pattern)`,
+    );
+  }
+  if (param.initializer) {
+    throw parameterRefusal(
+      originLabel,
+      raw,
+      `the parameter \`${text}\` carries a default value, which a lowered hook body cannot reproduce: the ` +
+        `build re-emits the parameter as a plain binding of \`ctx\`, the one name the sandbox binds. The ` +
+        `context is always passed, so drop the default`,
+    );
+  }
+
+  const name = param.name;
+  if (ts.isIdentifier(name) && name.text === 'ctx') return NO_REBIND;
+
+  const bound = bindingNames(name);
+  if (bound.includes('ctx')) {
+    throw parameterRefusal(
+      originLabel,
+      raw,
+      `the parameter \`${text}\` binds a name \`ctx\`, which is the name a lowered hook body receives the ` +
+        `context under, so the build cannot re-emit it as a binding of that context. Rename that binding`,
+    );
+  }
+  const clash = shadowingDeclarations(fn).find((n) => n === 'ctx' || bound.includes(n));
+  if (clash !== undefined) {
+    throw parameterRefusal(
+      originLabel,
+      raw,
+      `the handler declares \`${clash}\` in its body with \`let\` / \`const\` / \`class\` / \`function\`, and ` +
+        `a lowered hook body re-emits the parameter \`${text}\` as \`var ${text} = ctx;\` in that same scope, ` +
+        `which that declaration would shadow or collide with. Rename the declaration`,
+    );
+  }
+
+  const contextRoots: string[] = [];
+  const memberLocals: Record<'log' | 'crypto' | 'title', string[]> = { log: [], crypto: [], title: [] };
+  if (ts.isIdentifier(name)) {
+    contextRoots.push(name.text);
+  } else if (ts.isObjectBindingPattern(name)) {
+    for (const el of name.elements) {
+      if (el.dotDotDotToken) {
+        if (ts.isIdentifier(el.name)) contextRoots.push(el.name.text);
+        continue;
+      }
+      const key = el.propertyName
+        ? ts.isIdentifier(el.propertyName) || ts.isStringLiteral(el.propertyName)
+          ? el.propertyName.text
+          : undefined
+        : ts.isIdentifier(el.name)
+          ? el.name.text
+          : undefined;
+      if (key !== undefined && !CAPABILITY_BEARING_MEMBERS.has(key)) continue;
+      if (key === undefined || !ts.isIdentifier(el.name)) {
+        throw parameterRefusal(
+          originLabel,
+          raw,
+          `the parameter \`${text}\` reaches ${key === undefined ? 'a context member through a computed key' : `\`ctx.${key}\` through a nested pattern`}, ` +
+            `which the build's capability inference cannot follow, so the lowered body would be refused the ` +
+            `capability it uses at run time. Destructure ${key === undefined ? 'the member' : `\`${key}\``} to a plain name ` +
+            `(\`{ ${key ?? 'log'} }\`), or read it as \`ctx.${key ?? 'log'}\``,
+        );
+      }
+      if (key !== 'api') memberLocals[key as 'log' | 'crypto' | 'title'].push(el.name.text);
+    }
+  }
+
+  return { prologue: `var ${name.getText()} = ctx;`, contextRoots, memberLocals };
+}
+
+/** Every name a parameter's binding (an identifier or a pattern) introduces. */
+function bindingNames(name: ts.BindingName): string[] {
+  if (ts.isIdentifier(name)) return [name.text];
+  const out: string[] = [];
+  for (const el of name.elements) {
+    if (ts.isBindingElement(el)) out.push(...bindingNames(el.name));
+  }
+  return out;
+}
+
+/**
+ * The names a handler's body declares where the rebind prologue would meet
+ * them: `let` / `const` / `class` and `function` declarations among the body's
+ * own statements (a `let`/`const` of `ctx` collides with the wrapper's
+ * parameter; a `function` declaration of it is hoisted over it), and `function`
+ * declarations in nested blocks too (sloppy-mode block functions are hoisted
+ * onto a `var` of the same name, which the prologue's binding now is). `var` is
+ * deliberately absent: it re-declares the same binding the prologue writes.
+ * Nested functions and classes are their own scope and are not entered.
+ */
+function shadowingDeclarations(fn: ts.FunctionLikeDeclarationBase): string[] {
+  const out: string[] = [];
+  const body = fn.body;
+  if (!body || !ts.isBlock(body)) return out;
+  const visitBlockFunctions = (node: ts.Node): void => {
+    if (ts.isFunctionDeclaration(node)) {
+      if (node.name) out.push(node.name.text);
+      return;
+    }
+    if (ts.isFunctionLike(node) || ts.isClassLike(node)) return;
+    ts.forEachChild(node, visitBlockFunctions);
+  };
+  for (const stmt of body.statements) {
+    if (ts.isVariableStatement(stmt) && stmt.declarationList.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) {
+      for (const decl of stmt.declarationList.declarations) out.push(...bindingNames(decl.name));
+    } else if (ts.isClassDeclaration(stmt) && stmt.name) {
+      out.push(stmt.name.text);
+    } else {
+      visitBlockFunctions(stmt);
+    }
+  }
+  return out;
+}
+
+/** A name, escaped for use inside a `RegExp` source. */
+function escapeRx(name: string): string {
+  return name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * The capability tokens a REBOUND body needs through the handler's own names
+ * (#22837). {@link CAPABILITY_PATTERNS} spells `ctx.log.` and
+ * `ctx.crypto.randomUUID`; after the rebind the same members are reached as
+ * `hookCtx.log.info(…)` or, off `({ log })`, as `log.info(…)`, and a token the
+ * build does not infer is a sandbox refusal at run time. Each pattern below is
+ * its `ctx`-anchored sibling with the receiver renamed and nothing else, so a
+ * renamed handler infers exactly what the same handler named `ctx` infers.
+ * `api` needs nothing here: the `.object(…)` patterns are receiver-loose, and a
+ * receiver-loose `.title(…)` already covers a context root.
+ */
+function reboundCapabilities(source: string, rebind: ParameterRebind): Array<ExtractedBody['capabilities'][number]> {
+  const out: Array<ExtractedBody['capabilities'][number]> = [];
+  const root = (n: string): string => String.raw`(?<![\w$])${escapeRx(n)}`;
+  for (const r of rebind.contextRoots) {
+    if (new RegExp(String.raw`${root(r)}\.log\.(?:info|warn|error|debug)\b`).test(source)) out.push('log');
+    if (new RegExp(String.raw`${root(r)}\.crypto\.randomUUID\b`).test(source)) out.push('crypto.uuid');
+  }
+  for (const l of rebind.memberLocals.log) {
+    if (new RegExp(String.raw`${root(l)}\.(?:info|warn|error|debug)\b`).test(source)) out.push('log');
+  }
+  for (const l of rebind.memberLocals.crypto) {
+    if (new RegExp(String.raw`${root(l)}\.randomUUID\b`).test(source)) out.push('crypto.uuid');
+  }
+  for (const l of rebind.memberLocals.title) {
+    if (new RegExp(String.raw`${root(l)}\s*\(\s*[^)\s]`).test(source)) out.push('api.read');
+  }
+  return out;
+}
+
 interface PeeledBody {
   source: string;
   isExpression: boolean;
 }
 
 /**
- * Remove the parameter list and outermost braces from a function string,
- * yielding the bare statements (or expression for shorthand arrows).
+ * The handler's body as source text: the statements between its block's own
+ * braces, or, for an implicit-return arrow, its expression wrapped as
+ * `return (…);`.
+ *
+ * Read off the handler's function node — {@link parseFunction}, the parse the
+ * parameter rebind and {@link detectFreeIdentifiers} read — never off a scan
+ * of the text (#22860). The scan this replaces counted `{`/`}` and `(`/`)` with
+ * no idea of what a string, a template, a regex or a comment is, and took the
+ * first parenthesised `=>` anywhere as the handler's header. So ordinary code
+ * shipped a body that is not the handler's, at build exit 0:
+ *
+ *   - a `}` in a string, a template, a regex or a comment closed the body
+ *     early — `ctx.input.note = 'a}b'` shipped as `ctx.input.note = 'a`, a
+ *     SyntaxError on the body's first run;
+ *   - a statement-level inner arrow (`const f = (a) => a + '!'`) in a
+ *     `function` handler was read as the handler, and the body built around
+ *     it — a SyntaxError;
+ *   - a `function` handler whose parameter is a pattern (`function ({ input })
+ *     { … }`) shipped the PATTERN as its body — after the rebind,
+ *     `var { input } = ctx; input`, which runs, throws nothing and does none
+ *     of the handler's work;
+ *   - a `{` in a string left the scan unbalanced, so the handler was refused as
+ *     unparseable and bundled.
+ *
+ * The parser knows each of those tokens, so the class closes rather than the
+ * members. On every shape the scan read correctly the text is the same bytes:
+ * a block's inner text is everything between its braces, comments and layout
+ * included, and an expression is taken from the end of `=>` with its leading
+ * whitespace trimmed, as the scan took it.
+ *
+ * Returns `null` when the node has no body, or a block whose braces the parse
+ * had to invent (`String(fn)` of a real function never yields one) — the
+ * caller refuses that as `unparseable`.
  */
-function peelToBlockBody(raw: string): PeeledBody | null {
-  // Try arrow forms first since they're the dominant authoring style.
-  // Match the parameter list followed by `=>` and either `{...}` or expr.
-  // We rely on a manual brace scan rather than a single regex so braces
-  // inside string/template literals don't confuse us.
-  const arrowIdx = findTopLevelArrow(raw);
-  if (arrowIdx >= 0) {
-    const after = raw.slice(arrowIdx + 2).trimStart();
-    if (after.startsWith('{')) {
-      const body = sliceBalanced(after, '{', '}');
-      if (body) return { source: body.inner, isExpression: false };
-    } else {
-      // Implicit-return arrow — wrap as `return ...;`
-      const expr = after.replace(/[;\s]+$/g, '');
-      return { source: `return (${expr});`, isExpression: true };
-    }
+function peelToBlockBody(fn: ts.FunctionLikeDeclarationBase): PeeledBody | null {
+  const body = fn.body;
+  if (!body) return null;
+  const sf = body.getSourceFile();
+  const text = sf.text;
+  if (ts.isBlock(body)) {
+    const open = body.getStart(sf);
+    if (text[open] !== '{' || text[body.end - 1] !== '}') return null;
+    return { source: text.slice(open + 1, body.end - 1), isExpression: false };
   }
-
-  // function () { ... } / async function () { ... }
-  const fnIdx = raw.search(/\bfunction\b/);
-  if (fnIdx >= 0) {
-    const braceIdx = raw.indexOf('{', fnIdx);
-    if (braceIdx > 0) {
-      const body = sliceBalanced(raw.slice(braceIdx), '{', '}');
-      if (body) return { source: body.inner, isExpression: false };
-    }
-  }
-
-  // Method shorthand inside an object literal: `name(ctx) { ... }`.
-  const braceIdx = raw.indexOf('{');
-  if (braceIdx > 0) {
-    const body = sliceBalanced(raw.slice(braceIdx), '{', '}');
-    if (body) return { source: body.inner, isExpression: false };
-  }
-  return null;
-}
-
-function findTopLevelArrow(s: string): number {
-  // Skip past balanced parameter list `(...)` then expect `=>`.
-  // We scan looking for `(` not preceded by an identifier char and
-  // immediately matched by a balanced `)` then optional whitespace then `=>`.
-  let i = 0;
-  const len = s.length;
-  while (i < len) {
-    if (s[i] === '(') {
-      const closing = matchBalancedIndex(s, i, '(', ')');
-      if (closing < 0) return -1;
-      let j = closing + 1;
-      while (j < len && /\s/.test(s[j])) j++;
-      if (s[j] === '=' && s[j + 1] === '>') return j;
-      i = closing + 1;
-      continue;
-    }
-    i++;
-  }
-  return -1;
-}
-
-function matchBalancedIndex(s: string, start: number, open: string, close: string): number {
-  let depth = 0;
-  for (let i = start; i < s.length; i++) {
-    const c = s[i];
-    if (c === open) depth++;
-    else if (c === close) {
-      depth--;
-      if (depth === 0) return i;
-    }
-  }
-  return -1;
-}
-
-function sliceBalanced(s: string, open: string, close: string): { inner: string } | null {
-  const end = matchBalancedIndex(s, 0, open, close);
-  if (end < 0) return null;
-  return { inner: s.slice(1, end) };
+  // Implicit-return arrow — wrap as `return (...);`. `body.pos` is the end of
+  // the `=>` token, so leading comments survive the way the scan kept them.
+  return { source: `return (${text.slice(body.pos, body.end).trimStart()});`, isExpression: true };
 }

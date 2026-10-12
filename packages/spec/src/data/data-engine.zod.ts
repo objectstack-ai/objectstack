@@ -483,6 +483,20 @@ export const DataEngineAggregateOptionsSchema = lazySchema(() => BaseEngineOptio
 export const EngineCountOptionsSchema = lazySchema(() => BaseEngineOptionsSchema.extend({
   /** Filter conditions — standard QueryAST `where` */
   where: z.union([z.record(z.string(), z.unknown()), FilterConditionSchema]).optional(),
+  /**
+   * Full-Text Search over the rows BEFORE they are counted — declared exactly
+   * as {@link EngineQueryOptionsSchema}'s `search` (ADR-0061 D1). The engine
+   * expands it through the same `$search` → cross-field `$or` expansion `find`
+   * runs and ANDs it with `where`, so a count under a search is the number of
+   * rows `find` returns for the same bag — the `total` a paged list reports.
+   */
+  search: z.union([z.string(), FullTextSearchSchema]).optional(),
+  /**
+   * Fields the `search` expansion may match against — declared exactly as
+   * {@link EngineQueryOptionsSchema}'s `searchFields`: intersected with the
+   * object's declared/derived searchable set (ADR-0061), never widened.
+   */
+  searchFields: z.array(z.string()).optional(),
 }).describe('QueryAST-aligned options for DataEngine.count operations'));
 
 // --------------------------------------------------------------------------
@@ -1468,6 +1482,11 @@ export type EngineAggregateOptions = z.input<typeof EngineAggregateOptionsSchema
  */
 export type EngineAggregateOptionsParsed = z.infer<typeof EngineAggregateOptionsSchema>;
 export type EngineCountOptions = z.input<typeof EngineCountOptionsSchema>;
+/**
+ * Post-parse shape of {@link EngineCountOptions} — defaults applied (ADR-0122).
+ * The two shapes part at `search`, exactly as on {@link EngineQueryOptionsParsed}.
+ */
+export type EngineCountOptionsParsed = z.infer<typeof EngineCountOptionsSchema>;
 
 // --- Legacy: deprecated types (kept for backward compatibility) ---
 export type DataEngineFilter = z.input<typeof DataEngineFilterSchema>;

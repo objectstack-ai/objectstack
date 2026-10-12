@@ -5008,18 +5008,18 @@ function selfTest() {
 
   const commandIdCases = [
     // [path under the commands root, expected id, label]
-    ['meta/resync.ts', 'meta resync', 'topic + command — the #9230 specimen'],
+    ['meta/register.ts', 'meta register', 'topic + command (the #9230 specimen was `meta resync`, since retired)'],
     ['build.ts', 'build', 'a top-level command'],
     ['migrate/recorded-by.ts', 'migrate recorded-by', 'a hyphen is an ordinary id char'],
     ['migrate/index.ts', 'migrate', 'a topic index IS the topic, not "migrate index"'],
     ['a/b/c.ts', 'a b c', 'deeper nesting is read off the path, not special-cased'],
     ['cloud/whoami.js', 'cloud whoami', 'the compiled extension resolves the same way'],
 
-    ['meta/resync-skip-explanation.test.ts', null, 'a test file leaves a `.test` segment — declined, not guessed'],
+    ['meta/delete-json-error-code.test.ts', null, 'a test file leaves a `.test` segment — declined, not guessed'],
     ['__tests__/helper.ts', null, 'an underscore dir is not an oclif id segment'],
     ['meta/fixture.json', null, 'a non-source file under the commands dir'],
     ['index.ts', null, 'a bare index at the commands root would name the binary, not a command'],
-    ['meta/Resync.ts', null, 'an uppercase filename is not an oclif id'],
+    ['meta/Register.ts', null, 'an uppercase filename is not an oclif id'],
   ];
   for (const [rel, want, label] of commandIdCases) check('commandIdFor', label, rel, want, commandIdFor(rel));
 
@@ -5043,7 +5043,7 @@ function selfTest() {
   const readFakePkg = (dir) => (dir === 'packages/cli' ? cliPkg : { name: '@objectstack/spec' });
   const anchorFor = (f) => commandAnchorFor(f, readFakePkg, (d) => cliTree.has(d));
   const commandAnchorCases = [
-    ['packages/cli/src/commands/meta/resync.ts', 'os meta resync', 'the specimen resolves to its phrase'],
+    ['packages/cli/src/commands/meta/register.ts', 'os meta register', 'the specimen resolves to its phrase'],
     ['packages/cli/src/commands/build.ts', 'os build', 'a top-level command'],
     ['packages/cli/src/utils/schema-migrate.js', null, 'a CLI file OUTSIDE the commands dir is not a command'],
     ['packages/spec/src/commands/thing.ts', null, 'a commands dir in a package that declares no oclif is ignored'],
@@ -5057,20 +5057,20 @@ function selfTest() {
   check('commandAnchorFor', 'a file outside any commands dir is not reported as unmapped either',
     'packages/cli/src/utils/schema-migrate.js', null, anchorFor('packages/cli/src/utils/schema-migrate.js'));
 
-  // The doc-side matcher. `os meta resync` must find the page that writes it and must NOT
+  // The doc-side matcher. `os meta register` must find the page that writes it and must NOT
   // find prose that merely uses the words.
-  const cmdRe = commandPatternFor('meta resync', ['os', 'objectstack']);
+  const cmdRe = commandPatternFor('meta register', ['os', 'objectstack']);
   const commandMatchCases = [
-    ['`os migrate`, `os meta resync`, a test run.', true, 'the real drivers.mdx line — inside a code span'],
-    ['Run `objectstack meta resync --json` to re-sync.', true, 'the alternate declared binary'],
-    ['npx objectstack meta resync', true, 'the npx form is the same phrase with a prefix'],
-    ['os  meta\tresync', true, 'extra horizontal whitespace between the words'],
-    ['resync the metadata cache', false, 'the BARE token never matches — the whole point of the phrase'],
-    ['the meta resync step', false, 'the words without a binary name are prose'],
-    ['macos meta resync', false, 'a binary name must stand alone, not end another word'],
-    ['os meta resyncAll', false, 'a longer identifier is not the command'],
-    ['os meta resync-plan', false, 'a sibling command id is not this one'],
-    ['os meta\nresync', false, 'a line break is not intra-command whitespace'],
+    ['`os migrate`, `os meta register`, a test run.', true, 'inside a code span'],
+    ['Run `objectstack meta register --json` to register it.', true, 'the alternate declared binary'],
+    ['npx objectstack meta register', true, 'the npx form is the same phrase with a prefix'],
+    ['os  meta\tregister', true, 'extra horizontal whitespace between the words'],
+    ['register the metadata cache', false, 'the BARE token never matches — the whole point of the phrase'],
+    ['the meta register step', false, 'the words without a binary name are prose'],
+    ['macos meta register', false, 'a binary name must stand alone, not end another word'],
+    ['os meta registerAll', false, 'a longer identifier is not the command'],
+    ['os meta register-plan', false, 'a sibling command id is not this one'],
+    ['os meta\nregister', false, 'a line break is not intra-command whitespace'],
   ];
   for (const [text, want, label] of commandMatchCases) {
     check('commandPatternFor', label, JSON.stringify(text), want, cmdRe.test(text));

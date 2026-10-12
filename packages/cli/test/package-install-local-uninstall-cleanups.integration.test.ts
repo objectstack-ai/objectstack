@@ -245,14 +245,14 @@ const recordOf = (a: Answer) => a.body?.data ?? a.body?.record ?? a.body;
 interface Grants {
   /** `GET /data/sys_permission_set?name=…` — the projection the admin surface grants from. */
   sets: Answer;
-  /** `GET /data/sys_user_permission_set?permission_set_id=…` — the user grant made before the uninstall. */
+  /** `GET /data/sys_user_permission_set?permission_set=…` — the user grant made before the uninstall, by the set's name (ADR-0131 D4). */
   bindings: Answer;
 }
 
-async function readGrants(live: LiveStart, token: string, setId: string): Promise<Grants> {
+async function readGrants(live: LiveStart, token: string, _setId: string): Promise<Grants> {
   return {
     sets: await http(live, 'GET', `/api/v1/data/sys_permission_set?name=${PERMISSION_SET}`, token),
-    bindings: await http(live, 'GET', `/api/v1/data/sys_user_permission_set?permission_set_id=${encodeURIComponent(setId)}`, token),
+    bindings: await http(live, 'GET', `/api/v1/data/sys_user_permission_set?permission_set=${PERMISSION_SET}`, token),
   };
 }
 
@@ -299,7 +299,7 @@ async function grantThenUninstall(live: LiveStart, session: Session, run: Run): 
   run.setId = setId;
   run.granted = await http(live, 'POST', '/api/v1/data/sys_user_permission_set', session.token, {
     user_id: session.userId,
-    permission_set_id: setId,
+    permission_set: PERMISSION_SET,
   });
   run.before = await readGrants(live, session.token, setId);
   run.objectBefore = await http(live, 'GET', `/api/v1/data/${TASK}`, session.token);

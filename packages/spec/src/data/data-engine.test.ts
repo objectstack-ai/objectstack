@@ -598,6 +598,20 @@ describe('EngineCountOptionsSchema', () => {
     });
     expect(options.where).toBeDefined();
   });
+
+  // #22790 — a count under a search counts the searched rows (a paged list's
+  // `total`), so the count options declare the pair exactly as `find` does.
+  it('keeps `search` / `searchFields`, declared exactly as EngineQueryOptionsSchema declares them', () => {
+    const parsed = EngineCountOptionsSchema.parse({ search: { query: 'acme', fields: ['name'] }, searchFields: ['name'] });
+    expect(parsed.search).toMatchObject({ query: 'acme', fields: ['name'] });
+    expect(parsed.searchFields).toEqual(['name']);
+    const countShape = (EngineCountOptionsSchema as unknown as z.ZodObject<z.ZodRawShape>).shape;
+    const findShape = (EngineQueryOptionsSchema as unknown as z.ZodObject<z.ZodRawShape>).shape;
+    for (const key of ['search', 'searchFields'] as const) {
+      expect(z.toJSONSchema(countShape[key] as z.ZodType, { io: 'input' }), key)
+        .toEqual(z.toJSONSchema(findShape[key] as z.ZodType, { io: 'input' }));
+    }
+  });
 });
 
 describe('DataEngineFindRequestSchema', () => {

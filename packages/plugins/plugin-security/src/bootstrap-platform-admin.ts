@@ -630,10 +630,13 @@ const PLATFORM_ADMIN_PERMISSION_SET_NAME = 'admin_full_access';
  * comes back as `unnamedHolder`. It only ever RESTRICTS: the bootstrap
  * withholds the promotion on it, and it is never a holder — never an
  * `adminUserId`, never a claim target ({@link findExistingPlatformAdmin}).
+ * Leg C runs only when the deployment still carries a legacy `admin_full_access`
+ * row (`adminPsId`): a database with no such row has no grant written before
+ * the name column existed, and the by-name legs answer alone.
  */
 async function findPlatformAdminGrantHolder(
   ql: any,
-  adminPsId: string,
+  adminPsId: string | undefined,
 ): Promise<{
   holder: any | undefined;
   /** Leg C: an unscoped human grant of the admin set row that names no set yet (restricts only). */
@@ -697,7 +700,7 @@ async function findPlatformAdminGrantHolder(
   // Leg C — the grants that name nothing yet, through the set row's id; it
   // restricts only (see the function note).
   let unnamedHolder: any | undefined;
-  if (!holder) {
+  if (!holder && adminPsId) {
     unnamedHolder = await scan(
       { permission_set_id: adminPsId },
       (r) => grantSetNameOf(r) === undefined && isUnscopedHumanHolder(r),
@@ -723,7 +726,7 @@ async function findPlatformAdminGrantHolder(
  *  - a walled posture — no grant row anchors platform-admin standing there, and
  *    the bootstrap never promotes, so no claim ever ran under a wall;
  *  - no {@link PLATFORM_ADMIN_PERMISSION_SET_NAME} among the sets this plugin
- *    seeds (`admin_permission_set_missing`), or no stored row for it yet;
+ *    ships (`admin_permission_set_missing`);
  *  - nobody holds the unscoped grant yet — a first boot, where the promotion
  *    that follows does its own claim;
  *  - [ADR-0131 D4] the only unscoped grant of the set names nothing yet
@@ -743,11 +746,9 @@ export async function findExistingPlatformAdmin(
   if (!bootstrapPermissionSets.some((ps) => ps.name === PLATFORM_ADMIN_PERMISSION_SET_NAME)) {
     return undefined;
   }
-  // The read the bootstrap's own seed loop resolves this id with.
-  const sets = await tryFind(ql, 'sys_permission_set', { name: PLATFORM_ADMIN_PERMISSION_SET_NAME }, 1);
-  const adminPsId = sets[0]?.id;
-  if (!adminPsId) return undefined;
-  const { holder } = await findPlatformAdminGrantHolder(ql, adminPsId);
+  // [ADR-0131 D4] By name alone: leg C (the legacy id reach) only restricts
+  // and never names a holder, so this question needs no catalog row.
+  const { holder } = await findPlatformAdminGrantHolder(ql, undefined);
   return holder?.user_id ? String(holder.user_id) : undefined;
 }
 
@@ -951,15 +952,20 @@ export async function bootstrapPlatformAdmin(
   // fail toward the stricter reading, same direction ADR-0093 D5 fails.
   const walled = postureEnforcesWall(resolveTenancyPosture());
 
-  const adminPsId = seeded[PLATFORM_ADMIN_PERMISSION_SET_NAME];
-  if (!adminPsId) {
-    // [#22169] `unreadable`, not `missing`, when the read was what failed: the
-    // set may well exist, and the line above says so.
-    const reason = unreadable.includes(PLATFORM_ADMIN_PERMISSION_SET_NAME)
-      ? 'admin_permission_set_unreadable'
-      : 'admin_permission_set_missing';
-    return { seeded: seededCount, adminPromoted: false, reason, ...resyncCounts };
+  // [ADR-0131 D4] The grant names `admin_full_access`; the set is the catalog
+  // definition this plugin ships, so no `sys_permission_set` row is needed to
+  // grant it. The seeded row's id, when there is one, feeds only the legacy
+  // restrict-only leg of the holder scan ({@link findPlatformAdminGrantHolder}).
+  if (!bootstrapPermissionSets.some((ps) => ps.name === PLATFORM_ADMIN_PERMISSION_SET_NAME)) {
+    return { seeded: seededCount, adminPromoted: false, reason: 'admin_permission_set_missing', ...resyncCounts };
   }
+  if (unreadable.includes(PLATFORM_ADMIN_PERMISSION_SET_NAME)) {
+    // [#22169] The set's row table did not answer, so the legacy leg cannot ask
+    // whether an unnamed grant already makes someone the administrator; no
+    // promotion is made on a question this pass could not ask.
+    return { seeded: seededCount, adminPromoted: false, reason: 'admin_permission_set_unreadable', ...resyncCounts };
+  }
+  const adminPsId: string | undefined = seeded[PLATFORM_ADMIN_PERMISSION_SET_NAME];
 
   // ── Does this deployment ALREADY have a platform admin? (commit 1c83ca226) ─
   //
@@ -1237,9 +1243,7 @@ export async function bootstrapPlatformAdmin(
     const inserted = await tryInsert(ql, 'sys_user_permission_set', {
       id: genId('ups'),
       user_id: chosen.id,
-      permission_set_id: adminPsId,
-      // [ADR-0131 D4] Both columns, agreeing: `adminPsId` is the row seeded
-      // under exactly this name (`seeded[PLATFORM_ADMIN_PERMISSION_SET_NAME]`).
+      // [ADR-0131 D4] The grant names its set; no id is written (D10).
       permission_set: PLATFORM_ADMIN_PERMISSION_SET_NAME,
       organization_id: null,
       granted_by: null,

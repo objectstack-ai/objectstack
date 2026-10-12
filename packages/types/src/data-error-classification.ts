@@ -775,6 +775,39 @@ function isSandboxOrigin(error: any): boolean {
 }
 
 /**
+ * [#22741] Is this the sandbox's OWN fault: a `SandboxError` the runner raised
+ * itself, rather than one a sandboxed body threw?
+ *
+ * Both halves are read off the producer, `runtime/src/sandbox/quickjs-runner.ts`:
+ *
+ *  - its class names itself `'SandboxError'` (`this.name`), and
+ *  - its contract leaves `innerMessage` undefined for "the sandbox's own
+ *    internal errors (capability denials, timeouts, marshalling failures)",
+ *    so {@link isSandboxOrigin} answers `false` for them.
+ *
+ * So the CPU budget, the wall-clock ceiling, a denied capability, an
+ * unavailable `ctx.api`, a failed install or marshal, and a nested body's fault
+ * relayed across a VM hop all answer `true`. A body's refusal or crash carries
+ * `innerMessage` and answers `false`; it is {@link isSandboxOrigin}'s.
+ *
+ * The class is recognised by its declared name rather than by `instanceof`,
+ * for the reason {@link isEngineDuplicateRecordEnvelope} gives: the import
+ * runner's row report (`@objectstack/core`) sits below `@objectstack/runtime`
+ * and never sees the class.
+ *
+ * [#22868] {@link classifyDataError} asks it at its top, beside
+ * {@link isSandboxCrash}, and answers the sanitised `500 INTERNAL_ERROR`
+ * terminal — the answer it already gave these errors from their message,
+ * except where a text named the request's own object and the unknown-object
+ * heuristic answered `404`. The import row still takes that door's sentence
+ * through this predicate, as it does for a crash; the verdict stays the door's.
+ */
+export function isSandboxOwnFault(error: unknown): boolean {
+    const name = (error as { name?: unknown } | null | undefined)?.name;
+    return name === 'SandboxError' && !isSandboxOrigin(error);
+}
+
+/**
  * [commit cf6e0a193] Did a sandboxed body CRASH — as opposed to reporting a refusal?
  *
  * The two reads {@link sandboxBusinessMessage} already makes, asked from the
@@ -1304,6 +1337,28 @@ function classifyDataError(error: any, object?: string): { status: number; body:
     // ⛔ The terminal is not duplicated — it MOVED here from inside the unwrap
     // door below, which is why that door now reads a body that REPORTED.
     if (isSandboxCrash(error)) return UNCLASSIFIED_FAULT();
+    // [#22868] …and so is the sandbox's OWN fault ({@link isSandboxOwnFault}):
+    // a capability denial, an unavailable `ctx.api`, a missing `ctx.api`
+    // method, a budget, an install or marshal failure. Its producer's contract
+    // calls it a fault, and it carries no `code`, no `status` and no
+    // `innerMessage`, so nothing below could ever read it as anything else but
+    // its message TEXT. Two of those texts name the object the body addressed
+    // — `capability 'api.read' not granted to hook 'H' (called
+    // ctx.api.object('OBJ').find)` and `ctx.api.object('OBJ').find not
+    // implemented` — and when OBJ was the request's own object the
+    // unknown-object substring limb (a quoted object name plus `not`) answered
+    // `404 OBJECT_NOT_FOUND`, telling the caller the object does not exist.
+    //
+    // Asked HERE rather than beside that limb, because every message limb
+    // below reads text the runner interpolates from the body's own arguments
+    // (`ctx.api.object(name)`, `ctx.title(field)`), so a limb-local exclusion
+    // would fix one limb and leave the others free to misread the same fault.
+    // The answer is the terminal the other runner faults already reached, so
+    // only the misread ones move; the nested crash the pump loop relays as a
+    // fault reached it too, through the wrapper fallback below. ⛔ Not a second
+    // rule: the predicate reads the producer's identity, never the text, so
+    // the same words thrown by anything else keep the heuristic's answer.
+    if (isSandboxOwnFault(error)) return UNCLASSIFIED_FAULT();
     // [commit 6d178a408] The bespoke structured arms first, exactly as they were inline
     // here — same arms, same order, same position — now stated once so
     // {@link resolveErrorResponse} can ask them before ITS passthrough too.

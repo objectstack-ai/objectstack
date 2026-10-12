@@ -137,6 +137,21 @@
       "pinned": 4
     },
     {
+      "file": "packages/metadata-protocol/src/package-unmanaged-install.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/package-unmanaged-install.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/package-unmanaged-install.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol-14038-list-commits-created-at-iso.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -3435,16 +3450,6 @@
       "file": "packages/plugins/plugin-security/src/store-fault-fail-closed.test.ts",
       "verb": "findOne",
       "pinned": 1
-    },
-    {
-      "file": "packages/plugins/plugin-security/src/suggested-audience-bindings-install-path.test.ts",
-      "verb": "delete",
-      "pinned": 2
-    },
-    {
-      "file": "packages/plugins/plugin-security/src/suggested-audience-bindings-install-path.test.ts",
-      "verb": "update",
-      "pinned": 2
     },
     {
       "file": "packages/plugins/plugin-security/src/tenant-layer0-verdict-on-operation.test.ts",

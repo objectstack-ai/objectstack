@@ -48,7 +48,21 @@
  * targets are resolved inside `relationConditionSites` (`@objectstack/core`),
  * which is the caller classified below. The bridge asks each target the
  * decision for `list` (`enforceRelationTargetExposure`, #22777), held by its
- * own package's pin rather than by a row here.
+ * own package's pin rather than by a row here. The runtime's `callData` is a
+ * third such door: its `query` fallback (no protocol service resolved) and its
+ * `aggregate` arm hand a caller's `where` to the same engine lowering, and
+ * `refuseUnservedRelationTargets` (`runtime/src/action-execution.ts`) asks each
+ * target the gate the addressed object is asked, for `list`, through the same
+ * walk (#22823, census row 10), held by its own package's pin
+ * (`runtime/src/action-execution-calldata-relation-target-exposure.test.ts`)
+ * rather than by a row here. Nor, for the same reason, a
+ * door that drives `runImport` with a protocol of its own: plugin-auth's
+ * identity import takes its cells' targets from the `import-field-meta.ts` map
+ * classified below, and its run protocol carries the declaration reader the
+ * import already holds, so `servesReferenceTarget` asks each target the
+ * decision for `list` there too (#22800), held by its own package's pin
+ * (`plugin-auth/src/admin-import-users.test.ts`, its `[#22800]` block) rather
+ * than by a row here.
  *
  * The scan surface and its prefilter follow `row-serving-door-exposure.pin.test.ts`
  * in this directory: git's authored-file list, never a directory crawl, and `.ts`
@@ -171,9 +185,9 @@ const CALLERS: Record<string, Classification> = {
   'packages/core/src/utils/relation-condition-sites.ts': {
     kind: 'not-a-served-read',
     reason:
-      "finds a filter's nested-relation conditions and each one's target; reads no record. Both doors that call it ask " +
-      "each target the decision before the engine reads it: the data door's `refuseUnservedRelationTarget` and the MCP " +
-      "stdio data bridge's `enforceRelationTargetExposure`",
+      "finds a filter's nested-relation conditions and each one's target; reads no record. Every door that calls it asks " +
+      "each target the decision before the engine reads it: the data door's `refuseUnservedRelationTarget`, the MCP " +
+      "stdio data bridge's `enforceRelationTargetExposure` and the runtime `callData`'s `refuseUnservedRelationTargets`",
   },
   'packages/lint/src/object-graph.ts': {
     kind: 'not-a-served-read',
@@ -206,6 +220,14 @@ const CALLERS: Record<string, Classification> = {
   'packages/objectql/src/validation/rule-validator.ts': {
     kind: 'not-a-served-read',
     reason: 'validation-rule analysis and evaluation on the write path; the verdict is pass/fail and no target field is served',
+  },
+  'packages/verify/src/reference-shape.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "the verification harness's reference-value shape family: the target only picks, from the ids of records the " +
+      'family itself created through the REST door, the id its embedded-record probe carries. It writes probe values ' +
+      "to the SOURCE object (the REST data routes, which judge that object's exposure, and the engine's system write) " +
+      'and reads no record of the target',
   },
 };
 

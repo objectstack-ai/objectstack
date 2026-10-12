@@ -65,7 +65,7 @@ describe('sys_activity: a member reads the activity of records it can read, and 
     const memberId = (await ql.findOne('sys_user', { where: { email: MEMBER_EMAIL }, context: SYS }))?.id;
     const set = await ql.findOne('sys_permission_set', { where: { name: activityReaderSet.name }, context: SYS });
     expect(set?.id, 'fixture permission set seeded').toBeTruthy();
-    await ql.insert('sys_user_permission_set', { user_id: memberId, permission_set_id: set.id }, { context: { ...SYS } });
+    await ql.insert('sys_user_permission_set', { user_id: memberId, permission_set: set.name }, { context: { ...SYS } });
 
     await assertArmed([
       principalArmed({

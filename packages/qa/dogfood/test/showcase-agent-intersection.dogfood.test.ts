@@ -50,7 +50,7 @@ describe('showcase: ADR-0090 D10 agent intersection (served engine)', () => {
     // delegator holds NOTHING beyond the additive member_default baseline.
     const auditor = await ql.findOne('sys_permission_set', { where: { name: 'showcase_auditor' }, context: SYS });
     expect(auditor?.id, 'showcase_auditor seeded').toBeTruthy();
-    await ql.insert('sys_user_permission_set', { user_id: agentId, permission_set_id: auditor.id }, { context: SYS });
+    await ql.insert('sys_user_permission_set', { user_id: agentId, permission_set: auditor.name }, { context: SYS });
 
     // A private note owned by int-owner (NOT the delegator) — the VAMA probe.
     const other = await stack.apiAs(ownerTok, 'POST', '/data/showcase_private_note', { title: "someone else's note" });

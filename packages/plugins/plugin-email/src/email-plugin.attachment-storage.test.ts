@@ -183,7 +183,6 @@ async function boot(opts: BootOpts = {}) {
 
   const ctx = fakeCtx(services);
   const plugin = new EmailServicePlugin({
-    seedTemplates: false,
     transport,
     queueDelivery: true,
     defaultFrom: 'no-reply@example.test',

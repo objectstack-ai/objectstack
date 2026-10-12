@@ -139,8 +139,9 @@ describe('[#21913] runtime-datasource sys_metadata helpers carry the explicit sy
     expect(verbs.filter((v) => v === 'insert')).toHaveLength(1);
     expect(verbs.filter((v) => v === 'update')).toHaveLength(1);
     expect(verbs.filter((v) => v === 'delete')).toHaveLength(1);
-    expect(verbs.filter((v) => v === 'find').length).toBeGreaterThanOrEqual(1);
-    expect(verbs.filter((v) => v === 'findOne').length).toBeGreaterThanOrEqual(4);
+    // [#22835] Every read is a `find` filtered to the environment's rows:
+    // two existence probes, the boot restore, convergence and the delete probe.
+    expect(verbs.filter((v) => v === 'find').length).toBeGreaterThanOrEqual(5);
     expect(onMetadata).toHaveLength(data.calls.length);
     expectAllSystem(onMetadata);
   });

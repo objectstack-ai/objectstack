@@ -275,6 +275,7 @@ import { deriveViewContainerObject } from '@objectstack/metadata/view-container'
 // registrar and `os validate` both call.
 import { viewContainerNameRefusal } from './view-container-name-refusal.js';
 import { bindHooksToEngine } from './hook-binder.js';
+import { declaredHookCondition } from './hook-wrappers.js';
 import { validateRecord, validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
@@ -400,12 +401,17 @@ export interface AdmittedValueShapeViolationTally {
  * push a handler's own `ctx.api` writes outside the transaction the write ran
  * in, and an in-engine audit hook depends on landing inside it.
  *
- * Three ordinary paths open such a unit around the dispatch:
+ * Four ordinary paths open such a unit around the dispatch:
+ *   - the write door itself, when the object has a metadata-bound `after*`
+ *     hook that can abort — blocking with `onError` `abort`, or carrying a
+ *     `condition` — so that abort rolls the row back as `HookSchema.onError`
+ *     says (#22782, #22856, `opensAfterAbortUnit`);
  *   - a by-id {@link ObjectQL.delete} whose cascade is `'atomic'` — each
  *     dependent's own `afterDelete` fires inside the wrap the parent opened,
  *     and the parent's row removal can still refuse afterwards (#7413). The
- *     PARENT's `afterDelete` is outside that wrap by construction, so it is
- *     unaffected; the cascaded CHILDREN's are not;
+ *     PARENT's `afterDelete` is outside that wrap by construction (inside the
+ *     door's own unit when the first path opened one); the cascaded
+ *     CHILDREN's are not;
  *   - `runAtomicBatch` in `@objectstack/metadata-protocol` —
  *     `batchData`/`deleteManyData` with `atomic: true` runs every member's
  *     `after*` inside one transaction that aborts on the first failure
@@ -619,12 +625,13 @@ const ENGINE_DELETE_OPTION_KEYS: ReadonlySet<string> = new Set([
   'context', 'where', 'multi',
   ...ENGINE_DRIVER_PASSTHROUGH_KEYS,
 ]);
-const ENGINE_COUNT_OPTION_KEYS: ReadonlySet<string> = new Set(['context', 'where']);
-// `search` / `searchFields` are READ by `aggregate` through the same ADR-0061
-// expander `find` uses ({@link ObjectQL.expandSearchOnAggregateOptions}), so a
-// grouped answer under a search is the grouping of the searched rows. Before
-// `EngineAggregateOptionsSchema` declared them they were refused here, and the
-// one wire path to this verb left them out — the unsearched groups answered.
+// `search` / `searchFields` are READ by `count` and `aggregate` through the
+// same ADR-0061 expander `find` uses ({@link ObjectQL.expandSearchOnOptions}),
+// so a count or a grouped answer under a search is over the searched rows.
+// Before their schemas declared them they were refused here, and the wire paths
+// left them out: the unsearched groups answered, and a paged list's `total`
+// under a search was a page-local estimate (#22790).
+const ENGINE_COUNT_OPTION_KEYS: ReadonlySet<string> = new Set(['context', 'where', 'search', 'searchFields']);
 const ENGINE_AGGREGATE_OPTION_KEYS: ReadonlySet<string> = new Set([
   'context', 'where', 'groupBy', 'aggregations', 'having', 'timezone',
   'search', 'searchFields',
@@ -4126,6 +4133,16 @@ export class ObjectQL implements IObjectQLEngine {
   }>();
 
   /**
+   * [#22855] The units {@link runOpenedUnit} published, keyed by their handle.
+   * The value is the very entry {@link txStore} holds, so the one write that
+   * closes a unit answers both of its readers: the ambient one finds the entry
+   * empty, and {@link buildDriverOptions} looks an explicitly threaded handle up
+   * here ({@link isClosedUnitHandle}). Weak, so a finished unit's handle stays
+   * collectable.
+   */
+  private readonly openedUnits = new WeakMap<object, { transaction: unknown }>();
+
+  /**
    * [#22305] The {@link CascadeDeleteSet} of the by-id cascade delete in
    * progress, ambient for the same reason as {@link txStore}: the cascade
    * recurses through the public `delete()`, and each level must judge its
@@ -4675,6 +4692,59 @@ export class ObjectQL implements IObjectQLEngine {
     const entries = this.hooks.get(event);
     if (!entries || entries.length === 0) return false;
     return entries.some((entry) => hookMatchesObject(entry, object));
+  }
+
+  /**
+   * [#22782] Does this write need its own unit of work? Yes when its `after*`
+   * dispatch can ABORT and no unit is open, so the abort rolls back what
+   * `HookSchema.onError` says: the row and every `ctx.api` write the chain made. "Can abort"
+   * is a metadata-bound hook (`meta` — the only entries with a declared
+   * `onError`) on `event` for `object`, automations not skipped, that either
+   * is blocking (not `async`) with `onError` `abort` (the default), or carries
+   * a `condition` (#22856): a condition that cannot be evaluated aborts the
+   * operation whatever `onError` says, and before an `async` hook detaches
+   * (#4775, `HookConditionError`), so it is read by the wrapper's own
+   * {@link declaredHookCondition}. Hook count and order are untouched (#7413);
+   * only the boundary around them moves.
+   *
+   * No unit — the pre-#22782 path — when one is open (ambient or threaded: the
+   * caller's unit decides; a threaded handle whose unit has closed is not open,
+   * #22855 `isClosedUnitHandle`), when `object` is off the default driver
+   * (`transaction()` covers that one alone and would refuse the write), or when
+   * that driver has no transactions (ADR-0119 D1; asking would only warn).
+   * `SummaryRecomputeError` means "the records WERE written": it is rethrown
+   * after the commit, never through the rollback.
+   */
+  private opensAfterAbortUnit(event: 'afterInsert' | 'afterUpdate' | 'afterDelete', object: string, context: ExecutionContext | undefined): boolean {
+    const threaded = context?.transaction;
+    if ((threaded !== undefined && !this.isClosedUnitHandle(threaded)) || this.txStore.getStore()?.transaction !== undefined) return false;
+    if ((context as { skipAutomations?: unknown } | undefined)?.skipAutomations) return false;
+    const aborting = (this.hooks.get(event) ?? []).some((entry) =>
+      entry.meta && hookMatchesObject(entry, object)
+      && ((!entry.meta.async && (entry.meta.onError ?? 'abort') === 'abort') || declaredHookCondition(entry.meta) !== undefined));
+    if (!aborting) return false;
+    const defaultDriver = this.defaultDriver ? this.drivers.get(this.defaultDriver) : undefined;
+    try {
+      return this.getDriver(object) === defaultDriver && driverSupportsTransactions(defaultDriver);
+    } catch {
+      return false; // the write itself reports an unroutable object
+    }
+  }
+
+  /** [#22782] The unit {@link opensAfterAbortUnit} asked for; `write` re-enters the door, which joins it. */
+  private async inAfterAbortUnit<T>(write: () => Promise<T>): Promise<T> {
+    let written: SummaryRecomputeError | undefined;
+    const result = await this.transaction(async () => {
+      try {
+        return await write();
+      } catch (e) {
+        if (!(e instanceof SummaryRecomputeError)) throw e;
+        written = e;
+        return undefined as T;
+      }
+    });
+    if (written) throw written;
+    return result;
   }
 
   /**
@@ -6055,9 +6125,12 @@ export class ObjectQL implements IObjectQLEngine {
   private buildDriverOptions(object: string, execCtx?: ExecutionContext, base?: any): any {
     // The open transaction may arrive explicitly via the context, or ambiently
     // via txStore when an internal query runs during a transactional write
-    // (ADR-0034). Explicit wins; ambient is the safety net.
-    const tx = execCtx?.transaction !== undefined
-      ? execCtx.transaction
+    // (ADR-0034). Explicit wins; ambient is the safety net. [#22855] A handle
+    // whose unit has closed is no handle: work the unit started and did not
+    // await runs unenrolled (`runOpenedUnit`).
+    const explicit = execCtx?.transaction;
+    const tx = explicit !== undefined && !this.isClosedUnitHandle(explicit)
+      ? explicit
       : this.txStore.getStore()?.transaction;
     // [#5351] SAME-ORIGIN GATE. A transaction handle is a property of ONE
     // driver's connection; handing it to a different driver does not put that
@@ -8497,11 +8570,25 @@ export class ObjectQL implements IObjectQLEngine {
    * still resolves from an org-bound caller, and a NULL-organization row passes
    * the driver's `OR … IS NULL` term.
    *
+   * ## …except a master-detail header, which the caller must be able to read (#22519)
+   *
+   * A `master_detail` field names the detail's HEADER, and a write of a detail
+   * whose header the caller cannot read answers exactly what a write naming a
+   * header that exists nowhere answers. Nothing upstream of this check settles
+   * that: ADR-0055 §3 gates a detail write on its header (master edit) only for
+   * a `controlled_by_parent` detail, so an elevated probe alone would tell such
+   * a caller "exists" apart from "exists nowhere". So for a `master_detail`
+   * field the caller's read door is asked first ({@link masterDetailHeaderExists}),
+   * and a header it does not return is `reference_not_found`. ⛔ A plain
+   * `lookup` keeps the elevated probe above, unchanged.
+   *
    * Fails OPEN when the target cannot be checked (unregistered object, no
    * driver, a probe that throws): an integrity check that cannot run must not
    * invent a rejection, and the alternative — refusing every write to an object
    * whose target lives on an unreachable datasource — converts a connectivity
-   * problem into data loss.
+   * problem into data loss. A master-detail header's read door that fails is
+   * the exception: it did not return the header, so the header is missing
+   * (see {@link masterDetailHeadersCallerReads}).
    */
   private async assertReferencesResolve(
     schema: any,
@@ -8570,7 +8657,10 @@ export class ObjectQL implements IObjectQLEngine {
       for (const v of values) {
         if (v === null || v === undefined || v === '') continue;
         if (typeof v === 'object') continue;
-        const resolved = await this.referenceExists(target, v, context);
+        // [#22519] A master-detail header must also be one the caller can read.
+        const resolved = def?.type === 'master_detail'
+          ? await this.masterDetailHeaderExists(target, v, context)
+          : await this.referenceExists(target, v, context);
         if (resolved === false) {
           failures.push(buildFieldError(
             {
@@ -8621,6 +8711,83 @@ export class ObjectQL implements IObjectQLEngine {
       return !!row;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * [#22519] The write's reference check for a `master_detail` field: does `id`
+   * name a header THIS CALLER can read? The write's two header reads, as
+   * {@link resolveMasterDetailParent} reads them: the caller's read door
+   * ({@link masterDetailHeadersCallerReads}), then the elevated, tenant-kept
+   * {@link referenceExists} for a header it returned. A header the read door
+   * does not return is `false` — `reference_not_found`, exactly as a header
+   * that exists nowhere.
+   *
+   * `null` (fail-open) only where {@link referenceExists} answers it, and for
+   * an unregistered master, which has no read door to ask either. Never reached
+   * by a SYSTEM caller: {@link assertReferencesResolve} returns before it.
+   *
+   * ⛔ `master_detail` only — the plain `lookup` probe is not this rule's.
+   */
+  private async masterDetailHeaderExists(
+    target: string,
+    id: unknown,
+    context: ExecutionContext | undefined,
+  ): Promise<boolean | null> {
+    const master = this.resolveObjectName(target);
+    if (!this._registry.getObject(master)) return null;
+    const readable = await this.masterDetailHeadersCallerReads(master, [id], context);
+    if (!readable.has(String(id))) return false;
+    return this.referenceExists(target, id, context);
+  }
+
+  /**
+   * [#22519] Read 1 of the write's master-detail header read: which of `ids`
+   * the caller's READ DOOR returns — one `find` for the whole batch, under the
+   * caller's own context, so every enforcement layer in the middleware chain
+   * (RBAC, RLS, sharing, row scope) answers it, as it answers the preview's
+   * first read ({@link resolvePreviewParents}). Projected to `id`: what the
+   * header HOLDS is read 2's question, never this one's.
+   *
+   * A header it does not return binds as a header that exists nowhere binds:
+   * the reference check answers `reference_not_found` for it
+   * ({@link masterDetailHeaderExists}), and the write's header resolution
+   * leaves `parent` unbound for it ({@link resolveMasterDetailParent},
+   * {@link resolveMasterDetailParents}). A read that fails — a refusal of the
+   * read itself included — returned no header, so every header binds as
+   * missing, as the preview binds them and as the write's own failed header
+   * read does; ⛔ never as readable.
+   *
+   * A SYSTEM caller (seed replay, boot) has no read door to ask: every id goes
+   * straight to read 2, and its write resolves exactly as before.
+   */
+  private async masterDetailHeadersCallerReads(
+    master: string,
+    ids: ReadonlyArray<unknown>,
+    context: ExecutionContext | undefined,
+  ): Promise<ReadonlySet<string>> {
+    const asked = new Map<string, unknown>();
+    for (const id of ids) if (id != null) asked.set(String(id), id);
+    if (context?.isSystem || asked.size === 0) return new Set(asked.keys());
+    // One id is asked by equality, the predicate shape the elevated probe
+    // already sends; a batch by `$in`, as read 2 of the batch reads it.
+    const values = [...asked.values()];
+    try {
+      const rows = await this.find(master, {
+        where: { id: values.length === 1 ? values[0] : { $in: values } },
+        fields: ['id'],
+        context,
+      } as EngineQueryOptions) as Array<Record<string, unknown>>;
+      const served = new Set<string>();
+      for (const row of Array.isArray(rows) ? rows : []) {
+        if (row?.id != null && asked.has(String(row.id))) served.add(String(row.id));
+      }
+      return served;
+    } catch (err) {
+      this.logger?.warn?.('the caller\'s read of the master-detail header failed — the header binds as a missing header', {
+        object: master, error: err,
+      });
+      return new Set();
     }
   }
 
@@ -8731,15 +8898,41 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * The header id comes from the payload first, then the prior row: a write that
    * REPOINTS the detail at another master must be judged against the master it
-   * is landing on, not the one it is leaving. Read ELEVATED: the lock is a
-   * data-integrity property of the header's state, not of the caller's
-   * visibility of it, and the caller's right to touch this detail at all was
-   * already settled upstream (RLS / `controlled_by_parent`, ADR-0055) before the
-   * write reached the strip.
+   * is landing on, not the one it is leaving.
+   *
+   * ## Two reads: may the caller see the header, then what it holds (#22519)
+   *
+   * A write of a detail whose header the caller cannot read answers exactly
+   * what a write naming a header that exists nowhere answers — for every
+   * detail, `controlled_by_parent` or not, on insert, update (a repoint
+   * included) and the bulk paths. The caller's right to write the detail does
+   * NOT settle its right to read the header: ADR-0055 §3 gates a detail write
+   * on its header (master edit, which implies read) only for a
+   * `controlled_by_parent` detail, and a detail with a sharing model of its own
+   * meets no header check on write. So the header is read twice, each read
+   * answering one question, in the shape the preview reads it in
+   * ({@link resolvePreviewParents}):
+   *
+   *  1. ⛔ MAY THIS CALLER SEE THE HEADER — the read door, under the caller's
+   *     own context ({@link masterDetailHeadersCallerReads}). A header it does
+   *     not return binds as a missing header binds: `null`, so a parent-scoped
+   *     `requiredWhen` / `readonlyWhen` meets an unbound `parent`, and the
+   *     reference check answers `reference_not_found` for it
+   *     ({@link masterDetailHeaderExists}).
+   *  2. WHAT THE HEADER HOLDS — the write's own ELEVATED read below, for a
+   *     header read 1 returned only. The lock is a data-integrity property of
+   *     the header's state, so a header the caller can read is judged on its
+   *     STORED values, a column field-level security hides from or masks for
+   *     this caller included: author-defined integrity rules run on true data.
+   *     The preview's per-column masking is the preview's own, not the write's.
+   *
+   * A SYSTEM caller (seed replay, boot) asks no read door: read 2 alone, as
+   * before.
    *
    * ## The elevation keeps the tenant wall (#19837)
    *
-   * That argument is about row-level VISIBILITY, never about TENANCY, so the
+   * Read 2's argument is about the VALUES of a header the caller may see, never
+   * about TENANCY, so the
    * read runs under {@link ObjectQL.referenceCheckContext} — the `sudo()`-shaped
    * `{ ...context, isSystem: true }` both reference checks share — and never a
    * bare `{ isSystem: true }`. The bare spelling carried no `tenantId`, so the
@@ -8757,8 +8950,9 @@ export class ObjectQL implements IObjectQLEngine {
    * NULL-organization header passes the driver's `OR … IS NULL` term. A system
    * caller with no `tenantId` (seed replay, boot) still reads unscoped.
    *
-   * `null` on any failure — no relation, no id, header gone or outside the
-   * caller's tenant scope, read threw. It is NOT read as "unlocked": an
+   * `null` on any failure — no relation, no id, header not returned by the
+   * caller's read door, header gone or outside the caller's tenant scope, read
+   * threw. It is NOT read as "unlocked": an
    * unresolved binding leaves `parent` unbound, and `isReadonlyWhenLocked`
    * treats a predicate that needs it as LOCKED.
    *
@@ -8776,6 +8970,11 @@ export class ObjectQL implements IObjectQLEngine {
     if (!rel) return null;
     const parentId = masterIdOf(rel.fk, data, priorRow);
     if (parentId == null) return null;
+    // [#22519] 1. The caller's read door: a header it does not return binds as
+    // a missing header binds.
+    const readable = await this.masterDetailHeadersCallerReads(rel.master, [parentId], context);
+    if (!readable.has(String(parentId))) return null;
+    // 2. The write's own elevated, tenant-kept read, for a header read 1 returned.
     try {
       const row = await this.findOne(rel.master, { where: { id: parentId }, context: ObjectQL.referenceCheckContext(context) } as any);
       // `null` stays `null` — the fail-CLOSED signal (#4889) is the ABSENCE of
@@ -8811,6 +9010,11 @@ export class ObjectQL implements IObjectQLEngine {
    * for the same reason: a header outside the caller's tenant scope gets no
    * entry here, so it binds as absent rather than lending its fields to a
    * `parent.*` predicate.
+   *
+   * [#22519] The same two reads as the single-id twin, each once for the batch:
+   * the caller's read door ({@link masterDetailHeadersCallerReads}), then the
+   * elevated read for the headers it returned only. A header the read door does
+   * not return gets no entry, so it binds as a missing header binds.
    */
   private async resolveMasterDetailParents(
     schema: any,
@@ -8827,10 +9031,14 @@ export class ObjectQL implements IObjectQLEngine {
       if (id != null) ids.add(String(id));
     }
     if (ids.size === 0) return unbound;
+    // [#22519] 1. The caller's read door, once for the batch.
+    const readable = await this.masterDetailHeadersCallerReads(rel.master, [...ids], context);
+    if (readable.size === 0) return unbound;
     const byId = new Map<string, Record<string, unknown>>();
     try {
+      // 2. The write's own elevated, tenant-kept read, for the headers read 1 returned.
       const rows = await this.find(rel.master, {
-        where: { id: { $in: [...ids] } },
+        where: { id: { $in: [...readable] } },
         context: ObjectQL.referenceCheckContext(context),
       } as any) as Array<Record<string, unknown>>;
       // [#6457] One declared-field lookup for the whole batch, then one shallow
@@ -8868,12 +9076,10 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * ## Read under the caller's access, not elevated
    *
-   * The write reads the header ELEVATED ({@link resolveMasterDetailParents}):
-   * the caller's right to write the detail was settled by the write's gates
-   * before the header is read. The preview runs none of those gates, so a
-   * header read elevated here would answer a predicate over a row the caller
+   * A header read elevated here would answer a predicate over a row the caller
    * may not read. Two reads, each answering one question, as the preview's
-   * stored-row read does:
+   * stored-row read does — and, since #22519, as the write's own header read
+   * does ({@link resolveMasterDetailParent}):
    *
    *  1. ⛔ MAY THIS CALLER SEE THE HEADER — the READ DOOR, under the caller's
    *     own context, one `find` for the whole batch. A header it does not
@@ -8882,10 +9088,12 @@ export class ObjectQL implements IObjectQLEngine {
    *     failed read binds every header as missing, as the write's own failed
    *     header read does.
    *  2. WHAT THE WRITE WOULD JUDGE — the write's own header read
-   *     ({@link resolveMasterDetailParents}), for the headers read 1 returned
-   *     only.
+   *     ({@link resolveMasterDetailParents}, whose own read door returns the
+   *     same headers), for the headers read 1 returned only.
    *
-   * ⛔ A header column is kept only where the read door served this caller
+   * ⛔ The column rule is the preview's own; the write judges a header the
+   * caller can read on its stored values. A header column is kept only where
+   * the read door served this caller
    * that very value ({@link servedAsStored}); every other column, hidden or
    * served transformed (a partial mask keeps the key and replaces the value),
    * is judged as empty: the header is materialised over the master's declared
@@ -8965,9 +9173,10 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * ## Read under SYSTEM authority, like `parent` and for a related reason
    *
-   * {@link resolveMasterDetailParent} reads as SYSTEM because a master-detail
-   * lock is a property of the header's state, not of the caller's visibility of
-   * it. This read is the same shape: a validation rule's output is a pass/fail
+   * {@link resolveMasterDetailParent} reads a header's VALUES as SYSTEM (once
+   * the caller's read door has returned that header, #22519) because a
+   * master-detail lock is a property of the header's state, not of the caller's
+   * visibility of its columns. This read is the same shape: a validation rule's output is a pass/fail
    * the SYSTEM enforces, not data handed to the caller — categorically unlike
    * an access-control rule, which is why RLS predicates are excluded from this
    * capability altogether. Reading as the acting user instead made the rule
@@ -12679,13 +12888,15 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
-   * The aggregate verb's door into {@link expandSearchOnAst} — ⛔ not a second
-   * expander. `QuerySchema.search` (ADR-0061 D1) is declared beside `groupBy` /
-   * `aggregations` with no carve-out, so a grouped read under a search groups
-   * the SEARCHED rows: the same cross-field `$or`, resolved from the same
-   * server-side searchable set and the same `searchFields` narrowing, ANDed
-   * with `where` exactly as on `find` — before the security middlewares run,
-   * so an injected RLS predicate composes with it the same way on both verbs.
+   * The aggregate and count verbs' door into {@link expandSearchOnAst} — ⛔ not
+   * a second expander. `QuerySchema.search` (ADR-0061 D1) is declared beside
+   * `groupBy` / `aggregations` with no carve-out, so a grouped read under a
+   * search groups the SEARCHED rows, and a count under one counts them (#22790:
+   * `findData`'s paged `total`): the same cross-field `$or`, resolved from the
+   * same server-side searchable set, `internal: true` exclusion and
+   * `searchFields` narrowing, ANDed with `where` exactly as on `find` — before
+   * the security middlewares run, so an injected RLS predicate composes with it
+   * the same way on every verb.
    *
    * The expansion runs on a carrier AST holding only the three keys it reads,
    * and the result is a COPY of `query` with `where` replaced and the two
@@ -12694,16 +12905,13 @@ export class ObjectQL implements IObjectQLEngine {
    * `opCtx.options` unexpanded. The common path — no search key — returns the
    * same reference and allocates nothing.
    */
-  private expandSearchOnAggregateOptions(
-    object: string,
-    query: EngineAggregateOptions,
-  ): EngineAggregateOptions {
+  private expandSearchOnOptions<T extends EngineAggregateOptions | EngineCountOptions>(object: string, query: T): T {
     if (query.search === undefined && query.searchFields === undefined) return query;
     const { search, searchFields, ...rest } = query;
     const carrier = { object, where: rest.where, search, searchFields } as QueryAST;
     this.expandSearchOnAst(carrier, this._registry.getObject(object));
-    if (carrier.where === undefined) return rest;
-    return { ...rest, where: carrier.where };
+    if (carrier.where === undefined) return rest as T;
+    return { ...rest, where: carrier.where } as T;
   }
 
   /**
@@ -13507,10 +13715,10 @@ export class ObjectQL implements IObjectQLEngine {
    * pre-check. A preview that bound neither refused, as unevaluable, rows the
    * write admits. So the preview binds both, from the same view and under the
    * same gate as the write (an object with no parent-scoped `requiredWhen`
-   * reads no header). ⛔ Unlike the write, it reads the header under the
-   * caller's own access ({@link resolvePreviewParents}): a header the caller
-   * cannot read binds as a missing one, and a header column the read door
-   * served transformed or not at all is judged as empty.
+   * reads no header). It reads the header under the caller's own access, as
+   * the write does since #22519 ({@link resolvePreviewParents}): a header the
+   * caller cannot read binds as a missing one. ⛔ Unlike the write, a header
+   * column the read door served transformed or not at all is judged as empty.
    *
    * Nothing is written and no sequence is consumed. Reads do happen: the
    * stored row above, the master-detail headers, and the related rows a
@@ -13791,10 +13999,10 @@ export class ObjectQL implements IObjectQLEngine {
     // update also binds the header the stored row hangs off as
     // `previousParent`, the header the write's ADR-0113 pre-check reads.
     //
-    // ⛔ Read under the caller's access, unlike the write, which reads the
-    // header elevated: see {@link resolvePreviewParents}. A header the caller
-    // cannot read binds as a missing header binds, and a header column the
-    // read door did not serve this caller as stored is judged as empty.
+    // ⛔ Read under the caller's access, as the write reads it since #22519:
+    // see {@link resolvePreviewParents}. A header the caller cannot read binds
+    // as a missing header binds; unlike the write, a header column the read
+    // door did not serve this caller as stored is judged as empty.
     //
     // Named limit: the update's `readonlyWhen` judgement of the FK itself
     // (`settleMasterDetailLanding` ①) is not run, the limit `readonlyWhen`
@@ -13990,6 +14198,10 @@ export class ObjectQL implements IObjectQLEngine {
    */
   async insert(object: string, data: any | any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<any> {
     object = this.resolveObjectName(object);
+    // [#22782] An aborting `afterInsert` rolls this write back — see `opensAfterAbortUnit`.
+    if (this.opensAfterAbortUnit('afterInsert', object, options?.context)) {
+      return this.inAfterAbortUnit(() => this.insert(object, data, options));
+    }
     this.logger.debug('Insert operation starting', { object, isBatch: Array.isArray(data) });
     this.assertWriteAllowed(object, 'insert');
     // [#8844] The organization set is about to change. Dropped BEFORE the write
@@ -15165,6 +15377,10 @@ export class ObjectQL implements IObjectQLEngine {
    */
   async update(object: string, data: any, options?: EngineUpdateOptions & WriteObservabilityOptions): Promise<Record<string, any> | number | null> {
      object = this.resolveObjectName(object);
+     // [#22782] An aborting `afterUpdate` rolls this write back — see `opensAfterAbortUnit`.
+     if (this.opensAfterAbortUnit('afterUpdate', object, options?.context)) {
+       return this.inAfterAbortUnit(() => this.update(object, data, options));
+     }
      this.logger.debug('Update operation starting', { object });
      this.assertWriteAllowed(object, 'update');
      // [#8844] See the insert face — an organization row that changes identity
@@ -18144,6 +18360,10 @@ export class ObjectQL implements IObjectQLEngine {
 
   async delete(object: string, options?: EngineDeleteOptions): Promise<boolean | number> {
     object = this.resolveObjectName(object);
+    // [#22782] An aborting `afterDelete` rolls this write back — see `opensAfterAbortUnit`.
+    if (this.opensAfterAbortUnit('afterDelete', object, options?.context)) {
+      return this.inAfterAbortUnit(() => this.delete(object, options));
+    }
     this.logger.debug('Delete operation starting', { object });
     this.assertWriteAllowed(object, 'delete');
     // [#8844] See the insert face — deleting the install's only organization
@@ -18695,6 +18915,10 @@ export class ObjectQL implements IObjectQLEngine {
      query = foldEngineOptionAliases(object, 'count', query, ENGINE_WHERE_SLOTS);
      rejectUnknownEngineOptions(object, 'count', query, ENGINE_COUNT_OPTION_KEYS);
      query = lowerWhereFilterArray(object, 'count', query, this._registry.getObject(object), this.relatedSchemaOf);
+     // [#22790] ADR-0061 `search` → the rows are searched before they are
+     // counted, by the one expander `find` runs, at the same point in the
+     // sequence — so the count is the number of rows `find` returns for the bag.
+     if (query) query = this.expandSearchOnOptions(object, query);
      const driver = this.getDriver(object);
 
      // The AST must ride on the opCtx so the security/sharing middlewares can
@@ -18830,7 +19054,7 @@ export class ObjectQL implements IObjectQLEngine {
       // ADR-0061 `search` → the rows are searched BEFORE they are grouped, by
       // the one expander `find` runs, at the same point in the sequence (after
       // the `where` doors above, before the AST is built and tokens resolve).
-      query = this.expandSearchOnAggregateOptions(object, query);
+      query = this.expandSearchOnOptions(object, query);
       this.rejectCredentialAggregation(object, query);
       // [#20783] …and a `groupBy` entry naming a structured-JSON field (`json`,
       // `composite`, `address`, …) is refused `INVALID_FIELD` / 400 here, before
@@ -19453,11 +19677,9 @@ export class ObjectQL implements IObjectQLEngine {
     const trxCtx = { ...(baseContext ?? {}), transaction: trx };
     try {
       // Run the callback inside the ambient transaction store so internal
-      // queries during writes reuse this transaction's connection (ADR-0034).
-      const result = await this.txStore.run(
-        { transaction: trx, scope: this.newTransactionScope(driver!) },
-        () => callback(trxCtx, { owned: true }),
-      );
+      // queries during writes reuse this transaction's connection (ADR-0034),
+      // CLOSED once the callback settles, before the commit (#22782, #22855).
+      const result = await this.runOpenedUnit(trx, driver!, () => callback(trxCtx, { owned: true }));
       if (drv.commit) await drv.commit(trx);
       else if (drv.commitTransaction) await drv.commitTransaction(trx);
       return result;
@@ -19474,6 +19696,45 @@ export class ObjectQL implements IObjectQLEngine {
       // comes back as the same reference.
       throw redactPropagatedDriverFault(err);
     }
+  }
+
+  /**
+   * [#22782, #22855] Run `body`, the callback of a unit just opened on `owner`
+   * with handle `trx`. This is the ONE place both transaction surfaces
+   * ({@link transaction} and `ScopedContext.transaction`) publish a unit and
+   * close it again.
+   *
+   * Published: the entry goes into {@link txStore} (ADR-0034) for the body's
+   * lifetime, carrying its owner (#4619). Internal queries during writes reuse
+   * this connection, and a nested `transaction()` on either surface joins it.
+   *
+   * Closed once `body` settles, BEFORE the caller commits or rolls back. Work
+   * the body started and did not await (an `async: true` hook) holds the
+   * handle two ways: ambiently, through this entry, and explicitly, threaded
+   * into the callback's context and from there into the hook's `ctx.api`. That
+   * work used to run on the finished handle and lose its write ("Transaction
+   * query already complete"). Emptying the entry ends the ambient way;
+   * {@link openedUnits} ends the explicit one, because
+   * {@link buildDriverOptions} treats a closed unit's handle as absent. The
+   * work then runs unenrolled, on its own connection, as outside any unit:
+   * `opensAfterAbortUnit` reads the handle the same way, so such a write opens
+   * the door's own unit when its hooks call for one.
+   *
+   * A primitive handle cannot key {@link openedUnits}, so it keeps only the
+   * ambient half.
+   */
+  private runOpenedUnit<T>(trx: unknown, owner: IDataDriver, body: () => Promise<T>): Promise<T> {
+    const entry: { transaction: unknown; scope?: TransactionScope } =
+      { transaction: trx, scope: this.newTransactionScope(owner) };
+    if (trx !== null && (typeof trx === 'object' || typeof trx === 'function')) this.openedUnits.set(trx, entry);
+    return this.txStore.run(entry, body).finally(() => { entry.transaction = undefined; entry.scope = undefined; });
+  }
+
+  /** [#22855] Is `handle` a unit {@link runOpenedUnit} published whose callback has since settled? */
+  private isClosedUnitHandle(handle: unknown): boolean {
+    if (handle === null || (typeof handle !== 'object' && typeof handle !== 'function')) return false;
+    const entry = this.openedUnits.get(handle);
+    return entry !== undefined && entry.transaction === undefined;
   }
 
   /**
@@ -20320,14 +20581,10 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
   ): Promise<any> {
     const engine = this.engine as any;
     // The engine's ambient transaction store (ADR-0034), reached the `as any`
-    // way this whole class reaches engine internals. One accessor serves both
-    // readers below: the D2 join, and the `run` that publishes a transaction
-    // this call opens.
+    // way this whole class reaches engine internals, for the D2 join below. A
+    // transaction this call opens is published by the engine's own helper.
     const txStore = engine?.txStore as
-      | {
-          getStore(): { transaction: unknown } | undefined;
-          run<R>(s: { transaction: unknown; scope?: unknown }, fn: () => R): R;
-        }
+      | { getStore(): { transaction: unknown } | undefined }
       | undefined;
 
     // ADR-0067 D2 — JOIN an already-open ambient transaction instead of opening
@@ -20385,11 +20642,14 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
     // queries during writes reuse its connection (ADR-0034) — and so a nested
     // `transaction()` on either surface can JOIN it. The store entry also
     // carries WHICH driver owns the transaction (#4619) so the write path can
-    // report a write routed off it; `newTransactionScope` is the engine's,
-    // reached the same `as any` way as `txStore` itself.
-    const scope = engine.newTransactionScope?.(driver);
+    // report a write routed off it. [#22855] Through the engine's ONE unit
+    // helper, `runOpenedUnit`, the one `ObjectQL.transaction` runs its callback
+    // in, reached the same `as any` way as `txStore` itself. It closes the unit
+    // when the callback settles, so work the callback started and did not await
+    // (an `async: true` hook) no longer keeps the finished handle, neither the
+    // ambient one nor the `trxCtx` one threaded above.
     const runIn = <R>(fn: () => Promise<R>): Promise<R> =>
-      txStore ? txStore.run({ transaction: trx, scope }, fn) : fn();
+      typeof engine.runOpenedUnit === 'function' ? engine.runOpenedUnit(trx, driver, fn) : fn();
 
     try {
       // Reached only with no ambient transaction to join, so this call really

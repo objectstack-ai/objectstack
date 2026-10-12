@@ -182,10 +182,8 @@ async function boot(opts: BootOptions = {}) {
     { id: 'pos_rep', name: 'qa_rep', label: 'Rep', active: true },
     { id: 'pos_lead', name: 'qa_lead', label: 'Lead', active: true },
   ], { context: SYS } as any);
-  await engine.insert('sys_permission_set', {
-    id: 'ps_rep', name: 'qa_rep_set', label: 'QA Rep', object_permissions: '{}', field_permissions: '{}',
-    system_permissions: '[]', active: true,
-  }, { context: SYS } as any);
+  // [ADR-0131 D3/D4] The set a grant names lives in the catalog (the registry).
+  engine.registry.registerItem('permission', { name: 'qa_rep_set', label: 'QA Rep' } as any, 'name' as any, 'qa.grant-holder');
   if (withMembers) {
     for (const m of MEMBERSHIPS) {
       await engine.insert('sys_member', m, { context: { isSystem: true, tenantId: m.organization_id } } as any);
@@ -345,7 +343,7 @@ describe('sys_user_permission_set: an organization-scoped grant takes the same p
   it("a platform administrator's organization-scoped grant to a non-member is refused; the row is absent", async () => {
     const h = await boot({ walled: true });
     const err = await refusalOf(() => h.engine.insert(
-      'sys_user_permission_set', { user_id: 'u_member_b', permission_set_id: 'ps_rep' }, { context: PLATFORM_ADMIN_A } as any,
+      'sys_user_permission_set', { user_id: 'u_member_b', permission_set: 'qa_rep_set' }, { context: PLATFORM_ADMIN_A } as any,
     ));
     expectMembershipRefusal(err);
     expect(await rowsOf(h, 'sys_user_permission_set', { user_id: 'u_member_b' })).toHaveLength(0);
@@ -354,7 +352,7 @@ describe('sys_user_permission_set: an organization-scoped grant takes the same p
   it('positive control: the same grant to a member succeeds, stored in the organization that was judged', async () => {
     const h = await boot({ walled: true });
     await h.engine.insert(
-      'sys_user_permission_set', { user_id: 'u_member_a', permission_set_id: 'ps_rep' }, { context: PLATFORM_ADMIN_A } as any,
+      'sys_user_permission_set', { user_id: 'u_member_a', permission_set: 'qa_rep_set' }, { context: PLATFORM_ADMIN_A } as any,
     );
     const [row] = await rowsOf(h, 'sys_user_permission_set', { user_id: 'u_member_a' });
     expect(row?.organization_id).toBe(ORG_A);
@@ -362,7 +360,7 @@ describe('sys_user_permission_set: an organization-scoped grant takes the same p
 
   it('an update by id that moves user_id to a non-member is refused; the stored row is untouched', async () => {
     const h = await boot({ walled: true });
-    await h.engine.insert('sys_user_permission_set', { id: 'ups1', user_id: 'u_member_a', permission_set_id: 'ps_rep' }, { context: ADMIN_A } as any);
+    await h.engine.insert('sys_user_permission_set', { id: 'ups1', user_id: 'u_member_a', permission_set: 'qa_rep_set' }, { context: ADMIN_A } as any);
     expectMembershipRefusal(await refusalOf(() => h.engine.update(
       'sys_user_permission_set', { id: 'ups1', user_id: 'u_member_b' }, { context: ADMIN_A } as any,
     )));
@@ -377,7 +375,7 @@ describe('sys_user_permission_set: an organization-scoped grant takes the same p
     const h = await boot();
     const NO_ORG_ADMIN = { userId: 'u_admin', positions: [], permissions: ['qa_admin'] };
     await h.engine.insert(
-      'sys_user_permission_set', { user_id: 'u_nobody', permission_set_id: 'ps_rep' }, { context: NO_ORG_ADMIN } as any,
+      'sys_user_permission_set', { user_id: 'u_nobody', permission_set: 'qa_rep_set' }, { context: NO_ORG_ADMIN } as any,
     );
     const [row] = await rowsOf(h, 'sys_user_permission_set', { user_id: 'u_nobody' });
     expect(row?.organization_id ?? null).toBeNull();

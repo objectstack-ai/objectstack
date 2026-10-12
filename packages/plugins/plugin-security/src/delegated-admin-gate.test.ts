@@ -320,7 +320,7 @@ describe('DelegatedAdminGate — bindings (sys_position_permission_set)', () => 
 
 describe('DelegatedAdminGate — direct grants (sys_user_permission_set)', () => {
   it('delegate grants an allowlisted set to a user inside the subtree; granted_by stamped', async () => {
-    const row: any = { user_id: 'u_east_1', permission_set_id: 'ps_sales' };
+    const row: any = { user_id: 'u_east_1', permission_set: 'sales_user' };
     await expect(h.gate.assert({
       object: 'sys_user_permission_set', operation: 'insert', data: row, context: h.ctxOf('delegate'),
     })).resolves.toBeUndefined();
@@ -330,7 +330,7 @@ describe('DelegatedAdminGate — direct grants (sys_user_permission_set)', () =>
   it('denies grants to users outside the subtree', async () => {
     await expect(h.gate.assert({
       object: 'sys_user_permission_set', operation: 'insert',
-      data: { user_id: 'u_west_1', permission_set_id: 'ps_sales' },
+      data: { user_id: 'u_west_1', permission_set: 'sales_user' },
       context: h.ctxOf('delegate'),
     })).rejects.toThrow(/outside the delegated subtree/);
   });
@@ -338,7 +338,7 @@ describe('DelegatedAdminGate — direct grants (sys_user_permission_set)', () =>
   it('denies non-allowlisted sets — including to the delegate themselves', async () => {
     await expect(h.gate.assert({
       object: 'sys_user_permission_set', operation: 'insert',
-      data: { user_id: 'u_delegate', permission_set_id: 'ps_fin' },
+      data: { user_id: 'u_delegate', permission_set: 'finance_admin' },
       context: h.ctxOf('delegate'),
     })).rejects.toThrow(/not in the scope's allowlist/);
   });
@@ -347,7 +347,7 @@ describe('DelegatedAdminGate — direct grants (sys_user_permission_set)', () =>
     // sub_admin carries the delegate's own EXACT scope — lateral propagation banned.
     await expect(h.gate.assert({
       object: 'sys_user_permission_set', operation: 'insert',
-      data: { user_id: 'u_east_1', permission_set_id: 'ps_sub' },
+      data: { user_id: 'u_east_1', permission_set: 'sub_admin' },
       context: h.ctxOf('delegate'),
     })).rejects.toThrow(/not strictly contained/);
   });
@@ -393,7 +393,7 @@ describe('DelegatedAdminGate — direct grants (sys_user_permission_set)', () =>
       })).resolves.toBeUndefined();
       await expect(h.gate.assert({
         object: 'sys_user_permission_set', operation: 'update',
-        data: { id: 'g1', permission_set_id: 'ps_fin' }, context: h.ctxOf('delegate'),
+        data: { id: 'g1', permission_set: 'finance_admin' }, context: h.ctxOf('delegate'),
       })).rejects.toThrow(/'finance_admin' is not in the scope's allowlist/);
     });
   });
@@ -1051,7 +1051,7 @@ describe('DelegatedAdminGate — a position is the catalog definition, not an or
 // is pinned in `granted-by-writer-provenance.test.ts`; this block pins the
 // gate's own half, path by path.
 describe('DelegatedAdminGate — granted_by is the writer on every admitted insert', () => {
-  const grantRow = (extra: Record<string, unknown> = {}): any => ({ user_id: 'u_east_1', permission_set_id: 'ps_sales', ...extra });
+  const grantRow = (extra: Record<string, unknown> = {}): any => ({ user_id: 'u_east_1', permission_set: 'sales_user', ...extra });
   const assignmentRow = (extra: Record<string, unknown> = {}): any => ({ user_id: 'u_east_1', position: 'sales_rep', business_unit_id: 'bu_es', ...extra });
 
   for (const [object, row] of [

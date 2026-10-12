@@ -8,7 +8,7 @@ import { canServeApiOperation, type DroppedFieldsEvent, type EnableLike } from '
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { CreateDataRequest, FindDataRequest, GetMetaItemRequest, UpdateDataRequest, ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult } from './bulk-write.js';
-import { isUniqueViolationError, uniqueViolationColumn, isEngineDuplicateRecordEnvelope, mapDataError, sandboxBusinessMessage, isSandboxOrigin } from '@objectstack/types';
+import { isUniqueViolationError, uniqueViolationColumn, isEngineDuplicateRecordEnvelope, mapDataError, sandboxBusinessMessage, isSandboxOrigin, isSandboxOwnFault } from '@objectstack/types';
 
 /**
  * import-runner — the shared row-processing core for bulk import.
@@ -211,9 +211,9 @@ export interface ImportProtocolLike {
    * [#22739] The object-declaration read, the one the door's import template
    * and the connector pull already make. The reference resolution reads a
    * lookup TARGET's `enable` block through it ({@link servesReferenceTarget}).
-   * A protocol without it (plugin-auth's identity import, whose reads run
-   * under the system identity) has no declaration to judge, and none is
-   * fabricated for it.
+   * A protocol without it has no declaration to judge, and none is fabricated
+   * for it; plugin-auth's identity import, whose reads run under the system
+   * identity, carries it like every other caller (#22800).
    */
   getMetaItem?(request: GetMetaItemRequest): Promise<unknown>;
 }
@@ -485,6 +485,18 @@ export function sanitizeRowError(raw: unknown): string {
  * `code` is unchanged, so it still reads as a failed row with a fault code.
  * Every other error keeps its row text: driver text is still cleaned by
  * {@link sanitizeRowError}, which is the import's own reading of it.
+ *
+ * ## The sandbox's own fault reads as that fault too (#22741)
+ *
+ * The runner also raises `SandboxError`s of its own: the CPU budget, the
+ * wall-clock ceiling, a denied capability, a failed install or marshal. They
+ * carry no `innerMessage`, so the rule above, keyed on a sandbox origin, did not
+ * see them, and the row relayed `.message` (`hook '<name>' exceeded CPU budget
+ * of …`) where the create door answers `Internal server error`. The row
+ * recognises them by `isSandboxOwnFault`, read off the producer, and the same
+ * rule applies: a sandboxed error the door answers with a 5xx takes the door's
+ * sentence. ⛔ Still not "every door 5xx": a driver error is neither a sandbox
+ * origin nor a sandbox fault, and its row keeps {@link sanitizeRowError}'s text.
  */
 function toFailedResult(rowNo: number, err: unknown, objectName: string): ImportRowResult {
   const e = err as { code?: unknown; message?: unknown; fields?: unknown; field?: unknown } | null | undefined;
@@ -497,7 +509,8 @@ function toFailedResult(rowNo: number, err: unknown, objectName: string): Import
   const thrownCode = isEngineDuplicateRecordEnvelope(e) ? 'UNIQUE_VIOLATION' : e?.code;
   const code = first?.code ?? thrownCode ?? 'IMPORT_ROW_FAILED';
   const field = first?.field != null && first.field !== '' ? first.field : e?.field;
-  const sandboxFault = isSandboxOrigin(err) && door.status >= 500 ? String(door.body.error) : undefined;
+  const sandboxed = isSandboxOrigin(err) || isSandboxOwnFault(err);
+  const sandboxFault = sandboxed && door.status >= 500 ? String(door.body.error) : undefined;
   const message = sandboxFault ?? sandboxBusinessMessage(err) ?? sanitizeRowError(e?.message);
   return {
     row: rowNo, ok: false, action: 'failed', error: message, code: String(code),

@@ -45,7 +45,7 @@ export const CLI_ALIAS = 'os';
  *
  * Every other `--json` site in this CLI reports its duration INSIDE the
  * payload (`{ ...report, duration: timer.elapsed() }` — `os lint`,
- * `os migrate meta`, `os migrate summary-nulls`, `os meta resync`), which is
+ * `os migrate meta`, `os migrate summary-nulls`), which is
  * what those two meant to do as well. With this union a duration in the exit
  * slot is a compile error, so the mistake cannot be made silently again.
  *

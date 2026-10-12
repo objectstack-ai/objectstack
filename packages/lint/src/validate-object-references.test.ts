@@ -18,7 +18,7 @@ import { explainRule } from './rule-explanations.js';
 // suite exercises, not a chosen few. Run the whole file: those cases read what
 // the cases above fired. (`object-reference-unknown` already prints one
 // sentence of at most 175 characters here and is not converted.)
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateObjectReferences: typeof validateObjectReferencesUnrecorded = (...args) => {
   const findings = validateObjectReferencesUnrecorded(...args);
   fired.push(...findings);
@@ -115,8 +115,9 @@ describe('validateObjectReferences — field relationship targets (#16611)', () 
     expect(findings[0].where).toBe('object "crm_lead" · field "zzz_probe"');
     expect(findings[0].path).toBe('objects[0].fields.zzz_probe.reference');
     expect(findings[0].message).toContain('lookup target "zzz_object_that_does_not_exist"');
-    // The hint says what the miss costs at runtime, not just that it is a miss.
-    expect(findings[0].hint).toContain('record picker');
+    // What the miss costs at runtime, not just that it is a miss ([#22161]:
+    // `os explain`, one line away from the `fix:` line).
+    expect(explainRule(OBJECT_REFERENCE_UNKNOWN)!.paragraphs.join('\n')).toContain('the record picker has no object to query');
   });
 
   it('errors on a master_detail whose reference names an object declared nowhere', () => {
@@ -286,9 +287,17 @@ describe('validateObjectReferences — artifact packages[] as resolution context
     expect(findings[0].severity).toBe('error');
     expect(findings[0].rule).toBe(OBJECT_REFERENCE_UNKNOWN);
     expect(findings[0].path).toBe('objects[0].fields.contract.reference');
-    // The remedy lists what the ARTIFACT provides, not only this package's own
-    // objects — that is the list the author actually has to choose from.
-    expect(findings[0].hint).toContain('Defined objects: crm_account, crm_order.');
+    // The resolution set is what the ARTIFACT provides, not only this package's
+    // own objects — that is the set the author actually has to choose from.
+    // [#22161] The verdict's "Did you mean" reads it (a near miss of the
+    // sibling's object below); the `fix:` line no longer echoes the list.
+    expect(findings[0].hint).not.toContain('Defined objects');
+    const near = {
+      ...ORDERS_BODY,
+      objects: [{ name: 'crm_order', fields: { account: { type: 'lookup', reference: 'crm_acount' } } }],
+    };
+    const [miss] = validateObjectReferences(perPackageStack(near, [{ manifest: near }, { manifest: CORE_BODY }]));
+    expect(miss?.message).toContain('Did you mean "crm_account"?');
   });
 
   it('carries the context to every site on the rule, not only the field one', () => {
@@ -739,10 +748,12 @@ describe('[#20216] validateObjectReferences — view container `object`', () => 
     // The namespace prescription names the ONE spelling that resolves…
     expect(f.hint).toContain('manifest.namespace "my_app"');
     expect(f.hint).toContain('write "my_app_order_line", not "order_line"');
-    // …and the hint still lists every object the stack does declare.
-    expect(f.hint).toContain('Defined objects: my_app_order, my_app_order_line.');
-    // What the miss costs, not only that it is a miss.
-    expect(f.hint).toContain('getViewsByObject()');
+    // [#22161] …as the whole `fix:` line; what the miss costs is `os explain`.
+    expect(f.hint).toBe(
+      'Object names carry the package namespace prefix (manifest.namespace "my_app"): write ' +
+        '"my_app_order_line", not "order_line".',
+    );
+    expect(explainRule(OBJECT_REFERENCE_UNKNOWN)!.paragraphs.join('\n')).toContain('getViewsByObject()');
   });
 
   it('CONTROL — the correctly prefixed container is clean', () => {
@@ -765,7 +776,7 @@ describe('[#20216] validateObjectReferences — view container `object`', () => 
     expect(findings[0].path).toBe('views[0].object');
     // `my_app_invoice` is not declared, so prefixing is not the fix and is not offered.
     expect(findings[0].hint).not.toContain('namespace prefix');
-    expect(findings[0].hint).toContain('Defined objects: my_app_order, my_app_order_line.');
+    expect(findings[0].hint).toContain('Point it at one of this stack\'s objects');
   });
 
   it('passes a container over an object a `packages[]` sibling provides (rung ①, artifact scope)', () => {
@@ -896,5 +907,54 @@ describe('[#22161] one-line verdicts — object-reference-unregistered-platform'
       expect(f.message, f.rule).not.toContain('\n');
       expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
     }
+  });
+});
+
+// [#22161] Slice 12: the `fix:` line, both ids. One remedy line each (the
+// namespace prescription, where it applies, IS the line); what a miss costs at
+// each site, the ladder and the approval-object example are the explanations'
+// (`object-reference-unknown` gains one).
+describe('[#22161] one-line fixes — the two object-reference ids', () => {
+  const IDS = [OBJECT_REFERENCE_UNKNOWN, OBJECT_REFERENCE_UNREGISTERED_PLATFORM];
+
+  it('every `fix:` line the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => IDS.includes(f.rule));
+    // Coverage control: both ids fired, the unknown id with and without the
+    // namespace prescription.
+    expect([...new Set(converted.map((f) => f.rule))].sort()).toEqual([...IDS].sort());
+    const unknown = converted.filter((f) => f.rule === OBJECT_REFERENCE_UNKNOWN).map((f) => f.hint);
+    expect(unknown.some((h) => h.startsWith('Point it at one of'))).toBe(true);
+    expect(unknown.some((h) => h.startsWith('Object names carry the package namespace prefix'))).toBe(true);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+      expect(f.hint, 'no object list is echoed').not.toContain('Defined objects');
+    }
+  });
+
+  it('`os explain` names what a miss costs at every site the rule judges', () => {
+    for (const rule of IDS) {
+      const entry = explainRule(rule);
+      expect(entry, `no \`os explain ${rule}\` entry`).toBeDefined();
+      const text = entry!.paragraphs.join('\n');
+      for (const cost of [
+        'the record picker has no object to query',
+        'none of its views appears for any object',
+        'the picker degrades to a raw record-id text input',
+        'so it is left untyped',
+        'the dropdown renders an always-empty filter',
+        'every one of them queries nothing',
+        'so a typo hides it for good',
+        'so it is verified only here',
+      ]) {
+        expect(text, `${rule} explanation names ${cost}`).toContain(cost);
+      }
+    }
+    expect(explainRule(OBJECT_REFERENCE_UNKNOWN)!.paragraphs.join('\n')).toContain(
+      'the platform user object is `sys_user`, not `user`',
+    );
+    expect(explainRule(OBJECT_REFERENCE_UNREGISTERED_PLATFORM)!.paragraphs.join('\n')).toContain(
+      'if a third-party package genuinely provides the name, the warning is expected',
+    );
   });
 });

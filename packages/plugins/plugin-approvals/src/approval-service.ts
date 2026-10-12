@@ -64,7 +64,7 @@ import type { EnableLike, ObjectCapabilitiesParsed } from '@objectstack/spec/dat
 // mechanism for a second producer, and commit aa5994e17 landed this service's key
 // (`approval_recall_not_submitter`) into it ahead of this consumer half.
 import { renderOperationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
-import { isGrantActive, omitInternalFieldsFromWriteResponse } from '@objectstack/core';
+import { isGrantActive, omitInternalFieldsFromWriteResponse, resolveUserAuthzGrants } from '@objectstack/core';
 import {
   filterApproversWhoCanRead,
   resolveApproverDirectoryOrg,
@@ -970,9 +970,67 @@ const GRAPH_APPROVER_TYPES: ReadonlySet<string> = new Set([
  *
  * `user` needs no entry: its `value` IS the slot and it never falls back.
  * `position` keeps its literal because the literal is an acting address — a
- * holder staffed into the position later decides it.
+ * holder staffed into the position later decides it, on a slate that also
+ * names a person. A slate of literals alone names no one, and under the
+ * default `admin_rescue` it opens on the organization's administrators
+ * instead ({@link ApprovalService.openNodeRequest}).
  */
 const PERSON_APPROVER_TYPES: ReadonlySet<string> = new Set(['manager', 'field']);
+
+/**
+ * [ADR-0095 D3] Does a resolved permission list hold the `TENANT_ADMIN` rung?
+ *
+ * The ONE spelling of "is an organization administrator" in this file. The
+ * rung is derived from the {@link ORGANIZATION_ADMIN_GRANTS} capability grants
+ * and from nothing else (`derivePosture` in `@objectstack/core`), so the two
+ * readers here ask exactly this:
+ *   - the tenant arm of {@link ApprovalService.isOverrideActor}, over the
+ *     acting caller's resolved envelope;
+ *   - the administrators' slate an empty `admin_rescue` request opens on
+ *     ({@link ApprovalService.organizationAdministrators}), over each
+ *     candidate's grants as `resolveUserAuthzGrants` resolves them in the
+ *     request's organization.
+ * One predicate, so the people a rescue request is routed to and the people
+ * the override admits as tenant administrators cannot drift apart.
+ */
+function holdsTenantAdminRung(permissions: readonly string[]): boolean {
+  return ORGANIZATION_ADMIN_GRANTS.some((n) => permissions.includes(n));
+}
+
+/**
+ * The one synthetic group every administrator on a rescue slate shares, so a
+ * `per_group` node reads "the organization's administrators" as ONE group
+ * (any `minApprovals` of them, default one) rather than one group per person,
+ * and the display drops the key as it drops every unnamed `#N` group.
+ */
+const ADMIN_RESCUE_GROUP = '#0';
+
+/**
+ * [#22824] Why a slate opened on the organization's administrators, in words
+ * an operator reads on the request's timeline and in its `__resolvedFrom`
+ * snapshot: which approver entries resolved to no one.
+ *
+ * `abandoned` is the slate the node resolved (only `type:value` literals, or
+ * nothing at all: an empty `manager` rung adds no slot). `fallback` says why
+ * an `onEmptyApprovers: 'fallback'` node degraded here, when it is one.
+ */
+function emptySlateReason(
+  abandoned: readonly string[],
+  fallback: 'not_declared' | 'resolved_to_no_one' | undefined,
+): string {
+  const parts = abandoned
+    .filter((slot) => !!slot && slot.includes(':'))
+    .map((slot) => {
+      const at = slot.indexOf(':');
+      const type = slot.slice(0, at);
+      const value = slot.slice(at + 1);
+      return type === 'position' ? `position '${value}' has no holder` : `${type} '${value}' resolved to no one`;
+    });
+  let reason = parts.length ? parts.join('; ') : 'no approver on the node resolved to a person';
+  if (fallback === 'resolved_to_no_one') reason += '; the declared fallbackApprovers resolved to no one either';
+  if (fallback === 'not_declared') reason += "; onEmptyApprovers is 'fallback' but no fallbackApprovers are declared";
+  return reason;
+}
 
 /** One OOO delegation hop applied while resolving an approver (#1322 M1/M4). */
 interface OooSubstitution {
@@ -1672,8 +1730,10 @@ export class ApprovalService implements IApprovalService {
     // refused new writes WITHOUT a migration, so rows predating it still resolve
     // on every request — and a reader that trusts a name is not an invariant in
     // any case. Driven in `approval-tenant-positions-name-authority.test.ts`.
+    // [#22824] `holdsTenantAdminRung` is that same grant read, shared with the
+    // administrators' slate an empty `admin_rescue` request opens on.
     const isTenantAdmin = posture === 'TENANT_ADMIN'
-      || ORGANIZATION_ADMIN_GRANTS.some((n) => perms.includes(n));
+      || holdsTenantAdminRung(perms);
     if (!isTenantAdmin) return false;
     // A tenant admin's authority stops at their own org; a null-org request is
     // global and any admin may release it.
@@ -2707,6 +2767,71 @@ export class ApprovalService implements IApprovalService {
   }
 
   /**
+   * [#22824] The organization's administrators: the slate an empty
+   * `onEmptyApprovers: 'admin_rescue'` request opens on.
+   *
+   * "Administrator" has ONE meaning here, the authority the tenant arm of
+   * {@link ApprovalService.isOverrideActor} already trusts: a person holding
+   * the `TENANT_ADMIN` rung of THIS organization (ADR-0095 D3), which is
+   * {@link holdsTenantAdminRung} over the grants `resolveUserAuthzGrants`
+   * resolves for them with the organization as the active tenant. That is the
+   * resolver every authorization envelope comes from, so a grant window, a
+   * deactivated set, an organization-scoped grant of another organization and
+   * a position-bound set all answer here exactly as they answer when the
+   * person acts. Nothing reads a better-auth membership role as authority: the
+   * owner/admin role is only the provisioning source of the grant.
+   *
+   * ⛔ Platform administrators are not added for being platform
+   * administrators: that standing crosses the tenant wall, and a rescue slate
+   * is the organization's own. One who also holds this organization's rung
+   * (an owner of it, say) is on the slate for that rung.
+   *
+   * The candidates are the organization's members, `sys_member.organization_id`
+   * being this file's answer to "who is in this organization" (see
+   * {@link ApprovalService.lookupManager}); each is then asked the rung
+   * question. No organization means no tenant administrators: the request
+   * keeps the slate that names no one, for the override.
+   *
+   * A read that fails answers `{ failure }`, never an invented "nobody": the
+   * caller then opens the request on the slate that names no one and says the
+   * read failed. That is the rescue path's own fallback — killing the run here
+   * is the one outcome `admin_rescue` exists to avoid.
+   */
+  private async organizationAdministrators(
+    organizationId: string | null | undefined,
+  ): Promise<{ ids: string[] } | { failure: string }> {
+    if (!organizationId) return { ids: [] };
+    const org = String(organizationId);
+    try {
+      const rows = await this.engine.find('sys_member', {
+        where: { organization_id: org }, fields: ['user_id'],
+        limit: ApprovalService.APPROVER_INDEX_CAP, context: SYSTEM_CTX,
+      });
+      const list: any[] = Array.isArray(rows) ? rows : [];
+      if (list.length >= ApprovalService.APPROVER_INDEX_CAP) {
+        this.logger?.warn?.('[approvals] organization-administrator probe hit its window — results may be truncated', {
+          cap: ApprovalService.APPROVER_INDEX_CAP, organizationId: org,
+        });
+      }
+      const members = [...new Set(list.map((r) => String(r?.user_id ?? r?.userId ?? '')).filter(Boolean))];
+      const administrators: string[] = [];
+      // A few resolutions at a time: each is the full grant resolution an
+      // acting request pays, and an organization may have many members.
+      for (let at = 0; at < members.length; at += 8) {
+        const batch = members.slice(at, at + 8);
+        const verdicts = await Promise.all(batch.map(async (userId) => {
+          const grants = await resolveUserAuthzGrants(this.engine, userId, { tenantId: org });
+          return holdsTenantAdminRung(grants.permissions);
+        }));
+        batch.forEach((userId, i) => { if (verdicts[i]) administrators.push(userId); });
+      }
+      return { ids: administrators };
+    } catch (err: any) {
+      return { failure: err?.message ?? String(err) };
+    }
+  }
+
+  /**
    * better-auth org-membership tier (`sys_member.role`: owner/admin/member) —
    * NOT positions. Named for the projection (`org_membership_level`, ADR-0057
    * D7 / ADR-0090 D3), not for better-auth's column: the column name is theirs
@@ -3016,6 +3141,12 @@ export class ApprovalService implements IApprovalService {
    * same expansion as `approvers`. The return type is unchanged for that
    * policy: from the flow node's side it is an ordinary pending request.
    *
+   * An empty slate under the default `onEmptyApprovers: 'admin_rescue'` (and a
+   * `fallback` that found nobody either) opens on a NAMED slate too: the
+   * request organization's administrators ({@link ApprovalService.organizationAdministrators}),
+   * through the same expansion. Only an organization with no administrator
+   * leaves the request on the slate that names no one, for the #3424 override.
+   *
    * A request that opens tells each concrete approver on its slate, once, on
    * the `approval.requested` topic (see the fan-out at the end of the body).
    */
@@ -3112,9 +3243,16 @@ export class ApprovalService implements IApprovalService {
     // Empty-slate policy (#3447 P2). "Empty" = no CONCRETE person — an
     // unstaffed position / empty expression result leaves only `type:value`
     // literal slots, decidable by nobody. `slateNamesAPerson` is the one
-    // spelling of that test: the inbox's `unstaffed` arm reads it too (#22725).
+    // spelling of that test.
+    //
+    // [#22824] Set when the slate below is replaced by the organization's
+    // administrators: the reason, written to the request's timeline once the
+    // request row exists.
+    let routedToAdministrators: string | undefined;
     if (!slateNamesAPerson(approvers)) {
       const emptyPolicy = (input.config as any).onEmptyApprovers ?? 'admin_rescue';
+      // Why a `fallback` node degraded to admin_rescue, for the reason below.
+      let fallbackDegraded: 'not_declared' | 'resolved_to_no_one' | undefined;
       if (emptyPolicy === 'fail') {
         throw new Error(
           `NO_APPROVERS: approval node '${input.nodeId}' on ${input.object}/${input.recordId} resolved to no `
@@ -3177,6 +3315,7 @@ export class ApprovalService implements IApprovalService {
             for (const slot of approvers) delete groups[slot];
             approvers = fallbackApprovers;
           } else {
+            fallbackDegraded = 'resolved_to_no_one';
             this.logger?.warn?.(
               `[approvals] approval node '${input.nodeId}' on ${input.object}/${input.recordId} resolved to no `
               + `concrete approver AND its declared fallbackApprovers resolved to nobody either — falling back `
@@ -3188,6 +3327,7 @@ export class ApprovalService implements IApprovalService {
             );
           }
         } else {
+          fallbackDegraded = 'not_declared';
           this.logger?.warn?.(
             `[approvals] approval node '${input.nodeId}' on ${input.object}/${input.recordId} declares `
             + `onEmptyApprovers: 'fallback' with no fallbackApprovers — falling back to admin_rescue.`,
@@ -3196,21 +3336,72 @@ export class ApprovalService implements IApprovalService {
         }
       }
 
-      // #3424 admin_rescue (default): the request is still opened (a privileged
-      // admin can override it, and legacy 15.x literal slots stay queryable) —
-      // the only option that neither waves the record through nor kills the
-      // run — but warn loudly so the misconfiguration surfaces instead of
-      // silently locking the record with no obvious cause.
+      // [#22824] admin_rescue (default), and a `fallback` that found nobody
+      // above: the request opens on a NAMED slate, the request organization's
+      // administrators. They are ordinary approvers in the ordinary inbox: the
+      // `approverId` index lists and counts the request for each of them, the
+      // fan-out below tells each of them, and a decision by one of them is a
+      // slot decision, recorded as an approval and never as an override. Before
+      // this the request opened on the slate that names no one, which no inbox
+      // listed and no notification reached, so the #3424 override was the
+      // only way out and every downstream feature needed a rescue arm.
+      //
+      // The administrators go through the SAME resolver as `approvers` (as
+      // `user` entries, one shared group), so OOO delegation and the fan-out
+      // apply to them unchanged. The abandoned slate and the reason are kept
+      // in `__resolvedFrom` beside the primary resolution inputs, namespaced
+      // as the `fallback` branch namespaces its own.
       //
       // Re-tested rather than assumed: a `fallback` that landed people above
-      // has already turned this into a normal request, and warning "decidable
-      // only by a privileged admin" about it would be false.
+      // has already turned this into a normal request.
       if (!slateNamesAPerson(approvers)) {
-        this.logger?.warn?.(
-          `[approvals] approval node '${input.nodeId}' on ${input.object}/${input.recordId} resolved to no concrete approver`
-          + ' — the request is decidable only by a privileged admin. Check that the approver target(s) are staffed.',
-          { object: input.object, recordId: input.recordId, node: input.nodeId, resolved: approvers },
-        );
+        const reason = emptySlateReason(approvers, fallbackDegraded);
+        const found = await this.organizationAdministrators(requestOrg);
+        const administrators = 'ids' in found ? found.ids : [];
+        if (administrators.length) {
+          // Every per_group tag collected so far describes a slot that is no
+          // longer on this request (the primary slate's literals, and a failed
+          // fallback's): the tally reads the administrators' one group only.
+          for (const slot of Object.keys(groups)) delete groups[slot];
+          const administratorSlate = await this.expandApprovers(
+            {
+              approvers: administrators.map((value) => ({ type: 'user', value, group: ADMIN_RESCUE_GROUP })),
+            },
+            liveRecord, requestOrg, { now: nowDate.getTime(), substitutions, groups, exprCtx },
+          );
+          resolvedFrom['admin_rescue:abandoned'] = [...approvers];
+          resolvedFrom['admin_rescue:reason'] = reason;
+          this.logger?.warn?.(
+            `[approvals] approval node '${input.nodeId}' on ${input.object}/${input.recordId} resolved to no concrete `
+            + `approver (${reason}) — opening on this organization's administrators per onEmptyApprovers: `
+            + `'admin_rescue'. Staff the approver target(s), or declare onEmptyApprovers: 'fallback' with `
+            + `fallbackApprovers to name who decides instead.`,
+            {
+              object: input.object, recordId: input.recordId, node: input.nodeId,
+              resolved: approvers, administrators: administratorSlate,
+            },
+          );
+          approvers = administratorSlate;
+          routedToAdministrators = reason;
+        } else {
+          // Break-glass stays break-glass (#3424): an organization whose
+          // administrators' slate resolves to nobody opens the request on the
+          // slate that names no one — the only option that neither waves the
+          // record through nor kills the run — and only the privileged
+          // override can decide it. Said loudly, with the fix.
+          const why = 'failure' in found
+            ? `the administrators of organization '${requestOrg}' could not be read (${found.failure})`
+            : requestOrg
+              ? `organization '${requestOrg}' has no administrator`
+              : 'the request has no organization, so it has no organization administrators';
+          this.logger?.warn?.(
+            `[approvals] approval node '${input.nodeId}' on ${input.object}/${input.recordId} resolved to no concrete `
+            + `approver (${reason}), and ${why}, so the request opens on a slate that names no one: it is in no `
+            + `one's queue and decidable only by a privileged admin's override. Staff the approver target(s), give `
+            + `the organization an administrator, or declare onEmptyApprovers: 'fallback' with fallbackApprovers.`,
+            { object: input.object, recordId: input.recordId, node: input.nodeId, resolved: approvers, organizationId: requestOrg },
+          );
+        }
       }
     }
 
@@ -3274,6 +3465,21 @@ export class ApprovalService implements IApprovalService {
       step_name: input.nodeId, step_index: 0, action: 'submit',
       actor_id: input.submitterId ?? context.userId ?? null, comment: null, created_at: now,
     }, { context: SYSTEM_CTX });
+
+    // [#22824] The request's display says why it is with the administrators:
+    // one system note on its timeline (no person took it, so `actor_id` is
+    // null, ADR-0118 D1 — the shape the OOO hop below records), naming which
+    // approver entries resolved to no one. The same reason rides
+    // `__resolvedFrom` for the audit snapshot.
+    if (routedToAdministrators) {
+      await this.engine.insert('sys_approval_action', {
+        id: uid('aact'), request_id: id, organization_id: requestOrg,
+        step_name: input.nodeId, step_index: 0, action: 'comment',
+        actor_id: null,
+        comment: `Routed to this organization's administrators because the approver slate named no one: ${routedToAdministrators}.`,
+        created_at: now,
+      }, { context: SYSTEM_CTX });
+    }
 
     // OOO substitution audit + notification (#1322 M4). Each hop that rerouted
     // an approver away from an out-of-office user is recorded on the request's
@@ -3339,14 +3545,17 @@ export class ApprovalService implements IApprovalService {
     //
     // Who is told is the reminder's recipient rule, read off the slate this
     // request actually opened on (after OOO delegation and after an
-    // `onEmptyApprovers: 'fallback'` replacement):
+    // `onEmptyApprovers: 'fallback'` or `'admin_rescue'` replacement — so the
+    // organization's administrators a rescue opened on are told like any
+    // other approver, #22824):
     //  - each CONCRETE approver (a user id or an email), once — a person the
     //    slate lists under two groups (per_group tagging) is one person;
     //  - never a `type:value` literal: an unstaffed position / team names no
     //    one, and `notify()` drops every slot address anyway. So a slate of
-    //    literals only — what `admin_rescue` opens — notifies nobody, and an
-    //    `auto_approve` / `fail` empty slate opened no request to tell anyone
-    //    about: `onEmptyApprovers` decides that case, not this fan-out;
+    //    literals only — what `admin_rescue` opens only in an organization
+    //    with no administrator — notifies nobody, and an `auto_approve` /
+    //    `fail` empty slate opened no request to tell anyone about:
+    //    `onEmptyApprovers` decides that case, not this fan-out;
     //  - not an out-of-office DELEGATE, who was already told above by
     //    `approval.ooo_substituted` — one message per approver, not two.
     // No one-tap decision links: ADR-0043 mints those on `remind()` only, and
@@ -6849,97 +7058,6 @@ export class ApprovalService implements IApprovalService {
   }
 
   /**
-   * The "who acts next" constraint of a list or count read: the request ids
-   * its two arms match together, or `null` when the filter asked neither
-   * (callers then skip the id constraint, exactly as before #22725).
-   *
-   *   - `approverId`: requests where one of those addresses holds a pending
-   *     slot ({@link ApprovalService.approverRequestIds});
-   *   - `unstaffed: true`: pending requests nobody on the slate can decide,
-   *     which this caller may override
-   *     ({@link ApprovalService.unstaffedOverridableRequestIds}).
-   *
-   * The arms are ORed, never ANDed. The contract states this on the
-   * `unstaffed` member: one request answers "my pending approvals, rescues
-   * included", and the paged total counts both. `listRequests` and
-   * `countRequests` both call this, so the list and the total it pages
-   * cannot disagree about either arm.
-   */
-  private async awaitingRequestIds(
-    filter: { approverId?: string | string[]; unstaffed?: boolean } | undefined,
-    context: ExecutionContext,
-    tenantOrg: string | null,
-  ): Promise<string[] | null> {
-    const approverTargets = (Array.isArray(filter?.approverId) ? filter!.approverId : filter?.approverId ? [filter.approverId] : [])
-      .map(t => String(t).trim())
-      .filter(Boolean);
-    const byApprover = await this.approverRequestIds(approverTargets, tenantOrg);
-    if (filter?.unstaffed !== true) return byApprover;
-    const unstaffed = await this.unstaffedOverridableRequestIds(context, tenantOrg);
-    return [...new Set<string>([...(byApprover ?? []), ...unstaffed])];
-  }
-
-  /**
-   * [#22725] The `unstaffed` arm. These are the PENDING requests whose slate
-   * names no person and which this caller may override. This is the queue an
-   * `onEmptyApprovers: 'admin_rescue'` request waits in. Before this arm it
-   * waited in none: `approverRequestIds` matches a slot against the addresses
-   * a caller names, and an override actor's own addresses never equal an
-   * unstaffed `position:<p>` literal. So no "My Pending" listed the request
-   * and no bell counted it. A `lockRecord: true` record stayed locked until
-   * someone browsed the unfiltered list.
-   *
-   * "Names no person" is {@link slateNamesAPerson}, the test the open path
-   * applies before it warns "decidable only by a privileged admin". It is read
-   * off the stored slate as it stands now, never off a flag written at open
-   * time. So a slate that loses its last named approver to a decision and
-   * keeps only literals is caught as well. A slate that still names a person
-   * is not, even if that person has left: proving they left needs a directory
-   * read per slot, which neither this arm nor the open path makes.
-   *
-   * "May override" is {@link ApprovalService.isOverrideActor} and nothing else.
-   * There is no second notion of "admin" here. It is asked twice:
-   *   - first as the visibility read asks it (`visibleRequestIds`' first line,
-   *     the caller's organization). A caller who may override nothing pays no
-   *     read, and gets nothing;
-   *   - then per row, as `attachViewers` asks it for `viewer.can_override`
-   *     (the row's organization). So every row this arm adds reads
-   *     `can_override: true`, and a tenant admin's rescue queue never reaches
-   *     past their organization.
-   *
-   * Read with `SYSTEM_CTX`, like every probe in this file. The scan is the
-   * live pending queue inside the caller's organization wall, bounded by the
-   * same window as the approver index. A failed read throws; it is not read as
-   * an empty queue.
-   */
-  private async unstaffedOverridableRequestIds(
-    context: ExecutionContext,
-    tenantOrg: string | null,
-  ): Promise<string[]> {
-    if (!this.isOverrideActor(context, tenantOrg)) return [];
-    const where: any = { status: 'pending' };
-    if (tenantOrg) where.organization_id = tenantOrg;
-    const rows = await this.engine.find('sys_approval_request', {
-      where, fields: ['id', 'pending_approvers', 'organization_id'],
-      limit: ApprovalService.APPROVER_INDEX_CAP, context: SYSTEM_CTX,
-    });
-    const list: any[] = Array.isArray(rows) ? rows : [];
-    if (list.length >= ApprovalService.APPROVER_INDEX_CAP) {
-      this.logger?.warn?.('[approvals] unstaffed-request probe hit its window — results may be truncated', {
-        cap: ApprovalService.APPROVER_INDEX_CAP,
-      });
-    }
-    const ids: string[] = [];
-    for (const row of list) {
-      if (row?.id == null) continue;
-      if (slateNamesAPerson(csvSplit(row.pending_approvers))) continue;
-      if (!this.isOverrideActor(context, row.organization_id ?? null)) continue;
-      ids.push(String(row.id));
-    }
-    return ids;
-  }
-
-  /**
    * The request ids this caller is a PARTICIPANT of, or `null` for a caller
    * who may see everything in scope (#3590).
    *
@@ -7230,7 +7348,6 @@ export class ApprovalService implements IApprovalService {
       recordId?: string;
       status?: ApprovalStatus | ApprovalStatus[];
       approverId?: string | string[];
-      unstaffed?: boolean;
       submitterId?: string;
       q?: string;
       limit?: number;
@@ -7239,13 +7356,14 @@ export class ApprovalService implements IApprovalService {
     context: ExecutionContext,
   ): Promise<ApprovalRequestRow[]> {
     const { where, tenantOrg } = await this.buildRequestWhere(filter, context);
+    const approverTargets = (Array.isArray(filter?.approverId) ? filter!.approverId : filter?.approverId ? [filter.approverId] : [])
+      .map(t => String(t).trim())
+      .filter(Boolean);
 
     // Every filter now pushes into the engine (issue #1745): approver via
     // the normalized index, status arrays via $in — so the page window is
-    // always engine-side and correct at any table size. [#22725] The
-    // `unstaffed` arm joins the approver arm as an id set too, so a rescue
-    // request pages exactly like any other row.
-    const ids = await this.awaitingRequestIds(filter, context, tenantOrg);
+    // always engine-side and correct at any table size.
+    const ids = await this.approverRequestIds(approverTargets, tenantOrg);
     if (ids) {
       if (ids.length === 0) return [];
       where.id = ids.length === 1 ? ids[0] : { $in: ids };
@@ -7288,9 +7406,11 @@ export class ApprovalService implements IApprovalService {
     context: ExecutionContext,
   ): Promise<number> {
     const { where, tenantOrg } = await this.buildRequestWhere(filter, context);
+    const approverTargets = (Array.isArray(filter?.approverId) ? filter!.approverId : filter?.approverId ? [filter.approverId] : [])
+      .map(t => String(t).trim())
+      .filter(Boolean);
 
-    // [#22725] The same two arms `listRequests` reads, from the same helper.
-    const ids = await this.awaitingRequestIds(filter, context, tenantOrg);
+    const ids = await this.approverRequestIds(approverTargets, tenantOrg);
     if (ids) {
       if (ids.length === 0) return 0;
       where.id = ids.length === 1 ? ids[0] : { $in: ids };

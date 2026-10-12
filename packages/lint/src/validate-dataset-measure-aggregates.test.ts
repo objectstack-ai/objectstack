@@ -40,7 +40,7 @@ import {
 // one line of at most 200 characters — so the pin covers every firing variant
 // this suite exercises, not a chosen few. Run the whole file: those cases read
 // what the cases above fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateDatasetMeasureAggregates: typeof validateDatasetMeasureAggregatesUnrecorded = (...args) => {
   const found = validateDatasetMeasureAggregatesUnrecorded(...args);
   fired.push(...found);
@@ -750,8 +750,10 @@ describe('the cube leg — an analyticsCubes member the analytics door refuses i
     expect(json?.message).toContain('aggregate "count_distinct" over field "meta"');
     expect(json?.message).toContain('`json`');
     // The door that refuses it later is the cube's, never the dataset compile leg.
-    expect(json?.hint).toContain('on the cube with `400 INVALID_FIELD`');
+    // [#22161] The one-line `fix:` names no door; `os explain` names both.
+    expect(json?.hint).not.toContain('INVALID_FIELD');
     expect(json?.hint).not.toContain('DATASET_INVALID');
+    expect(explanationOf(RULE)).toContain("a cube's by the analytics door when a query names the measure");
 
     const [flagged] = findings(cubeStack({ measures: { distinct_stages: measure('count_distinct', 'stages') } }));
     expect(flagged?.message).toContain('`select` with `multiple: true`');
@@ -942,8 +944,10 @@ describe('the cube leg — every cube measure is judged by the aggregate × fiel
     expect(issue.message).toContain('(`text` on object "fx_ledger")');
     expect(explanationOf(RULE)).toContain(`\`sum\`: ${AGGREGATE_FIELD_TYPE_COMPATIBILITY.sum.join(', ')};`);
     // The door that refuses it later is the cube's, never the dataset compile leg.
-    expect(issue.hint).toContain('on the cube with `400 INVALID_FIELD`');
+    // [#22161] The one-line `fix:` names no door; `os explain` names both.
+    expect(issue.hint).not.toContain('INVALID_FIELD');
     expect(issue.hint).not.toContain('DATASET_INVALID');
+    expect(explanationOf(RULE)).toContain("a dataset's by its compile (`400 DATASET_INVALID`)");
 
     expect(
       validateDatasetMeasureAggregates(
@@ -1137,6 +1141,49 @@ describe('[#22161] one-line verdicts — the two ids', () => {
       expect(text, rule).toContain(`a structured-JSON type — ${[...STRUCTURED_JSON_TYPES].join(', ')} —`);
       expect(text, rule).toContain(`an inherently multi option type (${[...MULTI_OPTION_TYPES].join(', ')})`);
       expect(text, rule).toContain(`a multi-capable type (${[...MULTI_CAPABLE_TYPES].join(', ')}) flagged`);
+    }
+  });
+});
+
+// [#22161] Slice 12: the `fix:` line. The measure id names the aggregates the
+// declaration accepts, and the dimension id its one remedy per class; why
+// `count` reaches further, the stored-numeric route, the doors that refuse the
+// pair later and the per-member `$contains` query are the explanations'.
+describe('[#22161] one-line fixes — the two ids', () => {
+  const IDS = [MEASURE_AGGREGATE_FIELD_TYPE_REFUSED, DIMENSION_JSON_STORED_FIELD_REFUSED];
+
+  it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => IDS.includes(f.rule));
+    // Coverage control: each id fired; the measure id on a type row and on a
+    // flagged declaration, the dimension id on both classes, on a dataset and a cube.
+    const measure = converted.filter((f) => f.rule === MEASURE_AGGREGATE_FIELD_TYPE_REFUSED).map((f) => f.hint);
+    expect(measure.some((h) => / type accepts: /.test(h))).toBe(true);
+    expect(measure.some((h) => / declaration accepts: /.test(h))).toBe(true);
+    const dimension = converted.filter((f) => f.rule === DIMENSION_JSON_STORED_FIELD_REFUSED).map((f) => f.hint);
+    expect(dimension.some((h) => h.startsWith('Group by a field that stores one scalar value'))).toBe(true);
+    expect(dimension.some((h) => h.includes('`$contains`'))).toBe(true);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('`os explain` carries what the `fix:` lines no longer say', () => {
+    const facts: Record<string, readonly string[]> = {
+      [MEASURE_AGGREGATE_FIELD_TYPE_REFUSED]: [
+        '`count` accepts every type, because it reads no value',
+        'STORED as a numeric field (a computed column)',
+        "a dataset's by its compile (`400 DATASET_INVALID`)",
+        "a cube's by the analytics door when a query names the measure (`400 INVALID_FIELD`)",
+      ],
+      [DIMENSION_JSON_STORED_FIELD_REFUSED]: [
+        'store the part of the document you group on in a field of its own',
+        '`where { FIELD: { $contains: VALUE } }`',
+        'one query per member',
+      ],
+    };
+    for (const rule of IDS) {
+      for (const fact of facts[rule]) expect(explanationOf(rule), `${rule} explanation names ${fact}`).toContain(fact);
     }
   });
 });

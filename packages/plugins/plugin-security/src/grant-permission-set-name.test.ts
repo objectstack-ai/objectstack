@@ -1,25 +1,18 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [ADR-0131 D4] `sys_user_permission_set.permission_set` names the grant's set
- * beside `permission_set_id`, and the two never disagree.
+ * [ADR-0131 D4] A grant names its permission set BY NAME
+ * (`sys_user_permission_set.permission_set`), and nothing derives that name
+ * from `permission_set_id` any more (D10's first step): a non-system write
+ * naming a set the security catalog does not hold is refused, and a grant that
+ * carries no name is refused as `required`.
  *
  * Measured on a REAL `ObjectQL` engine over a real SQL driver with the REAL
  * `SecurityPlugin` started on it the way a kernel composition does, because
- * what is pinned here is what the WRITE DOOR does with a supplied name — the
- * engine's own `readonly` strips, the security middleware, the delegated-admin
- * gate and the reference check all sit on that path, and a double would answer
- * for none of them.
- *
- * What the door did with a supplied name before the hooks existed (measured on
- * this branch with the column declared and the hooks unregistered, over this
- * harness): an INSERT stored a supplied name verbatim, whatever set it named,
- * from a system and a non-system caller alike — the engine's create-side
- * `readonly` strip exempts the reserved `sys_` namespace; a non-system UPDATE
- * dropped it silently (the update-side strip) and a system UPDATE stored it;
- * an id written alone left the name NULL. So the column alone would have let a
- * client land a grant whose two halves disagree, and every refusal below is
- * the hooks' — each one is ablated in the PR record.
+ * what is pinned here is what the WRITE DOOR does — the security middleware,
+ * the delegated-admin gate and the engine's validation all sit on that path.
+ * The database holds ZERO `sys_permission_set` rows: the catalog is the
+ * registry (ADR-0131 D3), and no grant path needs a row.
  *
  * Refusals are identified by their ADR-0112 envelope — `code` and `status`,
  * read through `resolveThrownHttpError`, the resolver both HTTP doors answer
@@ -41,7 +34,7 @@ import { SysPositionPermissionSet } from './objects/sys-position-permission-set.
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import {
   GRANT_SET_NAME_HOOK_PACKAGE,
-  grantSetNameMismatchMessage,
+  grantSetNotInCatalogMessage,
   registerGrantPermissionSetNameHooks,
 } from './grant-permission-set-name.js';
 
@@ -63,6 +56,10 @@ const QA_ADMIN = {
   },
 } as unknown as PermissionSet;
 
+const QA_ALPHA = { name: 'qa_alpha', label: 'QA Alpha', objects: {} } as unknown as PermissionSet;
+const QA_BETA = { name: 'qa_beta', label: 'QA Beta', objects: {} } as unknown as PermissionSet;
+const CATALOG = [MEMBER_DEFAULT, QA_ADMIN, QA_ALPHA, QA_BETA];
+
 const SYS = { isSystem: true } as const;
 const ADMIN = { userId: 'u_admin', positions: [], permissions: ['qa_admin'] };
 
@@ -74,7 +71,7 @@ afterEach(async () => {
   }
 });
 
-async function boot(opts: { walled?: boolean } = {}) {
+async function boot() {
   const engine = new ObjectQL();
   engine.registerDriver(
     new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }),
@@ -101,13 +98,12 @@ async function boot(opts: { walled?: boolean } = {}) {
   const services: Record<string, unknown> = {
     manifest: { register: vi.fn() },
     objectql: engine,
+    // The security catalog's environment half: the sets a grant may name.
     metadata: {
-      get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
-      list: async () => [MEMBER_DEFAULT, QA_ADMIN],
+      get: async (type: string, name: string) =>
+        type === 'permission' ? (CATALOG.find((s) => s.name === name) ?? null) : (engine.getSchema(name) ?? null),
+      list: async () => CATALOG,
     },
-    ...(opts.walled
-      ? { 'org-scoping': { name: 'com.objectstack.org-scoping' }, tenancy: { posture: 'isolated' } }
-      : {}),
   };
   const ctx: any = {
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -124,12 +120,9 @@ async function boot(opts: { walled?: boolean } = {}) {
   await plugin.start(ctx);
   vi.spyOn((engine as any).logger, 'warn').mockImplementation(() => undefined);
 
-  const seed = opts.walled ? { isSystem: true, tenantId: 'org_a' } : SYS;
-  const set = (id: string, name: string) => ({
-    id, name, label: name, object_permissions: '{}', field_permissions: '{}', system_permissions: '[]', active: true,
-  });
-  await engine.insert('sys_permission_set', [set('ps_alpha', 'qa_alpha'), set('ps_beta', 'qa_beta')], { context: seed } as any);
-  return { engine, plugin };
+  // ⛔ No `sys_permission_set` row is seeded: a grant names its set, and the
+  // set is the catalog's definition of that name (ADR-0131 D3/D4).
+  return { engine, plugin, ctx };
 }
 
 type Harness = Awaited<ReturnType<typeof boot>>;
@@ -154,15 +147,15 @@ async function grantsOf(h: Harness, userId: string): Promise<any[]> {
   return Array.isArray(rows) ? rows : [];
 }
 
-function expectNameRefusal(err: unknown, value: unknown): void {
+function expectNotInCatalogRefusal(err: unknown, value: string): void {
   const env = envelopeOf(err);
   expect([env.code, env.status]).toEqual(['VALIDATION_FAILED', 400]);
   expect(env.fields).toHaveLength(1);
   expect(env.fields[0]).toMatchObject({
     field: 'permission_set',
-    code: 'invalid_value',
+    code: 'reference_not_found',
     value,
-    constraint: { target: 'sys_permission_set', targetField: 'name', derivedFrom: 'permission_set_id' },
+    constraint: { target: 'permission', targetField: 'name' },
   });
 }
 
@@ -171,132 +164,78 @@ function expectNameRefusal(err: unknown, value: unknown): void {
 // ---------------------------------------------------------------------------
 
 describe('the data door (a non-system writer)', () => {
-  it('a grant written with the id alone gets the name of the set the id points at', async () => {
+  it('a grant naming a catalog set is stored by name alone, with zero sys_permission_set rows', async () => {
     const h = await boot();
-    await h.engine.insert('sys_user_permission_set', { user_id: 'u_1', permission_set_id: 'ps_alpha' }, { context: ADMIN } as any);
+    await h.engine.insert('sys_user_permission_set', { user_id: 'u_1', permission_set: 'qa_alpha' }, { context: ADMIN } as any);
     const [row] = await grantsOf(h, 'u_1');
-    expect(row).toMatchObject({ permission_set_id: 'ps_alpha', permission_set: 'qa_alpha' });
+    expect(row).toMatchObject({ permission_set: 'qa_alpha' });
+    expect(row.permission_set_id ?? null).toBeNull();
+    expect(await h.engine.find('sys_permission_set', { context: SYS })).toEqual([]);
   });
 
-  it('a supplied name that agrees with the id is accepted and stored', async () => {
-    const h = await boot();
-    await h.engine.insert(
-      'sys_user_permission_set', { user_id: 'u_2', permission_set_id: 'ps_alpha', permission_set: 'qa_alpha' }, { context: ADMIN } as any,
-    );
-    expect((await grantsOf(h, 'u_2'))[0]).toMatchObject({ permission_set_id: 'ps_alpha', permission_set: 'qa_alpha' });
-  });
-
-  it('NEGATIVE — a supplied name of ANOTHER set is refused 400 VALIDATION_FAILED, invalid_value at permission_set; nothing is stored', async () => {
+  it('NEGATIVE — a name the catalog does not hold is refused 400 VALIDATION_FAILED, reference_not_found at permission_set; nothing is stored', async () => {
     const h = await boot();
     const err = await refusalOf(() => h.engine.insert(
-      'sys_user_permission_set', { user_id: 'u_3', permission_set_id: 'ps_alpha', permission_set: 'qa_beta' }, { context: ADMIN } as any,
+      'sys_user_permission_set', { user_id: 'u_2', permission_set: 'qa_nowhere' }, { context: ADMIN } as any,
     ));
-    expectNameRefusal(err, 'qa_beta');
-    expect(envelopeOf(err).fields[0].message).toBe(grantSetNameMismatchMessage('qa_beta'));
-    // The refusal names no set the caller did not send.
-    expect(envelopeOf(err).fields[0].message).not.toContain('qa_alpha');
+    expectNotInCatalogRefusal(err, 'qa_nowhere');
+    expect(envelopeOf(err).fields[0].message).toBe(grantSetNotInCatalogMessage('qa_nowhere'));
+    expect(await grantsOf(h, 'u_2')).toHaveLength(0);
+  });
+
+  it('NEGATIVE — a grant written with the id alone is refused 400 VALIDATION_FAILED, required at permission_set: nothing derives a name from the id', async () => {
+    const h = await boot();
+    const err = await refusalOf(() => h.engine.insert(
+      'sys_user_permission_set', { user_id: 'u_3', permission_set_id: 'ps_alpha' }, { context: ADMIN } as any,
+    ));
+    const env = envelopeOf(err);
+    expect([env.code, env.status]).toEqual(['VALIDATION_FAILED', 400]);
+    expect(env.fields.map((f: any) => [f.field, f.code])).toContainEqual(['permission_set', 'required']);
     expect(await grantsOf(h, 'u_3')).toHaveLength(0);
   });
 
-  it('NEGATIVE — a supplied name beside an id that names no set is refused the same way; nothing is stored', async () => {
+  it('a batch insert with one row naming no catalog set is refused whole; nothing is stored', async () => {
     const h = await boot();
     const err = await refusalOf(() => h.engine.insert(
-      'sys_user_permission_set', { user_id: 'u_4', permission_set_id: 'ps_nowhere', permission_set: 'qa_alpha' }, { context: ADMIN } as any,
+      'sys_user_permission_set',
+      [{ user_id: 'u_4', permission_set: 'qa_alpha' }, { user_id: 'u_4', permission_set: 'qa_nowhere' }],
+      { context: ADMIN } as any,
     ));
-    expectNameRefusal(err, 'qa_alpha');
+    expectNotInCatalogRefusal(err, 'qa_nowhere');
     expect(await grantsOf(h, 'u_4')).toHaveLength(0);
   });
 
-  it('a batch insert with one disagreeing row is refused whole; nothing is stored', async () => {
+  it('an update re-naming the grant to another catalog set lands; one naming no catalog set is refused and the row is untouched', async () => {
     const h = await boot();
-    const err = await refusalOf(() => h.engine.insert('sys_user_permission_set', [
-      { user_id: 'u_b1', permission_set_id: 'ps_alpha' },
-      { user_id: 'u_b2', permission_set_id: 'ps_beta', permission_set: 'qa_alpha' },
-    ], { context: ADMIN } as any));
-    expectNameRefusal(err, 'qa_alpha');
-    expect(await grantsOf(h, 'u_b1')).toHaveLength(0);
-    expect(await grantsOf(h, 'u_b2')).toHaveLength(0);
-  });
-
-  it('an update by id that re-points the grant moves the name with it', async () => {
-    const h = await boot();
-    await h.engine.insert('sys_user_permission_set', { id: 'g_up', user_id: 'u_5', permission_set_id: 'ps_alpha' }, { context: ADMIN } as any);
-    await h.engine.update('sys_user_permission_set', { id: 'g_up', permission_set_id: 'ps_beta' }, { context: ADMIN } as any);
-    expect((await grantsOf(h, 'u_5'))[0]).toMatchObject({ permission_set_id: 'ps_beta', permission_set: 'qa_beta' });
-  });
-
-  it('an update by id that re-points the grant AND echoes the new name lands both (the echo survives the readonly strip)', async () => {
-    const h = await boot();
-    await h.engine.insert('sys_user_permission_set', { id: 'g_echo', user_id: 'u_6', permission_set_id: 'ps_alpha' }, { context: ADMIN } as any);
-    await h.engine.update(
-      'sys_user_permission_set', { id: 'g_echo', permission_set_id: 'ps_beta', permission_set: 'qa_beta' }, { context: ADMIN } as any,
-    );
-    expect((await grantsOf(h, 'u_6'))[0]).toMatchObject({ permission_set_id: 'ps_beta', permission_set: 'qa_beta' });
-  });
-
-  it('NEGATIVE — an update by id that re-points the grant but echoes the OLD name is refused; the row is untouched', async () => {
-    const h = await boot();
-    await h.engine.insert('sys_user_permission_set', { id: 'g_stale', user_id: 'u_7', permission_set_id: 'ps_alpha' }, { context: ADMIN } as any);
+    await h.engine.insert('sys_user_permission_set', { id: 'ups_5', user_id: 'u_5', permission_set: 'qa_alpha' }, { context: ADMIN } as any);
+    await h.engine.update('sys_user_permission_set', { id: 'ups_5', permission_set: 'qa_beta' }, { context: ADMIN } as any);
+    expect((await grantsOf(h, 'u_5'))[0]).toMatchObject({ permission_set: 'qa_beta' });
     const err = await refusalOf(() => h.engine.update(
-      'sys_user_permission_set', { id: 'g_stale', permission_set_id: 'ps_beta', permission_set: 'qa_alpha' }, { context: ADMIN } as any,
+      'sys_user_permission_set', { id: 'ups_5', permission_set: 'qa_nowhere' }, { context: ADMIN } as any,
     ));
-    expectNameRefusal(err, 'qa_alpha');
-    expect((await grantsOf(h, 'u_7'))[0]).toMatchObject({ permission_set_id: 'ps_alpha', permission_set: 'qa_alpha' });
+    expectNotInCatalogRefusal(err, 'qa_nowhere');
+    expect((await grantsOf(h, 'u_5'))[0]).toMatchObject({ permission_set: 'qa_beta' });
   });
 
-  it('NEGATIVE — an update by id writing only a disagreeing name is refused; the row is untouched', async () => {
+  it('an echo of the stored name is not a new name: a grant whose set left the catalog still takes unrelated edits', async () => {
     const h = await boot();
-    await h.engine.insert('sys_user_permission_set', { id: 'g_name', user_id: 'u_8', permission_set_id: 'ps_alpha' }, { context: ADMIN } as any);
-    const err = await refusalOf(() => h.engine.update(
-      'sys_user_permission_set', { id: 'g_name', permission_set: 'qa_beta' }, { context: ADMIN } as any,
-    ));
-    expectNameRefusal(err, 'qa_beta');
-    expect((await grantsOf(h, 'u_8'))[0]).toMatchObject({ permission_set_id: 'ps_alpha', permission_set: 'qa_alpha' });
-  });
-
-  it('a whole-record round trip (the agreeing name echoed, another column edited) is accepted and changes nothing else', async () => {
-    const h = await boot();
-    await h.engine.insert('sys_user_permission_set', { id: 'g_rt', user_id: 'u_9', permission_set_id: 'ps_alpha' }, { context: ADMIN } as any);
+    await h.engine.insert('sys_user_permission_set', { id: 'ups_6', user_id: 'u_6', permission_set: 'qa_gone' }, { context: SYS } as any);
     await h.engine.update(
-      'sys_user_permission_set', { id: 'g_rt', permission_set: 'qa_alpha', reason: 'edited' }, { context: ADMIN } as any,
+      'sys_user_permission_set', { id: 'ups_6', permission_set: 'qa_gone', reason: 'edited' }, { context: ADMIN } as any,
     );
-    expect((await grantsOf(h, 'u_9'))[0]).toMatchObject({ permission_set_id: 'ps_alpha', permission_set: 'qa_alpha', reason: 'edited' });
+    expect((await grantsOf(h, 'u_6'))[0]).toMatchObject({ permission_set: 'qa_gone', reason: 'edited' });
   });
 
-  it('a cleared name is not a clear: the derived name is written back', async () => {
+  it('a catalog read that throws refuses nothing: the write proceeds and the operator is told', async () => {
     const h = await boot();
-    await h.engine.insert('sys_user_permission_set', { id: 'g_clr', user_id: 'u_10', permission_set_id: 'ps_alpha' }, { context: ADMIN } as any);
-    await h.engine.update('sys_user_permission_set', { id: 'g_clr', permission_set: null }, { context: ADMIN } as any);
-    expect((await grantsOf(h, 'u_10'))[0]).toMatchObject({ permission_set_id: 'ps_alpha', permission_set: 'qa_alpha' });
-  });
-
-  it('a predicate (multi) update that re-points every matched grant names every one of them', async () => {
-    const h = await boot();
-    await h.engine.insert('sys_user_permission_set', [
-      { id: 'g_m1', user_id: 'u_m1', permission_set_id: 'ps_alpha' },
-      { id: 'g_m2', user_id: 'u_m2', permission_set_id: 'ps_alpha' },
-    ], { context: ADMIN } as any);
-    await h.engine.update(
-      'sys_user_permission_set', { permission_set_id: 'ps_beta' },
-      { where: { permission_set_id: 'ps_alpha' }, multi: true, context: ADMIN } as any,
+    const metadata = h.ctx.getService('metadata');
+    vi.spyOn(metadata, 'get').mockRejectedValue(new Error('metadata store down'));
+    await h.engine.insert('sys_user_permission_set', { user_id: 'u_7', permission_set: 'qa_nowhere' }, { context: ADMIN } as any);
+    expect(await grantsOf(h, 'u_7')).toHaveLength(1);
+    expect(h.ctx.logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('was NOT checked'),
+      expect.objectContaining({ object: 'sys_user_permission_set' }),
     );
-    const rows = [...(await grantsOf(h, 'u_m1')), ...(await grantsOf(h, 'u_m2'))];
-    expect(rows).toHaveLength(2);
-    for (const r of rows) expect(r).toMatchObject({ permission_set_id: 'ps_beta', permission_set: 'qa_beta' });
-  });
-
-  it('an update that writes neither column leaves the name alone (no backfill rides an unrelated edit)', async () => {
-    const h = await boot();
-    // A grant written before the column existed carries no name: written here
-    // with the hooks unbound, then the hooks bound again.
-    await h.plugin.destroy();
-    await h.engine.insert('sys_user_permission_set', { id: 'g_old', user_id: 'u_11', permission_set_id: 'ps_alpha' }, { context: SYS } as any);
-    expect((await grantsOf(h, 'u_11'))[0]?.permission_set ?? null).toBeNull();
-    expect(registerGrantPermissionSetNameHooks(h.engine as any)).toBe(true);
-    await h.engine.update('sys_user_permission_set', { id: 'g_old', reason: 'edited' }, { context: ADMIN } as any);
-    const [row] = await grantsOf(h, 'u_11');
-    expect(row).toMatchObject({ reason: 'edited' });
-    expect(row?.permission_set ?? null).toBeNull();
   });
 });
 
@@ -305,132 +244,20 @@ describe('the data door (a non-system writer)', () => {
 // ---------------------------------------------------------------------------
 
 describe('a system writer', () => {
-  it('a system grant written with the id alone is stamped too (a seed, a writer outside this repository)', async () => {
+  it('stands down: a system grant naming a set not yet registered is stored as written (seed ordering)', async () => {
     const h = await boot();
-    await h.engine.insert('sys_user_permission_set', { user_id: 'u_s1', permission_set_id: 'ps_beta' }, { context: SYS } as any);
-    expect((await grantsOf(h, 'u_s1'))[0]).toMatchObject({ permission_set_id: 'ps_beta', permission_set: 'qa_beta' });
+    await h.engine.insert('sys_user_permission_set', { user_id: 'u_s1', permission_set: 'qa_later' }, { context: SYS } as any);
+    expect((await grantsOf(h, 'u_s1'))[0]).toMatchObject({ permission_set: 'qa_later' });
   });
 
-  it('NEGATIVE — a system grant naming another set is refused: a platform writer that names the wrong set fails at its first write', async () => {
+  it('NEGATIVE — a system grant naming nothing is still refused as required (the engine judges every writer)', async () => {
     const h = await boot();
     const err = await refusalOf(() => h.engine.insert(
-      'sys_user_permission_set', { user_id: 'u_s2', permission_set_id: 'ps_beta', permission_set: 'qa_alpha' }, { context: SYS } as any,
+      'sys_user_permission_set', { user_id: 'u_s2', permission_set_id: 'ps_beta' }, { context: SYS } as any,
     ));
-    expectNameRefusal(err, 'qa_alpha');
+    const env = envelopeOf(err);
+    expect([env.code, env.status]).toEqual(['VALIDATION_FAILED', 400]);
     expect(await grantsOf(h, 'u_s2')).toHaveLength(0);
-  });
-
-  it('a system grant whose set row does not exist yet is left as written (seed ordering), name and all', async () => {
-    const h = await boot();
-    await h.engine.insert(
-      'sys_user_permission_set', { user_id: 'u_s3', permission_set_id: 'ps_later', permission_set: 'qa_later' }, { context: SYS } as any,
-    );
-    expect((await grantsOf(h, 'u_s3'))[0]).toMatchObject({ permission_set_id: 'ps_later', permission_set: 'qa_later' });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// A walled, two-organization posture
-// ---------------------------------------------------------------------------
-
-describe("walled posture, two organizations — the name is read from the WRITER's catalog", () => {
-  const ORG_A_ADMIN = { ...ADMIN, tenantId: 'org_a' };
-
-  it("an own-organization grant is stamped; a supplied name beside another organization's set id is refused exactly like one beside an id that names nothing", async () => {
-    const h = await boot({ walled: true });
-    await h.engine.insert('sys_permission_set',
-      { id: 'ps_b_only', name: 'qa_b_only', label: 'B only', object_permissions: '{}', field_permissions: '{}', system_permissions: '[]', active: true },
-      { context: { isSystem: true, tenantId: 'org_b' } } as any);
-
-    await h.engine.insert('sys_member', { user_id: 'u_wa', organization_id: 'org_a', role: 'member' },
-      { context: { isSystem: true, tenantId: 'org_a' } } as any);
-    await h.engine.insert('sys_user_permission_set', { user_id: 'u_wa', permission_set_id: 'ps_alpha' }, { context: ORG_A_ADMIN } as any);
-    expect((await grantsOf(h, 'u_wa'))[0]).toMatchObject({ permission_set: 'qa_alpha', organization_id: 'org_a' });
-
-    const foreign = envelopeOf(await refusalOf(() => h.engine.insert(
-      'sys_user_permission_set', { user_id: 'u_wb', permission_set_id: 'ps_b_only', permission_set: 'qa_b_only' }, { context: ORG_A_ADMIN } as any,
-    )));
-    const nowhere = envelopeOf(await refusalOf(() => h.engine.insert(
-      'sys_user_permission_set', { user_id: 'u_wb', permission_set_id: 'ps_nowhere', permission_set: 'qa_b_only' }, { context: ORG_A_ADMIN } as any,
-    )));
-    const shape = (e: typeof foreign) => [e.code, e.status, e.fields.map((f) => [f.field, f.code, f.value, f.message, Object.keys(f).sort(), f.constraint])];
-    expect(shape(foreign)).toEqual(shape(nowhere));
-    expect([foreign.code, foreign.status]).toEqual(['VALIDATION_FAILED', 400]);
-    expect(await grantsOf(h, 'u_wb')).toHaveLength(0);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// A name never crosses organizations — judged at write time
-// ---------------------------------------------------------------------------
-
-describe("a name never crosses organizations — the set row must be the grant's own organization's or organization-less", () => {
-  /** A tenant-less system writer: its catalog read is not walled, so it can read every organization's set. */
-  const TENANTLESS = SYS;
-  const B_SET = {
-    id: 'ps_b_only', name: 'qa_b_only', label: 'B only', object_permissions: '{}', field_permissions: '{}', system_permissions: '[]', active: true,
-  };
-  const GLOBAL_SET = {
-    id: 'ps_global', name: 'qa_global', label: 'Global', object_permissions: '{}', field_permissions: '{}', system_permissions: '[]', active: true,
-  };
-  async function walledWithSets() {
-    const h = await boot({ walled: true });
-    await h.engine.insert('sys_permission_set', B_SET, { context: { isSystem: true, tenantId: 'org_b' } } as any);
-    await h.engine.insert('sys_permission_set', GLOBAL_SET, { context: SYS } as any);
-    return h;
-  }
-
-  it('an organization-less grant pointing at another organization’s set is stored UNNAMED', async () => {
-    const h = await walledWithSets();
-    await h.engine.insert('sys_user_permission_set', { user_id: 'u_x1', permission_set_id: 'ps_b_only' }, { context: TENANTLESS } as any);
-    const [row] = await grantsOf(h, 'u_x1');
-    expect(row).toMatchObject({ permission_set_id: 'ps_b_only', organization_id: null });
-    expect(row.permission_set ?? null).toBeNull();
-  });
-
-  it('NEGATIVE — a supplied name of another organization’s set is refused, from a system writer too; nothing is stored', async () => {
-    const h = await walledWithSets();
-    const err = await refusalOf(() => h.engine.insert(
-      'sys_user_permission_set', { user_id: 'u_x2', permission_set_id: 'ps_b_only', permission_set: 'qa_b_only' }, { context: TENANTLESS } as any,
-    ));
-    expectNameRefusal(err, 'qa_b_only');
-    expect(await grantsOf(h, 'u_x2')).toHaveLength(0);
-  });
-
-  it('CONTROL — the same writer naming an organization-less set, or an organization’s grant its own set, is stamped', async () => {
-    const h = await walledWithSets();
-    await h.engine.insert('sys_user_permission_set', { user_id: 'u_x3', permission_set_id: 'ps_global' }, { context: TENANTLESS } as any);
-    expect((await grantsOf(h, 'u_x3'))[0]).toMatchObject({ permission_set: 'qa_global', organization_id: null });
-    await h.engine.insert(
-      'sys_user_permission_set', { user_id: 'u_x3', permission_set_id: 'ps_b_only', organization_id: 'org_b' }, { context: TENANTLESS } as any,
-    );
-    const own = (await grantsOf(h, 'u_x3')).find((g) => g.organization_id === 'org_b');
-    expect(own).toMatchObject({ permission_set: 'qa_b_only' });
-  });
-
-  it('an update re-pointing an organization-less grant at another organization’s set clears its name', async () => {
-    const h = await walledWithSets();
-    await h.engine.insert('sys_user_permission_set', { id: 'g_x4', user_id: 'u_x4', permission_set_id: 'ps_global' }, { context: TENANTLESS } as any);
-    expect((await grantsOf(h, 'u_x4'))[0]).toMatchObject({ permission_set: 'qa_global' });
-    await h.engine.update('sys_user_permission_set', { id: 'g_x4', permission_set_id: 'ps_b_only' }, { context: TENANTLESS } as any);
-    const [row] = await grantsOf(h, 'u_x4');
-    expect(row.permission_set_id).toBe('ps_b_only');
-    expect(row.permission_set ?? null).toBeNull();
-  });
-
-  it('moving a grant out of the organization its set belongs to clears the name; a name on an organization-less set moves with it', async () => {
-    const h = await walledWithSets();
-    await h.engine.insert('sys_user_permission_set', [
-      { id: 'g_x5', user_id: 'u_x5', permission_set_id: 'ps_b_only', organization_id: 'org_b' },
-      { id: 'g_x6', user_id: 'u_x5', permission_set_id: 'ps_global', organization_id: 'org_b' },
-    ], { context: TENANTLESS } as any);
-    await h.engine.update('sys_user_permission_set', { id: 'g_x5', organization_id: null }, { context: TENANTLESS } as any);
-    await h.engine.update('sys_user_permission_set', { id: 'g_x6', organization_id: null }, { context: TENANTLESS } as any);
-    const rows = await grantsOf(h, 'u_x5');
-    const moved = rows.find((g) => g.id === 'g_x5');
-    expect(moved?.organization_id ?? null).toBeNull();
-    expect(moved?.permission_set ?? null).toBeNull();
-    expect(rows.find((g) => g.id === 'g_x6')).toMatchObject({ permission_set: 'qa_global' });
   });
 });
 

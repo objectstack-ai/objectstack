@@ -30,7 +30,7 @@ import { explainRule } from './rule-explanations.js';
 // the lowered-handler suffix included, not a chosen few. Run the whole file:
 // that case reads what the cases above fired.
 const SHORTENED_RULE_IDS: readonly string[] = [HOOK_API_UPDATE_READONLY_FIELD, HOOK_API_UPDATE_READONLY_WHEN_FIELD];
-const firedShortened: Array<{ rule: string; message: string }> = [];
+const firedShortened: Array<{ rule: string; message: string; hint: string }> = [];
 const validateReadonlyHookWrites: typeof validateReadonlyHookWritesUnrecorded = (...args) => {
   const findings = validateReadonlyHookWritesUnrecorded(...args);
   for (const f of findings) if (SHORTENED_RULE_IDS.includes(f.rule)) firedShortened.push(f);
@@ -100,7 +100,9 @@ describe('validateReadonlyHookWrites - RED: a ctx.api write to a readonly field'
     // under the default onError:'abort'). Substring-matching 'sudo' is not
     // enough to tell "offers it" from "warns against it": the corrected hint
     // still contains the word. Pin the DIRECTION.
-    expect(findings[0].hint).toMatch(/sudo\(\) is NOT an option|not marshalled into the sandbox/);
+    // [#22161] The one-line `fix:` keeps the direction; the explanation says why.
+    expect(findings[0].hint).toMatch(/sudo\(\) is no option from a body/);
+    expect(explainRule(HOOK_API_UPDATE_READONLY_FIELD)?.paragraphs.join('\n')).toContain('not marshalled into the sandbox');
     expect(findings[0].hint).not.toMatch(/make the elevation explicit|write it through ctx\.api\.sudo/);
   });
 
@@ -320,7 +322,9 @@ describe('validateReadonlyHookWrites - RED: insert() of a static-readonly field 
     expect(findings[0].hint).toContain("runAs: 'system'");
     expect(findings[0].hint).toContain('beforeInsert');
     expect(findings[0].hint).toContain('ctx.input.last_activity_date');
-    expect(findings[0].hint).toMatch(/sudo\(\) is NOT an option|not marshalled into the sandbox/);
+    // [#22161] The one-line `fix:` keeps the direction; the explanation says why.
+    expect(findings[0].hint).toMatch(/sudo\(\) is no option from a body/);
+    expect(explainRule(HOOK_API_UPDATE_READONLY_FIELD)?.paragraphs.join('\n')).toContain('not marshalled into the sandbox');
     expect(findings[0].hint).not.toMatch(/make the elevation explicit|write it through ctx\.api\.sudo/);
   });
 
@@ -667,7 +671,9 @@ describe('validateReadonlyHookWrites - readonlyWhen is a SECOND shape, not the s
     // hook-derived value on a TRUE readonlyWhen field now LANDS". The hint used
     // to assert the opposite and thereby rule out the one remedy that works.
     expect(finding.hint).toContain('beforeUpdate hook');
-    expect(finding.hint).toContain('does land, even on a locked record');
+    // [#22161] Why it lands is the explanation's, one line away.
+    const why = explainRule(HOOK_API_UPDATE_READONLY_WHEN_FIELD)!.paragraphs.join('\n');
+    expect(why).toContain('does land, even on a locked record');
     expect(finding.hint).not.toMatch(/strips even a beforeUpdate-derived value/);
     // [#14010] The conditional lock is the one place elevation genuinely does
     // NOT help, so the hint must keep saying so now that the platform HAS a
@@ -681,9 +687,12 @@ describe('validateReadonlyHookWrites - readonlyWhen is a SECOND shape, not the s
     // AND a system context does not waive the conditional lock anyway ("LOCK 2 -
     // isSystem does NOT exempt a caller-supplied value"). The second reason is
     // what makes this hint's refusal survive if the first is ever fixed.
-    expect(finding.hint).toContain('Elevation is not a workaround here');
-    expect(finding.hint).toContain('not marshalled into the sandbox');
-    expect(finding.hint).toContain('does not waive the conditional lock');
+    // [#22161] The `fix:` line refuses both in one clause; the two reasons are
+    // the explanation's.
+    expect(finding.hint).toContain("runAs: 'system' and sudo() do not waive this lock");
+    expect(why).toContain('elevation is no workaround');
+    expect(why).toContain('not marshalled into the sandbox');
+    expect(why).toContain('does not waive the conditional lock');
     expect(finding.hint).not.toMatch(/write it through ctx\.api\.sudo/);
   });
 
@@ -841,5 +850,50 @@ describe('[#22161] one-line verdicts — the rule ids this file shortened', () =
     expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
     const text = explanation!.paragraphs.join('\n');
     for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
+});
+
+// [#22161] Slice 11: the `fix:` line. `hook-api-update-readonly-field` names
+// its two routes and the sudo() refusal in one line per verb; the reasoning and
+// the drop-the-field alternatives are its explanation's.
+// (`hook-api-update-readonly-when-field` is slice 12's, in the block below.)
+describe('[#22161] one-line fixes — hook-api-update-readonly-field', () => {
+  it('every `fix:` line of the id the cases above fired is one line of at most 200 characters', () => {
+    const converted = firedShortened.filter((f) => f.rule === HOOK_API_UPDATE_READONLY_FIELD);
+    // Coverage control: the update and the create arm both fired.
+    expect(converted.some((f) => f.hint.startsWith('Stamp it on the record'))).toBe(true);
+    expect(converted.some((f) => f.hint.startsWith("Declare runAs: 'system'"))).toBe(true);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('`os explain` carries the alternatives the `fix:` line no longer lists', () => {
+    const text = explainRule(HOOK_API_UPDATE_READONLY_FIELD)!.paragraphs.join('\n');
+    expect(text).toContain('Seeding a readonly column at create time is a SYSTEM act');
+    expect(text).toContain('drop `readonly: true` from the field');
+  });
+});
+
+// [#22161] Slice 12: the `fix:` line of `hook-api-update-readonly-when-field`:
+// the two routes and the refusal of elevation, in one line. The reasons and the
+// drop-the-field alternative are its explanation's.
+describe('[#22161] one-line fixes — hook-api-update-readonly-when-field', () => {
+  it('every `fix:` line of the id the cases above fired is one line of at most 200 characters', () => {
+    const converted = firedShortened.filter((f) => f.rule === HOOK_API_UPDATE_READONLY_WHEN_FIELD);
+    // Coverage control: the id fired.
+    expect(converted.some((f) => f.hint.startsWith('Derive '))).toBe(true);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('`os explain` carries the alternative the `fix:` line no longer lists', () => {
+    const text = explainRule(HOOK_API_UPDATE_READONLY_WHEN_FIELD)!.paragraphs.join('\n');
+    expect(text).toContain('otherwise drop the field from the payload');
+    expect(text).toContain('The warning never blocks a build');
+    expect(text).toContain('a TypeError at run time');
   });
 });

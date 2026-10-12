@@ -18,7 +18,11 @@ import type {
 // The declared envelope is written in ONE place for the whole platform (#3973).
 // [#22719] …and so is the read of a sandboxed hook's refusal sentence.
 import { sendOk, sendError, sandboxBusinessMessage } from '@objectstack/types';
+// [#22764] …and so is the `/data` door's answer for a sandboxed body it
+// answers as a fault.
+import { nestedRefusalEnvelope, sandboxFaultAnswer } from './error-response.js';
 import { mountDirectRoutes, type DirectMountedRoute } from './direct-mount.js';
+import { logError } from './log.js';
 
 /**
  * External Datasource Federation REST routes (ADR-0015 §6.2).
@@ -396,14 +400,45 @@ export function registerExternalDatasourceRoutes(
    * `.message`. It answers `undefined` for anything that is not a sandboxed
    * refusal, so every other message here is byte-identical.
    *
-   * ⛔ Only the SENTENCE moves. Both arms keep their status and their code:
-   * `EXTERNAL_IMPORT_ERROR` is what the import route answers for a refusal it
-   * relays from the metadata door (a declared `409 DESTRUCTIVE_CHANGE`
-   * included, which the import dogfood pins at `400`), so this family's status
-   * is its own decision and the shared classification is not asked here.
+   * ⛔ For a refusal only the SENTENCE moves. Both arms keep their status and
+   * their code: `EXTERNAL_IMPORT_ERROR` is what the import route answers for a
+   * refusal it relays from the metadata door (a declared `409
+   * DESTRUCTIVE_CHANGE` included, which the import dogfood pins at `400`), so
+   * this family's refusal status is its own decision and the shared refusal
+   * classification is not asked here. A FAULT is the other question, answered
+   * by {@link answerThrown} below.
    */
   const refusalSentence = (err: unknown): string =>
     sandboxBusinessMessage(err) ?? (err instanceof Error ? err.message : String(err));
+
+  /**
+   * [#22764] Both catch arms' answer. A sandboxed body the doors answer as a
+   * FAULT — one that CRASHED, or a refusal that DECLARED a 5xx — answers as the
+   * doors do ({@link sandboxFaultAnswer}), logged first because the caller no
+   * longer reads its words. Before, both reached this family's `400`: a crash
+   * as the caller's mistake, with the QuickJS wrapper around the native error
+   * text, and a declared `503` as a client error carrying its sentence.
+   * [#22885] The sandbox's own fault (a denied capability, a budget) is that
+   * answer's too, and reached this `400` with the runner's text until then.
+   *
+   * ⛔ Every other throw keeps this family's own `400` and code, a declared 4xx
+   * included: a sandboxed refusal declaring one, and the metadata door's
+   * `409 DESTRUCTIVE_CHANGE` the import dogfood pins at `400`. That status is
+   * a separate decision this does not take.
+   */
+  const answerThrown = (
+    res: any,
+    err: unknown,
+    code: 'EXTERNAL_DATASOURCE_ERROR' | 'EXTERNAL_IMPORT_ERROR',
+  ) => {
+    const fault = sandboxFaultAnswer(err);
+    if (fault) {
+      logError('[REST] external-datasource error:', err);
+      const nested = nestedRefusalEnvelope(fault);
+      return sendError(res, nested.status, nested.code, nested.message, nested.extra);
+    }
+    return sendError(res, 400, code, refusalSentence(err));
+  };
 
   /**
    * A refusal from the external-datasource service — same code as the
@@ -411,8 +446,7 @@ export function registerExternalDatasourceRoutes(
    * since #4264 every route here except the import (which has its own
    * registered code) answers its catch with this.
    */
-  const refused = (res: any, err: unknown) =>
-    sendError(res, 400, 'EXTERNAL_DATASOURCE_ERROR', refusalSentence(err));
+  const refused = (res: any, err: unknown) => answerThrown(res, err, 'EXTERNAL_DATASOURCE_ERROR');
 
   /**
    * ONE declaration of this registrar's surface (#5822): the array below is
@@ -489,7 +523,7 @@ export function registerExternalDatasourceRoutes(
           );
           sendOk(res, { object: result }, 201);
         } catch (err) {
-          sendError(res, 400, 'EXTERNAL_IMPORT_ERROR', refusalSentence(err));
+          answerThrown(res, err, 'EXTERNAL_IMPORT_ERROR');
         }
       },
     },

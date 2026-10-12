@@ -509,7 +509,7 @@ describe('the callee input maps are value slots (#19939)', () => {
   const CALLEE_MAPS: ReadonlyArray<readonly [string, Judged, string, Record<string, unknown>]> = [
     ['script', ScriptConfigSchema as unknown as Judged, 'inputs', { function: 'f' }],
     ['subflow', SubflowConfigSchema as unknown as Judged, 'input', { flowName: 'child_flow' }],
-    ['map', MapConfigSchema as unknown as Judged, 'input', { flowName: 'child_flow', collection: '{rows}' }],
+    ['map', MapConfigSchema as unknown as Judged, 'input', { flowName: 'child_flow', collection: { dialect: 'cel', source: 'rows' } }],
   ];
 
   it.each(CALLEE_MAPS)('%s: a `{token}` is refused at its key, naming its CEL envelope', (_type, schema, key, base) => {

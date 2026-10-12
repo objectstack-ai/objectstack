@@ -45,6 +45,11 @@
 // (ADR-0055), so the read row sits on `cpg_vault_item`, whose master is
 // private: explain's read verdict is pinned beside that door for a principal
 // who cannot read the master, for one who can, and for an id no row carries.
+// Whether explain may say such a record exists is decided by the ASKER's own
+// read (ruling A of the explain-asker decision): the principal explaining
+// itself a record it cannot read is told what an id no row carries is told,
+// and an administrator who reads it is told the principal's verdict, decider
+// included. The batch form answers each id as the singular form does.
 //
 // ## A transfer is judged by the update policies its door is judged by
 //
@@ -235,15 +240,23 @@ describe('security/explain answers a controlled_by_parent update as its PATCH do
     return { record: decision.record, sharing: sharing?.record as { outcome?: string; detail?: string } | undefined };
   };
 
-  /** explain for any verb, as the REST route answers it; the sharing layer's record attribution beside the record verdict. */
-  const explainAs = async (token: string, operation: ExplainOperation, object: string, recordId: string) => {
-    const res = await stack.apiAs(token, 'POST', '/security/explain', { object, operation, recordId });
+  /** The whole decision, as the REST route answers it; `userId` explains another user, as an administrator does. */
+  const explainDecision = async (token: string, body: Record<string, unknown>) => {
+    const res = await stack.apiAs(token, 'POST', '/security/explain', body);
     const text = await res.text();
-    expect(res.status, `explain ${operation} ${object}/${recordId}: ${text}`).toBe(200);
-    const decision = JSON.parse(text) as any;
+    expect(res.status, `explain ${JSON.stringify(body)}: ${text}`).toBe(200);
+    return JSON.parse(text) as any;
+  };
+
+  /** explain for any verb, as the REST route answers it; the sharing layer's record attribution beside the record verdict. */
+  const explainAs = async (token: string, operation: ExplainOperation, object: string, recordId: string, userId?: string) => {
+    const decision = await explainDecision(token, { object, operation, recordId, ...(userId ? { userId } : {}) });
     const sharing = (decision.layers ?? []).find((l: any) => l.layer === 'sharing');
     return { record: decision.record, sharing: sharing?.record as { outcome?: string; detail?: string } | undefined };
   };
+
+  /** The decision with its record id set aside: the one field two different ids must differ in. */
+  const withoutRecordId = (d: any) => ({ ...d, record: d.record ? { ...d.record, recordId: 'ID' } : d.record });
 
   const patch = async (token: string, object: string, id: string, name: string) =>
     answer(await stack.apiAs(token, 'PATCH', `/data/${object}/${id}`, { name }));
@@ -259,7 +272,7 @@ describe('security/explain answers a controlled_by_parent update as its PATCH do
     stewardId = await uid('cpe-steward@verify.test');
     const stewardSet = await ql.findOne('sys_permission_set', { where: { name: contractStewardSet.name }, context: SYS });
     expect(stewardSet?.id, 'fixture permission set seeded').toBeTruthy();
-    await ql.insert('sys_user_permission_set', { user_id: stewardId, permission_set_id: stewardSet.id }, { context: { ...SYS } });
+    await ql.insert('sys_user_permission_set', { user_id: stewardId, permission_set: stewardSet.name }, { context: { ...SYS } });
 
     await assertArmed([
       principalArmed({
@@ -397,16 +410,45 @@ describe('security/explain answers a controlled_by_parent update as its PATCH do
     }
 
     for (const verb of verbsOf('by_id_read_door')) {
-      it(`${verb}: a record under a master the principal cannot read is explained not visible, as its door answers`, async () => {
+      it(`${verb}: a record under a master the principal cannot read, explained to that principal, is the id no row carries`, async () => {
         const { object, door } = readDoorOf(verb);
         const id = underUnreadable[verb]!;
-        const explained = await explainAs(stewardTok, verb, object, id);
+        const explained = await explainDecision(stewardTok, { object, operation: verb, recordId: id });
+        const noRow = await explainDecision(stewardTok, { object, operation: verb, recordId: `${verb}-no-such-record` });
         const answered = await answer(await door(stewardTok, id));
         expect(answered.status, `${verb} door, the master's non-reader: ${answered.body}`).toBe(404);
         expect(answered.code).toBe('RECORD_NOT_FOUND');
 
-        expect(explained.record, `explain ${verb}`).toEqual({ recordId: id, visible: false, decidedBy: 'sharing' });
+        // The asker cannot read it: not visible, no decider, every layer the missing record's.
+        expect(explained.record, `explain ${verb}`).toEqual({ recordId: id, visible: false });
+        expect(explained.layers.find((l: any) => l.layer === 'sharing')?.record?.outcome).toBe('not_evaluated');
+        expect(withoutRecordId(explained), `explain ${verb}, whole`).toEqual(withoutRecordId(noRow));
+      });
+
+      it(`${verb}: the same record, explained by an administrator who reads it, is the principal's verdict, decider included`, async () => {
+        const { object, door } = readDoorOf(verb);
+        const id = underUnreadable[verb]!;
+        const adminRead = await answer(await door(adminTok, id));
+        expect(adminRead.status, `${verb} door, the administrator: ${adminRead.body}`).toBe(200);
+
+        const explained = await explainAs(adminTok, verb, object, id, stewardId);
+        expect(explained.record, `explain ${verb} for the steward`).toEqual({ recordId: id, visible: false, decidedBy: 'sharing' });
         expect(explained.sharing?.outcome).toBe('excluded');
+      });
+
+      it(`${verb}: the batch form answers each id as the singular form does, whoever asks`, async () => {
+        const { object } = readDoorOf(verb);
+        const ids = [underUnreadable[verb]!, underReadable[verb]!, `${verb}-no-such-batch-record`];
+        for (const [who, token, userId] of [['the steward', stewardTok, undefined], ['an administrator', adminTok, stewardId]] as const) {
+          const batch = await explainDecision(token, { object, operation: verb, recordIds: ids, ...(userId ? { userId } : {}) });
+          const singular: unknown[] = [];
+          for (const id of ids) singular.push((await explainAs(token, verb, object, id, userId)).record);
+          expect(batch.records, `${who}, ${verb} batch`).toEqual(singular);
+        }
+        const toSteward = await explainDecision(stewardTok, { object, operation: verb, recordIds: ids });
+        expect(toSteward.records[0]).toEqual({ recordId: ids[0], visible: false });
+        const toAdmin = await explainDecision(adminTok, { object, operation: verb, recordIds: ids, userId: stewardId });
+        expect(toAdmin.records[0]).toEqual({ recordId: ids[0], visible: false, decidedBy: 'sharing' });
       });
 
       it(`${verb}: control, a record under a master the principal reads is explained visible and its door answers 200`, async () => {
@@ -474,7 +516,7 @@ describe('security/explain answers a controlled_by_parent update as its PATCH do
       const boardStewardId = await uid('cpe-board-steward@verify.test');
       const set = await ql.findOne('sys_permission_set', { where: { name: boardStewardSet.name }, context: SYS });
       expect(set?.id, 'board steward permission set seeded').toBeTruthy();
-      await ql.insert('sys_user_permission_set', { user_id: boardStewardId, permission_set_id: set.id }, { context: { ...SYS } });
+      await ql.insert('sys_user_permission_set', { user_id: boardStewardId, permission_set: set.name }, { context: { ...SYS } });
       await assertArmed([
         principalArmed({
           stack,

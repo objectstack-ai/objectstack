@@ -477,6 +477,12 @@ const DISPATCHER_DOMAINS = {
   // `deps.error`.
   'approvals.ts': { handBuilt: 0 },
   'automation.ts': { handBuilt: 0 },
+  // [#22773] The inbound-hook door the `/automation` domain hands its one
+  // admitted route to: the trigger-api member's own JSON `Response` is handed
+  // back as `result` (the `/webhooks/redeliver` shape), and every refusal it
+  // makes itself — the two 501s, the sanitised 500s — goes through
+  // `deps.error`.
+  'automation-hooks.ts': { handBuilt: 0 },
   // The `/security` domain's catalog activation door (ADR-0126 §3 regime C,
   // ADR-0131 D6), split out of `security.ts` beside the gate it calls. Every
   // answer it gives goes through `deps.success` / `deps.error`.
@@ -485,6 +491,10 @@ const DISPATCHER_DOMAINS = {
   'i18n.ts': { handBuilt: 0 },
   'notifications.ts': { handBuilt: 0 },
   'packages.ts': { handBuilt: 0 },
+  // The `/security` domain's permission-set clone door (ADR-0126 §7.1), beside
+  // the activation door. Every answer goes through `deps.success` /
+  // `deps.error` / `deps.errorFromThrown`.
+  'permission-set-clone.ts': { handBuilt: 0 },
   'security.ts': { handBuilt: 0 },
   // No `storage.ts` — the `/storage` domain was retired in #4087 (it called
   // the storage contract with the wrong arity and read a Buffer as a

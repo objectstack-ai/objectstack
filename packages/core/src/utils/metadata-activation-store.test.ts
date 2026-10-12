@@ -362,4 +362,33 @@ describe('InMemoryMetadataActivationStore', () => {
         await store.setActive({ name: 'nightly_sync', packageId: 'crm', active: true });
         expect(await store.list()).toEqual([{ name: 'nightly_sync', packageId: 'crm', active: true }]);
     });
+
+    // The flow and action stores' test double refuses exactly the row the
+    // durable store refuses: a double more lenient than what it stands for lets
+    // a test pass a write the real ledger refuses.
+    it('REFUSES an empty-string package as the durable store does, and keeps nothing', async () => {
+        const store = new InMemoryMetadataActivationStore();
+        const { engine } = makeStoreEngine([]);
+
+        const fromDouble = await store.setActive({ name: 'env_action', packageId: '', active: false }).catch((e) => e);
+        const fromStore = await new ObjectStoreMetadataActivationStore(engine, 'action')
+            .setActive({ name: 'env_action', packageId: '', active: false }).catch((e) => e);
+
+        expect(fromDouble).toBeInstanceOf(TypeError);
+        expect(fromStore).toBeInstanceOf(TypeError);
+        // One refusal, two stores: the same text, except that the durable store
+        // names its row's type in the subject and the double has no type.
+        expect(fromDouble.message).toBe(fromStore.message.replace(`action 'env_action'`, `'env_action'`));
+        expect(await store.list()).toEqual([]);
+    });
+
+    it('keeps an item no package ships with packageId ABSENT', async () => {
+        const store = new InMemoryMetadataActivationStore();
+
+        await store.setActive({ name: 'env_action', active: false });
+
+        const rows = await store.list();
+        expect(rows).toEqual([{ name: 'env_action', active: false }]);
+        expect('packageId' in rows[0]).toBe(false);
+    });
 });

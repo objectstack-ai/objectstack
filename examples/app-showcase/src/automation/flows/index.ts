@@ -916,7 +916,7 @@ export const BatchRemindersFlow = defineFlow({
       type: 'loop',
       label: 'For each task',
       config: {
-        collection: '{tasks}',
+        collection: { dialect: 'cel', source: 'tasks' },
         iteratorVariable: 'task',
         indexVariable: 'taskIndex',
         maxIterations: 500,
@@ -1116,7 +1116,7 @@ export const NestedFanOutRemindersFlow = defineFlow({
       type: 'loop',
       label: 'For each task',
       config: {
-        collection: '{tasks}',
+        collection: { dialect: 'cel', source: 'tasks' },
         iteratorVariable: 'task',
         indexVariable: 'taskIndex',
         maxIterations: 500,
@@ -1541,7 +1541,7 @@ export const ReleaseSignoffFlow = defineFlow({
       type: 'map',
       label: 'Sign off each task',
       config: {
-        collection: '{items}',
+        collection: { dialect: 'cel', source: 'items' },
         iteratorVariable: 'task',
         flowName: 'showcase_one_task_signoff',
         itemObject: 'showcase_task',
@@ -1578,13 +1578,15 @@ export const ReleaseSignoffFlow = defineFlow({
  * or a schedule. The start node's config arms the hook:
  *
  *   POST /api/v1/automation/hooks/showcase_inbound_task_webhook/intake
- *   x-objectstack-signature: sha256=<hmac-sha256 of the raw body, key below>
+ *   x-objectstack-signature: t=<unix seconds>,v1=<hmac-sha256 of "<t>.<raw body>", key below>
  *   { "title": "...", "assignee": "...", "project": "<showcase_project id>" }
  *
- * The trigger validates the HMAC (constant-time), enqueues, and ACKs 202; a
- * queue consumer runs the flow with the JSON payload as the trigger record —
- * so `{record.title}` here reads straight from the webhook body, exactly like
- * a record-change flow reads its record.
+ * `signHttpBodyAt(rawBody, secret, Math.floor(Date.now() / 1000))` from
+ * `@objectstack/core` writes that header value. The trigger validates the HMAC
+ * (constant-time) and refuses a `t` more than 300 s from its own clock, then
+ * enqueues and ACKs 202; a queue consumer runs the flow with the JSON payload
+ * as the trigger record — so `{record.title}` here reads straight from the
+ * webhook body, exactly like a record-change flow reads its record.
  */
 export const InboundTaskWebhookFlow = defineFlow({
   name: 'showcase_inbound_task_webhook',

@@ -219,10 +219,10 @@ A direct grant is a data row; a position's sets are declared on the position's
 definition:
 
 ```typescript
-// Grant a set to a single user (direct grant)
+// Grant a set to a single user (direct grant) — by the set's name
 await objectql.object('sys_user_permission_set').insert({
   user_id: 'user123',
-  permission_set_id: psId,
+  permission_set: 'crm_sales_user',
 });
 
 // A position names the sets it distributes (everyone holding it gets them)
@@ -253,22 +253,24 @@ hand.
 ## Package suggestion — `isDefault` (ADR-0090 D5)
 
 A package may mark one of its sets `isDefault: true`: an **install-time
-suggestion** to bind it to the `everyone` anchor. The admin confirms each
-suggestion individually; nothing auto-binds, and the D7 linter rejects an
+suggestion** to give it to every signed-in member through the `everyone`
+anchor. An admin holding `manage_metadata` accepts each suggestion once, for
+the whole deployment; nothing auto-binds, and the D7 linter rejects an
 `isDefault` set that carries anchor-forbidden bits (VAMA, destructive bits,
 system permissions). A plain `'*'` wildcard grant is *not* an anchor-forbidden
 bit for `everyone` — the platform's own `member_default` baseline is exactly
 that shape; the wildcard ban is the stricter `guest` tier's rule.
 
-Pending suggestions are materialized as `sys_audience_binding_suggestion`
-rows (one per organization × package × set × anchor, read-only over the data
-API) and resolved through the security surface — both installing a package at
-runtime and declaring the set in the stack produce them:
+Suggestions are materialized as `sys_audience_binding_suggestion` rows (one
+per package × set × anchor for the deployment, owned by the Default
+Organization, read-only over the data API) and resolved through the security
+surface — any `isDefault` set the security catalog serves with an owning
+package produces one:
 
 ```http
 GET  /api/v1/security/suggested-bindings?status=pending   # list (reconciles first)
-POST /api/v1/security/suggested-bindings/:id/confirm      # create the everyone binding
-POST /api/v1/security/suggested-bindings/:id/dismiss      # decline the prompt
+POST /api/v1/security/suggested-bindings/:id/confirm      # accept: everyone carries the set
+POST /api/v1/security/suggested-bindings/:id/dismiss      # decline, or revoke an acceptance
 ```
 
 `status` accepts `pending`, `confirmed` or `dismissed`, and may be omitted to
@@ -276,15 +278,30 @@ list every suggestion. Any other value is rejected with a `400` naming the
 accepted set — it previously reached the query as a filter nothing matched, so
 a mistyped status returned an empty list that read as "no suggestions".
 
-All three require a tenant-level administrator (the anchors are tenant-level
-only — D12). Confirm writes a `sys_position_permission_set` row **as the
-caller**, so the audience-anchor gate re-checks the forbidden-bits predicate
-at the data layer. That row does not grant the set: what `everyone` grants is
-the `permissionSets` its definition names, so a confirmed suggestion changes no
-one's access until the set is named there. A suggestion whose binding was created out-of-band (boot
-baseline, manual bind) is marked `confirmed` automatically, and uninstalling
-the package prunes its pending suggestions. Studio surfaces pending
-suggestions after marketplace installs and in the Access pillar.
+All three require the `manage_metadata` capability, and under a walled
+tenancy posture the platform operator: the decision reaches every member of
+every organization, so a tenant administrator cannot make it. An acceptance
+takes effect at once. What `everyone` grants is the `permissionSets` its
+definition names, and the security plugin derives that definition as the
+deployment's baseline plus every accepted set — again on each accept, revoke,
+uninstall and package publish. No caller writes the definition itself (see
+[Authorization](./authorization)).
+
+- **The high-risk gate is on the definition.** Accepting a set that carries a
+  bit the `everyone` anchor forbids is refused with `403 PERMISSION_DENIED`;
+  if a later publish adds such a bit to an accepted set, the derivation
+  withholds it and logs why.
+- **Revoke** an acceptance by dismissing the accepted suggestion; uninstalling
+  the package removes its suggestions and its sets leave `everyone`.
+- A set the baseline already names (the served app's own `isDefault` set) is
+  marked `confirmed` without a resolver — observed, not accepted — and cannot
+  be dismissed here.
+- Only an `everyone` suggestion can be accepted. A decision a tenant
+  administrator recorded per organization before acceptances were
+  deployment-level is never carried over: the suggestion is pending again.
+
+Studio surfaces pending suggestions after marketplace installs and in the
+Access pillar.
 
 ## Delegated administration — `adminScope` (ADR-0090 D12)
 
@@ -348,8 +365,9 @@ has three author-visible consequences:
   an installed package declares (a `*.permission.ts` file, a stack's
   `permissionSets`) or a platform default such as `member_default`. Editing it
   through Setup or the metadata API answers `403 NOT_OVERRIDABLE` and stores
-  nothing. Clone it to a new name instead (the **Clone** action on the set, or
-  `POST /api/v1/data/sys_permission_set` with a new name) and edit the clone:
+  nothing. Clone it to a new name instead (the **Clone** action on the set,
+  `POST /api/v1/data/sys_permission_set` with a new name, or the clone door
+  below) and edit the clone:
   the clone is your organization's own set, and package upgrades keep reaching
   the original. Every other set (one created in this environment, a clone, or
   one saved into a writable runtime package) is edited in place: the edit
@@ -370,6 +388,36 @@ packaged set grants too much, clone it, narrow the clone, and bind the clone
 in its place: restriction is done by not granting. Narrowing the packaged set
 itself is the package author's change: they edit the declaration in the
 package and re-publish it (ADR-0086 two-doors).
+
+### Cloning a permission set (ADR-0126 §7.1)
+
+```text
+POST /api/v1/security/permission-sets/:name/clone    body: { "name": "...", "label": "..." }
+```
+
+The clone door copies a set's whole definition under a new machine name. It
+reads the source from the security catalog, where every packaged and
+environment-authored set lives, and never from a `sys_permission_set` record,
+so it works with no record at all. It saves the copy through the metadata layer
+as a set authored in this environment: no package, and no link back to the set
+it was copied from, so changes to the source never reach the copy.
+
+- **The body is `{ name, label }`, both required, and nothing else.** `name` is
+  a new snake_case machine name: a name failing that rule answers `400`, and a
+  name any permission set already uses (the source's own included) answers `409`
+  `RESOURCE_CONFLICT`. An unknown source answers `404`.
+- **Every permission facet is copied** — `objects`, `fields`,
+  `systemPermissions`, `tabPermissions`, `rowLevelSecurity`, `description`.
+- **The server drops a declared set of keys**: the package provenance
+  (`packageId`, `managedBy`, `protection` and the internal protection envelope),
+  and two privilege decisions — `adminScope` (delegated administration) and
+  `isDefault` (the `everyone` suggestion). Grant either deliberately on the copy
+  if it needs one. The response, `{ permissionSet, notice }`, says what was not
+  copied.
+- **The copy is held by nobody** until you add it to a position or assign it.
+- **Who may call it** is who may save a permission set through the metadata
+  API: a holder of `manage_metadata`. Anyone else is refused `403`
+  `PERMISSION_DENIED`.
 
 ### Declared ≠ enforced — diagnosing a frozen package set
 

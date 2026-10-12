@@ -688,7 +688,7 @@ describe('FlowSchema', () => {
             // live in `config.body` (a single-entry/single-exit region run in
             // the enclosing scope) and `iteratorVariable` is what binds `item`.
             config: {
-              collection: '{oldRecords}',
+              collection: { dialect: 'cel', source: 'oldRecords' },
               iteratorVariable: 'item',
               maxIterations: 200,
               body: {
@@ -1492,7 +1492,7 @@ describe('BPMN — Wait Event Configuration', () => {
    */
   it('nested in a region: the flow parse refuses the `wait` node itself, and the REGION contract still refuses the missing block by path', () => {
     const loopConfig = (bodyNode: Record<string, unknown>) => ({
-      collection: '{rows}', iteratorVariable: 'row',
+      collection: { dialect: 'cel', source: 'rows' }, iteratorVariable: 'row',
       body: { nodes: [bodyNode], edges: [] },
     });
     const bare = { id: 'pause', type: 'wait', label: 'Wait' };
@@ -2327,7 +2327,7 @@ describe('FlowSchema — top-level node ids are unique', () => {
       {
         id: 'n', type: 'loop', label: 'Loop',
         config: {
-          collection: '{items}',
+          collection: { dialect: 'cel', source: 'items' },
           body: {
             nodes: [{ id: 'start', type: 'assignment', label: 'Body step (reuses a top-level id)' }],
           },
@@ -2369,7 +2369,7 @@ describe('FlowSchema — one node-id space across the top-level nodes[] and ever
   const step = (id: string, label = id): FlowNode => ({ id, type: 'assignment', label });
   const loopOver = (bodyNodes: FlowNode[], bodyEdges: FlowEdge[] = []): FlowNode => ({
     id: 'n', type: 'loop', label: 'Loop',
-    config: { collection: '{items}', body: { nodes: bodyNodes, edges: bodyEdges } },
+    config: { collection: { dialect: 'cel', source: 'items' }, body: { nodes: bodyNodes, edges: bodyEdges } },
   });
   const bodyReusesStart = flowWith([
     { id: 'start', type: 'start', label: 'Start' },
@@ -2523,9 +2523,9 @@ describe('FlowSchema — one node-id space across the top-level nodes[] and ever
     // `l${k}` sits at nesting k and its body is nesting k + 1.
     let body: { nodes: FlowNode[]; edges: FlowEdge[] } = { nodes: innermost, edges: innermostEdges };
     for (let k = nesting - 1; k >= 1; k--) {
-      body = { nodes: [{ id: `l${k}`, type: 'loop', label: `L${k}`, config: { collection: '{items}', body } }], edges: [] };
+      body = { nodes: [{ id: `l${k}`, type: 'loop', label: `L${k}`, config: { collection: { dialect: 'cel', source: 'items' }, body } }], edges: [] };
     }
-    return { id: 'n', type: 'loop', label: 'Loop', config: { collection: '{items}', body } };
+    return { id: 'n', type: 'loop', label: 'Loop', config: { collection: { dialect: 'cel', source: 'items' }, body } };
   };
   const roundTripped = (nesting: number, innermost: FlowNode[], innermostEdges: FlowEdge[] = []): Flow => JSON.parse(JSON.stringify(flowWith([
     { id: 'start', type: 'start', label: 'Start' },
@@ -2698,7 +2698,7 @@ describe('FlowSchema — an edge resolves in its own graph, and is followed once
 
   const loopOf = (bodyNodes: FlowNode[], bodyEdges: FlowEdge[]): FlowNode => ({
     id: 'sweep', type: 'loop', label: 'Sweep',
-    config: { collection: '{items}', body: { nodes: bodyNodes, edges: bodyEdges } },
+    config: { collection: { dialect: 'cel', source: 'items' }, body: { nodes: bodyNodes, edges: bodyEdges } },
   });
 
   it('a region edge resolves in its region body — an endpoint on the top-level graph is refused at the region path, naming where that node lives', () => {
@@ -2741,7 +2741,7 @@ describe('FlowSchema — an edge resolves in its own graph, and is followed once
     const issues = issuesOf(flowOf([start, {
       id: 'sweep', type: 'loop', label: 'Sweep',
       config: {
-        collection: '{items}',
+        collection: { dialect: 'cel', source: 'items' },
         body: { nodes: [{ id: 'b1', type: 'assignment' }], edges: [null, { id: 'x', source: 'b1', target: 'ghost' }] },
       },
     } as never, end], [

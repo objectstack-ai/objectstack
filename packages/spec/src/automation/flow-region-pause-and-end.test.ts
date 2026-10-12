@@ -48,7 +48,7 @@ const pausingNode = (type: string, id = 'pauser'): FlowNode => ({
   type,
   label: `A ${type}`,
   ...(type === 'wait' ? { waitEventConfig: { eventType: 'timer' as const, timerDuration: 'PT1H' } } : {}),
-  ...(type === 'map' ? { config: { collection: '{items}', flowName: 'per_item' } } : {}),
+  ...(type === 'map' ? { config: { collection: { dialect: 'cel', source: 'items' }, flowName: 'per_item' } } : {}),
   ...(type === 'subflow' ? { config: { flowName: 'child' } } : {}),
   // The approval node's declared contract is judged whole at parse, so its
   // fixture carries the one key that contract requires.
@@ -67,7 +67,7 @@ const flowWith = (nodes: FlowNode[], edges: FlowEdge[] = []): Flow => ({
 
 const loopOver = (bodyNodes: FlowNode[], id = 'sweep'): FlowNode => ({
   id, type: 'loop', label: 'Sweep',
-  config: { collection: '{items}', body: { nodes: bodyNodes, edges: [] } },
+  config: { collection: { dialect: 'cel', source: 'items' }, body: { nodes: bodyNodes, edges: [] } },
 });
 
 const tryCatchOver = (tryNodes: FlowNode[], catchNodes: FlowNode[], id = 'guard'): FlowNode => ({
@@ -308,10 +308,10 @@ describe('the declared boundaries — measured, so they move deliberately', () =
     const nestedTo = (nesting: number): Flow => {
       let body: { nodes: FlowNode[]; edges: FlowEdge[] } = { nodes: [pausingNode('wait')], edges: [] };
       for (let k = nesting - 1; k >= 1; k--) {
-        body = { nodes: [{ id: `l${k}`, type: 'loop', label: `L${k}`, config: { collection: '{items}', body } }], edges: [] };
+        body = { nodes: [{ id: `l${k}`, type: 'loop', label: `L${k}`, config: { collection: { dialect: 'cel', source: 'items' }, body } }], edges: [] };
       }
       return JSON.parse(JSON.stringify(flowWith([
-        { id: 'sweep', type: 'loop', label: 'Sweep', config: { collection: '{items}', body } },
+        { id: 'sweep', type: 'loop', label: 'Sweep', config: { collection: { dialect: 'cel', source: 'items' }, body } },
       ]))) as Flow;
     };
 

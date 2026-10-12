@@ -221,6 +221,9 @@ const NOT_A_STAND_IN = {
     'site would delete no check.',
   formatReport: 'formats a `VerifyReport` this package produced; presentation, not conformance.',
   formatRlsReport: 'formats an `RlsReport` this package produced; presentation, not conformance.',
+  runReferenceShapeProofs: 'same `VerifyStack` handle as runCrudVerification.',
+  formatReferenceShapeReport:
+    'formats a `ReferenceShapeReport` this package produced; presentation, not conformance.',
   fillRelationalRefs:
     'takes one `CrudCase` derived by `deriveCrudCases` — a data record this package built, with no ' +
     'external implementer.',

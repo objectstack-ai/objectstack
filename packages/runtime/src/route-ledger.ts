@@ -277,7 +277,7 @@ export const NON_DISPATCH_MOUNT_PREFIXES = [
 /**
  * The ledger.
  *
- * CENSUS (generated): this list holds 86 rows.
+ * CENSUS (generated): this list holds 88 rows.
  *
  * ⛔ THAT NUMBER IS WRITTEN BY A TOOL — never by hand.
  * `pnpm check:route-ledger-census` counts the rows below and fails when the two
@@ -354,11 +354,29 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
       + '`manage_metadata`, then the ADR-0126 §5 posture rule requiring the platform operator in `group`/`isolated` — one shared '
       + 'implementation in `domains/activation-gate.ts`. The name must resolve in the security catalog the resolver reads (404 '
       + 'otherwise, 503 when no catalog is bound), and the audience anchors `everyone` / `guest` are refused 400 in either direction; switching `admin_full_access` off is refused 403 by the last-admin guard\'s '
-      + 'ledger hook. The ONE `/security` route the dispatcher mounts on the wire (`registerSecurityActivationRoutes`); the rest '
-      + 'of `/security` is the REST server\'s. NOT JS-SDK surface, for the action door\'s reason: its caller is the Setup console '
+      + 'ledger hook. One of the two `/security` routes the dispatcher mounts on the wire (`registerSecurityActivationRoutes`, '
+      + 'beside the permission-set clone door below); the rest of `/security` is the REST server\'s. NOT JS-SDK surface, for the action door\'s reason: its caller is the Setup console '
       + '(Deactivate on the position and permission-set pages), which calls the platform API directly; adding a client method '
       + 'reclassifies this row to `sdk`. Pinned in `domains/catalog-activation-door.test.ts` and '
       + '`qa/dogfood/test/catalog-activation-door.dogfood.test.ts`' },
+  { route: 'POST /security/permission-sets/:name/clone', domain: '/security', disposition: 'server-only',
+    note: "ADR-0126 §7.1 — copy a permission set's whole definition under a NEW machine name: the sanctioned way to customize a "
+      + "packaged set whose base is locked (the lock-and-clone rule), and the clone that keeps working once no `sys_permission_set` "
+      + "row exists. Body `{ name, label }`, both mandatory, closed; the name must meet the metadata name rule (snake_case), else 400. "
+      + "The SOURCE is read through the security catalog the resolver reads (registry first, then the metadata service) — ⛔ never a "
+      + "`sys_permission_set` row; unknown 404, no catalog bound or an unreadable one 503. A target name the catalog holds (the "
+      + "source's own included) answers 409 `RESOURCE_CONFLICT`, and the save is create-only (`parentVersion: null`), so a row "
+      + "written in between is refused rather than overwritten. The copy is saved through the metadata protocol's `saveMetaItem` as an "
+      + "environment-authored `permission` item — no organization, no package — so `/meta`'s schema, gates and hooks judge it. "
+      + "Whole-definition copy minus ONE server-declared list, `PERMISSION_SET_CLONE_DROPPED_KEYS` (`domains/permission-set-clone.ts`): "
+      + "the provenance envelope (derived from the spec), `packageId` / `managedBy` / `protection`, and the two privilege decisions "
+      + "`adminScope` and `isDefault`; the response `{ permissionSet, notice }` names what was not copied. ⛔ No ancestry on the "
+      + "definition or the response (ADR-0126 §9). ⚑ `manage_metadata` — the metadata door's own verdict "
+      + "(`metaWriteCapabilityVerdict`), because the clone is a metadata save; fail-closed, only `isSystem` bypassing; the domain-wide "
+      + "anonymous floor answers 401 first. ⛔ NOT the ADR-0126 §5 activation gate: a clone takes nothing away from any tenant. NOT "
+      + "JS-SDK surface, for the flow clone door's reason: its caller is the Setup console's Clone on the permission-set page, which "
+      + "calls the platform API directly; adding a client method reclassifies this row to `sdk`. Pinned in "
+      + "`domains/permission-set-clone.test.ts` and over HTTP in `qa/dogfood/test/permission-set-clone-door.dogfood.test.ts`" },
 
   // ── keys ──────────────────────────────────────────────────────────────────
   { route: 'POST /keys', domain: '/keys', disposition: 'sdk', client: 'keys.create',
@@ -484,6 +502,9 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
     note: "authored metadata, so `manage_metadata` gates it — the same `isFlowAuthoringWrite` door as `POST /automation` above: fail-closed on an absent executionContext, an absent `systemPermissions` or an empty one, refusing 403 `PERMISSION_DENIED`, with only `isSystem` bypassing" },
   { route: 'DELETE /automation/:name', domain: '/automation', disposition: 'sdk', client: 'automation.delete',
     note: "authored metadata, so `manage_metadata` gates it — the same `isFlowAuthoringWrite` door as `POST /automation` above, and the destructive member of the family: before the gate a tenant org owner WITHOUT the capability deregistered a registered flow, 200, and flow metadata is registered at ENVIRONMENT scope so the write crossed the tenant wall. Fail-closed on an absent executionContext, an absent `systemPermissions` or an empty one, refusing 403 `PERMISSION_DENIED`, with only `isSystem` bypassing" },
+  // [#22773] The inbound hook's hosted door (segment 2 of ruling A on #22757).
+  { route: 'POST /automation/hooks/:flowName/:hookId', domain: '/automation', disposition: 'public',
+    note: 'the inbound hook a third-party sender posts a signed event through to start an `api` flow (ADR-0041 Tier 1). Session-less by design: the HMAC signature over the raw body, under the hook\'s own secret, is the only credential, and the trigger-api slot\'s ITriggerApiService.handleInboundHook verifies it before anything is enqueued. The ONE route under /automation the domain\'s anonymous floor admits: the ADR-0069 allow-list\'s one parameterised row (core auth-gate.ts, exactly these four segments, POST only) is read by the floor, the ADR-0069 gate and the membership gate\'s skip through one reading, and the domain hands the route to `domains/automation-hooks.ts` on the statement after the floor, ahead of every other /automation gate. Forwarded with its body UNREAD, the two path parameters decoded, the slot resolved per request, and the member\'s Response returned as it is. An absent slot or member answers 501 NOT_IMPLEMENTED, never ROUTE_NOT_FOUND; a body consumed before it got here is a transport fault, answered 500 and logged. Every other method on the path stays an ordinary /automation request at the floor. This is the door for a kernel with no raw app; a self-hosted kernel serves the same path from the trigger\'s raw-app mount, which never passes through the dispatcher. NOT JS-SDK surface: a sender is a third-party service, not a client of this SDK. Pinned in `domains/automation-hooks.test.ts`' },
 
   // ── auth (better-auth passthrough) ────────────────────────────────────────
   { route: '* /auth/**', domain: '/auth', disposition: 'sdk', client: 'auth.me',

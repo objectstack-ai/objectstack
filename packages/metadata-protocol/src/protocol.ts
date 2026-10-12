@@ -123,8 +123,15 @@ import type {
     UpdateManyDataRequest,
     DeleteManyDataRequest,
     InstallPackageRequest,
-    InstallPackageResponse
+    InstallPackageResponse,
+    ImportUnmanagedPackageRequest,
+    ImportUnmanagedPackageResponse,
 } from '@objectstack/spec/api';
+// [ADR-0131 D6] The `unmanaged` install mode: its request is PARSED through
+// the published declaration, and the pure half of the import (what a package
+// body holds, what is copied, what is refused) lives beside this file.
+import { ImportUnmanagedPackageRequestSchema } from '@objectstack/spec/api';
+import { planUnmanagedImport, unmanagedInstallPostureRefusal } from './package-unmanaged-install.js';
 import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoutes, WellKnownCapabilities, CapabilityDescriptor } from '@objectstack/spec/api';
 import type { ApiError, BatchOperationResult } from '@objectstack/spec/api';
 import { readServiceSelfInfo, readChannelRoute, readAuthFamilies, isSubscribableChannel, CHANNEL_SURFACE_SLOTS, ErrorCode, standardErrorCodeForHttpStatus, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
@@ -3418,8 +3425,9 @@ function specValidationFindings(
             // Byte-identical to the clause before commit d806081dd: the first three findings
             // as `<path>: <message>`, then a `(+N more)` tail. Read by
             // `duplicatePackage`'s `failed[].error`, `migrateStoredMetadata`'s
-            // `rows[].reason`, and the two out-of-package log faces — none of
-            // which carry `issues[]`.
+            // `rows[].reason`, `importUnmanagedPackage`'s rolled-back refusal
+            // (`'package-unmanaged-import'`), and the two out-of-package log
+            // faces — none of which carry `issues[]`.
             return issues.slice(0, 3)
                 .map((i: { path: string; message: string }) => `${i.path || '<root>'}: ${i.message}`)
                 .join('; ')
@@ -5026,8 +5034,21 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
  * the findings. It therefore stays OUT of {@link specValidationFindings}'
  * trimming case and keeps the full-prose default — the polarity that comment
  * defends, working as designed for a door added after it.
+ *
+ * ⚠️ [ADR-0131 D6] `'package-unmanaged-import'` is stated by
+ * {@link ObjectStackProtocolImplementation.importUnmanagedPackage}, the
+ * `unmanaged` install mode's copy-once import, for every item it writes. Its
+ * refusal is relayed by that verb's own thrown error, which carries the
+ * item's message and nothing structured beside it, so it too keeps the
+ * full-prose default on the 422. Its 409 clause is its own: the import accepts
+ * no `force`, and it writes only names no environment row held when it began.
  */
-type MetadataWriteFace = 'package-duplicate' | 'meta-envelope' | 'meta-dispatch' | 'external-import';
+type MetadataWriteFace =
+    | 'package-duplicate'
+    | 'meta-envelope'
+    | 'meta-dispatch'
+    | 'external-import'
+    | 'package-unmanaged-import';
 
 function destructiveChangeRemedy(
     face: MetadataWriteFace | undefined,
@@ -5072,6 +5093,19 @@ function destructiveChangeRemedy(
             return `this import cannot be forced: the external-table import route accepts no \`force\`. `
                 + `Import the table under a new \`name\`, or save the changed definition of '${name}' `
                 + `through \`PUT /api/v1/meta/object/${name}?force=true\`, which accepts the destructive change on purpose.`;
+        case 'package-unmanaged-import':
+            // [ADR-0131 D6] The `unmanaged` install mode's copy-once import.
+            // It refuses every name an environment row already holds before
+            // it writes anything, so reaching this gate means a row appeared
+            // under the name while the import ran. The import accepts no
+            // `force`; what the caller can do is reconcile the item that
+            // appeared, then import again. What became of the base is the
+            // verb's own sentence around this one, which it writes only once
+            // it has read the rollback's outcome — never claimed here. Same
+            // grammar as the faces above — name the door, deny the mechanism,
+            // then prescribe.
+            return `this import cannot be forced: the unmanaged install accepts no \`force\`. `
+                + `Reconcile the environment item '${name}' that appeared while the import ran, then install again.`;
         default:
             return 're-submit with ?force=true to proceed.';
     }
@@ -13302,10 +13336,11 @@ export class ObjectStackProtocolImplementation implements
         // whether more pages remain (true server-side pagination). Without a limit
         // the full result set is returned, so its length already IS the total.
         //
-        // engine.count() only honors `where`; a `search`/`distinct` query can't be
-        // reproduced by it, so for those we skip the count and fall back to a
-        // page-local estimate (a full page implies there may be more) rather than
-        // reporting a wrong total.
+        // [#22790] The count takes the query's `search` / `searchFields` too: the
+        // engine expands them through the one ADR-0061 expander `find` uses, so
+        // `total` counts exactly the rows this query pages. A search used to skip
+        // the count and report a page-local estimate (`offset + page + 1`) that
+        // the Console rendered as the record count.
         //
         // [#22588] `limit: 0` IS a limit. It asks for no rows (objectstack#6485,
         // the drivers' pagination conformance), so `records.length` is 0 and was
@@ -13316,9 +13351,8 @@ export class ObjectStackProtocolImplementation implements
         // the full set is the total" arm, which is true of every limit except
         // this one. So `>= 0`: a zero-row request is a paged request like any
         // other, and the three arms below keep their meaning for it — the count
-        // runs (`total` is the filtered count, whatever the page size), `$count=false`
-        // still omits `total` instead of reporting the page's 0, and `search`
-        // still reports its page-local estimate rather than a count.
+        // runs (`total` is the filtered count, whatever the page size), and
+        // `$count=false` still omits `total` instead of reporting the page's 0.
         const pageLimit = typeof options.limit === 'number' && options.limit >= 0 ? options.limit : undefined;
         const pageOffset = typeof options.offset === 'number' && options.offset > 0 ? options.offset : 0;
         let total: number | undefined = records.length;
@@ -13328,7 +13362,6 @@ export class ObjectStackProtocolImplementation implements
             // the flag's ONLY observable effect platform-wide, on a capability
             // that never deduplicated a row. Removed with `query.distinct`
             // (tombstoned in spec 17); `total`/`hasMore` are truthful again.
-            const countable = options.search == null;
             if (countOptOut) {
                 // [#10757] The caller said it does not need `total`, so the
                 // COUNT query is not issued at all — that is the whole point of
@@ -13340,19 +13373,16 @@ export class ObjectStackProtocolImplementation implements
                 // filter (IF REQUESTED)",
                 // `packages/spec/src/api/protocol.zod.ts`), so absent is the
                 // declared shape for "not requested" — and it is the only
-                // honest one: the `search` branch below reports an estimate
-                // because it has no better number to give, while here a real
-                // number was available and the caller declined it. Handing back
-                // a plausible-looking guess under those circumstances is how a
+                // honest one: a real number was available and the caller
+                // declined it. Handing back a plausible-looking guess is how a
                 // page-local estimate ends up rendered as a record count.
                 //
                 // `hasMore` is still answered, from the page alone: a FULL page
-                // means there may be more. Same page-local rule the search
-                // branch uses, and it never over-reports the data — it can only
-                // say "maybe more" on an exactly-full last page.
+                // means there may be more. It never over-reports the data — it
+                // can only say "maybe more" on an exactly-full last page.
                 hasMore = records.length === pageLimit;
                 total = undefined;
-            } else if (countable) {
+            } else {
                 // [#10757] `counted` is a separate, always-assigned local so
                 // `hasMore` below compares against a `number`: `total` became
                 // optional when `$count=false` gained the right to omit it, and
@@ -13361,6 +13391,8 @@ export class ObjectStackProtocolImplementation implements
                 try {
                     counted = await this.engine.count(request.object, {
                         where: options.where,
+                        search: options.search,
+                        searchFields: options.searchFields,
                         context: options.context,
                     } as any);
                 } catch {
@@ -13370,9 +13402,6 @@ export class ObjectStackProtocolImplementation implements
                 }
                 total = counted;
                 hasMore = pageOffset + records.length < counted;
-            } else {
-                hasMore = records.length === pageLimit;
-                total = pageOffset + records.length + (hasMore ? 1 : 0);
             }
         }
         return {
@@ -24370,6 +24399,320 @@ export class ObjectStackProtocolImplementation implements
             copied,
             failed,
         };
+    }
+
+    /**
+     * [ADR-0131 D6] The `unmanaged` install mode's copy-once import: every
+     * metadata item of ONE package body is written into a NEW writable base in
+     * the environment ledger, through {@link saveMetaItem} — the same save
+     * door a Studio edit takes — so every copied item is environment metadata
+     * from its first byte: owned by the base, `organization_id` NULL, served
+     * `_provenance: 'org'`, editable by the next save, and followed by no
+     * upgrade. The managed mode is the package install; this verb is what that
+     * install's manifest service is to it, and no more (see
+     * `package-unmanaged-install.ts` for what is copied, what is refused, and
+     * what is left to the door).
+     *
+     * ## All or nothing (the stage-0 ACCEPT's Q7)
+     *
+     * Every refusal that can be judged is raised BEFORE the base exists, so a
+     * refused import writes nothing — no package record, no row:
+     *  1. an organization-scoped request (ADR-0131 D6, as every write verb);
+     *  2. a request its published declaration refuses
+     *     (`ImportUnmanagedPackageRequestSchema`);
+     *  3. the deployment's REQUESTED tenancy posture walls organizations
+     *     (`UNMANAGED_INSTALL_WALLED_POSTURE` / 409; Q2: requested, never in
+     *     force, and an unrecognised value reads as walled);
+     *  4. the body carries what cannot be copied (`UNMANAGED_INSTALL_UNCOPYABLE`
+     *     / 422; Q5), names it badly, or names no usable target (400);
+     *  5. the ADR-0087 D1 protocol handshake;
+     *  6. the target id names an installed package (`RESOURCE_CONFLICT` / 409;
+     *     Q3: ⛔ never into an existing base) or the namespace is owned;
+     *  7. an item does not convert to today's protocol (`INVALID_METADATA` /
+     *     422), or a flow's conversion would clobber a live name
+     *     (`FLOW_CONVERSION_CONFLICT` / 409);
+     *  8. a name collides with an environment row or an item a managed package
+     *     ships (`RESOURCE_CONFLICT` / 409).
+     *
+     * Then the base is installed ({@link installPackage}, scope-less, the
+     * source namespace kept, an id that differs from the source) and every item
+     * is written in registry `loadOrder`. A write that fails deletes the base
+     * ({@link deletePackage}, which removes its rows and drops its tables), and
+     * the failure is thrown with the item's own `code` and `status`, naming the
+     * item and what the rollback did. There is no half-copied app.
+     *
+     * ⛔ No `OS_METADATA_WRITABLE` hatch: a runtime-uncreatable type is refused
+     * by the registry's own flag, never opened for this verb — a second write
+     * path is exactly what Q5 rules out.
+     *
+     * `actor` is stated by the door that calls this verb, never by a body; it
+     * is outside the published request for that reason.
+     */
+    async importUnmanagedPackage(
+        request: ImportUnmanagedPackageRequest & { actor?: string },
+    ): Promise<ImportUnmanagedPackageResponse> {
+        const rawSourceId = (request as { manifest?: { id?: unknown } } | undefined)?.manifest?.id;
+        const sourceLabel = typeof rawSourceId === 'string' && rawSourceId !== '' ? rawSourceId : '(unnamed)';
+        // 1. FIRST, as on every package write verb.
+        ObjectStackProtocolImplementation.refuseOrganizationScopedWrite(`Package '${sourceLabel}'`, request);
+
+        // 2. The request, through its published declaration. The two keys that
+        //    are never a body's — the door's `actor`, and the organization the
+        //    refusal above has already judged — are read off before the parse.
+        const { actor, organizationId: _scopeJudgedAbove, ...body } =
+            (request ?? {}) as ImportUnmanagedPackageRequest & { actor?: string; organizationId?: unknown };
+        const declared = ImportUnmanagedPackageRequestSchema.safeParse(body);
+        if (!declared.success) {
+            const issues = zodIssuesToMetadataIssues(declared.error.issues);
+            throw Object.assign(
+                new Error(`Invalid unmanaged install request: ${metadataIssueHeadline(issues)}.`),
+                { statusCode: 400, issues },
+            );
+        }
+
+        // 3. The deployment walls organizations: nothing is read or written.
+        const walled = unmanagedInstallPostureRefusal(sourceLabel);
+        if (walled) throw walled;
+
+        // 4. Everything the body alone can answer.
+        const plan = planUnmanagedImport(declared.data.manifest, {
+            ...(declared.data.targetPackageId !== undefined ? { targetPackageId: declared.data.targetPackageId } : {}),
+            ...(declared.data.targetName !== undefined ? { targetName: declared.data.targetName } : {}),
+            // The save door's own predicate — registry-only, the hatch unread.
+            isRuntimeCreatable: (type) => ObjectStackProtocolImplementation.isRuntimeCreateAllowed(type),
+            loadOrderOf: (type) =>
+                DEFAULT_METADATA_TYPE_REGISTRY.find((entry) => entry.type === type)?.loadOrder ?? Number.MAX_SAFE_INTEGER,
+        });
+        const { sourcePackageId, targetPackageId, namespace } = plan;
+
+        // 5. The handshake `installPackage` asks too — asked here so a refusal
+        //    precedes the base.
+        assertProtocolCompat(declared.data.manifest);
+
+        // 6. A NEW base, under a namespace nobody owns.
+        const registry: any = (this.engine as any).registry;
+        if (registry?.getPackage?.(targetPackageId) || (this.engine as any).manifests?.has?.(targetPackageId)) {
+            throw Object.assign(new Error(
+                `Package '${targetPackageId}' already exists. An unmanaged install of '${sourcePackageId}' writes into a `
+                + 'NEW base, never into an existing one. Name another `targetPackageId`, or uninstall '
+                + `'${targetPackageId}' first.`,
+            ), { code: 'RESOURCE_CONFLICT', status: 409, details: { targetPackageId } });
+        }
+        const owners: unknown = registry?.getNamespaceOwners?.(namespace);
+        if (Array.isArray(owners) && owners.length > 0) {
+            throw Object.assign(new Error(
+                `The namespace '${namespace}' of package '${sourcePackageId}' is already owned by `
+                + `${owners.map((o) => `'${String(o)}'`).join(', ')}. The unmanaged copy keeps the source namespace, `
+                + 'so it cannot sit beside a package that owns it — a managed install of this same package '
+                + 'included. Uninstall that package first, or keep the managed install.',
+            ), { code: 'RESOURCE_CONFLICT', status: 409, details: { namespace, owners } });
+        }
+
+        // 7. Today's protocol, item by item — the conversion a managed install
+        //    applies to an artifact, so an older package imports as it installs.
+        const canonicalizeFlow = plan.items.some((i) => i.type === 'flow') ? this.resolveFlowCanonicalizer() : undefined;
+        const prepared: Array<{ type: string; name: string; item: unknown }> = [];
+        const unconvertible: string[] = [];
+        const flowConflicts: string[] = [];
+        for (const planned of plan.items) {
+            try {
+                if (planned.type !== 'flow') {
+                    prepared.push({ type: planned.type, name: planned.name, item: this.convertStoredItem(planned.type, planned.body) });
+                } else if (!canonicalizeFlow) {
+                    // No engine in this process: the body as declared, exactly as
+                    // `duplicatePackage` copies it; the save door still judges it.
+                    prepared.push({ type: planned.type, name: planned.name, item: planned.body });
+                } else {
+                    const result = canonicalizeFlow(planned.name, planned.body);
+                    if (result.conflicts.length > 0) {
+                        const first = result.conflicts[0]!;
+                        flowConflicts.push(`flow '${planned.name}': '${first.token}' at ${first.path} — ${first.message}`);
+                    } else {
+                        prepared.push({ type: planned.type, name: planned.name, item: result.storable });
+                    }
+                }
+            } catch (e: any) {
+                unconvertible.push(`${planned.type} '${planned.name}': ${e?.message ?? String(e)}`);
+            }
+        }
+        if (unconvertible.length > 0) {
+            throw Object.assign(new Error(
+                `Package '${sourcePackageId}' cannot be installed unmanaged: ${unconvertible.length} item(s) do not convert `
+                + `to this runtime's protocol — ${unconvertible.slice(0, 3).join('; ')}`
+                + `${unconvertible.length > 3 ? ` (+${unconvertible.length - 3} more)` : ''}. Rebuild the package against `
+                + 'this protocol, then install again.',
+            ), { code: 'INVALID_METADATA', status: 422 });
+        }
+        if (flowConflicts.length > 0) {
+            throw Object.assign(new Error(
+                `Package '${sourcePackageId}' cannot be installed unmanaged: converting its flows would overwrite live `
+                + `names in this environment — ${flowConflicts.slice(0, 3).join('; ')}`
+                + `${flowConflicts.length > 3 ? ` (+${flowConflicts.length - 3} more)` : ''}.`,
+            ), { code: 'FLOW_CONVERSION_CONFLICT', status: 409 });
+        }
+
+        // 8. Every name the copy would take, against the environment and the
+        //    managed packages — the save door would refuse or overlay them.
+        const collisions = await this.unmanagedImportCollisions(plan.items);
+        if (collisions.length > 0) {
+            throw Object.assign(new Error(
+                `Package '${sourcePackageId}' cannot be installed unmanaged: ${collisions.length} of its names are already `
+                + `taken — ${collisions.slice(0, 3).map((c) => `${c.type} '${c.name}' (${c.heldBy})`).join('; ')}`
+                + `${collisions.length > 3 ? ` (+${collisions.length - 3} more)` : ''}. The copy keeps every name `
+                + 'the package declares, so remove or rename the items that hold them, then install again.',
+            ), { code: 'RESOURCE_CONFLICT', status: 409, details: { collisions } });
+        }
+
+        // The base. Not best-effort: a refusal here is the import's, and
+        // `installPackage` leaves nothing behind when it refuses.
+        await this.installPackage({ manifest: plan.baseManifest } as InstallPackageRequest);
+
+        const copied: Array<{ type: string; name: string }> = [];
+        for (const item of prepared) {
+            try {
+                await this.saveMetaItem({
+                    type: item.type,
+                    name: item.name,
+                    item: item.item,
+                    mode: 'publish',
+                    packageId: targetPackageId,
+                    // Server-stated, as on every face: no body reaches this field.
+                    writeFace: 'package-unmanaged-import',
+                    ...(actor ? { actor } : {}),
+                });
+                copied.push({ type: item.type, name: item.name });
+            } catch (e: any) {
+                throw await this.rollBackUnmanagedImport(e, {
+                    sourcePackageId, targetPackageId, failed: item, copiedCount: copied.length, actor,
+                });
+            }
+        }
+
+        return {
+            sourcePackageId,
+            ...(plan.sourceVersion !== undefined ? { sourceVersion: plan.sourceVersion } : {}),
+            targetPackageId,
+            namespace,
+            copiedCount: copied.length,
+            copied,
+        };
+    }
+
+    /**
+     * [ADR-0131 D6] The names an unmanaged import would take that something
+     * already holds: an environment row of any package and any state, or an
+     * item a managed package ships ({@link isArtifactBacked}). A view
+     * container's expansion names are asked too, since the save door files
+     * each of them.
+     *
+     * An unprovisioned `sys_metadata` holds no rows; any other read failure is
+     * thrown (503), because "no collision" invented from an outage would let
+     * the import write over rows it never saw.
+     */
+    private async unmanagedImportCollisions(
+        items: ReadonlyArray<{ type: string; name: string; expands: readonly string[] }>,
+    ): Promise<Array<{ type: string; name: string; heldBy: string }>> {
+        const wanted = new Map<string, { type: string; name: string }>();
+        for (const item of items) {
+            wanted.set(`${item.type}/${item.name}`, { type: item.type, name: item.name });
+            for (const view of item.expands) wanted.set(`view/${view}`, { type: 'view', name: view });
+        }
+        const found = new Map<string, { type: string; name: string; heldBy: string }>();
+        const names = [...new Set([...wanted.values()].map((slot) => slot.name))];
+        try {
+            for (let at = 0; at < names.length; at += 200) {
+                // [#21911] The explicit system opt-in — see findServedOverlayRow.
+                const rows = (await this.engine.find('sys_metadata', {
+                    where: { organization_id: null, name: { $in: names.slice(at, at + 200) } },
+                    context: { isSystem: true },
+                })) as Array<{ type?: unknown; name?: unknown; package_id?: unknown }>;
+                for (const row of rows ?? []) {
+                    const type = PLURAL_TO_SINGULAR[String(row.type)] ?? String(row.type);
+                    const key = `${type}/${String(row.name)}`;
+                    if (!wanted.has(key) || found.has(key)) continue;
+                    found.set(key, {
+                        type,
+                        name: String(row.name),
+                        heldBy: typeof row.package_id === 'string' && row.package_id !== ''
+                            ? `an environment item of package '${row.package_id}'`
+                            : 'an environment item',
+                    });
+                }
+            }
+        } catch (error) {
+            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+        }
+        // The managed side asks the save door's own predicate and nothing else:
+        // it answers whether a package ships the name, not which one, and a
+        // second spelling of the registry lookup to name it would be the
+        // drift the predicate exists to prevent.
+        for (const [key, slot] of wanted) {
+            if (found.has(key) || !this.isArtifactBacked(slot.type, slot.name)) continue;
+            found.set(key, { ...slot, heldBy: 'shipped by a managed package' });
+        }
+        return [...found.values()];
+    }
+
+    /**
+     * [ADR-0131 D6] Undo a failed unmanaged import: uninstall the base it was
+     * writing into — its rows, its tables, its package record — and return the
+     * error the import throws.
+     *
+     * The thrown error keeps the failed item's own `code` and `status` (the
+     * closed vocabulary its refusal already declared), and its message says
+     * what the rollback did. A rollback that could not finish is also logged at
+     * `error`, once: the base and some of its rows are still there while the
+     * import has answered failure, and on a 5xx a boundary withholds the
+     * message that says so.
+     */
+    private async rollBackUnmanagedImport(
+        cause: any,
+        context: {
+            sourcePackageId: string;
+            targetPackageId: string;
+            failed: { type: string; name: string };
+            copiedCount: number;
+            actor?: string;
+        },
+    ): Promise<Error> {
+        const { sourcePackageId, targetPackageId, failed, copiedCount, actor } = context;
+        let residue: string | undefined;
+        try {
+            const outcome = await this.deletePackage({ packageId: targetPackageId, ...(actor ? { actor } : {}) });
+            if (outcome.failedCount > 0) {
+                residue = `${outcome.failedCount} of its items could not be removed`;
+            }
+        } catch (rollbackError) {
+            residue = `the uninstall failed: ${clientFacingFailureText(rollbackError, 'uninstall failed')}`;
+        }
+        if (residue !== undefined) {
+            console.error(
+                `[protocol.importUnmanagedPackage] the unmanaged install of '${sourcePackageId}' failed and its base `
+                + `'${targetPackageId}' was NOT fully removed (${residue}): the environment still holds a partial copy `
+                + `while the install answered failure. Uninstall the package '${targetPackageId}' to remove it.`,
+            );
+        }
+        const rolledBack = residue === undefined
+            ? `the new base '${targetPackageId}' was removed, so nothing of the package remains`
+            : `the new base '${targetPackageId}' could NOT be fully removed (${residue}) — uninstall it to finish`;
+        return Object.assign(
+            new Error(
+                `The unmanaged install of '${sourcePackageId}' was rolled back: ${failed.type} '${failed.name}' could not `
+                + `be written — ${clientFacingFailureText(cause, 'write failed')}. ${rolledBack}.`,
+            ),
+            {
+                ...(typeof cause?.code === 'string' ? { code: cause.code } : {}),
+                ...(typeof cause?.status === 'number' ? { status: cause.status } : {}),
+                ...(typeof cause?.statusCode === 'number' ? { statusCode: cause.statusCode } : {}),
+                ...(Array.isArray(cause?.issues) ? { issues: cause.issues } : {}),
+                details: {
+                    failedItem: { type: failed.type, name: failed.name },
+                    copiedBeforeFailure: copiedCount,
+                    rolledBack: residue === undefined,
+                },
+                cause,
+            },
+        );
     }
 
     /**

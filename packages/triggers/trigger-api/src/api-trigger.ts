@@ -78,35 +78,40 @@ interface ArmedHook {
     secret: HookSecret;
     queue: string;
     callback: (ctx: AutomationContext) => Promise<void>;
-    /**
-     * Whether this arming has already logged that it accepted a body-only
-     * signature. The deprecation line is said once per armed hook, never once
-     * per post, so a sender that keeps posting cannot flood the log with it.
-     */
-    bodyOnlyDeprecationLogged: boolean;
 }
+
+/**
+ * Why an inbound post's signature did not verify at this door. The first four
+ * carry `verifyHttpSignature`'s own `reason`, the one vocabulary for them.
+ * `signature-body-only` is the one this door adds: core verified the body-only
+ * form, and this door accepts only the timestamped one ({@link verifyInboundSignature}).
+ */
+type UnverifiedSignatureCause =
+    | `signature-${Extract<HttpSignatureVerdict, { valid: false }>['reason']}`
+    | 'signature-body-only';
 
 /**
  * Why an inbound post did not verify. Recorded in the server log only, ⛔ never
  * sent: every one of these gets the same answer ({@link unverifiedPostAnswer}),
  * so an operator can still tell a misconfigured sender's wrong URL from its
- * wrong secret while the sender cannot. The `signature-*` kinds carry
- * `verifyHttpSignature`'s own `reason`, the one vocabulary for them.
+ * wrong secret, or from its retired signing form, while the sender cannot.
  */
-type UnverifiedPostCause =
-    | 'unknown-flow'
-    | 'wrong-hook-id'
-    | `signature-${Extract<HttpSignatureVerdict, { valid: false }>['reason']}`;
+type UnverifiedPostCause = 'unknown-flow' | 'wrong-hook-id' | UnverifiedSignatureCause;
 
 const UNVERIFIED_POST_CAUSE_TEXT: Readonly<Record<UnverifiedPostCause, string>> = {
     'unknown-flow': 'no hook is armed for the flow it names',
     'wrong-hook-id': 'the hook id it names is not the one its flow is armed with',
     'signature-absent': 'it carries no x-objectstack-signature',
-    'signature-malformed': 'its x-objectstack-signature has neither accepted form',
+    'signature-malformed': 'its x-objectstack-signature is in neither the timestamped form nor the body-only one',
     'signature-mismatch': "its x-objectstack-signature is not the hook secret's HMAC of the body it carries",
     'signature-outside-window':
         `its timestamped x-objectstack-signature verified, with a timestamp more than ` +
         `${HTTP_SIGNATURE_TOLERANCE_SECONDS}s from this server's clock (a replay, or a sender clock that is wrong)`,
+    'signature-body-only':
+        `its x-objectstack-signature is in the body-only form (sha256=<hex HMAC-SHA256 of the raw body>), which ` +
+        `this door does not accept because it signs no time. The sender signs the timestamped form instead: ` +
+        `t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>">, refused once t is more than ` +
+        `${HTTP_SIGNATURE_TOLERANCE_SECONDS}s from this server's clock (@objectstack/core signHttpBodyAt)`,
 };
 
 /**
@@ -133,25 +138,54 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 /**
- * GitHub/Stripe-style HMAC verification of `x-objectstack-signature` against
- * the shared per-flow secret, through `@objectstack/core`'s
- * `verifyHttpSignature` — the one definition of the scheme every ObjectStack
+ * The inbound door's judgement of a post's `x-objectstack-signature`: the one
+ * place it is made, for {@link ApiTrigger.handleRequest} and
+ * {@link verifySignature} alike. The HMAC is checked by `@objectstack/core`'s
+ * `verifyHttpSignature`, the one definition of the scheme every ObjectStack
  * sender signs with, so this receiver holds no copy of the signed material.
- * Two forms verify:
+ * What this door adds is which verified form it accepts: the timestamped one
+ * only.
  *
  *  - `t=<unix seconds>,v1=<hex>`, the HMAC of `<t>.<raw body>`: the timestamp
  *    is signed, and a `t` more than `HTTP_SIGNATURE_TOLERANCE_SECONDS` (five
  *    minutes) from this clock is refused, so a captured post stops verifying.
- *  - `sha256=<hex>`, the HMAC of the raw body alone. Still accepted, so no
- *    existing sender breaks, and deprecated: it signs no time, so a captured
- *    post verifies forever. {@link ApiTrigger.handleRequest} logs it once per
- *    armed hook.
+ *    The one accepted form.
+ *  - `sha256=<hex>`, the HMAC of the raw body alone, is refused even when it is
+ *    the secret's HMAC of the body: it signs no time, so a captured post would
+ *    verify forever (ruling B on #22805; the sender guidance teaches only the
+ *    timestamped form). Core keeps verifying that form because it is the
+ *    receiver half of the form our own outbound senders sign with
+ *    (`signHttpBody`); refusing it inbound is this door's policy, held here.
  *
- * A value that claims the timestamped form is judged by it alone, and every
- * refusal is the same `false`.
+ * A value that claims the timestamped form is judged by it alone. The `cause`
+ * of a refusal is for the server log, ⛔ never for the sender.
+ */
+function verifyInboundSignature(
+    rawBody: string,
+    secret: string,
+    header: string | undefined,
+): { readonly valid: true } | { readonly valid: false; readonly cause: UnverifiedSignatureCause } {
+    const verdict = verifyHttpSignature(rawBody, secret, header);
+    if (!verdict.valid) return { valid: false, cause: `signature-${verdict.reason}` };
+    // Every verified scheme is named, so a scheme core adds later fails to
+    // compile here until this door decides whether it accepts it.
+    switch (verdict.scheme) {
+        case 'v1':
+            return { valid: true };
+        case 'body-only':
+            return { valid: false, cause: 'signature-body-only' };
+    }
+}
+
+/**
+ * HMAC verification of `x-objectstack-signature` against the shared per-flow
+ * secret, exactly as the inbound door judges it ({@link verifyInboundSignature}):
+ * `true` only for the timestamped form `t=<unix seconds>,v1=<hex>` inside its
+ * five-minute window. The body-only `sha256=<hex>` form is `false` even when
+ * it is the secret's HMAC of the body, and every refusal is the same `false`.
  */
 export function verifySignature(secret: string, rawBody: string, header: string | undefined): boolean {
-    return verifyHttpSignature(rawBody, secret, header).valid;
+    return verifyInboundSignature(rawBody, secret, header).valid;
 }
 
 /**
@@ -161,13 +195,15 @@ export function verifySignature(secret: string, rawBody: string, header: string 
  * hook (URL path + the required HMAC secret from the start node's `config`)
  * and subscribes a queue consumer that runs the flow. The HTTP side
  * ({@link handleRequest}) validates and **enqueues** — it never executes the
- * flow in-band:
+ * flow in-band. It answers the same through the self-hosted mount and through
+ * the `trigger-api` service's `handleInboundHook` (#22774):
  *
  *   POST /api/v1/automation/hooks/:flowName/:hookId
  *     → 401 INVALID_SIGNATURE — every post that does not verify, one answer:
  *           an unknown flow, a wrong hookId, a missing or bad HMAC signature
- *           (a timestamped one outside its window included — see
- *           {@link verifySignature}). The cause goes to the server log only.
+ *           (a timestamped one outside its window, and one in the body-only
+ *           form, included — see {@link verifyInboundSignature}). The cause
+ *           goes to the server log only.
  *     → 503 the armed hook's secret cannot be read (the one residual: it
  *           answers a post naming that flow and its hookId, signed or not)
  *     → 400 non-JSON body
@@ -229,9 +265,7 @@ export class ApiTrigger implements FlowTrigger {
         const queue = `${QUEUE_PREFIX}:${binding.flowName}`;
 
         const secret: HookSecret = resolve ? { kind: 'resolved', resolve } : { kind: 'literal', secret: literal! };
-        const hook: ArmedHook = {
-            flowName: binding.flowName, hookId, secret, queue, callback, bodyOnlyDeprecationLogged: false,
-        };
+        const hook: ArmedHook = { flowName: binding.flowName, hookId, secret, queue, callback };
         this.hooks.set(binding.flowName, hook);
 
         const q = this.getQueue();
@@ -271,7 +305,10 @@ export class ApiTrigger implements FlowTrigger {
 
     /**
      * Handle one inbound request. Transport-agnostic: the plugin adapts this
-     * to the host HTTP server. Returns the response to send.
+     * to both faces of the door, the self-hosted raw-app mount and the
+     * `trigger-api` service's `handleInboundHook` (#22774), through one
+     * adapter, so both answer exactly what this returns. Returns the response
+     * to send.
      */
     async handleRequest(input: {
         flowName: string;
@@ -308,19 +345,11 @@ export class ApiTrigger implements FlowTrigger {
                 body: { success: false, error: { code: 'SERVICE_UNAVAILABLE', message: 'The hook secret is unavailable.' } },
             };
         }
-        const verdict = verifyHttpSignature(input.rawBody, secret, input.signatureHeader);
-        if (!verdict.valid) return this.refuseUnverified(`signature-${verdict.reason}`, hook.flowName);
-        if (verdict.scheme === 'body-only' && !hook.bodyOnlyDeprecationLogged) {
-            hook.bodyOnlyDeprecationLogged = true;
-            this.logger.warn(
-                `[trigger-api] flow '${hook.flowName}' hook '${hook.hookId}' accepted a post signed with the deprecated ` +
-                    `body-only x-objectstack-signature (sha256=<hex HMAC-SHA256 of the raw body>). It signs no time, so a ` +
-                    `captured post can be replayed and still verify. Sign with the timestamped form instead: ` +
-                    `t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>">, refused once t is more than ` +
-                    `${HTTP_SIGNATURE_TOLERANCE_SECONDS}s from this server's clock (@objectstack/core signHttpBodyAt). ` +
-                    `Logged once per armed hook.`,
-            );
-        }
+        // Verified before the body is parsed or anything is enqueued; a
+        // body-only signature is refused here like any other that does not
+        // verify, with its own cause in the log.
+        const verdict = verifyInboundSignature(input.rawBody, secret, input.signatureHeader);
+        if (!verdict.valid) return this.refuseUnverified(verdict.cause, hook.flowName);
 
         let payload: Record<string, unknown>;
         try {

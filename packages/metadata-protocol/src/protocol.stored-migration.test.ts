@@ -975,7 +975,7 @@ describe('migrateStoredMetadata — the decision review list: stored rows take f
                 {
                     id: 'sweep', type: 'loop', label: 'Sweep',
                     config: {
-                        collection: '{leads}',
+                        collection: { dialect: 'cel', source: 'leads' },
                         iteratorVariable: 'lead',
                         body: {
                             nodes: [

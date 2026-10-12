@@ -809,7 +809,7 @@
         "app": "showcase",
         "requires": [
           "showcase_inquiry is OWD private with create granted to the baseline — depth only matters where the baseline stops (permission-sets.ts docblock)",
-          "personas staffed by granting the sets (sys_user_permission_set) or assigning the bound positions manager/exec/ops (bind-position-sets.ts wires position → set at boot)"
+          "personas staffed by granting the sets (sys_user_permission_set) or assigning the positions manager/exec/ops (each declares its set in permissionSets, examples/app-showcase/src/security/positions.ts)"
         ]
       },
       "steps": [
@@ -1806,44 +1806,45 @@
     },
     {
       "id": "access-security.suggested-binding-loop",
-      "title": "Suggested audience bindings reconcile, confirm materializes the anchor binding, dismiss removes it; bad states 404/409/400 and non-admins are refused",
+      "title": "Suggested audience bindings reconcile; a manage_metadata holder's accept takes effect for every member and a revoke undoes it; bad states 404/409/400, tenant admins and non-admins are refused",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
-        "tenant admin (the only principal the surface serves)",
-        "a plain member (the deny contrast)",
+        "a manage_metadata holder (the platform administrator) — the only principal the surface serves under single",
+        "a tenant administrator (an org admin without manage_metadata — the refusal contrast)",
+        "a plain member (whose reads the acceptance changes)",
         "anonymous (the unconditional-deny contrast)"
       ],
       "fixtures": {
         "app": "showcase",
         "requires": [
           "sys_audience_binding_suggestion (plugin-security) + the reconcile at boot/list",
-          "showcase's isDefault permission set showcase_member_default (examples/app-showcase/src/security/permission-sets.ts) — the one declared install-time suggestion"
+          "showcase's isDefault permission set showcase_member_default (examples/app-showcase/src/security/permission-sets.ts)",
+          "a boot with a VANILLA SecurityPlugin, so showcase_member_default is a package suggestion and not the configured baseline (packages/qa/dogfood/test/suggested-binding-acceptance.dogfood.test.ts boots it so)"
         ],
         "knownGaps": [
-          "stock showcase produces NO suggestion row AT ALL — not a 'confirmed (observed)' one (corrected against the observed run #7637; the pre-#7687 text claimed a confirmed row and was wrong). GET /api/v1/security/suggested-bindings answers 200 {suggestions: [], synced: {created: 0}} on a stock boot: the security plugin auto-binds the app's only isDefault set (everyone → showcase_member_default) at BOOT, before any list call, so syncAudienceBindingSuggestions takes its `if (bound) continue` branch ('satisfied before ever being surfaced — nothing pending', suggested-audience-bindings.ts) and never inserts a row, while the 'confirmed (observed)' transition one branch above only fires for a row ALREADY in status 'pending'. This contradicts the module's own docblock ('binding already present → confirmed (observed)') and is filed as the product defect #7677 — so clause 0 states the intended behaviour and currently FAILS on stock, it is not a fixture excuse",
-          "consequence — every clause that needs a suggestion id has nothing to run against until the row is PROVISIONED by the unbind sequence: (1) delete the live sys_position_permission_set row pairing the `everyone` anchor position with showcase_member_default (system context), (2) re-list → synced {created: 1} and a genuine PENDING row appears, (3) drive confirm/dismiss against it (confirm also restores the stock binding). Clauses needing a row: 0 (list/reconcile), 1 (status-filter narrowing), 2 (idempotent-409, which needs a SETTLED row — confirm the pending row first), 6 (the confirm/dismiss-a-PENDING loop). Clauses 3 (404), 4 (non-admin 403) and 5 (anon 401) need no row and run on stock unchanged. A second, independent pending row can be raised by installing a scratch package declaring a not-auto-bound suggestion — that fixture is still worth adding (FOLLOW-UPS.md §3), but it is no longer what blocks the loop: the run closed clause 6 by provisioning rather than recording blocked"
+          "on a stock CLI boot the served app's own isDefault set IS the baseline: the everyone definition names showcase_member_default from boot, so the list shows it 'confirmed' with no resolver (observed) and offers no pending row. The pending loop needs the vanilla-plugin boot above, or an installed package declaring an isDefault set"
         ]
       },
       "steps": [
-        "boot showcase with the console; admin session",
-        "GET /api/v1/security/suggested-bindings — capture the reconciled list; locate the showcase_member_default → everyone suggestion and its status",
-        "GET with ?status=confirmed and ?status=pending — confirm the filter narrows and the member_default suggestion reports 'confirmed' (auto-bound at boot)",
-        "GET with ?status=garbage — capture the 400 naming the accepted values",
-        "POST /api/v1/security/suggested-bindings/<confirmed id>/confirm — capture the 409 SUGGESTION_STATE (confirm is not re-runnable on a settled row)",
-        "POST /api/v1/security/suggested-bindings/does-not-exist/confirm — capture the 404 SUGGESTION_NOT_FOUND",
-        "as a plain member: GET the list AND POST a confirm — both must be refused 403 (tenant-admin pre-gate)",
-        "anon (no auth): GET the list — capture the 401 UNAUTHENTICATED",
-        "(knownGap) PENDING loop: seed/install a package suggesting a not-auto-bound binding so a 'pending' row appears; POST /confirm materializes the anchor binding under the caller's context (verify via /api/v1/security/explain or an access probe); POST /dismiss records the 'no' and drops it from pending; re-list reflects the transition"
+        "boot showcase with a vanilla SecurityPlugin; admin (manage_metadata) session; sign up a plain member; make a second user the Default Organization's 'admin' member (a tenant administrator)",
+        "GET /api/v1/security/suggested-bindings — locate the showcase_member_default → everyone suggestion: status 'pending'",
+        "GET with ?status=pending and ?status=confirmed — confirm the filter narrows; GET with ?status=garbage — capture the 400 naming the accepted values",
+        "as the member: GET /api/v1/data/showcase_account — 403 (the control)",
+        "as the tenant administrator: GET the list AND POST .../<id>/confirm — both 403 PERMISSION_DENIED",
+        "as the admin: POST .../<id>/confirm — 200, bindingCreated true; the member's GET /api/v1/data/showcase_account now answers 200",
+        "POST .../<confirmed id>/confirm again — 409 SUGGESTION_STATE; POST .../does-not-exist/confirm — 404 SUGGESTION_NOT_FOUND",
+        "as the admin: POST .../<id>/dismiss on the accepted row (revoke) — 200; the member's read is 403 again",
+        "anon (no auth): GET the list — capture the 401 UNAUTHENTICATED"
       ],
       "acceptance": [
         {
-          "clause": "the list reconciles declarations against live bindings: GET /security/suggested-bindings returns showcase's isDefault suggestion, and the reconcile marks it 'confirmed' because everyone → showcase_member_default is already bound at boot (a binding-present suggestion is observed-confirmed, never pending)",
+          "clause": "the list reconciles declarations against the everyone DEFINITION: a set the definition does not name is 'pending'; a set it names (the served app's baseline) is 'confirmed' with no resolver (observed)",
           "oracle": "api",
-          "verify": "the list body carries the member_default suggestion with status 'confirmed' (packages/plugins/plugin-security/src/suggested-audience-bindings.ts syncAudienceBindingSuggestions)",
+          "verify": "the list body (packages/plugins/plugin-security/src/suggested-audience-bindings.ts syncAudienceBindingSuggestions)",
           "evidence": "the reconciled list"
         },
         {
@@ -1853,51 +1854,52 @@
           "evidence": "the filtered lists + the 400"
         },
         {
-          "clause": "confirm on a settled row is a 409: POST .../<confirmed id>/confirm answers 409 SUGGESTION_STATE — confirm is idempotent-safe, never a double-bind",
+          "clause": "an accept takes effect: after a manage_metadata holder's confirm, a plain member's read of showcase_account goes 403 → 200, and the everyone definition names showcase_member_default",
           "oracle": "api",
-          "verify": "the confirm trace status 409 code SUGGESTION_STATE (SuggestionStateError)",
-          "evidence": "the trace"
+          "verify": "the member's GET before/after; the confirm body bindingCreated true",
+          "evidence": "the member traces + the confirm trace"
         },
         {
-          "clause": "a bad suggestion id is a 404: POST .../does-not-exist/confirm|dismiss answers 404 SUGGESTION_NOT_FOUND",
+          "clause": "a revoke undoes it: dismiss on the accepted row answers 200 and the member's read is 403 again",
           "oracle": "api",
-          "verify": "the trace status 404 code SUGGESTION_NOT_FOUND (SuggestionNotFoundError)",
-          "evidence": "the trace"
+          "verify": "the dismiss trace + the member's GET after",
+          "evidence": "the traces"
         },
         {
-          "clause": "the whole surface is tenant-admin-only: a plain member's list AND confirm both answer 403 — the read is as gated as the write (ADR-0066 pre-gate)",
+          "clause": "confirm on a settled row is a 409 and a bad id is a 404: POST .../<confirmed id>/confirm answers 409 SUGGESTION_STATE, POST .../does-not-exist/confirm|dismiss answers 404 SUGGESTION_NOT_FOUND",
           "oracle": "api",
-          "verify": "member GET list and POST confirm both >=400 (403)",
-          "evidence": "both member traces"
+          "verify": "the trace statuses and nested error.code",
+          "evidence": "the traces"
         },
         {
-          "clause": "anonymous is denied unconditionally: an unauthenticated GET answers 401 UNAUTHENTICATED (this admin seam never honoured a deny opt-out, #2567/#3963)",
+          "clause": "the surface needs manage_metadata: a tenant administrator's list AND confirm both answer 403 PERMISSION_DENIED, as do a plain member's, and nothing changes",
+          "oracle": "api",
+          "verify": "tenant-admin and member GET list and POST confirm all 403; the row stays pending",
+          "evidence": "the refused traces"
+        },
+        {
+          "clause": "anonymous is denied unconditionally: an unauthenticated GET answers 401 UNAUTHENTICATED",
           "oracle": "api",
           "verify": "anon GET /security/suggested-bindings status 401 code UNAUTHENTICATED",
           "evidence": "the anon trace"
-        },
-        {
-          "clause": "(knownGap) confirm materializes a PENDING binding and dismiss removes it: given a fixture seeding a pending suggestion, POST /confirm creates the anchor binding under the CALLER's context (a follow-up /security/explain shows the new grant), and POST /dismiss records the no and drops it from pending",
-          "oracle": "api",
-          "verify": "pre/post /security/explain (or access probe) around confirm; the list transitions pending→confirmed and pending→dismissed",
-          "evidence": "explain before/after + the list transitions"
         }
       ],
       "negative": [
-        "a confirm that binds a high-privilege set onto everyone/guest must be refused by the D5/D9 audience-anchor gate (403), never silently accepted",
-        "a confirm running under the SYSTEM context rather than the caller's is the ADR-0090 D9 violation — the write must carry the admin's identity through the gates",
-        "do not tick confirm/dismiss-a-pending on an unprovisioned stock boot — stock auto-binds the only isDefault suggestion at boot and therefore surfaces NO row at all; run the knownGaps unbind sequence to raise a genuine PENDING row, or record blocked, but never tick it green off an empty list"
+        "an accept of a set carrying a bit the everyone anchor forbids (ADR-0090 D7) must be refused 403 PERMISSION_DENIED and leave the row pending — never silently accepted",
+        "a tenant administrator's accept must never widen everyone; under a walled posture only the platform operator may accept",
+        "do not tick the pending loop on a stock CLI boot — the served app's set is the baseline there and no row is pending; use the vanilla-plugin boot, or record blocked"
       ],
       "traps": [
         "wrong-persona"
       ],
       "source": [
         "packages/runtime/src/domains/security.ts (GET list / POST :id/confirm|dismiss; 400 unknown-status, 401 anon, 403/404/409 typed-error mapping)",
-        "packages/plugins/plugin-security/src/suggested-audience-bindings.ts#syncAudienceBindingSuggestions (syncAudienceBindingSuggestions convergent reconcile; SuggestionNotFoundError 404, SuggestionStateError 409; confirm under caller context)",
+        "packages/plugins/plugin-security/src/suggested-audience-bindings.ts (syncAudienceBindingSuggestions, readAcceptedEveryoneSets, the deployment authority, SuggestionNotFoundError 404, SuggestionStateError 409)",
+        "packages/plugins/plugin-security/src/security-plugin.ts#declareEveryone (the everyone derivation)",
         "packages/plugins/plugin-security/src/objects/sys-audience-binding-suggestion.object.ts",
         "packages/rest/src/rest-route-ledger.ts (security suggested-bindings rows)",
-        "examples/app-showcase/src/security/bind-position-sets.ts + permission-sets.ts (isDefault auto-bind)",
-        "ADR-0090 D5/D9/D12, #2567/#3963"
+        "packages/qa/dogfood/test/suggested-binding-acceptance.dogfood.test.ts",
+        "ADR-0090 D5/D7/D9, #22801 → A, #22621 → A, #2567/#3963"
       ],
       "history": [
         {
@@ -1911,6 +1913,12 @@
           "date": "2026-08-11",
           "change": "knownGaps corrected against run #7637: stock surfaces NO suggestion row at all (the old text claimed a 'confirmed (observed)' row), so the row-dependent clauses have nothing to run against until the unbind sequence provisions one — the sequence, the per-clause dependency split, and the product defect #7677 behind it are now recorded on the item; the pending-loop negative is re-worded from 'fixture-gapped' to 'unprovisioned'",
           "ref": "#7687"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-11",
+          "change": "rewritten for the deployment-level acceptance (#22801 → A): a manage_metadata holder's accept re-derives the everyone definition and takes effect (member read 403 → 200), a dismiss on an accepted row revokes it, a tenant administrator is refused; the reconcile reads the everyone definition, not a binding row; the knownGap is now the stock CLI boot, where the served app's set is the baseline",
+          "ref": "#15204"
         }
       ]
     },

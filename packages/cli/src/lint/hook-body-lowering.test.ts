@@ -123,20 +123,21 @@ describe('checkHookBodyLowering', () => {
       // The wrong-remedy failure is worse than none: there is nothing to inline
       // `Intl` from, so an author (or a code-writing model) told to inline it
       // lands on a second broken shape. The remedy sentence is chosen from the
-      // refusal's own `nodeOnlyIdentifiers`, never re-derived here.
+      // refusal's own `nodeOnlyIdentifiers`, never re-derived here. [#22161]
+      // The remedy is the finding's `fix:` line; the verdict stays one sentence.
       const [issue] = checkHookBodyLowering({ hooks: [nodeOnlyGlobalHook] });
-      expect(issue.message).toContain('provided by the Node host');
-      expect(issue.message).toContain('cannot be inlined');
-      expect(issue.message).toContain('string handler ref');
-      expect(issue.message).toContain('validation rule');
-      expect(issue.message).not.toContain('Inline the value(s) into the handler');
+      expect(issue.fix).toContain('provided by the Node host');
+      expect(issue.fix).toContain('cannot be inlined');
+      expect(issue.fix).toContain('string handler ref');
+      expect(issue.fix).toContain('validation rule');
+      expect(issue.fix).not.toContain('Inline the value(s) into the handler');
     });
 
     it('leaves the module-scope remedy exactly as it was', () => {
       // The reverse leg: the sentence commit ada3834ad wrote must not have been rewritten for
       // every author by a branch added for one new sub-case.
       const [issue] = checkHookBodyLowering({ hooks: [freeIdentifierHook] });
-      expect(issue.message).toContain('Inline the value(s) into the handler, or reach them through `ctx`.');
+      expect(issue.fix).toBe('Inline the value(s) into the handler, or reach them through `ctx`.');
       expect(issue.message).not.toContain('provided by the Node host');
     });
   });
@@ -361,6 +362,34 @@ describe('checkHookBodyLowering', () => {
       expect(issues).toHaveLength(1);
       expect(issues[0].path).toBe('actions[0].target');
       expect(issues[0].message).toContain("action 'global_sweep'");
+    });
+  });
+
+  // [#22837] The build lowers a hook handler and an action target in different
+  // faces: a hook's one parameter is rebound to the sandbox's `ctx`, an
+  // action's `(input, ctx)` is its own wrapper's binding list. Lint must judge
+  // each by the face the build uses, or it reports what the build never does.
+  describe('judges each callable in the face the build lowers it in (#22837)', () => {
+    it('says nothing about a hook handler whose parameter is renamed: the build rebinds it', () => {
+      const issues = checkHookBodyLowering({
+        hooks: [{ name: 'named', object: 'o', events: ['beforeInsert'], handler: async (hookCtx: any) => { hookCtx.input.n = 1; } }],
+      });
+      expect(issues).toEqual([]);
+    });
+
+    it('reports a two-parameter hook handler on the bundled-fallback rule, naming the parameters', () => {
+      const issues = checkHookBodyLowering({
+        hooks: [{ name: 'two', object: 'o', events: ['beforeInsert'], handler: async (ctx: any, extra: any) => { ctx.input.n = extra; } }],
+      });
+      expect(issues.map((i) => [i.rule, i.severity, i.path])).toEqual([[BUNDLED_FALLBACK_RULE, 'warning', 'hooks[0].handler']]);
+      expect(issues[0].message).toContain('(`ctx`, `extra`)');
+    });
+
+    it('says nothing about an `(input, ctx)` action target, which the action face lowers unchanged', () => {
+      const issues = checkHookBodyLowering({
+        actions: [{ name: 'a', target: async (input: any, ctx: any) => { await ctx.api.object('t').insert({ n: input.n }); } }],
+      });
+      expect(issues).toEqual([]);
     });
   });
 

@@ -160,13 +160,13 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
     // spelling under which it still carries `manage_sharing` and still reaches
     // `adminOrgScope`.
     await ql.insert('sys_user_permission_set', {
-      user_id: orgLessUserId, permission_set_id: psId, organization_id: null,
+      user_id: orgLessUserId, permission_set: 'sharing_admin_8158', organization_id: null,
     }, { context: SYS });
     // The #8158 grant as filed — scoped to tenant A — for the control (which
     // has tenant A active) and for the org-scoped persona (which has none).
     for (const userId of [orgBoundUserId, orgScopedOrgLessUserId]) {
       await ql.insert('sys_user_permission_set', {
-        user_id: userId, permission_set_id: psId, organization_id: ORG_A,
+        user_id: userId, permission_set: 'sharing_admin_8158', organization_id: ORG_A,
       }, { context: SYS });
     }
     // [ADR-0131 D3] The membership reconciler bound every sign-up above to the
@@ -189,7 +189,7 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
     const adminSet = await ql.findOne('sys_permission_set', { where: { name: 'admin_full_access' }, context: SYS });
     expect(adminSet?.id, 'admin_full_access is seeded').toBeTruthy();
     await ql.insert('sys_user_permission_set', {
-      user_id: await uid(OPERATOR_EMAIL), permission_set_id: adminSet.id, organization_id: null,
+      user_id: await uid(OPERATOR_EMAIL), permission_set: adminSet.name, organization_id: null,
     }, { context: SYS });
 
     // Sign in AFTER the grants, so every session is minted by the same path

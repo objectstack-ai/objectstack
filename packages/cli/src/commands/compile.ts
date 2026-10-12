@@ -16,7 +16,7 @@ import {
 } from '@objectstack/spec';
 import { loadConfig, namedExportRejectionHints } from '../utils/config.js';
 import { refuseUnbuiltStack } from '../utils/stack-provenance-refusal.js';
-import { lowerCallables } from '../utils/lower-callables.js';
+import { isExtractionRefusal, lowerCallables } from '../utils/lower-callables.js';
 import { authoringRuleUnionStack } from '../utils/stack-collections.js';
 import { artifactPackages, runPerPackageAuthoringRules } from '../utils/artifact-packages.js';
 import { stackFilterJudge } from '../utils/authoring-filter-judge.js';
@@ -328,18 +328,26 @@ export default class Compile extends Command {
       //     all hooks disabled.
       if (!flags.json) printStep('Lowering inline handlers...');
       const lowering = lowerCallables(normalized);
+      // The callables the extractor refused, each once: the refusal rows of the
+      // one population every verdict below reads. ⛔ Not
+      // `bodyExtractionWarnings`, which records a refusal once per SLOT — a
+      // handler shared by two hooks, or the same callable at the top level and
+      // in a `packages[i].manifest` body, is in it twice.
+      const refusedCallables = lowering.bodylessCallables.filter(isExtractionRefusal);
 
-      // Strict-body gate: refuse to ship if any callable failed body extraction.
+      // Strict-body gate: refuse to ship if any callable was not lowered into a
+      // metadata body, i.e. if the runtime module would still have to carry it.
       // Body-only is the long-term target — `--strict-body` lets CI enforce it
       // before ESM-bundle emission becomes mandatory-off.
-      const missingBody = lowering.count - lowering.bodyExtracted;
+      //
+      // `issues` is one row per callable, each callable once, so the header's
+      // count and the `--json` list are the same number. ⛔ Never rebuild it
+      // from `count - bodyExtracted` plus the extraction warnings: those count
+      // different populations (`bodylessCallables`' doc says how). Summing them
+      // printed one more callable than it listed and published a placeholder
+      // row in `issues` that named no callable.
       if (flags['strict-body']) {
-        const issues = [
-          ...lowering.bodyExtractionWarnings,
-          ...(missingBody > 0
-            ? [{ origin: '<aggregate>', reason: `${missingBody} callable(s) lowered to handler ref but produced no body` }]
-            : []),
-        ];
+        const issues = lowering.bodylessCallables;
         if (issues.length > 0) {
           if (flags.json) {
             await emitJson({ success: false, error: 'strict-body: missing body', issues, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
@@ -377,14 +385,18 @@ export default class Compile extends Command {
       //     dump for `--strict-body`'s per-callable diagnostic; on the default path
       //     we print the first line and point at the flag for the rest, so the
       //     default build stays readable while staying honest.
-      if (lowering.bodyExtractionWarnings.length > 0 && !flags.json) {
-        const n = lowering.bodyExtractionWarnings.length;
+      //
+      //     It counts and lists `refusedCallables`, each refused handler once, so
+      //     its number is the number of handlers the runtime module carries for
+      //     a refusal, not the number of slots that refused one.
+      if (refusedCallables.length > 0 && !flags.json) {
+        const n = refusedCallables.length;
         console.log('');
         printWarning(
           `${n} handler${n === 1 ? '' : 's'} could not be lowered to a metadata body — ` +
             `bundled via the legacy runtime module instead (build still succeeds)`,
         );
-        for (const w of lowering.bodyExtractionWarnings.slice(0, 20)) {
+        for (const w of refusedCallables.slice(0, 20)) {
           console.log(`  • ${w.origin}: ${String(w.reason).split('\n')[0]}`);
         }
         if (n > 20) console.log(chalk.dim(`  … and ${n - 20} more`));
@@ -1017,10 +1029,20 @@ export default class Compile extends Command {
       if (lowering.count > 0) {
         // New default: auto-skip the legacy bundle when every callable is
         // body-only (the metadata is fully self-describing). The bundle is
-        // emitted only when (a) some callable could not be lowered, or
-        // (b) the user explicitly opted in via --runtime-bundle.
-        const stillNeeded = lowering.count - lowering.bodyExtracted;
-        const needsBundle = stillNeeded > 0 || lowering.bodyExtractionWarnings.length > 0;
+        // emitted only when (a) some callable still needs it, or (b) the user
+        // explicitly opted in via --runtime-bundle.
+        //
+        // (a) is `bodylessCallables` being non-empty: the list `--strict-body`
+        // counts, one row per callable the module has to carry. ⛔ Never
+        // decide it from `count - bodyExtracted` again. `count` is per
+        // callable and `bodyExtracted` per lowered slot, so a callable lowered
+        // at two slots (a handler shared by two hooks, or the same hook at the
+        // top level and in a `packages[i].manifest` body) cancelled a
+        // `functions` entry beside it: the module was skipped and the entry
+        // shipped with no implementation, at exit 0. Every extraction refusal
+        // is a row of this list, so the warnings need no second term here.
+        const bodyless = lowering.bodylessCallables;
+        const needsBundle = bodyless.length > 0;
         const forceBundle = flags['runtime-bundle'];
         const strictNoBundle = flags['no-runtime-bundle'];
 
@@ -1028,7 +1050,7 @@ export default class Compile extends Command {
           // Legacy strict mode: explicit --no-runtime-bundle fails loudly
           // when any callable still requires the bundle. Preserved so CI
           // pipelines can guard against accidental regressions.
-          const msg = `--no-runtime-bundle requires every callable to have a metadata body (${stillNeeded} missing, ${lowering.bodyExtractionWarnings.length} extraction warning(s)). Re-run with --strict-body to see details, or omit --no-runtime-bundle.`;
+          const msg = `--no-runtime-bundle requires every callable to have a metadata body (${bodyless.length} missing, ${refusedCallables.length} extraction warning(s)). Re-run with --strict-body to see details, or omit --no-runtime-bundle.`;
           if (flags.json) {
             await emitJson({ success: false, error: msg, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
             this.exit(1);
@@ -1047,7 +1069,8 @@ export default class Compile extends Command {
           try {
             runtimeBundle = await buildRuntimeBundle({
               sourceConfigPath: absolutePath,
-              refs: Object.keys(lowering.functions),
+              callables: lowering.functions,
+              loadedConfig: config,
               outputDir: artifactDir,
             });
             finalBundle.runtimeModule = `./${runtimeBundle.outputFileName}`;
@@ -1174,11 +1197,11 @@ export default class Compile extends Command {
       if (ruleAdvisories.length > 0) {
         printWarning(`${ruleAdvisories.length} author-time warning(s) — see above`);
       }
-      if (lowering.bodyExtractionWarnings.length > 0) {
+      if (refusedCallables.length > 0) {
         // [#10678] Repeat the tally in the summary: the detail printed before the
-        // parse, and a long build scrolls it away.
+        // parse, and a long build scrolls it away. Same number as that detail.
         printWarning(
-          `${lowering.bodyExtractionWarnings.length} handler(s) bundled instead of lowered to a metadata body — see above`,
+          `${refusedCallables.length} handler(s) bundled instead of lowered to a metadata body — see above`,
         );
       }
       console.log('');

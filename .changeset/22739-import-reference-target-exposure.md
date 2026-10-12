@@ -24,7 +24,7 @@ Clause-②: no (narrowing)
 
 **Bindings.**
 
-- **Every caller of `runImport` whose protocol reads object declarations.** The decision takes no user, so an administrator, a member and a system context (the connector pull) are answered the same. The target's declaration is read through the protocol's `getMetaItem`, a new optional member of `ImportProtocolLike`; a protocol without it (plugin-auth's identity import, whose reads run under the system identity) is not judged.
+- **Every caller of `runImport` whose protocol reads object declarations.** The decision takes no user, so an administrator, a member and a system context (the connector pull) are answered the same. The target's declaration is read through the protocol's `getMetaItem`, a new optional member of `ImportProtocolLike`; a protocol without it is not judged (plugin-auth's identity import carries the reader since #22800).
 - **No new error code, no status change.** The refusal is the per-row `reference_not_found` the resolver already answers.
 - **Which fields count as references does not widen.** A `user` field written without `reference` still has no target on these doors (its cell reaches the write as written), although the arbiter gives it `sys_user`; adopting that target would widen what the import accepts and is not this change.
 

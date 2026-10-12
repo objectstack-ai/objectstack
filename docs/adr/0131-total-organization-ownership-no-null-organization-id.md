@@ -266,7 +266,7 @@ environment ledger exactly as ADR-0094 D3 already redirects it today.
 Setup authoring under `single` requires `manage_metadata` — D14's execution-plan note, item 4.
 
 A package reaches a deployment in one of **two install modes** (D6): **managed** — registered as code,
-sealed, upgradeable; or **template** — copied once into the environment ledger as environment
+sealed, upgradeable; or **unmanaged** — copied once into the environment ledger as environment
 metadata, fully editable, no upgrade channel, refused on shared-DB multi-tenant postures.
 
 This retires: `bootstrapBuiltinRoles`, `bootstrapDeclaredPositions`, `bootstrapDeclaredPermissions`,
@@ -375,7 +375,22 @@ The `single` anchor's own disposition is #11979's (Choice 4B), which this record
 
 **Two install modes.** The package **declares** the modes it permits (`installModes`, default
 `['managed']`); the installer picks one at install time; a shared-DB multi-tenant deployment refuses
-`template` whatever the package permits (ruled 2026-09-04).
+`unmanaged` whatever the package permits (ruled 2026-09-04).
+
+**Spelling note (2026-10-11, #22831).** The second install mode is spelled `unmanaged`: the maintainer's
+ruling **B** on [#15213](https://github.com/objectstack-ai/objectstack/issues/15213) (record `6108509158`,
+「同意」, 2026-10-11) and, for the bullet label below, the maintainer's decision **B** on #22831 (record
+`6109891008`, 2026-10-11). This record was accepted spelling it `template`; the value now reads `unmanaged`
+in this paragraph, in the **Unmanaged** bullet label below, in D2's install-mode sentence, in §6's record of
+the accepted install-mode question and in §8's C12 row. Why: it is the industry's name for this mode —
+Salesforce's unmanaged packages and Power Platform's unmanaged solutions, both already in
+[ADR-0086](./0086-authz-metadata-config-boundary-and-cross-package-composition.md)'s comparison;
+`managed` and `unmanaged` are the two states of one property, whether the package stays the authority; and
+`template` already names other things in the code — the scaffold manifest
+(`TemplateManifestSchema`), the `email_template` metadata type and the `os init` templates. ⛔ Only the
+spelling moves: the copy-once import, full editability, no upgrade channel and the refusal on `group` /
+`isolated` stand as decided. The rest of this record's prose — "template package", "template import",
+"template install mode" — is kept as written and names this same mode.
 
 - **Managed** (default). The package is registered into the registry as code. **No door edits a managed
   definition** — not Setup, not Studio, not the data or metadata API; to change one, the vendor publishes a
@@ -396,7 +411,7 @@ The `single` anchor's own disposition is #11979's (Choice 4B), which this record
   - **E — extend** (`object`, `app`): fields, validations, navigation arrive as a package.
   Managed is the **only** mode a shared-DB multi-tenant deployment (`group` / `isolated`) accepts, and every
   regime there is environment-wide and operator-gated — a plant admin neither overlays, switches nor clones.
-- **Template.** The package's metadata is copied **once** into the environment definition ledger as
+- **Unmanaged.** The package's metadata is copied **once** into the environment definition ledger as
   environment-provenance items — from then on it is the environment's own metadata, editable in Studio like
   anything authored there, with no upgrade channel (a later version is a new import, refused where names
   collide; provenance recorded for information only). ⛔ **Refused on `group` / `isolated`** with a message
@@ -837,7 +852,7 @@ sits beside them.
 Four of the five questions this draft carried were **accepted as proposed** on 2026-09-04 (「接受你的建议」)
 and are now part of the decisions: the `single`-posture first-user grant row is owned by the Default
 Organization (D5); the package **declares** the install modes it permits (`installModes`, default
-`['managed']`), the installer picks one, and a shared-DB multi-tenant deployment refuses `template`
+`['managed']`), the installer picks one, and a shared-DB multi-tenant deployment refuses `unmanaged`
 whatever the package permits (D6); deployment-level settings go to configuration, with a tenant-less
 object only for values an operator must change without a restart (D7); ADR-0005's per-organization
 overlay axis is retired (D6). One remains:
@@ -924,7 +939,7 @@ One epic tracks the family. C0 and #15030 land before 17.3; every other card is 
 | C3 | Retire the seeders, the per-organization catalog machinery and the four catalog objects; `PositionSchema.permissionSets` added and `sys_position_permission_set` rows migrated into definitions; built-ins and audience anchors as declared metadata; Setup catalog creation = environment metadata write under `single`, refused under a wall; platform-admin grant row owned by the Default Organization | D2, D3, D5, D13 | C1, C2 |
 | C4 | Templates: `sendTemplate` resolves the registry; seed and provenance stamp retired; door closed; customized-rows ruling applied | D6, D10 | ADR merge (+ §6 Q1) |
 | C5 | `sys_metadata` family tenant-less (environment definitions, UI-editable by metadata authors); per-organization overlay axis retired (org-scoped writes of the five tier-A types refused); `sys_view_definition` and its two runtime index migrations retired as inert (ADR-0087 entry; ADR-0017 amended); ADR-0005 amended | D6, D7, D13 | C1 |
-| C12 | Template install mode: manifest `installModes`, one-time import into the environment ledger with provenance, refusal on `group` / `isolated`, CLI + marketplace surfaces | D6 | C5 |
+| C12 | Unmanaged install mode: manifest `installModes`, one-time import into the environment ledger with provenance, refusal on `group` / `isolated`, CLI + marketplace surfaces | D6 | C5 |
 | C6 | Deployment-level state has no column: settings global rung leaves `sys_setting`; plumbing objects drop the column; #12699 declaration made total | D7 | ADR merge (+ §6 Q3) |
 | C7 | Inventory + the manual migration ceremony (`os migrate` family: plan / apply / post-check, idempotent + resumable, per-table constraint gate) and the v18 boot refusal against an un-migrated database. First named fate-3 members (the #14096 census, ruled 2026-09-04): `sys_file`, `sys_upload_session`, `sys_approval_request`, `sys_approval_action`, `sys_approval_approver`, `sys_automation_run`, `sys_notification_delivery`, `sys_record_share` | D10 | C2, C3, C4, C5, C6 |
 | C8 | One predicate; NOT NULL per cleared table; every-posture refusal; both arms and the ledger retired — protocol 18 | D1, D8, D9, D13, D14 | C7 |

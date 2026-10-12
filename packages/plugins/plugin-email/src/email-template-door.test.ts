@@ -7,8 +7,9 @@
  *  1. An organization's create, update and predicate update are refused with
  *     `PERMISSION_DENIED` / 403, the refusal names the closed door, and nothing
  *     reaches the driver.
- *  2. A system-context write still passes: the seeds, the boot sweep, the live
- *     projector of a Studio save, and the v18 migration ceremony's promotion.
+ *  2. A system-context write still passes: the v18 migration ceremony's
+ *     promotion. (The plugin's own writers — the seed, the boot sweep and the
+ *     live projector — are gone: templates resolve from the registry.)
  *  3. No update marks a row `customized` any more. The provenance stamp that
  *     did is retired, and with the door closed no non-system update reaches the
  *     engine's write at all.
@@ -29,7 +30,7 @@ const silentLogger = { debug() {}, info() {}, warn() {}, error() {} };
 
 /** An organization admin through the data door: a caller, not system-elevated. */
 const ORG_CTX = { userId: 'usr_admin', tenantId: 'org_default', positions: [], permissions: [] };
-/** The platform's own writers (seeds, sweep, projector, promotion). */
+/** A platform writer: the v18 migration ceremony's promotion. */
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
 
 /** Minimal in-memory driver: what reached it is what the door let through. */
@@ -114,7 +115,7 @@ async function boot() {
   return { engine, driver };
 }
 
-/** A package-seeded and a platform-seeded row, as the boot seeders leave them. */
+/** A package-seeded and a platform-seeded row, as earlier releases' boot seeders left them. */
 const SEEDED = [
   { id: 'a', name: 'auth.password_reset', locale: 'en-US', subject: 'Reset', managed_by: 'package', customized: false },
   { id: 'b', name: 'auth.verify_email', locale: 'en-US', subject: 'Verify', managed_by: 'platform', customized: false },
@@ -185,7 +186,7 @@ describe('the sys_email_template organization door is closed', () => {
 /* ── 2. system writes pass ─────────────────────────────────────────────── */
 
 describe('a system-context write passes the closed door', () => {
-  it('creates and updates a template row (the seeds, the sweep, the projector, the promotion)', async () => {
+  it('creates and updates a template row (the v18 migration ceremony\'s promotion)', async () => {
     const { engine, driver } = await boot();
 
     await engine.insert(OBJECT, {

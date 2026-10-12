@@ -45,7 +45,7 @@ const NEWLY_LOCALIZED = [
 ] as const;
 type TemplateName = (typeof NEWLY_LOCALIZED)[number];
 
-// ── harness: the real EmailService over the real seeded rows ───────────────
+// ── harness: the real EmailService over the real built-in templates ────────
 
 class CaptureTransport implements IEmailTransport {
   public sent: NormalizedEmailMessage[] = [];
@@ -56,7 +56,7 @@ class CaptureTransport implements IEmailTransport {
 }
 
 /**
- * A loader over exactly what `EmailServicePlugin` seeds, matching `(name,
+ * A loader over exactly what `EmailServicePlugin` registers, matching `(name,
  * locale)` exactly and with no fallback of its own — so the fallback observed
  * in these tests is the SERVICE's ladder, which is the thing under test.
  */
@@ -239,7 +239,7 @@ describe('#8195 — the five remaining auth templates ship in all four locales',
     expect(rows.map((t) => t.locale).sort()).toEqual([...SUPPORTED_LOCALES].sort());
   });
 
-  it('every seeded auth row is a valid EmailTemplateDefinition', () => {
+  it('every registered auth template is a valid EmailTemplateDefinition', () => {
     for (const t of BUILTIN_AUTH_TEMPLATES) {
       const parsed = EmailTemplateDefinitionSchema.safeParse(t);
       expect(parsed.success, `${t.name} @ ${t.locale}: ${parsed.error?.message}`).toBe(true);

@@ -112,6 +112,15 @@ const asRec = (v: unknown): AnyRec | undefined =>
 /** How many declared names the refusal quotes before it counts the rest. */
 const MAX_QUOTED_NAMES = 10;
 
+/** How many outside dependencies the notice quotes before it counts the rest. */
+const MAX_QUOTED_DEPENDENCIES = 2;
+
+function dependencyList(quoted: readonly string[]): string {
+  return quoted.length <= MAX_QUOTED_DEPENDENCIES
+    ? quoted.join(', ')
+    : `${quoted.slice(0, MAX_QUOTED_DEPENDENCIES).join(', ')} and ${quoted.length - MAX_QUOTED_DEPENDENCIES} more`;
+}
+
 /** One body the boot path registers, with the dependencies that bound it. */
 interface JudgedBody {
   /** Path prefix of this body in the parsed stack: `''` or `packages[1].manifest.`. */
@@ -217,8 +226,6 @@ function referencesOf(judged: JudgedBody): PicklistReference[] {
 /** The sentences that differ between a field's reference and an extension's. */
 function wordingOf(ref: PicklistReference, declared: readonly string[]): {
   names: string;
-  /** What the notice calls the thing the declaring package declares. */
-  declarer: string;
   consequence: string;
   refusalHint: string;
   noticeHint: string;
@@ -229,7 +236,6 @@ function wordingOf(ref: PicklistReference, declared: readonly string[]): {
   if (ref.site === 'field') {
     return {
       names,
-      declarer: 'the field',
       consequence: `${names} (${quoteNames(declared)}), so the field has no list to take its options from.`,
       refusalHint:
         `Declare the list — ${declare} in the stack, or a ` +
@@ -242,7 +248,6 @@ function wordingOf(ref: PicklistReference, declared: readonly string[]): {
   }
   return {
     names,
-    declarer: 'the extension',
     consequence: `${names} (${quoteNames(declared)}), so the options it adds have no list to join.`,
     refusalHint:
       'Correct `extend` to the picklist this entry adds options to, or declare that list — ' +
@@ -298,10 +303,13 @@ export function judgePicklistReferences(parsed: AnyRec): PicklistReferenceJudgem
           where: ref.where,
           path: ref.path,
           // The notice printer shows no `where`, so this message names the field or the extension.
+          // [#22161] One verdict sentence; why a dependency outside the stack
+          // cannot be read is this rule's `RULE_EXPLANATIONS` entry
+          // (`os explain picklist-reference-unverified`).
           message:
-            `${ref.where}: ${wording.names} — not judged: the package declaring ${wording.declarer} depends on ` +
-            `${judged.outside.map((id) => `'${id}'`).join(', ')}, which this stack does not carry, ` +
-            'and whose picklists this command cannot read.',
+            `${ref.where}: ${wording.names} — not judged: it may come from ` +
+            `${dependencyList(judged.outside.map((id) => `'${id}'`))}, ` +
+            `${judged.outside.length === 1 ? 'a dependency' : 'dependencies'} this stack does not carry`,
           hint: wording.noticeHint,
         });
       }

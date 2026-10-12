@@ -186,13 +186,15 @@ function isTenancyDisabled(object: AnyRec): boolean {
   return false;
 }
 
+/**
+ * [#22161] One remedy line, both arms. Why membership is the only
+ * cross-organization route, why a Layer-1 policy cannot widen Layer 0, and the
+ * business-unit tree for a hierarchy inside one organization are
+ * `os explain org-axis-permission-inheritance`.
+ */
 const INHERITANCE_HINT =
-  `Remove the ${ORG_PARENT_FIELD} reference. Cross-organization visibility comes from MEMBERSHIP: ` +
-  `under the \`group\` tenancy posture the engine's Layer 0 wall is ` +
-  `\`organization_id IN accessible_org_ids\`, so a user who should see several organizations is made ` +
-  `a member of them (ADR-0105 D2). A Layer-1 policy cannot widen Layer 0 anyway, so this rule would ` +
-  `not grant the access it appears to. For a hierarchy INSIDE one organization, use the business-unit ` +
-  `tree (\`unit_and_subordinates\` sharing, or a depth scope anchored on \`sys_user_position\`).`;
+  `Remove the ${ORG_PARENT_FIELD} reference: make a user who should see several organizations a ` +
+  `member of each (Layer 0 reads accessible_org_ids)`;
 
 /**
  * Lint an ObjectStack config for the ADR-0105 D6 organization-axis red lines.
@@ -297,11 +299,11 @@ export function validateOrgAxisRedLines(stack: unknown): OrgAxisFinding[] {
       message:
         `Recipient \`${recipientType}\` (${reach}) on an object that opted out of tenancy spans ` +
         `EVERY organization: a cross-org business-unit grant ADR-0105 D6 forbids`,
+      // [#22161] One remedy line; the `public_read` route for a catalog
+      // everyone reads is the explanation's.
       hint:
-        `Either scope the object to organizations (drop \`tenancy.enabled: false\` so Layer 0 walls it), ` +
-        `or share it to a \`user\` / \`team\` / \`position\` audience instead — those expand flat, with no ` +
-        `business-unit tree to resolve. A platform-global catalog that everyone should read wants an OWD ` +
-        `of \`public_read\`, not a BU grant.`,
+        'Scope the object to organizations (drop `tenancy.enabled: false`), or share it to a `user` / ' +
+        '`team` / `position` audience, which expands flat',
     });
   });
 

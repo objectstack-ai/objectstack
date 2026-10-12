@@ -249,7 +249,7 @@ describe('FlowSchema applies the `end` contract — the structural node\'s only 
         {
           id: 'each', type: 'loop', label: 'Each',
           config: {
-            collection: '{items}',
+            collection: { dialect: 'cel', source: 'items' },
             body: {
               nodes: [{ id: 'inner_end', type: 'end', label: 'Inner end', config: { outcome: 'refused' } }],
               edges: [],

@@ -1071,15 +1071,12 @@ function checkElement(
         `visibility predicate is syntactically valid CEL but overruns ${bound}` +
         `${refusal.overrun.limit && refusal.overrun.limitValue !== null ? '' : ` (${refusal.overrun.summary})`}, ` +
         NEVER_EVALUATES,
+      // [#22161] One remedy line; that it is a SIZE fault and not a dialect
+      // mistake, and why logic this large belongs on the record, are
+      // `os explain visibility-predicate-over-budget`.
       hint:
-        `There is no syntax or dialect error to correct here — this is a SIZE fault, not a dialect ` +
-        `mistake, so re-spelling the predicate will not fix it. Make it smaller, or move the work ` +
-        `off the predicate: (1) collapse a long \`${root}.f == 'a' || ${root}.f == 'b' || …\` chain ` +
-        `into a single \`${root}.f in ['a', 'b', …]\`, which is far fewer AST nodes ` +
-        `(\`maxListElements\` is 64, so a very large set needs option 2); (2) precompute the heavy ` +
-        `part into a formula/rollup field on the object and test that one field instead. Logic ` +
-        `genuinely this large is not element visibility — compute it once on the record rather ` +
-        `than re-deriving it in every predicate that needs it.`,
+        `Make the predicate smaller: collapse an \`||\` chain into \`${root}.f in ['a', 'b', …]\`, or precompute ` +
+        'the heavy part into a formula/rollup field on the object and test that one field',
     });
   }
   if (source && refusal?.kind === 'syntax') {

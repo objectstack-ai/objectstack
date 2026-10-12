@@ -2,10 +2,13 @@
 //
 // Minimal booted-app fixture for the "My Pending" position-address pin.
 //
-// One object, one autolaunched `approval` flow whose sole node routes to a
+// One object, one autolaunched `approval` flow whose node routes to a
 // POSITION that nobody holds when the request opens — so the request's slate
-// is the literal `position:<p>` slot, exactly what a HotCRM approval carries
-// when its approver position is staffed only after submission. The pin then
+// keeps the literal `position:<p>` slot, the slot a holder staffed only after
+// submission decides — beside one named co-approver who never acts. The
+// co-approver is what keeps the literal on the slate: a slate of literals ALONE
+// names no one, and under the default `onEmptyApprovers: 'admin_rescue'` it now
+// opens on the organization's administrators instead (#22824). The pin then
 // staffs a user into that position and asks the approvals inbox's "My
 // Pending" door for the request: `position:<p>` lists it, and the retired
 // `role:<p>` spelling (ADR-0090 D3) does not.
@@ -27,6 +30,9 @@ export const ROUTED_POSITION = 'my_pending_reviewer';
 /** A position the negative-control user holds — never the routed one. */
 export const OTHER_POSITION = 'my_pending_bystander';
 
+/** The named co-approver beside the position: no account is ever this address. */
+export const CO_APPROVER = 'my-pending-co-approver@example.com';
+
 export const MyPendingRequest = ObjectSchema.create({
   name: 'my_pending_request',
   label: 'My Pending Request',
@@ -40,7 +46,7 @@ export const MyPendingRequest = ObjectSchema.create({
 export const MyPendingFlow = defineFlow({
   name: 'my_pending_flow',
   label: 'My Pending Flow',
-  description: 'Fires on insert and routes to a position nobody holds yet.',
+  description: 'Fires on insert and routes to a position nobody holds yet, beside a named co-approver.',
   type: 'autolaunched',
   status: 'active',
   nodes: [
@@ -55,7 +61,7 @@ export const MyPendingFlow = defineFlow({
       type: 'approval',
       label: 'Review',
       config: {
-        approvers: [{ type: 'position', value: ROUTED_POSITION }],
+        approvers: [{ type: 'position', value: ROUTED_POSITION }, { type: 'user', value: CO_APPROVER }],
         behavior: 'first_response',
       },
     },

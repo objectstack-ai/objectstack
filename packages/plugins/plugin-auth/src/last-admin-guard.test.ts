@@ -1325,13 +1325,14 @@ describe('[#5978] path 3 — revoking the last administrator\'s admin_full_acces
     );
   });
 
-  it('RE-POINTING the last grant at another permission set is refused', async () => {
+  it('RE-NAMING the last grant to another permission set is refused', async () => {
     await seedUser(engine, 'usr_platform', { platformAdmin: true });
 
     // The row is neither deleted nor scoped nor expired — it simply stops
     // granting `admin_full_access`. The simulation re-tests which set the grant
-    // points at rather than trusting the enumeration's own `where`.
-    await expect(editGrant('ups_usr_platform', { permission_set_id: 'ps_member' })).rejects.toThrow(
+    // names rather than trusting the enumeration's own `where`. [ADR-0131 D4]
+    // The name is the grant's one reference to its set.
+    await expect(editGrant('ups_usr_platform', { permission_set: 'member_default' })).rejects.toThrow(
       /last administrator/i,
     );
   });

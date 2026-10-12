@@ -2379,12 +2379,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         // template — so `screen.fields[].visibleWhen`, declared bare CEL since
         // #3304, was validated by nobody and #3528 shipped a template-dialect
         // predicate through compile, validate and run time in silence.
-        // Only `predicate` slots are checkable: `flow-template` slots take the
-        // single-brace `{var}` dialect `interpolate()` implements, which no
-        // validator covers (the `template` role enforces ADR-0032 §3's
-        // double-brace text template and would reject every correct
-        // `loop.collection`). The ledger records them regardless, so the
-        // reconciliation ratchet still sees the marker.
+        // A `predicate` slot is checked as bare CEL, and a `value` slot's
+        // envelope by its own rule (`checkDeclaredValue`) — the two roles the
+        // ledger has since #19939 retired the single-brace one with the
+        // `loop` / `map` `collection` it recorded.
         const nodeType = typeof node.type === 'string' ? node.type : '';
         // [#20316] What the node's executor needs its `config` to carry — a key
         // its contract requires, left out, and a `decision` branch list it

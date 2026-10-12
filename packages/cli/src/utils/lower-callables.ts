@@ -21,7 +21,12 @@
  * emitting it.
  */
 
-import { extractHookBody, HookBodyExtractionError, type HookBodyRefusalKind } from './extract-hook-body.js';
+import {
+  extractLoweredBody,
+  HookBodyExtractionError,
+  type HookBodyRefusalKind,
+  type LoweringFace,
+} from './extract-hook-body.js';
 
 /**
  * One recorded extraction refusal.
@@ -48,17 +53,98 @@ export interface BodyExtractionWarning {
   freeIdentifiers: readonly string[];
 }
 
+/**
+ * One registered callable the runtime module still has to carry, the unit
+ * `objectstack build --strict-body` counts and lists. The row is the
+ * extractor's refusal, verbatim, when some slot tried extraction and was
+ * refused. Otherwise it says why extraction was never tried.
+ */
+export type BodylessCallable = BodyExtractionWarning | { origin: string; reason: string };
+
+/** Is this row the extractor's refusal (as opposed to a slot that was never extracted)? */
+export function isExtractionRefusal(row: BodylessCallable): row is BodyExtractionWarning {
+  return 'kind' in row;
+}
+
+/**
+ * How a slot that did not lower its callable leaves it. A callable bound at
+ * several slots reports the row of its highest-ranked one, the first among
+ * equals, so the row is the extractor's refusal whenever some slot refused it.
+ *
+ * A rank above 0 is a slot with no body at all, which runs the callable only
+ * from the runtime module. Another slot lowering the same callable gives THAT
+ * slot a body and leaves this one without, so it does not take the callable
+ * off `bodylessCallables`. Only a slot that carries its own authored `body`
+ * (rank 0) is taken off by a lowering elsewhere.
+ */
+type UnloweredSlot = 'refused' | 'functions-entry' | 'authored-body';
+const UNLOWERED_SLOT_RANK: Record<UnloweredSlot, number> = { 'authored-body': 0, 'functions-entry': 1, refused: 2 };
+
+/** Why a top-level `functions` entry is never lowered: it has no `body` slot. */
+export const FUNCTIONS_ENTRY_NO_BODY_REASON =
+  'a `functions` entry has no metadata body: it runs only from the bundled runtime module (objectstack-runtime.*.mjs)';
+
+/** Why an inline function beside an authored `body` is never lowered: the slot already has one. */
+export const AUTHORED_BODY_BESIDE_FUNCTION_REASON =
+  'it carries its own `body`, so its inline function is not lowered and is bundled into the runtime module (objectstack-runtime.*.mjs) beside it';
+
 export interface LoweringResult {
   /** A deep-cloned, JSON-safe copy of the stack with handlers replaced by strings. */
   lowered: Record<string, unknown>;
-  /** name → original handler function. Empty when nothing needed lowering. */
+  /**
+   * ref → the callable it names: the runtime module's `functions` export, entry
+   * for entry. Empty when nothing needed lowering.
+   *
+   * This map is the ONE reading of which ref names which code. The runtime
+   * module is generated from it (`buildRuntimeBundle` locates each callable by
+   * identity, see `locateCallables`), never by re-deriving names from the
+   * config, because the runtime resolves a hook's `handler`, an action's
+   * `target` and a `functions` key against one merged namespace.
+   *
+   * An authored `functions` name (a map key, an array entry's `name`) is a ref
+   * of its own: it ships under that name and names its own callable, even when
+   * another slot binds the same function or wants the same name. A ref minted
+   * for a hook or an action is internal, so it is the one that takes a numeric
+   * suffix on a collision.
+   */
   functions: Record<string, (...args: unknown[]) => unknown>;
-  /** Number of inline function handlers replaced. */
+  /**
+   * Number of refs the runtime module serves (the keys of `functions`). Two
+   * authored `functions` names bound to one function are two refs; slots that
+   * only re-bind a callable already registered (a handler shared by two hooks,
+   * the same callable in a `packages[i].manifest` body) add none.
+   */
   count: number;
-  /** Number of handlers that successfully emitted a metadata-only `body`. */
+  /** Number of SLOTS that emitted a metadata-only `body` (one callable can fill several). */
   bodyExtracted: number;
-  /** Per-extraction failures (still emit handler ref + bundle, but warn). */
+  /** Per-slot extraction failures (still emit handler ref + bundle, but warn). */
   bodyExtractionWarnings: BodyExtractionWarning[];
+  /**
+   * Every registered callable (an entry of `functions`) the runtime module
+   * still has to carry, each ONCE, in the order a slot first left it
+   * unlowered, keyed by its ref. That is a callable bound at a slot with no
+   * body at all (a `functions` entry, which has no body slot, or a slot whose
+   * extraction was refused), whether or not another slot lowered it, and a
+   * callable beside an authored `body` that no slot lowered. This is the list
+   * `--strict-body` counts, the population `objectstack build` decides the
+   * runtime module from, and (its refusal rows, {@link isExtractionRefusal})
+   * the default build's warning.
+   *
+   * ⛔ Not derivable from the counters above. `count - bodyExtracted` is
+   * this list's length only when every callable is walked once at one slot,
+   * and the extraction warnings are a subset of it:
+   *   - a `functions` entry, or an inline function beside an authored
+   *     `body`, is never extracted, so it leaves no warning;
+   *   - a stack carrying the same callable at the top level AND in a
+   *     `packages[i].manifest` body (ADR-0130 D4) is walked twice. `count`
+   *     dedups by identity, while extraction runs once per walk, so each
+   *     refusal is recorded twice and each success is counted twice;
+   *   - one function bound at two or more slots in one walk (a handler
+   *     shared by two hooks) counts once in `count` and once per lowered slot
+   *     in `bodyExtracted`, and a slot that lowered it says nothing about a
+   *     `functions` entry or a refused slot bound to the same function.
+   */
+  bodylessCallables: BodylessCallable[];
   /**
    * [#16546] The `hooks[*].handler` ref strings whose `body` was minted HERE
    * — extracted from the author's inline `handler` function — as opposed to a
@@ -90,10 +176,10 @@ const isPlainObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
 
 /**
- * Generate a unique reference name. Hook handlers reuse the hook name
- * verbatim (callers should ensure hook names are unique anyway).
- * Anonymous registrations (e.g. `functions: { foo: fn }`) use the map key.
- * Collisions get a numeric suffix.
+ * Generate a unique reference name for an internal ref. Hook handlers reuse
+ * the hook name verbatim and action targets `<owner>_<action>`, unless that
+ * name is already taken; every authored `functions` name is taken before any
+ * internal ref is minted. Collisions get a numeric suffix.
  */
 function uniqueName(base: string, taken: Set<string>): string {
   if (!taken.has(base)) return base;
@@ -107,18 +193,36 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
   const taken = new Set<string>();
   const warnings: BodyExtractionWarning[] = [];
   const loweredHookRefs = new Set<string>();
+  /**
+   * ref → the row `bodylessCallables` reports for it, and that row's slot
+   * rank ({@link UnloweredSlot}). A higher-ranked slot replaces the row in
+   * place, so the list keeps the order slots first left a callable unlowered.
+   */
+  const unlowered = new Map<string, { row: BodylessCallable; rank: number }>();
+  /** The refs some slot lowered into a `body`. */
+  const loweredRefs = new Set<string>();
   let bodyExtracted = 0;
+
+  function noteUnlowered(ref: string, row: BodylessCallable, slot: UnloweredSlot): void {
+    const rank = UNLOWERED_SLOT_RANK[slot];
+    const held = unlowered.get(ref);
+    if (held === undefined || rank > held.rank) unlowered.set(ref, { row, rank });
+  }
 
   // Try to extract a metadata-only body from a callable. Returns null if the
   // body source contains a forbidden token — the caller still bundles the fn.
-  function tryExtractBody(fn: AnyFn, originLabel: string): {
+  // Called only for a slot with no `body` of its own; `ref` is the callable's.
+  // `face` is the wrapper the body will run in (#22837): a hook handler's one
+  // parameter is rebound to the sandbox's `ctx`; an action target's is not.
+  function tryExtractBody(fn: AnyFn, originLabel: string, ref: string, face: LoweringFace): {
     language: 'js';
     source: string;
     capabilities: string[];
   } | null {
     try {
-      const ext = extractHookBody(fn, originLabel);
+      const ext = extractLoweredBody(fn, originLabel, face);
       bodyExtracted += 1;
+      loweredRefs.add(ref);
       return { language: 'js', source: ext.source, capabilities: ext.capabilities };
     } catch (err: any) {
       // ⛔ The catch STAYS. Deleting it would make every refusal fatal and take
@@ -126,12 +230,14 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
       // the two share this catch, which is exactly why the refusal now arrives
       // classified. Telling them apart is the consumer's job (`os lint`), not
       // this function's: lowering keeps bundling both, at exit 0, unchanged.
-      warnings.push({
+      const warning: BodyExtractionWarning = {
         origin: originLabel,
         reason: err?.message ?? String(err),
         kind: err instanceof HookBodyExtractionError ? err.kind : 'unknown',
         freeIdentifiers: err instanceof HookBodyExtractionError ? err.freeIdentifiers : [],
-      });
+      };
+      warnings.push(warning);
+      noteUnlowered(ref, warning, 'refused');
       return null;
     }
   }
@@ -154,14 +260,97 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
    */
   const refByFn = new Map<AnyFn, string>();
 
-  /** Register one callable and answer its ref, reusing the ref if it has one. */
+  /**
+   * Authored `functions` name → the callable its entry binds (`undefined` for
+   * an entry that carries no callable, such as an already-lowered ref).
+   *
+   * Filled by {@link claimAuthoredNames} BEFORE any slot is walked, so the
+   * names are taken before a hook or an action mints an internal ref. The walk
+   * order (hooks, then actions, then `functions`) used to decide who kept a
+   * contested name: a hook named like a `functions` key kept it, the key was
+   * re-keyed to a `__2` ref the runtime module never served, and the hook's
+   * ref then resolved to the `functions` entry's code. A function shared with
+   * a hook lost its authored key outright, since the key was re-keyed to the
+   * hook's ref.
+   *
+   * The first binding of a name wins it. A later entry binding the same name
+   * to a DIFFERENT callable (a second `packages[i].manifest` body, or a
+   * duplicated `name` in the array form) cannot share one flat runtime-module
+   * namespace with it, so it keeps today's suffixed ref ({@link suffixedByName}).
+   */
+  const authoredFn = new Map<string, AnyFn | undefined>();
+  /** (authored name, callable) → the suffixed ref a contested name was minted under, so every walk agrees. */
+  const suffixedByName = new Map<string, Map<AnyFn, string>>();
+
+  function claimAuthoredName(name: string, fn: AnyFn | undefined): void {
+    if (authoredFn.has(name)) return;
+    authoredFn.set(name, fn);
+    taken.add(name);
+    // A hook or action bound to this same function re-uses the authored name
+    // rather than minting a second ref for it.
+    if (fn !== undefined && !refByFn.has(fn)) refByFn.set(fn, name);
+  }
+
+  /** Take every authored `functions` name of one stack-shaped body (map keys, array `name`s). */
+  function claimAuthoredNames(body: Record<string, unknown>): void {
+    const fnsField = body.functions;
+    if (Array.isArray(fnsField)) {
+      for (const entry of fnsField) {
+        if (!isPlainObject(entry) || typeof entry.name !== 'string' || entry.name.length === 0) continue;
+        claimAuthoredName(entry.name, typeof entry.handler === 'function' ? (entry.handler as AnyFn) : undefined);
+      }
+    } else if (isPlainObject(fnsField)) {
+      for (const [key, value] of Object.entries(fnsField)) {
+        if (typeof value === 'function') claimAuthoredName(key, value as AnyFn);
+        else if (isPlainObject(value) && typeof value.handler === 'function') claimAuthoredName(key, value.handler as AnyFn);
+        else claimAuthoredName(key, undefined);
+      }
+    }
+  }
+
+  /** Make `ref` serve `fn` in the runtime module (first registration of the ref wins its place). */
+  function serve(ref: string, fn: AnyFn): void {
+    if (!Object.prototype.hasOwnProperty.call(functions, ref)) functions[ref] = fn;
+  }
+
+  /**
+   * Register one callable bound at an INTERNAL slot (a hook, an action, a
+   * nameless `functions` array entry) and answer its ref, reusing the ref the
+   * callable already has: an authored `functions` name bound to it, or the ref
+   * an earlier slot minted for it.
+   */
   function register(fn: AnyFn, base: string): string {
     const seen = refByFn.get(fn);
-    if (seen !== undefined) return seen;
+    if (seen !== undefined) {
+      serve(seen, fn);
+      return seen;
+    }
     const ref = uniqueName(base, taken);
     taken.add(ref);
-    functions[ref] = fn;
+    serve(ref, fn);
     refByFn.set(fn, ref);
+    return ref;
+  }
+
+  /**
+   * Register the callable of an authored `functions` entry and answer its ref:
+   * the authored name itself, whatever other slot binds the same function.
+   */
+  function registerAuthored(fn: AnyFn, name: string): string {
+    if (authoredFn.get(name) === fn) {
+      serve(name, fn);
+      return name;
+    }
+    let byFn = suffixedByName.get(name);
+    if (byFn === undefined) suffixedByName.set(name, (byFn = new Map()));
+    let ref = byFn.get(fn);
+    if (ref === undefined) {
+      ref = uniqueName(name, taken);
+      taken.add(ref);
+      byFn.set(fn, ref);
+    }
+    serve(ref, fn);
+    if (!refByFn.has(fn)) refByFn.set(fn, ref);
     return ref;
   }
 
@@ -193,13 +382,15 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
 
           // Extract metadata body unless the user already provided one.
           if (!hook.body) {
-            const body = tryExtractBody(hook.handler as AnyFn, `hook '${name}'`);
+            const body = tryExtractBody(hook.handler as AnyFn, `hook '${name}'`, ref, 'hook');
             if (body) {
               hook.body = body;
               // [#16546] This ref's `body` was minted here, not authored — the
               // marker the two hook write-set rules redirect their `path` on.
               loweredHookRefs.add(ref);
             }
+          } else {
+            noteUnlowered(ref, { origin: `hook '${name}'`, reason: AUTHORED_BODY_BESIDE_FUNCTION_REASON }, 'authored-body');
           }
           hook.handler = ref;
         }
@@ -216,7 +407,7 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
         const obj = { ...rawObj };
         if (Array.isArray(obj.actions)) {
           obj.actions = (obj.actions as unknown[]).map((rawAct) =>
-            lowerActionCallable(rawAct, register, tryExtractBody, `${String(obj.name ?? 'object')}`),
+            lowerActionCallable(rawAct, register, tryExtractBody, noteUnlowered, `${String(obj.name ?? 'object')}`),
           );
         }
         return obj;
@@ -224,7 +415,7 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
     }
     if (Array.isArray((lowered as any).actions)) {
       (lowered as any).actions = ((lowered as any).actions as unknown[]).map((rawAct) =>
-        lowerActionCallable(rawAct, register, tryExtractBody, 'global'),
+        lowerActionCallable(rawAct, register, tryExtractBody, noteUnlowered, 'global'),
       );
     }
 
@@ -238,10 +429,10 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
         if (!isPlainObject(entry)) return entry;
         const next = { ...entry };
         if (typeof next.handler === 'function') {
-          const name = typeof next.name === 'string' && next.name.length > 0
-            ? next.name
-            : 'anon_fn';
-          const ref = register(next.handler as AnyFn, name);
+          const authored = typeof next.name === 'string' && next.name.length > 0;
+          const name = authored ? (next.name as string) : 'anon_fn';
+          const ref = authored ? registerAuthored(next.handler as AnyFn, name) : register(next.handler as AnyFn, name);
+          noteUnlowered(ref, { origin: `function '${name}'`, reason: FUNCTIONS_ENTRY_NO_BODY_REASON }, 'functions-entry');
           next.name = ref;
           next.handler = ref;
         }
@@ -252,7 +443,8 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
       const out: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(fnsField)) {
         if (typeof value === 'function') {
-          const ref = register(value as AnyFn, key);
+          const ref = registerAuthored(value as AnyFn, key);
+          noteUnlowered(ref, { origin: `function '${key}'`, reason: FUNCTIONS_ENTRY_NO_BODY_REASON }, 'functions-entry');
           out[ref] = ref;
         } else if (isPlainObject(value) && typeof value.handler === 'function') {
           // A DECLARED entry (`{ handler, effect: 'writes' }`, #4396). Lower the
@@ -260,7 +452,8 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
           // it, so what the function said about itself survives into the
           // artifact — dropping it here would silently un-declare the function
           // on every built deployment while it kept working from source.
-          const ref = register(value.handler as AnyFn, key);
+          const ref = registerAuthored(value.handler as AnyFn, key);
+          noteUnlowered(ref, { origin: `function '${key}'`, reason: FUNCTIONS_ENTRY_NO_BODY_REASON }, 'functions-entry');
           out[ref] = { ...value, handler: ref };
         } else {
           // NOTHING ELSE IS THIS STEP'S TO JUDGE (#7318). Everything that is not
@@ -296,6 +489,16 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
     return lowered;
   }
 
+  // 0. Take every authored `functions` name, in every body the walks below
+  //    visit, before any hook or action mints an internal ref (see
+  //    `authoredFn`). The bodies are the ones step 3 walks, in its order.
+  claimAuthoredNames(input);
+  if (Array.isArray(input.packages)) {
+    for (const entry of input.packages as unknown[]) {
+      if (isPlainObject(entry) && isPlainObject(entry.manifest)) claimAuthoredNames(entry.manifest);
+    }
+  }
+
   const lowered = lowerBody(input);
 
   // 3. [ADR-0130 D4] The artifact's own package bodies.
@@ -325,6 +528,12 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
     count: Object.keys(functions).length,
     bodyExtracted,
     bodyExtractionWarnings: warnings,
+    // A slot with no body (rank > 0) keeps its callable on the list whatever
+    // another slot did: the hook that lowered a shared function does not run
+    // the `functions` entry, or the refused slot, bound to that same function.
+    bodylessCallables: [...unlowered]
+      .filter(([ref, { rank }]) => rank > 0 || !loweredRefs.has(ref))
+      .map(([, { row }]) => row),
     loweredHookRefs,
   };
 }
@@ -345,7 +554,8 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
 function lowerActionCallable(
   raw: unknown,
   register: (fn: AnyFn, base: string) => string,
-  tryExtract: (fn: AnyFn, label: string) => { language: 'js'; source: string; capabilities: string[] } | null,
+  tryExtract: (fn: AnyFn, label: string, ref: string, face: LoweringFace) => { language: 'js'; source: string; capabilities: string[] } | null,
+  noteUnlowered: (ref: string, row: BodylessCallable, slot: UnloweredSlot) => void,
   ownerLabel: string,
 ): unknown {
   if (!isPlainObject(raw)) return raw;
@@ -359,8 +569,10 @@ function lowerActionCallable(
   const fn = action.target as AnyFn;
   const ref = register(fn, baseName);
   if (!action.body) {
-    const body = tryExtract(fn, `action '${baseName}'`);
+    const body = tryExtract(fn, `action '${baseName}'`, ref, 'action');
     if (body) action.body = body;
+  } else {
+    noteUnlowered(ref, { origin: `action '${baseName}'`, reason: AUTHORED_BODY_BESIDE_FUNCTION_REASON }, 'authored-body');
   }
   // Keep a string-named target so the legacy executor can still resolve it.
   action.target = ref;

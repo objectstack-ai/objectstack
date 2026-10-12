@@ -55,8 +55,8 @@ const VALID: Readonly<Record<string, Config>> = {
   // [#19939] `inputs.*` / `input.*` are value slots: the id is a CEL envelope.
   script: { function: 'score_lead', inputs: { leadId: { dialect: 'cel', source: 'record.id' } }, outputVariable: 'score' },
   subflow: { flowName: 'child_flow', input: { id: { dialect: 'cel', source: 'record.id' } }, outputVariable: 'out' },
-  map: { collection: '{rows}', flowName: 'per_item', iteratorVariable: 'item' },
-  loop: { collection: '{rows}', iteratorVariable: 'row', maxIterations: 50, body: REGION },
+  map: { collection: { dialect: 'cel', source: 'rows' }, flowName: 'per_item', iteratorVariable: 'item' },
+  loop: { collection: { dialect: 'cel', source: 'rows' }, iteratorVariable: 'row', maxIterations: 50, body: REGION },
   parallel: { branches: [{ name: 'a', ...region('inner_a') }, { name: 'b', ...region('inner_b') }] },
   try_catch: { try: REGION, errorVariable: 'err', retry: { maxRetries: 2, backoffMs: 100 } },
 };
@@ -127,7 +127,7 @@ describe('the measured pair: refused at save, with its location', () => {
 
   it('a node inside an ADR-0031 region body is refused at the path the author wrote', () => {
     const body = { nodes: [{ id: 'mk', type: 'create_record', label: 'Mk', config: { objectName: 'task', outputVariable: 42 } }], edges: [] };
-    const issues = issuesOf(flowWith('loop', { collection: '{rows}', body }));
+    const issues = issuesOf(flowWith('loop', { collection: { dialect: 'cel', source: 'rows' }, body }));
     expect(issues.map(({ path }) => path)).toEqual(['nodes.1.config.body.nodes.0.config.outputVariable']);
   });
 });
@@ -159,6 +159,12 @@ describe('one refusal per judged builtin, at each typed key', () => {
     ['map', { flowName: 7 }, 'flowName'],
     ['map', { collection: 5 }, 'collection'],
     ['loop', { collection: 5 }, 'collection'],
+    // [#19939] `collection` is a value slot whose literal is a list: a string
+    // with no token — a variable's bare name, the arm the contract declared and
+    // the structured executors never read — has no other judge, so it is here.
+    ['map', { collection: 'rows' }, 'collection'],
+    ['loop', { collection: 'rows' }, 'collection'],
+    ['map', { collection: null }, 'collection'],
     ['loop', { maxIterations: 0 }, 'maxIterations'],
     ['try_catch', { errorVariable: 5 }, 'errorVariable'],
     ['try_catch', { retry: { maxRetries: 99 } }, 'retry.maxRetries'],
@@ -179,6 +185,19 @@ describe('one refusal per judged builtin, at each typed key', () => {
     const [refusal] = flowNodeConfigRefusals('notify', config);
     expect(refusal!.message).toContain(contractSentence('notify', config, 'template'));
     expect(refusal!.message).not.toMatch(/Write a value the notify contract accepts/);
+  });
+
+  it('[#19939] a bare-name collection is refused in the contract\'s words, naming that variable in an envelope', () => {
+    for (const type of ['loop', 'map'] as const) {
+      const [refusal] = flowNodeConfigRefusals(type, { ...VALID[type], collection: 'rows' });
+      expect(refusal!.message).toContain(`This \`${type}\` node's config is refused at \`collection\` by the ${type} contract: `
+        + '`collection` is the list the node iterates');
+      expect(refusal!.message).toContain("A variable's bare name, `rows`, is not one");
+      expect(refusal!.message).toContain("`{ dialect: 'cel', source: 'rows' }`");
+    }
+    const [five] = flowNodeConfigRefusals('map', { ...VALID.map, collection: 5 });
+    expect(five!.message).toContain('`collection` is the list the node iterates: a CEL value envelope that evaluates to one');
+    expect(five!.message).toContain('This one is a number.');
   });
 
   it('a type finding closes on what to write at the key', () => {
@@ -264,6 +283,19 @@ describe('what stays accepted (lit controls)', () => {
       expect(getBuiltinNodeConfigContracts().get('screen')!.schema.safeParse(config).success, JSON.stringify(config)).toBe(false);
       expect(flowNodeConfigRefusals('screen', config), JSON.stringify(config)).toEqual([]);
     }
+    // [#19939] …and at a `loop`'s and a `map`'s collection: a malformed envelope
+    // is the envelope pass's, a `{token}` the value-slot judge's, an inline
+    // array is accepted as written — none is judged here.
+    for (const [type, collection] of [
+      ['map', { dialect: 'cel' }],
+      ['loop', { dialect: 'template', source: 'rows' }],
+      ['map', '{rows}'],
+      ['loop', '{rows}'],
+      ['map', ['{rows}', 1]],
+    ] as const) {
+      const config = { ...VALID[type], collection };
+      expect(flowNodeConfigRefusals(type, config), JSON.stringify(collection)).toEqual([]);
+    }
     // A region slot: `validateControlFlow` judges a region's shape at registration.
     expect(flowNodeConfigRefusals('try_catch', { try: 5 })).toEqual([]);
     expect(flowNodeConfigRefusals('parallel', { branches: [{ name: 'a', ...REGION }] })).toEqual([]);
@@ -274,6 +306,9 @@ describe('what stays accepted (lit controls)', () => {
   it('CONTROL: a legacy loop with no body is not parsed by its executor, so nothing is judged', () => {
     expect(getBuiltinNodeConfigContracts().get('loop')!.parsedWhen!({ collection: 5 })).toBe(false);
     expect(flowNodeConfigRefusals('loop', { collection: 5, maxIterations: 0 })).toEqual([]);
+    // [#19939] Its bare variable name is the one spelling that form reads.
+    expect(flowNodeConfigRefusals('loop', { collection: 'rows' })).toEqual([]);
+    expect(issuesOf(flowWith('loop', { collection: 'rows' }))).toEqual([]);
   });
 
   it('CONTROL: a key left out keeps its presence code beside a refused value', () => {

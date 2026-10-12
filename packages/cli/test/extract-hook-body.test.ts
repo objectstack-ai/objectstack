@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { extractHookBody, HookBodyExtractionError } from '../src/utils/extract-hook-body.js';
+import { extractHookBody, extractLoweredBody, HookBodyExtractionError } from '../src/utils/extract-hook-body.js';
 import { lowerCallables } from '../src/utils/lower-callables.js';
 
 describe('extractHookBody', () => {
@@ -526,6 +526,189 @@ describe('lowerCallables keeps a refused `scope` handler as the in-process calla
     await lowering.functions.stash(ctx);
     expect(ctx.dispatch.scope.stashed).toBe('alpha');
     expect(ctx.input.note).toBe('stashed');
+  });
+});
+
+// ── #22860: the body is read off the handler's parse, not by counting braces ──
+//
+// The peel used to find the body by counting `{`/`}` and `(`/`)` through the
+// text, blind to strings, templates, regexes and comments, and took the first
+// parenthesised `=>` anywhere as the handler's header. Each handler below lowered
+// at build exit 0 to a body that is not its own: a SyntaxError on the body's
+// first run, or (the pattern parameter, the block-bodied inner arrow, the
+// comment) a body that runs and does none of the handler's work. Each pin runs
+// the handler in-process and its lowered body the way the runtime's L2 wrapper
+// does — `(async (ctx) => { SOURCE })(ctx)` — and asserts the two agree on a
+// concrete value, so "both did nothing" cannot pass. The artifact door for the
+// same shapes is `packages/qa/dogfood/test/lowered-body-door.dogfood.test.ts`.
+describe("the lowered body is read off the handler's parse, not by counting braces (#22860)", () => {
+  type Handler = (...a: any[]) => unknown;
+  const runLowered = async (source: string, ctx: unknown): Promise<unknown> =>
+    (new Function(`return (async (ctx) => { ${source} });`)() as (c: unknown) => Promise<unknown>)(ctx);
+  const fresh = () => ({ input: { name: 'alpha' } as Record<string, unknown> });
+  const bothWays = async (handler: Handler) => {
+    const ext = extractHookBody(handler as (...a: unknown[]) => unknown, "hook 'h'");
+    const inProcess = fresh();
+    await handler(inProcess);
+    const lowered = fresh();
+    await runLowered(ext.source, lowered);
+    return { ext, inProcess: inProcess.input, lowered: lowered.input };
+  };
+
+  it('a `}` inside a string: the lowered body runs, as the handler does', async () => {
+    const r = await bothWays(async (ctx: any) => {
+      ctx.input.note = 'a}b';
+    });
+    expect(r.ext.isExpression).toBe(false);
+    expect(r.lowered.note).toBe('a}b');
+    expect(r.lowered).toEqual(r.inProcess);
+  });
+
+  it('a template literal with `${…}`, and one whose text carries a `}`: both run', async () => {
+    const balanced = await bothWays(async (ctx: any) => {
+      ctx.input.note = `t:${String(ctx.input.name)}!`;
+    });
+    expect(balanced.lowered.note).toBe('t:alpha!');
+    expect(balanced.lowered).toEqual(balanced.inProcess);
+
+    const brace = await bothWays(async (ctx: any) => {
+      ctx.input.note = `}${String(ctx.input.name)}`;
+    });
+    expect(brace.lowered.note).toBe('}alpha');
+    expect(brace.lowered).toEqual(brace.inProcess);
+  });
+
+  it('a `}` inside a regex literal, and inside a comment: both run', async () => {
+    const regex = await bothWays(async (ctx: any) => {
+      ctx.input.note = String(ctx.input.name).replace(/}/g, '') + '!';
+    });
+    expect(regex.lowered.note).toBe('alpha!');
+    expect(regex.lowered).toEqual(regex.inProcess);
+
+    // A comment survives into `String(fn)` only where nothing transformed the
+    // handler, so this one is built at run time (esbuild strips the comment out
+    // of a literal in this file).
+    const commented = await bothWays(
+      new Function('ctx', "// a } in a comment\nctx.input.note = 'c:' + ctx.input.name;") as Handler,
+    );
+    expect(commented.lowered.note).toBe('c:alpha');
+    expect(commented.lowered).toEqual(commented.inProcess);
+  });
+
+  it("a statement-level inner arrow: the body is the handler's block, not the arrow's", async () => {
+    const expression = await bothWays(async function (ctx: any) {
+      const exclaim = (a: string) => a + '!';
+      ctx.input.note = exclaim(String(ctx.input.name));
+    });
+    expect(expression.ext.isExpression).toBe(false);
+    expect(expression.ext.source).toContain('const exclaim =');
+    expect(expression.lowered.note).toBe('alpha!');
+    expect(expression.lowered).toEqual(expression.inProcess);
+
+    // Block-bodied, the old reading shipped the INNER arrow's statements — a
+    // body that compiled, ran, and wrote nothing.
+    const block = await bothWays(async function (ctx: any) {
+      const exclaim = (a: string) => {
+        return a + '!';
+      };
+      ctx.input.note = exclaim(String(ctx.input.name));
+    });
+    expect(block.ext.source).toContain('ctx.input.note = exclaim(');
+    expect(block.lowered.note).toBe('alpha!');
+    expect(block.lowered).toEqual(block.inProcess);
+
+    const method = await bothWays(
+      {
+        async handler(ctx: any) {
+          const ask = (a: string) => a + '?';
+          ctx.input.note = ask(String(ctx.input.name));
+        },
+      }.handler,
+    );
+    expect(method.lowered.note).toBe('alpha?');
+    expect(method.lowered).toEqual(method.inProcess);
+  });
+
+  it('a `function` handler whose parameter is a pattern: the body is its block, not the pattern', async () => {
+    const r = await bothWays(async function ({ input }: any) {
+      input.note = 'fn:' + String(input.name);
+    });
+    expect(r.ext.source.startsWith('var { input } = ctx;')).toBe(true);
+    expect(r.ext.source).toContain('input.note =');
+    expect(r.lowered.note).toBe('fn:alpha');
+    expect(r.lowered).toEqual(r.inProcess);
+  });
+
+  // The old scan's "safe case": an unbalanced `{` left it with no body at all,
+  // so the handler was refused as `unparseable` and bundled. It now lowers.
+  it('a `{` inside a string, formerly refused as unparseable and bundled, now lowers and runs', async () => {
+    const handler = async (ctx: any) => {
+      ctx.input.note = 'a{b';
+    };
+    const lowering = lowerCallables({
+      hooks: [{ name: 'open_brace', object: 'note', events: ['beforeInsert'], handler }],
+    });
+    expect(lowering.bodyExtractionWarnings).toEqual([]);
+    expect((lowering.lowered.hooks as Array<Record<string, unknown>>)[0].body).toEqual(
+      expect.objectContaining({ source: expect.any(String) }),
+    );
+    const r = await bothWays(handler);
+    expect(r.lowered.note).toBe('a{b');
+    expect(r.lowered).toEqual(r.inProcess);
+  });
+});
+
+// CONTROL (#22860): on every shape the brace count read correctly, the parse
+// reads the same bytes. Each expected `source` below was MEASURED by running the
+// replaced scan (`origin/main` 69d4218058) over the exact text it is keyed by —
+// ⛔ never re-derive one from the current implementation, which would make this
+// pin agree with whatever the code does. The handlers are built from source
+// strings so `String(fn)` is exactly that text (asserted), whatever transform
+// this file goes through.
+describe('CONTROL: a shape the brace count read correctly lowers byte-identically (#22860)', () => {
+  type Lowerable = (...a: unknown[]) => unknown;
+  interface Shape {
+    text: string;
+    source: string;
+    isExpression?: boolean;
+    method?: true;
+    face?: 'action';
+  }
+  const shapes: Shape[] = [
+    { text: 'async (ctx) => {\n  ctx.input.note = String(ctx.input.name);\n}', source: '\n  ctx.input.note = String(ctx.input.name);\n' },
+    { text: '(ctx) => ctx.input.name', source: 'return (ctx.input.name);', isExpression: true },
+    { text: '(ctx) =>   ({ note: ctx.input.name })', source: 'return (({ note: ctx.input.name }));', isExpression: true },
+    { text: '(ctx) => /* lead */ ctx.input.name', source: 'return (/* lead */ ctx.input.name);', isExpression: true },
+    { text: 'function (ctx) {\n  ctx.input.y = 2;\n}', source: '\n  ctx.input.y = 2;\n' },
+    { text: 'async function named(ctx) { if (ctx.input.a) { ctx.input.b = { c: 1 }; } }', source: ' if (ctx.input.a) { ctx.input.b = { c: 1 }; } ' },
+    { text: 'async h(ctx) {\n  ctx.input.n = [1].map((i) => i).length;\n}', source: '\n  ctx.input.n = [1].map((i) => i).length;\n', method: true },
+    { text: 'async (ctx) => { ctx.input.note = `t:${ctx.input.name}`; }', source: ' ctx.input.note = `t:${ctx.input.name}`; ' },
+    { text: 'async (ctx) => {\n  // a comment\n  ctx.input.c = 1;\n}', source: '\n  // a comment\n  ctx.input.c = 1;\n' },
+    { text: 'async () => { return 1; }', source: ' return 1; ' },
+    { text: 'async (input, ctx) => { return { ok: input.id, by: ctx.user }; }', source: ' return { ok: input.id, by: ctx.user }; ', face: 'action' },
+  ];
+  const build = ({ text, method }: Shape): Lowerable =>
+    method
+      ? Object.values(new Function(`return ({ ${text} });`)() as Record<string, Lowerable>)[0]
+      : (new Function(`return (${text});`)() as Lowerable);
+
+  for (const shape of shapes) {
+    const face = shape.face ?? 'hook';
+    it(`${face}: ${JSON.stringify(shape.text)}`, () => {
+      const fn = build(shape);
+      expect(String(fn)).toBe(shape.text);
+      expect(extractLoweredBody(fn, "hook 'h'", face)).toEqual({
+        source: shape.source,
+        capabilities: [],
+        isExpression: shape.isExpression ?? false,
+      });
+    });
+  }
+
+  it("hook: `new Function`'s own shape, `function anonymous(ctx\\n) {…}`", () => {
+    const fn = new Function('ctx', 'ctx.input.z = 3;') as Lowerable;
+    expect(String(fn)).toBe('function anonymous(ctx\n) {\nctx.input.z = 3;\n}');
+    expect(extractHookBody(fn, "hook 'h'")).toEqual({ source: '\nctx.input.z = 3;\n', capabilities: [], isExpression: false });
   });
 });
 
