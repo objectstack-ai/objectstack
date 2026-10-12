@@ -90,14 +90,39 @@
  * ever add an index and never replace a stronger one, and the report says
  * plainly that uniqueness is not enforced on this dialect.
  *
- * ## The KEY spelling is untouched
+ * ## The KEY, and its one re-keying (#22877)
  *
- * `(type, name, organization_id, COALESCE(package_id, ''))`, byte-identical to
- * what shipped before. #6418 is an ORDER and REPORTING fix; re-keying this
- * index (notably the bare, NULL-distinct `organization_id` part) is a separate
- * question with its own ADR-0120 D4 ceremony and is deliberately not decided
- * here.
+ * `(type, name, organization_id, COALESCE(package_id, ''),
+ * COALESCE(bundle_member, ''))`. #6418 was an ORDER and REPORTING fix and kept
+ * the key byte-identical; the member part is the one re-keying since, ruled
+ * through this ceremony.
+ *
+ * `bundle_member` is the member of a metadata type whose identity is a pair
+ * (`ITEM_KEY_DISCRIMINATORS`, today `email_template`'s `(name, locale)`): two
+ * locales of one template are two overlay rows, where the four-part key kept
+ * one and the second locale's save replaced the first at the next boot. NULL is
+ * the canonical member and every row of an undiscriminated type, folded to the
+ * `''` bucket so those rows are constrained exactly as before.
+ *
+ * The probe-then-replace order needs nothing new to carry a CHANGED key: it
+ * drops and rebuilds the real name on every first write, so the next boot after
+ * the upgrade replaces the four-part index with this one. Adding a key part only
+ * RELAXES uniqueness — rows the old key admitted are distinct under the new one
+ * — so no store that built the old index can be refused by this one; the
+ * `conflict` arm below still reports a store that was already blocked. Rows
+ * written before the column existed carry NULL whatever member their body
+ * declares, and {@link backfillOverlayBundleMembers} gives each its body's
+ * member before a read can take it for the canonical one.
+ *
+ * The bare, NULL-distinct `organization_id` part is still a separate question
+ * with its own ADR-0120 D4 ceremony and is deliberately not decided here.
  */
+
+import { ITEM_KEY_DISCRIMINATORS, itemDiscriminator } from '@objectstack/metadata-core';
+import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
+import { operatorFacingErrorText } from '@objectstack/types';
+// The shared "which driver read errors are benign" vocabulary (#4867).
+import { isMissingTableError } from '@objectstack/metadata/errors';
 
 import {
     logProblem,
@@ -133,17 +158,30 @@ export const OVERLAY_PROBE_INDEX_NAMES: Readonly<Record<OverlayIndexState, strin
     draft: 'idx_sys_metadata_overlay_draft_probe',
 };
 
-/** The key COLUMNS, unchanged by #6418 — see the module header. */
-export const OVERLAY_INDEX_COLUMNS = ['type', 'name', 'organization_id', 'package_id'] as const;
+/**
+ * The column that carries a bundled type's member (#22877) — see the module
+ * header and `sys-metadata.object.ts`. One name, read by the key below, the
+ * repository's write head and the protocol's by-name reads.
+ */
+export const OVERLAY_MEMBER_COLUMN = 'bundle_member';
+
+/** The key COLUMNS — see the module header for the member part. */
+export const OVERLAY_INDEX_COLUMNS = ['type', 'name', 'organization_id', 'package_id', OVERLAY_MEMBER_COLUMN] as const;
 
 /**
- * The nullable key column that folds its NULLs into ONE bucket, and the
- * sentinel it folds to.
+ * The nullable key columns that fold their NULLs into ONE bucket, and the
+ * sentinel each folds to.
  *
  * `package_id` is NULL for every package-less (global) overlay, and SQL UNIQUE
  * treats NULLs as DISTINCT — so without this the global rows would be
  * unconstrained among themselves. `''` is the spelling that shipped; a package
  * id is never the empty string, so the bucket cannot collide with real data.
+ *
+ * `bundle_member` is NULL for the canonical member and for every row of an
+ * undiscriminated type — nearly every row of the table — so a bare part would
+ * leave exactly the rows this index has always constrained unconstrained. A
+ * member is never the empty string ({@link overlayMemberValue} answers NULL for
+ * it), so `''` cannot collide with a real member either.
  *
  * ⚠️ `organization_id` is deliberately NOT listed. It is bare in the index that
  * shipped, and #6418 is an ordering fix — folding it too is a re-keying with
@@ -151,6 +189,7 @@ export const OVERLAY_INDEX_COLUMNS = ['type', 'name', 'organization_id', 'packag
  */
 export const OVERLAY_NULL_SENTINELS: Readonly<Record<string, string>> = {
     package_id: '',
+    [OVERLAY_MEMBER_COLUMN]: '',
 };
 
 /**
@@ -202,10 +241,11 @@ export function buildOverlayFallbackIndexSql(indexName: string): string {
  *
  * It GROUPs by exactly the index's own key parts, so what it reports and what
  * the index rejects cannot diverge. The nullable column is projected through
- * the SAME `COALESCE` it is grouped by (aliased `package_key`) rather than
+ * the SAME `COALESCE` it is grouped by (aliased `<column>_key`) rather than
  * bare: a bare projection of a column that appears in `GROUP BY` only inside an
  * expression is rejected by PostgreSQL, and this query has to run on both
- * dialects that can build the index it is explaining.
+ * dialects that can build the index it is explaining. Both NULL-folded parts
+ * project that way: `package_id_key` and `bundle_member_key`.
  */
 export function buildOverlayDuplicateProbeSql(state: OverlayIndexState): string {
     const projected = OVERLAY_INDEX_COLUMNS.map((column) => {
@@ -354,7 +394,8 @@ function reportDegradation(
             `[metadata-protocol] this database cannot build the overlay-uniqueness index — ` +
             `'${indexName}' on "${OVERLAY_TABLE}" cannot be scoped to state='${state}' rows over ` +
             `(${keyParts}), so ADR-0005 overlay uniqueness is NOT enforced as specified on this ` +
-            `dialect: package-less ${state} rows (package_id NULL) stay NULL-distinct and can duplicate ` +
+            `dialect: package-less ${state} rows (package_id NULL) and canonical bundle members ` +
+            `(${OVERLAY_MEMBER_COLUMN} NULL) stay NULL-distinct and can duplicate ` +
             `— getMetaItem then has no defined answer for which row wins — and any unrestricted UNIQUE ` +
             `that remains additionally rejects the legal ACTIVE+DRAFT pair. The system keeps looking ` +
             `healthy either way. Whatever index already carried this name is left exactly as it was, ` +
@@ -393,4 +434,160 @@ function reportDegradation(
         `Fix the cause below and restart.`,
         detail,
     );
+}
+
+// ── The member part (#22877) ────────────────────────────────────────────────
+
+/**
+ * The discriminator `type` declares, under either spelling of the type.
+ * `undefined` for every type whose identity is `name` alone.
+ */
+function overlayDiscriminatorOf(type: string): { field: string; canonical: string } | undefined {
+    return ITEM_KEY_DISCRIMINATORS[PLURAL_TO_SINGULAR[type] ?? type];
+}
+
+/**
+ * The value {@link OVERLAY_MEMBER_COLUMN} holds for the member a caller names.
+ *
+ *  - `undefined` — `type` declares no discriminator. The load-bearing answer:
+ *    every caller adds the column to a key, a row or a `where` ONLY when it is
+ *    defined, so an undiscriminated type's writes and reads stay byte-identical
+ *    to what they were before the column existed (the `itemDiscriminator`
+ *    contract, one layer down).
+ *  - `null` — the canonical member: no member named, an empty one, or the
+ *    canonical value itself. ONE spelling for it, never the canonical value,
+ *    so a row written before the column existed and a row written after it
+ *    cannot hold the same member under two keys.
+ *  - the trimmed value — any other member.
+ */
+export function overlayMemberValue(type: string, member?: string | null): string | null | undefined {
+    const disc = overlayDiscriminatorOf(type);
+    if (!disc) return undefined;
+    const value = typeof member === 'string' ? member.trim() : '';
+    return value === '' || value === disc.canonical ? null : value;
+}
+
+/**
+ * The member a metadata BODY belongs to, as {@link OVERLAY_MEMBER_COLUMN}
+ * stores it — read through `itemDiscriminator`, the one place a type declares
+ * what else is part of its identity. Same three answers as
+ * {@link overlayMemberValue}.
+ */
+export function overlayMemberOfBody(type: string, body: unknown): string | null | undefined {
+    const singular = PLURAL_TO_SINGULAR[type] ?? type;
+    const declared = itemDiscriminator(singular, body);
+    if (declared === undefined) return undefined;
+    return overlayMemberValue(singular, declared);
+}
+
+/**
+ * The `where` fragment that addresses one member of `type`: `{}` for an
+ * undiscriminated type (no predicate at all), else the column pinned to the
+ * member — `null` (IS NULL) for the canonical one. Spread into a row read.
+ */
+export function overlayMemberWhere(type: string, member?: string | null): Record<string, unknown> {
+    const value = overlayMemberValue(type, member);
+    return value === undefined ? {} : { [OVERLAY_MEMBER_COLUMN]: value };
+}
+
+/** The engine surface {@link backfillOverlayBundleMembers} reads and writes through. */
+export interface OverlayMemberBackfillEngine {
+    find(table: string, options: { where: Record<string, unknown>; context?: any }): Promise<any[] | null | undefined>;
+    update(table: string, data: Record<string, unknown>, options: { where: Record<string, unknown>; context?: any }): Promise<unknown>;
+}
+
+export interface OverlayMemberBackfillResult {
+    /** `'failed'` — a read or a write did not happen; `detail` says why. */
+    status: 'done' | 'failed';
+    /** Rows that now carry their body's member. */
+    backfilled: number;
+    /** Rows of a discriminated type whose stored body does not parse — left NULL. */
+    unparseable: number;
+    detail?: string;
+}
+
+/**
+ * Give every row written before {@link OVERLAY_MEMBER_COLUMN} existed the
+ * member its body declares.
+ *
+ * Such a row carries NULL — the canonical member — whatever its body says, so
+ * a `zh-CN` overlay stored by the four-part key reads as the `en-US` one to a
+ * bare-name read, and the next `zh-CN` save would mint a second row beside it
+ * holding the same member. Only rows of a discriminated type whose body names
+ * a NON-canonical member are written; a canonical body's NULL is already
+ * right, and every other type's rows are never read here at all.
+ *
+ * Through the ENGINE rather than raw SQL: the member is read out of the JSON
+ * body by `itemDiscriminator`, which no portable SQL expression can reproduce,
+ * and the engine reaches every driver this table lives on (memory hosts
+ * included, where there is no raw seam). Idempotent — a row that carries a
+ * member is skipped — and safe in any order relative to the index rebuild,
+ * because the new key only relaxes the old one: rows unique under the
+ * four-part key stay unique when each gains its member.
+ *
+ * Never throws: a boot must not fail over a backfill. A failure is reported at
+ * `error` (AGENTS.md "Degradation log levels": the rows it did not reach keep
+ * answering bare-name reads as the canonical member while everything looks
+ * healthy) with the fix, and the next boot retries.
+ */
+export async function backfillOverlayBundleMembers(
+    engine: OverlayMemberBackfillEngine | undefined,
+    logger?: IndexMigrationLogger,
+): Promise<OverlayMemberBackfillResult> {
+    let backfilled = 0;
+    let unparseable = 0;
+    if (!engine || typeof engine.find !== 'function' || typeof engine.update !== 'function') {
+        return { status: 'done', backfilled, unparseable };
+    }
+    const context = { isSystem: true };
+    try {
+        for (const type of Object.keys(ITEM_KEY_DISCRIMINATORS)) {
+            const rows = (await engine.find(OVERLAY_TABLE, { where: { type }, context })) ?? [];
+            for (const row of rows as Array<Record<string, unknown>>) {
+                if (row?.[OVERLAY_MEMBER_COLUMN] != null) continue;
+                let body: unknown;
+                try {
+                    body = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+                } catch {
+                    // Every read of this row already fails on the same bytes; it
+                    // stays the canonical member until a save repairs it.
+                    unparseable++;
+                    continue;
+                }
+                const member = overlayMemberOfBody(type, body);
+                if (member === null || member === undefined) continue;
+                await engine.update(
+                    OVERLAY_TABLE,
+                    { [OVERLAY_MEMBER_COLUMN]: member },
+                    { where: { id: row.id }, context },
+                );
+                backfilled++;
+            }
+        }
+    } catch (error) {
+        // Benign — and only benign: no table, therefore no row to backfill.
+        if (isMissingTableError(error, OVERLAY_TABLE)) return { status: 'done', backfilled, unparseable };
+        // The dialect's own words, read out of the `cause` a raw seam attaches
+        // (see `partial-index-probe.ts`), so the report names the real refusal.
+        const detail = operatorFacingErrorText(error);
+        logProblem(
+            logger,
+            `[metadata-protocol] could not backfill "${OVERLAY_TABLE}".${OVERLAY_MEMBER_COLUMN} from the ` +
+            `stored bodies (${backfilled} row(s) done before the failure). Overlay rows of a bundled type ` +
+            `(${Object.keys(ITEM_KEY_DISCRIMINATORS).join(', ')}) stored before this column existed keep ` +
+            `NULL, so a non-canonical member (an email template's second locale) is answered as the ` +
+            `canonical one by a bare-name read, and the next save of that member stores a second row ` +
+            `beside it — while everything looks healthy. Fix the cause below (the column is added by the ` +
+            `schema sync of "${OVERLAY_TABLE}") and restart; the backfill runs again on every boot.`,
+            detail,
+        );
+        return { status: 'failed', backfilled, unparseable, detail };
+    }
+    if (backfilled > 0) {
+        logger?.info?.(
+            `[metadata-protocol] backfilled ${OVERLAY_MEMBER_COLUMN} on ${backfilled} "${OVERLAY_TABLE}" ` +
+            `row(s) from the member their body declares.`,
+        );
+    }
+    return { status: 'done', backfilled, unparseable };
 }

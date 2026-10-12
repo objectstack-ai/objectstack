@@ -41,12 +41,17 @@ import { isWritablePackage as isWritablePackageShared } from './package-writabil
 import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 // [#6418] `sys_metadata`'s overlay-uniqueness indexes: probe-first DDL plus the
 // ADR-0120 D4 reporting that replaced this file's empty `catch` blocks.
-import { ensureMetadataOverlayIndexes } from './migrations/overlay-index.js';
+import {
+    backfillOverlayBundleMembers,
+    ensureMetadataOverlayIndexes,
+    overlayMemberWhere,
+} from './migrations/overlay-index.js';
 import { driverCanRunSql, resolveDriverExec } from './migrations/driver-exec.js';
 import {
     DraftConflictError,
     SysMetadataRepository,
     envWritableMetadataTypes,
+    historyRowsOfMember,
     packageScopedRowWhere,
     resetEnvWritableMetadataTypes,
     type SysMetadataEngine,
@@ -106,6 +111,9 @@ import {
     // the anonymous form doors read it — the runtime authoring gate's input for
     // its public-form intake advisory (see `tenancyPostureInForce()`).
     anonymousFormIntakePosture,
+    // [#22877] A bundled type's member as its body declares it — the value the
+    // save door addresses the write's stored head by.
+    itemDiscriminator,
 } from '@objectstack/metadata-core';
 // [#5532] One vocabulary of "which driver read errors are benign", shared with
 // `sys-metadata-repository.ts` in this package and with `DatabaseLoader` in
@@ -7186,6 +7194,9 @@ export class ObjectStackProtocolImplementation implements
     private async ensureOverlayIndex(): Promise<void> {
         if (this.overlayIndexEnsured) return;
         this.overlayIndexEnsured = true;
+        // [#22877] Rows stored before the member column existed get their
+        // body's member before the first write can address them.
+        await this.ensureOverlayMembersBackfilled();
         try {
             const engineAny = this.engine as any;
             let driver: any = engineAny?.driver ?? engineAny?.getDriver?.();
@@ -7218,6 +7229,27 @@ export class ObjectStackProtocolImplementation implements
             // this point is classified and reported by the migration itself,
             // instead of vanishing into an empty catch (#6418).
         }
+    }
+
+    /**
+     * [#22877] One run per protocol instance of the bundle-member backfill
+     * (`./migrations/overlay-index.ts` {@link backfillOverlayBundleMembers}):
+     * a row of a bundled type stored before `sys_metadata.bundle_member`
+     * existed is given the member its body declares, so a bare-name read does
+     * not take a second locale's overlay for the canonical one and that
+     * locale's next save updates the row instead of minting a second.
+     *
+     * Asked by boot hydration ({@link loadMetaFromDb}) once its own read of
+     * the table succeeded, and by the first write ({@link ensureOverlayIndex})
+     * on a host that hydrates nothing. Never throws — the migration reports its
+     * own failure at `error`, and the guard stays down so the next instance
+     * (the next boot) retries.
+     */
+    private overlayMembersBackfilled = false;
+    private async ensureOverlayMembersBackfilled(): Promise<void> {
+        if (this.overlayMembersBackfilled) return;
+        this.overlayMembersBackfilled = true;
+        await backfillOverlayBundleMembers(this.engine as any, console);
     }
 
     /**
@@ -8543,6 +8575,8 @@ export class ObjectStackProtocolImplementation implements
         state: 'draft' | 'active';
         packageId: string | null;
         item: any;
+        /** [#22877] The bundle member the save addresses (its body's). */
+        member?: string;
     }): Promise<any> {
         if (!hasMetadataRedactor(args.type)) return args.item;
         const body = await this.storedBodyForCarryForward(args);
@@ -8565,6 +8599,7 @@ export class ObjectStackProtocolImplementation implements
         ref: Parameters<SysMetadataRepository['get']>[0];
         state: 'draft' | 'active';
         packageId: string | null;
+        member?: string;
     }): Promise<unknown> {
         // [#22128] The row this save overwrites, and with no draft row yet the
         // active row the draft overlays: the one in the package the draft is
@@ -8572,12 +8607,14 @@ export class ObjectStackProtocolImplementation implements
         const target = await args.repo.headAt(args.ref, {
             state: args.state,
             packageId: args.packageId,
+            member: args.member,
         });
         let stored = target.head;
         if (!stored && args.state === 'draft') {
             stored = (await args.repo.headAt(args.ref, {
                 state: 'active',
                 packageId: target.packageId,
+                member: args.member,
             })).head;
         }
         // [#20552] NO overlay row at either state: the body the read served is
@@ -9806,6 +9843,10 @@ export class ObjectStackProtocolImplementation implements
             if (type === undefined) continue;
             const where: Record<string, unknown> = {
                 type, name: args.name, state: args.state, organization_id: candidate.organizationId,
+                // [#22877] A by-name read of a bundled type answers its
+                // CANONICAL member, as the registry's bare-name read does;
+                // nothing for every other type.
+                ...overlayMemberWhere(type),
             };
             if (candidate.packageId !== undefined) where.package_id = candidate.packageId;
             // [#21911, ADR-0096] The explicit system opt-in: a platform store
@@ -17867,8 +17908,13 @@ export class ObjectStackProtocolImplementation implements
         ref: Parameters<SysMetadataRepository['headAt']>[0],
         state: 'active' | 'draft',
         packageId: string | null,
+        /**
+         * [#22877] The bundle member the save addresses (its body's); omitted,
+         * the canonical member — what a by-name read addresses today.
+         */
+        member?: string,
     ): Promise<string | null> {
-        return (await repo.headAt(ref, { state, packageId })).head?.hash ?? null;
+        return (await repo.headAt(ref, { state, packageId, member })).head?.hash ?? null;
     }
 
     /**
@@ -20801,6 +20847,9 @@ export class ObjectStackProtocolImplementation implements
             // against, the inherited draft binding included.
             const currentStored = await this.storedHeadAt(
                 repo, ref, mode === 'draft' ? 'draft' : 'active', request.packageId ?? null,
+                // [#22877] The write's bundle member, from the body it writes —
+                // the member the repository's `put` keys this save by.
+                itemDiscriminator(singularTypeForRepo, request.item),
             );
             if (request.parentVersion === undefined) {
                 parentVersion = currentStored;
@@ -20862,6 +20911,7 @@ export class ObjectStackProtocolImplementation implements
             state: mode === 'draft' ? 'draft' : 'active',
             packageId: request.packageId ?? null,
             item: request.item,
+            member: itemDiscriminator(singularTypeForRepo, request.item),
         });
         // [#20790] …and then OUT of the body: a type with a write-only
         // credential channel (`flow`, registered by the automation plugin)
@@ -22045,7 +22095,12 @@ export class ObjectStackProtocolImplementation implements
                 // exactly as its sibling store reads do. Principal-less, the
                 // engine now refuses it.
                 draftRow = await this.engine.findOne('sys_metadata', {
-                    where: { type: singularType, name: request.name, organization_id: null, state: 'draft' },
+                    where: {
+                        type: singularType, name: request.name, organization_id: null, state: 'draft',
+                        // [#22877] The canonical member's draft — the one
+                        // `repo.get` / `repo.promoteDraft` below address.
+                        ...overlayMemberWhere(singularType),
+                    },
                     context: { isSystem: true },
                 });
             } catch (error) {
@@ -26044,14 +26099,17 @@ export class ObjectStackProtocolImplementation implements
             // the protocol scopes it by organization itself. Principal-less,
             // the engine refuses it, and the `catch` below would have answered
             // an empty diff for an item that has history.
-            const rows = await engineAny.find('sys_metadata_history', {
+            // [#22877] The canonical member's lineage only — a by-name diff of a
+            // bundled type compares the member a by-name read serves, never a
+            // second locale's snapshot as its "earlier version".
+            const rows = historyRowsOfMember(singularType, await engineAny.find('sys_metadata_history', {
                 where: {
                     organization_id: orgId,
                     type: singularType,
                     name: request.name,
                 },
                 context: { isSystem: true },
-            });
+            }));
             rows.sort((a: any, b: any) => (a.version ?? 0) - (b.version ?? 0));
             for (const r of rows) {
                 const body = r.metadata == null
@@ -26140,7 +26198,11 @@ export class ObjectStackProtocolImplementation implements
             // [#21908, ADR-0096 D5] The explicit system opt-in, as the history
             // read above.
             const current = (await this.engine.findOne('sys_metadata', {
-                where: { organization_id: orgId, type: singularType, name: request.name, state: 'active' },
+                where: {
+                    organization_id: orgId, type: singularType, name: request.name, state: 'active',
+                    // [#22877] The canonical member, as the by-name read serves.
+                    ...overlayMemberWhere(singularType),
+                },
                 context: { isSystem: true },
             })) as { metadata?: unknown; version?: unknown } | null;
             toBody = current?.metadata == null
@@ -26861,6 +26923,11 @@ export class ObjectStackProtocolImplementation implements
                 organization_id: null,
             };
             const records = await this.engine.find('sys_metadata', { where });
+            // [#22877] The table answered, so it is provisioned: give rows stored
+            // before `bundle_member` existed their body's member now, before any
+            // by-name read or write can address them. Hydration below reads the
+            // bodies, not the column, so the order between the two is free.
+            await this.ensureOverlayMembersBackfilled();
             // [#20312] ADR-0080 §5 — a page's `requires` is validated at save
             // AND at load. The deployment's manifest, read once for this load
             // through the key the save door reads per publish (one channel,
