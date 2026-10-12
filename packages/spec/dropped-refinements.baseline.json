@@ -2,8 +2,8 @@
   "description": "Shrink-only ledger of every PUBLISHED JSON Schema that is STILL WIDER than the Zod type it was generated from, because a rule written as `.refine()` reaches the runtime and not the file (#18670). `z.toJSONSchema()` has no arm for a `custom` check: a plain record, the same record with a `.refine()`, and the same record with an ABORTING `.refine()` all project byte-identically (measured on zod 4.4.3, the version packages/spec resolves). So a document one of these files ACCEPTS can still be refused at parse time, and an author -- or an AI -- validating against packages/spec/json-schema/** finds out a release later. Each `sites` path is a position under that schema at which a refinement is dropped; the same paths are written onto the artifact itself as `x-dropped-refinements`. Item 2 closed the first patterns: a refinement DECLARED through the closed list in src/shared/refinement-projection.ts is emitted into the published file, reads `projected` rather than `dropped`, and its row LEAVES this ledger in the same PR -- which is why the ledger shrinks and never grows on a repair. Every refinement outside that closed list stays here, and adding an arm to the list is a public-contract decision, not a refactor. Hand-edited on purpose and with no `gen:` script: a generator would let a new gap be admitted by running a command instead of by a decision, which is the silence this ledger exists to end. Adding, removing or moving a site fails packages/spec/scripts/build-schemas.ts until the line moves with it, and the failure prints the corrected entry in full. ⛔ Do not delete or weaken a refinement to shorten this file -- the runtime rule is correct; it is the projection that is silent, and the remedy is to teach the closed list a NAMED pattern, never to drop the rule.",
   "measured": {
     "zod": "4.4.3",
-    "publishedSchemasWithDroppedRefinements": 226,
-    "droppedRefinementSites": 711,
+    "publishedSchemasWithDroppedRefinements": 227,
+    "droppedRefinementSites": 729,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -110,6 +110,7 @@
         "manifest.views.element.form.submitBehavior.options[1].url",
         "manifest.views.element.list",
         "manifest.views.element.list.bulkActionDefs.element",
+        "manifest.views.element.list.emptyState.link.url",
         "manifest.views.element.list.filter.element",
         "manifest.views.element.list.gantt.groupByField",
         "manifest.views.element.list.grouping.fields.element.field",
@@ -219,6 +220,7 @@
         "data.options[1].manifest.views.element.form.submitBehavior.options[1].url",
         "data.options[1].manifest.views.element.list",
         "data.options[1].manifest.views.element.list.bulkActionDefs.element",
+        "data.options[1].manifest.views.element.list.emptyState.link.url",
         "data.options[1].manifest.views.element.list.filter.element",
         "data.options[1].manifest.views.element.list.gantt.groupByField",
         "data.options[1].manifest.views.element.list.grouping.fields.element.field",
@@ -251,6 +253,7 @@
         "form.submitBehavior.options[1].url",
         "list",
         "list.bulkActionDefs.element",
+        "list.emptyState.link.url",
         "list.filter.element",
         "list.gantt.groupByField",
         "list.grouping.fields.element.field",
@@ -324,6 +327,7 @@
         "options[1].manifest.views.element.form.submitBehavior.options[1].url",
         "options[1].manifest.views.element.list",
         "options[1].manifest.views.element.list.bulkActionDefs.element",
+        "options[1].manifest.views.element.list.emptyState.link.url",
         "options[1].manifest.views.element.list.filter.element",
         "options[1].manifest.views.element.list.gantt.groupByField",
         "options[1].manifest.views.element.list.grouping.fields.element.field",
@@ -409,6 +413,7 @@
         "data.lifecycle",
         "data.listViews.valueType",
         "data.listViews.valueType.bulkActionDefs.element",
+        "data.listViews.valueType.emptyState.link.url",
         "data.listViews.valueType.filter.element",
         "data.listViews.valueType.gantt.groupByField",
         "data.listViews.valueType.grouping.fields.element.field",
@@ -838,6 +843,7 @@
         "lifecycle",
         "listViews.valueType",
         "listViews.valueType.bulkActionDefs.element",
+        "listViews.valueType.emptyState.link.url",
         "listViews.valueType.filter.element",
         "listViews.valueType.gantt.groupByField",
         "listViews.valueType.grouping.fields.element.field",
@@ -1114,6 +1120,7 @@
         "operations.element.options[3].object.lifecycle",
         "operations.element.options[3].object.listViews.valueType",
         "operations.element.options[3].object.listViews.valueType.bulkActionDefs.element",
+        "operations.element.options[3].object.listViews.valueType.emptyState.link.url",
         "operations.element.options[3].object.listViews.valueType.filter.element",
         "operations.element.options[3].object.listViews.valueType.gantt.groupByField",
         "operations.element.options[3].object.listViews.valueType.grouping.fields.element.field",
@@ -1134,6 +1141,7 @@
         "object.lifecycle",
         "object.listViews.valueType",
         "object.listViews.valueType.bulkActionDefs.element",
+        "object.listViews.valueType.emptyState.link.url",
         "object.listViews.valueType.filter.element",
         "object.listViews.valueType.gantt.groupByField",
         "object.listViews.valueType.grouping.fields.element.field",
@@ -1176,6 +1184,7 @@
         "options[3].object.lifecycle",
         "options[3].object.listViews.valueType",
         "options[3].object.listViews.valueType.bulkActionDefs.element",
+        "options[3].object.listViews.valueType.emptyState.link.url",
         "options[3].object.listViews.valueType.filter.element",
         "options[3].object.listViews.valueType.gantt.groupByField",
         "options[3].object.listViews.valueType.grouping.fields.element.field",
@@ -1348,6 +1357,11 @@
         "filter.element"
       ]
     },
+    "ui/EmptyState": {
+      "sites": [
+        "link.url"
+      ]
+    },
     "ui/FormSection": {
       "sites": [
         "in"
@@ -1395,6 +1409,7 @@
     },
     "ui/InterfacePageConfig": {
       "sites": [
+        "emptyState.link.url",
         "filterBy.element"
       ]
     },
@@ -1414,6 +1429,7 @@
       "sites": [
         "",
         "bulkActionDefs.element",
+        "emptyState.link.url",
         "filter.element",
         "gantt.groupByField",
         "grouping.fields.element.field",
@@ -1458,6 +1474,7 @@
     "ui/ObjectGridProps": {
       "sites": [
         "bulkActionDefs.element",
+        "emptyState.link.url",
         "filter.element",
         "grouping.fields.element.field"
       ]
@@ -1472,6 +1489,7 @@
       "sites": [
         "",
         "bulkActionDefs.element",
+        "emptyState.link.url",
         "filter.element",
         "gantt.groupByField",
         "grouping.fields.element.field",
@@ -1517,6 +1535,7 @@
     "ui/Page": {
       "sites": [
         "",
+        "interfaceConfig.emptyState.link.url",
         "interfaceConfig.filterBy.element",
         "slots.header.options[0].in.type"
       ]
@@ -1576,6 +1595,7 @@
         "form.submitBehavior.options[1].url",
         "list",
         "list.bulkActionDefs.element",
+        "list.emptyState.link.url",
         "list.filter.element",
         "list.gantt.groupByField",
         "list.grouping.fields.element.field",
@@ -1592,6 +1612,7 @@
       "sites": [
         "options[0].config",
         "options[0].config.bulkActionDefs.element",
+        "options[0].config.emptyState.link.url",
         "options[0].config.filter.element",
         "options[0].config.gantt.groupByField",
         "options[0].config.grouping.fields.element.field",
@@ -1607,6 +1628,7 @@
       "sites": [
         "options[0].config",
         "options[0].config.bulkActionDefs.element",
+        "options[0].config.emptyState.link.url",
         "options[0].config.filter.element",
         "options[0].config.gantt.groupByField",
         "options[0].config.grouping.fields.element.field",
