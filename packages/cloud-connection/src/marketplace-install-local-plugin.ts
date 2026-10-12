@@ -54,12 +54,15 @@
  *              naming the base, before any write.
  *            - `unmanaged`: the package's metadata is copied ONCE into a new
  *              writable base in the environment ledger
- *              (`importUnmanagedPackage`), editable and followed by no upgrade;
+ *              (`importUnmanagedPackage`): the environment's own metadata,
+ *              which the next save edits (an item shipped with an authored
+ *              `_lock` keeps that lock on the copy), followed by no upgrade;
  *              nothing is registered, ledgered or rehydrated under the
  *              package's id, and its sample data is not loaded. Refused
  *              `409 UNMANAGED_INSTALL_WALLED_POSTURE` on a deployment whose
- *              REQUESTED tenancy posture walls organizations, before anything
- *              else about the package is judged.
+ *              REQUESTED tenancy posture walls organizations: after the
+ *              payload check and steps 1b–1c (package id, protocol
+ *              handshake; none of them writes), before any write.
  *          A mode the package's `installModes` does not permit answers
  *          `422 INSTALL_MODE_NOT_PERMITTED`, before any write.
  *
@@ -170,8 +173,8 @@ import type {
 } from '@objectstack/metadata-protocol';
 // [ADR-0131 D6] The `unmanaged` install mode's two shared judgements, imported
 // from their producer rather than restated: the walled-posture refusal the
-// import verb raises (answered here before anything else about the package is
-// judged), the read-only-package rule (a namespace held by a WRITABLE base is
+// import verb raises (answered here after the payload, id and handshake checks,
+// before any write), the read-only-package rule (a namespace held by a WRITABLE base is
 // this environment's own metadata), and the client-facing sentence rule.
 import { unmanagedInstallPostureRefusal, isWritablePackage, clientFacingFailureText } from '@objectstack/metadata-protocol';
 import { resolveThrownHttpError } from '@objectstack/types';
@@ -1275,8 +1278,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }, refusal.status);
         }
 
-        // 1e. [ADR-0131 D6] ⭐ THE INSTALL MODE — before anything else about the
-        //     package is judged, because nothing an author changes in the
+        // 1e. [ADR-0131 D6] ⭐ THE INSTALL MODE — after the payload, id and
+        //     handshake checks and before every other judgement of the package
+        //     and any write, because nothing an author changes in the
         //     package answers either refusal:
         //       - the package must PERMIT the requested mode: its manifest's
         //         `installModes`, parsed by reference

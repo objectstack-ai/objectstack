@@ -406,8 +406,10 @@ export function manifestIdRefusal(key: string, input: unknown): string {
  *    it (an environment overlay, disable + clone, extend).
  *  - `unmanaged`: every metadata item is copied ONCE into the environment
  *    ledger, under a new writable base whose id differs from the package's.
- *    From then on it is the environment's own metadata — editable like
- *    anything authored there — and it follows no upgrade. A deployment whose
+ *    From then on it is the environment's own metadata and the next save
+ *    edits it, except that an item shipped with an authored protection lock
+ *    (`_lock`) keeps that lock on the copy (an open question on #15213); it
+ *    follows no upgrade. A deployment whose
  *    tenancy posture walls organizations (`group`, `isolated`) refuses it,
  *    whatever the package permits.
  *
