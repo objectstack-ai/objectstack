@@ -141,6 +141,20 @@ export function summaryArtifactShard(artifactName, shardCount = SHARD_COUNT) {
   return index >= 1 && index <= shardCount ? index : null;
 }
 
+// `test-core-timings-3-of-6` -> 3: the shard's per-FILE capture
+// (`report-test-timings.mjs --capture`), anchored like the summary matcher.
+// NOT an eligibility input -- the capture step is report-only
+// (`continue-on-error`), so a run can be a complete measurement without one --
+// but the refresh PR's per-file budget list (#22949 ruling E, item 3) reads it,
+// so its id rides along beside the summary's.
+export function timingCaptureShard(artifactName, shardCount = SHARD_COUNT) {
+  const m = /^test-core-timings-(\d+)-of-(\d+)$/.exec(String(artifactName ?? '').trim());
+  if (!m) return null;
+  if (Number(m[2]) !== shardCount) return null;
+  const index = Number(m[1]);
+  return index >= 1 && index <= shardCount ? index : null;
+}
+
 // How long a shard's suite actually ran, from the job's own step window. This
 // is the tighter reading than job wall-clock -- setup, install and cache restore
 // are not the suite -- and it is what the refresh PR quotes as "per-shard
@@ -188,6 +202,14 @@ export function runIsEligible({ jobs, artifacts }, shardCount = SHARD_COUNT) {
     if (artifact?.expired === true) continue;
     if (!artifactByShard.has(shard)) artifactByShard.set(shard, artifact.id);
   }
+  // The per-file captures, when retained: read by the refresh PR body only,
+  // never a reason to reject a run (see timingCaptureShard).
+  const timingByShard = new Map();
+  for (const artifact of artifacts ?? []) {
+    const shard = timingCaptureShard(artifact?.name, shardCount);
+    if (shard === null || artifact?.expired === true) continue;
+    if (!timingByShard.has(shard)) timingByShard.set(shard, artifact.id);
+  }
   const missingArtifacts = [];
   for (let i = 1; i <= shardCount; i++) if (!artifactByShard.has(i)) missingArtifacts.push(`${i}-of-${shardCount}`);
   if (missingArtifacts.length > 0) {
@@ -203,6 +225,7 @@ export function runIsEligible({ jobs, artifacts }, shardCount = SHARD_COUNT) {
     eligible: reasons.length === 0,
     reasons,
     artifactIds: Object.fromEntries([...artifactByShard.entries()].sort((a, b) => a[0] - b[0])),
+    timingArtifactIds: Object.fromEntries([...timingByShard.entries()].sort((a, b) => a[0] - b[0])),
     shardSeconds,
   };
 }
@@ -345,6 +368,7 @@ export async function listCandidates({
       eligible: verdict.eligible,
       reasons: verdict.reasons,
       artifact_ids: verdict.artifactIds,
+      timing_artifact_ids: verdict.timingArtifactIds,
       shard_seconds: verdict.shardSeconds,
     });
   }
@@ -507,7 +531,7 @@ export function extractStepScript(yamlText, stepName) {
 // stopped running, and the remedy is to find what stopped registering, never to
 // lower the number.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'select-shard-timings-run self-test': 35,
+  'select-shard-timings-run self-test': 37,
   // #16467. Its own battery rather than more cases in the one above, so that
   // "the query stopped being tested" is a NAMED breach: the floor check below
   // reports a battery that registered zero cases by name, and a battery folded
@@ -608,6 +632,17 @@ async function selfTest() {
       throw new Error('artifact matcher: a longer name was accepted');
     }
   });
+  // #22949 ruling E: the per-file capture matcher, anchored the same way --
+  // and NOT the run-summary name, which is a different artifact.
+  check(() => {
+    if (timingCaptureShard('test-core-timings-2-of-6') !== 2) throw new Error('capture matcher: the plain shape did not parse');
+    if (timingCaptureShard('test-core-timings-2-of-8') !== null || timingCaptureShard('test-core-timings-2-of-6-retry') !== null) {
+      throw new Error('capture matcher: a different shard count or a longer name was accepted');
+    }
+    if (timingCaptureShard('test-core-run-summary-2-of-6') !== null || summaryArtifactShard('test-core-timings-2-of-6') !== null) {
+      throw new Error('capture matcher: the run summary and the per-file capture were read as each other');
+    }
+  });
 
   // -- Eligibility. The fixtures are built from the two rejection shapes this
   //    workflow actually meets: a cancelled shard, and an expired artifact.
@@ -624,6 +659,20 @@ async function selfTest() {
   check(() => {
     const v = runIsEligible({ jobs: jobs(allSix), artifacts: artifacts([1, 2, 3, 4, 5, 6]) });
     if (v.artifactIds['5'] !== 1005) throw new Error(`eligibility: artifact ids were not returned per shard (${JSON.stringify(v.artifactIds)})`);
+  });
+  check(() => {
+    // #22949 ruling E: the per-file captures ride along per shard, an expired
+    // one is left out -- and a run WITHOUT them is still eligible, because the
+    // capture step is report-only and the dataset never reads it.
+    const captures = [1, 2, 3, 4, 5].map((n) => ({ id: 2000 + n, name: `test-core-timings-${n}-of-6`, expired: n === 2 }));
+    const v = runIsEligible({ jobs: jobs(allSix), artifacts: [...artifacts([1, 2, 3, 4, 5, 6]), ...captures] });
+    if (!v.eligible || JSON.stringify(v.timingArtifactIds) !== '{"1":2001,"3":2003,"4":2004,"5":2005}') {
+      throw new Error(`eligibility: the per-file captures read ${JSON.stringify(v.timingArtifactIds)} (eligible ${v.eligible})`);
+    }
+    const none = runIsEligible({ jobs: jobs(allSix), artifacts: artifacts([1, 2, 3, 4, 5, 6]) });
+    if (!none.eligible || Object.keys(none.timingArtifactIds).length !== 0) {
+      throw new Error('eligibility: a run without per-file captures was rejected, or invented some');
+    }
   });
   check(() => {
     const cancelled = [...allSix];
