@@ -331,7 +331,7 @@ export default function HomePage() {
             </span>
           </div>
           <h2 className="mt-4 max-w-2xl text-3xl font-bold tracking-tight md:text-4xl" style={{ fontFamily: 'var(--l-display)' }}>
-            Why code recedes
+            An ontology written clearly enough runs directly
           </h2>
           {/* The figure's caption takes its spacing and colour from the blog's prose
               styles there; this page has no prose wrapper, so the wrapper sets them. */}
