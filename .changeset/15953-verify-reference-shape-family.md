@@ -27,4 +27,4 @@ expect(report.summary.hardFailures).toBe(0);
 await stack.stop();
 ```
 
-**`@objectstack/cli` — `os verify --reference-shapes`.** Opt-in, like `--rls`, on a fresh boot of its own. A field with holes, or a door that faulted, counts in `hardFailures` and fails the run. The `--json` document carries the report as `referenceShapes` when the flag is given; without the flag the run and its document are unchanged.
+**`@objectstack/cli` — `os verify --reference-shapes`.** Opt-in, like `--rls`, on a fresh boot of its own. It is opt-in because the engine still admits wrong-shaped elements on a `multiple: true` `lookup` or `user` field (#22908), so an app that declares one would fail the run until the engine refuses them. A field with holes, or a door that faulted, counts in `hardFailures` and fails the run. The `--json` document carries the report as `referenceShapes` when the flag is given; without the flag the run and its document are unchanged.
