@@ -2393,7 +2393,7 @@ function selfTestPlannedStatus() {
   const retired = (over = {}) => statusFieldProblems({ status: 'retired', since: null, retiredReason: 'ruled out, no successor', ...over });
 
   t('R1 a planned item retired before it was implemented — `since: null`, no steps — is clean', retired().length === 0, retired().join('; '));
-  t('R2 an item retired AFTER it shipped keeps its release and its steps and still passes — the shape the two live precedents carry',
+  t('R2 an item retired AFTER it shipped keeps its release and its steps and still passes — the shape `dashboards.saved-report-ownership` carries',
     retired({ since: 'v15.1', steps: ['open the report'] }).length === 0, retired({ since: 'v15.1', steps: ['open the report'] }).join('; '));
   t('R3 an empty steps array passes too — steps are not judged on an item no selector runs', retired({ steps: [] }).length === 0);
   t('R4 a retired item with no `retiredReason` is refused', retired({ retiredReason: undefined }).length === 1);
