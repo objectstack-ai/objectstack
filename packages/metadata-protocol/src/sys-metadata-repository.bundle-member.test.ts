@@ -69,9 +69,11 @@ function makeFakeEngine() {
       if (table === 'sys_metadata') wheres.push(q.where);
       return tableOf(table).find((r) => matches(r, q.where)) ?? null;
     },
-    async find(table: string, q: { where: Record<string, unknown> }) {
+    async find(table: string, q: { where: Record<string, unknown>; limit?: number }) {
       if (table === 'sys_metadata') wheres.push(q.where);
-      return tableOf(table).filter((r) => matches(r, q.where));
+      const rows = tableOf(table).filter((r) => matches(r, q.where));
+      // The caller's bound, after the filter, by presence (`check:objectql-double-limit`).
+      return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
     },
     async insert(table: string, data: Row) {
       if (table === 'sys_metadata') payloads.push({ ...data });
