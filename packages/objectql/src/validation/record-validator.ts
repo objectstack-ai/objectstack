@@ -1535,43 +1535,45 @@ function validateOne(
   // Scalars are wrapped upstream by `normalizeMultiValueFields`; whatever
   // still isn't an array here (objects, nested junk) is a shape error —
   // storing it verbatim corrupts the column for every array-consumer (#2552).
-  if (isMultiValueField(def) && !Array.isArray(value)) {
-    return fail('invalid_type', undefined, 'invalid_type_array');
-  }
-  // [#22908] A multi-valued `lookup` / `user` / `file` / `image` holds record
-  // ids or `sys_file` ids, never options, and each ELEMENT's stored form is the
-  // single value's (ADR-0104 D1): `valueSchemaFor` derives `z.array(element)`
-  // for it. So this branch judges option types only, and a value-shape type
-  // falls through to the ADR-0104 arm below, which parses the whole array with
-  // that derived schema under the same posture, the same sink and the same
-  // `invalid_type` refusal as a single value. ⛔ No second shape rule here: an
-  // element rule of this branch's own is the drift this arm's shared schema
-  // exists to prevent. The early `return null` it replaces let an embedded
-  // record, a boolean or a number through as an element on every door,
-  // including a system write. Whether a referenced id EXISTS is still
-  // `assertReferencesResolve`'s question, with its own `isSystem` latitude.
-  if (isMultiValueField(def) && !isValueShapeJudgedType(t)) {
-    if (shapeOnly) return null;
-    const allowed = optionValues(def.options);
-    if (allowed.length === 0) {
-      // A picklist-bound field with no options is a list that did not
-      // resolve, never a free-form one: nothing it could hold has been offered.
-      return picklist !== undefined && value.length > 0 ? picklistUnresolved() : null;
+  if (isMultiValueField(def)) {
+    if (!Array.isArray(value)) {
+      return fail('invalid_type', undefined, 'invalid_type_array');
     }
-    for (const v of value) {
-      // [#22183] Each item an import kept is admitted on that write, and only it.
-      if (!allowed.includes(String(v)) && !keptOptions.includes(String(v))) {
-        return fail(
-          'invalid_option',
-          { allowed: allowed.join(', ') },
-          picklist !== undefined ? 'invalid_option_value_picklist' : 'invalid_option_value',
-          allowed,
-          String(v),
-          picklist !== undefined ? { picklist } : undefined,
-        );
+    // [#22908] A multi-valued `lookup` / `user` / `file` / `image` holds record
+    // ids or `sys_file` ids, never options, and each ELEMENT's stored form is the
+    // single value's (ADR-0104 D1): `valueSchemaFor` derives `z.array(element)`
+    // for it. So this branch judges option types only, and a value-shape type
+    // falls through to the ADR-0104 arm below, which parses the whole array with
+    // that derived schema under the same posture, the same sink and the same
+    // `invalid_type` refusal as a single value. ⛔ No second shape rule here: an
+    // element rule of this branch's own is the drift this arm's shared schema
+    // exists to prevent. The early `return null` it replaces let an embedded
+    // record, a boolean or a number through as an element on every door,
+    // including a system write. Whether a referenced id EXISTS is still
+    // `assertReferencesResolve`'s question, with its own `isSystem` latitude.
+    if (!isValueShapeJudgedType(t)) {
+      if (shapeOnly) return null;
+      const allowed = optionValues(def.options);
+      if (allowed.length === 0) {
+        // A picklist-bound field with no options is a list that did not
+        // resolve, never a free-form one: nothing it could hold has been offered.
+        return picklist !== undefined && value.length > 0 ? picklistUnresolved() : null;
       }
+      for (const v of value) {
+        // [#22183] Each item an import kept is admitted on that write, and only it.
+        if (!allowed.includes(String(v)) && !keptOptions.includes(String(v))) {
+          return fail(
+            'invalid_option',
+            { allowed: allowed.join(', ') },
+            picklist !== undefined ? 'invalid_option_value_picklist' : 'invalid_option_value',
+            allowed,
+            String(v),
+            picklist !== undefined ? { picklist } : undefined,
+          );
+        }
+      }
+      return null;
     }
-    return null;
   }
 
   // ── previously-opaque types: value-shape contract (ADR-0104 D1) ─────
