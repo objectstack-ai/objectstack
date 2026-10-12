@@ -260,6 +260,49 @@ export function buildOverlayDuplicateProbeSql(state: OverlayIndexState): string 
 }
 
 /**
+ * [#22877] Does this store's `sys_metadata` carry {@link OVERLAY_MEMBER_COLUMN}
+ * yet? `SELECT <column> FROM sys_metadata WHERE 1 = 0` — reads no row, writes
+ * nothing, and is refused on a table an earlier version created.
+ */
+export function buildOverlayMemberPresenceSql(): string {
+    return `SELECT ${OVERLAY_MEMBER_COLUMN} FROM ${OVERLAY_TABLE} WHERE 1 = 0`;
+}
+
+/**
+ * [#22877] {@link buildOverlayDuplicateProbeSql} for a store whose table
+ * predates {@link OVERLAY_MEMBER_COLUMN} — the shape `os migrate duplicates`
+ * meets, because it boots read-only and the column arrives with the next
+ * SERVING boot's schema sync.
+ *
+ * Every row there reads as the EMPTY member: the column is added NULL, and
+ * the member part folds NULL to the `''` bucket, so the key the rebuild will
+ * judge those rows by is the four columns plus `''`. The listing therefore
+ * groups by the other key parts and projects the member as the constant
+ * `bundle_member_key = ''`, the same projection names as the full listing, so
+ * a group reads the same whichever statement found it. A row of a bundled type
+ * whose body names a non-canonical member is backfilled to that member on the
+ * serving boot, so such a pair can be reported here and then not block — the
+ * strict direction, and the population the backfill measures at boot.
+ */
+export function buildOverlayDuplicateProbeSqlWithoutMember(state: OverlayIndexState): string {
+    const columns = OVERLAY_INDEX_COLUMNS.filter((column) => column !== OVERLAY_MEMBER_COLUMN);
+    const projected = columns.map((column) => {
+        const sentinel = OVERLAY_NULL_SENTINELS[column];
+        return sentinel === undefined ? column : `COALESCE(${column}, '${sentinel}') AS ${column}_key`;
+    });
+    const grouped = columns.map((column) => {
+        const sentinel = OVERLAY_NULL_SENTINELS[column];
+        return sentinel === undefined ? column : `COALESCE(${column}, '${sentinel}')`;
+    });
+    return (
+        `SELECT ${projected.join(', ')}, '${OVERLAY_NULL_SENTINELS[OVERLAY_MEMBER_COLUMN]}' AS ${OVERLAY_MEMBER_COLUMN}_key, ` +
+        `COUNT(*) AS duplicate_rows ` +
+        `FROM ${OVERLAY_TABLE} WHERE state = '${state}' ` +
+        `GROUP BY ${grouped.join(', ')} HAVING COUNT(*) > 1`
+    );
+}
+
+/**
  * What became of the non-UNIQUE composite fallback, when one was attempted.
  *
  * `'ensured'` deliberately does not claim the index was CREATED: the statement
