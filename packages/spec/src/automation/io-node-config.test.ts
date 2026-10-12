@@ -284,7 +284,9 @@ describe('NotifyConfigSchema — an unknown key is refused, not stripped', () =>
       expect(NotifyConfigSchema.safeParse({
         recipients: ['u1'],
         template: 'crm.large_deal_won',
-        templateData: { dealName: '{record.name}' },
+        // [#19939] A templateData value is a value slot: a CEL envelope (a
+        // `{…}` token there is refused, pinned below).
+        templateData: { dealName: { dialect: 'cel', source: 'record.name' } },
       }).success).toBe(true);
     });
 
