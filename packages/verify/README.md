@@ -1,7 +1,7 @@
 # @objectstack/verify
 
 Boot any ObjectStack app **in-process** and verify it through the **real HTTP
-stack** — no mocks, no ports, no sockets. Five app-agnostic proof families, all
+stack** — no mocks, no ports, no sockets. Six app-agnostic proof families, all
 derived from your own metadata:
 
 - **Data fidelity** — author one record per object covering every field type,
@@ -29,6 +29,13 @@ derived from your own metadata:
   org-scoped boot a second organization is provisioned too, and there a
   `true` / `'organization'` value must be admitted while a `'global'` one, or
   one on an object with no organization column, must be refused.
+- **Parent-derived write reach** (opt-in) — *a write on a `controlled_by_parent`
+  detail is admitted exactly when the caller holds that verb on the detail's
+  object and can edit its master* (ADR-0055 §3): per detail object, persona and
+  master chain, an edit, a delete and a create through the engine as that
+  persona, each compared with that conjunction — the caller's effective grants
+  on the detail, and its edit of the master MEASURED by an empty update of the
+  master.
 
 And, on the same booted stack, an **in-process handle** so an app's own tests
 can run a hook, a validation rule, a flow, an action, a seed or a read against
@@ -73,6 +80,9 @@ objectstack verify --delete-behaviors
 
 # also prove every declared unique collides where its scope says (both legs)
 objectstack verify --unique-scopes --multi-tenant
+
+# also prove every controlled_by_parent detail write follows its master
+objectstack verify --parent-write-reach
 ```
 
 `--reference-shapes` is opt-in, on a fresh boot of its own: the engine still
@@ -106,10 +116,33 @@ entry covers the field, a refusal that names none is `unattributed`: that
 entry refuses the same write, naming no field either, so it may be the
 entry's rather than the field's own declaration.
 
+`--parent-write-reach` is opt-in, on a fresh boot of its own that registers
+the three verifier personas' permission sets (`parentWriteReachSecurity`). The
+population is every object the spec's parse declares `controlled_by_parent`
+with exactly one `master_detail` field, and the chain of masters above it. The
+writes are made by three verifier personas — the root master by the
+all-records grant (`modifyAllRecords`) with every verb on the detail; the root
+master readable but not editable with every verb on the detail; the
+all-records grant with no delete on the detail — and by one persona per
+declared position (its capability is what the app binds to the position), each
+under a master chain another principal owns and one it owns, and on a detail
+another principal owns and one it owns. The writes go through the engine as
+the persona (the insert, update and delete by id the REST data route makes,
+with the caller's context): there a refusal keeps the object and operation it
+names, while the REST envelope names the route's object whatever was refused.
+A refusal holds only as the platform's `403 PERMISSION_DENIED` naming the
+detail and the operation; any other refusal (a rule, a hook's own code, a
+refusal on another object) is `unattributed`. The system door bypasses
+authorization and is not asked. Today's engine refuses every write to a detail
+two levels below its root master, even where the caller edits the middle
+master, so on an app that declares such a chain the family reports a
+contradiction and fails the run.
+
 Exit code is **non-zero** on real failures (`create-failed`, `read-failed`,
 `fidelity-gaps`, `rls-hole`, with `--reference-shapes` a field with `holes` or
-`failed`, and with `--delete-behaviors` or `--unique-scopes` a field
-`contradicted` or `failed`) so
+`failed`, with `--delete-behaviors` or `--unique-scopes` a field
+`contradicted` or `failed`, and with `--parent-write-reach` an object
+`contradicted` or `failed` or a persona that could not be provisioned) so
 it drops straight into a CI gate. Inconclusive
 verdicts (`needs-fixture`, `skipped`, `member-visible`) are warnings and exit 0.
 
@@ -121,6 +154,7 @@ import {
   runReferenceShapeProofs, formatReferenceShapeReport,
   runDeleteBehaviorProofs, formatDeleteBehaviorReport,
   runUniqueScopeProofs, formatUniqueScopeReport,
+  runParentWriteReachProofs, formatParentWriteReachReport, parentWriteReachSecurity,
 } from '@objectstack/verify';
 import myApp from './objectstack.config.js';
 
@@ -160,6 +194,13 @@ const uniques = await runUniqueScopeProofs(uniqueStack, await uniqueStack.signIn
 console.log(formatUniqueScopeReport(uniques)); // `uniques.boot` says which legs ran
 expect(uniques.summary.hardFailures).toBe(0);
 await uniqueStack.stop();
+
+// Parent-derived write reach, on a fresh stack that registers the verifier personas' sets
+const parentStack = await bootStack(myApp, { security: parentWriteReachSecurity(myApp) });
+const reach = await runParentWriteReachProofs(parentStack, myApp);
+console.log(formatParentWriteReachReport(reach)); // `reach.personas` says who wrote
+expect(reach.summary.hardFailures).toBe(0);
+await parentStack.stop();
 ```
 
 ## The in-process handle (drive the real engine from a test)
@@ -380,6 +421,28 @@ on a walled boot `across` × door × insert:
 | `excluded` | a derived value (`formula`, `summary`) is not stored, or the declaration does not parse |
 | `not-derivable` | no fresh value can be built: a closed or tiny value space (`boolean`, `select`, …), a multi-valued reference, a target the app does not declare, or an object the CRUD derivation cannot synthesize |
 
+**Parent-derived write reach** (`runParentWriteReachProofs`), per object
+declared `controlled_by_parent`. Probes per persona and master chain (another
+principal's, the persona's own): edit and delete of a detail another principal
+owns and of one the persona owns, and a create. Each is expected `allowed`
+exactly when the persona's effective grant on the detail (`/auth/me/permissions`,
+folded by `objectPermissionGrants`) holds the verb and the persona's empty
+update of the master was admitted:
+
+| status | meaning |
+| --- | --- |
+| `proven` | every write met that conjunction: admitted where both halves hold, refused with `403 PERMISSION_DENIED` naming the detail and the operation where either does not |
+| `contradicted` | a write met the other answer — refused where the persona holds the verb and edits the master, admitted where it does not, or refused while the record shows it landed **(failure)** |
+| `failed` | a door faulted **(failure)** |
+| `inconclusive` | a refusal was not the platform's authorization refusal of this write (a rule, a hook's own code, a refusal on another object), a fixture could not be written, or a master's edit could not be measured (the reason is reported) |
+| `excluded` | the declaration names no one master: no `master_detail` field, two of them, a master the app does not declare, a cycle, or a chain at the write gate's depth bound |
+| `not-derivable` | the detail or a master in its chain cannot be synthesized by the CRUD derivation |
+
+A master chain a persona cannot read is outside its reach and is counted, not
+probed (a write to a record the caller cannot read is the RLS family's
+subject). `summary.hardFailures` is `contradicted + failed` objects plus
+personas that could not be provisioned.
+
 `member-visible` everywhere usually means the app is single-tenant; pass
 `--multi-tenant` (or `{ multiTenant: true }`) to register org-scoping so tenant
 isolation policies actually apply.
@@ -425,6 +488,11 @@ run" must never read like "nothing to find".
   second organization meets, or the reason it is not compared; `runUniqueScopeProofs(stack, token, config, { doors? })`
   → `UniqueScopeReport` (`boot` names the legs this boot ran; `summary.hardFailures` is what a gate reads);
   `formatUniqueScopeReport(report)`.
+- `deriveParentWriteReachCases(config)` → one case per object declared `controlled_by_parent`, with the chain of
+  `master_detail` hops a write on it walks, or the reason it is not compared; `parentWriteReachSecurity(config)` → the
+  `SecurityPlugin` to boot with (registers the verifier personas' sets); `runParentWriteReachProofs(stack, config)` →
+  `ParentWriteReachReport` (`personas` names who wrote and who could not be provisioned; `summary.hardFailures` is what
+  a gate reads); `formatParentWriteReachReport(report)`.
 
 `bootStack` options: `admin`, `authSecret`, `security` (a custom `SecurityPlugin`
 for owner-scoped fixtures), `multiTenant` (also what decides the posture

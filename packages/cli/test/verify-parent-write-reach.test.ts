@@ -14,7 +14,8 @@
  *     edits another principal's contract through the account and is refused
  *     the delete it lacks, `hardFailures` stays 0 and the run exits 0;
  *   - with the flag, on the same metadata plus a hook that refuses every edit
- *     of the contract with the platform's own `403 PERMISSION_DENIED`, the
+ *     of the contract with the platform's own envelope (`403
+ *     PERMISSION_DENIED`, `details` naming the update of the contract), the
  *     detail's answer disagrees with its master's: the contract is reported
  *     `contradicted`, `hardFailures` counts it and the run exits 1.
  *
@@ -84,7 +85,11 @@ const CONTROL_SOURCE = `{
       object: 'vpw_contract',
       events: ['beforeUpdate'],
       handler: async () => {
-        throw Object.assign(new Error('refused by the app'), { code: 'PERMISSION_DENIED', status: 403 });
+        throw Object.assign(new Error('refused by the app'), {
+          code: 'PERMISSION_DENIED',
+          status: 403,
+          details: { operation: 'update', object: 'vpw_contract' },
+        });
       },
     },
   ],
@@ -166,7 +171,7 @@ describe('os verify --parent-write-reach', () => {
     expect(proven.status, `${proven.stdout}\n${proven.stderr}`).toBe(0);
     const doc = docOf(proven);
     const report = doc.parentWriteReach!;
-    expect(report.door).toBe('rest');
+    expect(report.door).toBe('user');
     expect(report.personas.map((p) => `${p.name} ${p.status}`)).toEqual([
       'master-all-records run', 'detail-only run', 'master-all-records-no-delete run', 'position:vpw_manager run',
     ]);

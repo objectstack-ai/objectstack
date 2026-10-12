@@ -12,9 +12,9 @@
 //   • a run on a stack booted without `parentWriteReachSecurity` reports the
 //     verifier personas not run, with the reason, and counts them.
 //
-// The REST envelope names the route's object on every refusal and carries no
-// operation, so attribution there is `403 PERMISSION_DENIED` at a route whose
-// one operation is the request's own.
+// The door is the engine's write as each persona (the calls the REST data
+// ingress makes, with the caller's context), so a refusal keeps its own
+// `details`: attribution reads the object and the operation it names.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
@@ -200,7 +200,7 @@ describe('runParentWriteReachProofs — the fixture app, booted with parentWrite
   });
 
   it('runs every persona: the three verifier personas and one per declared position', () => {
-    expect(report.door).toBe('rest');
+    expect(report.door).toBe('user');
     expect(report.personas.map((p) => `${p.name} ${p.status}`)).toEqual([
       ...VERIFIERS.map((v) => `${v} run`), 'position:pwr_manager run', 'position:pwr_rep run',
     ]);
@@ -229,7 +229,9 @@ describe('runParentWriteReachProofs — the fixture app, booted with parentWrite
     expect(other).toMatchObject({ masterRead: 'readable', masterEdit: 'editable', grants: { edit: true, delete: false, create: true } });
     expect(shape(report, 'pwr_contract', 'position:pwr_manager', 'other')).toEqual(NO_DELETE);
     // A refusal is the platform's authorization refusal for the detail.
-    expect(other.probes.find((p) => p.verb === 'delete')!.answer).toMatchObject({ kind: 'refused', status: 403, code: 'PERMISSION_DENIED', object: 'pwr_contract' });
+    expect(other.probes.find((p) => p.verb === 'delete')!.answer).toMatchObject({
+      kind: 'refused', status: 403, code: 'PERMISSION_DENIED', object: 'pwr_contract', operation: 'delete',
+    });
     // The rep cannot read another's account, so that chain is outside its reach, and named.
     expect(reachOf(report, 'pwr_contract', 'position:pwr_rep', 'other')).toMatchObject({ masterRead: 'unreadable', probes: [] });
     // On its own account the rep edits the master and is still refused the contract: the object gate.
@@ -242,7 +244,7 @@ describe('runParentWriteReachProofs — the fixture app, booted with parentWrite
     // ADR-0055's amendment: the write gate walks the chain hop by hop, and a
     // detail whose whole chain is reachable stays writable. Measured on this
     // engine, a quote line is refused for every persona, its own chain
-    // included, while the same persona's empty PATCH of the quote is admitted.
+    // included, while the same persona's empty update of the quote is admitted.
     // This flips to `proven` the day the chain walk agrees with the quote's own write.
     const r = resultFor(report, 'pwr_quote_line');
     expect(r.status).toBe('contradicted');
@@ -252,7 +254,7 @@ describe('runParentWriteReachProofs — the fixture app, booted with parentWrite
       expect(reach.probes.map((p) => p.outcome)).toEqual(['contradicted', 'contradicted', 'contradicted', 'contradicted', 'contradicted']);
       for (const p of reach.probes) {
         expect(p.answer).toMatchObject({ kind: 'refused', status: 403, code: 'PERMISSION_DENIED', object: 'pwr_quote_line' });
-        expect(p.detail).toMatch(/^the persona holds allow(Edit|Delete|Create) on pwr_quote_line and edited its master pwr_quote \(200\), and the (edit|delete|create) was refused/);
+        expect(p.detail).toMatch(/^the persona holds allow(Edit|Delete|Create) on pwr_quote_line and edited its master pwr_quote, and the (edit|delete|create) was refused/);
       }
       // Where the conjunction refuses, the refusal still holds.
       expect(shape(report, 'pwr_quote_line', 'detail-only', masters)).toEqual(ALL_REFUSED);
@@ -285,12 +287,14 @@ describe('runParentWriteReachProofs — the fixture app, booted with parentWrite
 });
 
 /**
- * The negative and attribution controls. `pwr_signed`'s hooks refuse every
- * write with the platform's own `403 PERMISSION_DENIED`, whoever writes and
- * whatever the master says; `pwr_locked`'s refuse with the app's own code.
+ * The negative and attribution controls. `pwc_signed`'s hooks refuse every
+ * edit and delete with the platform's own envelope (`403 PERMISSION_DENIED`,
+ * `details` naming the write), whoever writes and whatever the master says;
+ * `pwc_locked`'s refuse an edit with that envelope naming ANOTHER object, and
+ * a delete with the app's own code.
  */
-const deny = (code: string, status: number) => async () => {
-  throw Object.assign(new Error(`refused by the app (${code})`), { code, status });
+const deny = (code: string, status: number, details?: { operation: string; object: string }) => async () => {
+  throw Object.assign(new Error(`refused by the app (${code})`), { code, status, ...(details ? { details } : {}) });
 };
 const controlSource = {
   manifest: { id: 'com.example.parent-write-reach-controls', namespace: 'pwc', version: '0.0.1', type: 'app', name: 'Parent Write Reach Controls' },
@@ -313,15 +317,27 @@ const controlSource = {
     // Update and delete only: the fixtures are seeded through a door that
     // runs hooks, so an insert refusal would refuse the fixtures too.
     {
-      name: 'pwc_signed_refuses',
+      name: 'pwc_signed_refuses_an_edit',
       object: 'pwc_signed',
-      events: ['beforeUpdate', 'beforeDelete'],
-      handler: deny('PERMISSION_DENIED', 403),
+      events: ['beforeUpdate'],
+      handler: deny('PERMISSION_DENIED', 403, { operation: 'update', object: 'pwc_signed' }),
     },
     {
-      name: 'pwc_locked_refuses',
+      name: 'pwc_signed_refuses_a_delete',
+      object: 'pwc_signed',
+      events: ['beforeDelete'],
+      handler: deny('PERMISSION_DENIED', 403, { operation: 'delete', object: 'pwc_signed' }),
+    },
+    {
+      name: 'pwc_locked_refuses_an_edit_naming_the_account',
       object: 'pwc_locked',
-      events: ['beforeUpdate', 'beforeDelete'],
+      events: ['beforeUpdate'],
+      handler: deny('PERMISSION_DENIED', 403, { operation: 'update', object: 'pwc_account' }),
+    },
+    {
+      name: 'pwc_locked_refuses_a_delete_with_its_own_code',
+      object: 'pwc_locked',
+      events: ['beforeDelete'],
       handler: deny('RECORD_LOCKED', 409),
     },
   ],
@@ -360,13 +376,18 @@ describe('runParentWriteReachProofs — NEGATIVE and ATTRIBUTION controls', () =
     const r = resultFor(report, 'pwc_locked');
     expect(r.status, formatParentWriteReachReport(report)).toBe('inconclusive');
     for (const masters of ['other', 'own'] as const) {
-      // Expected allowed, and refused by the app's own code: unattributed.
+      // Expected allowed, and refused — naming another object, or with the app's own code: unattributed.
       expect(shape(report, 'pwc_locked', 'master-all-records', masters)).toEqual([
         'edit/other allowed unattributed', 'delete/other allowed unattributed',
         'edit/own allowed unattributed', 'delete/own allowed unattributed',
         'create allowed held',
       ]);
-      for (const p of reachOf(report, 'pwc_locked', 'master-all-records', masters).probes.filter((x) => x.verb !== 'create')) {
+      const probes = reachOf(report, 'pwc_locked', 'master-all-records', masters).probes;
+      for (const p of probes.filter((x) => x.verb === 'edit')) {
+        expect(p.answer).toMatchObject({ kind: 'refused', status: 403, code: 'PERMISSION_DENIED', object: 'pwc_account', operation: 'update' });
+        expect(p.detail).toMatch(/^refused for another reason: PERMISSION_DENIED \(403\) naming update on pwc_account/);
+      }
+      for (const p of probes.filter((x) => x.verb === 'delete')) {
         expect(p.answer).toMatchObject({ kind: 'refused', status: 409, code: 'RECORD_LOCKED' });
         expect(p.detail).toMatch(/^refused for another reason: RECORD_LOCKED \(409\)/);
       }

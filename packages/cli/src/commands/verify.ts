@@ -105,9 +105,9 @@ export function resolveVerifyMultiTenant(flags: { 'multi-tenant'?: boolean }): b
  *          as its declared scope says
  *        - parent-derived write reach (--parent-write-reach, ADR-0055 §3):
  *          for every `controlled_by_parent` object, a persona's edit, delete
- *          or create of a detail through the REST door is admitted exactly
- *          when it holds that verb on the detail's object and can edit the
- *          master
+ *          or create of a detail, written through the engine as the persona,
+ *          is admitted exactly when it holds that verb on the detail's object
+ *          and can edit the master
  *
  * Exits non-zero on either stage's failures so it drops straight into CI.
  */
@@ -147,7 +147,7 @@ export default class Verify extends Command {
       default: false,
     }),
     'parent-write-reach': Flags.boolean({
-      description: "Also prove, for every controlled_by_parent object, that a persona's edit, delete or create of a detail through the REST door is admitted exactly when it holds that verb on the detail's object and can edit the master, as verifier personas and one persona per declared position (ADR-0055 master-detail write reach)",
+      description: "Also prove, for every controlled_by_parent object, that a persona's edit, delete or create of a detail is admitted exactly when it holds that verb on the detail's object and can edit the master, written through the engine as verifier personas and one persona per declared position (ADR-0055 master-detail write reach)",
       default: false,
     }),
     'multi-tenant': Flags.boolean({

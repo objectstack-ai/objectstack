@@ -16,7 +16,7 @@
 //   - P holds the verb on D's object — read from the server's effective object
 //     permissions for P (`GET /auth/me/permissions`, the one merge of the sets
 //     P holds, ADR-0124 D4), folded by the spec's `objectPermissionGrants`;
-//   - P can edit M — MEASURED, never re-derived: an empty `PATCH` of M as P,
+//   - P can edit M — MEASURED, never re-derived: an empty update of M as P,
 //     which runs every write gate M has (the object gate, the record gate and,
 //     for a master that is itself controlled by its parent, the master gate
 //     above it) and changes no business value.
@@ -31,9 +31,17 @@
 //
 // ## The door, and who walks through it
 //
-// The REST data route as the signed-in principal: `PATCH`, `DELETE` and `POST`
-// on `/data/:object[/:id]`. The engine's own write as the system principal
-// bypasses authorization by design, so it is not in this family's population.
+// The engine's write as the signed-in principal: the handle's `hooks.run` with
+// `{ as: token }`, which makes the three calls the REST data ingress makes
+// (`insert`, `update` by id, `delete` by id) with the caller's resolved
+// context, the security middleware and the bound hooks included. It is the
+// door, rather than the REST route itself, because only it keeps the refusal's
+// own identity: the REST envelope names the ROUTE's object on every refusal
+// (measured: a hook refusal naming another object comes back naming the
+// route's) and carries no operation, so a hook's nested refusal on another
+// object would read there as the detail's own. The engine's own write as the
+// system principal bypasses authorization by design, so it is not in this
+// family's population.
 //
 // The principals: three verifier personas whose permission sets this module
 // authors from the app's own objects (registered at boot by
@@ -48,10 +56,11 @@
 // ## Attribution is the control
 //
 // A refusal proves the conjunction held only when it is the platform's
-// authorization refusal for this detail: `403 PERMISSION_DENIED` naming the
-// detail's object. The REST envelope carries no operation; the route names
-// it. Any other refusal (validation, a hook's own code, a uniqueness
-// collision, a missing field) is `unattributed`, never proven.
+// authorization refusal for this write: `PERMISSION_DENIED` with status 403
+// whose `details` name the detail's object and the probed operation
+// (`update`, `delete`, `insert`). Any other refusal (validation, a hook's own
+// code, a refusal on another object, a uniqueness collision, a missing field)
+// is `unattributed`, never proven.
 //
 // Run it on a fresh stack of its own, booted with
 // `parentWriteReachSecurity(config)`: it writes, deletes and signs up.
@@ -104,14 +113,15 @@ export type ParentWriteReachVerb = 'edit' | 'delete' | 'create';
 /** Who owns a fixture record: another principal, or the probing persona. */
 export type ParentWriteReachOwner = 'other' | 'own';
 
-/** What one REST call answered. */
+/** What one write answered. */
 export interface ParentWriteReachAnswer {
-  /** `written` — 2xx; `refused` — a coded refusal; `faulted` — a 5xx, or no code. */
+  /** `written` — the engine wrote; `refused` — a coded refusal; `faulted` — a 5xx, or a throw with no code. */
   kind: 'written' | 'refused' | 'faulted';
   status?: number;
   code?: string;
-  /** The object the refusal names. */
+  /** The object and the operation the refusal's `details` name. */
   object?: string;
+  operation?: string;
   detail?: string;
 }
 
@@ -141,7 +151,7 @@ export interface ParentWriteReachReach {
   masters: ParentWriteReachOwner;
   /** `unreadable` — the persona cannot read the master, so the detail is outside its reach (not probed). */
   masterRead: 'readable' | 'unreadable' | 'unmeasured';
-  /** The measured half: an empty `PATCH` of the master as the persona. */
+  /** The measured half: an empty update of the master as the persona. */
   masterEdit?: 'editable' | 'not-editable' | 'unmeasured';
   masterAnswer?: ParentWriteReachAnswer;
   /** The detail object's effective grants for the persona (`/auth/me/permissions`). */
@@ -183,8 +193,8 @@ export interface ParentWriteReachPersona {
 
 export interface ParentWriteReachReport {
   app: string;
-  /** The one door asked. The system door bypasses authorization by design and is not. */
-  door: 'rest';
+  /** The one door asked: the engine's write as the signed-in principal. The system door bypasses authorization by design and is not. */
+  door: 'user';
   personas: ParentWriteReachPersona[];
   results: ParentWriteReachObjectResult[];
   summary: {
@@ -398,52 +408,61 @@ export function parentWriteReachSecurity(config: any): SecurityPlugin {
 
 // ── The door ────────────────────────────────────────────────────────────────
 
-async function rest(
-  stack: VerifyStack,
-  token: string,
-  method: string,
-  path: string,
-  body?: unknown,
-): Promise<ParentWriteReachAnswer & { id?: string; payload?: any }> {
-  let res: Response;
+/** The server's effective permissions for the caller: `GET /auth/me/permissions`, or why it gave none. */
+async function effectivePermissions(stack: VerifyStack, token: string): Promise<{ objects?: Record<string, any>; sets: string[]; reason?: string }> {
   try {
-    res = await stack.apiAs(token, method, path, body);
+    const res = await stack.apiAs(token, 'GET', '/auth/me/permissions');
+    const payload = (await res.json().catch(() => undefined)) as { objects?: unknown; permissionSets?: unknown } | undefined;
+    const sets = Array.isArray(payload?.permissionSets) ? payload!.permissionSets.map(String) : [];
+    if (res.status !== 200 || !payload?.objects || typeof payload.objects !== 'object') {
+      return { sets, reason: `GET /auth/me/permissions answered ${res.status}: no effective grants to read` };
+    }
+    return { objects: payload.objects as Record<string, any>, sets };
   } catch (e) {
-    return { kind: 'faulted', detail: clip((e as Error)?.message ?? e) };
+    return { sets: [], reason: `GET /auth/me/permissions faulted: ${clip((e as Error)?.message ?? e)}` };
   }
-  const status = res.status;
-  const text = await res.text();
-  let payload: any;
-  try {
-    payload = JSON.parse(text);
-  } catch {
-    payload = undefined;
-  }
-  if (status >= 200 && status < 300) {
-    const id = payload?.id ?? payload?.record?.id;
-    return { kind: 'written', status, payload, ...(id != null ? { id: String(id) } : {}) };
-  }
-  if (status >= 500 || typeof payload?.code !== 'string') {
-    return { kind: 'faulted', status, ...(payload?.code ? { code: payload.code } : {}), detail: clip(payload?.error ?? text) };
-  }
-  return {
-    kind: 'refused',
-    status,
-    code: payload.code,
-    ...(typeof payload.object === 'string' ? { object: payload.object } : {}),
-    detail: clip(payload.error ?? text),
-  };
 }
 
-/** The platform's authorization refusal for `object`. */
-const deniedFor = (answer: ParentWriteReachAnswer, object: string): boolean =>
-  answer.kind === 'refused' && answer.code === 'PERMISSION_DENIED' && answer.status === 403 && answer.object === object;
+/** One write through the engine as the signed-in principal, and what it answered. */
+async function write(
+  stack: VerifyStack,
+  token: string,
+  object: string,
+  operation: 'insert' | 'update' | 'delete',
+  input: Record<string, unknown>,
+): Promise<ParentWriteReachAnswer & { id?: string }> {
+  try {
+    const answered = (await stack.hooks.run(object, operation, input, { as: token })) as { id?: unknown } | boolean | undefined;
+    const id = typeof answered === 'object' && answered?.id != null ? String(answered.id) : undefined;
+    return { kind: 'written', ...(id ? { id } : {}) };
+  } catch (e) {
+    const err = e as { code?: unknown; status?: unknown; statusCode?: unknown; details?: any; message?: unknown };
+    const status = typeof err?.status === 'number' ? err.status : typeof err?.statusCode === 'number' ? err.statusCode : undefined;
+    if (typeof err?.code !== 'string' || (status !== undefined && status >= 500)) {
+      return { kind: 'faulted', ...(status !== undefined ? { status } : {}), detail: clip(err?.message ?? e) };
+    }
+    return {
+      kind: 'refused',
+      code: err.code,
+      ...(status !== undefined ? { status } : {}),
+      ...(typeof err.details?.object === 'string' ? { object: err.details.object } : {}),
+      ...(typeof err.details?.operation === 'string' ? { operation: err.details.operation } : {}),
+      detail: clip(err.message),
+    };
+  }
+}
+
+/** The platform's authorization refusal of `operation` on `object`. */
+const deniedFor = (answer: ParentWriteReachAnswer, object: string, operation: string): boolean =>
+  answer.kind === 'refused' && answer.code === 'PERMISSION_DENIED' && answer.status === 403
+  && answer.object === object && answer.operation === operation;
 
 const plain = (a: ParentWriteReachAnswer): ParentWriteReachAnswer => ({
   kind: a.kind,
   ...(a.status !== undefined ? { status: a.status } : {}),
   ...(a.code !== undefined ? { code: a.code } : {}),
   ...(a.object !== undefined ? { object: a.object } : {}),
+  ...(a.operation !== undefined ? { operation: a.operation } : {}),
   ...(a.detail !== undefined && a.kind !== 'written' ? { detail: a.detail } : {}),
 });
 
@@ -512,6 +531,13 @@ const GRANT: Record<ParentWriteReachVerb, 'allowEdit' | 'allowDelete' | 'allowCr
   create: 'allowCreate',
 };
 
+/** The engine operation each verb is written as, and named by in a refusal's `details`. */
+const OPERATION: Record<ParentWriteReachVerb, 'update' | 'delete' | 'insert'> = {
+  edit: 'update',
+  delete: 'delete',
+  create: 'insert',
+};
+
 /**
  * Compare one detail write against the conjunction. The whole verdict of the
  * family is this function: it reads the expectation, the door's answer and
@@ -526,19 +552,21 @@ function judge(
 ): Pick<ParentWriteReachProbeResult, 'outcome' | 'detail'> {
   if (answer.kind === 'faulted') return { outcome: 'failed', detail: `the door faulted: ${answer.status ?? ''} ${answer.detail ?? ''}` };
   if (answer.kind === 'refused') {
-    if (!deniedFor(answer, c.object)) {
+    if (!deniedFor(answer, c.object, OPERATION[probe.verb])) {
       return {
         outcome: 'unattributed',
-        detail: `refused for another reason: ${answer.code}${answer.status ? ` (${answer.status})` : ''}${answer.object ? ` naming ${answer.object}` : ''} ${answer.detail ?? ''}`,
+        detail:
+          `refused for another reason: ${answer.code}${answer.status ? ` (${answer.status})` : ''}` +
+          `${answer.object || answer.operation ? ` naming ${answer.operation ?? '?'} on ${answer.object ?? '?'}` : ''} ${answer.detail ?? ''}`,
       };
     }
     if (landed === true) return { outcome: 'contradicted', detail: `the ${probe.verb} was refused, yet the record shows it landed` };
     if (probe.expected === 'refused') return { outcome: 'held' };
     return { outcome: 'contradicted', detail: `${probe.why}, and the ${probe.verb} was refused (403 PERMISSION_DENIED)` };
   }
-  if (landed === false) return { outcome: 'not-run', detail: `the door answered ${answer.status}, but the record does not show the ${probe.verb}` };
+  if (landed === false) return { outcome: 'not-run', detail: `the engine answered the ${probe.verb} written, but the record does not show it` };
   if (probe.expected === 'allowed') return { outcome: 'held' };
-  return { outcome: 'contradicted', detail: `${probe.why}, and the ${probe.verb} was admitted (${answer.status})` };
+  return { outcome: 'contradicted', detail: `${probe.why}, and the ${probe.verb} was admitted` };
 }
 
 function objectStatus(reaches: ParentWriteReachReach[]): { status: ParentWriteReachObjectStatus; reason?: string } {
@@ -571,9 +599,9 @@ interface RunningPersona extends ParentWriteReachPersona {
 /**
  * Run the parent-derived write reach family against a live stack: every
  * persona (the three verifier personas, then one per declared position)
- * writes every probed detail object's records through the REST door — edit,
- * delete and create — under a master chain another principal owns and one it
- * owns, and each answer is compared with the conjunction. Returns a
+ * writes every probed detail object's records through the engine as itself —
+ * edit, delete and create — under a master chain another principal owns and
+ * one it owns, and each answer is compared with the conjunction. Returns a
  * structured report; a per-object failure is collected, not thrown.
  */
 export async function runParentWriteReachProofs(stack: VerifyStack, config: any): Promise<ParentWriteReachReport> {
@@ -597,13 +625,12 @@ export async function runParentWriteReachProofs(stack: VerifyStack, config: any)
 
   const admit = async (base: ParentWriteReachPersona, token: string): Promise<void> => {
     const userId = String((await stack.contextFor(token)).userId);
-    const me = await rest(stack, token, 'GET', '/auth/me/permissions');
-    const sets: string[] = Array.isArray(me.payload?.permissionSets) ? me.payload.permissionSets.map(String) : [];
-    if (me.kind !== 'written' || typeof me.payload?.objects !== 'object') {
-      notRun.push({ ...base, status: 'not-run', reason: `GET /auth/me/permissions answered ${me.status ?? me.kind}: no effective grants to read` });
+    const me = await effectivePermissions(stack, token);
+    if (!me.objects) {
+      notRun.push({ ...base, status: 'not-run', reason: me.reason });
       return;
     }
-    personas.push({ ...base, status: 'run', permissionSets: sets, token, userId, objects: me.payload.objects });
+    personas.push({ ...base, status: 'run', permissionSets: me.sets, token, userId, objects: me.objects });
   };
 
   for (const v of VERIFIER_PERSONAS) {
@@ -615,8 +642,8 @@ export async function runParentWriteReachProofs(stack: VerifyStack, config: any)
       // boot by `parentWriteReachSecurity`, never written as a row.
       await stack.seed('sys_user_permission_set', [{ user_id: userId, permission_set: v.set }]);
       const token = await stack.signIn(v.email, VERIFIER_PASSWORD);
-      const me = await rest(stack, token, 'GET', '/auth/me/permissions');
-      if (!Array.isArray(me.payload?.permissionSets) || !me.payload.permissionSets.includes(v.set)) {
+      const me = await effectivePermissions(stack, token);
+      if (!me.sets.includes(v.set)) {
         notRun.push({
           ...base,
           status: 'not-run',
@@ -733,25 +760,29 @@ export async function runParentWriteReachProofs(stack: VerifyStack, config: any)
         const masterId = chain.id;
 
         // The measured half: can this persona read, then edit, the master?
-        const read = await rest(stack, p.token, 'GET', `/data/${master}/${masterId}`);
-        if (read.kind !== 'written') {
-          if (read.kind === 'refused' && (read.status === 404 || read.status === 403)) {
-            reach.masterRead = 'unreadable';
-            reach.reason =
-              `GET ${master} answered ${read.status}: the master is outside the persona's read reach, so its details are ` +
-              "too (a write to a record the caller cannot read is the RLS family's subject)";
-          } else {
-            reach.reason = `GET ${master} answered ${read.status ?? read.kind}: the master's read reach could not be measured`;
-          }
+        let readable: boolean | undefined;
+        try {
+          readable = (await stack.rows(master, { id: masterId }, { as: p.token })).length > 0;
+        } catch (e) {
+          const err = e as { code?: unknown; message?: unknown };
+          if (err?.code === 'PERMISSION_DENIED') readable = false;
+          else reach.reason = `the read of ${master} as the persona faulted: ${clip(err?.message ?? e, 160)}`;
+        }
+        if (readable === undefined) continue;
+        if (!readable) {
+          reach.masterRead = 'unreadable';
+          reach.reason =
+            `the persona's read of ${master} returns no row: the master is outside its read reach, so its details are ` +
+            "too (a write to a record the caller cannot read is the RLS family's subject)";
           continue;
         }
         reach.masterRead = 'readable';
-        const edit = await rest(stack, p.token, 'PATCH', `/data/${master}/${masterId}`, {});
+        const edit = await write(stack, p.token, master, 'update', { id: masterId });
         reach.masterAnswer = plain(edit);
-        reach.masterEdit = edit.kind === 'written' ? 'editable' : deniedFor(edit, master) ? 'not-editable' : 'unmeasured';
+        reach.masterEdit = edit.kind === 'written' ? 'editable' : deniedFor(edit, master, 'update') ? 'not-editable' : 'unmeasured';
         reach.grants = grants;
         if (reach.masterEdit === 'unmeasured') {
-          reach.reason = `the empty PATCH of ${master} answered ${edit.code ?? edit.status ?? edit.kind}, not a write gate's verdict: its edit reach could not be measured`;
+          reach.reason = `the empty update of ${master} answered ${edit.code ?? edit.kind}, not a write gate's verdict on it: its edit reach could not be measured`;
           continue;
         }
 
@@ -763,7 +794,7 @@ export async function runParentWriteReachProofs(stack: VerifyStack, config: any)
             expected: holds && editable ? ('allowed' as const) : ('refused' as const),
             why:
               `the persona ${holds ? 'holds' : 'lacks'} ${GRANT[verb]} on ${c.object} and ` +
-              `${editable ? 'edited' : 'was refused an edit of'} its master ${master} (${edit.status})`,
+              `${editable ? 'edited' : 'was refused an edit of'} its master ${master}`,
           };
         };
 
@@ -779,14 +810,14 @@ export async function runParentWriteReachProofs(stack: VerifyStack, config: any)
           {
             const e = expect('edit');
             const before = await row(c.object, d.id);
-            const answer = await rest(stack, p.token, 'PATCH', `/data/${c.object}/${d.id}`, {});
+            const answer = await write(stack, p.token, c.object, 'update', { id: d.id });
             const after = await row(c.object, d.id);
             const stamp = before && 'updated_at' in before ? after?.updated_at !== before.updated_at : undefined;
             reach.probes.push({ verb: 'edit', detailOwner, expected: e.expected, answer: plain(answer), ...judge(c, e, answer, stamp) });
           }
           {
             const e = expect('delete');
-            const answer = await rest(stack, p.token, 'DELETE', `/data/${c.object}/${d.id}`);
+            const answer = await write(stack, p.token, c.object, 'delete', { id: d.id });
             const gone = !(await row(c.object, d.id));
             reach.probes.push({ verb: 'delete', detailOwner, expected: e.expected, answer: plain(answer), ...judge(c, e, answer, gone) });
           }
@@ -810,7 +841,7 @@ export async function runParentWriteReachProofs(stack: VerifyStack, config: any)
           } else {
             const refs = (cc.relationalRefs ?? []).filter((r) => r.field !== field);
             const { body } = fillRelationalRefs({ ...cc, relationalRefs: refs }, ids);
-            const answer = await rest(stack, p.token, 'POST', `/data/${c.object}`, {
+            const answer = await write(stack, p.token, c.object, 'insert', {
               ...fixtureBody(body, objectDefs.get(c.object), ++counter),
               [field]: masterId,
             });
@@ -839,7 +870,7 @@ export async function runParentWriteReachProofs(stack: VerifyStack, config: any)
   ];
   return {
     app: config?.manifest?.id ?? config?.manifest?.namespace ?? 'app',
-    door: 'rest',
+    door: 'user',
     personas: reported,
     results,
     summary: {
@@ -875,7 +906,7 @@ export async function runParentWriteReachProofs(stack: VerifyStack, config: any)
 /** Pretty one-line-per-object summary for logs. */
 export function formatParentWriteReachReport(report: ParentWriteReachReport): string {
   const lines: string[] = [`\n=== objectstack verify — parent-derived write reach — ${report.app} ===`];
-  lines.push('  door: REST (POST / PATCH / DELETE /data/:object); the system door bypasses authorization and is not asked');
+  lines.push('  door: the engine write as each persona (insert, update and delete by id); the system door bypasses authorization and is not asked');
   const ran = report.personas.filter((p) => p.status === 'run');
   lines.push(`  personas: ${ran.map((p) => p.name).join(', ') || 'none'}`);
   for (const p of report.personas.filter((x) => x.status === 'not-run')) {
