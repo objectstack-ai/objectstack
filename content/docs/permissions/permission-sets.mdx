@@ -352,7 +352,10 @@ Environment-authored sets and other packages' rows survive. Under a `group` or
 `isolated` tenancy posture, removing a package that carries positions or
 permission sets is the platform operator's (ADR-0131 D3): that delete, and an
 `install-local` install, upgrade or uninstall of such a package, refuse any
-other caller `403` before anything changes.
+other caller `403` before anything changes. So do the package verbs that
+publish, discard, roll back, revert, duplicate or adopt catalog items
+(`publish-drafts`, `revert`, `rollback`, `commits/:commitId/revert`,
+`duplicate`, `adopt-orphans`).
 
 ## One authoritative store — the record is a projection (ADR-0094)
 
