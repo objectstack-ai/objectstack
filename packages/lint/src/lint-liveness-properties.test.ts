@@ -1611,17 +1611,22 @@ const fieldLedgerDir = () => ledgerDirWith((dir) => writeLedger(dir, 'field', SY
 
 describe('the object/field walk, against a synthetic ledger directory (#19268)', () => {
   // The state that makes this block necessary, asserted rather than recalled.
-  // If `field.json` ever warns again these two flip, and the block above
-  // ("field walk: a malformed `fields` array …") can take its real subject back
-  // — but this block keeps working either way, which is the point.
+  // If `field.json` ever warns on a STABLE subject again, the first assertion
+  // below names it, and the block above ("field walk: a malformed `fields`
+  // array …") can take its real subject back — but this block keeps working
+  // either way, which is the point.
   it('the SHIPPED field ledger warns on no stable subject — which is why the walk needs a subject of its own', () => {
     // `picklist` was the last opted-in row (`planned` + `authorWarn`) and left
     // when the server began resolving picklist references (`live`). What is
     // left is `conditionalRequired`, a `retiredKey` tombstone whose `dead` row
     // warns on its own since #16094 — but a parse refuses it first, so it is no
-    // subject for #11385 either. The synthetic slot below is warned by nothing
-    // shipped.
-    expect([...authorWarnedProperties('field')]).toEqual(['conditionalRequired']);
+    // subject for #11385 either. `mailAssociation` (#22870) opted in as
+    // `planned` + `authorWarn` — the inbound-mail correspondent flag on an email
+    // field, declared ahead of the mailbox ingest that reads it — and it leaves
+    // this set when that reader lands and the row flips `live`: a verdict
+    // scheduled to move, so no stable subject either. The synthetic slot below
+    // is warned by nothing shipped.
+    expect([...authorWarnedProperties('field')]).toEqual(['conditionalRequired', 'mailAssociation']);
     expect(
       lintLivenessProperties({
         objects: [{ name: 'widget', fields: [{ name: 'a', synthWarnedSlot: true }] }],

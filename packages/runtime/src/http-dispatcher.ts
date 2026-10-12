@@ -2382,8 +2382,30 @@ export class HttpDispatcher {
      * When `scopeId` is provided, tries the SCOPED factory on `defaultKernel` first (SharedProjectPlugin
      * mode). Falls back to `kernel` — THE REQUEST'S OWN kernel, passed in by the
      * caller (#5155) — for singleton / legacy services.
+     *
+     * [#22944] Except when the request carries a kernel of its OWN — a
+     * `kernel-resolver` host routed it to its environment's kernel, so
+     * `kernel !== defaultKernel`. That kernel answers first. The host kernel's
+     * SINGLETONS (`protocol`, `metadata`, `objectql`) answer
+     * `getServiceAsync(name, scopeId)` whatever the scope, so asking the host
+     * first handed every dispatcher door that passes `context.environmentId`
+     * the HOST's data plane: `POST /actions/:object/:action` loaded its subject
+     * row from a protocol that registers none of the environment's objects
+     * (`OBJECT_NOT_FOUND`, swallowed by `loadActionSubjectRecord`), and
+     * answered `404 RECORD_NOT_FOUND` for a row the caller can read. The
+     * REST-owned routes never had this — `RestServer.resolveProtocol` takes the
+     * environment kernel's own `protocol`. A request with no kernel of its own
+     * (single-environment hosts, SharedProjectPlugin) resolves exactly as before.
      */
     private async resolveService(kernel: any, name: string, scopeId?: string) {
+        if (kernel && kernel !== this.defaultKernel && typeof kernel.getServiceAsync === 'function') {
+            try {
+                const svc = await kernel.getServiceAsync(name, scopeId);
+                if (svc != null) return svc;
+            } catch {
+                // Not on the request's own kernel — fall through to the host's scoped lookup
+            }
+        }
         // Prefer scoped lookup on defaultKernel when scopeId is given (shared-kernel / multi-environment mode)
         if (scopeId && typeof this.defaultKernel.getServiceAsync === 'function') {
             try {
@@ -2443,9 +2465,13 @@ export class HttpDispatcher {
      *    re-raised unbranded, for the resolver to answer as
      *    `AuthzStoreUnavailableError` (503).
      *
-     * The chain order is `resolveService`'s (scoped lookup on the host kernel
-     * first, then the request's own kernel), so WHICH registry answers is
-     * unchanged; only what a rejection MEANS is. A host with no async accessor
+     * The chain order is scoped lookup on the host kernel first, then the
+     * request's own kernel — `resolveService`'s order before #22944 — so WHICH
+     * registry answers is unchanged; only what a rejection MEANS is. ⚠️ #22944
+     * moved the probe's order on a `kernel-resolver` host (the request's own
+     * kernel first) and deliberately NOT this one: this lookup decides which
+     * kernel's `tenancy` answers the identity step, which is a separate
+     * question from where a data-plane row is read. A host with no async accessor
      * (`KernelBase`-shaped, e.g. `LiteKernel`) supports no service factories,
      * so "not registered" is the only fault it can report — it keeps the quiet
      * probe, which is the same classification rather than a second collapse.

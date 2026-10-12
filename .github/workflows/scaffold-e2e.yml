@@ -9,7 +9,7 @@
 #
 # Job 1 (PRs touching the scaffolder / docker example) scaffolds with the
 # repo-built scaffolder and runs the generated project against the registry:
-# install → validate → build → boot → health probes → docker build/run. That
+# install → validate → build → test → boot → health probes → docker build/run. That
 # run scaffolds with `--skip-install` and installs the project itself, so it
 # exercises the scaffolder's `--skip-install` shape; a second, throwaway
 # project is scaffolded WITHOUT it purely to assert the shape a real user
@@ -147,6 +147,16 @@ jobs:
           cd "$RUNNER_TEMP/e2e-app"
           npm run validate
           npm run build
+
+      # The starter's own test (`note.test.ts`): it boots the generated
+      # project's stack in-process through @objectstack/verify, as installed
+      # from the registry, and asserts one business fact on the real engine.
+      # A scaffold whose `test` script is red out of the box teaches its user
+      # to ignore tests, so the starter ships it green or not at all.
+      - name: Test the generated project
+        run: |
+          cd "$RUNNER_TEMP/e2e-app"
+          npm test
 
       # Two questions this step must answer about its own server, and used to
       # answer neither (#9779). Both belong here rather than in the CLI: `os
@@ -486,7 +496,8 @@ jobs:
 
       # `build` is the gate every template must pass; `validate` is run only
       # when the scaffolded project defines it (the now-retired remote
-      # templates did not always ship it).
+      # templates did not always ship it), and `test` likewise: a published
+      # scaffolder older than the starter's `note.test.ts` declares none.
       - name: Gate the generated project
         run: |
           cd "$RUNNER_TEMP/canary-app"
@@ -494,6 +505,9 @@ jobs:
             npm run validate
           fi
           npm run build
+          if node -e "process.exit(JSON.parse(require('fs').readFileSync('package.json','utf8')).scripts?.test ? 0 : 1)"; then
+            npm test
+          fi
 
       # Same two guards, same reasoning, as `Boot from the artifact and probe
       # health` in scaffold-local — see the measurement written out there. Kept

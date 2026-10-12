@@ -26,7 +26,7 @@
  *
  * ## …and WHICH channel the shape door stands in (updated by #5488)
  *
- * `api` is now CODE-ONLY (`allowRuntimeCreate: false` + `allowOrgOverride:
+ * `api` is now CODE-ONLY (`allowRuntimeCreate: false` + `allowEnvironmentOverlay:
  * false`, maintainer ruling 2026-08-07T16:59Z). The declaration schema is
  * therefore consulted on the ARTIFACT route — stack compile, `publishPackage`,
  * loader ingest — and no longer on `PUT /api/v1/meta/api/:name`, which the
@@ -141,7 +141,7 @@ describe('`api` registry flags — the authorization verdict, written down', () 
     // 403 `NOT_CREATABLE` instead of 200 "Saved" — in draft mode too, since the
     // inlet runs before the draft/publish branch and does not look at `mode`.
     const entry = apiEntry()!;
-    const codeOnly = entry.allowRuntimeCreate === false && entry.allowOrgOverride === false;
+    const codeOnly = entry.allowRuntimeCreate === false && entry.allowEnvironmentOverlay === false;
     expect(codeOnly).toBe(true);
   });
 
@@ -154,11 +154,11 @@ describe('`api` registry flags — the authorization verdict, written down', () 
     expect(apiEntry()!.filePatterns[0]).toMatch(/\.api\./);
   });
 
-  it('declares `allowOrgOverride: false` — an endpoint is the publisher’s outward URL', () => {
-    // A per-org fork could move `path`, flip `authRequired` or drop
+  it('declares `allowEnvironmentOverlay: false` — an endpoint is the publisher’s outward URL', () => {
+    // An environment fork could move `path`, flip `authRequired` or drop
     // `rateLimit` on a URL third parties have already integrated against.
     // ADR-0005 defaults the flag to false so opting in is deliberate.
-    expect(apiEntry()!.allowOrgOverride).toBe(false);
+    expect(apiEntry()!.allowEnvironmentOverlay).toBe(false);
   });
 
   it('declares `executionPinned: false` — the pinned artifact is the target flow', () => {

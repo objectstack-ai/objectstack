@@ -14,7 +14,7 @@
 //        2026-08-09 — see ADR-0094 D5-R): a data-plane edit of a
 //        package-managed, ARTIFACT-BACKED row is REFUSED with 403
 //        `not_overridable` and no overlay is minted — commit ee58392e1 rolled
-//        `permission` back to `allowOrgOverride: false`, and ADR-0086 names
+//        `permission` back to `allowEnvironmentOverlay: false`, and ADR-0086 names
 //        the supported channel instead: edit the package and re-publish.
 //        A "delete" through this door still degrades to a RESET — a packaged
 //        definition can never be removed from the environment — though with
@@ -82,7 +82,7 @@ describe('two-doors permission separation (ADR-0086 P2)', () => {
   it('块2: an admin edit of a package-managed set is refused — no env overlay is minted (#6483)', async () => {
     // Before commit ee58392e1 this edit became an env-scope overlay (ADR-0094's 2026-07-14
     // direction). `permission` has since rolled back to
-    // `allowOrgOverride: false` (ADR-0005 security row: "Authorization
+    // `allowEnvironmentOverlay: false` (ADR-0005 security row: "Authorization
     // correctness; overlays would create silent privilege drift"), so the
     // write-through's `saveMetaItem` refuses the artifact-backed target with
     // 403 `not_overridable` — loudly, at the moment of the write. ADR-0086
@@ -130,7 +130,7 @@ describe('two-doors permission separation (ADR-0086 P2)', () => {
     // The specimen was `member_default` until commit ee58392e1: its record is env-owned
     // (`managed_by` ≠ 'package'), but its METADATA identity is a platform
     // artifact (`defaultPermissionSets`), so with `permission` rolled back
-    // to `allowOrgOverride: false` the write-through's `saveMetaItem` now
+    // to `allowEnvironmentOverlay: false` the write-through's `saveMetaItem` now
     // refuses to overlay it — the record's provenance column was never what
     // the gate reads. A truly env-AUTHORED set (created through the data
     // door, definition living only in `sys_metadata`) rides the

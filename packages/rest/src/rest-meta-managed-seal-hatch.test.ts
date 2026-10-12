@@ -92,7 +92,7 @@ function boot(environmentId: string | undefined) {
         const entries: any[] = res._json?.entries ?? [];
         return Object.fromEntries(types.map((t) => {
             const e = entries.find((x) => x.type === t);
-            return [t, e ? { allowOrgOverride: e.allowOrgOverride, overrideSource: e.overrideSource } : 'absent'];
+            return [t, e ? { allowEnvironmentOverlay: e.allowEnvironmentOverlay, overrideSource: e.overrideSource } : 'absent'];
         }));
     };
     return { call, listing };
@@ -154,7 +154,7 @@ describe('[#22411] the removed spelling OBJECTSTACK_METADATA_WRITABLE is not rea
     // The types this registry lists (`field` is named in the variable but is no registered type here:
     // its items live inside an object, so the listing carries no entry for it).
     const HATCH_TYPES = ['flow', 'object', 'permission', 'position'] as const;
-    const SHUT = { allowOrgOverride: false, overrideSource: 'registry' };
+    const SHUT = { allowEnvironmentOverlay: false, overrideSource: 'registry' };
 
     for (const environmentId of [undefined, 'env_1']) {
         const kernel = environmentId ? 'environment' : 'host-config';
@@ -182,7 +182,7 @@ describe('[#22411] the removed spelling OBJECTSTACK_METADATA_WRITABLE is not rea
             open();
             const { listing } = boot(environmentId);
             expect(await listing(HATCH_TYPES)).toEqual(
-                Object.fromEntries(HATCH_TYPES.map((t) => [t, { allowOrgOverride: true, overrideSource: 'env' }])),
+                Object.fromEntries(HATCH_TYPES.map((t) => [t, { allowEnvironmentOverlay: true, overrideSource: 'env' }])),
             );
         });
     }

@@ -8,6 +8,12 @@
  * `DEFAULT_METADATA_TYPE_REGISTRY`: the TABLE in both directions (legs 1-2),
  * and the two registry-derived COUNTS in the sentence under it (leg 3).
  *
+ * The flag this reads is `allowEnvironmentOverlay`, renamed from
+ * `allowOrgOverride` in protocol 18 (ADR-0131 C5); the page's column header,
+ * this file's `COL_FLAG` and the self-test fixtures moved in one change. The
+ * measurements quoted below were taken under the old spelling and read the
+ * same under the new one.
+ *
  *   node scripts/check-overlay-whitelist-table.mjs              # judge the checked-in tree
  *   node scripts/check-overlay-whitelist-table.mjs --list       # every type and where it is asserted
  *   node scripts/check-overlay-whitelist-table.mjs --self-test  # prove the battery can go red
@@ -15,7 +21,7 @@
  * ## The gap this closes
  *
  * The section states its own contract: "The whitelist lives in **one** place:
- * `MetadataTypeRegistryEntry.allowOrgOverride`". The table under that sentence
+ * `MetadataTypeRegistryEntry.allowEnvironmentOverlay`". The table under that sentence
  * is hand-maintained -- no generator writes the page, there is no `DO NOT EDIT`
  * marker -- so the single source of truth had a hand-kept copy sitting directly
  * beneath it with nothing holding the two together.
@@ -35,7 +41,7 @@
  * ## Why BOTH directions (constraint 1, established by measurement on #11750)
  *
  * `translation` was a false negative BY OMISSION -- a type the registry marks
- * `allowOrgOverride: true` that the table simply did not list. A one-directional
+ * `allowEnvironmentOverlay: true` that the table simply did not list. A one-directional
  * table→registry gate ("every row I can see agrees with the registry") passes
  * on a table that is missing a whole row. Three of the four defects were
  * findable from the table side; the fourth was findable ONLY from the registry
@@ -47,7 +53,7 @@
  *
  *   LEG 1  table → registry: every type named in the table carries the
  *          registry's verdict for it (and is a type the registry declares).
- *   LEG 2  registry → table: every registry entry with `allowOrgOverride: true`
+ *   LEG 2  registry → table: every registry entry with `allowEnvironmentOverlay: true`
  *          is named somewhere in the table.
  *
  * Leg 2 is deliberately asymmetric: it demands rows only for the `true` set.
@@ -61,7 +67,7 @@
  * #11750 corrected the table and, in the same PR, added a sentence under it so
  * a human could check the completeness claim without opening the registry:
  *
- *   "Those five are the **complete** `allowOrgOverride: true` set: of the 27
+ *   "Those five are the **complete** `allowEnvironmentOverlay: true` set: of the 27
  *    types in `DEFAULT_METADATA_TYPE_REGISTRY`, every other one is `false`."
  *
  * Both numbers are derived from the registry, and both were hand-kept. That is
@@ -81,7 +87,7 @@
  * Scanned over the WHOLE page, not just the whitelist section: a claim ABOUT
  * the registry is no less a hand-kept copy for having drifted into a
  * neighbouring section. Both patterns are anchored on backticked identifiers
- * (`DEFAULT_METADATA_TYPE_REGISTRY`, `allowOrgOverride: true`), so they cannot
+ * (`DEFAULT_METADATA_TYPE_REGISTRY`, `allowEnvironmentOverlay: true`), so they cannot
  * collide with ordinary English.
  *
  * ### "five" is a WORD, and the prose keeps it
@@ -120,7 +126,7 @@
  *   this file's AST walk                                                      ->  27
  *
  * The missed entry is `datasource`, whose object literal opens `{` on its own
- * line, so `type:` and `allowOrgOverride:` land on separate lines. A
+ * line, so `type:` and `allowEnvironmentOverlay:` land on separate lines. A
  * regex-built gate would have been born with one type invisible to it -- and
  * invisible in the direction that matters, because an entry the gate never
  * parsed can never be reported as an omission from the table. It would have
@@ -128,9 +134,9 @@
  *
  * Two more shapes in the same file that a regex reads wrong, both present today:
  *
- *   grep -c 'allowOrgOverride: true'   -> 6, but only 5 are ENTRIES; the sixth
+ *   grep -c 'allowEnvironmentOverlay: true'   -> 6, but only 5 are ENTRIES; the sixth
  *                                        is prose inside a code comment.
- *   grep -c 'allowOrgOverride: false'  -> 33 inside the registry region, but
+ *   grep -c 'allowEnvironmentOverlay: false'  -> 33 inside the registry region, but
  *                                        only 22 are entries; the other 11 are
  *                                        comments discussing the flags.
  *
@@ -144,13 +150,13 @@
  * Every way this gate can lose track of its subject is a finding:
  *
  *   - the `## Overlay whitelist ...` heading is gone or renamed;
- *   - the table's header row no longer reads `Type | allowOrgOverride | ...`
+ *   - the table's header row no longer reads `Type | allowEnvironmentOverlay | ...`
  *     (a column swap would otherwise make the gate read the WRONG column and
  *     keep printing green);
  *   - a verdict cell holds anything but a bare ✅ / ❌;
  *   - a type cell holds anything but backticked type names;
  *   - the registry is not an array literal of object literals with literal
- *     `type` / `allowOrgOverride` values (a spread, a computed key, an
+ *     `type` / `allowEnvironmentOverlay` values (a spread, a computed key, an
  *     identifier flag, a helper call).
  *
  * That last one is the route-around clause. If the registry ever grows a shape
@@ -163,13 +169,13 @@
  *
  * Sibling pages state the same facts correctly in PROSE, not in a machine-shaped
  * type→flag table: `content/docs/permissions/authorization.mdx`
- * ("`permission` declares `allowOrgOverride: false`"),
+ * ("`permission` declares `allowEnvironmentOverlay: false`"),
  * `content/docs/automation/jobs.mdx` (a job-vs-flow comparison table whose
  * flag mention sits inside an English cell), `content/docs/ai/agents.mdx`,
  * `content/docs/permissions/capabilities.mdx`,
  * `content/docs/references/system/email-template.mdx`.
  *
- * Measured before deciding: `grep -rn allowOrgOverride content/docs/` hits 22
+ * Measured before deciding: `grep -rn allowEnvironmentOverlay content/docs/` hits 22
  * lines across 13 files. Of those, ~5 are genuine "<type> is <bool>" assertions;
  * the rest are the schema-field reference row, a code sample using an invented
  * type, and sentences ABOUT the flag rather than about any type
@@ -252,7 +258,7 @@ const TABLE_LINE = /^\s*\|/;
 
 /** The two columns this gate reads, by name. A rename or reorder is a finding. */
 const COL_TYPE = 'Type';
-const COL_FLAG = 'allowOrgOverride';
+const COL_FLAG = 'allowEnvironmentOverlay';
 
 const YES = '✅';
 const NO = '❌';
@@ -269,7 +275,7 @@ const BACKTICKED = /`([^`]*)`/g;
 /**
  * Read `DEFAULT_METADATA_TYPE_REGISTRY` by AST.
  *
- * @returns {{ entries: Array<{type: string, allowOrgOverride: boolean, line: number}>,
+ * @returns {{ entries: Array<{type: string, allowEnvironmentOverlay: boolean, line: number}>,
  *             findings: Array<{kind: string, message: string, line: number}> }}
  *   `findings` non-empty means the registry could not be read honestly. It is
  *   never "read what we could and carry on" -- see the header.
@@ -397,10 +403,10 @@ export function readRegistry(text, fileLabel = REGISTRY_FILE) {
       });
       continue;
     }
-    // `allowOrgOverride` is optional in the schema and defaults to false
+    // `allowEnvironmentOverlay` is optional in the schema and defaults to false
     // (see the reference row for MetadataTypeRegistryEntry). An entry that
     // omits it is a legitimate `false`.
-    entries.push({ type, allowOrgOverride: flag === true, line });
+    entries.push({ type, allowEnvironmentOverlay: flag === true, line });
   }
 
   const seen = new Map();
@@ -422,7 +428,7 @@ export function readRegistry(text, fileLabel = REGISTRY_FILE) {
       message: `\`${REGISTRY_CONST}\` parsed to ZERO entries — the gate has no input and must not report clean.`,
     });
   }
-  if (findings.length === 0 && !entries.some((e) => e.allowOrgOverride)) {
+  if (findings.length === 0 && !entries.some((e) => e.allowEnvironmentOverlay)) {
     findings.push({
       kind: 'structure',
       line: lineOf(array),
@@ -741,21 +747,21 @@ export function compare(entries, rows) {
         });
         continue;
       }
-      if (entry.allowOrgOverride !== row.allow) {
+      if (entry.allowEnvironmentOverlay !== row.allow) {
         leg1.push({
           kind: 'mismatch',
           type,
           line: row.line,
           message:
             `the table says \`${type}\` is ${row.allow ? YES : NO}, the registry declares ` +
-            `\`${COL_FLAG}: ${entry.allowOrgOverride}\` (${REGISTRY_FILE}:${entry.line}).`,
+            `\`${COL_FLAG}: ${entry.allowEnvironmentOverlay}\` (${REGISTRY_FILE}:${entry.line}).`,
         });
       }
     }
   }
 
   for (const entry of entries) {
-    if (entry.allowOrgOverride && !tableTypes.has(entry.type)) {
+    if (entry.allowEnvironmentOverlay && !tableTypes.has(entry.type)) {
       leg2.push({
         kind: 'missing-row',
         type: entry.type,
@@ -784,7 +790,7 @@ export function compare(entries, rows) {
 export function compareProse(entries, claims) {
   const actual = new Map([
     ['total', entries.length],
-    ['true-set', entries.filter((e) => e.allowOrgOverride).length],
+    ['true-set', entries.filter((e) => e.allowEnvironmentOverlay).length],
   ]);
   const leg3 = [];
   for (const claim of claims) {
@@ -963,14 +969,14 @@ export function selfTest() {
   );
   check(
     'fixture/AST reads the multi-line `datasource` entry',
-    before.entries.some((e) => e.type === 'datasource' && e.allowOrgOverride === false),
+    before.entries.some((e) => e.type === 'datasource' && e.allowEnvironmentOverlay === false),
   );
 
   // ---- 5. Comments are not entries. `grep -c` over the fixture inflates both
   //         flags; the AST count must be the smaller, correct one.
   battery('5. Comments are not entries. `grep -c` over the fixture inflates both');
   const grepTrue = (FIXTURE_REGISTRY.match(new RegExp(`${COL_FLAG}: true`, 'g')) || []).length;
-  const astTrue = before.entries.filter((e) => e.allowOrgOverride).length;
+  const astTrue = before.entries.filter((e) => e.allowEnvironmentOverlay).length;
   check('fixture/ast true-set = 5', astTrue === 5, `got ${astTrue}`);
   check(
     'fixture/grep over-counts true because of comment prose',
@@ -1084,7 +1090,7 @@ export function selfTest() {
     'fixture.ts',
   );
   check('omitted flag defaults to false', omitted.findings.length === 0 &&
-    omitted.entries.some((e) => e.type === 'agent' && e.allowOrgOverride === false),
+    omitted.entries.some((e) => e.type === 'agent' && e.allowEnvironmentOverlay === false),
     JSON.stringify(omitted.findings));
 
   // ---- 13. LEG 3 (#11763): the two registry counts stated in the prose.
@@ -1307,7 +1313,7 @@ function main() {
 
   const { leg1, leg2, tableTypes } = compare(reg.entries, tab.rows);
   const leg3 = compareProse(reg.entries, prose.claims);
-  const trueSet = reg.entries.filter((e) => e.allowOrgOverride).map((e) => e.type);
+  const trueSet = reg.entries.filter((e) => e.allowEnvironmentOverlay).map((e) => e.type);
   const claimList = prose.claims.map((c) => `${c.what}=${c.value} ("${c.token}" @:${c.line})`);
 
   if (process.argv.includes('--list')) {
@@ -1315,7 +1321,7 @@ function main() {
     for (const e of reg.entries.slice().sort((a, b) => a.type.localeCompare(b.type))) {
       const row = tableTypes.get(e.type);
       console.log(
-        `  ${(e.allowOrgOverride ? YES : NO)}  ${e.type.padEnd(20)} ` +
+        `  ${(e.allowEnvironmentOverlay ? YES : NO)}  ${e.type.padEnd(20)} ` +
           `registry:${String(e.line).padEnd(5)} ` +
           `${row ? `table:${row.line}` : 'table: (not listed)'}`,
       );

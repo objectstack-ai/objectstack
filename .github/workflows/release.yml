@@ -613,14 +613,31 @@ jobs:
             exit 1
           fi
 
-          # Same four filters cut-rc.yml applies to the same surface: the fixed
-          # release paths by pattern, then the three declared lists by WHOLE-LINE
+          # The SKILL.md stamps the skill-compatibility rewriter writes (the root
+          # `version` script's last step, `--fix`), on the same terms: resolved from
+          # `stampedSkillPaths()`, derived from the walk its `--fix` writes from, and
+          # judged by `check:skill-compatibility` in the content half below.
+          SKILL_LIST="${RUNNER_TEMP}/post-version-skill-surfaces.txt"
+          if ! node --input-type=module \
+                 -e 'import { stampedSkillPaths } from "./scripts/check-skill-compatibility-version.mjs"; for (const p of stampedSkillPaths()) console.log(p);' \
+                 > "${SKILL_LIST}"; then
+            echo "::error::could not resolve stampedSkillPaths() from scripts/check-skill-compatibility-version.mjs, so the skill half of the post-version surface is unknown. Refusing to call this tree validated."
+            exit 1
+          fi
+          if [ ! -s "${SKILL_LIST}" ]; then
+            echo "::error::stampedSkillPaths() in scripts/check-skill-compatibility-version.mjs resolved EMPTY. It THROWS on a moved or empty skills directory, so an empty file here is a resolution that reported nothing while still exiting 0. Refusing to call this tree validated."
+            exit 1
+          fi
+
+          # Same five filters cut-rc.yml applies to the same surface: the fixed
+          # release paths by pattern, then the four declared lists by WHOLE-LINE
           # EXACT match, so no derived filter can accept a path its declaration
           # does not name and none needs regex-escaping.
           UNEXPECTED="$(grep -vE '(^|/)package\.json$|(^|/)CHANGELOG\.md$|^\.changeset/|^packages/spec/src/kernel/protocol-version\.ts$' "${MOVED_FILE}" \
             | grep -vxF -f "${TEMPLATE_LIST}" \
             | grep -vxF -f "${SURFACE_LIST}" \
-            | grep -vxF -f "${INDEX_LIST}" || true)"
+            | grep -vxF -f "${INDEX_LIST}" \
+            | grep -vxF -f "${SKILL_LIST}" || true)"
           if [ -n "${UNEXPECTED}" ]; then
             printf '%s\n' "${UNEXPECTED}" | sed 's/^/::error::  unexpected: /'
             echo "::error::the version pass wrote outside the reviewed post-version surface (paths above). This is the treadmill guard: a new version-time output must arrive together with the gate that judges it. Add the surface to the declaration its rewriter reads, and its gate to the content half below — deliberately, in one reviewed diff."
@@ -672,6 +689,7 @@ jobs:
           run_gate pnpm check:docs-image-tag-sync
           run_gate pnpm check:template-version-sync
           run_gate pnpm check:release-index-currency-sync
+          run_gate pnpm check:skill-compatibility
           run_gate pnpm check:nul-bytes
           run_gate pnpm check:release-notes
           run_gate pnpm check:release-page-status

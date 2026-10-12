@@ -20,8 +20,10 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         description: 'A test application',
     };
 
-    /** [#6190] An org-overridable specimen — `view` declares `allowOrgOverride`,
-     *  so it is the type that may legitimately carry an org-scoped row. */
+    /** [#6190] An overlay-enabled specimen — `view` declares
+     *  `allowEnvironmentOverlay`, so an environment may overlay a packaged
+     *  one; it was the type that could carry an org-scoped row before
+     *  ADR-0131 D6. */
     const sampleView = {
         name: 'test_grid',
         type: 'grid',
@@ -313,7 +315,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             // [ADR-0131 D6] The specimen is a packaged VIEW, the regime-O type
             // whose overlay the registry allows. It was a packaged `app` behind
             // the `OS_METADATA_WRITABLE=app` hatch (commit ee58392e1 rolled
-            // `app`'s `allowOrgOverride` back to `false`), but managed content
+            // `app`'s `allowEnvironmentOverlay` back to `false`), but managed content
             // is sealed now and the hatch no longer opens that overlay.
             const sampleView = { name: 'test_grid', label: 'Test Grid', object: 'account', list: { columns: ['name'] } };
             registry.registerItem('view', { ...sampleView }, 'name', 'com.acme.showcase');
@@ -1368,7 +1370,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
     // ═══════════════════════════════════════════════════════════════
     // ADR-0005 PR-10d.7 — two-tier metadata authorization model.
     //
-    // For types declaring `allowOrgOverride:false, allowRuntimeCreate:true`
+    // For types declaring `allowEnvironmentOverlay:false, allowRuntimeCreate:true`
     // (hook, trigger, validation), the per-item provenance decides:
     //
     //  • Item exists in the SchemaRegistry tagged with `_packageId`
@@ -1470,7 +1472,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         // ⇒ writable" fall-through, i.e. through the hole #8421 closed, while
         // reading as a pin on the declared `allowRuntimeCreate` tier. Debt
         // regardless of that card's ruling. REPLACED, not deleted — `mapping`
-        // really does declare `allowOrgOverride: false, allowRuntimeCreate:
+        // really does declare `allowEnvironmentOverlay: false, allowRuntimeCreate:
         // true` — so the tier keeps a live specimen.
         it('accepts brand-new mapping and seed (allowRuntimeCreate:true)', async () => {
             mockEngine.findOne.mockResolvedValue(null);
@@ -1903,7 +1905,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
 
             // The body #5271 pinned at 422. It never reaches the schema now.
             await expect(
-                // [#6190] Env-wide: `api` is `allowOrgOverride: false`, so an
+                // [#6190] Env-wide: `api` is `allowEnvironmentOverlay: false`, so an
                 // org-scoped write is refused BEFORE the schema is consulted and
                 // this case would have measured that refusal instead of the 422.
                 scoped.saveMetaItem({
@@ -1917,7 +1919,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             });
         });
 
-        it('artifact-backed view (allowOrgOverride:true) still overlays cleanly', async () => {
+        it('artifact-backed view (allowEnvironmentOverlay:true) still overlays cleanly', async () => {
             // Regression: types that DO allow overlays must keep working
             // even when the item is artifact-backed.
             // [#7741] the inline arm requires the object binding pair.
@@ -2012,7 +2014,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         // `loadMetaFromDb` registers DB-rehydrated objects with a
         // synthetic packageId of `'sys_metadata'`. Without the sentinel
         // filter in `isArtifactBacked`, a DB-only object would be
-        // misclassified as artifact-backed. Object is allowOrgOverride:true
+        // misclassified as artifact-backed. Object is allowEnvironmentOverlay:true
         // so the gate still passes either way, but this test pins down
         // the classification so future refactors do not regress the
         // semantic distinction (which matters for any future type that

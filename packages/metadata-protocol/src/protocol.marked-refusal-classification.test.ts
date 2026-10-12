@@ -224,7 +224,7 @@ function unreadableEngine(error: () => unknown) {
  * under test is DERIVED (Prime Directive #8) rather than named.
  */
 const REPO_PATH_TYPE = DEFAULT_METADATA_TYPE_REGISTRY
-    .filter((e) => e.allowOrgOverride || e.allowRuntimeCreate)
+    .filter((e) => e.allowEnvironmentOverlay || e.allowRuntimeCreate)
     .map((e) => e.type)
     .sort()[0]!;
 

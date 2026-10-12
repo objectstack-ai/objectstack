@@ -526,7 +526,7 @@
     },
     {
       "id": "studio-authoring.org-override-registry-gate",
-      "title": "The metadata type registry gates runtime writes: allowOrgOverride=false kinds refuse overlay (403 not_overridable), allowRuntimeCreate=false kinds refuse creation — both sides",
+      "title": "The metadata type registry gates runtime writes: allowEnvironmentOverlay=false kinds refuse overlay (403 not_overridable), allowRuntimeCreate=false kinds refuse creation — both sides",
       "since": "v16",
       "status": "active",
       "revision": 2,
@@ -539,14 +539,14 @@
           "the stock showcase artifact (artifact-backed objects like showcase_task and packaged views are the locked targets; a scratch name serves the allowed-create side)"
         ],
         "knownGaps": [
-          "CORRECTION TO RUN #7637 (recorded by run #7695): the Studio read-only badge is HONEST on this build/pin — it is not asserting a lock the server declines to apply. With OS_METADATA_WRITABLE=permission set, GET /meta reports permission { allowOrgOverride: true, overrideSource: 'env' } (the enum is registry|env — packages/spec/src/api/protocol.zod.ts) and the editor becomes fully writable; the badge tracks the real writable computation, proven BOTH ways in that run. #7637's contrary observation does not reproduce here — do not act on it as written, and do not re-file it",
-          "ROUTE NOTE (run #7695 / #7690): a flow authored over the metadata API is NOT editable in Studio — it opens behind 'This flow is provided by an installed package, so it is read-only at runtime', with or without `?package=`. objectui's ResourceEditPage treats an item as artifact-backed when `layered.code != null && _packageId !== 'sys_metadata'` (packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx / 1311-1323) and `flow` declares allowOrgOverride:false, so for THIS kind the banner is arguably telling the truth: the server would refuse the overlay write anyway. The editable path is the console's own create page. Recorded as a route note, NOT a defect — the polarity-reversed case (the same heuristic locking an object published into a WRITABLE package, which Studio and the server both treat as editable) IS the defect and is filed at objectui#4308; whoever works that card should confirm this case stays correct"
+          "CORRECTION TO RUN #7637 (recorded by run #7695): the Studio read-only badge is HONEST on this build/pin — it is not asserting a lock the server declines to apply. With OS_METADATA_WRITABLE=permission set, GET /meta reports permission { allowEnvironmentOverlay: true, overrideSource: 'env' } (the enum is registry|env — packages/spec/src/api/protocol.zod.ts) and the editor becomes fully writable; the badge tracks the real writable computation, proven BOTH ways in that run. #7637's contrary observation does not reproduce here — do not act on it as written, and do not re-file it",
+          "ROUTE NOTE (run #7695 / #7690): a flow authored over the metadata API is NOT editable in Studio — it opens behind 'This flow is provided by an installed package, so it is read-only at runtime', with or without `?package=`. objectui's ResourceEditPage treats an item as artifact-backed when `layered.code != null && _packageId !== 'sys_metadata'` (packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx / 1311-1323) and `flow` declares allowEnvironmentOverlay:false, so for THIS kind the banner is arguably telling the truth: the server would refuse the overlay write anyway. The editable path is the console's own create page. Recorded as a route note, NOT a defect — the polarity-reversed case (the same heuristic locking an object published into a WRITABLE package, which Studio and the server both treat as editable) IS the defect and is filed at objectui#4308; whoever works that card should confirm this case stays correct"
         ]
       },
       "steps": [
-        "read the authority first: DEFAULT_METADATA_TYPE_REGISTRY in packages/spec/src/kernel/metadata-plugin.zod.ts declares per-kind allowOrgOverride and allowRuntimeCreate — if the flags have changed, revise this item's variants before running",
-        "positive overlay: PUT /api/v1/meta/view/<a packaged showcase view name> with a modified label (view: allowOrgOverride true) → expect acceptance; GET the name and confirm the overlay wins at read",
-        "negative overlay: PUT /api/v1/meta/object/showcase_task (artifact-backed; object: allowOrgOverride false) with any modified body → capture the refusal",
+        "read the authority first: DEFAULT_METADATA_TYPE_REGISTRY in packages/spec/src/kernel/metadata-plugin.zod.ts declares per-kind allowEnvironmentOverlay and allowRuntimeCreate — if the flags have changed, revise this item's variants before running",
+        "positive overlay: PUT /api/v1/meta/view/<a packaged showcase view name> with a modified label (view: allowEnvironmentOverlay true) → expect acceptance; GET the name and confirm the overlay wins at read",
+        "negative overlay: PUT /api/v1/meta/object/showcase_task (artifact-backed; object: allowEnvironmentOverlay false) with any modified body → capture the refusal",
         "negative create: PUT /api/v1/meta/job/qa_probe_job (job: allowRuntimeCreate false — a runtime-authored job could never be scheduled, #4509) → capture the refusal",
         "positive create: PUT /api/v1/meta/object/qa_org_probe as a brand-NEW object (object: allowRuntimeCreate true) → expect acceptance — the two flags gate different doors",
         "cleanup + reset semantics: DELETE /api/v1/meta/view/<overlaid name> and confirm reset:true, then GET returns the artifact default again",
@@ -554,7 +554,7 @@
       ],
       "acceptance": [
         {
-          "clause": "a kind with allowOrgOverride=false refuses the org-level override of an artifact-backed item with 403 not_overridable — the lock is server-side",
+          "clause": "a kind with allowEnvironmentOverlay=false refuses the environment overlay of an artifact-backed item with 403 not_overridable — the lock is server-side",
           "oracle": "api",
           "verify": "PUT /api/v1/meta/object/showcase_task answers 403 with the not_overridable code (the runtime behavior the registry's own doc comment declares)",
           "evidence": "the 403 response body"
@@ -597,7 +597,7 @@
       "traps": ["dispatcher-vs-hono-route"],
       "automated": { "kind": "unit", "ref": "packages/objectql/src/overlay-precedence.test.ts" },
       "source": [
-        "packages/spec/src/kernel/metadata-plugin.zod.ts#DEFAULT_METADATA_TYPE_REGISTRY (DEFAULT_METADATA_TYPE_REGISTRY per-kind flags; allowOrgOverride doc: 'runtime returns HTTP 403 not_overridable'; the object/field lock rationale; job's #4509 create lock)",
+        "packages/spec/src/kernel/metadata-plugin.zod.ts#DEFAULT_METADATA_TYPE_REGISTRY (DEFAULT_METADATA_TYPE_REGISTRY per-kind flags; allowEnvironmentOverlay doc: 'runtime returns HTTP 403 not_overridable'; the object/field lock rationale; job's #4509 create lock)",
         "packages/objectql/src/overlay-precedence.test.ts#not_overridable ('denied — must throw 403 (not_overridable or not_creatable)')",
         "packages/metadata-protocol/src/protocol.ts#isRuntimeCreateAllowed (isRuntimeCreateAllowed — the write-gate authority)",
         "ADR-0005 (metadata customization opt-in), ADR-0049 (enforce-or-remove — the job rationale)",
@@ -1199,9 +1199,9 @@
           "a vendored console matching .objectui-sha"
         ],
         "knownGaps": [
-          "DASHBOARD OVERLAY DOOR VERIFIED PRESENT at authoring time (this worktree): DEFAULT_METADATA_TYPE_REGISTRY declares dashboard allowOrgOverride:true (packages/spec/src/kernel/metadata-plugin.zod.ts), same as view — so the dashboard leg is ASSERTED, not waived. If a run finds the flag flipped, revise this item (ADR-0005 admission-pair change) before scoring",
+          "DASHBOARD OVERLAY DOOR VERIFIED PRESENT at authoring time (this worktree): DEFAULT_METADATA_TYPE_REGISTRY declares dashboard allowEnvironmentOverlay:true (packages/spec/src/kernel/metadata-plugin.zod.ts), same as view — so the dashboard leg is ASSERTED, not waived. If a run finds the flag flipped, revise this item (ADR-0005 admission-pair change) before scoring",
           "dashboards.system-overview-live-counts drives the SAME system_overview board expecting its stock shape — the dashboard leg here MUST end with the reset-overlay step; an overlay left behind corrupts that item's next run",
-          "the neighbouring failure class is objectui#4308 mis-tiering (an item in a WRITABLE package shown behind the installed-package lock): if the packaged view/dashboard opens LOCKED, read the ResourceEditPage tiering (isArtifactItem; artifact-backed canWrite = allowOrgOverride) and the layered envelope's provenance, and forge the raw PUT, before filing a registry defect"
+          "the neighbouring failure class is objectui#4308 mis-tiering (an item in a WRITABLE package shown behind the installed-package lock): if the packaged view/dashboard opens LOCKED, read the ResourceEditPage tiering (isArtifactItem; artifact-backed canWrite = allowEnvironmentOverlay) and the layered envelope's provenance, and forge the raw PUT, before filing a registry defect"
         ]
       },
       "steps": [
@@ -1210,15 +1210,15 @@
         "edit DIRECTLY on the packaged artifact — change the default list's label and add/remove a column — save draft and publish through the designer chrome",
         "as an end user, open the showcase task list (client reload only, no server restart): the edited label/column set renders",
         "server truth: GET the view again — the overlay body is served over the shipped base (overlay wins at read; the code layer remains underneath in the layered read)",
-        "dashboard leg: open the designer on the built-in system_overview dashboard — it opens EDITABLE the same way (dashboard allowOrgOverride:true); edit a widget title; publish; open the rendered System Overview board and confirm the edited title renders (its live-count semantics stay dashboards.system-overview-live-counts' business)",
+        "dashboard leg: open the designer on the built-in system_overview dashboard — it opens EDITABLE the same way (dashboard allowEnvironmentOverlay:true); edit a widget title; publish; open the rendered System Overview board and confirm the edited title renders (its live-count semantics stay dashboards.system-overview-live-counts' business)",
         "reset BOTH overlays via the designer's destructive control: it must carry the 'Reset overlay' verb (resettable:true on the layered envelope — a package baseline exists), confirm; the follow-up GET serves the SHIPPED body again and the end-user surfaces render the base",
-        "negative, same surface: open the designer route on the PACKAGED flow — it opens read-only behind the installed-package banner (artifact-backed + flow allowOrgOverride:false) with no operating save/publish path"
+        "negative, same surface: open the designer route on the PACKAGED flow — it opens read-only behind the installed-package banner (artifact-backed + flow allowEnvironmentOverlay:false) with no operating save/publish path"
       ],
       "acceptance": [
         {
           "clause": "a PACKAGED view opens directly editable in the designer — no installed-package lock — and the edit persists as an org overlay served over the shipped base (the tier-1 claim 'views … are yours to edit directly', on the packaged artifact itself)",
           "oracle": "api",
-          "verify": "the editor renders editable (no artifactLockedBanner — artifact-backed canWrite is allowOrgOverride, which view declares true); after publish, GET /api/v1/meta/view?object=showcase_task serves the edited label/columns while the layered read still carries the code base underneath",
+          "verify": "the editor renders editable (no artifactLockedBanner — artifact-backed canWrite is allowEnvironmentOverlay, which view declares true); after publish, GET /api/v1/meta/view?object=showcase_task serves the edited label/columns while the layered read still carries the code base underneath",
           "evidence": "the editable-designer screenshot + the pre/post meta reads"
         },
         {
@@ -1242,7 +1242,7 @@
         {
           "clause": "a Regime-C artifact in the SAME surface stays locked: the packaged flow opens read-only behind the installed-package banner with no operating save/publish path — 'yours to edit directly' is the Regime-O display classes (view, dashboard), never flow (ADR-0126 §3)",
           "oracle": "dom",
-          "verify": "after a screenshot confirms render, the flow editor shows the installed-package lock banner and its inputs are read-only (isArtifactItem + flow allowOrgOverride:false ⇒ canWrite false); no save/publish affordance operates",
+          "verify": "after a screenshot confirms render, the flow editor shows the installed-package lock banner and its inputs are read-only (isArtifactItem + flow allowEnvironmentOverlay:false ⇒ canWrite false); no save/publish affordance operates",
           "evidence": "the locked-editor screenshot + the disabled-state DOM read"
         }
       ],
@@ -1254,11 +1254,11 @@
       ],
       "traps": ["stale-console-bundle", "hydration-race", "automation-input", "cache-staleness"],
       "source": [
-        "packages/spec/src/kernel/metadata-plugin.zod.ts#allowOrgOverride (view allowOrgOverride:true), (dashboard allowOrgOverride:true — the overlay door the dashboard leg rides, verified present), (flow allowOrgOverride:false — the same-surface Regime-C negative)",
+        "packages/spec/src/kernel/metadata-plugin.zod.ts#allowEnvironmentOverlay (view allowEnvironmentOverlay:true), (dashboard allowEnvironmentOverlay:true — the overlay door the dashboard leg rides, verified present), (flow allowEnvironmentOverlay:false — the same-surface Regime-C negative)",
         "docs/adr/0126-packaged-metadata-customization-model.md §3 (Regime O = view, dashboard, report, translation, email_template; flow = Regime C)",
         "content/docs/capabilities/integrations.mdx + content/docs/build-without-code.mdx (the E1 tier-1 claim under test: 'views and dashboards are yours to edit directly' on installed/packaged apps)",
         "packages/platform-objects/src/apps/dashboards/system_overview.dashboard.ts (the code-shipped built-in board the dashboard leg edits)",
-        "objectui packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx (isArtifactItem tiering), (artifact-backed canWrite = allowOrgOverride — why the view/dashboard open editable and the flow does not), (resettable → the Reset-overlay verb), (the installed-package lock banner) — objectui owns the designer and end-user markup, so locator fixes land there (ADR-0054); the framework owns the registry flags and the overlay/reset doors",
+        "objectui packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx (isArtifactItem tiering), (artifact-backed canWrite = allowEnvironmentOverlay — why the view/dashboard open editable and the flow does not), (resettable → the Reset-overlay verb), (the installed-package lock banner) — objectui owns the designer and end-user markup, so locator fixes land there (ADR-0054); the framework owns the registry flags and the overlay/reset doors",
         "#12438 (the ADR-0126 sweep this item lands from)",
         "studio-authoring.org-override-registry-gate (the raw-PUT registry-gate half — cross-referenced, not duplicated), studio-authoring.view-authoring-live (the non-packaged authoring loop this item complements), dashboards.system-overview-live-counts (the same board's live-count semantics — and the reason the overlay must be reset)"
       ],

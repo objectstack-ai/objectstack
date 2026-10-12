@@ -665,6 +665,24 @@ jobs:
           echo "release-index surfaces declared by syncedPaths() (${#INDEX_SURFACES[@]}):"
           sed 's/^/  /' "$INDEX_LIST"
 
+          # The SKILL.md stamps `check-skill-compatibility-version.mjs --fix` writes
+          # (the `version` script's last step), read from `stampedSkillPaths()` —
+          # derived from the walk that `--fix` writes from — on the same terms.
+          SKILL_LIST="${RUNNER_TEMP:-/tmp}/cut-rc-skill-surfaces.txt"
+          if ! node --input-type=module \
+                 -e 'import { stampedSkillPaths } from "./scripts/check-skill-compatibility-version.mjs"; for (const p of stampedSkillPaths()) console.log(p);' \
+                 > "$SKILL_LIST"; then
+            echo "::error::could not resolve stampedSkillPaths() from scripts/check-skill-compatibility-version.mjs, so the skill half of the release file surface is unknown. Refusing to push."
+            exit 1
+          fi
+          if [ ! -s "$SKILL_LIST" ]; then
+            echo "::error::stampedSkillPaths() in scripts/check-skill-compatibility-version.mjs resolved EMPTY, so no SKILL.md stamp would be staged even though the version pass writes them. Refusing to push."
+            exit 1
+          fi
+          mapfile -t SKILL_SURFACES < "$SKILL_LIST"
+          echo "skill surfaces declared by stampedSkillPaths() (${#SKILL_SURFACES[@]}):"
+          sed 's/^/  /' "$SKILL_LIST"
+
           git add -A -- \
             '*package.json' \
             '*CHANGELOG.md' \
@@ -673,7 +691,8 @@ jobs:
             packages/spec/src/kernel/protocol-version.ts \
             "${TEMPLATE_SURFACES[@]}" \
             "${DOCS_SURFACES[@]}" \
-            "${INDEX_SURFACES[@]}"
+            "${INDEX_SURFACES[@]}" \
+            "${SKILL_SURFACES[@]}"
 
           STAGED="$(git diff --cached --name-only)"
           if [ -z "$STAGED" ]; then
@@ -682,9 +701,9 @@ jobs:
           fi
 
           # Re-check every staged path against the allowlist. The pathspec above is
-          # convenience; THIS is the guarantee. Four filters, same allowlist the
+          # convenience; THIS is the guarantee. Five filters, same allowlist the
           # pathspec used: the fixed release paths by pattern, then the declared
-          # template, doc and release-index surfaces by WHOLE-LINE EXACT match
+          # template, doc, release-index and skill surfaces by WHOLE-LINE EXACT match
           # (`-xF`) against the very lists that were staged — so no derived filter
           # can accept a path its declaration does not name, and none needs
           # regex-escaping of the paths to stay exact.
@@ -692,7 +711,8 @@ jobs:
             | grep -vE '(^|/)package\.json$|(^|/)CHANGELOG\.md$|^\.changeset/|^\.objectui-sha$|^packages/spec/src/kernel/protocol-version\.ts$' \
             | grep -vxF -f "$TEMPLATE_LIST" \
             | grep -vxF -f "$SURFACE_LIST" \
-            | grep -vxF -f "$INDEX_LIST" || true)"
+            | grep -vxF -f "$INDEX_LIST" \
+            | grep -vxF -f "$SKILL_LIST" || true)"
           if [ -n "$BAD" ]; then
             echo "::error::the version commit would carry paths outside the release file surface. Refusing to push. Offending paths follow; if the version pass legitimately grew a new output, widen the allowlist in this workflow deliberately."
             printf '%s\n' "$BAD" | sed 's/^/::error::  unexpected: /'

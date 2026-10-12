@@ -1364,6 +1364,9 @@ const actionObject = () => strictObject({
    *
    * Liveness: the ledger row was `planned` until the console reader landed,
    * and it is `live` from the pin this repo builds against (`.objectui-sha` =
+   * `e5311165a`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `499799502` (`git diff --quiet`), so every anchor held unmoved. At
    * `499799502`, re-read there 2026-10-11:
    * every objectui file this record cites is byte-identical across the hop from
    * `0df67f237` (`git diff --quiet`), so every anchor held unmoved. At

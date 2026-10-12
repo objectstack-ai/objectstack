@@ -74,6 +74,8 @@ for OAuth, API keys, and which objects/actions become tools.
   stack, so `objectstack generate flow NAME` (or `view`, `action`, …) adds a
   file and one export line, and the item is loaded, and counted by
   `pnpm validate`, with no edit to the config
+- `note.test.ts` — the starter test `pnpm test` runs, configured by
+  `vitest.config.ts`
 
 ## Connectors (default providers)
 
@@ -112,12 +114,20 @@ pnpm validate     # schema + CEL predicates + widget bindings (no artifact)
 pnpm lint         # authoring rules validate does not run — e.g. a handler that
                   # stopped lowering to a metadata-only body
 pnpm typecheck    # TypeScript types against @objectstack/spec
+pnpm test         # your app's own tests, against the real engine
 ```
 
 `pnpm validate` runs the same gates as `pnpm build` and catches mistakes that
 otherwise fail *silently at runtime* — e.g. a bare `done` (instead of
 `record.done`) in an action predicate that would hide the action on every
 record. See `AGENTS.md` for the full convention.
+
+`pnpm test` checks what the app *does*. `note.test.ts` boots this app's stack
+in-process with `bootStack` from `@objectstack/verify` (in-memory database, no
+server) and asserts one business fact through its handle: a note without a
+title is refused. Write your own the same way: `stack.hooks.run` makes a real
+write through validation, permissions and hooks, and the same handle runs flows
+and actions, seeds fixtures and reads rows as a given user.
 
 ## Deploy
 
