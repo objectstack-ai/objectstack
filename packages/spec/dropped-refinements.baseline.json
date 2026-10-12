@@ -63,12 +63,14 @@
       "sites": [
         "manifest.actions.element.in",
         "manifest.actions.element.in.ai.outputSchema",
+        "manifest.actions.element.in.onSuccess",
         "manifest.actions.element.in.params.element.in",
         "manifest.agents.element.memory",
         "manifest.agents.element.structuredOutput.schema",
         "manifest.analyticsCubes.element.measures.valueType",
         "manifest.connectors.element.out",
         "manifest.dashboards.element.globalFilters.element",
+        "manifest.dashboards.element.header.actions.element",
         "manifest.dashboards.element.widgets.element",
         "manifest.dashboards.element.widgets.element.filter",
         "manifest.datasets.element",
@@ -176,12 +178,14 @@
         "data.options[0].manifest.navigationContributions.element.items.element.lazy.options[0]",
         "data.options[1].manifest.actions.element.in",
         "data.options[1].manifest.actions.element.in.ai.outputSchema",
+        "data.options[1].manifest.actions.element.in.onSuccess",
         "data.options[1].manifest.actions.element.in.params.element.in",
         "data.options[1].manifest.agents.element.memory",
         "data.options[1].manifest.agents.element.structuredOutput.schema",
         "data.options[1].manifest.analyticsCubes.element.measures.valueType",
         "data.options[1].manifest.connectors.element.out",
         "data.options[1].manifest.dashboards.element.globalFilters.element",
+        "data.options[1].manifest.dashboards.element.header.actions.element",
         "data.options[1].manifest.dashboards.element.widgets.element",
         "data.options[1].manifest.dashboards.element.widgets.element.filter",
         "data.options[1].manifest.datasets.element",
@@ -278,12 +282,14 @@
         "options[0].manifest.navigationContributions.element.items.element.lazy.options[0]",
         "options[1].manifest.actions.element.in",
         "options[1].manifest.actions.element.in.ai.outputSchema",
+        "options[1].manifest.actions.element.in.onSuccess",
         "options[1].manifest.actions.element.in.params.element.in",
         "options[1].manifest.agents.element.memory",
         "options[1].manifest.agents.element.structuredOutput.schema",
         "options[1].manifest.analyticsCubes.element.measures.valueType",
         "options[1].manifest.connectors.element.out",
         "options[1].manifest.dashboards.element.globalFilters.element",
+        "options[1].manifest.dashboards.element.header.actions.element",
         "options[1].manifest.dashboards.element.widgets.element",
         "options[1].manifest.dashboards.element.widgets.element.filter",
         "options[1].manifest.datasets.element",
@@ -336,12 +342,14 @@
         "data.packages.element.options[0].manifest.navigationContributions.element.items.element.lazy.options[0]",
         "data.packages.element.options[1].manifest.actions.element.in",
         "data.packages.element.options[1].manifest.actions.element.in.ai.outputSchema",
+        "data.packages.element.options[1].manifest.actions.element.in.onSuccess",
         "data.packages.element.options[1].manifest.actions.element.in.params.element.in",
         "data.packages.element.options[1].manifest.agents.element.memory",
         "data.packages.element.options[1].manifest.agents.element.structuredOutput.schema",
         "data.packages.element.options[1].manifest.analyticsCubes.element.measures.valueType",
         "data.packages.element.options[1].manifest.connectors.element.out",
         "data.packages.element.options[1].manifest.dashboards.element.globalFilters.element",
+        "data.packages.element.options[1].manifest.dashboards.element.header.actions.element",
         "data.packages.element.options[1].manifest.dashboards.element.widgets.element",
         "data.packages.element.options[1].manifest.dashboards.element.widgets.element.filter",
         "data.packages.element.options[1].manifest.datasets.element",
@@ -393,6 +401,7 @@
       "sites": [
         "data.actions.element.in",
         "data.actions.element.in.ai.outputSchema",
+        "data.actions.element.in.onSuccess",
         "data.actions.element.in.params.element.in"
       ]
     },
@@ -401,6 +410,7 @@
         "data",
         "data.actions.element.in",
         "data.actions.element.in.ai.outputSchema",
+        "data.actions.element.in.onSuccess",
         "data.actions.element.in.params.element.in",
         "data.fieldGroups",
         "data.fields.out.valueType",
@@ -830,6 +840,7 @@
         "",
         "actions.element.in",
         "actions.element.in.ai.outputSchema",
+        "actions.element.in.onSuccess",
         "actions.element.in.params.element.in",
         "fieldGroups",
         "fields.out.valueType",
@@ -1009,6 +1020,7 @@
         "",
         "actions.element.in",
         "actions.element.in.ai.outputSchema",
+        "actions.element.in.onSuccess",
         "actions.element.in.params.element.in"
       ]
     },
@@ -1108,6 +1120,7 @@
         "operations.element.options[3].object",
         "operations.element.options[3].object.actions.element.in",
         "operations.element.options[3].object.actions.element.in.ai.outputSchema",
+        "operations.element.options[3].object.actions.element.in.onSuccess",
         "operations.element.options[3].object.actions.element.in.params.element.in",
         "operations.element.options[3].object.fieldGroups",
         "operations.element.options[3].object.fields.out.valueType",
@@ -1126,6 +1139,7 @@
         "object",
         "object.actions.element.in",
         "object.actions.element.in.ai.outputSchema",
+        "object.actions.element.in.onSuccess",
         "object.actions.element.in.params.element.in",
         "object.fieldGroups",
         "object.fields.out.valueType",
@@ -1170,6 +1184,7 @@
         "options[3].object",
         "options[3].object.actions.element.in",
         "options[3].object.actions.element.in.ai.outputSchema",
+        "options[3].object.actions.element.in.onSuccess",
         "options[3].object.actions.element.in.params.element.in",
         "options[3].object.fieldGroups",
         "options[3].object.fields.out.valueType",
@@ -1267,6 +1282,7 @@
       "sites": [
         "in",
         "in.ai.outputSchema",
+        "in.onSuccess",
         "in.params.element.in"
       ]
     },
@@ -1308,9 +1324,20 @@
     "ui/Dashboard": {
       "sites": [
         "globalFilters.element",
+        "header.actions.element",
         "widgets.element",
         "widgets.element.filter",
         "widgets.element.filter.lazy"
+      ]
+    },
+    "ui/DashboardHeader": {
+      "sites": [
+        "actions.element"
+      ]
+    },
+    "ui/DashboardHeaderAction": {
+      "sites": [
+        ""
       ]
     },
     "ui/DashboardWidget": {
