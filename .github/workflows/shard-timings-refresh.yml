@@ -778,8 +778,9 @@ jobs:
             lines.push(uncapped.length ? "No ceiling: " + uncapped.join(", ") + "." : "Every package carries a ceiling.");
             if (over > 0) {
               lines.push(
-                "⚠️ " + over + " package(s) ran OVER their held ceiling in this window (marked in the table): the brake " +
-                "fired on main. This refresh does not raise them; that takes a ruling."
+                "⚠️ " + over + " package(s) ran OVER their held ceiling in this window (marked in the table): a reading, " +
+                "not a red -- under #22949 ruling E the ceiling reports on every event, and a regression is judged by " +
+                "the diff at the top of this body. This refresh does not raise them; that takes a ruling."
               );
             }
             console.log(lines.join("\n\n"));

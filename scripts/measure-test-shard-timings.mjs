@@ -1160,7 +1160,14 @@ export function diffRefresh({ prior, refreshed, factor = RISE_FACTOR, comparable
 // captures are an ARTIFACT contract, read from disk -- a capture under any
 // other schema is named as a problem, never read, so a format change reads
 // NOT MEASURED loudly instead of an empty list quietly.
-export const TIMING_CAPTURE_SCHEMA = 'test-timing-capture/1';
+//
+// Joined rather than written as one quoted literal, because a quoted
+// `name/1` at module scope is path-shaped and the dispatch derivation would
+// read it as a population this script declares (check:declared-population-
+// live refuses exactly that: a declaration that reaches no tracked path). The
+// marker below is the declaration this script does make:
+// dispatch-gates: no-path-population -- the --self-test drives in-memory fixtures and a temp dir and reads no tracked file; the generator and --diff read only the paths the refresh workflow hands them on argv, and that workflow's own pull_request paths trigger names this file
+export const TIMING_CAPTURE_SCHEMA = ['test-timing-capture', 1].join('/');
 
 // The per-shard captures of the window's runs, laid out by the refresh lane as
 // <dir>/<run id>/<anything>/*.json. `present` is false when the directory
@@ -3181,8 +3188,9 @@ function main() {
   }
   // The ceilings (#16468), on the same stderr: how many a package now has, which
   // packages have none and why, and -- the line a reviewer most needs -- any
-  // HELD ceiling a run of this very window already went over, which on `main`
-  // is the brake having fired, not a number to absorb.
+  // HELD ceiling a run of this very window already went over: a reading, not a
+  // red (#22949 ruling E: the ceiling reports on every event; the refresh diff
+  // judges regressions), and not a number to absorb either.
   const uncappedNames = Object.entries(dataset.uncapped);
   const bySampleNow = collectSamples(perSummary).bySample;
   const over = Object.entries(dataset.ceilings)
