@@ -142,7 +142,7 @@ function tenantProtocol(opts: Parameters<typeof makeStubEngine>[0]) {
 
 /**
  * CONTROL-PLANE scope (`environmentId` undefined) — the only scope from which
- * a code-only type (`allowOrgOverride: false` AND `allowRuntimeCreate: false`)
+ * a code-only type (`allowEnvironmentOverlay: false` AND `allowRuntimeCreate: false`)
  * reaches the legacy raw-engine delete path that owns sentences 3 and 4. See
  * the block comment on that path in `protocol.ts` (#5264): it is alive on
  * purpose, and it is the only code that can serve such a delete.
@@ -162,9 +162,9 @@ describe('#5927 — a delete receipt names what actually happened', () => {
         // `view` is both, so it can be either; `job` is neither, which is what
         // routes it to the legacy path. If any of this flips, these cases must
         // be re-read rather than repaired.
-        expect(entry('object')).toMatchObject({ allowRuntimeCreate: true, allowOrgOverride: false });
-        expect(entry('view')).toMatchObject({ allowRuntimeCreate: true, allowOrgOverride: true });
-        expect(entry('job')).toMatchObject({ allowRuntimeCreate: false, allowOrgOverride: false });
+        expect(entry('object')).toMatchObject({ allowRuntimeCreate: true, allowEnvironmentOverlay: false });
+        expect(entry('view')).toMatchObject({ allowRuntimeCreate: true, allowEnvironmentOverlay: true });
+        expect(entry('job')).toMatchObject({ allowRuntimeCreate: false, allowEnvironmentOverlay: false });
         // #6283 → commit ee58392e1 — the overlay-less-yet-overridable specimen the last
         // case in this file needs. It was `flow` until #6283 rolled that
         // flag back to `false` (ADR-0005:57), then `action` until commit ee58392e1
@@ -174,7 +174,7 @@ describe('#5927 — a delete receipt names what actually happened', () => {
         // documented door left. A future registry edit minting a new member
         // turns this pin red instead of landing an untested pairing.
         const overlaylessYetOverridable = DEFAULT_METADATA_TYPE_REGISTRY
-            .filter((e) => e.supportsOverlay === false && e.allowOrgOverride)
+            .filter((e) => e.supportsOverlay === false && e.allowEnvironmentOverlay)
             .map((e) => e.type);
         expect(overlaylessYetOverridable).toEqual([]);
     });

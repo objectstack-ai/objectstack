@@ -30,7 +30,7 @@
  * 2026-07-14 direction confirmation that used to sit here — "the environment
  * customizes them through the platform's standard ADR-0005 metadata overlay"
  * — is **RETIRED** (ADR-0094 D5-R, 2026-08-09, recording ruling A, executed by
- * #6858). Commit ee58392e1 rolled `permission` back to `allowOrgOverride: false`
+ * #6858). Commit ee58392e1 rolled `permission` back to `allowEnvironmentOverlay: false`
  * (the nine-type rollback), so ADR-0005's security row is enforced again: an overlay of the
  * authorization surface IS the "silent privilege drift" it excludes.
  *
@@ -535,7 +535,7 @@ function hasSchemaRegistry(ql: any): boolean {
  * declaration" — is **RETIRED**, in BOTH halves (ADR-0094 D5-R, 2026-08-09;
  * the ruling A it records, executed by #6858; the file header above records the same
  * retirement). Since commit ee58392e1 rolled `permission` back to
- * `allowOrgOverride: false`:
+ * `allowEnvironmentOverlay: false`:
  *
  *  - **no new overlay of a packaged set can be minted.** A metadata write
  *    against a CODE-DECLARED (artifact-backed) set — `*.permission.ts`, a
@@ -1390,8 +1390,8 @@ export function createPermissionSetWriteThrough(
       // the producer's gate is exactly what the documented
       // `OS_METADATA_WRITABLE=permission` hatch switches off — so on the
       // deployments this card came from there is no refusal at all — and its
-      // message ("the type has not opted into per-org overlay writes") names
-      // nothing an admin can act on. It is NOT a second copy of
+      // message then ("the type has not opted into per-org overlay writes")
+      // named nothing an admin can act on. It is NOT a second copy of
       // `isArtifactBacked` (Prime Directive #8): it reads the engine
       // SchemaRegistry, the one source this plugin already calls
       // "package-declared" in `readDeclaredBody` above. See `packaged-permission-set-lock.ts`.

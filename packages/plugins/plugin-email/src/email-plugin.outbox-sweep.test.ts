@@ -180,7 +180,7 @@ async function boot(opts: BootOpts = {}) {
   if (opts.queue) services.queue = adapter;
 
   const ctx = fakeCtx(services);
-  const plugin = new EmailServicePlugin({ seedTemplates: false, transport, ...(opts.plugin ?? {}) });
+  const plugin = new EmailServicePlugin({ transport, ...(opts.plugin ?? {}) });
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
 

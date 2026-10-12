@@ -97,7 +97,7 @@ describe('[#22591] the sealed-item refusal names the remedy the caller\'s ACT ha
             // Measured against the registry's own flag, never a transcribed list:
             // a type is sealed exactly when its entry opens no overlay channel.
             const expected = [
-                ...DEFAULT_METADATA_TYPE_REGISTRY.filter((e) => !e.allowOrgOverride).map((e) => e.type),
+                ...DEFAULT_METADATA_TYPE_REGISTRY.filter((e) => !e.allowEnvironmentOverlay).map((e) => e.type),
                 PLUGIN_TYPE,
             ];
             expect(reached.sort()).toEqual(expected.sort());

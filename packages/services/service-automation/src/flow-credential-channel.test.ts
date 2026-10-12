@@ -103,7 +103,7 @@ function inbound(secrets: { hook?: string; sign?: string; nested?: string } = {}
                 type: 'loop',
                 label: 'Each',
                 config: {
-                    collection: '{items}',
+                    collection: { dialect: 'cel', source: 'items' },
                     body: { nodes: [{ id: 'inner_call', type: 'http', label: 'Inner', config: nestedConfig }], edges: [] },
                 },
             },

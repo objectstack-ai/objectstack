@@ -42,11 +42,20 @@ function makeCtx(engine: unknown) {
   // #4887 — the log IS the deliverable for the provisioning path: its silence
   // is what made a working-but-elsewhere table read as a never-created one.
   // Capture info/warn so the tests can assert on what an operator would see.
-  const logs = { info: [] as string[], warn: [] as string[] };
+  // [#22913] …and every `error` call whole, in the contract's
+  // `error(message, error?, meta?)` shape, so a pin can count them.
+  const logs = {
+    info: [] as string[],
+    warn: [] as string[],
+    error: [] as Array<{ message: string; error: unknown; meta: Record<string, unknown> | undefined }>,
+  };
   const logger = {
     info(msg: string) { logs.info.push(String(msg)); },
     warn(msg: string) { logs.warn.push(String(msg)); },
-    error() {}, debug() {},
+    error(msg: string, error?: unknown, meta?: Record<string, unknown>) {
+      logs.error.push({ message: String(msg), error, meta });
+    },
+    debug() {},
     child() { return logger; },
   };
   const ctx = {
@@ -92,6 +101,71 @@ describe('AuditPlugin — system table provisioning', () => {
     await plugin.init(ctx);
     await plugin.start(ctx);
     await expect(fireReady()).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * [#22913] A failed provision is a DURABILITY degradation, so it is reported at
+ * `error` — once per object, never per write — and the boot is not failed.
+ *
+ * When an object's DDL throws, the boot still completes and the deployment
+ * serves as healthy while the table does not exist; for `sys_audit_log` /
+ * `sys_activity`, audited writes keep succeeding while their audit rows have
+ * nowhere to land. AGENTS.md "Degradation log levels" sends that class to
+ * `error`, with the consequence and the fix in the first line. The wording is
+ * not pinned: the pins hold the level, the count, the named object, the named
+ * remedy command and the driver's refusal in meta.
+ */
+describe('AuditPlugin — a failed provision is an error, once per object (#22913)', () => {
+  const OBJECTS = ['sys_audit_log', 'sys_activity', 'sys_comment', 'sys_comment_reaction'];
+
+  /** Every DDL succeeds except the named object's, which the driver refuses. */
+  function makeEngine(refused?: string) {
+    return {
+      async syncObjectSchema(name: string) {
+        if (name === refused) throw new Error(`there is already an index named ${name}`);
+      },
+      getDriverForObject() { return { name: 'sqlite' }; },
+      getDefaultDriverName() { return 'sqlite'; },
+    };
+  }
+
+  async function boot(refused?: string) {
+    const { ctx, logs, fireReady } = makeCtx(makeEngine(refused));
+    const plugin = new AuditPlugin();
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    // The boot is NOT failed: kernel:ready resolves.
+    await expect(fireReady()).resolves.toBeUndefined();
+    return logs;
+  }
+
+  it.each(OBJECTS)('a refused DDL for %s logs exactly one error line naming it, the remedy and the refusal', async (name) => {
+    const logs = await boot(name);
+
+    expect(logs.error).toHaveLength(1);
+    const [line] = logs.error;
+    expect(line.message).toContain(name);
+    // ② the fix, by its named subject: the command measured to create it.
+    expect(line.message).toContain('os migrate apply');
+    // One line: the first line carries both halves.
+    expect(line.message).not.toContain('\n');
+    // The driver's refusal travels in meta, never interpolated into the line.
+    expect(line.meta).toEqual({ object: name, error: `there is already an index named ${name}` });
+    // …and it is not ALSO reported at a quieter level.
+    expect(logs.warn.filter((m) => m.includes('could not provision'))).toEqual([]);
+    // The other three objects still provisioned.
+    const placement = logs.info.find((m) => m.includes('system tables provisioned'));
+    for (const other of OBJECTS.filter((o) => o !== name)) expect(placement).toContain(`${other}→sqlite`);
+    expect(placement).not.toContain(`${name}→`);
+  });
+
+  it('CONTROL: a clean provision logs no error at all', async () => {
+    const logs = await boot();
+
+    expect(logs.error).toEqual([]);
+    const placement = logs.info.find((m) => m.includes('system tables provisioned'));
+    for (const name of OBJECTS) expect(placement).toContain(`${name}→sqlite`);
   });
 });
 
@@ -231,7 +305,7 @@ describe('AuditPlugin — provisioning is audible (#4887)', () => {
     await plugin.start(ctx);
     await fireReady();
 
-    expect(logs.warn.some((m) => m.includes('could not provision sys_activity'))).toBe(true);
+    expect(logs.error.some((e) => e.message.includes('could not provision sys_activity'))).toBe(true);
     const placement = logs.info.find((m) => m.includes('system tables provisioned'));
     expect(placement).toContain('sys_audit_log→sqlite');
     expect(placement).toContain('sys_comment→sqlite');

@@ -36,6 +36,7 @@
     "automation/ExecutionStepMetrics",
     "automation/ExecutionStepSkipReason",
     "automation/Flow",
+    "automation/FlowCollectionSlot",
     "automation/FlowEdge",
     "automation/FlowFunctionEffect",
     "automation/FlowFunctionLoweredDeclaration",

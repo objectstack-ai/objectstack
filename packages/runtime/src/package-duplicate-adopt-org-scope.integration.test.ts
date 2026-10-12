@@ -211,7 +211,9 @@ describe('#7819 tier 2 — duplicatePackage must copy the source’s env-wide ro
     // case that makes the defect a corruption rather than an omission.
     //
     // ⭐ And this case is why widening the SCAN alone was not a fix. `object`
-    // is declared `allowOrgOverride=false`, so stamping the request's org on
+    // was outside the five types the pre-D6 doors let an organization write
+    // (its registry flag, `allowEnvironmentOverlay` since 18, was false), so
+    // stamping the request's org on
     // the copy is refused outright with `NOT_OVERRIDABLE` — measured, with the
     // scan widened and the write still request-scoped, this answered
     // `failed: [{type: 'object', name: 'iojn_widget', …}]`. An `object` cannot

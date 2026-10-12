@@ -183,7 +183,7 @@ const seedBody = { object: 'sys_metadata', records: [{ name: 'row_a', type: 'vie
  * Stage drafts bound to PKG and publish the whole package — the REST pair
  * `PUT /meta/:type/:name?mode=draft` (with `packageId`) +
  * `POST /packages/:id/publish-drafts`. Env-wide (`organizationId` absent) on
- * purpose: `flow` and `seed` declare `allowOrgOverride: false`, so an
+ * purpose: the protocol refuses every org-scoped write (ADR-0131 D6), so an
  * org-scoped draft would be refused before the door under test runs.
  */
 async function stageDrafts(

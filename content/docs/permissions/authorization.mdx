@@ -240,7 +240,9 @@ one of two doors, each writing only what it owns:
   CRUD) is transparently redirected into an env-scope metadata save
   (`saveMetaItem`), and the data record is a **pure projection** the platform
   re-derives on every metadata mutation (awaited — no staleness window) and at
-  boot. Deleting an artifact-backed set through this door **resets** it to its
+  boot. Under a `group` or `isolated` tenancy posture that Setup write is the
+  platform operator's: anyone else is refused `403 PERMISSION_DENIED` before the
+  redirect (ADR-0131 D3). Deleting an artifact-backed set through this door **resets** it to its
   declared body rather than removing it; renaming through the data door is
   rejected (the name is the metadata identity — clone instead). Subject
   assignments remain plain config rows, unchanged.
@@ -252,7 +254,7 @@ one of two doors, each writing only what it owns:
   admin-door **edit of a set whose definition ships as a code artifact is
   refused with `403 not_overridable`**, loudly, at the moment of the write:
   the ADR-0094 write-through still translates the edit into a metadata save,
-  but `permission` declares `allowOrgOverride: false` (ADR-0005's security
+  but `permission` declares `allowEnvironmentOverlay: false` (ADR-0005's security
   row — overlays of the authorization surface would create silent privilege
   drift), so the tier gate refuses it and no env-scope overlay is minted. The
   supported channel is the one ADR-0086 two-doors always named: **edit the

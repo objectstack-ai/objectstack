@@ -1,7 +1,7 @@
 # @objectstack/verify
 
 Boot any ObjectStack app **in-process** and verify it through the **real HTTP
-stack** — no mocks, no ports, no sockets. Two app-agnostic proof families, both
+stack** — no mocks, no ports, no sockets. Three app-agnostic proof families, all
 derived from your own metadata:
 
 - **Data fidelity** — author one record per object covering every field type,
@@ -9,6 +9,11 @@ derived from your own metadata:
   with type fidelity.
 - **Authorization** — the cross-owner RLS invariant: *a user who cannot READ a
   record must not be able to WRITE it.*
+- **Reference-value shape** (opt-in) — *every client-writable reference field
+  refuses a value that is not a record id* (ADR-0104): a boolean, a number or an
+  embedded record object is written into each `lookup` / `master_detail` /
+  `user` / `tree` field, on insert and update, through the REST door and the
+  system door, and the engine must refuse it naming the field.
 
 And, on the same booted stack, an **in-process handle** so an app's own tests
 can run a hook, a validation rule, a flow, an action, a seed or a read against
@@ -44,16 +49,28 @@ objectstack verify
 
 # explicit config + the RLS invariant + multi-tenant isolation
 objectstack verify --app ./objectstack.config.ts --rls --multi-tenant
+
+# also prove every reference field refuses a value that is not a record id
+objectstack verify --reference-shapes
 ```
 
+`--reference-shapes` is opt-in, on a fresh boot of its own: the engine still
+admits wrong-shaped ELEMENTS on a `multiple: true` `lookup` / `user` field, so
+on an app that declares one the family reports holes and fails the run until
+the engine refuses them.
+
 Exit code is **non-zero** on real failures (`create-failed`, `read-failed`,
-`fidelity-gaps`, `rls-hole`) so it drops straight into a CI gate. Inconclusive
+`fidelity-gaps`, `rls-hole`, and with `--reference-shapes` a field with
+`holes` or `failed`) so it drops straight into a CI gate. Inconclusive
 verdicts (`needs-fixture`, `skipped`, `member-visible`) are warnings and exit 0.
 
 ## Programmatic (embed in your own test runner)
 
 ```ts
-import { bootStack, runCrudVerification, runRlsProofs, formatReport } from '@objectstack/verify';
+import {
+  bootStack, runCrudVerification, runRlsProofs, formatReport,
+  runReferenceShapeProofs, formatReferenceShapeReport,
+} from '@objectstack/verify';
 import myApp from './objectstack.config.js';
 
 const stack = await bootStack(myApp);
@@ -70,6 +87,13 @@ const rls = await runRlsProofs(stack, adminToken, memberToken, myApp);
 expect(rls.summary.holes).toBe(0);
 
 await stack.stop();
+
+// Reference-value shape, on a fresh stack: a door that admits a probe lands a row
+const shapeStack = await bootStack(myApp);
+const shapes = await runReferenceShapeProofs(shapeStack, await shapeStack.signIn(), myApp);
+console.log(formatReferenceShapeReport(shapes));
+expect(shapes.summary.hardFailures).toBe(0);
+await shapeStack.stop();
 ```
 
 ## The in-process handle (drive the real engine from a test)
@@ -254,6 +278,16 @@ await expect(shipped.hooks.run('crm_lead', 'insert', { last_name: 'Ada' }, { sys
 | `member-visible` | member *can* read it — not a cross-owner scenario (inconclusive) |
 | `probe-blocked` | the **object** gate refused the persona, so record scope was never consulted — never a pass (inconclusive) |
 
+**Reference-value shape** (`runReferenceShapeProofs`), per field:
+
+| status | meaning |
+| --- | --- |
+| `proven` | every wrong-shaped write was refused, the refusal naming the field |
+| `holes` | at least one wrong-shaped write was admitted **(failure)** |
+| `failed` | a door faulted on a probe **(failure)** |
+| `inconclusive` | a refusal named something else, or a probe could not be written (the reason is reported) |
+| `excluded` | the field is `readonly` or `system`; the caller does not write it |
+
 `member-visible` everywhere usually means the app is single-tenant; pass
 `--multi-tenant` (or `{ multiTenant: true }`) to register org-scoping so tenant
 isolation policies actually apply.
@@ -290,6 +324,8 @@ run" must never read like "nothing to find".
 - `deriveCrudCases(config)` → the auto-derived round-trip cases (write one, read one, assert) for every object.
 - `runCrudVerification(stack, token, config)` → `VerifyReport`; `formatReport(report)` for a log summary.
 - `runRlsProofs(stack, adminToken, memberToken, config)` → `RlsReport`; `formatRlsReport(report)`.
+- `deriveReferenceShapeCases(config)` → one case per reference field; `runReferenceShapeProofs(stack, token, config, { doors? })`
+  → `ReferenceShapeReport` (`summary.hardFailures` is what a gate reads); `formatReferenceShapeReport(report)`.
 
 `bootStack` options: `admin`, `authSecret`, `security` (a custom `SecurityPlugin`
 for owner-scoped fixtures), `multiTenant` (also what decides the posture

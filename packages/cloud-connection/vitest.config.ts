@@ -50,6 +50,15 @@ export default defineConfig({
         find: /^@objectstack\/metadata-core$/,
         replacement: path.resolve(__dirname, '../metadata-core/src/index.ts'),
       },
+      // [#15204 W2] The install-local door reads a manifest's catalog
+      // declarations through `declaredSecurityCatalogNames`, so every suite
+      // that imports the plugin judges THIS checkout's engine reading, not an
+      // `objectql/dist` that may be behind it. Anchored: `@objectstack/objectql`
+      // exports a `./core` subpath.
+      {
+        find: /^@objectstack\/objectql$/,
+        replacement: path.resolve(__dirname, '../objectql/src/index.ts'),
+      },
     ],
   },
   // Discovery is untouched — but this file is NOT "the alias and nothing else".

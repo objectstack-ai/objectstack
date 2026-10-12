@@ -41,7 +41,7 @@ const legacyFlow = () => ({
             type: 'loop',
             label: 'Per Item',
             config: {
-                collection: '{record.items}',
+                collection: { dialect: 'cel', source: 'record.items' },
                 // A well-formed region: single entry (b1), single exit (b2),
                 // acyclic — `validateControlFlow` rejects anything else, and it
                 // runs before the region canonicalization under test.

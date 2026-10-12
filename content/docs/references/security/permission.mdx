@@ -32,7 +32,7 @@ const result = AdminScopeSchema.parse(data);
 | **includeSubtree** | `boolean` | optional (default: `true`) | Cover descendant business units too (default true) |
 | **manageAssignments** | `boolean` | optional (default: `false`) | Manage user↔position assignments within the subtree |
 | **manageBindings** | `boolean` | optional (default: `false`) | Manage position↔permission-set bindings within the subtree |
-| **authorEnvironmentSets** | `boolean` | optional (default: `false`) | Author environment-owned permission sets |
+| **authorEnvironmentSets** | `boolean` | optional (default: `false`) | Author environment-owned permission sets (single posture only: under group or isolated the platform operator authors the catalog, ADR-0131 D3) |
 | **assignablePermissionSets** | `string[]` | optional (default: `[]`) | Allowlist of permission-set names the delegate may hand out |
 
 
@@ -183,7 +183,7 @@ const result = AdminScopeSchema.parse(data);
 | **includeSubtree** | `boolean` | optional (default: `true`) | Cover descendant business units too (default true) |
 | **manageAssignments** | `boolean` | optional (default: `false`) | Manage user↔position assignments within the subtree |
 | **manageBindings** | `boolean` | optional (default: `false`) | Manage position↔permission-set bindings within the subtree |
-| **authorEnvironmentSets** | `boolean` | optional (default: `false`) | Author environment-owned permission sets |
+| **authorEnvironmentSets** | `boolean` | optional (default: `false`) | Author environment-owned permission sets (single posture only: under group or isolated the platform operator authors the catalog, ADR-0131 D3) |
 | **assignablePermissionSets** | `string[]` | optional (default: `[]`) | Allowlist of permission-set names the delegate may hand out |
 
 ### Nested Shape: `PermissionSet.protection`

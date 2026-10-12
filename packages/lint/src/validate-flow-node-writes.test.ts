@@ -484,7 +484,7 @@ describe('validateFlowNodeWrites', () => {
 
     it('reaches a loop body', () => {
       const findings = validateFlowNodeWrites(
-        nested('loop', { collection: '{items}', body: { nodes: [badWrite], edges: [] } }),
+        nested('loop', { collection: { dialect: 'cel', source: 'items' }, body: { nodes: [badWrite], edges: [] } }),
       );
       expect(findings).toHaveLength(1);
       expect(findings[0].path).toBe('flows[0].nodes[1].config.body.nodes[0].config.fields.stagee');
@@ -511,7 +511,7 @@ describe('validateFlowNodeWrites', () => {
         nested('try_catch', {
           try: {
             nodes: [
-              { id: 'each', type: 'loop', label: 'Each', config: { collection: '{x}', body: { nodes: [badWrite], edges: [] } } },
+              { id: 'each', type: 'loop', label: 'Each', config: { collection: { dialect: 'cel', source: 'x' }, body: { nodes: [badWrite], edges: [] } } },
             ],
             edges: [],
           },

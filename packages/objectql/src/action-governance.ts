@@ -564,15 +564,21 @@ export async function runActionGovernanceInventory(args: {
         const fp = fingerprint(findings);
         if (fp === (args.lastFingerprint ?? '')) return fp;
         if (findings.undeclaredHandlers.length > 0) {
+            // [#22161] One line of at most 200 characters, `STATEMENT; FIX`. A
+            // boot-log line has no rule id, so the reasoning it used to print
+            // stays here rather than behind `os explain`: the three sources are
+            // the router's (object-embedded `actions[]`, the engine registry's
+            // standalone `action` items, the metadata service's `action` rows);
+            // ADR-0110 D3 refuses a handler whose declaration the router cannot
+            // resolve, so the 404 is EXPECTED, not measured — this audit reads
+            // the sources and does not dispatch. A handler its author believes
+            // IS declared means the declaration is not reaching this engine:
+            // that is the bug to report, rather than dropping a registration
+            // that may still be serving traffic.
             args.logger.warn(
-                '[action-governance] registered handlers with NO declaration in any source the ' +
-                'router resolves through (object-embedded `actions[]`, the engine registry ' +
-                'standalone `action` items, the metadata service `action` rows). ADR-0110 D3 ' +
-                'refuses a handler whose declaration the router cannot resolve, so each of these ' +
-                'is expected to answer 404 — expected, not measured: this audit read the sources, ' +
-                'it did not dispatch. Declare each one with `defineAction`; if you believe it IS ' +
-                'declared, then its declaration is not reaching this engine, and that is the bug ' +
-                'to report rather than dropping a registration that may still be serving traffic',
+                '[action-governance] registered handlers with NO declaration in object `actions[]`, ' +
+                'the registry or the metadata service: expected, not measured, to answer 404; ' +
+                'declare each with `defineAction`',
                 {
                     count: findings.undeclaredHandlers.length,
                     handlers: findings.undeclaredHandlers.map((h) => `${h.objectName}:${h.actionName}`),

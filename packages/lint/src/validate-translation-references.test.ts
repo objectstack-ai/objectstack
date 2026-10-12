@@ -2053,7 +2053,7 @@ describe('validateTranslationReferences — flows (#7646 / #11287)', () => {
               type: 'loop',
               label: 'Each Lead',
               config: {
-                collection: '{leads}',
+                collection: { dialect: 'cel', source: 'leads' },
                 body: {
                   nodes: [
                     {

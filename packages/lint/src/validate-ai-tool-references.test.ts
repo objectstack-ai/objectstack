@@ -5,6 +5,7 @@ import {
   validateAiToolReferences as validateAiToolReferencesUnrecorded,
   AI_SKILL_TOOL_UNRESOLVED,
 } from './validate-ai-tool-references.js';
+import { PLATFORM_TOOL_FAMILY_PREFIXES } from '@objectstack/spec/system';
 import { explainRule } from './rule-explanations.js';
 
 // [#22161] Each finding is one verdict sentence; the reasoning it used to
@@ -13,7 +14,7 @@ import { explainRule } from './rule-explanations.js';
 // verdict to one line of at most 200 characters — every firing variant this
 // suite exercises, not a chosen few. Run the whole file: those cases read what
 // the cases above fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateAiToolReferences: typeof validateAiToolReferencesUnrecorded = (...args) => {
   const findings = validateAiToolReferencesUnrecorded(...args);
   fired.push(...findings);
@@ -98,7 +99,8 @@ describe('validate-ai-tool-references', () => {
 
   it('does NOT resolve a UI-only action type, even when opted in', () => {
     // `modal`/`form`/`url` have no headless invocation path — staying
-    // human-driven is a legitimate design answer, and the hint says so.
+    // human-driven is a legitimate design answer, and `os explain` says so
+    // ([#22161]: the one-line `fix:` names the UI-action route).
     for (const type of ['modal', 'form', 'url']) {
       const stack = {
         actions: [{ ...exposed('escalate_case'), type }],
@@ -106,8 +108,11 @@ describe('validate-ai-tool-references', () => {
       };
       const findings = validateAiToolReferences(stack);
       expect(findings, type).toHaveLength(1);
-      expect(findings[0].hint).toContain('stays human-driven by design');
+      expect(findings[0].hint).toContain('recommend the UI action');
     }
+    expect(explainRule(AI_SKILL_TOOL_UNRESOLVED)!.paragraphs.join('\n')).toContain(
+      'stays human-driven by design: that is a legitimate answer, not a gap',
+    );
   });
 
   it('does NOT resolve an exposed action missing its LLM-facing description', () => {
@@ -327,5 +332,29 @@ describe('[#22161] one-line verdicts — ai-skill-tool-unresolved', () => {
       expect(f.message, f.rule).not.toContain('\n');
       expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
     }
+  });
+});
+
+// [#22161] Slice 12: the `fix:` line. One remedy line per arm; the design note
+// on UI-only actions, the ADR-0109 default path, the family prefixes and the
+// runtime-plugin exception are the explanation's.
+describe('[#22161] one-line fixes — ai-skill-tool-unresolved', () => {
+  it('every `fix:` line the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === AI_SKILL_TOOL_UNRESOLVED);
+    // Coverage control: the opt-in arm and the back-it arm both fired.
+    expect(converted.some((f) => f.hint.startsWith('Opt "'))).toBe(true);
+    expect(converted.some((f) => f.hint.startsWith('Back "'))).toBe(true);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('`os explain` names exactly the family prefixes the runtime materialises, and the moved text', () => {
+    const text = explainRule(AI_SKILL_TOOL_UNRESOLVED)!.paragraphs.join('\n');
+    expect(text).toContain(`Family prefixes materialised by the runtime: ${PLATFORM_TOOL_FAMILY_PREFIXES.join(', ')}.`);
+    expect(text).toContain('the ADR-0109 default path');
+    expect(text).toContain('at least 40 characters');
+    expect(text).toContain('a runtime plugin outside the platform registry provides the name');
   });
 });

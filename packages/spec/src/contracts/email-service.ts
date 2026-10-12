@@ -143,15 +143,17 @@ export interface SendEmailResult {
 }
 
 /**
- * Input for IEmailService.sendTemplate(). Resolves a named template
- * row from `sys_email_template`, renders it against `data`, and
- * forwards through the same transport pipeline as `send()`.
+ * Input for IEmailService.sendTemplate(). Resolves a named `email_template`
+ * from the metadata registry — the environment's item over each code
+ * package's declaration, the built-in auth templates included — renders it
+ * against `data`, and forwards through the same transport pipeline as
+ * `send()`.
  */
 export interface SendTemplateInput {
   /**
-   * Template identifier (matches `sys_email_template.name`), e.g.
+   * Template identifier (the `email_template` item's `name`), e.g.
    * `'auth.password_reset'`. There is no "best match" and no language-subtag
-   * folding: the locale row is resolved by the exact ladder documented on
+   * folding: the locale member is resolved by the exact ladder documented on
    * `locale` below.
    */
   template: string;
@@ -168,10 +170,10 @@ export interface SendTemplateInput {
    *  1. this locale, matched exactly (no language-only prefix matching: `zh`
    *     does not resolve `zh-CN`);
    *  2. `'en-US'` — which is also where a call that omits `locale` STARTS, so
-   *     "no locale" means the default rather than an arbitrary row;
+   *     "no locale" means the default rather than an arbitrary member;
    *  3. only for a call that named no locale, and only when the bundle has no
-   *     `en-US` row at all: its lowest locale tag, so a single-locale tenant
-   *     keeps rendering and does so identically on every boot.
+   *     `en-US` member at all: its lowest locale tag, so a single-locale
+   *     bundle keeps rendering and does so identically on every boot.
    */
   locale?: string;
   /**
@@ -228,7 +230,7 @@ export interface SendTemplateInput {
  */
 export interface RenderTemplateInput {
   /**
-   * Template identifier (matches `sys_email_template.name`), e.g.
+   * Template identifier (the `email_template` item's `name`), e.g.
    * `'auth.password_reset'`.
    */
   template: string;
@@ -250,8 +252,8 @@ export interface RenderTemplateInput {
 
 /**
  * Outcome of IEmailService.renderTemplate() — the rendered content of the
- * resolved `sys_email_template` row, mirroring what the row itself carries:
- * a subject, an HTML body, and a plain-text body (the row's `body_text`
+ * resolved `email_template`, mirroring what the template itself carries:
+ * a subject, an HTML body, and a plain-text body (the template's `bodyText`
  * when present, otherwise derived from the rendered HTML). Consumers pick
  * the face they need — an email composer uses `html`/`text`, an in-app
  * inbox row uses `subject`/`text`.
@@ -259,10 +261,10 @@ export interface RenderTemplateInput {
 export interface RenderTemplateResult {
   /** Rendered subject line. */
   subject: string;
-  /** Rendered HTML body (`sys_email_template.body_html`). */
+  /** Rendered HTML body (the template's `bodyHtml`). */
   html: string;
   /**
-   * Rendered plain-text body — the row's `body_text` when declared,
+   * Rendered plain-text body — the template's `bodyText` when declared,
    * otherwise derived from the rendered HTML.
    */
   text: string;
@@ -281,21 +283,21 @@ export interface IEmailService {
   send(input: SendEmailInput): Promise<SendEmailResult>;
 
   /**
-   * Resolve a named template from `sys_email_template`, render its
+   * Resolve a named `email_template` from the metadata registry, render its
    * subject/body against `input.data`, then deliver via `send()`.
    *
    * Locale resolution is the ladder on {@link SendTemplateInput.locale}.
    *
    * Errors:
-   * - `TEMPLATE_NOT_FOUND` — no row matches `(name, locale|en-US)`, and (for a
-   *   call that named no locale) the name carries no rows at all.
-   * - `TEMPLATE_INACTIVE`  — row exists but `active=false`.
+   * - `TEMPLATE_NOT_FOUND` — no template matches `(name, locale|en-US)`, and
+   *   (for a call that named no locale) the name carries no members at all.
+   * - `TEMPLATE_INACTIVE`  — the template exists but `active=false`.
    * - `MISSING_VARIABLES`  — declared `required` variables absent from `data`.
    */
   sendTemplate(input: SendTemplateInput): Promise<SendEmailResult>;
 
   /**
-   * Resolve a named template from `sys_email_template` and render its
+   * Resolve a named `email_template` from the metadata registry and render its
    * subject/body against `input.data` — WITHOUT sending anything. Strictly
    * render-only: no delivery, no queueing, no `sys_email` row. One resolver,
    * many channels (#9225): the same locale ladder + `{{var}}` renderer
@@ -306,9 +308,9 @@ export interface IEmailService {
    * Locale resolution is the ladder on {@link SendTemplateInput.locale}.
    *
    * Errors (same vocabulary as `sendTemplate`, since resolution is shared):
-   * - `TEMPLATE_NOT_FOUND` — no row matches `(name, locale|en-US)`, and (for a
-   *   call that named no locale) the name carries no rows at all.
-   * - `TEMPLATE_INACTIVE`  — row exists but `active=false`.
+   * - `TEMPLATE_NOT_FOUND` — no template matches `(name, locale|en-US)`, and
+   *   (for a call that named no locale) the name carries no members at all.
+   * - `TEMPLATE_INACTIVE`  — the template exists but `active=false`.
    * - `MISSING_VARIABLES`  — declared `required` variables absent from `data`.
    */
   renderTemplate(input: RenderTemplateInput): Promise<RenderTemplateResult>;

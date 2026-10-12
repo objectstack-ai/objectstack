@@ -6,7 +6,7 @@
  * The cost of one such import is not paid by the command that needs the driver.
  * oclif's `findCommand` walks the command table and `import()`s every command
  * module on **every** CLI invocation, so a broken import chain anywhere in that
- * table is charged to whatever command you actually ran. `schema-migrate.ts` is
+ * table is charged to whatever command you actually ran. `schema-migrate.ts`
  * was shared by nine commands (then `meta:resync`, `migrate`, and seven `migrate:*`), and
  * its one static `import { isInPlaceSchemaWork } from '@objectstack/driver-sql'`
  * meant that an unbuilt `packages/drivers/driver-sql/dist` made `os dev` print

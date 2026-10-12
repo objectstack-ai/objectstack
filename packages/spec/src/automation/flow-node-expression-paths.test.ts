@@ -28,6 +28,7 @@ import {
   type FlowNodeExpressionPath,
   type FlowNodeExpressionRole,
 } from './flow-node-expression-paths.js';
+import { getBuiltinNodeConfigContracts } from './flow-node-config-refusals.js';
 
 /** The ruling's example — the declared stdlib, reachable from metadata. */
 const DIGEST_SOURCE = 'joinNonEmpty(overdue_tasks.map(t, t.subject), "\\n")';
@@ -52,10 +53,16 @@ describe('FLOW_NODE_EXPRESSION_PATHS — the assignment value entry', () => {
     expect(FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.nodeType === 'assignment')).toHaveLength(1);
   });
 
-  it('the role union carries `value` beside `predicate` and `flow-template`', () => {
+  // [#19939] RE-JUDGED IN PLACE: the union carried `flow-template` too, the
+  // single-brace role whose two slots (`loop` / `map` `collection`) became
+  // value slots in stage S3. The role went with them.
+  it('the role union carries `value` beside `predicate`, and nothing else', () => {
     // A type-level pin: the union is what downstream consumers switch on.
-    const roles: FlowNodeExpressionRole[] = ['predicate', 'flow-template', 'value'];
+    const roles: FlowNodeExpressionRole[] = ['predicate', 'value'];
     expect(new Set(FLOW_NODE_EXPRESSION_PATHS.map((e) => e.role))).toEqual(new Set(roles));
+    // @ts-expect-error — the single-brace role is gone from the union (#19939).
+    const retired: FlowNodeExpressionRole = 'flow-template';
+    expect(roles).not.toContain(retired);
   });
 
   it('resolves the envelope value of a two-variable assignment, and only it', () => {
@@ -190,7 +197,7 @@ describe('FLOW_NODE_EXPRESSION_PATHS — the CRUD `fields.*` value entries', () 
  * CALLEE are `value` slots: `subflow.input.*`, `map.input.*` and
  * `script.inputs.*`. Same shape rule as the other value maps: an
  * envelope-shaped TOP-LEVEL value is an expression, every other value is a
- * literal. `map.collection` keeps its `flow-template` entry.
+ * literal. `map.collection` is a value slot too since S3 (below).
  */
 describe('FLOW_NODE_EXPRESSION_PATHS — the callee input maps (#19939)', () => {
   const LIST_ENVELOPE = { dialect: 'cel', source: 'rows' };
@@ -201,7 +208,8 @@ describe('FLOW_NODE_EXPRESSION_PATHS — the callee input maps (#19939)', () => 
   ] as const;
 
   it.each(CALLEE_MAPS)('declares `%s.%s.*` as a `value` slot', (nodeType, key, label) => {
-    const entries = FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.nodeType === nodeType && e.role === 'value');
+    // `map.collection` is a value slot too since S3 — this pins the input map's own entry.
+    const entries = FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.nodeType === nodeType && e.role === 'value' && e.path !== 'collection');
     expect(entries.map((e) => [e.path, e.label])).toEqual([[`${key}.*`, label]]);
   });
 
@@ -218,9 +226,65 @@ describe('FLOW_NODE_EXPRESSION_PATHS — the callee input maps (#19939)', () => 
       .map((f) => [f.path, f.value])).toEqual([[`${key}.a`, '{x}'], [`${key}.b`, LIST_ENVELOPE], [`${key}.c`, null]]);
   });
 
-  it('`map.collection` stays a `flow-template` slot beside `map.input`', () => {
-    expect(resolveFlowNodeExpressions('map', { collection: '{rows}', input: { a: LIST_ENVELOPE } })
-      .map((f) => [f.path, f.entry.role])).toEqual([['collection', 'flow-template'], ['input.a', 'value']]);
+  // [#19939] RE-JUDGED IN PLACE: `map.collection` stayed a `flow-template`
+  // slot beside `map.input` until stage S3 made it a value slot; the two
+  // entries still resolve independently.
+  it('`map.collection` resolves beside `map.input`, each its own value entry', () => {
+    expect(resolveFlowNodeExpressions('map', { collection: LIST_ENVELOPE, input: { a: LIST_ENVELOPE } })
+      .map((f) => [f.path, f.entry.label])).toEqual([['collection', 'map collection'], ['input.a', 'map item input value']]);
+  });
+});
+
+/**
+ * #19939 (stage S3) — the list a `loop` (with a `body`) and a `map` iterate is
+ * a `value` slot: `loop.collection` and `map.collection`. Same shape rule as
+ * every value slot: an envelope-shaped value is an expression, every other
+ * value is a literal — a list, or a string the value-slot judge and the
+ * contract refuse. A body-less `loop` is the legacy flat-graph form, which
+ * reads `collection` as a bare variable name: neither walk reaches it.
+ */
+describe('FLOW_NODE_EXPRESSION_PATHS — the loop and map collection (#19939)', () => {
+  const LIST_ENVELOPE = { dialect: 'cel', source: 'rows' };
+  const BODY = { nodes: [{ id: 'b', type: 'noop', label: 'B' }], edges: [] };
+
+  it.each([['loop', 'loop collection'], ['map', 'map collection']] as const)(
+    'declares `%s.collection` as a `value` slot', (nodeType, label) => {
+      const entry = FLOW_NODE_EXPRESSION_PATHS.find((e) => e.nodeType === nodeType && e.path === 'collection');
+      expect(entry).toBeDefined();
+      expect([entry!.role, entry!.label]).toEqual(['value', label]);
+    },
+  );
+
+  it('reads `loop.collection` only with a `body` — the contract map\'s `parsedWhen`, stated in the ledger', () => {
+    const entry = FLOW_NODE_EXPRESSION_PATHS.find((e) => e.nodeType === 'loop' && e.path === 'collection')!;
+    expect(entry.onlyWithKey).toBe('body');
+    // No other entry carries the condition: every other slot is read whenever it is there.
+    expect(FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.onlyWithKey !== undefined)).toEqual([entry]);
+    // The structured form: both walks reach it.
+    expect(resolveFlowNodeExpressions('loop', { collection: LIST_ENVELOPE, body: BODY }).map((f) => f.path))
+      .toEqual(['collection']);
+    expect(resolveFlowNodeValueSlots('loop', { collection: '{rows}', body: BODY }).map((f) => [f.path, f.value]))
+      .toEqual([['collection', '{rows}']]);
+    // The legacy flat-graph form (no `body`, or a `null` one): neither does.
+    for (const legacy of [{ collection: LIST_ENVELOPE }, { collection: 'rows', body: null }]) {
+      expect(resolveFlowNodeExpressions('loop', legacy)).toEqual([]);
+      expect(resolveFlowNodeValueSlots('loop', legacy)).toEqual([]);
+    }
+  });
+
+  it('`map.collection` is read on every `map`', () => {
+    expect(resolveFlowNodeValueSlots('map', { collection: 'rows' }).map((f) => [f.path, f.value]))
+      .toEqual([['collection', 'rows']]);
+  });
+
+  it('agrees with the contract map\'s `parsedWhen` for `loop`, over configs with and without a body', () => {
+    const parsedWhen = getBuiltinNodeConfigContracts().get('loop')!.parsedWhen!;
+    const entry = FLOW_NODE_EXPRESSION_PATHS.find((e) => e.nodeType === 'loop' && e.path === 'collection')!;
+    for (const config of [{ body: BODY }, { body: null }, {}, { body: {} }, { body: 'x' }]) {
+      const read = resolveFlowNodeValueSlots('loop', { ...config, collection: 'rows' }).length > 0;
+      expect(read, JSON.stringify(config)).toBe(parsedWhen(config));
+      expect((config as Record<string, unknown>)[entry.onlyWithKey!] != null).toBe(parsedWhen(config));
+    }
   });
 });
 
@@ -291,8 +355,9 @@ describe('resolveFlowNodeValueSlots — every authored value of a `value` slot, 
       .toEqual(['assignments.total']);
   });
 
-  it('reaches ONLY `value` slots — a predicate or flow-template slot, an undeclared map, a legacy shape: nothing', () => {
+  it('reaches ONLY `value` slots — a predicate slot, an undeclared map, a legacy shape: nothing', () => {
     expect(resolveFlowNodeValueSlots('screen', { fields: [{ visibleWhen: 'a == 1' }] })).toEqual([]);
+    // [#19939] A body-less `loop` (the legacy flat-graph form): its `collection` is read by no value slot.
     expect(resolveFlowNodeValueSlots('loop', { collection: '{rows}' })).toEqual([]);
     expect(resolveFlowNodeValueSlots('update_record', { filter: { id: '{x}' } })).toEqual([]);
     expect(resolveFlowNodeValueSlots('assignment', { digest: '{x}' })).toEqual([]);
@@ -330,14 +395,15 @@ describe('every entry older than the value role resolves byte-identically (the r
     // `value` rows at the end — the CRUD write map's two, then `subflow.input`,
     // `map.input` and `script.inputs`, then the screen's `defaults.*`,
     // `fields[].defaultValue` and `recordId` — and every row above them is
-    // byte-identical to what it was (`map.collection` keeps its
-    // `flow-template` row beside `map.input`, `screen.fields[].visibleWhen` its
-    // `predicate` row beside the screen's value rows).
+    // byte-identical to what it was, with one exception: #19939's stage S3
+    // moved `loop.collection` and `map.collection` from the retired
+    // `flow-template` role to `value` IN PLACE (`screen.fields[].visibleWhen`
+    // keeps its `predicate` row beside the screen's value rows).
     expect(FLOW_NODE_EXPRESSION_PATHS.map(byKey)).toEqual([
       'screen.fields[].visibleWhen (predicate)',
       'decision.conditions[].expression (predicate)',
-      'loop.collection (flow-template)',
-      'map.collection (flow-template)',
+      'loop.collection (value)',
+      'map.collection (value)',
       'assignment.assignments.* (value)',
       'create_record.fields.* (value)',
       'update_record.fields.* (value)',
@@ -365,11 +431,17 @@ describe('every entry older than the value role resolves byte-identically (the r
     expect(found.every((f) => f.entry.role === 'predicate')).toBe(true);
   });
 
-  it('loop / map: the top-level flow-template slot, still a string', () => {
-    const loop = resolveFlowNodeExpressions('loop', { collection: '{tasks}' });
-    expect(loop.map((f) => [f.path, f.value, f.entry.role])).toEqual([['collection', '{tasks}', 'flow-template']]);
-    const map = resolveFlowNodeExpressions('map', { collection: '{tasks}' });
-    expect(map.map((f) => [f.path, f.value, f.entry.role])).toEqual([['collection', '{tasks}', 'flow-template']]);
+  // [#19939] RE-JUDGED IN PLACE: this pinned the string as resolved for the
+  // `flow-template` role. Stage S3 made `collection` a value slot, which emits
+  // only an envelope: a string there is the value-slot judge's and the
+  // contract's to refuse, not an expression to check.
+  it('loop / map: the top-level collection slot emits its envelope, never a string', () => {
+    const envelope = { dialect: 'cel', source: 'tasks' };
+    const loop = resolveFlowNodeExpressions('loop', { collection: envelope, body: { nodes: [], edges: [] } });
+    expect(loop.map((f) => [f.path, f.value, f.entry.role])).toEqual([['collection', envelope, 'value']]);
+    const map = resolveFlowNodeExpressions('map', { collection: envelope });
+    expect(map.map((f) => [f.path, f.value, f.entry.role])).toEqual([['collection', envelope, 'value']]);
+    expect(resolveFlowNodeExpressions('map', { collection: '{tasks}' })).toEqual([]);
   });
 
   it('decision: each branch predicate, with its index', () => {
@@ -397,14 +469,12 @@ describe('every entry older than the value role resolves byte-identically (the r
       .map((f) => [f.path, f.value, f.entry.role])).toEqual([['fields[0].visibleWhen', '   ', 'predicate']]);
     expect(resolveFlowNodeExpressions('decision', { conditions: [{ label: 'x', expression: '' }] })
       .map((f) => [f.path, f.value])).toEqual([['conditions[0].expression', '']]);
-    // …and ONLY for that role: a `flow-template` slot's blank is still skipped,
-    // because no validator implements that dialect and the ruling did not
-    // reach it.
-    expect(resolveFlowNodeExpressions('loop', { collection: '   ' })).toEqual([]);
+    // …and ONLY for that role: a `value` slot's blank string is a literal, not
+    // an expression to check — `collection`'s is refused by its contract
+    // instead (#19939; it was the `flow-template` role's skip before).
+    expect(resolveFlowNodeExpressions('map', { collection: '   ' })).toEqual([]);
     expect(resolveFlowNodeExpressions('screen', { fields: 'nope' })).toEqual([]);
-    // A `flow-template` slot keeps the old rule: no validator implements that
-    // dialect, so emitting a non-string there would hand every consumer a
-    // finding none of them can judge.
+    // A body-less `loop` reads no value slot at all (#19939), an envelope there included.
     expect(resolveFlowNodeExpressions('loop', { collection: { dialect: 'cel', source: 'x' } })).toEqual([]);
     expect(resolveFlowNodeExpressions('decision', { condition: 'a == b' })).toEqual([]);
   });

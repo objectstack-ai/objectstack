@@ -75,7 +75,7 @@
 //   node scripts/partition-test-shards.mjs <turbo-ls.json> --shard N/M \
 //     [--exclude <pkg>]...
 //   node scripts/partition-test-shards.mjs --check-drift <run-summary.json>... \
-//     [--label <text>]
+//     --event <github.event_name> [--label <text>]
 //   node scripts/partition-test-shards.mjs --self-test
 //
 // `--check-drift` is the half that keeps the dataset honest AFTER it is
@@ -83,7 +83,8 @@
 // run it just finished has written the measured truth to `.turbo/runs/`; this
 // mode reads that back, compares it to what this script PREDICTED for the same
 // packages, raises a `::warning::` past WARN_MEASURED_OVER_PREDICTED, and reds
-// past MAX_MEASURED_OVER_PREDICTED. Without it the dataset
+// past MAX_MEASURED_OVER_PREDICTED -- on a `schedule` run; on every other event
+// that red is a `::warning::` and exits 0 (TIMING_GRADED_EVENT, C2). Without it the dataset
 // rots silently in one direction and the only instrument that notices is a
 // shard killed by the job timeout -- which is a shard that produced NO reading
 // while the rollup read green.
@@ -199,6 +200,54 @@ export const MAX_MEASURED_OVER_PREDICTED = 1.5;
 //     1.5x above. The self-test pins the band between the two as non-empty, so
 //     the warning cannot be made unreachable by moving either end.
 export const WARN_MEASURED_OVER_PREDICTED = 1.3;
+
+// ── WHERE THE TWO TIMING GATES EXIT-GRADE: `schedule` ALONE (C2) ──────────
+//
+// Ruling (letter C2, for both timing steps):
+//   https://github.com/objectstack-ai/objectstack/issues/22949#issuecomment-6119186511
+// "a timing gate exit-grades only on the run profile its baseline was measured
+// on; everywhere else it reports."
+//
+// Both timing gates read one baseline: the weights `--check-drift` predicts
+// from, and the ceilings scripts/check-test-suite-ceilings.mjs grades against.
+// The refresh lane measures it on ci.yml's hourly `schedule` runs and no others
+// (DEFAULT_RUN_EVENT in scripts/ci/select-shard-timings-run.mjs). A
+// `merge_group` or `pull_request` build executes far more of the workspace on
+// the same runners. On the morning the refreshed dataset went live this step
+// redded 3 of 19 queue builds and the heads of three PRs (#22953, #22954,
+// #22959, filed as #22966) at 1.56-1.62x, on packages none of them touched,
+// while every hourly run read green. So both gates take the run's event
+// (`--event "$GITHUB_EVENT_NAME"` in ci.yml) and:
+//
+//   schedule      exit-graded, exactly as before: a red exits 1
+//   every other   REPORT ONLY (merge_group, pull_request, push,
+//   event         workflow_dispatch): the same table prints, each red becomes a
+//                 `::warning::` annotation, and the step exits 0
+//
+// A real slowdown merged to `main` reds the next hourly run. A missing or empty
+// `--event` is refused, never defaulted: a step that lost its event would
+// otherwise grade everywhere or nowhere, and say nothing either way.
+export const TIMING_GRADED_EVENT = 'schedule';
+
+/** 'grade' on TIMING_GRADED_EVENT, 'report' on any other event; a missing event is refused. */
+export function timingGateMode(event) {
+  if (typeof event !== 'string' || event.trim() === '') {
+    throw new Error(
+      `the run's event is ${JSON.stringify(event ?? null)}. The timing gates exit-grade on ` +
+        `\`${TIMING_GRADED_EVENT}\` alone and report on every other event, so they need it: pass ` +
+        '`--event "$GITHUB_EVENT_NAME"`. A missing event is refused rather than guessed.'
+    );
+  }
+  return event === TIMING_GRADED_EVENT ? 'grade' : 'report';
+}
+
+/** The one line both timing gates print to say which of the two modes this run is in. */
+export function timingModeNote(event) {
+  return timingGateMode(event) === 'grade'
+    ? `exit-graded: a \`${event}\` run is the profile the baseline was measured on`
+    : `report only: a \`${event}\` run is not the profile the baseline was measured on ` +
+        `(\`${TIMING_GRADED_EVENT}\`), so a red reading is a warning here and the step exits 0`;
+}
 
 // ── SHARDING ONE PACKAGE BELOW PACKAGE GRANULARITY (#16173) ────────────────
 //
@@ -1082,7 +1131,12 @@ export function escapeWorkflowCommandMessage(text) {
   return String(text).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
 }
 
-export function renderDriftVerdict(report, label) {
+//
+// `event` is the run's (ci.yml passes `$GITHUB_EVENT_NAME`): off
+// TIMING_GRADED_EVENT a DRIFT prints the same text, becomes a `::warning::`
+// annotation, and exits 0 (C2, see timingGateMode).
+export function renderDriftVerdict(report, label, event) {
+  const mode = timingGateMode(event);
   const skipped =
     report.unpredicted.length === 0
       ? ''
@@ -1115,25 +1169,37 @@ export function renderDriftVerdict(report, label) {
         `(${ratioOf(r)}${r.overshoot >= 0 ? '+' : ''}${r.overshoot.toFixed(1)}s)`
     )
     .join('\n');
+  const note = `\n  ${timingModeNote(event)}.`;
 
   if (report.drifted) {
-    return {
-      verdict: 'DRIFT',
-      exitCode: 1,
-      out: [],
-      err: [
-        `shard-timing-drift: DRIFT -- ${label}, ${head}.${skipped}\n` +
-          '  Heaviest overshoots:\n' +
-          `${worst}\n` +
-          '  scripts/test-shard-timings.json no longer describes this workspace, so the shard split\n' +
-          '  is balancing a quantity that is not the runtime. Refresh it -- see\n' +
-          '  scripts/measure-test-shard-timings.mjs for the two refresh paths -- and ⛔ do NOT\n' +
-          '  hand-edit the dataset or raise this bound to absorb the gap. Expect the refresh to red\n' +
-          "  this script's own balance pins if a single suite has outgrown the acceptance bound:\n" +
-          '  that is those pins working, and the remedy they name is splitting that suite below\n' +
-          '  package granularity, never a different shard count.',
-      ],
-    };
+    const text =
+      `shard-timing-drift: DRIFT -- ${label}, ${head}.${skipped}\n` +
+      '  Heaviest overshoots:\n' +
+      `${worst}\n` +
+      '  scripts/test-shard-timings.json no longer describes this workspace, so the shard split\n' +
+      '  is balancing a quantity that is not the runtime. Refresh it -- see\n' +
+      '  scripts/measure-test-shard-timings.mjs for the two refresh paths -- and ⛔ do NOT\n' +
+      '  hand-edit the dataset or raise this bound to absorb the gap. Expect the refresh to red\n' +
+      "  this script's own balance pins if a single suite has outgrown the acceptance bound:\n" +
+      '  that is those pins working, and the remedy they name is splitting that suite below\n' +
+      `  package granularity, never a different shard count.${note}`;
+    if (mode === 'report') {
+      const top = report.rows[0];
+      return {
+        verdict: 'DRIFT',
+        exitCode: 0,
+        out: [
+          `::warning title=Test Core shard timing drift::${escapeWorkflowCommandMessage(
+            `${label}: ${head}, past the red bound. Heaviest overshoot: ${top.name}, predicted ` +
+              `${top.predicted.toFixed(1)}s, measured ${top.measured.toFixed(1)}s. Report only on a \`${event}\` run: ` +
+              `this step exit-grades on \`${TIMING_GRADED_EVENT}\` runs alone, the profile ` +
+              'scripts/test-shard-timings.json was measured on, so a drift that is real reds the next hourly run on main.'
+          )}`,
+        ],
+        err: [text],
+      };
+    }
+    return { verdict: 'DRIFT', exitCode: 1, out: [], err: [text] };
   }
 
   if (report.warned) {
@@ -1149,7 +1215,7 @@ export function renderDriftVerdict(report, label) {
             'Not a failure: this step stays green until the red bound.'
         )}`,
       ],
-      err: [`shard-timing-drift: WARN -- ${label}, ${head}.${skipped}\n  Heaviest overshoots:\n${worst}`],
+      err: [`shard-timing-drift: WARN -- ${label}, ${head}.${skipped}\n  Heaviest overshoots:\n${worst}${note}`],
     };
   }
 
@@ -1157,7 +1223,7 @@ export function renderDriftVerdict(report, label) {
     verdict: 'OK',
     exitCode: 0,
     out: [],
-    err: [`shard-timing-drift: OK -- ${label}, ${head}.${skipped}`],
+    err: [`shard-timing-drift: OK -- ${label}, ${head}.${skipped}${note}`],
   };
 }
 
@@ -1249,11 +1315,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'file-level slice items (#16173)': 20,
   'file-level slices reach vitest through OS_TEST_SHARD (#19278)': 11,
   'density cap and the per-run slice decision (#22075)': 14,
+  'the drift step exit-grades on `schedule` alone, and reports everywhere else (C2)': 8,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 12;
+const SELF_TEST_BATTERY_FLOOR = 13;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1898,7 +1965,7 @@ function selfTest() {
   // with a workflow command would mint a real annotation on every lint run).
   const label = 'Test Core (9/9)';
   check(() => {
-    const v = renderDriftVerdict(tierOf(131), label);
+    const v = renderDriftVerdict(tierOf(131), label, TIMING_GRADED_EVENT);
     const commands = v.out.filter((line) => line.startsWith('::'));
     if (v.verdict !== 'WARN' || v.exitCode !== 0 || commands.length !== 1) {
       throw new Error(
@@ -1910,19 +1977,19 @@ function selfTest() {
     }
   });
   check(() => {
-    const v = renderDriftVerdict(tierOf(151), label);
+    const v = renderDriftVerdict(tierOf(151), label, TIMING_GRADED_EVENT);
     if (v.verdict !== 'DRIFT' || v.exitCode !== 1 || v.out.some((line) => line.startsWith('::'))) {
       throw new Error(`drift warning: a red rendered ${v.verdict} exit ${v.exitCode}, ${v.out.length} stdout line(s)`);
     }
   });
   check(() => {
     for (const [seconds, expected] of [[118, 'OK'], [WARN_MEASURED_OVER_PREDICTED * 100, 'OK']]) {
-      const v = renderDriftVerdict(tierOf(seconds), label);
+      const v = renderDriftVerdict(tierOf(seconds), label, TIMING_GRADED_EVENT);
       if (v.verdict !== expected || v.exitCode !== 0 || v.out.length !== 0) {
         throw new Error(`drift warning: ${seconds / 100}x rendered ${v.verdict} with ${v.out.length} stdout line(s)`);
       }
     }
-    const nm = renderDriftVerdict(driftReport(replayed.samples, driftTimings), label);
+    const nm = renderDriftVerdict(driftReport(replayed.samples, driftTimings), label, TIMING_GRADED_EVENT);
     if (nm.verdict !== 'NOT MEASURED' || nm.exitCode !== 0 || nm.out.length !== 0) {
       throw new Error(`drift warning: a replay-only shard rendered ${nm.verdict}`);
     }
@@ -1934,6 +2001,85 @@ function selfTest() {
     if (escaped !== '50%25 done%0D%0A::error::x') {
       throw new Error(`drift warning: workflow-command escaping produced ${JSON.stringify(escaped)}`);
     }
+  });
+
+  // -- EXIT-GRADED ON `schedule` ALONE (C2) --------------------------------
+  //
+  // The baseline is measured on hourly `schedule` runs, so only those exit 1
+  // on a DRIFT; every other event prints the same text, annotates a warning
+  // and exits 0. Read as rendered text, like the tier above: printing a
+  // `::warning::` from here would mint a real annotation on every lint run.
+  battery('the drift step exit-grades on `schedule` alone, and reports everywhere else (C2)');
+  const offSchedule = ['merge_group', 'pull_request', 'push', 'workflow_dispatch'];
+
+  check(() => {
+    if (TIMING_GRADED_EVENT !== 'schedule' || timingGateMode('schedule') !== 'grade') {
+      throw new Error(`C2: the graded event is ${TIMING_GRADED_EVENT}, and schedule reads ${timingGateMode('schedule')}`);
+    }
+  });
+  check(() => {
+    const graded = offSchedule.filter((e) => timingGateMode(e) !== 'report');
+    if (graded.length) throw new Error(`C2: ${graded.join(', ')} exit-grade, but only schedule may`);
+  });
+  // A step that lost its event is refused, never defaulted to either mode.
+  check(() => {
+    const accepted = [undefined, null, '', '  '].filter((e) => !threw(() => timingGateMode(e)));
+    if (accepted.length) throw new Error(`C2: a missing event was read as a mode: ${JSON.stringify(accepted)}`);
+    if (!threw(() => renderDriftVerdict(tierOf(151), label))) throw new Error('C2: a render with no event was graded');
+  });
+  check(() => {
+    const v = renderDriftVerdict(tierOf(151), label, 'schedule');
+    if (v.verdict !== 'DRIFT' || v.exitCode !== 1 || v.out.length !== 0 || !v.err[0].includes('exit-graded')) {
+      throw new Error(`C2: a schedule DRIFT rendered ${v.verdict} exit ${v.exitCode}, ${v.out.length} stdout line(s)`);
+    }
+  });
+  check(() => {
+    for (const event of offSchedule) {
+      const v = renderDriftVerdict(tierOf(151), label, event);
+      const commands = v.out.filter((line) => line.startsWith('::'));
+      if (v.verdict !== 'DRIFT' || v.exitCode !== 0 || commands.length !== 1) {
+        throw new Error(`C2: a ${event} DRIFT rendered ${v.verdict} exit ${v.exitCode} with ${commands.length} command(s)`);
+      }
+      if (!commands[0].startsWith('::warning ') || !commands[0].includes(label) || !commands[0].includes(event) || commands[0].includes('\n')) {
+        throw new Error(`C2: a ${event} DRIFT is not one ::warning line naming the shard and the event: ${commands[0]}`);
+      }
+    }
+  });
+  // The SAME table on every event: only the mode line differs.
+  check(() => {
+    const body = (v) => v.err[0].split('\n').slice(0, -1).join('\n');
+    const graded = renderDriftVerdict(tierOf(151), label, 'schedule');
+    const reported = renderDriftVerdict(tierOf(151), label, 'merge_group');
+    if (body(graded) !== body(reported) || !body(graded).includes('Heaviest overshoots:')) {
+      throw new Error(`C2: the report-only text is not the graded text:\n${graded.err[0]}\n---\n${reported.err[0]}`);
+    }
+    if (!reported.err[0].endsWith('so a red reading is a warning here and the step exits 0.')) {
+      throw new Error(`C2: the report-only text does not say so:\n${reported.err[0]}`);
+    }
+  });
+  check(() => {
+    // The tiers under the red are unchanged off schedule: WARN annotates, OK and NOT MEASURED say nothing on stdout.
+    const warn = renderDriftVerdict(tierOf(131), label, 'pull_request');
+    const ok = renderDriftVerdict(tierOf(118), label, 'push');
+    const nm = renderDriftVerdict(driftReport(replayed.samples, driftTimings), label, 'merge_group');
+    if (warn.verdict !== 'WARN' || warn.exitCode !== 0 || warn.out.length !== 1 || !warn.out[0].startsWith('::warning ')) {
+      throw new Error(`C2: a pull_request WARN rendered ${warn.verdict} exit ${warn.exitCode}`);
+    }
+    if (ok.verdict !== 'OK' || ok.exitCode !== 0 || ok.out.length !== 0 || !ok.err[0].includes('report only')) {
+      throw new Error(`C2: a push OK rendered ${ok.verdict} exit ${ok.exitCode}:\n${ok.err[0]}`);
+    }
+    if (nm.verdict !== 'NOT MEASURED' || nm.exitCode !== 0 || nm.out.length !== 0) {
+      throw new Error(`C2: a merge_group replay-only shard rendered ${nm.verdict}`);
+    }
+  });
+  // The CLI: `--event` is read, and its absence is refused before any summary is.
+  check(() => {
+    const parsed = parseDriftArgs(['--check-drift', 'a.json', '--label', 'L', '--event', 'merge_group']);
+    if (parsed.event !== 'merge_group' || parsed.inputs.join() !== 'a.json' || parsed.label !== 'L') {
+      throw new Error(`C2: --check-drift parsed as ${JSON.stringify(parsed)}`);
+    }
+    if (!threw(() => parseDriftArgs(['--check-drift', 'a.json']))) throw new Error('C2: --check-drift with no --event was accepted');
+    if (!threw(() => parseDriftArgs(['--check-drift', 'a.json', '--event', '']))) throw new Error('C2: an empty --event was accepted');
   });
 
   // -- FILE-LEVEL SLICE ITEMS (#16173) ------------------------------------
@@ -2474,19 +2620,31 @@ function selfTest() {
 // test tasks were all cache replays has said nothing about the dataset, and
 // reporting that as OK is the #4690 shape -- a check that read nothing
 // reporting as a check that found nothing wrong.
-function checkDrift(argv) {
+//
+// `--event` is required (C2): the run's event decides whether a DRIFT exits 1
+// (`schedule`) or is reported as a warning (every other event), and a missing
+// one is refused by timingGateMode rather than defaulted either way.
+export function parseDriftArgs(argv) {
   const inputs = [];
   let label = 'this shard';
+  let event = null;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--check-drift') continue;
     else if (arg === '--label') label = argv[++i];
+    else if (arg === '--event') event = argv[++i];
     else if (arg.startsWith('--')) throw new Error(`unrecognized argument: ${arg}`);
     else inputs.push(arg);
   }
+  timingGateMode(event);
+  return { inputs, label, event };
+}
+
+function checkDrift(argv) {
+  const { inputs, label, event } = parseDriftArgs(argv);
   if (inputs.length === 0) {
     console.error(
-      'usage: partition-test-shards.mjs --check-drift <run-summary.json>... [--label <text>]'
+      'usage: partition-test-shards.mjs --check-drift <run-summary.json>... --event <github.event_name> [--label <text>]'
     );
     process.exit(1);
   }
@@ -2515,7 +2673,7 @@ function checkDrift(argv) {
   }
   const timings = loadTimings();
   const report = driftReport(merged, timings, MAX_MEASURED_OVER_PREDICTED, observedSlices);
-  const rendered = renderDriftVerdict(report, label);
+  const rendered = renderDriftVerdict(report, label, event);
   for (const line of rendered.out) console.log(line);
   for (const line of rendered.err) console.error(line);
   if (rendered.exitCode !== 0) process.exit(rendered.exitCode);

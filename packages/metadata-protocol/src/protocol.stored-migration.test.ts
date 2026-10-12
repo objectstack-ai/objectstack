@@ -505,7 +505,7 @@ describe('migrateStoredMetadata — what it declines to touch, loudly (#4327)', 
     });
 
     it('skips a type with no repository write path rather than rewriting it without history', async () => {
-        // `agent` is allowOrgOverride:false + allowRuntimeCreate:false. The
+        // `agent` is allowEnvironmentOverlay:false + allowRuntimeCreate:false. The
         // skip is what this test pins, and it is unchanged; only its rationale
         // moved. It used to be "`saveMetaItem` would take the legacy raw-engine
         // branch: no history row and a forced `state: 'active'`" — #5086
@@ -975,7 +975,7 @@ describe('migrateStoredMetadata — the decision review list: stored rows take f
                 {
                     id: 'sweep', type: 'loop', label: 'Sweep',
                     config: {
-                        collection: '{leads}',
+                        collection: { dialect: 'cel', source: 'leads' },
                         iteratorVariable: 'lead',
                         body: {
                             nodes: [

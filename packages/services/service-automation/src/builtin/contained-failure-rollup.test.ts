@@ -233,7 +233,7 @@ function registerLoopParent(
             { id: 'query', type: 'seed', label: 'Query' },
             {
                 id: 'each', type: 'loop', label: 'Each case',
-                config: { collection: '{cases}', iteratorVariable: 'currentCase', body },
+                config: { collection: { dialect: 'cel', source: 'cases' }, iteratorVariable: 'currentCase', body },
             },
             { id: 'end', type: 'end', label: 'End' },
         ],
@@ -254,7 +254,7 @@ function registerMapParent(engine: AutomationEngine, name: string, childFlow: st
             { id: 'query', type: 'seed', label: 'Query' },
             {
                 id: 'each', type: 'map', label: 'Each case',
-                config: { collection: '{cases}', flowName: childFlow, iteratorVariable: 'currentCase' },
+                config: { collection: { dialect: 'cel', source: 'cases' }, flowName: childFlow, iteratorVariable: 'currentCase' },
             },
             { id: 'end', type: 'end', label: 'End' },
         ],

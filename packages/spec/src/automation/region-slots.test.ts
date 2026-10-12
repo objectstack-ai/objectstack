@@ -61,7 +61,7 @@ const region = () => ({ nodes: [{ id: 'probe', type: 'script', label: 'Probe' }]
  * mistake an inline-array collection for a list of regions.
  */
 const PROBE_VALUES: Readonly<Record<string, unknown>> = {
-  collection: '{items}',
+  collection: { dialect: 'cel', source: 'items' },
   body: region(),
   try: region(),
   catch: region(),

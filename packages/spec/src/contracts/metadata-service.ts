@@ -131,7 +131,12 @@ export interface MetadataTypeInfo {
     description?: string;
     /** File glob patterns */
     filePatterns: string[];
-    /** Supports overlay customization */
+    /**
+     * The registry's removal carve-out (`MetadataTypeRegistryEntry`
+     * `supportsOverlay`): a stored overlay row of an item a managed package
+     * ships may be removed without the type's environment-overlay permission.
+     * It opens no save and decides no read.
+     */
     supportsOverlay: boolean;
     /** Protocol domain */
     domain: string;

@@ -453,7 +453,7 @@ describe('#16224 — an overlay that REDEFINES a code-package item is judged fro
 
     /**
      * The overlay: same name, same object, same dimensions — one measure
-     * REMOVED and one added. `dataset` is `allowOrgOverride: false`
+     * REMOVED and one added. `dataset` is `allowEnvironmentOverlay: false`
      * (`DEFAULT_METADATA_TYPE_REGISTRY`), so the reachable redefinition is the
      * env-wide one, which is the other limb the card names.
      */

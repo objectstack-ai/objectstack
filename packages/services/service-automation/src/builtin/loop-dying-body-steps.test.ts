@@ -141,7 +141,7 @@ describe('#13803 a dying loop keeps the record of the writes it already made', (
         type: 'loop',
         label: 'For each row',
         config: {
-          collection: '{rows}',
+          collection: { dialect: 'cel', source: 'rows' },
           iteratorVariable: 'currentRow',
           indexVariable: 'idx',
           body,
@@ -360,7 +360,7 @@ describe('#13803 a dying loop keeps the record of the writes it already made', (
             type: 'loop',
             label: 'Outer',
             config: {
-              collection: '{rows}',
+              collection: { dialect: 'cel', source: 'rows' },
               iteratorVariable: 'outerRow',
               body: {
                 nodes: [
@@ -369,7 +369,7 @@ describe('#13803 a dying loop keeps the record of the writes it already made', (
                     type: 'loop',
                     label: 'Inner',
                     config: {
-                      collection: '{rows}',
+                      collection: { dialect: 'cel', source: 'rows' },
                       iteratorVariable: 'currentRow',
                       body: FLAG_THEN_NOTIFY,
                     },

@@ -30,6 +30,17 @@
  *    400. Both boots refuse. In-process the caller gets the handler's own
  *    error; on the body-only path it gets a `SandboxError` that carries the
  *    declared `code` and `status` out of the VM. This is the refusal envelope.
+ *  - `lbd_brace_string` writes `'a}b'`, `lbd_inner_arrow` is an `async
+ *    function` with a statement-level inner arrow, and `lbd_fn_pattern` is an
+ *    `async function` whose parameter is a pattern. Until #22860 the lowering
+ *    found the body by counting braces through the handler's text, blind to
+ *    strings, and took the first parenthesised `=>` anywhere as the handler's
+ *    header. So the first shipped a body cut off inside the string, and the
+ *    second a body built around the inner arrow. Both are a SyntaxError in the
+ *    sandbox, `500` over REST, at build exit 0. The third shipped its PATTERN as
+ *    its body (`var { input } = ctx; input`), which runs, throws nothing and
+ *    stores nothing. The body is now read off the handler's parse, so all three
+ *    boots store the same row.
  *  - `lbd_derive` derives a field. Both boots store the same value. This is
  *    the control.
  *
@@ -90,6 +101,9 @@ const buildApp = ({ withRefused = false }: { withRefused?: boolean } = {}): Reco
       object('lbd_destructure_note'),
       object('lbd_refuse_note'),
       object('lbd_derive_note'),
+      object('lbd_brace_string_note'),
+      object('lbd_inner_arrow_note'),
+      object('lbd_fn_pattern_note'),
     ],
     hooks: [
       ...(withRefused
@@ -147,6 +161,31 @@ const buildApp = ({ withRefused = false }: { withRefused?: boolean } = {}): Reco
           ctx.input.note = 'derived:' + String(ctx.input.name);
         },
       },
+      {
+        name: 'lbd_brace_string',
+        object: 'lbd_brace_string_note',
+        events: ['beforeInsert'],
+        handler: async (ctx: HookCtx) => {
+          ctx.input.note = 'a}b:' + String(ctx.input.name);
+        },
+      },
+      {
+        name: 'lbd_inner_arrow',
+        object: 'lbd_inner_arrow_note',
+        events: ['beforeInsert'],
+        handler: async function (ctx: HookCtx) {
+          const exclaim = (s: string) => s + '!';
+          ctx.input.note = exclaim('arrow:' + String(ctx.input.name));
+        },
+      },
+      {
+        name: 'lbd_fn_pattern',
+        object: 'lbd_fn_pattern_note',
+        events: ['beforeInsert'],
+        handler: async function ({ input }: HookCtx) {
+          input.note = 'pattern:' + String(input.name);
+        },
+      },
     ],
   } as never) as unknown as Record<string, unknown>;
 
@@ -194,13 +233,33 @@ const hookNamed = (artifact: BuildShapedArtifact, name: string): HookRow | undef
 describe('the artifact under test is what the build lowers', () => {
   it('every hook reaches the artifact as a body the real lowering extracted from its handler', () => {
     const hooks = (built.artifact.hooks ?? []) as HookRow[];
-    expect(hooks.map((h) => h.name).sort()).toEqual(['lbd_derive', 'lbd_destructure', 'lbd_param', 'lbd_refuse']);
+    const lowerable = [
+      'lbd_brace_string',
+      'lbd_derive',
+      'lbd_destructure',
+      'lbd_fn_pattern',
+      'lbd_inner_arrow',
+      'lbd_param',
+      'lbd_refuse',
+    ];
+    expect(hooks.map((h) => h.name).sort()).toEqual(lowerable);
     for (const hook of hooks) {
       expect((hook.body as { source?: unknown } | undefined)?.source, `${String(hook.name)} lowered`).toEqual(
         expect.any(String),
       );
     }
-    expect(built.refs).toEqual(['lbd_derive', 'lbd_destructure', 'lbd_param', 'lbd_refuse']);
+    expect(built.refs).toEqual(lowerable);
+  });
+
+  // Anti-vacuity for #22860: each body is the handler's own block — the
+  // statement the old brace count cut off or dropped is there.
+  it("each #22860 body is the handler's block: the string, the inner arrow and the statement after the pattern survive", () => {
+    const sourceOf = (name: string) => String((hookNamed(built, name)?.body as { source?: unknown }).source);
+    expect(sourceOf('lbd_brace_string')).toContain('a}b:');
+    expect(sourceOf('lbd_inner_arrow')).toContain('const exclaim =');
+    expect(sourceOf('lbd_inner_arrow')).toContain('ctx.input.note = exclaim(');
+    expect(sourceOf('lbd_fn_pattern').startsWith('var { input } = ctx;')).toBe(true);
+    expect(sourceOf('lbd_fn_pattern')).toContain('input.note =');
   });
 
   // Anti-vacuity: the body still names the handler's own parameter — the case
@@ -243,6 +302,32 @@ describe('the rebind: a renamed or destructured parameter, in-process and lowere
   }
 });
 
+describe('the body span: a `}` in a string, an inner arrow, a pattern parameter, in-process and lowered (#22860)', () => {
+  for (const [hook, object, note, suffix] of [
+    ['lbd_brace_string', 'lbd_brace_string_note', 'a}b:', ''],
+    ['lbd_inner_arrow', 'lbd_inner_arrow_note', 'arrow:', '!'],
+    ['lbd_fn_pattern', 'lbd_fn_pattern_note', 'pattern:', ''],
+  ] as const) {
+    it(`${hook}: both boots run the handler and store the same row`, async () => {
+      const inProcess = await insert(source, object, 'alpha');
+      const loweredRow = await insert(lowered, object, 'alpha');
+      expect(inProcess.note).toBe(`${note}alpha${suffix}`);
+      expect(loweredRow.note).toBe(inProcess.note);
+    });
+
+    it(`${hook}: over REST, created on both boots, with the same stored note`, async () => {
+      const ok = await source.apiAs(sourceToken, 'POST', `/data/${object}`, { name: 'beta' });
+      expect(ok.status).toBe(201);
+      const okLowered = await lowered.apiAs(loweredToken, 'POST', `/data/${object}`, { name: 'beta' });
+      expect(okLowered.status).toBe(201);
+      const notes = async (stack: VerifyStack) =>
+        (await stack.rows(object)).filter((r) => r.name === 'beta').map((r) => r.note);
+      expect(await notes(lowered)).toEqual([`${note}beta${suffix}`]);
+      expect(await notes(lowered)).toEqual(await notes(source));
+    });
+  }
+});
+
 describe('what the lowering refuses is bundled, and never diverges at this door', () => {
   it('`lbd_stash` (#22810) and `lbd_two` (#22837) ship no body, while the other hooks still lower', () => {
     for (const name of ['lbd_stash', 'lbd_two']) {
@@ -251,7 +336,7 @@ describe('what the lowering refuses is bundled, and never diverges at this door'
       expect(hook?.handler).toBe(name);
       expect(typeof refusedBuild.functions[name]).toBe('function');
     }
-    for (const name of ['lbd_param', 'lbd_destructure', 'lbd_refuse', 'lbd_derive']) {
+    for (const name of ['lbd_param', 'lbd_destructure', 'lbd_refuse', 'lbd_derive', 'lbd_brace_string', 'lbd_inner_arrow', 'lbd_fn_pattern']) {
       expect((hookNamed(refusedBuild, name)?.body as { source?: unknown } | undefined)?.source, `${name} lowered`).toEqual(
         expect.any(String),
       );

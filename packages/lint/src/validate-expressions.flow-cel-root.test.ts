@@ -152,7 +152,7 @@ describe('every flow CEL site the door visits', () => {
     const found = rootFindings(flowStack({
       middle: [{
         id: 'sweep', type: 'loop',
-        config: { collection: '{rows}', iteratorVariable: 'row', body: { nodes: [{ id: 'inner', type: 'decision', config: { conditions: [{ label: 'y', expression: 'user.id == row.owner' }] } }], edges: [] } },
+        config: { collection: { dialect: 'cel', source: 'rows' }, iteratorVariable: 'row', body: { nodes: [{ id: 'inner', type: 'decision', config: { conditions: [{ label: 'y', expression: 'user.id == row.owner' }] } }], edges: [] } },
       }],
       variables: [{ name: 'rows', type: 'list' }],
     }));
@@ -172,8 +172,8 @@ describe('controls — one per binding kind the run has', () => {
     ['an `outputVariable`', { edgeCondition: 'acc.status == "x"', middle: [{ id: 'read', type: 'get_record', config: { objectName: 'acct', filter: { id: '{record.id}' }, outputVariable: 'acc' } }] }],
     ['a node id (its outputs land under it)', { edgeCondition: 'read.record != null', middle: [{ id: 'read', type: 'get_record', config: { objectName: 'acct', filter: { id: '{record.id}' } } }] }],
     ['an `assignment` target', { edgeCondition: 'flag == true', middle: [{ id: 'set', type: 'assignment', config: { assignments: { flag: true } } }] }],
-    ['a `loop` iterator and index', { edgeCondition: 'row != null && i >= 0', variables: [{ name: 'rows', type: 'list' }], middle: [{ id: 'sweep', type: 'loop', config: { collection: '{rows}', iteratorVariable: 'row', indexVariable: 'i', body: { nodes: [], edges: [] } } }] }],
-    ['a `loop` with no iterator binds the default `item`', { edgeCondition: 'item != null', variables: [{ name: 'rows', type: 'list' }], middle: [{ id: 'sweep', type: 'loop', config: { collection: '{rows}', body: { nodes: [], edges: [] } } }] }],
+    ['a `loop` iterator and index', { edgeCondition: 'row != null && i >= 0', variables: [{ name: 'rows', type: 'list' }], middle: [{ id: 'sweep', type: 'loop', config: { collection: { dialect: 'cel', source: 'rows' }, iteratorVariable: 'row', indexVariable: 'i', body: { nodes: [], edges: [] } } }] }],
+    ['a `loop` with no iterator binds the default `item`', { edgeCondition: 'item != null', variables: [{ name: 'rows', type: 'list' }], middle: [{ id: 'sweep', type: 'loop', config: { collection: { dialect: 'cel', source: 'rows' }, body: { nodes: [], edges: [] } } }] }],
     ['a `try_catch` `errorVariable`', { edgeCondition: 'caught != null', middle: [{ id: 'guard', type: 'try_catch', config: { errorVariable: 'caught', try: { nodes: [], edges: [] }, catch: { nodes: [], edges: [] } } }] }],
     ['a screen field (a resume binds it under its name)', { edgeCondition: 'approve == true', middle: [{ id: 'ask', type: 'screen', config: { fields: [{ name: 'approve', type: 'boolean' }] } }] }],
     ['a trigger field, read bare', { edgeCondition: 'status == "open" && amount > 5', objectName: 'acct' }],
@@ -209,7 +209,7 @@ describe('the door stands down where the run can bind a name it cannot see', () 
     ['a `connector_action` (its handler gets the live variable map)', { id: 'push', type: 'connector_action', config: { connectorId: 'slack', actionId: 'post' } }],
     ['a `wait` (a resume folds the caller\'s bag)', { id: 'hold', type: 'wait', config: { eventType: 'signal', signalName: 'go' } }],
     ['a `subflow` (a resume folds the caller\'s bag)', { id: 'child', type: 'subflow', config: { flowName: 'other' } }],
-    ['a `map` (a resume folds the caller\'s bag)', { id: 'each', type: 'map', config: { collection: '{rows}', flowName: 'other' } }],
+    ['a `map` (a resume folds the caller\'s bag)', { id: 'each', type: 'map', config: { collection: { dialect: 'cel', source: 'rows' }, flowName: 'other' } }],
     ['a plugin node type', { id: 'ai', type: 'ai_classify', config: {} }],
     ['a screen with no fields', { id: 'ok', type: 'screen', config: { waitForInput: true } }],
     ['an object-form screen', { id: 'form', type: 'screen', config: { kind: 'object-form', objectName: 'acct', idVariable: 'saved' } }],
@@ -357,7 +357,7 @@ describe('the entrances the stack declares (A′)', () => {
   it('a map node: an undeclared or absent itemObject stands down the flow it feeds; a declared one is judged', () => {
     const fedBy = (itemObject?: string): AnyRec => withFlows(
       flowStack({ edgeCondition: USER }),
-      parentFlow({ node: { id: 'each', type: 'map', config: { collection: '{rows}', flowName: 'f', ...(itemObject ? { itemObject } : {}) } } }),
+      parentFlow({ node: { id: 'each', type: 'map', config: { collection: { dialect: 'cel', source: 'rows' }, flowName: 'f', ...(itemObject ? { itemObject } : {}) } } }),
     );
     expect(userRefusals(fedBy('sys_task'))).toEqual([]);
     expect(userRefusals(fedBy(undefined))).toEqual([]);
@@ -382,7 +382,7 @@ describe('the entrances the stack declares (A′)', () => {
     // other item leaves the child holding the parent's record. The declared
     // `itemObject` keeps the node from opening `f` itself, so only the parent's
     // openness can.
-    const each = (child: string): AnyRec => ({ id: 'each', type: 'map', config: { collection: '{rows}', flowName: child, itemObject: 'acct' } });
+    const each = (child: string): AnyRec => ({ id: 'each', type: 'map', config: { collection: { dialect: 'cel', source: 'rows' }, flowName: child, itemObject: 'acct' } });
     const openParent = parentFlow({ type: 'api', node: each('f') });
     expect(userRefusals(withFlows(flowStack({ edgeCondition: USER }), openParent))).toEqual([]);
     expect(flowCelEntrances(
@@ -524,7 +524,7 @@ describe('`record` — bound only where an entrance hands the flow a record (#22
     }],
     ['an action on a declared object', (stack) => ({ ...stack, actions: [{ name: 'go', label: 'Go', type: 'flow', target: 'f', objectName: 'acct' }] })],
     ['an object-less action (it hands an empty record, still a record)', (stack) => ({ ...stack, actions: [{ name: 'go', label: 'Go', type: 'flow', target: 'f' }] })],
-    ['a `map` node with a declared itemObject', (stack) => withFlows(stack, parent({ node: { id: 'each', type: 'map', config: { collection: '{rows}', flowName: 'f', itemObject: 'acct' } } }))],
+    ['a `map` node with a declared itemObject', (stack) => withFlows(stack, parent({ node: { id: 'each', type: 'map', config: { collection: { dialect: 'cel', source: 'rows' }, flowName: 'f', itemObject: 'acct' } } }))],
     ['a declared `record` variable', (stack) => ({ ...stack, flows: [{ ...(stack.flows as AnyRec[])[0]!, variables: [{ name: 'record', type: 'object' }] }] })],
   ])('control: %s', (_entrance, give) => {
     expect(recordRefusals(give(flowStack({ edgeCondition: READ })))).toEqual([]);

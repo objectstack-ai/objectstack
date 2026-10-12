@@ -332,8 +332,11 @@ function startsWithLedgerSlot(segments: readonly string[], path: ReadonlyArray<P
  * {@link builtinValueJudged} skips anyway. A LITERAL the contract refuses for
  * its type has no other judge, so it stays this arm's: a screen's `recordId`
  * takes a string literal and refuses `42` (`ScreenConfigSchema`), as it did
- * when it was not a value slot. Every other value slot's literal arm refuses
- * nothing but a token, so their verdicts do not move.
+ * when it was not a value slot; and a `loop`'s or a `map`'s `collection` takes
+ * a list and refuses any string (`FlowCollectionSlotSchema`, #19939) — a
+ * variable's bare name included, in the contract's words — as it refused
+ * `42` before. Every other value slot's literal arm refuses nothing but a
+ * token, so their verdicts do not move.
  */
 function atOrInsideJudgedLedgerSlot(
   nodeType: string,
