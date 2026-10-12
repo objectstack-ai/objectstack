@@ -369,7 +369,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gitFreeEnv } from './git-env.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
@@ -530,6 +530,7 @@ export const CATEGORIES = [
   'no-migration-prescription',
   'runtime-interface-only',
   'type-surface-only',
+  'runtime-export-retired',
 ];
 
 /** The ADR whose disposition vocabulary this gate enforces (#8299). */
@@ -1794,17 +1795,29 @@ function labelPositioned(line, col, prev, after = '') {
  * @param {string} body
  */
 function carriesConcreteRewrite(body) {
+  return firstConcreteRewrite(body) !== null;
+}
+
+/**
+ * `carriesConcreteRewrite`, answering WHICH line -- the same walk, unchanged, so a
+ * caller that has to name the rewrite it refuses on (`readFromBlock`, #22918) reads
+ * exactly what branch 1's corroboration reads.
+ *
+ * @param {string} body
+ * @returns {{ shape: string, line: string } | null}
+ */
+function firstConcreteRewrite(body) {
   let inTable = false;
-  let sawFromBlock = false;
+  let fromLine = null;
   for (const line of body.split(/\r?\n/)) {
-    if (REWRITE_RE.test(line)) return true;
-    if (VERTICAL_FROM_RE.test(line)) sawFromBlock = true;
-    else if (sawFromBlock && VERTICAL_TO_RE.test(line)) return true;
+    if (REWRITE_RE.test(line)) return { shape: 'an arrow rewrite', line: line.trim() };
+    if (VERTICAL_FROM_RE.test(line)) fromLine ??= line.trim();
+    else if (fromLine !== null && VERTICAL_TO_RE.test(line)) return { shape: 'a vertical FROM / TO pair', line: fromLine };
     if (TABLE_DELIM_RE.test(line)) { inTable = true; continue; }
     if (!TABLE_ROW_RE.test(line)) { inTable = false; continue; }
-    if (inTable && isRewriteRow(line)) return true;
+    if (inTable && isRewriteRow(line)) return { shape: 'a rewrite table row', line: line.trim() };
   }
-  return false;
+  return null;
 }
 
 /**
@@ -3956,8 +3969,749 @@ export function verifyTypeSurfaceOnly(refs, { base, head, cwd, bumps, packages, 
 }
 
 // ---------------------------------------------------------------------------
-// The scan
+// The seventh category: `runtime-export-retired` (#22918)
+//
+// ## The class, and the dead end it closes
+//
+// A changeset that RETIRES PUBLISHED RUNTIME EXPORTS -- functions, constants,
+// classes and types a published package's entry exported, and members of an
+// exported type -- declares `**BREAKING**` truthfully and ships the FROM -> TO line
+// a consumer needs for each retired name. The worked example is
+// `.changeset/15205-email-templates-resolve-registry.md` (PR #22875, merged as
+// `7de0265fc7`): nine exports and two `EmailServicePluginOptions` members of
+// `@objectstack/plugin-email`, six arrowless `- FROM ... TO ...` lines. Every
+// disposition was closed to it on the facts but one -- `no-migration-prescription`,
+// which it held ONLY because the detector reads an arrow and those lines carry
+// none. That is the detector-miss shape D7 retires, and its own marker asked for a
+// ruling (#22915, ruling A; #22918, the ruling of 2026-10-12).
+//
+// The ledger is the wrong channel for the reason D7 and D8 give: the affected party
+// is a TypeScript consumer, the compiler at their own call site delivers the break
+// (`TS2305 ... has no exported member`), and `objectstack migrate meta` has no
+// metadata to rewrite.
+//
+// ## The operands (the ruling's Q1: B, narrowed)
+//
+//   <package>#<Export>           a retired export of the package's published entry
+//   <package>#<Type>.<member>    a retired member of an exported type -- the dotted
+//                                spelling `type-surface-only` already uses
+//
+// The PACKAGE is named, never a file: "reachable from the published entry" is a
+// fact about the package, and a declaration can move between files without the
+// export moving. ⛔ A member is addressed by that canonical spelling ONLY. Nothing
+// here parses a constructor argument or an object literal: a FROM line written
+// `new EmailServicePlugin({ seedTemplates: false })` names `EmailServicePlugin`, an
+// operand outside any set that names the member, and is refused as out of range.
+// The worked example's lines 29-30 are exactly that, which is why it stays on
+// `no-migration-prescription` (merged, never re-graded) and why the member limb
+// exists at all.
+//
+// ## The three predicates, BY NAME, re-verified on every run
+//
+//   1. retired-from-entry -- an export is reachable from the package's published
+//      entry at the merge base and absent at HEAD; a member's type is reachable at
+//      the base, the member is present on it there (`getPropertiesOfType`) and
+//      absent at HEAD. Read by the TypeScript COMPILER over the package's source
+//      entry at each rev (`getExportsOfModule`, so `export *` resolves). The entry
+//      is located through the package's `exports` map -- `resolveTypesEntry`,
+//      imported from the readme-exports gate, never re-implemented -- and tsup's
+//      convention: its declaration entry `dist/index.d.ts` (or the `.d.mts` /
+//      `.d.cts` twin tsup writes beside it) is generated from `src/index.ts`. A
+//      published package whose entry cannot be mapped that way is REFUSED, loudly
+//      and by name, never guessed.
+//   2. no-metadata-surface -- at the merge base no operand is declared in a
+//      `*.zod.ts`, under `packages/spec/src/contracts/` or in an object definition,
+//      none is a Zod projection, and no metadata surface references it in code: the
+//      `runtime-interface-only` primitives, read at the BASE because the operand is
+//      gone at HEAD.
+//   3. from-operands-named -- the FROM -> TO block names EXACTLY the named
+//      operands, each spelled as in the marker (`Type.member` for a member), and the
+//      body carries no other prescription the detector can read.
+//
+// ## The deviation the maintainer accepted
+//
+// A merge base has no build output (`dist/` is gitignored), so predicate 1 compiles
+// the SOURCE entry that generates the published `.d.ts`, not the `.d.ts`. For the
+// question "which names does the package export" the two agree.
+//
+// ## Predicate 3 is a NARROWING of `no-migration-prescription`, never an escape
+//
+// This category does not skip the prescription refusal the way `type-surface-only`
+// does. It reads the FROM side of every rewrite line the body writes -- a
+// `FROM ... TO ...` line, an arrow `X -> Y` (or `X -> delete`), the FROM column of a
+// `| FROM | TO |` / `| Wrote | Write instead |` table -- requires each FROM operand
+// to be a named operand and each named operand to have a FROM side, neutralises
+// exactly those lines, and then runs the SAME `findMigrationPrescription` over
+// what is left. Anything the detector still reads is refused: a rewrite table with
+// no FROM column, a vertical FROM / TO pair, a FROM -> TO label above anything this
+// reader did not read. So nothing the detector refuses today becomes claimable
+// unless every operand it rests on was positively verified retired by predicates
+// 1-2 -- and an arrowless block, invisible to the detector, is READ here rather
+// than waved through.
+//
+// ## What is deliberately NOT checked
+//
+// **That the claim is complete.** Like `registered` and `runtime-interface-only`,
+// this judges the operands the author named, not every export the diff removed:
+// inferring that set is the cross-package retirement detector the 2026-08-07 ruling
+// routes around.
+//
+// **A subpath entry (`@scope/pkg/sub`).** Only the root entry is read; a retirement
+// from a subpath names no operand this category can verify, so it is refused at the
+// mapping step rather than assumed.
+//
+// **A static member of a class.** A member operand reads the declared (instance)
+// type of a class, interface or type alias, and the value type of anything else.
 // ---------------------------------------------------------------------------
+
+/**
+ * The three predicates, BY NAME -- the same discipline as `TYPE_SURFACE_PREDICATES`:
+ * the self-test pins the set and that the shipping function evaluates exactly it.
+ */
+export const RUNTIME_EXPORT_PREDICATES = [
+  'retired-from-entry',
+  'no-metadata-surface',
+  'from-operands-named',
+];
+
+/** An npm package name, scoped or not. */
+const PACKAGE_NAME_RE = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
+/** `Export` or `Type.member` -- one level deep, never more. */
+const EXPORT_SPELLING_RE = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?$/;
+
+/**
+ * `<package>#<Export>` / `<package>#<Type>.<member>` -> its parts, or a refusal.
+ *
+ * @param {string} ref
+ * @returns {{ pkg: string, spelling: string, exportName: string, member: string|null } | { refusal: string }}
+ */
+export function parseExportOperand(ref) {
+  const at = ref.lastIndexOf('#');
+  const pkg = at > 0 ? ref.slice(0, at) : '';
+  const spelling = at > 0 ? ref.slice(at + 1) : '';
+  if (at <= 0 || !PACKAGE_NAME_RE.test(pkg)) {
+    return {
+      refusal: /[\\/][^#]*\.[cm]?tsx?(?:#|$)/.test(ref)
+        ? `names a FILE (${pkg || ref}). This category names the PACKAGE whose published entry exported the operand,\n` +
+          '      because "reachable from the published entry" is a fact about the package, not about a file'
+        : 'is not a `<package>#<Export>` or `<package>#<Type>.<member>` reference',
+    };
+  }
+  if (!EXPORT_SPELLING_RE.test(spelling)) {
+    return {
+      refusal: /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*){2,}$/.test(spelling)
+        ? `spells a member ${spelling.split('.').length - 1} levels deep. A member is named \`<Type>.<member>\`: the\n` +
+          '      exported type it sits on, then the member, and nothing in between'
+        : `names \`${spelling}\`, which is not an export name or a canonical \`<Type>.<member>\` spelling`,
+    };
+  }
+  const [exportName, member = null] = spelling.split('.');
+  return { pkg, spelling, exportName, member };
+}
+
+/**
+ * The canonical spelling a FROM operand names, or null.
+ *
+ * An export is spelled by its name; a member as `Type.member`. A CALL of it reads as
+ * it -- `createSysEmailTemplateLoader(engine, options?)` names
+ * `createSysEmailTemplateLoader`, and `new X(...)` names `X` -- because that is how a
+ * consumer writes the thing they must change. The argument list is never read: it is
+ * accepted as a trailing `( ... )` and nothing more (the ruling's ⛔ on parsing
+ * constructor arguments and object literals). Anything else -- an import statement,
+ * a literal, a deeper path, a type argument -- is not canonical.
+ *
+ * @param {string} text the operand, backticks already stripped
+ * @returns {string|null}
+ */
+export function canonicalFromOperand(text) {
+  const m = /^(?:new\s+)?([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?)\s*(?:\([\s\S]*\))?\s*;?$/.exec(text.trim());
+  if (!m || m[1] === 'new') return null;
+  return m[1];
+}
+
+const stripTicks = (s) => s.replace(/^`|`$/g, '');
+/** An inline code span on one line. */
+const CODE_SPAN_G = /`([^`\n]+)`/g;
+/** The convention's two words, as WORDS -- `FROMAGE` and `TOP` are not tokens. */
+const CONVENTION_TOKEN_G = /(?<![A-Za-z0-9_$])(FROM|TO)(?![A-Za-z0-9_$])/g;
+/** The gap of the bare placeholder: arrows, emphasis and punctuation, no words. */
+const PLACEHOLDER_GAP_RE = /^[\s*_()[\]:：,.;|>→—-]*$/;
+/** Text left of a FROM token that OPENS a segment: list/quote/emphasis markup or a sentence boundary. */
+const OPENS_SEGMENT_RE = /^(?:\s*(?:[-*+>]|\d+[.)])\s+)*\s*(?:\*\*|__|\*|_)?\s*$|[.:;。：](?:\*\*|__|\*|_)?\s*$/;
+const ARROW_G = new RegExp(ARROW, 'g');
+const LEFT_OPERAND_RE = new RegExp(`(${OPERAND})\\s*$`);
+const RIGHT_OF_ARROW_RE = new RegExp(`^\\s*(?:${OPERAND}|${REMOVAL_INSTRUCTION})`);
+const OPERAND_G = new RegExp(OPERAND, 'g');
+/** The FROM column of a mapping table: `FROM`, or one of `OLD_COLUMN_RE`'s words. */
+const FROM_COLUMN_RE = /^\**\s*FROM\b/;
+const TO_COLUMN_RE = /^\**\s*TO\b/;
+
+/** The index of a mapping table's FROM column, read off its header row, or -1. */
+function fromColumnOf(headerRow) {
+  const cells = tableCells(headerRow).map((c) => c.trim());
+  const at = cells.findIndex((c) => FROM_COLUMN_RE.test(c) || OLD_COLUMN_RE.test(c));
+  if (at < 0) return -1;
+  return cells.slice(at + 1).some((c) => TO_COLUMN_RE.test(c) || NEW_COLUMN_RE.test(c)) ? at : -1;
+}
+
+/** A line with the convention's words lowercased and its arrows gone: nothing left for the detector. */
+const neutraliseLine = (line) => line.replace(ARROW_G, '~').replace(CONVENTION_TOKEN_G, (t) => t.toLowerCase());
+
+/**
+ * Every FROM side the body writes, every rewrite shape it writes that this reader
+ * does NOT read, and what the detector still finds once the read lines are gone.
+ *
+ * The FROM sides come from three shapes, read wherever they stand:
+ *
+ *   - a `FROM ... TO ...` segment on one line: every code span between the two
+ *     words is an operand (the worked example's spelling). The bare placeholder --
+ *     `FROM -> TO`, nothing but markup between the words -- carries no operand and
+ *     is left to the detector, which reads it as a label or a mention exactly as it
+ *     always has. A segment that OPENS its line or sentence but spans no code at all
+ *     is a prescription naming nothing, and is reported;
+ *   - an arrow rewrite or removal -- precisely `REWRITE_RE` / `RETIREMENT_RE`'s
+ *     shape -- whose FROM side is the operand left of the arrow;
+ *   - a mapping table whose header names a FROM column (`FROM`, or the
+ *     `OLD_COLUMN_RE` words) followed by a TO one: each data row's FROM cell.
+ *
+ * A VERTICAL FROM / TO pair -- the two words opening consecutive blocks -- is not
+ * read: its FROM side can span a fenced block, and reading code lines as operands
+ * is a parser this category does not need. It is reported, never skipped.
+ *
+ * @param {string} body
+ * @returns {{ sides: {text: string, operand: string, spelling: string|null}[],
+ *             unread: {shape: string, text: string}[],
+ *             residual: {branch: string, line: string}|null }}
+ */
+export function readFromBlock(body) {
+  const lines = body.split(/\r?\n/);
+  const copy = [...lines];
+  const sides = [];
+  const unread = [];
+  const verticalFrom = [];
+  let inTable = false;
+  let fromCol = -1;
+  let prev = '';
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    let read = false;
+    if (TABLE_DELIM_RE.test(line)) {
+      inTable = true;
+      fromCol = TABLE_ROW_RE.test(prev) ? fromColumnOf(prev) : -1;
+      if (fromCol >= 0) copy[i - 1] = neutraliseLine(lines[i - 1]);
+      prev = line;
+      continue;
+    }
+    const isRow = TABLE_ROW_RE.test(line);
+    if (!isRow) { inTable = false; fromCol = -1; }
+    if (isRow && inTable && fromCol >= 0) {
+      const cells = tableCells(line);
+      const operands = [...(cells[fromCol] ?? '').matchAll(OPERAND_G)].map((m) => m[0]);
+      if (operands.length === 0) unread.push({ shape: 'a FROM cell naming no operand', text: line.trim() });
+      for (const o of operands) sides.push({ text: line.trim(), operand: o, spelling: canonicalFromOperand(stripTicks(o)) });
+      copy[i] = `|${cells.map(() => ' - ').join('|')}|`;
+      prev = line;
+      continue;
+    }
+    if (!isRow) {
+      const spans = [...line.matchAll(CODE_SPAN_G)].map((m) => ({ from: m.index, to: m.index + m[0].length, text: m[1] }));
+      const tokens = [...line.matchAll(CONVENTION_TOKEN_G)]
+        .filter((m) => !spans.some((s) => m.index >= s.from && m.index < s.to))
+        .map((m) => ({ tok: m[1], at: m.index, end: m.index + m[1].length }));
+      let segment = false;
+      for (let k = 0; k < tokens.length; k++) {
+        const next = tokens[k + 1];
+        if (tokens[k].tok !== 'FROM' || next?.tok !== 'TO') continue;
+        segment = true;
+        const inGap = spans.filter((s) => s.from >= tokens[k].end && s.to <= next.at);
+        if (inGap.length === 0) {
+          if (PLACEHOLDER_GAP_RE.test(line.slice(tokens[k].end, next.at))) continue;
+          if (OPENS_SEGMENT_RE.test(line.slice(0, tokens[k].at))) {
+            unread.push({ shape: 'a `FROM ... TO ...` line naming no operand', text: line.trim() });
+          }
+          continue;
+        }
+        read = true;
+        for (const s of inGap) sides.push({ text: line.trim(), operand: `\`${s.text}\``, spelling: canonicalFromOperand(s.text) });
+      }
+      if (!segment && VERTICAL_FROM_RE.test(line)) verticalFrom.push(i);
+    }
+    for (const m of line.matchAll(ARROW_G)) {
+      const left = LEFT_OPERAND_RE.exec(line.slice(0, m.index));
+      if (!left || !RIGHT_OF_ARROW_RE.test(line.slice(m.index + m[0].length))) continue;
+      read = true;
+      sides.push({ text: line.trim(), operand: left[1], spelling: canonicalFromOperand(stripTicks(left[1])) });
+    }
+    if (read) copy[i] = neutraliseLine(line);
+    prev = line;
+  }
+  for (const i of verticalFrom) {
+    if (lines.slice(i + 1).some((l) => VERTICAL_TO_RE.test(l))) {
+      unread.push({ shape: 'a vertical FROM / TO pair', text: lines[i].trim() });
+    }
+  }
+
+  // What the detector still reads once every line above is neutralised. A
+  // placeholder LABEL may stand above the block it introduces, so a label hit is
+  // let through -- but only when the block exists and NOTHING concrete is left
+  // anywhere in the body: branch 1 judges the whole body, and so does this.
+  let residual = null;
+  for (let guard = 0; guard <= copy.length && residual === null; guard++) {
+    const hit = findMigrationPrescription(copy.join('\n'));
+    if (!hit) break;
+    const at = copy.findIndex((l) => l.trim() === hit.line);
+    if (hit.branch !== 'from-to-label' || at < 0) { residual = hit; break; }
+    const concrete = firstConcreteRewrite(copy.join('\n'));
+    if (sides.length === 0) residual = hit;
+    else if (concrete) residual = { branch: `${hit.branch} over ${concrete.shape}`, line: concrete.line };
+    else copy[at] = neutraliseLine(copy[at]);
+  }
+  return { sides, unread, residual };
+}
+
+/**
+ * The compiler kit predicate 1 reads exports with -- `typescript`, the checked
+ * doors of `scripts/ts-parse.mjs` and `resolveTypesEntry` -- or null until loaded.
+ *
+ * LAZY, deliberately: `scan()` is synchronous and runs on every pull request, and
+ * almost none of them names this category, so the import is paid only by a run
+ * that needs it (`loadExportReader`, awaited by the entry point when a scan reports
+ * `needsExportReader`, and by `--self-test`). A run that reaches the category
+ * without it is a RED naming the loader, never a pass.
+ */
+let exportReaderKit = null;
+
+/**
+ * Load the kit once per process. `typescript` goes through `import-prerequisite.mjs`,
+ * so an uninstalled tree says so instead of dying on a link error.
+ */
+export async function loadExportReader() {
+  if (exportReaderKit) return exportReaderKit;
+  const { requireDefaultExport } = await import('./import-prerequisite.mjs');
+  const ts = await requireDefaultExport('typescript', () => import('typescript'), import.meta.url, {
+    measures: 'whether each export a `runtime-export-retired` marker names really left the package\'s published entry',
+  });
+  const { createProgramChecked, parseSourceFile } = await import('./ts-parse.mjs');
+  const { resolveTypesEntry } = await import('./check-published-readme-exports.mjs');
+  exportReaderKit = { ts, createProgramChecked, parseSourceFile, resolveTypesEntry, libFiles: new Map() };
+  return exportReaderKit;
+}
+
+/** tsup's declaration entry, and the `.d.mts` / `.d.cts` twins it writes beside it. */
+const TSUP_DTS_ENTRY_RE = /^dist\/index\.d\.[cm]?ts$/;
+/** Where a rev's blobs live inside the compiler's file system. Never a real path. */
+const VIRTUAL_ROOT = '/__adr0087__/';
+const TS_SOURCE_RE = /\.(?:d\.)?[cm]?tsx?$/;
+
+/**
+ * The repo-relative SOURCE entry of a workspace package at a rev, or a refusal.
+ *
+ * Only the mapping the ruling names: the package's `exports` map, read by
+ * `resolveTypesEntry`, lands on tsup's `dist/index.d.ts` (or its twin), which tsup
+ * generates from `src/index.ts`. Anything else -- no types entry, another file
+ * name, no `src/index.ts` -- is refused by name rather than guessed.
+ */
+function sourceEntryAt(rev, cwd, pkgName, pkgs, kit) {
+  const info = pkgs.get(pkgName);
+  if (!info) return { refusal: `no workspace manifest at ${rev.slice(0, 12)} is named \`${pkgName}\`` };
+  if (info.private) {
+    return {
+      refusal: `\`${pkgName}\` is PRIVATE (\`private: true\` in ${info.file}): it has no published entry to retire an\n` +
+        '      export from. The disposition that says so is `not-required (unpublished)`',
+    };
+  }
+  let manifest;
+  try { manifest = JSON.parse(showOrNull(rev, info.file, cwd) ?? ''); } catch { return { refusal: `${info.file} does not parse at ${rev.slice(0, 12)}` }; }
+  const declared = kit.resolveTypesEntry(manifest, '.').entry?.replace(/^\.\//, '') ?? null;
+  const dir = info.file.slice(0, -'package.json'.length);
+  const entry = `${dir}src/index.ts`;
+  if (declared === null || !TSUP_DTS_ENTRY_RE.test(declared) || showOrNull(rev, entry, cwd) === null) {
+    return {
+      refusal: `the published entry of \`${pkgName}\` cannot be mapped to its source at ${rev.slice(0, 12)}: its \`exports\` map\n` +
+        `      names ${declared === null ? 'no types entry' : `\`${declared}\``}, and the only mapping this gate reads is tsup's\n` +
+        `      \`dist/index.d.ts\` (or its \`.d.mts\` / \`.d.cts\` twin) -> \`src/index.ts\`` +
+        (declared !== null && TSUP_DTS_ENTRY_RE.test(declared) ? `, whose source ${entry} does not exist there` : '') + '.\n' +
+        '      An entry this gate cannot map is refused, never guessed',
+    };
+  }
+  return { entry, dir };
+}
+
+/**
+ * What a package's published entry exports at a rev, read by the compiler.
+ *
+ * A Program is built over the package's source entry with a CompilerHost that
+ * serves the rev's BLOBS (never the working tree), so the base and HEAD readings
+ * are each a pure function of their rev. Relative imports resolve inside the
+ * rev; a re-export (`export ... from`) of another workspace package's ROOT entry
+ * resolves through the same mapping, so a cross-package `export *` is followed; any
+ * other bare import is left unresolved, which costs nothing for the question asked
+ * -- an unresolved `export *` is recorded instead, because a name could hide
+ * behind it.
+ *
+ * @returns {{ refusal: string } | { pkg: string, entry: string, names: Map<string, object>,
+ *            unresolvedStars: {file: string, specifier: string}[], checker: object, entryFile: object,
+ *            fromVirtual: (f: string) => string|null }}
+ */
+function readExportSurface(rev, cwd, pkgName, pkgs, kit) {
+  const mapped = sourceEntryAt(rev, cwd, pkgName, pkgs, kit);
+  if (mapped.refusal) return mapped;
+  const { ts } = kit;
+  const texts = new Map();
+  const loaded = new Set();
+  const loadDir = (dir) => {
+    if (loaded.has(dir)) return;
+    loaded.add(dir);
+    let listed = '';
+    try { listed = git(['ls-tree', '-r', '--name-only', rev, '--', dir], cwd); } catch { return; }
+    const paths = listed.split('\n').map((s) => s.trim()).filter((p) => TS_SOURCE_RE.test(p) && !p.includes('node_modules/'));
+    for (const [p, t] of showManyOrNull(rev, paths, cwd)) texts.set(p, t);
+  };
+  loadDir(mapped.dir);
+  const toVirtual = (p) => VIRTUAL_ROOT + p;
+  const fromVirtual = (f) => (f.startsWith(VIRTUAL_ROOT) ? f.slice(VIRTUAL_ROOT.length) : null);
+  const options = {
+    noEmit: true, skipLibCheck: true, types: [], lib: ['lib.es2022.d.ts'],
+    target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler,
+  };
+  const real = ts.createCompilerHost(options, true);
+  const extensionOf = (p) => (p.endsWith('.d.ts') ? ts.Extension.Dts : p.endsWith('.tsx') ? ts.Extension.Tsx : ts.Extension.Ts);
+  const found = (p) => ({ resolvedModule: { resolvedFileName: toVirtual(p), extension: extensionOf(p), isExternalLibraryImport: false } });
+  const resolveIn = (target) => {
+    const stem = target.replace(/\.(?:[cm]?js|jsx)$/, '');
+    const candidates = [`${stem}.ts`, `${stem}.tsx`, `${stem}.d.ts`, `${stem}/index.ts`, `${stem}/index.tsx`];
+    for (const c of candidates) {
+      if (texts.has(c)) return c;
+      if (![...loaded].some((d) => c.startsWith(d))) {
+        const t = showOrNull(rev, c, cwd);
+        if (t !== null) { texts.set(c, t); return c; }
+      }
+    }
+    return null;
+  };
+  const host = {
+    ...real,
+    getCurrentDirectory: () => '/',
+    writeFile: () => {},
+    fileExists: (f) => (fromVirtual(f) === null ? real.fileExists(f) : texts.has(fromVirtual(f))),
+    readFile: (f) => (fromVirtual(f) === null ? real.readFile(f) : texts.get(fromVirtual(f))),
+    getSourceFile: (f, version, onError, create) => {
+      const rel = fromVirtual(f);
+      if (rel === null) {
+        // A lib file: one parse per process, shared by every Program after it.
+        if (!kit.libFiles.has(f)) kit.libFiles.set(f, real.getSourceFile(f, version, onError, create));
+        return kit.libFiles.get(f);
+      }
+      return texts.has(rel) ? kit.parseSourceFile(f, texts.get(rel)) : undefined;
+    },
+    resolveModuleNameLiterals: (literals, containingFile) => literals.map((lit) => {
+      const from = fromVirtual(containingFile);
+      const spec = lit.text;
+      if (from === null) return { resolvedModule: undefined };
+      if (spec.startsWith('.')) {
+        const hit = resolveIn(posix.normalize(posix.join(posix.dirname(from), spec)));
+        return hit ? found(hit) : { resolvedModule: undefined };
+      }
+      // Another workspace package, ONLY where this file RE-EXPORTS it: that is the
+      // one place its names become this entry's names.
+      if (!lit.parent || !ts.isExportDeclaration(lit.parent)) return { resolvedModule: undefined };
+      const other = sourceEntryAt(rev, cwd, spec, pkgs, kit);
+      if (other.refusal) return { resolvedModule: undefined };
+      loadDir(other.dir);
+      return texts.has(other.entry) ? found(other.entry) : { resolvedModule: undefined };
+    }),
+  };
+  const program = kit.createProgramChecked([toVirtual(mapped.entry)], options, host);
+  const checker = program.getTypeChecker();
+  const entryFile = program.getSourceFile(toVirtual(mapped.entry));
+  const moduleSymbol = entryFile ? checker.getSymbolAtLocation(entryFile) : undefined;
+  const names = new Map((moduleSymbol ? checker.getExportsOfModule(moduleSymbol) : []).map((s) => [s.name, s]));
+  const unresolvedStars = [];
+  const walked = new Set();
+  const walk = (sf) => {
+    if (!sf || walked.has(sf.fileName)) return;
+    walked.add(sf.fileName);
+    for (const st of sf.statements) {
+      if (!ts.isExportDeclaration(st) || !st.moduleSpecifier || st.exportClause) continue;
+      const target = checker.getSymbolAtLocation(st.moduleSpecifier)?.declarations?.find((d) => ts.isSourceFile(d));
+      if (target) walk(target);
+      else unresolvedStars.push({ file: fromVirtual(sf.fileName) ?? sf.fileName, specifier: st.moduleSpecifier.text });
+    }
+  };
+  walk(entryFile);
+  return { pkg: pkgName, entry: mapped.entry, names, unresolvedStars, checker, entryFile, fromVirtual };
+}
+
+/** The symbol an export resolves to, through every re-export alias. */
+function resolvedExport(surface, name, ts) {
+  const s = surface.names.get(name);
+  if (!s) return null;
+  return s.flags & ts.SymbolFlags.Alias ? surface.checker.getAliasedSymbol(s) : s;
+}
+
+/** The repo-relative files declaring a symbol -- empty when it does not resolve. */
+const declarationFiles = (surface, symbol) =>
+  [...new Set((symbol?.declarations ?? []).map((d) => surface.fromVirtual(d.getSourceFile().fileName)).filter(Boolean))];
+
+/**
+ * The members of an exported type at one rev, or why they cannot be read.
+ *
+ * `unresolved` lists what the type's MEMBER SET depends on and the reader could not
+ * resolve -- an `extends` from another package, an intersection with an imported
+ * type. A member's own annotation is skipped: it decides the member's type, never
+ * whether the member exists. At HEAD a non-empty list means absence cannot be
+ * proven, because the member may have moved into what the reader cannot see.
+ */
+function membersOf(surface, typeName, ts) {
+  const symbol = resolvedExport(surface, typeName, ts);
+  if (!symbol) return { state: 'not-exported' };
+  if (!symbol.declarations?.length) return { state: 'unreadable', why: 'it is re-exported from a module this reader does not follow' };
+  const { checker } = surface;
+  const type = symbol.flags & (ts.SymbolFlags.Class | ts.SymbolFlags.Interface | ts.SymbolFlags.TypeAlias)
+    ? checker.getDeclaredTypeOfSymbol(symbol)
+    : checker.getTypeOfSymbolAtLocation(symbol, surface.entryFile);
+  if (type.flags & ts.TypeFlags.Any) return { state: 'unreadable', why: 'it resolves to `any`' };
+  const unresolved = [];
+  const visit = (node) => {
+    if (ts.isTypeElement(node) || ts.isClassElement(node) || ts.isTypeParameterDeclaration(node) || ts.isFunctionLike(node)) return;
+    if (ts.isHeritageClause(node) && node.token === ts.SyntaxKind.ImplementsKeyword) return;
+    const name = ts.isTypeReferenceNode(node) ? node.typeName
+      : ts.isExpressionWithTypeArguments(node) ? node.expression
+        : ts.isTypeQueryNode(node) ? node.exprName : null;
+    if (name) {
+      const s = checker.getSymbolAtLocation(name);
+      const target = s && (s.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(s) : s);
+      if (!target?.declarations?.length) unresolved.push(name.getText());
+    }
+    ts.forEachChild(node, visit);
+  };
+  for (const d of symbol.declarations) ts.forEachChild(d, visit);
+  const props = new Map(checker.getPropertiesOfType(type).map((p) => [p.name, p]));
+  return { state: 'ok', symbol, props, unresolved: [...new Set(unresolved)] };
+}
+
+/** What predicate 3 reads, said once for every message that refuses on it. */
+const FROM_BLOCK_READS =
+  '      This category reads the FROM side of a `FROM ... TO ...` line, of an arrow `X -> Y` (or\n' +
+  '      `X -> delete it`), and of the FROM column of a `| FROM | TO |` / `| Wrote | Write instead |`\n' +
+  '      table. Every FROM operand must be a named operand, spelled as the marker spells it, and\n' +
+  '      every named operand must have a FROM side; what the detector still reads after that is\n' +
+  '      the `no-migration-prescription` refusal, inherited (ADR-0087, the seventh category).';
+
+/**
+ * Verify one `runtime-export-retired` claim: the three predicates, all three, by
+ * name, every failure reported (the `verifyTypeSurfaceOnly` discipline).
+ *
+ * @param {string[]} refs the `<package>#<Export>` / `<package>#<Type>.<member>` operands
+ * @param {{ base: string, head: string, cwd: string, body: string,
+ *           packagesAt: (rev: string) => Map<string, {private: boolean, file: string}>,
+ *           kit?: object }} ctx `kit` defaults to the loaded `exportReaderKit`
+ * @returns {{ problems: string[], verified: {ref: string, kind: string, declared: string}[], checked: string[] }}
+ */
+export function verifyRuntimeExportRetired(refs, { base, head, cwd, body, packagesAt, kit = exportReaderKit }) {
+  const problems = [];
+  const verified = [];
+  const checked = [];
+  const P = (name) => { checked.push(name); return name; };
+  const HOW =
+    '      fix: name each retired operand by the package that published it, e.g.\n' +
+    '        <!-- adr-0087: not-required (runtime-export-retired @objectstack/plugin-email#mapTemplateToRow,\n' +
+    '             @objectstack/plugin-email#EmailServicePluginOptions.seedTemplates) why -->';
+  if (!kit) throw new Error('verifyRuntimeExportRetired: the export reader is not loaded -- await loadExportReader() first');
+  const { ts } = kit;
+
+  if (refs.length === 0) {
+    problems.push(
+      '`not-required (runtime-export-retired)` names no operand.\n' +
+      '      The whole content of this exemption is WHICH exports retired, and every predicate is a\n' +
+      '      statement about a named one. An unnamed claim asserts nothing checkable (#4690).\n' + HOW,
+    );
+    return { problems, verified, checked };
+  }
+  const operands = [];
+  for (const ref of refs) {
+    const parsed = parseExportOperand(ref);
+    if (parsed.refusal) problems.push(`\`runtime-export-retired\` operand "${ref}" ${parsed.refusal}.\n${HOW}`);
+    else operands.push({ ref, ...parsed });
+  }
+  if (operands.length === 0) return { problems, verified, checked };
+
+  // ---- predicate 1: retired from the published entry --------------------------
+  P('retired-from-entry');
+  const read = new Map();
+  const surfaceAt = (rev, pkg) => {
+    const key = `${rev} ${pkg}`;
+    if (!read.has(key)) read.set(key, readExportSurface(rev, cwd, pkg, packagesAt(rev), kit));
+    return read.get(key);
+  };
+  const tag = (op) => `\`runtime-export-retired ${op.ref}\` [predicate 1: retired-from-entry]`;
+  const starNote = (surface) => surface.unresolvedStars.length === 0 ? '' :
+    `\n      Its entry re-exports ${surface.unresolvedStars.map((s) => `\`export * from '${s.specifier}'\` (${s.file})`).join(', ')},\n` +
+    '      which this reader cannot follow -- a name could sit behind it.';
+  const retired = [];
+  for (const op of operands) {
+    const at = surfaceAt(base, op.pkg);
+    if (at.refusal) { problems.push(`${tag(op)} cannot be read at the merge base:\n      ${at.refusal}.`); continue; }
+    const now = surfaceAt(head, op.pkg);
+    if (now.refusal) { problems.push(`${tag(op)} cannot be read at HEAD:\n      ${now.refusal}.`); continue; }
+    if (op.member === null) {
+      if (!at.names.has(op.exportName)) {
+        problems.push(
+          `${tag(op)} is false: \`${op.exportName}\` is not exported by ${at.entry} at the merge base, so\n` +
+          `      nothing named that was published to retire.${starNote(at)}`,
+        );
+        continue;
+      }
+      if (now.unresolvedStars.length > 0) {
+        problems.push(`${tag(op)} cannot be proven: absence at HEAD is a claim about every name the entry exports.${starNote(now)}`);
+        continue;
+      }
+      if (now.names.has(op.exportName)) {
+        problems.push(
+          `${tag(op)} is false: \`${op.exportName}\` is STILL exported by ${now.entry} at HEAD.\n` +
+          '      A name that is still published retired nothing; the compiler has no break to deliver.',
+        );
+        continue;
+      }
+      retired.push({ op, at, symbol: resolvedExport(at, op.exportName, ts), member: null });
+      continue;
+    }
+    const before = membersOf(at, op.exportName, ts);
+    if (before.state !== 'ok') {
+      problems.push(before.state === 'not-exported'
+        ? `${tag(op)} is false: the type \`${op.exportName}\` is not exported by ${at.entry} at the merge base.${starNote(at)}`
+        : `${tag(op)} cannot read the members of \`${op.exportName}\` at the merge base: ${before.why}.`);
+      continue;
+    }
+    if (!before.props.has(op.member)) {
+      problems.push(
+        `${tag(op)} is false: \`${op.exportName}\` has no member \`${op.member}\` at the merge base.` +
+        (before.unresolved.length ? `\n      Its shape there depends on ${before.unresolved.map((n) => `\`${n}\``).join(', ')}, which this reader does not resolve.` : ''),
+      );
+      continue;
+    }
+    const after = membersOf(now, op.exportName, ts);
+    if (after.state === 'not-exported') {
+      problems.push(
+        `${tag(op)}: the type \`${op.exportName}\` itself is no longer exported at HEAD. A retired TYPE is\n` +
+        `      named as an export (\`${op.pkg}#${op.exportName}\`), not through one of its members.`,
+      );
+      continue;
+    }
+    if (after.state !== 'ok') { problems.push(`${tag(op)} cannot read the members of \`${op.exportName}\` at HEAD: ${after.why}.`); continue; }
+    if (after.unresolved.length > 0) {
+      problems.push(
+        `${tag(op)} cannot be proven: at HEAD the members of \`${op.exportName}\` depend on\n` +
+        `      ${after.unresolved.map((n) => `\`${n}\``).join(', ')}, which this reader does not resolve -- \`${op.member}\` could have moved there.`,
+      );
+      continue;
+    }
+    if (after.props.has(op.member)) {
+      problems.push(`${tag(op)} is false: \`${op.exportName}\` still has a member \`${op.member}\` at HEAD.`);
+      continue;
+    }
+    retired.push({ op, at, symbol: before.symbol, member: before.props.get(op.member) });
+  }
+
+  // ---- predicate 2: no metadata surface, read at the merge base ----------------
+  P('no-metadata-surface');
+  let metadataTexts = null;
+  const surfacePaths = retired.length > 0 ? metadataSurfaceFilesAt(base, cwd) : [];
+  if (retired.length > 0 && surfacePaths.length === 0) {
+    problems.push(
+      '`not-required (runtime-export-retired)` [predicate 2: no-metadata-surface] cannot be verified: NO\n' +
+      `      metadata-surface file (\`*.zod.ts\`, \`${SPEC_CONTRACTS_DIR}**\`, object definitions) exists at the merge\n` +
+      '      base, so the scan that would refuse this claim has nothing to read (#4690).',
+    );
+  }
+  for (const { op, at, symbol, member } of surfacePaths.length > 0 ? retired : []) {
+    const t = `\`runtime-export-retired ${op.ref}\` [predicate 2: no-metadata-surface]`;
+    const files = declarationFiles(at, symbol);
+    if (files.length === 0) {
+      problems.push(`${t} cannot be verified: the declaration of \`${op.exportName}\` cannot be located at the merge base.`);
+      continue;
+    }
+    const site = [...files, ...declarationFiles(at, member)].find((f) => metadataSurfaceKind(f) !== null);
+    if (site) {
+      problems.push(
+        `${t} is false: \`${op.spelling}\` is declared in ${site} (${metadataSurfaceKind(site)}).\n` +
+        '      A metadata surface is what `objectstack migrate meta` reaches, so the ledger IS a channel here.\n' +
+        '      fix: register the migration.',
+      );
+      continue;
+    }
+    const projection = (symbol.declarations ?? []).find((d) => ts.isTypeAliasDeclaration(d) && ZOD_PROJECTION_RE.test(d.type.getText()));
+    if (projection) {
+      problems.push(
+        `${t} is false: \`${op.exportName}\` is a projection of a Zod schema (${projection.type.getText().slice(0, 90)}).\n` +
+        '      Under Prime Directive #1 that is the house spelling of "this type IS metadata".',
+      );
+      continue;
+    }
+    metadataTexts ??= showManyOrNull(base, surfacePaths, cwd);
+    const hit = metadataSurfaceReference(op.exportName, files[0], metadataTexts, () => packagesAt(base));
+    if (hit) {
+      problems.push(
+        `${t} is false: ${hit.hitPath} (${metadataSurfaceKind(hit.hitPath)}) ` +
+        (hit.kind === 'import'
+          ? `IMPORTS \`${op.exportName}\` from the module that declares it.`
+          : `mentions \`${op.exportName}\` IN CODE while neither declaring nor importing it:\n        ${hit.line.slice(0, 140)}`) +
+        '\n      An export a metadata surface reaches HAS a metadata surface (comment spans are already excluded).',
+      );
+      continue;
+    }
+    verified.push({ ref: op.ref, kind: op.member === null ? 'export' : 'member', declared: files[0] });
+  }
+
+  // ---- predicate 3: the FROM -> TO block names exactly the named operands ------
+  P('from-operands-named');
+  const t3 = '`not-required (runtime-export-retired)` [predicate 3: from-operands-named]';
+  const named = new Set(operands.map((o) => o.spelling));
+  const block = readFromBlock(body);
+  for (const u of block.unread) {
+    problems.push(`${t3}: the body carries ${u.shape}, which this category does not read:\n        ${u.text.slice(0, 160)}\n${FROM_BLOCK_READS}`);
+  }
+  const seen = new Set();
+  const reported = new Set();
+  for (const side of block.sides) {
+    if (side.spelling === null) {
+      if (reported.has(side.operand)) continue;
+      reported.add(side.operand);
+      problems.push(
+        `${t3}: the FROM operand ${side.operand} is not a canonical operand:\n        ${side.text.slice(0, 160)}\n` +
+        '      An export is spelled by its name -- a call `name(...)` or `new Name(...)` reads as that name --\n' +
+        '      and a member as `<Type>.<member>`. Nothing inside an argument list or an object literal is\n' +
+        '      read (the ruling\'s ⛔ on parsing constructor arguments).',
+      );
+      continue;
+    }
+    seen.add(side.spelling);
+    if (named.has(side.spelling) || reported.has(side.spelling)) continue;
+    reported.add(side.spelling);
+    problems.push(
+      `${t3}: the FROM operand ${side.operand} names \`${side.spelling}\`, which the marker does not name -- out of range:\n` +
+      `        ${side.text.slice(0, 160)}\n` +
+      '      A prescription for anything but the named operands keeps the `no-migration-prescription` refusal.\n' +
+      '      A retired MEMBER is named `<Type>.<member>` in the marker and written the same way on the FROM side.',
+    );
+  }
+  for (const op of operands) {
+    if (seen.has(op.spelling)) continue;
+    problems.push(
+      `${t3}: the named operand \`${op.ref}\` has no FROM side in the body. The block must name EXACTLY the\n` +
+      `      named operands: write the one-line fix a consumer needs, a line such as\n` +
+      `        - FROM \`${op.spelling}\` TO <what to write instead>\n${FROM_BLOCK_READS}`,
+    );
+  }
+  if (block.residual) {
+    problems.push(
+      `${t3}: once the named FROM sides are set aside, the body still carries a migration prescription\n` +
+      `      (${block.residual.branch}):\n        ${block.residual.line.slice(0, 160)}\n${FROM_BLOCK_READS}`,
+    );
+  }
+
+  return { problems, verified, checked };
+}
 
 const FIXIT = (ids) =>
   [
@@ -3971,6 +4725,7 @@ const FIXIT = (ids) =>
     '        <!-- adr-0087: not-required (no-migration-prescription) why -->',
     '        <!-- adr-0087: not-required (runtime-interface-only path/to/file.ts#Symbol) why -->',
     '        <!-- adr-0087: not-required (type-surface-only path/to/file.ts#Symbol) why -->',
+    '        <!-- adr-0087: not-required (runtime-export-retired @scope/package#Export) why -->',
     '',
     '      Each category is described in ADR-0087, addendum of 2026-08-13.',
   ].join('\n');
@@ -3999,6 +4754,18 @@ export function scan({ cwd, base, head = 'HEAD' }) {
   // such claim.
   let pkgsCache = null;
   const packages = () => (pkgsCache ??= workspacePackagesAt(head, cwd));
+  // `runtime-export-retired` reads manifests at BOTH revs (#22918); keyed by rev,
+  // and the HEAD entry is the same map `packages()` reads.
+  const pkgsByRev = new Map();
+  const packagesAt = (rev) => {
+    if (rev === head) return packages();
+    if (!pkgsByRev.has(rev)) pkgsByRev.set(rev, workspacePackagesAt(rev, cwd));
+    return pkgsByRev.get(rev);
+  };
+  // Set when a marker names `runtime-export-retired` in a process that has not
+  // loaded the compiler kit; the entry point loads it and scans again (see
+  // `exportReaderKit`). Never a pass: the changeset is reported as a problem too.
+  let needsExportReader = false;
   // Same lazy posture, and for the same reason: only a `type-surface-only` claim
   // needs the diff's file list. A sentinel rather than `??=`, because
   // `changedPathsBetween` returns null on a failed read and `??=` would re-run it
@@ -4215,7 +4982,15 @@ export function scan({ cwd, base, head = 'HEAD' }) {
     // (the base-side type reading), never by this line. Predicates 1-3 were measured
     // NOT to separate #6048 from #12104. Read that function's header before widening
     // this condition to a second category.
-    const prescription = d.category === 'type-surface-only' ? null : findMigrationPrescription(parsed.body);
+    //
+    // `runtime-export-retired` (#22918) is NOT exempt, and is not dispatched here
+    // only because it inherits the refusal more finely: predicate 3 of
+    // `verifyRuntimeExportRetired` runs this same detector over the body with ONLY
+    // the FROM sides it verified set aside, so what is refused here is refused
+    // there, minus exactly the lines naming operands predicates 1-2 proved retired.
+    const prescription = d.category === 'type-surface-only' || d.category === 'runtime-export-retired'
+      ? null
+      : findMigrationPrescription(parsed.body);
     if (prescription) {
       push(
         `\`not-required (${d.category})\` contradicts the changeset's own body, which carries\n` +
@@ -4237,7 +5012,12 @@ export function scan({ cwd, base, head = 'HEAD' }) {
         '        <!-- adr-0087: not-required (type-surface-only path/to/file.ts#Symbol) why -->\n' +
         '      ⛔ Do NOT reach for it by dropping the `**BREAKING**` token instead. That was the only\n' +
         '      move this gate used to leave open and four changesets took it; it is what #13080 was\n' +
-        '      filed to stop.',
+        '      filed to stop.\n' +
+        '      And if the prescription rewrites only EXPORTS (or members of an exported type) that a\n' +
+        '      published package RETIRED -- each one reachable from its entry at the merge base, gone at\n' +
+        '      HEAD, no metadata surface -- the compiler delivers it too, and the operands are checked\n' +
+        '      (#22918):\n' +
+        '        <!-- adr-0087: not-required (runtime-export-retired @scope/package#Export) why -->',
       );
       continue;
     }
@@ -4251,6 +5031,30 @@ export function scan({ cwd, base, head = 'HEAD' }) {
       judged.push({
         file, verdict: 'not-required', category: d.category, ids: d.ids, why: d.why, signals: decl.signals,
         detail: verified.map((v) => `${v.ref} (${v.kind})`).join(', '),
+      });
+      continue;
+    }
+
+    if (d.category === 'runtime-export-retired') {
+      if (!exportReaderKit) {
+        needsExportReader = true;
+        push(
+          '`not-required (runtime-export-retired)` cannot be judged in this process: its export reader (the\n' +
+          '      TypeScript compiler) is loaded on demand and was not. The entry point loads it and scans\n' +
+          '      again; a caller of `scan()` must `await loadExportReader()` first. Never a pass (#4690).',
+        );
+        continue;
+      }
+      const { problems: bad, verified } = verifyRuntimeExportRetired(d.ids, {
+        base: from, head, cwd, body: parsed.body, packagesAt,
+      });
+      if (bad.length > 0) {
+        for (const message of bad) push(message);
+        continue;
+      }
+      judged.push({
+        file, verdict: 'not-required', category: d.category, ids: d.ids, why: d.why, signals: decl.signals,
+        detail: verified.map((v) => `${v.ref} (${v.kind}, ${v.declared})`).join(', '),
       });
       continue;
     }
@@ -4273,7 +5077,7 @@ export function scan({ cwd, base, head = 'HEAD' }) {
     judged.push({ file, verdict: 'not-required', category: d.category, why: d.why, signals: decl.signals });
   }
 
-  return { problems, judged, skipped, base: from, ledgerAdded };
+  return { problems, judged, skipped, base: from, ledgerAdded, needsExportReader };
 }
 
 // ---------------------------------------------------------------------------
@@ -7605,6 +8409,10 @@ if (isEntrypoint(import.meta.url)) {
   };
 
   if (argv.includes('--self-test')) {
+    // The self-test drives `runtime-export-retired` through the shipping `scan()`,
+    // which reads exports with the compiler -- loaded here, once, as the gate's own
+    // entry point loads it (#22918).
+    await loadExportReader();
     if (selfTest() !== SELF_TEST_VERDICT) {
       console.error(
         '\n✗ check-adr-0087-registration self-test: selfTest() returned without reaching its verdict,\n'
@@ -7647,6 +8455,12 @@ if (isEntrypoint(import.meta.url)) {
     let result;
     try {
       result = scan({ cwd: REPO_ROOT, base, head });
+      // Only a PR whose changeset names `runtime-export-retired` pays for the
+      // compiler (#22918): load it, then judge the same diff again with it.
+      if (result.needsExportReader) {
+        await loadExportReader();
+        result = scan({ cwd: REPO_ROOT, base, head });
+      }
     } catch (e) {
       console.error(`⛔ check-adr-0087-registration: ${e.message}`);
       process.exit(1);
