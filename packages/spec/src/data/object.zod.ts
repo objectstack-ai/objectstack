@@ -1670,11 +1670,20 @@ function refuseForeignTreeReference(ownName: unknown, fields: unknown, ctx: z.Re
  *    save stores the authored body verbatim and a raw registration is never
  *    parsed, and both reach the registry without the parse's output.
  *
- * Absence is what `referenceCarrierOf` reads as absence — `undefined`, `null`
- * or `''` — so the carrier reader and this materialization agree on which
- * fields name nothing. A present value is returned untouched: a foreign one is
- * `refuseForeignTreeReference`'s to refuse, and a non-string one is the carrier
- * reader's to refuse loudly. The key lands at its `FieldSchema` shape position,
+ * Absence is the two spellings a contract admits for "names no target":
+ * `undefined` (what `FieldSchema`'s `.optional()` admits) and `null` (what the
+ * blueprint's `StrictField` admits). Every other value is returned untouched,
+ * so the two doors cannot disagree about it:
+ *
+ *  - `''` is NOT absence here. The parse refuses it on a `tree` as a foreign
+ *    target (`refuseForeignTreeReference` passes only an absent key or the own
+ *    name), so the registry leaves it as written rather than repairing,
+ *    unparsed, a value the contract refuses; the carrier reader then reads it
+ *    as naming nothing, exactly as before this helper existed;
+ *  - a foreign name is `refuseForeignTreeReference`'s to refuse, and a
+ *    non-string value is the carrier reader's to refuse loudly.
+ *
+ * The key lands at its `FieldSchema` shape position,
  * so a parsed referenceless `tree` is byte-identical to one that wrote its own
  * name, and a re-parse is a no-op.
  *
@@ -1691,7 +1700,7 @@ export function materializeTreeSelfReferences<F>(ownName: unknown, fields: F): F
   for (const [fieldName, def] of Object.entries(fields as Record<string, unknown>)) {
     if (def === null || typeof def !== 'object') continue;
     const { type, reference } = def as { type?: unknown; reference?: unknown };
-    if (type !== 'tree' || !(reference === undefined || reference === null || reference === '')) continue;
+    if (type !== 'tree' || !(reference === undefined || reference === null)) continue;
     stamped ??= { ...(fields as Record<string, unknown>) };
     stamped[fieldName] = withReferenceAtShapePosition(def as Record<string, unknown>, ownName);
   }

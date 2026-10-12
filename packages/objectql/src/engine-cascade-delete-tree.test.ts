@@ -48,7 +48,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { FieldSchema, ObjectSchema } from '@objectstack/spec/data';
+import { FieldSchema, ObjectSchema, referenceTargetOf } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 
 type Row = Record<string, unknown>;
@@ -492,6 +492,17 @@ describe('[#23065] a tree field that names no reference is a reference to its ow
     expect(namesOf(driver.rowsOf('zr_branch'))).toEqual(['a2', 'root']);
     expect(driver.committed).toHaveLength(1);
     expect(driver.rolledBack).toHaveLength(0);
+  });
+
+  it('an empty-string reference is not written over: it reaches the registry as written, and names nothing', async () => {
+    // The parse refuses `reference: ''` on a tree (`refuseForeignTreeReference`),
+    // so the registry, which never parses, must not repair it into a valid
+    // self-reference: the two doors give the shape one reading. The carrier
+    // reader then reads it as naming nothing, as it did before.
+    const { engine } = await makeEngine([treeObject('zr_empty', { type: 'tree', reference: '' })]);
+    const parent = (engine.registry.getObject('zr_empty') as any)?.fields?.parent;
+    expect(parent?.reference).toBe('');
+    expect(referenceTargetOf(parent)).toBeUndefined();
   });
 
   it('CONTROL: a tree that wrote its own name registers exactly as written', async () => {

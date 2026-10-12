@@ -221,31 +221,44 @@ describe('a referenceless `tree` is written as a self-reference by the doors tha
     expect(parsed.fields.f_text).not.toHaveProperty('reference');
   });
 
-  it('the helper: absence is the carrier reader\'s absence, a present value is untouched, nothing to write allocates nothing', () => {
+  it('the helper: absence is `undefined` or `null`, every other value is untouched, nothing to write allocates nothing', () => {
     const untouched = { name: { type: 'text' }, parent: { type: 'tree', reference: 'node' } };
     expect(materializeTreeSelfReferences('node', untouched)).toBe(untouched);
 
-    const absent = {
+    const fields = {
       a: { type: 'tree' },
       b: { type: 'tree', reference: null },
       c: { type: 'tree', reference: '' },
       d: { type: 'tree', reference: { object: 'node' } },
       e: { type: 'lookup' },
     };
-    const out = materializeTreeSelfReferences('node', absent) as Record<string, { reference?: unknown }>;
-    expect(out).not.toBe(absent);
-    expect([out.a.reference, out.b.reference, out.c.reference]).toEqual(['node', 'node', 'node']);
+    const out = materializeTreeSelfReferences('node', fields) as Record<string, { reference?: unknown }>;
+    expect(out).not.toBe(fields);
+    expect([out.a.reference, out.b.reference]).toEqual(['node', 'node']);
+    // `''` is not absence here: the parse refuses it on a tree (the pin below),
+    // so the helper leaves it as written instead of repairing it unparsed.
+    expect(out.c).toBe(fields.c);
     // A non-string carrier is the carrier reader's to refuse, loudly — never
     // overwritten here, where it would read as a valid self-reference.
-    expect(out.d.reference).toEqual({ object: 'node' });
-    expect(out.e).toBe(absent.e);
+    expect(out.d).toBe(fields.d);
+    expect(out.e).toBe(fields.e);
     // The input is not mutated.
-    expect(absent.a).toEqual({ type: 'tree' });
+    expect(fields.a).toEqual({ type: 'tree' });
+    // Only an empty string to look at: nothing is written, nothing allocated.
+    const onlyEmpty = { parent: { type: 'tree', reference: '' } };
+    expect(materializeTreeSelfReferences('node', onlyEmpty)).toBe(onlyEmpty);
 
     // No name, or no field map, is nothing to write against.
-    expect(materializeTreeSelfReferences(undefined, absent)).toBe(absent);
-    expect(materializeTreeSelfReferences('', absent)).toBe(absent);
+    expect(materializeTreeSelfReferences(undefined, fields)).toBe(fields);
+    expect(materializeTreeSelfReferences('', fields)).toBe(fields);
     const list = [{ name: 'parent', type: 'tree' }];
     expect(materializeTreeSelfReferences('node', list)).toBe(list);
+  });
+
+  it('`reference: \'\'` on a tree has one reading: the parse refuses it, and nothing writes over it', () => {
+    const parsed = ObjectSchema.safeParse(zoo(''));
+    expect(parsed.success).toBe(false);
+    if (parsed.success) return;
+    expect(parsed.error.issues.map((i) => i.path)).toEqual([['fields', 'f_tree', 'reference']]);
   });
 });

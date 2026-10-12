@@ -27,6 +27,17 @@
 //     through both of its doors, instead of excluding it as "names no target";
 //   - CONTROLS: a tree that writes its own name, a `lookup` and a
 //     `master_detail` answer exactly as they always did.
+//
+// And the other readers of the same target, at the record doors (measured on
+// `origin/main` `275ad4229a` before, on this stack after):
+//   - the write-time reference check: a parent id that names no record is
+//     refused `400` with `reference_not_found` (it was `201`, accepted) — the
+//     one refusal this change adds at a data door; CONTROL: an existing parent
+//     is accepted;
+//   - `expand=parent` resolves the parent record (it was `404`, "declares no
+//     target object");
+//   - a nested relation condition `{ parent: { title } }` filters through the
+//     parent (it was `400`, "declares no related object").
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
@@ -174,6 +185,37 @@ describe('[#23065] a referenceless tree field — delete behaviour at the public
       expect(r!.declared).toBe(declared);
       expect(r!.probes.map((probe) => probe.door)).toEqual(['rest', 'system']);
     }
+  });
+
+  it('the write check: a parent id that names no record is refused 400 reference_not_found; an existing parent is accepted', async () => {
+    const refused = await stack.apiAs(token, 'POST', '/data/rtl_default', { title: 'orphan', parent: 'no_such_parent_id' });
+    const body = JSON.parse(await refused.text()) as { code?: string; fields?: Array<{ field?: string; code?: string }> };
+    expect(refused.status).toBe(400);
+    expect(body.code).toBe('VALIDATION_FAILED');
+    expect(body.fields).toEqual(
+      expect.arrayContaining([expect.objectContaining({ field: 'parent', code: 'reference_not_found' })]),
+    );
+
+    // CONTROL: a parent that exists is accepted, and stored as written.
+    const p = await create('rtl_default', { title: 'p' });
+    const c = await create('rtl_default', { title: 'c', parent: p });
+    expect((await read('rtl_default', c)).record?.parent).toBe(p);
+  });
+
+  it('expand=parent resolves the parent record, and a nested relation condition filters through it', async () => {
+    const p = await create('rtl_default', { title: 'expand-parent' });
+    const c = await create('rtl_default', { title: 'expand-child', parent: p });
+
+    const expanded = await stack.apiAs(token, 'GET', `/data/rtl_default/${c}?expand=parent`);
+    const record = (JSON.parse(await expanded.text()) as { record?: { parent?: { id?: unknown; title?: unknown } } }).record;
+    expect(expanded.status).toBe(200);
+    expect(record?.parent).toMatchObject({ id: p, title: 'expand-parent' });
+
+    const filter = encodeURIComponent(JSON.stringify({ parent: { title: 'expand-parent' } }));
+    const listed = await stack.apiAs(token, 'GET', `/data/rtl_default?filter=${filter}`);
+    const rows = (JSON.parse(await listed.text()) as { records?: Array<{ id?: unknown }> }).records;
+    expect(listed.status).toBe(200);
+    expect(rows?.map((r) => r.id)).toEqual([c]);
   });
 
   it('CONTROLS: a tree that writes its own name, a lookup and a master_detail answer as before', async () => {
