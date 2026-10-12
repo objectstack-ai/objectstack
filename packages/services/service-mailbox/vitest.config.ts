@@ -20,6 +20,7 @@ export default defineConfig({
   },
   resolve: {
     alias: [
+      { find: /^@objectstack\/lint$/, replacement: path.resolve(__dirname, '../../lint/src/index.ts') },
       { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
       { find: /^@objectstack\/platform-objects\/apps$/, replacement: path.resolve(__dirname, '../../platform-objects/src/apps/index.ts') },
       { find: /^@objectstack\/spec$/, replacement: path.resolve(__dirname, '../../spec/src/index.ts') },

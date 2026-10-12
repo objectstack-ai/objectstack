@@ -2726,6 +2726,9 @@ importers:
         specifier: workspace:*
         version: link:../../spec
     devDependencies:
+      '@objectstack/lint':
+        specifier: workspace:*
+        version: link:../../lint
       '@types/node':
         specifier: ^26.6.3
         version: 26.6.3
