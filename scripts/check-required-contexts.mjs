@@ -364,6 +364,21 @@ const UNATTRIBUTED_BATTERY = '(no battery open)';
  * reporting the staleness — sat open, every gate green throughout. The count
  * is a property of the workflow, so the workflow is where it is read from: the
  * job's own step list, one grep away and never stale (#9103).
+ *
+ * ⛔ TOMBSTONE — `Dogfood Regression Gate` (ci.yml:dogfood-gate) and `Temporal
+ * Conformance (live PG + MySQL)` (ci.yml:temporal-conformance), dropped by the
+ * #22998 ruling (two-speed CI; ruling record 6120820653 on #22991): their legs
+ * run in the FULL BATTERY only — `main`'s push, hourly and dispatch runs — so a
+ * PR or queue build carries the fast set and these two contexts leave the
+ * required set. The order is the #9325 two-step: the registry and the
+ * instruction surfaces drop the rows in the PR, and the maintainer removes the
+ * two contexts from the ruleset in the same sitting as the merge; until then
+ * `--verify-required-set` reports them in direction B (required, pinned by no
+ * row), report-only, which is the sitting's own reminder. Prose and not a
+ * RETIRED_CONTEXT_NAMES row, for the reason the `Build Docs` / `Console Pin
+ * Gate` tombstone above gives: neither name is dead — both jobs still publish
+ * these check-runs on every full-battery run, and the instruction files name
+ * them correctly as full-battery jobs.
  */
 export const REQUIRED_CONTEXTS = [
   {
@@ -400,28 +415,12 @@ export const REQUIRED_CONTEXTS = [
   },
   {
     workflow: 'ci.yml',
-    job: 'dogfood-gate',
-    context: 'Dogfood Regression Gate',
-    authorized: '#5617 closing ruling 2026-08-09, confirmation item 2 (the bare aggregate name)',
-    carries: 'the sharded dogfood matrix + dogfood-verify, counted via check:shard-attestation',
-  },
-  {
-    workflow: 'ci.yml',
     job: 'build-core',
     context: 'Build Core',
     authorized:
       '#5617 closing ruling 2026-08-09, second batch — "the highest-value addition"; ' +
       'the only member of that batch the 2026-08-10 ruleset screenshot (#7022) shows applied, and live in the 2026-08-18 read',
     carries: 'the only compile-regression gate in the repo',
-  },
-  {
-    workflow: 'ci.yml',
-    job: 'temporal-conformance',
-    context: 'Temporal Conformance (live PG + MySQL)',
-    authorized:
-      '#5617 closing ruling 2026-08-09, second batch; absent from the 2026-08-10 screenshot and present in the ' +
-      '2026-08-18 read, so it was applied somewhere between the two — no attestation names the day',
-    carries: 'the live-server datetime conformance axis (#3912/#3942)',
   },
   {
     workflow: 'governed-surface-guard.yml',
@@ -551,17 +550,17 @@ export const INSTRUCTION_SURFACES = [
     // misclassification that puts a PR into the queue to be ejected. Then
     // 6→7 by #17798 — the same misclassification, one enrolment later and
     // with every gate green, which is what put the exclusivity rule below in
-    // the judge. The full set is pinned here so the corrected sentence cannot
-    // rot back — a rename in ANY of the seven now reddens this gate instead.
+    // the judge. Then 7→5 by #22998 (two-speed CI: the dogfood and temporal
+    // contexts moved to the full battery). The full set is pinned here so the
+    // corrected sentence cannot rot back — a rename in ANY of the five
+    // reddens this gate instead.
     file: 'AGENTS.md',
     statesTheSet: true,
     mustName: [
       'Lint & Repo Gates',
       'TypeScript Type Check',
       'Test Core',
-      'Dogfood Regression Gate',
       'Build Core',
-      'Temporal Conformance (live PG + MySQL)',
       'Governed Surface Queue Guard',
     ],
   },
@@ -585,12 +584,10 @@ export const INSTRUCTION_SURFACES = [
       'Lint & Repo Gates',
       'TypeScript Type Check',
       'Test Core',
-      'Dogfood Regression Gate',
       'Build Core',
-      'Temporal Conformance (live PG + MySQL)',
-      // The seventh, enrolled 2026-08-27 (#12427) and pinned here by #15233.
-      // The ledger's own count line is hand-followed prose, so it is this
-      // array — held equal to the registry by the exclusivity rule in
+      // Enrolled 2026-08-27 (#12427) and pinned here by #15233. The ledger's
+      // own count line is hand-followed prose, so it is this array — held
+      // equal to the registry by the exclusivity rule in
       // judgeInstructionSurfaces — that makes the seat's copy non-optional.
       'Governed Surface Queue Guard',
     ],
@@ -614,8 +611,8 @@ export const INSTRUCTION_SURFACES = [
  * own source, and "looks like a path" there means "carries a separator". Five
  * of the six surfaces have one; `AGENTS.md` does not, because a repo-root FILE
  * has no separator to be found by — so an AGENTS.md card derived this gate not
- * at all, while that surface is the one carrying `mustName` for all seven
- * required contexts (widened 2→6 by #9677, 6→7 by #17798). Editing the merge-queue
+ * at all, while that surface is the one carrying `mustName` for every
+ * required context (widened 2→6 by #9677, 6→7 by #17798, 7→5 by #22998). Editing the merge-queue
  * paragraph there is precisely how this gate goes red, and it was reachable
  * only by judgment.
  *
@@ -1587,7 +1584,9 @@ export function renderRequiredSetReport(verdict) {
       '',
       `  ⛔ direction B — required in the live set, pinned by NO registry row (${verdict.unpinned.length}). Renaming the job`,
       '     that publishes one of these detaches its gate silently — the defect this whole file exists for. The remedy',
-      '     is a REQUIRED_CONTEXTS row naming the workflow, job id and authorizing ruling; no settings change.',
+      '     is a REQUIRED_CONTEXTS row naming the workflow, job id and authorizing ruling; no settings change —',
+      '     unless a TOMBSTONE above REQUIRED_CONTEXTS records the row as dropped on purpose: then the settings half of',
+      '     that two-step (removing the context from the ruleset) is what is still owed, and re-adding the row is wrong.',
     );
     for (const entry of verdict.unpinned) lines.push(`       • ${entry.context} — from ${entry.from.join(', ')}`);
   }
@@ -1854,24 +1853,30 @@ async function selfTest() {
     renamedBuildCore.problems.some((p) => p.includes("job 'build-core'") && p.includes("'Build Core'")),
     'renaming ci.yml\'s Build Core job ⇒ red (the newly-approved batch is covered too)',
   );
-  const renamedTemporal = fixture('rename Temporal Conformance', 'ci.yml', (s) =>
-    s.replace('    name: Temporal Conformance (live PG + MySQL)\n', '    name: Temporal Conformance\n'),
+  // Re-pointed from `temporal-conformance` (whose "(live PG + MySQL)" suffix
+  // it used to drop) when #22998 moved that job to the full battery: a fixture
+  // must mutate a job the registry still REGISTERS. The aggregate `Test Core`
+  // is the live specimen for the same property — a suffix grown onto a
+  // registered name is a rename, and the bare name never reports again.
+  const renamedTestCore = fixture('rename Test Core', 'ci.yml', (s) =>
+    s.replace('    name: Test Core\n', '    name: Test Core (aggregate)\n'),
   );
   assert(
-    renamedTemporal.problems.some((p) => p.includes("job 'temporal-conformance'") && p.includes('Temporal Conformance (live PG + MySQL)')),
-    'dropping the "(live PG + MySQL)" suffix ⇒ red — the parenthetical is part of the contract, not decoration',
+    renamedTestCore.problems.some((p) => p.includes("job 'test-gate'") && p.includes("'Test Core'")),
+    'growing a suffix on the bare `Test Core` name ⇒ red — the exact literal is the contract, not decoration',
   );
 
   // ── (2) the job disappearing entirely ─────────────────────────────────────
   // Re-pointed from `console-pin` to `temporal-conformance` when #9533 dropped
-  // the console-pin row: a fixture must mutate a job the registry still
+  // the console-pin row, and from `temporal-conformance` to `build-core` when
+  // #22998 dropped that one: a fixture must mutate a job the registry still
   // REGISTERS, or it asserts nothing while reading exactly as before.
   battery('(2) the job disappearing entirely');
-  const droppedJob = fixture('drop the temporal-conformance job', 'ci.yml', (s) =>
-    s.replace('\n  temporal-conformance:\n', '\n  temporal-conformance-disabled:\n'),
+  const droppedJob = fixture('drop the build-core job', 'ci.yml', (s) =>
+    s.replace('\n  build-core:\n', '\n  build-core-disabled:\n'),
   );
   assert(
-    droppedJob.problems.some((p) => p.includes("job 'temporal-conformance' no longer exists") && p.includes('Temporal Conformance (live PG + MySQL)')),
+    droppedJob.problems.some((p) => p.includes("job 'build-core' no longer exists") && p.includes('Build Core')),
     'a required context whose job id is gone ⇒ red',
   );
 
@@ -2395,17 +2400,18 @@ async function selfTest() {
       REQUIRED_CONTEXTS.every((e) => ledgerEntry.mustName.includes(e.context)),
     `the readings ledger is a scanned surface naming all ${REQUIRED_CONTEXTS.length} required contexts — got ${JSON.stringify(ledgerEntry)}`,
   );
-  // A rename reaches it. Read from the file as it ships, with ONE of the six
-  // replaced by a name that never existed: the baseline above is green, so
-  // the literal is present and this substitution cannot be a no-op.
+  // A rename reaches it. Read from the file as it ships, with ONE of the
+  // registered names replaced by a name that never existed: the baseline
+  // above is green, so the literal is present and this substitution cannot be
+  // a no-op. (`Build Core` since #22998 dropped `Dogfood Regression Gate`.)
   const ledgerRenamed = judgeSurfaces({
     files: surfaceMap({
-      [LEDGER_SURFACE]: surfaceSources[LEDGER_SURFACE].replaceAll('Dogfood Regression Gate', 'Nonexistent Job Name'),
+      [LEDGER_SURFACE]: surfaceSources[LEDGER_SURFACE].replaceAll('Build Core', 'Nonexistent Job Name'),
     }),
   });
   assert(
     ledgerRenamed.problems.some(
-      (p) => p.includes(LEDGER_SURFACE) && p.includes("'Dogfood Regression Gate'") && p.includes('no longer names'),
+      (p) => p.includes(LEDGER_SURFACE) && p.includes("'Build Core'") && p.includes('no longer names'),
     ),
     'renaming a required context in the readings ledger ⇒ red on the ledger, naming the dropped literal',
   );
@@ -2456,7 +2462,7 @@ async function selfTest() {
   );
   // THE PIN: a set-stating surface one name short of the registry ⇒ red,
   // naming the surface and the literal it dropped. The FILES are the ones that
-  // ship — AGENTS.md still names all seven — so the floor half sees nothing
+  // ship — AGENTS.md still names all five — so the floor half sees nothing
   // and this red can only be the census.
   const shortOfTheSet = judgeSurfaces({
     surfaces: INSTRUCTION_SURFACES.map((s) =>
@@ -2540,8 +2546,8 @@ async function selfTest() {
   // Enforcement cannot hold any of these: the declaration is read by another
   // tool entirely, so a wrong or missing entry runs perfectly green here and
   // shows up only as a dev dispatched on an AGENTS.md card with this gate
-  // absent from the brief — on the surface that carries `mustName` for all
-  // seven required contexts.
+  // absent from the brief — on the surface that carries `mustName` for every
+  // required context.
   battery('the dispatch-gates declaration (#9979)');
   assert(
     INSTRUCTION_SURFACES.map((s) => s.file)
@@ -2635,7 +2641,18 @@ async function selfTest() {
     assert(snapshot.live.length === 6, `the 2026-08-18 reading carries six required contexts — got ${snapshot.live.length}`);
     assert(snapshot.strict === false, 'strict_required_status_checks_policy is read, not assumed');
     assert(snapshot.enforcing.length === 1 && !snapshot.noEnforcingRuleset, 'one active ruleset covers the default branch');
-    assert(snapshot.unpinned.length === 0, `every context in the 2026-08-18 reading has a registry row — got ${JSON.stringify(snapshot.unpinned)}`);
+    // Direction B against the checked-in registry, derived for the same reason
+    // as direction A below: the 2026-08-18 reading still carries the two
+    // contexts #22998 dropped from the registry (`Dogfood Regression Gate`,
+    // `Temporal Conformance (live PG + MySQL)`), so the snapshot reports them
+    // as required-and-unpinned — exactly the reading the maintainer's
+    // settings half of that two-step clears.
+    const pinned = new Set(REQUIRED_CONTEXTS.map((e) => e.context));
+    const unpinnedNames = snapshot.unpinned.map((e) => e.context ?? e).sort();
+    assert(
+      JSON.stringify(unpinnedNames) === JSON.stringify(snapshot.live.filter((c) => !pinned.has(c)).sort()),
+      `direction B reports exactly the live contexts no registry row pins — got ${JSON.stringify(snapshot.unpinned)}`,
+    );
     // Direction A against the checked-in registry. It was LIVE when this was
     // written (`Build Docs` / `Console Pin Gate`, #9533) and is EMPTY since
     // that card dropped the two rows — which is exactly why the assertion is

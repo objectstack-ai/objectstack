@@ -122,7 +122,13 @@ climbs out and comes straight back in. What it does flag is judged on the **shal
 point a path reaches, not where it ends.
 
 Clocked windows measure behaviour, never loading — a test that boots a real plugin chain
-pays its first load at module top; `pnpm check:test-source-alias` gates it.
+pays its first load at module top; `pnpm check:test-source-alias` gates it. A gate grading a
+duration reports and ⛔ never reds a required job, judges only on the run profile it measured,
+and when new soaks report-only a week before it grades; any seat flips a gate that reds untouched
+packages twice in an hour to report-only before any ruling. A suite-weight ceiling rises only by
+ruling (`RULED_CEILING_RAISES`); a test file over 10 s of wall is its lane's card, fixed and ⛔
+never deleted; a test is deleted only when its PR names a duplicate pinning that assertion at a
+layer at least as close to the code (ruling record 6120820653).
 
 ### Running the dev server
 
@@ -516,12 +522,16 @@ Even inside your own worktree, operate defensively:
    yet"; `in_progress` is not a pass. Arming a red PR does not queue it, it hides it:
    every poll then misreads "not on `main` yet" as "queued". Always read *two* things:
    the queue branch **and** `origin/main`. And **the queue enforces only the required
-   set** — seven contexts block: `Lint & Repo Gates` (all `check:*` gates),
-   `TypeScript Type Check`, `Test Core`, `Dogfood Regression Gate`, `Build Core`,
-   `Temporal Conformance (live PG + MySQL)` and `Governed Surface Queue Guard`. A check outside
-   those seven is advisory and rides through, and an advisory red that lands rides `main`'s
-   merge ref into every later PR until stanched. A required context is matched by check-run
-   name, so a rename detaches its gate silently — treat those seven names as contract.
+   set** — five contexts block: `Lint & Repo Gates` (all `check:*` gates),
+   `TypeScript Type Check`, `Test Core`, `Build Core` and `Governed Surface Queue Guard`. A
+   check outside those five is advisory and rides through, and an advisory red that lands rides
+   `main`'s merge ref into every later PR until stanched. A required context is matched by
+   check-run name, so a rename detaches its gate silently — treat those five names as contract.
+   **Two speeds** (ruling record 6120820653): PR and queue runs carry the fast set, 10 minutes of
+   wall per queue entry; `main`'s hourly and push runs carry the full battery — dogfood, e2e,
+   `Console Pin Gate`, `Temporal Conformance (live PG + MySQL)` — read by the publish lane before
+   any approval. **Main-red:** a full-battery red is its lane's first work — triage files it under
+   the main-red convention, the lane's next PR fixes it, and ⛔ no lane PR arms the queue meanwhile.
 
    **Re-arm awareness** — none of these is a reason to avoid the queue; all are reasons to
    confirm a PR is still *in* it: a red queue build **ejects** your entry and drops
@@ -1089,13 +1099,10 @@ Both non-handshake shapes, and how to classify and probe your own:
    body, which also carries the PR's `Clause-②` line: `pnpm check:adr-0087-registration` reads the arm there. ⛔ The
    categories are NOT copied here — the gate prints the full set when it fails.
 4. **A removal that breaks the pinned sibling checkout ships together with the sibling fix and the pin bump — or it
-   does not ship.** The `Console Pin Gate` job builds objectui at the pinned `.objectui-sha` against **current** `main`,
-   so a removal or rename the pinned sibling still imports turns `main` red for every PR in the repo the moment it
-   merges — "retire the surface" and "leave the sibling untouched" cannot both hold. A ruling that authorizes such a
-   removal therefore implicitly authorizes the objectui-side fix and the pin bump as part of the same landing (the
-   bump's manifest regeneration included — see the Frontend section). Pre-merge check for any removal or rename
-   of an exported surface: does the pinned sibling import what you are removing? `git grep` it in `../objectui` at the
-   pinned SHA before merging.
+   does not ship.** The full battery's `Console Pin Gate` builds objectui at the pinned `.objectui-sha` against
+   **current** `main`, so such a removal is a main-red the moment it merges; its ruling therefore authorizes the
+   objectui-side fix and the pin bump (manifest regeneration included — see the Frontend section) in the same
+   landing. Before merging, `git grep` what you remove or rename in `../objectui` at the pinned SHA.
 5. **Touched `packages/spec`? Regenerate and commit its artifacts before pushing** — § *Touched `packages/spec`*
    above is the authority; note `OS_SKIP_DTS=1` greens `check:api-surface` locally and reds it in CI.
 6. Update `ROADMAP.md` if user-facing or architectural.
