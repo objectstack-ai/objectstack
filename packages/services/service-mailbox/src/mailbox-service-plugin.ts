@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
+import type { II18nService } from '@objectstack/spec/contracts';
 import { SysMailAssociation, SysMailbox, SysMailMessage } from './objects/index.js';
 import { installMailReadVisibility, type MailGateEngine } from './mail-read-visibility.js';
 
@@ -45,7 +46,7 @@ export class MailboxServicePlugin implements Plugin {
     // ADR-0029 D8 — contribute the objects' translations on kernel:ready.
     ctx.hook('kernel:ready', async () => {
       try {
-        const i18n = ctx.getService<any>('i18n');
+        const i18n = ctx.getService<II18nService>('i18n');
         if (i18n && typeof i18n.loadTranslations === 'function') {
           const { MailboxTranslations } = await import('./translations/index.js');
           for (const [locale, data] of Object.entries(MailboxTranslations)) {
