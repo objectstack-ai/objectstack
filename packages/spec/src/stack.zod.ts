@@ -2230,6 +2230,59 @@ function collectDuplicateActionKeyErrors(config: ObjectStackDefinition): string[
 }
 
 /**
+ * Same-stack duplicate `functions` names in the ARRAY form (#22902) — one
+ * refusal line per colliding name, naming the name and every index.
+ *
+ * Functions live in one flat namespace resolved by name: a hook's `handler`,
+ * an action's `target` and a flow `script` node's `config.function` all look a
+ * function up by its name, and the engine registers each under that name
+ * (`registerFunction` is a plain `Map.set`). The map form cannot author one
+ * name twice — an object key is unique — so it is never visited. The array
+ * form can, and nothing refused it, so the two entries diverged silently and
+ * differently on each path. Measured on main `7dbb89dc5` with
+ * `[{ name: 'kc_a', handler: first }, { name: 'kc_a', handler: second }]`:
+ *
+ * - `objectstack build` exited 0 and shipped
+ *   `[{ name: 'kc_a' }, { name: 'kc_a__2' }]`: `lowerCallables` mints refs in
+ *   one namespace, so the second entry took a suffixed internal ref the author
+ *   never wrote and nothing references — `kc_a` ran `first`;
+ * - a source boot (no build) registered `kc_a` as `second` and dropped
+ *   `first`, with no notice (`collectBundleFunctionEntries` keys by name, last
+ *   wins).
+ *
+ * So the same stack ran different code under `kc_a` depending on whether it
+ * was built. {@link composeStacks} already refuses the cross-stack case
+ * (`composeFunctions`, `STACK_COMPOSE_FUNCTION_CONFLICT`); this is its
+ * one-stack sibling, in the aggregate beside the action-key check. Every entry
+ * counts, byte-identical twins included: two entries are two registrations
+ * under one name whatever they hold, and only one can own it.
+ */
+function collectDuplicateFunctionNameErrors(config: ObjectStackDefinition): string[] {
+  const functions = config.functions;
+  if (!Array.isArray(functions)) return [];
+
+  const indicesByName = new Map<string, number[]>();
+  for (const [i, entry] of functions.entries()) {
+    const list = indicesByName.get(entry.name) ?? [];
+    list.push(i);
+    indicesByName.set(entry.name, list);
+  }
+
+  const errors: string[] = [];
+  for (const [name, indices] of indicesByName) {
+    if (indices.length < 2) continue;
+    errors.push(
+      `Function '${name}' is declared ${indices.length === 2 ? 'twice' : `${indices.length} times`} ` +
+        `in the \`functions\` array: ${joinDeclarationOrigins(indices.map((i) => `stack.functions[${i}]`))}. ` +
+        `Functions are registered and resolved by name, so only one of these entries can own ` +
+        `'${name}' and the others would be silently renamed or dropped. Rename one of them, or ` +
+        `merge them into a single entry.`,
+    );
+  }
+  return errors;
+}
+
+/**
  * [ADR-0112 · #15963] The envelope every refusal `defineStack` raises shares:
  * `status: 422` — an unprocessable authored entity, not a server fault, the
  * reading {@link StackCrossReferenceError} took from its two precedents — ONE
@@ -2303,8 +2356,8 @@ abstract class StackRefusalError<TIssue = string> extends Error {
  * machine-readable in {@link StackCrossReferenceError.issues}, one entry per
  * finding, which is the structured form of what was previously only
  * newline-joined prose. The family is also WIDER than "undefined object": the
- * same aggregate carries the duplicate-action-key, global-`update`-action and
- * mapping `javascript`-transform findings, so a
+ * same aggregate carries the duplicate-action-key, duplicate-function-name,
+ * global-`update`-action and mapping `javascript`-transform findings, so a
  * `…_UNDEFINED_OBJECT` spelling would be false for those.
  *
  * ⭐ There are TWO raise sites since #18202, one per PASS, and they share this
@@ -2945,6 +2998,9 @@ function validateCrossReferences(
   // stack that declares two globals under one name collides on exactly the
   // same runtime key, and this check needs no object to resolve against.
   errors.push(...collectDuplicateActionKeyErrors(config));
+  // Same placement, same reason: two `functions` array entries under one name
+  // collide in the one function namespace whether or not there are objects.
+  errors.push(...collectDuplicateFunctionNameErrors(config));
   // Same placement, same reason: a global `operation: 'update'` action is
   // wrong whether or not the stack declares any objects.
   errors.push(...collectGlobalUpdateActionErrors(config));
