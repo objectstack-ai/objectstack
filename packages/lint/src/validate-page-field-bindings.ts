@@ -362,7 +362,7 @@ export function checkSectionCountRefs(
   for (const ref of refs) {
     if (ref.name.includes('.')) continue;
     const verdict = resolveFieldPath(graph, objectName, ref.name);
-    if (verdict.kind !== 'ok') continue;
+    if (!verdict || verdict.kind !== 'ok') continue;
     const type = verdict.meta?.type;
     if (type === undefined) continue;
     if (isMultiValueField({ type, multiple: verdict.meta?.multiple === true })) continue;
