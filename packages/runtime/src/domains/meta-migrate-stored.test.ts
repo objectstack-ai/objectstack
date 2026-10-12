@@ -147,7 +147,7 @@ describe('POST /meta/_migrate-stored — preview by default (#4327)', () => {
         const res = await make({ migrateStoredMetadata }).handleMetadata(
             '/_migrate-stored', ctx({ isSystem: true }), 'POST', { apply: true },
         );
-        expect(res.response.status).toBe(200);
+        expect(res.response?.status).toBe(200);
         expect(migrateStoredMetadata.mock.calls[0][0]).not.toHaveProperty('actor');
     });
 
