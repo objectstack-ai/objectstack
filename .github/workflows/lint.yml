@@ -157,6 +157,12 @@ concurrency:
 # the majority of red runs at no cost to a green one (whose wall clock is the
 # sum of its steps, and so is order-independent) — ⛔ so do not re-sort them
 # back among their topical neighbours as tidying.
+#
+# Since #22991 those gates run in eight parallel lanes behind the
+# `Lint & Repo Gates` aggregate, and the rule holds PER LANE: each lane runs
+# its gates sequentially and aborts at its first red, every step kept the
+# relative order it had in the single job, and the two anchor gates still sit
+# immediately after the six setup steps, at the top of `lint-repo-tooling`.
 # ─────────────────────────────────────────────────────────────────────────────
 
 jobs:
@@ -655,7 +661,8 @@ jobs:
         run: pnpm check:adr-anchors
 
       # @objectstack/verify stand-in erasure guard (#6399). The third and
-      # narrowest member of the two above. `checkReadCoercion` /
+      # narrowest member of the slot-lookup and query-options erasure ratchets
+      # (in the scoped lanes since #22991). `checkReadCoercion` /
       # `checkDateBucketParity` take their driver STRUCTURALLY
       # (`CoercibleDriver` / `BucketableDriver`) so an out-of-tree driver —
       # cloud's driver-turso in remote mode — runs the identical contract
@@ -721,7 +728,9 @@ jobs:
         run: pnpm check:gitlink-declared
 
       # The first three of these are the shared modules the two `scripts/**`
-      # routing gates below DELEGATE their design arguments to (#10608). Both of
+      # routing gates DELEGATE their design arguments to (#10608) — the parse
+      # guard below, and the entry guard in `lint-scoped-slot-corpus` since
+      # #22991. Both of
       # those gates are
       # SPELLING gates by deliberate design — `check:entry-guard` enforces that
       # only `scripts/invoked-as.mjs` may read `process.argv[1]`, and
@@ -771,7 +780,7 @@ jobs:
       # rest of that remainder from here; that is a separate card.
       #
       # What runs here is the self-tests, not the modules' callers: for the first
-      # three the callers are the two gate steps below, which already run on
+      # three the callers are the two routing gates named above, which already run on
       # every PR; for `import-prerequisite` the callers are the 45 importing
       # gates, whose ordinary runs take the branch where the dependency IS
       # present and therefore observe none of what the self-test pins.
@@ -846,7 +855,8 @@ jobs:
       # The #10573 sweep converted 32 call sites across 15 gates; it could not
       # stop the sixteenth being typed, and within the hour a new gate landed
       # with two raw calls in it — caught by this step, which is the whole
-      # argument for having it. Same shape as `check:entry-guard` above.
+      # argument for having it. Same shape as `check:entry-guard` (in
+      # `lint-scoped-slot-corpus` since #22991).
       # Also prints the parses OUTSIDE `scripts/**` (#10575) that it does not
       # govern, so its green line is read as a claim about `scripts/` and not
       # about the repository.
@@ -1102,7 +1112,8 @@ jobs:
         run: pnpm check:pm-label-desc-cap
 
       # Every ROOT_DIR_WATCH_HINTS declaration stays READABLE BY A TEXT SCANNER
-      # (#12762). The step above proves the extractor still works; this one
+      # (#12762). The PM dispatch-gates self-test (its own lane since #22991)
+      # proves the extractor still works; this one
       # proves it still has something to extract. `extractWatchHints` reads
       # source text, so a declaration rewritten from a literal into a mapped
       # expression over the gate's population constant contributes NO hint at
@@ -1136,7 +1147,8 @@ jobs:
       # PR-scoped blocking check in its own workflow — it needs a pull request
       # body to judge, which this job does not have — so what runs HERE is its
       # self-test, which is the half with a verdict independent of any PR.
-      # Unconditional, and not on the two steps above's borrowed reason — they
+      # Unconditional, and not on the borrowed reason of the declared-population
+      # and bare-root steps (the scoped lanes since #22991) — they
       # are scoped since #19498 and this one is not, because the cost that
       # bought that ruling is not here: this step is a tenth of a second, and a
       # self-test that runs only when someone remembers is a check whose
@@ -3697,7 +3709,8 @@ jobs:
       # content/docs/protocol/backward-compatibility.mdx and one header
       # comment in scripts/publish-smoke-pack.mjs — so all three drifted
       # silently (69 written, 70 true) the day a package joined the group.
-      # Full-repo state, not diff-shaped, so — unlike the self-tests above —
+      # Full-repo state, not diff-shaped, so — unlike the changeset-family
+      # self-tests (`lint-docs-code`) —
       # this runs its real check every time, unconditionally.
       - name: Lockstep package-count guard
         run: pnpm check:lockstep-package-count
@@ -4174,9 +4187,10 @@ jobs:
       - name: Gate-family selection self-test
         run: pnpm check:select-gate-families
 
-      # Aggregator roster gate (#10490). Three required contexts are aggregate
+      # Aggregator roster gate (#10490). Four required contexts are aggregate
       # jobs standing in for a set of real jobs — `Test Core` and `Dogfood
-      # Regression Gate` in ci.yml, `TypeScript Type Check` in this file — and
+      # Regression Gate` in ci.yml, `TypeScript Type Check` and, since #22991,
+      # `Lint & Repo Gates` in this file — and
       # each decides its verdict from what it lists in `needs:`. Nothing held
       # those rosters to anything. Add a lane to a workflow, forget the
       # `needs:` line, and the lane's check-run is ADVISORY (only the aggregate
@@ -4619,7 +4633,8 @@ jobs:
         run: pnpm check:manifest-repository-directory
 
       # WHERE-matcher conformance gate (#8494, from #7620). The read-side
-      # sibling of the gate above, and the half its header lists as not
+      # sibling of the engine test-double gate (in `lint-eslint` since #22991),
+      # and the half its header lists as not
       # covered. #7620 corrected sixteen in-memory `matches(row, where)`
       # doubles that short-circuited on `$or` and discarded every sibling
       # equality key — turning a conjunction into a different query while the
@@ -5271,6 +5286,14 @@ jobs:
       # out, and a ran/skipped table in the job summary (the seat reads it).
       # This step only exports the event's fields, so the same script -- every
       # branch of it -- runs locally and under its self-test.
+      #
+      # Since #22991 the gates run in lanes, and this step runs once in EACH
+      # lane that carries a scoped step: a step `if:` can read only its own
+      # job's step outputs, so the nine `if:` lines below stay byte-identical
+      # and each lane selects for itself. The script reads only the diff and
+      # is idempotent, and it cost 0 s at the median (1 s p90) over the 70
+      # runs the `lint` job cites. A separate families job would instead put a
+      # second full-history checkout on the critical path of every scoped lane.
       - name: Select the gate families this run pays for
         id: gate-families
         env:
@@ -5280,8 +5303,8 @@ jobs:
         run: |
           bash scripts/ci/select-gate-families.sh
 
-      # Engine query-options erasure ratchet (#4918). The slot-lookup rule above
-      # protects the service LOOKUP; this one protects what you pass to the
+      # Engine query-options erasure ratchet (#4918). The slot-lookup rule
+      # (`lint-scoped-slot-corpus` since #22991) protects the service LOOKUP; this one protects what you pass to the
       # service you looked up. `IDataEngine.find/findOne/count/aggregate` declare
       # their options as `EngineQueryOptions` & co., and for an internal caller
       # `tsc` is the ONLY channel enforcing them — the protocol's ingress
@@ -5297,12 +5320,13 @@ jobs:
       # must be able to build it). Runs its own --self-test first.
       #
       # Scoped (#16496): the same population and inputs as the slot-lookup
-      # ratchet above, with `scripts/query-options-erasure-baseline.json`.
+      # ratchet, with `scripts/query-options-erasure-baseline.json`.
       - name: Engine query-options erasure ratchet
         if: steps.gate-families.outputs.query_options_erasure != 'skip'
         run: pnpm check:query-options-erasure
 
-      # The other half of the same failure (#13519). The step above holds that a
+      # The other half of the same failure (#13519). The watch-hint literal step
+      # (`lint-repo-tooling` since #22991) holds that a
       # declaration is still READABLE BY A TEXT SCANNER; this one holds that
       # what it reads still names something. A family whose declared literals
       # all reach zero tracked files prints as an ORDINARY SILENCE — byte for
@@ -5422,7 +5446,7 @@ jobs:
         run: |
           bash scripts/ci/select-gate-families.sh
 
-      # Slot-lookup sweep ratchet (#4251). `pnpm lint` above bans erasing a
+      # Slot-lookup sweep ratchet (#4251). `pnpm lint` (`lint-eslint`) bans erasing a
       # service-lookup result to `any` across packages/, but the files still
       # holding pre-existing sites are grandfathered by path — and an ignored
       # file is ignored COMPLETELY, so new erasures added to one ride the old
@@ -5467,7 +5491,7 @@ jobs:
         run: pnpm check:entry-guard
 
       # The comment-mask CORPUS sweep (#10640) — the other instrument for the
-      # module the two gates above delegate "is this span a comment, or code?"
+      # module the entry and parse guards delegate "is this span a comment, or code?"
       # to. `js-comment-mask.mjs --self-test` pins the SHAPES someone wrote
       # down; this parses every .{ts,tsx,mts,cts,js,mjs,cjs,jsx} file in the
       # tree with @typescript-eslint/parser and diffs its comment ranges
@@ -5603,7 +5627,8 @@ jobs:
         run: |
           bash scripts/ci/select-gate-families.sh
 
-      # PM bare-root worklist self-test (#10840). The step above proves the
+      # PM bare-root worklist self-test (#10840). The PM dispatch-gates
+      # self-test proves the
       # dispatch derivation still WORKS; this one proves the recorded triage of
       # the gates that derivation structurally cannot see is still true of the
       # tree. A gate whose population is spelled as a bare single-segment word
@@ -5625,7 +5650,7 @@ jobs:
       # ⚠️ This step WAS unconditional, on the reasoning that a self-test which
       # can be skipped is the gap moving rather than closing. #19498 scopes it
       # anyway, and the trade is explicit rather than reasoned away: it imports
-      # the same derivation as the two steps above, so its inputs are the
+      # the same derivation as the dispatch-gates and watch-hint literal steps, so its inputs are the
       # workflow tree and the gate sources, and on a group touching neither the
       # gap does move — to `push` on main and the hourly full run, which keep
       # the whole battery. Gate weakening is a maintainer floor; the sentence
@@ -5635,7 +5660,8 @@ jobs:
         run: node scripts/pm/bare-root-worklist.mjs --self-test
 
       # Self-test output vs. the runner's command parser (#11886). Sibling of
-      # the step above and sharing its population: that one asks whether CI RUNS
+      # the self-test wiring gate (`lint-repo-tooling`) and sharing its
+      # population: that one asks whether CI RUNS
       # each self-test, this one asks what each self-test PRINTS while it does.
       #
       # The defect it closes was live on every PR in this repo. A line of
@@ -5864,6 +5890,13 @@ jobs:
       # quoted in the selector's header. ⛔ A defect in that wider set can now
       # first appear on `main`; the push-on-main and hourly full runs are what
       # bound it, and widening the skip further is again a maintainer call.
+      #
+      # ⚠️ Since #22991 the battery is TIERED by event, inside the gate rather
+      # than here: on `pull_request` and `merge_group` `pnpm check:pm-dispatch-gates`
+      # runs the fast tier; on `schedule`, `push` and any other event it runs
+      # both. Every case still runs at least hourly on the full run, and a
+      # slow-tier red is a red on `main`. The step below is unchanged; the
+      # decision and its argument live in `scripts/pm/check-dispatch-gates.mjs`.
       #
       # The gate runs the SELF-TEST only. The live derivation
       # (`node scripts/pm/dispatch-gates.mjs <path>`) answers a question about a
@@ -7878,8 +7911,9 @@ jobs:
     # moment a lane moves, and cannot say WHICH lane went missing.
     #
     # Two things read this list, which is why it is real YAML and not a comment:
-    #   - `node scripts/check-aggregator-roster.mjs` (statically, in the lint
-    #     job) asserts it equals this job's `needs:` EXACTLY, in both
+    #   - `node scripts/check-aggregator-roster.mjs` (statically, in the
+    #     `lint-ci-engine` lane of `Lint & Repo Gates` since #22991) asserts it
+    #     equals this job's `needs:` EXACTLY, in both
     #     directions. A fifth lane added to this workflow and forgotten here
     #     would otherwise ride green as an ADVISORY check-run behind the
     #     required "TypeScript Type Check" context — a job that appears in the
