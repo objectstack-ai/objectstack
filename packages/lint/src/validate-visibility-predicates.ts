@@ -1088,13 +1088,14 @@ function checkElement(
       message:
         `visibility predicate is not valid CEL — ${refusal.detail} ` +
         `(predicate: \`${quoteSource(source)}\`), ${NEVER_EVALUATES}`,
+      // [#22161] One remedy line; the other-language spellings CEL does not
+      // parse are `os explain visibility-predicate-syntax`.
       hint: refusal.token
         ? `\`${refusal.token.wrote}\` is not a CEL operator — CEL spells it ` +
           `\`${refusal.token.cel}\`. Replace \`${refusal.token.wrote}\` with ` +
           `\`${refusal.token.cel}\`, e.g. \`${refusal.token.example}\`.`
-        : `Visibility predicates are bare CEL, e.g. \`record.status == 'open'\`. Spellings from ` +
-          `other languages do not parse: write \`==\` (not \`===\`), \`!=\` (not \`!==\` or \`<>\`), ` +
-          `\`&&\` (not \`and\`), \`||\` (not \`or\`), \`!\` (not \`not\`).`,
+        : `Visibility predicates are bare CEL, e.g. \`record.status == 'open'\`: fix the syntax ` +
+          `error the verdict quotes`,
     });
   }
 
@@ -1143,12 +1144,12 @@ function checkElement(
       message:
         `visibility predicate calls unregistered \`${unknownCall.name}\` (${unknownCall.detail}), ` +
         `so view/page elements always render and actions hide for everyone`,
+      // [#22161] One remedy line that still names the NAME fault (the
+      // dialect prescription cannot succeed here); why re-spelling will not
+      // fix it is `os explain visibility-predicate-unknown-function`.
       hint:
-        `\`${unknownCall.name}\` is not a function this platform registers — a NAME fault, not a ` +
-        `dialect mistake, so re-spelling the predicate will not fix it. The callable names ` +
-        `advertised for authoring are the \`functions\` list \`introspectScope\` returns ` +
-        `(\`CEL_STDLIB_FUNCTIONS\`): pick one of those, or precompute the value into a formula ` +
-        `field on the object and test that field instead.`,
+        `A NAME fault, not a dialect one: call a function in \`CEL_STDLIB_FUNCTIONS\` (what ` +
+        `\`introspectScope\` lists), or precompute the value into a formula field and test that`,
     });
   }
 
@@ -1191,12 +1192,11 @@ function checkElement(
         message:
           `visibility predicate reads through \`${unbound.name}.\`, a namespace this surface does not ` +
           `bind, ${NEVER_EVALUATES}`,
+        // [#22161] One remedy line; which namespaces each surface binds is
+        // `os explain visibility-bare-identifier`.
         hint:
           `Root the path at a namespace this surface binds — e.g. \`${root}.<field>\` instead of ` +
-          `\`${unbound.name}.<field>\`` +
-          (layer === 'runtime'
-            ? ' (runtime view/page surfaces bind `record` + `current_user`; a page component also exposes page state as `page.<var>`).'
-            : ' (a metadata-editing form binds the row under edit as `data`, plus `current_user`).'),
+          `\`${unbound.name}.<field>\``,
       });
     } else if (unbound) {
       const bare = unbound.name;
@@ -1209,11 +1209,9 @@ function checkElement(
         message:
           `visibility predicate references \`${bare}\` as a bare identifier, which resolves to ` +
           `nothing on this surface, ${NEVER_EVALUATES}`,
-        hint:
-          `Write \`${root}.${bare}\` instead of \`${bare}\`` +
-          (layer === 'runtime'
-            ? ' (runtime view/page surfaces bind `record` + `current_user`; a page component also exposes page state as `page.<var>`).'
-            : ' (a metadata-editing form binds the row under edit as `data`).'),
+        // [#22161] One remedy line; which namespaces each surface binds is
+        // `os explain visibility-bare-identifier`.
+        hint: `Write \`${root}.${bare}\` instead of \`${bare}\``,
       });
     }
   }

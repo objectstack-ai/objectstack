@@ -14,7 +14,7 @@ import { explainRule } from './rule-explanations.js';
 // verdict to one line of at most 200 characters — every firing variant this
 // suite exercises, not a chosen few. Run the whole file: those cases read what
 // the cases above fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateMappingTargetFields: typeof validateMappingTargetFieldsUnrecorded = (...args) => {
   const findings = validateMappingTargetFieldsUnrecorded(...args);
   fired.push(...findings);
@@ -95,7 +95,7 @@ describe('validateMappingTargetFields', () => {
       + 'endpoint refuses this mapping (INVALID_FIELD). Did you mean "street"?',
     );
     expect(findings[0].hint).toContain(
-      'or at a declared part of a compound field as field.part (mailing_address: street, city, state, postalCode, country, countryCode, formatted)',
+      'or at a part as field.part (mailing_address: street, city, state, postalCode, country, countryCode, formatted)',
     );
   });
 
@@ -307,6 +307,27 @@ describe('[#22161] one-line verdicts — mapping-target-field-unknown', () => {
     for (const f of converted) {
       expect(f.message, f.rule).not.toContain('\n');
       expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+});
+
+// [#22161] Slice 14: the `fix:` line. It names where a target may point in one
+// line and keeps the compound fields' legal parts (ruling on #20149, item 3:
+// every refusal lists them); the roster of addressable names is not echoed,
+// because the verdict's "Did you mean" names the near miss, and what a target
+// may name is the explanation's.
+describe('[#22161] one-line fixes — mapping-target-field-unknown', () => {
+  it('every `fix:` line the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === MAPPING_TARGET_FIELD_UNKNOWN);
+    // Coverage control: the target arm with and without compound parts on the
+    // object, and the collision arm.
+    expect(converted.some((f) => f.hint.startsWith('Point the target at a field') && f.hint.includes('field.part ('))).toBe(true);
+    expect(converted.some((f) => f.hint.startsWith('Point the target at a field') && !f.hint.includes('field.part'))).toBe(true);
+    expect(converted.some((f) => f.hint.startsWith('Map the field whole or by its parts'))).toBe(true);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+      expect(f.hint, 'the roster is not echoed').not.toContain('Addressable names');
     }
   });
 });
