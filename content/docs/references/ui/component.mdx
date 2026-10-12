@@ -793,7 +793,7 @@ Sort field and direction pair
 | **label** | `string \| Record<string, string>` | optional | Grid label — used as the table caption and export file title |
 | **title** | `string \| Record<string, string>` | optional | Fallback for `label` (the renderer reads `label \|\| title`) |
 | **description** | `string \| Record<string, string>` | optional | One line of help text drawn above the grid's rows — a string, or an inline locale map resolved against the display locale |
-| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string }` | optional | What the grid draws instead of an empty table: `{ title, message, icon }` — the list view's own empty-state shape |
+| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string; link?: object }` | optional | What the grid draws instead of an empty table: `{ title, message, icon }` — the list view's own empty-state shape |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | optional | Columns — all field-name strings, or all column entries `{ field, label?, width?, align?, hidden?, sortable?, … }`, the same union a list view's `columns` declares. One spelling per list: an array mixing strings and column objects is refused |
 | **fields** | `string[]` | optional | Field-name fallback the grid reads when `columns` is absent — bare field names (`['name', 'amount']`); write column decoration such as `label` or `width` on `columns` |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. THE key, singular — not the plural misspelling. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
@@ -837,6 +837,7 @@ Sort field and direction pair
 | **title** | `string \| Record<string, string>` | optional | Heading of the empty state |
 | **message** | `string \| Record<string, string>` | optional | Line of text below the heading |
 | **icon** | `string` | optional | Icon name drawn above the heading; a name that resolves to no icon draws the default empty-state glyph |
+| **link** | `{ label: string \| Record<string, string>; url: string }` | optional | [PLANNED — not yet rendered] The one next step an empty list names: a link the user follows, `{ label, url }` — for example to the how-to page that explains what belongs here when nobody can add a row. It opens a page or an address and runs no action. The console's empty-state renderers are its planned readers; until they ship, the link parses and is not drawn. |
 
 ### Nested Shape: `ObjectGridProps.columns[number]`
 
