@@ -177,7 +177,9 @@ describe('a referenceless `tree` is written as a self-reference by the doors tha
       name: 'category',
       fields: { name: { type: 'text', label: 'Name' }, parent: { type: 'tree', label: 'Parent' } },
     });
-    expect(created.fields.parent.reference).toBe('category');
+    // `create()` is typed off the authored literal, so the written key is read
+    // through the field's declared shape.
+    expect((created.fields.parent as { reference?: string }).reference).toBe('category');
 
     const stack = defineStack({
       manifest: { id: 'com.example.tree', namespace: 'tre', version: '0.0.1', type: 'app', name: 'Tree' },

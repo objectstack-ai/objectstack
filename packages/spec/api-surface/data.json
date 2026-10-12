@@ -906,6 +906,7 @@
     "lowerFilterCondition (function)",
     "markFilterSubtreeProvenance (function)",
     "matchesLikePattern (function)",
+    "materializeTreeSelfReferences (function)",
     "missingFieldValues (function)",
     "nextUtcCalendarDay (function)",
     "normalizeFilterComparandTypes (function)",
