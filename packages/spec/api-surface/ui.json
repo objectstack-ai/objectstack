@@ -156,6 +156,8 @@
     "DocNavItemSchema (const)",
     "EXPRESSION_BINDABLE_TEXT_KEYS (const)",
     "EXPRESSION_BINDABLE_TEXT_KEYS_BY_COMPONENT (const)",
+    "ElementApiDataSource (type)",
+    "ElementApiDataSourceSchema (const)",
     "ElementButtonPropsSchema (const)",
     "ElementDataSource (type)",
     "ElementDataSourceParsed (type)",
