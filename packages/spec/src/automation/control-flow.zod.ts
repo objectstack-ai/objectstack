@@ -90,6 +90,11 @@ import { FLOW_REGION_SLOTS_BY_TYPE } from './region-slots';
 // too — the one rule, composed into `loop`'s `iteratorVariable` /
 // `indexVariable` and `try_catch`'s `errorVariable` below.
 import { ENGINE_ERROR_VARIABLE, flowBoundVariableNameSchema } from './flow-bound-variable-name';
+// [#19939] The list a `loop` iterates is the value slot `map.collection` takes
+// too — one contract, imported rather than re-spelled. `builtin-node-config`
+// reaches no module of the flow-schema import cycle, so its bindings are
+// initialised before this module reads them.
+import { FlowCollectionSlotSchema } from './builtin-node-config.zod';
 
 /**
  * Shared history sentence for the five shapes in this file — one silence, one
@@ -201,22 +206,19 @@ export const LoopConfigSchema = lazySchema(() => strictObject(
   },
   {
     /**
-     * The collection to iterate. A `{token}` template or bare variable name that
-     * resolves (at run time) to an array in the flow's variable scope, or an
-     * inline array — the same union `map.collection` declares, because the two
-     * executors share the resolve logic (#4277 aligned this contract with what
-     * the executor has always read; the string-only declaration under-declared).
+     * The list to iterate — a `value` slot whose literal is a list (#19939,
+     * {@link FlowCollectionSlotSchema}, the contract `map.collection` declares
+     * too): a CEL value envelope the executor evaluates in the run's scope to a
+     * list, or an inline array, iterated as written. A string is refused: a
+     * `{…}` token of the retired template dialect, and a variable's bare name,
+     * which this contract declared and the executor never read (the
+     * interpolator handed the name back unchanged, and every run failed here).
+     *
+     * The `xExpression: 'value'` marker the expression ledger reads rides the
+     * shipped `loop` descriptor's `collection` (`service-automation`'s
+     * `builtin/loop-node.ts`), not this contract — one slot, one channel.
      */
-    // `xExpression: 'template'` marks the string form as an `interpolate()`
-    // `{var}` template (not bare CEL), so the flow designer renders a `{var}`
-    // picker + mono editor and skips the CEL brace-trap (objectui #2670 Phase 3).
-    // Flows through `z.toJSONSchema` verbatim, same channel as `xRef` /
-    // `xEnumDeprecated`. The shipped `loop` descriptor carries the same marker on
-    // its hand-written configSchema literal (service-automation/builtin/loop-node.ts).
-    collection: z.union([z.string().min(1), z.array(z.unknown())]).meta({
-      description: 'Template/variable resolving to the array to iterate (an inline array is accepted)',
-      xExpression: 'template',
-    }),
+    collection: FlowCollectionSlotSchema,
     /** Variable name the current item is bound to inside the body — never a `$` name: those are the engine's (#22572). */
     iteratorVariable: flowBoundVariableNameSchema('iteratorVariable').min(1).default('item')
       .describe('Loop variable holding the current item — a name without a leading `$` (the `$` names are the flow engine\'s own), read as `{{ name }}`'),

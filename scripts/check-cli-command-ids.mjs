@@ -317,7 +317,7 @@ const ROOT_DIR_WATCH_HINTS = ['scripts/**'];
 const FIXTURE_EXEMPTIONS = [
   {
     file: 'scripts/docs-audit/affected-docs.mjs',
-    text: 'os meta resync-plan',
+    text: 'os meta register-plan',
     why: "affected-docs's own self-test case for 'a sibling command id is not this one'",
   },
   {

@@ -184,7 +184,7 @@ describe.each([true, false])('[#6562] /meta object read — effective schema (mu
         // Seeded straight into `sys_metadata` rather than through
         // `saveMetaItem` — the same reason #4513's `page` row is, and the reason
         // is the point of this file: the subject here is the READ path, and
-        // `object` carries `allowOrgOverride: false`, so a save over an
+        // `object` carries `allowEnvironmentOverlay: false`, so a save over an
         // ARTIFACT-backed object is (correctly) refused with `NOT_OVERRIDABLE`
         // and going through it would only measure that refusal. The rows this
         // shape stands for are real and reachable three ways: a runtime-created

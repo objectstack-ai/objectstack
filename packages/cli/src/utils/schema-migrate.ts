@@ -137,7 +137,7 @@ export interface SchemaStack {
   dbSource: DatabaseSource;
   managedTableCount: number;
   /** The booted kernel — `getService('objectql')` etc. for one-shot commands
-   *  beyond schema migration (e.g. `os meta resync`, #2705). */
+   *  beyond schema migration. */
   kernel: any;
   /**
    * Create-table / add-column work the boot sync was held back from running
@@ -579,7 +579,7 @@ export async function bootSchemaStack(
      * a `--json` flag, and each of them re-introduced the same defect
      * independently: `os migrate plan` / `apply` / `resume` / `recorded-by` /
      * `summary-nulls` / `value-shapes` / `files-to-references`, `os migrate
-     * meta --stored` and `os meta resync` all emitted ~60 INFO lines around
+     * meta --stored` and the since-retired `os meta resync` all emitted ~60 INFO lines around
      * their payload. Booting the stack is what makes a command a member of
      * this family, so this is the one place a new member cannot avoid — and
      * with no default, a new member has to *decide* rather than inherit the
@@ -641,7 +641,7 @@ export async function bootSchemaStack(
      * about.
      *
      * A WRITE mode that needs the tables to exist before it writes (`--apply`
-     * of the data commands, `os meta resync --yes`) leaves this off.
+     * of the data commands) leaves this off.
      */
     deferSchemaDdl?: boolean;
     /**
@@ -789,7 +789,7 @@ export async function bootSchemaStack(
     //   • the write modes — `--apply` of `os migrate meta --stored` /
     //     `value-shapes` / `recorded-by` / `summary-nulls` /
     //     `files-to-references` / `audit-metadata-bodies`, `os migrate resume
-    //     --run`, `os secret orphans --delete`, `os meta resync --yes` — boot
+    //     --run`, `os secret orphans --delete` — boot
     //     NOT deferred, so a `defer`-keyed policy would have left all of them
     //     repairing rows. They write, but only the change the operator
     //     confirmed; `os migrate apply` likewise. A repair riding along is a
@@ -1063,8 +1063,8 @@ export async function bootSchemaStack(
  * package is `import type`, which erases. A *static* value import for it was
  * not a local cost, because this file is not loaded only when someone migrates:
  * oclif's `findCommand` `import()`s every command module on **every** CLI
- * invocation, and nine commands reach this file (`meta:resync`, `migrate`, and
- * seven `migrate:*`). So an unbuilt `packages/drivers/driver-sql/dist` did not
+ * invocation, and nine commands reached this file (then `meta:resync`, `migrate`,
+ * and seven `migrate:*`). So an unbuilt `packages/drivers/driver-sql/dist` did not
  * merely break those nine — running *any* command, `os dev` included, printed
  * one `MODULE_NOT_FOUND` block per command in front of the output you asked for
  * (and `os dev` forks a child, so you saw each one twice), while the nine

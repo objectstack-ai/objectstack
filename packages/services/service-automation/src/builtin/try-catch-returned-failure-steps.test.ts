@@ -495,7 +495,7 @@ describe('#14184 a no-catch try_catch keeps the record of the writes its try reg
               type: 'loop',
               label: 'For each row',
               config: {
-                collection: '{rows}',
+                collection: { dialect: 'cel', source: 'rows' },
                 iteratorVariable: 'currentRow',
                 body: {
                   nodes: [

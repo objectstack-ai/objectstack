@@ -735,7 +735,7 @@ A file-backed SQLite database is switched to **WAL** (write-ahead logging) the
 first time ObjectStack connects to it. SQLite's own default is a rollback
 journal (`journal_mode = delete`), which is the wrong trade for the way this
 platform is actually used — **several processes on one file**: a dev server,
-`os migrate`, `os meta resync`, a test run.
+`os migrate`, a test run.
 
 | | rollback journal (SQLite default) | WAL (ObjectStack default) |
 |:---|:---|:---|

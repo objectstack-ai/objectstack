@@ -29,7 +29,7 @@ import { explainRule } from './rule-explanations.js';
 // fired, and the last case in this file holds each recorded verdict to one
 // line of at most 200 characters. Run the whole file: that case reads what the
 // cases above fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateRlsPredicateEnforceability: typeof validateRlsPredicateEnforceabilityUnrecorded = (...args) => {
   const findings = validateRlsPredicateEnforceabilityUnrecorded(...args);
   fired.push(...findings);
@@ -133,10 +133,18 @@ describe('validateRlsPredicateEnforceability — the engine judge is an INPUT (#
       return validateRlsPredicateEnforceability(stackWith({ using: 'owner == current_user.id' }), { judgeFilter })[0]
         .hint;
     };
-    expect(hintFor('FILTER_TOKEN_UNKNOWN')).toMatch(/Write `owner == current_user\.id`/);
-    expect(hintFor('FILTER_TOKEN_UNRESOLVED')).toMatch(/Write `owner == current_user\.id`/);
+    // [#22161] One line each; the `current_user` keys and what each operator
+    // runs on are the explanation's.
+    expect(hintFor('FILTER_TOKEN_UNKNOWN')).toMatch(/`owner == current_user\.id`, not `owner == '\{current_user_id\}'`/);
+    expect(hintFor('FILTER_TOKEN_UNRESOLVED')).toMatch(/`owner == current_user\.id`, not `owner == '\{current_user_id\}'`/);
     expect(hintFor('INVALID_FIELD')).toMatch(/Denormalise the value/);
-    expect(hintFor('INVALID_FILTER')).toMatch(/a text operator .* only on a field that holds a string/);
+    expect(hintFor('INVALID_FILTER')).toMatch(/a text operator only on a field that holds a string/);
+    for (const code of ['FILTER_TOKEN_UNKNOWN', 'INVALID_FIELD', 'INVALID_FILTER']) {
+      expect(hintFor(code).length, code).toBeLessThanOrEqual(200);
+    }
+    expect(explainRule(RLS_PREDICATE_UNENFORCEABLE)?.paragraphs.join('\n')).toContain(
+      'the caller\'s values are the `current_user` keys (accessible_org_ids, email, id, org_user_ids, organization_id, positions)',
+    );
   });
 
   it('judges ONLY the read scope: `using` on a `select` / `all` policy — never a `check`, never another operation', () => {
@@ -253,6 +261,19 @@ describe('[#22161] one-line verdicts', () => {
     for (const f of fired) {
       expect(f.message, f.rule).not.toContain('\n');
       expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+});
+
+// [#22161] Slice 11: the `fix:` line of every finding this file fired is one
+// remedy sentence; what it stopped saying is the id's `os explain` entry.
+describe('[#22161] one-line fixes', () => {
+  it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {
+    expect(fired.length).toBeGreaterThan(0);
+    // Every RLS id: slice 11 converted three, slice 12 the other two.
+    for (const f of fired.filter((x) => x.rule.startsWith('rls-predicate-'))) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
     }
   });
 });

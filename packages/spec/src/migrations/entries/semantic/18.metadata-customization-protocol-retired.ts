@@ -17,9 +17,9 @@ export const entry: SemanticMigration = {
     + '`RETIRED_KEYS_BY_MAJOR[18]`)',
   replacement:
     'nothing to re-declare — delete any authored keys. The customization mechanisms that '
-    + 'actually ship: ADR-0005\'s org-scoped overlay (opt-in via `allowOrgOverride` on '
-    + '`DEFAULT_METADATA_TYPE_REGISTRY`, stored as `sys_metadata` org rows, written through the '
-    + 'REST meta write doors and read back through `getMetaItemLayered`\'s '
+    + 'actually ship: ADR-0005\'s environment overlay (opt-in via `allowEnvironmentOverlay` on '
+    + '`DEFAULT_METADATA_TYPE_REGISTRY`, stored as environment-wide `sys_metadata` rows, written '
+    + 'through the metadata protocol\'s write doors and read back through `getMetaItemLayered`\'s '
     + '`code`/`overlay`/`effective` layers), and ADR-0126\'s packaged-metadata customization '
     + 'model (clone with a new machine name + ledger disable — never a field-level patch '
     + 'overlay)',
@@ -50,6 +50,6 @@ export const entry: SemanticMigration = {
     + 'parse is refused with the prescription at the key\'s path). ⚠️ Runtime behaviour is '
     + 'deliberately UNCHANGED and must be verified as such: no route ever served the paper '
     + '`…/overlay` / `…/effective` endpoints, so removing the limb removes no served '
-    + 'behaviour — the ADR-0005 org-overlay read/write path (`getMetaItemLayered`, the REST '
-    + 'meta write doors) stays exactly as it was, before and after.',
+    + 'behaviour — the ADR-0005 overlay read/write path (`getMetaItemLayered`, the metadata '
+    + 'write doors) stays exactly as it was, before and after.',
 };

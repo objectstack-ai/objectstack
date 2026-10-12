@@ -374,7 +374,12 @@ describe('[#11642] no capped render is left silent in the three printers', () =>
         expect(window, `${file}:${line + 1} truncates ${m[1]} with no remainder line`).toMatch(NAMES_REMAINDER);
       }
     }
-    expect(remaining).toEqual([expect.stringContaining('lowering.bodyExtractionWarnings')]);
+    // The precedent block renders `refusedCallables`, the refusal rows of
+    // `lowerCallables`' `bodylessCallables` (each refused handler once). It
+    // rendered `lowering.bodyExtractionWarnings`, which lists a handler once
+    // per refusing slot, until its count moved to that population; the
+    // remainder line and the pointer below are the same bytes.
+    expect(remaining).toEqual([expect.stringContaining(' refusedCallables')]);
   });
 
   it('the precedent is untouched, byte for byte', () => {

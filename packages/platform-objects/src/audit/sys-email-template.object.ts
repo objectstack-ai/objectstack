@@ -3,25 +3,24 @@
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 /**
- * sys_email_template — Outbound Email Template (metadata row)
+ * sys_email_template — Outbound Email Template (legacy rows)
  *
- * Backing persistence for the `email_template` metadata type. Each
- * row is the runtime representation of an `EmailTemplate` Zod
- * envelope. Resolved by an EXACT `(name, locale)` match — the
- * EmailService does NO language-subtag folding, so `en-US` never
- * reaches an `en` row and there is no "best match". A call that NAMES
- * a locale retries exactly one rung, the literal `en-US`, and then
- * raises `TEMPLATE_NOT_FOUND`; a call that names none starts AT
- * `en-US` and, only when the bundle carries no `en-US` row at all,
- * takes the bundle's lowest locale tag. See
- * `@objectstack/plugin-email`'s `createSysEmailTemplateLoader` and
- * `SendTemplateInput.locale` for the ladder of record.
+ * No mail is sent from this table any more (ADR-0131 D6/D10, ruling C on
+ * §6 Q1). Email templates are `email_template` metadata, read from the
+ * registry by an EXACT `(name, locale)` match: the built-in auth templates
+ * code-declared by `@objectstack/plugin-email`, the ones an app declares, and
+ * the ones authored in Studio (environment level). See plugin-email's
+ * `createRegistryEmailTemplateLoader` and `SendTemplateInput.locale` for the
+ * ladder of record.
  *
- * Authoring: built-in templates are seeded by `EmailServicePlugin`
- * on `kernel:ready`, and an `email_template` edited in Studio is
- * projected into its row. An organization does not create or edit a
- * row here: `@objectstack/plugin-email` refuses a non-system create or
- * update (ADR-0131 D6).
+ * What the table still holds is the rows earlier releases wrote — the
+ * built-in seed, the declared-template sweep and the Studio projection —
+ * including rows an organization customized before its door closed. Those
+ * customized rows are the population the v18 migration ceremony promotes to
+ * environment-level Studio templates; nothing else reads, writes or deletes
+ * them. An organization does not create or edit a row here:
+ * `@objectstack/plugin-email` refuses a non-system create or update
+ * (ADR-0131 D6).
  *
  * @namespace sys
  */
@@ -155,15 +154,15 @@ export const SysEmailTemplate = ObjectSchema.create({
     }),
 
     // ── Provenance (#4509 — record-authoritative seed-not-clobber) ──
-    // Mirrors sys_webhook (#3461) / sys_sharing_rule (#2909). `is_system`
-    // remains the built-in-auth-template axis; these two track the DECLARED
-    // metadata door: bootstrapDeclaredEmailTemplates seeds `package` rows and
-    // re-seeds them every boot, and skips a row marked `customized`. Both are
-    // `readonly` — the engine strips them from non-system payloads. Since
-    // ADR-0131 ruling C closed the organization door (plugin-email refuses a
-    // non-system create or update), nothing marks a row `customized` any more:
-    // the rows already marked are the population the v18 migration ceremony
-    // promotes to environment-level Studio templates.
+    // Mirrors sys_webhook (#3461) / sys_sharing_rule (#2909). Recorded on the
+    // rows earlier releases wrote: `is_system` was the built-in seed's axis,
+    // and these two tracked the DECLARED metadata door — `package` rows the
+    // boot sweep re-seeded, and the `customized` mark it skipped. Both are
+    // `readonly` — the engine strips them from non-system payloads. Nothing
+    // writes either any more: templates resolve from the registry, and
+    // ADR-0131 ruling C closed the organization door. The rows already marked
+    // `customized` are the population the v18 migration ceremony promotes to
+    // environment-level Studio templates.
     managed_by: Field.select(
       ['platform', 'package', 'admin'],
       {

@@ -809,7 +809,7 @@
         "app": "showcase",
         "requires": [
           "showcase_inquiry is OWD private with create granted to the baseline — depth only matters where the baseline stops (permission-sets.ts docblock)",
-          "personas staffed by granting the sets (sys_user_permission_set) or assigning the bound positions manager/exec/ops (bind-position-sets.ts wires position → set at boot)"
+          "personas staffed by granting the sets (sys_user_permission_set) or assigning the positions manager/exec/ops (each declares its set in permissionSets, examples/app-showcase/src/security/positions.ts)"
         ]
       },
       "steps": [

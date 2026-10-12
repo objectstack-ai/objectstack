@@ -10,10 +10,13 @@ import { strictObject } from '../shared/strict-object';
  * Email Template Metadata Protocol
  *
  * Declarative template definition consumed by `IEmailService.sendTemplate()`
- * to render outbound mail. Persisted as rows of `sys_email_template` so
- * administrators can author/edit/translate templates in Studio without
- * shipping code, and tenants can override the built-in defaults
- * (`allowOrgOverride: true` in the metadata registry).
+ * to render outbound mail. Read from the metadata registry by
+ * `(name, locale)` — the environment's item over each code package's
+ * declaration, the built-in auth templates included — so administrators can
+ * author/edit/translate templates in Studio without shipping code, and a
+ * Studio save overrides a built-in default at environment level
+ * (`allowEnvironmentOverlay: true` in the metadata registry). No
+ * `sys_email_template` row is read or written on the way.
  *
  * Aligned with Salesforce `EmailTemplate` and ServiceNow
  * `sysevent_email_action` conventions: a single named template is

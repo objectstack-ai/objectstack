@@ -27,6 +27,7 @@ import {
   validateRlsPredicateEnforceability as validateRlsPredicateEnforceabilityUnrecorded,
   RLS_PREDICATE_UNENFORCEABLE,
   RLS_PREDICATE_UNKNOWN_FIELD,
+  CROSS_FIELD_CLASS_LISTING,
 } from './validate-rls-predicate-enforceability.js';
 import { runAuthoringRules } from './authoring-rules.js';
 import { runRuntimeAuthoringRules } from './runtime-gate.js';
@@ -37,7 +38,7 @@ import { explainRule } from './rule-explanations.js';
 // fired, and the last case in this file holds each recorded verdict to one
 // line of at most 200 characters. Run the whole file: that case reads what the
 // cases above fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateRlsPredicateEnforceability: typeof validateRlsPredicateEnforceabilityUnrecorded = (...args) => {
   const findings = validateRlsPredicateEnforceabilityUnrecorded(...args);
   fired.push(...findings);
@@ -142,7 +143,7 @@ describe('validateRlsPredicateEnforceability — a field compared with a field o
               `RLS ${clause} compares \`record.${left} ${quoted} record.${right}\`, which no comparison class spans ` +
                 `(${why}), ${REFUSED[clause]}`,
             );
-            expect(finding.hint).toMatch(/^Compare a field only with a field of the same comparison class: /);
+            expect(finding.hint).toMatch(/^Compare a field only with a field of its comparison class, or with a literal or a `current_user` value/);
           });
         }
       }
@@ -174,15 +175,21 @@ describe('validateRlsPredicateEnforceability — a field compared with a field o
     expect(text).toContain('across two classes every insert or update it judges');
   });
 
-  it('the prescription names every class with the declared types it holds, read from the spec', () => {
+  it('the explanation names every class with the declared types it holds, read from the spec', () => {
+    // [#22161] The listing was the `fix:` line's, computed from the spec's
+    // class table; the explanation writes it out (it imports nothing), so it is
+    // held here to the rule's own computed listing, and the `fix:` is one line.
     const [finding] = validateRlsPredicateEnforceability(stackWith({ operation: 'select', using: 'record.status != record.amount' }));
-    expect(finding.hint).toContain('a number only with a number (`number`, `currency`, `percent`, `rating`, `slider`, `progress`, `summary`)');
-    expect(finding.hint).toContain('a boolean only with a boolean (`boolean`, `toggle`)');
-    expect(finding.hint).toContain('a date only with a date (`date`)');
-    expect(finding.hint).toContain('a datetime only with a datetime (`datetime`)');
-    expect(finding.hint).toContain('a time of day only with a time of day (`time`)');
+    expect(finding.hint.length).toBeLessThanOrEqual(200);
+    const text = explanationOf(RLS_PREDICATE_UNENFORCEABLE);
+    expect(text).toContain(`Compare a field only with a field of the same comparison class: ${CROSS_FIELD_CLASS_LISTING}.`);
+    expect(text).toContain('a number only with a number (`number`, `currency`, `percent`, `rating`, `slider`, `progress`, `summary`)');
+    expect(text).toContain('a boolean only with a boolean (`boolean`, `toggle`)');
+    expect(text).toContain('a date only with a date (`date`)');
+    expect(text).toContain('a datetime only with a datetime (`datetime`)');
+    expect(text).toContain('a time of day only with a time of day (`time`)');
     for (const t of ['text', 'autonumber', 'select', 'radio', 'lookup', 'master_detail', 'user', 'tree']) {
-      expect(finding.hint).toMatch(new RegExp(`text only with text \\([^)]*\`${t}\``));
+      expect(text).toMatch(new RegExp(`text only with text \\([^)]*\`${t}\``));
     }
   });
 });
@@ -357,6 +364,19 @@ describe('[#22161] one-line verdicts', () => {
     for (const f of fired) {
       expect(f.message, f.rule).not.toContain('\n');
       expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+});
+
+// [#22161] Slice 11: the `fix:` line of every finding this file fired is one
+// remedy sentence; what it stopped saying is the id's `os explain` entry.
+describe('[#22161] one-line fixes', () => {
+  it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {
+    expect(fired.some((f) => f.message.includes('which no comparison class spans'))).toBe(true);
+    // Every RLS id: slice 11 converted three, slice 12 the other two.
+    for (const f of fired.filter((x) => x.rule.startsWith('rls-predicate-'))) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
     }
   });
 });

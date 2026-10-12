@@ -1467,6 +1467,44 @@ export const FieldSchema = lazySchema(() => {
     + 'natural key against the object the sibling column names, and an unresolvable pointer is refused '
     + 'loudly instead of stored verbatim. Adds no referential integrity or $expand behavior.'
   ),
+  /**
+   * Inbound mail association — `email` fields only (#22870; ruling
+   * `6116489638`, Q1 → A, under the inbound-mail design record on #8998).
+   *
+   * Marks this email field as identifying a message correspondent. The one
+   * closed extension point of inbound mail — "given these participant
+   * addresses, which record(s) does this message belong to?" — is answered by
+   * this declaration, never by app code:
+   *
+   * - **Input:** the participant set — the normalised addr-specs of From,
+   *   Sender, Reply-To, To and Cc, plus those of a forwarded message the mail
+   *   carries, minus the receiving mailbox's own addresses — scoped to the
+   *   mailbox's organization.
+   * - **Output:** one association per match, naming the object, the record id,
+   *   this field and the matched address. An empty set leaves the message in
+   *   the mailbox's unassociated pool.
+   *
+   * The platform learns which fields carry a correspondent's address, the same
+   * kind of fact as `searchable`, and never what a contact is: every object
+   * that flags a field is treated alike. No resolver contract is published.
+   *
+   * Declared = enforced (ADR-0049). The parse seam refuses it on every type
+   * but `email` (the superRefine below, beside the `referenceVia` checks): no
+   * other type stores an address to match. The runtime reader is the mailbox
+   * service's ingest and re-match, which lands with the ingest card; until it
+   * does, the liveness ledger row is `planned` with `authorWarn`, so an author
+   * who sets it is told it takes no effect yet. No default: `undefined` always
+   * means "not authored".
+   */
+  mailAssociation: z.boolean().optional().describe(
+    'Inbound mail association (`email` fields only): TRUE marks this field as identifying a correspondent. '
+    + 'When a mailbox service ingests a message, it associates the message with every record of this object '
+    + "whose value in this field equals one of the message's participant addresses (From, Sender, Reply-To, To "
+    + 'and Cc, plus those of a forwarded message it carries; ASCII case-insensitive; the receiving mailbox\'s '
+    + "own addresses excluded; only within the mailbox's organization). A message no record matches waits in "
+    + "the mailbox's unassociated pool. Refused on any other type. Takes effect only where a mailbox service "
+    + 'is composed.'
+  ),
   // `referenceFilters` (string[]) removed in the 16.x line (#2377, ADR-0049):
   // the lookup picker reads the structured `lookupFilters` ({field,operator,value}),
   // never this string[] form — as authored it filtered nothing. Use `lookupFilters`.
@@ -2195,6 +2233,24 @@ export const FieldSchema = lazySchema(() => {
         'sibling column, the other a single static target object — both cannot be honest about where ' +
         'this field points. Keep `referenceVia` for a polymorphic pointer, or `reference` (on a ' +
         'lookup/master_detail field) for a fixed relationship.',
+    });
+  }
+  // [#22870] `mailAssociation` marks a field as holding a correspondent's
+  // address, matched against the participant addresses of inbound mail — and
+  // only an `email` column stores an address to match. On any other type the
+  // flag would parse and match nothing, so it is refused at the authoring
+  // seam, in the `referenceVia` refusal's shape (the offending type named, the
+  // remedy one keystroke away). An authored `false` off-type is refused too:
+  // the key describes nothing on that type.
+  if (field.mailAssociation !== undefined && field.type !== 'email') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['mailAssociation'],
+      message:
+        `\`mailAssociation\` is only valid on \`type: 'email'\` (this field is \`${field.type}\`): it marks ` +
+        "a field as holding a correspondent's address, matched against the participant addresses of " +
+        'inbound mail, and only an `email` field stores an address to match. Change the field to ' +
+        "`type: 'email'` if it holds an email address, or drop the key.",
     });
   }
 

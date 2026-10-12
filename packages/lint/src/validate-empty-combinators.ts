@@ -199,25 +199,6 @@ function rows(verdict: FilterVerdict): string {
   return 'carries a real predicate';
 }
 
-/**
- * The one spelling of "match no row" that is a declared predicate rather than
- * an identity nobody can read: an empty `$in` list.
- *
- * Not invented here — `packages/objectql/src/filter-comparand-shape.ts` names
- * `$in: []` / `$nin: []` as "a legitimate, declared predicate — matches nothing
- * and matches everything respectively", and deliberately does not refuse them.
- */
-const MATCH_NONE_SPELLING =
-  'If you really do want a predicate that selects nothing, `{ <field>: { $in: [] } }` is the declared ' +
-  'spelling for it (an empty `$in` list matches nothing, on every backend) — it says so where an empty ' +
-  'combinator only implies it.';
-
-/** The prescription every shape shares: an absent key IS "no filter". */
-const OMIT_THE_KEY =
-  'To express "no filter", DELETE the key — an absent `filter` and a filter that reduces to TRUE run ' +
-  'identically, and only the absent key says so to the next reader (and to the next AI author that ' +
-  'copies this metadata).';
-
 interface Ctx {
   where: string;
   out: EmptyCombinatorFinding[];
@@ -238,15 +219,17 @@ function emitEmptyCombinator(key: '$and' | '$or' | '$not', path: string, ctx: Ct
         : '`$not: {}` negates an EMPTY node, which is TRUE, so it ' +
           `${rows(VERDICT_OF.$not)}: the opposite of the "no filter" an empty operand looks like`;
 
+  // [#22161] One remedy line per shape. The declared match-none spelling and
+  // what a programmatic producer keeps are `os explain filter-empty-combinator`.
   const hint =
     key === '$and'
-      ? `${OMIT_THE_KEY} To express a constraint, put the conditions in the array. ${MATCH_NONE_SPELLING}`
+      ? 'To express "no filter", delete the key (an absent `filter` runs identically); to express a ' +
+        'constraint, put the conditions in the array'
       : key === '$or'
-        ? 'If you meant "no filter", this is its OPPOSITE: emptying the array does not relax the filter, ' +
-          `it closes it. ${OMIT_THE_KEY} If you meant to offer alternatives, put the branches in the ` +
-          `array. ${MATCH_NONE_SPELLING}`
-        : 'Put the condition you are negating inside `$not` (`{ $not: { status: \'closed\' } }`). ' +
-          `${OMIT_THE_KEY} ${MATCH_NONE_SPELLING}`;
+        ? 'Emptying the array closes the filter instead of relaxing it: delete the key to express "no filter", ' +
+          'or put the branches in the array to offer alternatives'
+        : 'Put the condition you are negating inside `$not` (`{ $not: { status: \'closed\' } }`), or delete ' +
+          'the key to express "no filter"';
 
   ctx.out.push({
     severity: 'error',
@@ -254,9 +237,7 @@ function emitEmptyCombinator(key: '$and' | '$or' | '$not', path: string, ctx: Ct
     where: ctx.where,
     path,
     message,
-    hint:
-      `${hint} A PROGRAMMATIC producer that loops to zero operands keeps the runtime identity ` +
-      'unchanged — this rule judges only what is written in the metadata.',
+    hint,
   });
 }
 
@@ -273,9 +254,13 @@ function emitEmptyNode(position: EmptyNodePosition, path: string, ctx: Ctx): voi
         'An EMPTY filter node (`{}`) is TRUE, so it ' +
         `${rows(VERDICT_OF.node)} exactly as if the key were absent: a filter is declared and enforces ` +
         'nothing',
+      // [#22161] One remedy line per position. Why the absent key is the
+      // spelling, and the declared match-none spelling (`$in: []`, which
+      // `packages/objectql/src/filter-comparand-shape.ts` names a legitimate
+      // declared predicate), are `os explain filter-empty-node`.
       hint:
-        `${OMIT_THE_KEY} If you meant to constrain something, write the condition into the node. ` +
-        `${MATCH_NONE_SPELLING}`,
+        'Delete the key to express "no filter" (an absent `filter` runs identically), or write the ' +
+        'condition into the node',
     });
     return;
   }
@@ -290,9 +275,8 @@ function emitEmptyNode(position: EmptyNodePosition, path: string, ctx: Ctx): voi
         'An EMPTY branch (`{}`) of a `$or` is TRUE, and one TRUE disjunct ABSORBS the disjunction ' +
         `(it ${rows(VERDICT_OF.orWithEmptyBranch)}), so every branch written beside it is dead`,
       hint:
-        'Delete the empty branch — the `$or` then means what it looks like. If it was meant to carry a ' +
-        'condition, write it. (A compiler that DROPPED the empty branch instead would silently NARROW ' +
-        'the scope to the surviving branches, which is why the runtime absorbs rather than filters.)',
+        'Delete the empty branch so the `$or` means what it looks like, or write the condition it was ' +
+        'meant to carry',
     });
     return;
   }
@@ -305,9 +289,7 @@ function emitEmptyNode(position: EmptyNodePosition, path: string, ctx: Ctx): voi
     message:
       'An EMPTY branch (`{}`) of a `$and` is TRUE, the AND identity, so it contributes no condition ' +
       'and the conjunction means whatever its other branches mean',
-    hint:
-      'Delete the empty branch, or write the condition it was meant to carry. A branch that constrains ' +
-      'nothing is indistinguishable from one whose condition was lost in an edit.',
+    hint: 'Delete the empty branch, or write the condition it was meant to carry',
   });
 }
 

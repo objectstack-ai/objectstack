@@ -331,10 +331,51 @@ function str(v: unknown): string {
   return typeof v === 'string' ? v : '';
 }
 
-const PUSHDOWN_SUBSET =
-  'The lowerable subset is: `==` `!=` `>` `<` `>=` `<=`, `in`, `&&` `||` `!`, `== null` / `!= null`, ' +
-  'and the string methods `startsWith` / `endsWith` / `contains` — over SINGLE-column field paths ' +
-  '(ADR-0058 D2), compared against a literal or a `current_user.*` value.';
+/*
+ * [#22161] The `fix:` lines. Each finding's `hint` is one remedy sentence of
+ * at most 200 characters, and what the hints used to enumerate — the lowerable
+ * subset and its three traps, the rule each holding breaks with the other
+ * rewrites a site admits, the comparison classes with their types, the four
+ * ways to shrink an oversized predicate, the declared fields of the object,
+ * what each kernel key holds and how an app stages a membership set, the
+ * legacy SQL bridge's reach and the subquery route — is each id's
+ * `os explain` entry (`rule-explanations.ts`), held to its source by this
+ * file's tests. A predicate with several faulty sites gets the first site's
+ * rewrite and a count of the rest.
+ */
+
+/** Rewrite into the lowerable subset — the shape arm of `rls-predicate-unenforceable`. */
+const LOWERABLE_REWRITE =
+  'Rewrite the predicate inside the lowerable subset (comparisons, `in`, `&&` `||` `!`, null tests and string ' +
+  'methods over single-column fields); write `has(record.x)` as `record.x != null`';
+
+/** A refused comparand with no `null` in it — the shared-face arm's other half. */
+const COMPARAND_REWRITE =
+  'Rewrite the comparand the verdict names inside the lowerable subset: a literal or a `current_user.*` value ' +
+  'compared with a single-column field';
+
+/** `rls-predicate-over-budget`: the four ways to shrink, in one line; the `&&` warning is never dropped. */
+const OVER_BUDGET_FIX =
+  'Make the predicate smaller: collapse an `||` chain into `field in [a, b, …]`, test a membership key ' +
+  '`field in current_user.<key>`, or split a top-level `||` across policies (never a top-level `&&`)';
+
+/**
+ * `rls-predicate-unparseable`: the SQL-to-CEL translations in one line. What the
+ * legacy bridge covers, and why a subquery has no CEL spelling, are the explanation's.
+ */
+const UNPARSEABLE_FIX =
+  'Author the predicate in canonical CEL: `&&` / `||` for AND / OR, `!` for NOT, `startsWith` / `endsWith` / ' +
+  '`contains` for LIKE; pre-resolve a subquery into a membership key';
+
+/** `rls-predicate-unknown-field`: the verdict's "Did you mean" names the nearest declared column. */
+const UNKNOWN_FIELD_FIX =
+  'Point the predicate at a column the object declares (denormalise a value from another object onto it ' +
+  'first), or delete the policy if the narrowing is gone';
+
+/** `x (and N more)` — the first of several faulty sites' rewrites, and a count of the rest. */
+function firstAndCount(items: readonly string[]): string {
+  return `${items[0]}${items.length > 1 ? ` (and ${items.length - 1} more)` : ''}`;
+}
 
 /**
  * The overrun behind a `parse-error`, or `null` when the refusal was a genuine
@@ -812,13 +853,6 @@ function attributeTypeFault(bridged: string, probe: UserProbe): TypeFault | null
   return null;
 }
 
-/** The kernel keys that hold `holding` on every request, from their declared types. */
-function kernelKeysHolding(holding: 'list' | 'one value'): string[] {
-  return [...PRERESOLVED_USER_KEYS]
-    .filter((key) => Array.isArray(kernelKeyProbe(key)) === (holding === 'list'))
-    .sort();
-}
-
 /** The lowered string-method operators, back to the CEL method an author writes. */
 const STRING_METHOD_OF: ReadonlyMap<string, string> = new Map([
   ['$startsWith', 'startsWith'],
@@ -826,41 +860,35 @@ const STRING_METHOD_OF: ReadonlyMap<string, string> = new Map([
   ['$contains', 'contains'],
 ]);
 
-/** The pasteable rewrite for one lowered site of a type fault. */
+/**
+ * The pasteable rewrite for one lowered site of a type fault — [#22161] the
+ * primary one only, for the one-line `fix:`. The alternatives a site also
+ * admits (pass one value instead of the set to a string method; name a
+ * membership key, or an app-staged §7.3.1 set, for a set) are the
+ * explanation's, beside the kernel keys by what each holds.
+ */
 function typeFaultRewrite(fault: TypeFault, site: LoweredSite): string {
   const f = `record.${site.field}`;
   const v = fault.variable;
   const method = STRING_METHOD_OF.get(site.op);
-  const oneValueKeys = kernelKeysHolding('one value');
   if (fault.holds === 'list') {
     if (site.op === '==') return `replace \`${f} == ${v}\` with \`${f} in ${v}\``;
     if (site.op === '$ne') return `replace \`${f} != ${v}\` with \`!(${f} in ${v})\``;
-    if (method) {
-      return (
-        `replace \`${f}.${method}(${v})\` with the membership test \`${f} in ${v}\`, or pass one value: ` +
-        oneValueKeys.map((key) => `\`${f}.${method}(current_user.${key})\``).join(' / ')
-      );
-    }
+    if (method) return `replace \`${f}.${method}(${v})\` with the membership test \`${f} in ${v}\``;
   }
   if (fault.holds === 'one value' && site.op === '$in') {
-    return (
-      `replace \`${f} in ${v}\` with \`${f} == ${v}\` (and \`!(${f} in ${v})\` with \`${f} != ${v}\`); for a ` +
-      `set, name a membership key: ` +
-      kernelKeysHolding('list').map((key) => `\`${f} in current_user.${key}\``).join(' / ')
-    );
+    return `replace \`${f} in ${v}\` with \`${f} == ${v}\``;
   }
   if (fault.holds === 'context object') {
+    // Which key is the author's to name: the explanation lists the kernel
+    // keys by what each holds, so the rewrite names the slot, not a guess.
     if (site.op === '$in') {
-      return (
-        `replace \`${f} in current_user\` with the key that holds the set: ` +
-        kernelKeysHolding('list').map((key) => `\`${f} in current_user.${key}\``).join(' / ') +
-        `, or an app-staged §7.3.1 set \`${f} in current_user.<key>\``
-      );
+      return `replace \`${f} in current_user\` with the membership key that holds the set: \`${f} in current_user.<key>\``;
     }
     if (method) {
       return (
         `replace \`${f}.${method}(current_user)\` with the key that holds the string: ` +
-        oneValueKeys.map((key) => `\`${f}.${method}(current_user.${key})\``).join(' / ')
+        `\`${f}.${method}(current_user.<key>)\``
       );
     }
   }
@@ -879,14 +907,9 @@ const HOLDING_VERDICT: Readonly<Record<RuntimeHolding, (variable: string) => str
     '`current_user` alone is the whole caller context object, used where one value or one set belongs',
 };
 
-/** The one-sentence rule each holding breaks, leading its hint. */
-const HOLDING_RULE: Readonly<Record<RuntimeHolding, string>> = {
-  list:
-    '`==` / `!=` compare ONE value and a string method takes ONE string; a membership set is tested with `in` — ' +
-    '"one of these" is `x in set`, "none of these" is `!(x in set)`.',
-  'one value': '`in` tests membership in a SET; one value is compared with `==` / `!=`.',
-  'context object': '`current_user` is the caller context, not a value: name the key that holds what you mean.',
-};
+// [#22161] The one-sentence rule each holding breaks led the hint until the
+// hint became one line; it is the `rls-predicate-unenforceable` explanation's
+// now, which `os explain` prints.
 
 /**
  * The verdict of the shared filter faces on this predicate's LOWERED filter —
@@ -949,7 +972,7 @@ function nullComparandRewrites(filter: Record<string, unknown>): string[] {
         rest.length === 0
           ? `replace \`${written}\` with \`${f} == null\``
           : `replace \`${written}\` with \`(${f} in [${rest.map(celLiteral).join(', ')}] || ${f} == null)\` ` +
-              `to keep matching a missing value, or drop the member: \`${f} in [${rest.map(celLiteral).join(', ')}]\``,
+              'to keep matching a missing value',
       );
     } else {
       rewrites.push(
@@ -1178,11 +1201,13 @@ export function crossClassVerdict(comparisons: readonly CrossClassComparison[]):
   );
 }
 
-/** The prescription both rules share, ahead of their per-surface alternatives. */
-export const CROSS_CLASS_REMEDY =
-  `Compare a field only with a field of the same comparison class: ${CROSS_FIELD_CLASS_LISTING}. ` +
-  'A file field and a formula field cannot be compared with another column at all. If the two columns do ' +
-  'hold comparable values, one of them is declared with the wrong type: fix the declaration, not the predicate.';
+/*
+ * [#22161] The prescription both rules shared, ahead of their per-surface
+ * alternatives (`CROSS_CLASS_REMEDY`), listed every class with its types on
+ * the `fix:` line. The listing is the explanation's now — written out there
+ * and held to {@link CROSS_FIELD_CLASS_LISTING} by the rules' tests — and each
+ * rule's `fix:` line is one sentence naming its own alternatives.
+ */
 
 /**
  * The engine's judge-only filter admission, as the caller hands it in
@@ -1257,10 +1282,10 @@ function engineRefusal(
 /** The prescription for an engine refusal, keyed by the engine's `code` (never by its prose). */
 function engineRefusalHint(code: string): string {
   if (code === 'FILTER_TOKEN_UNKNOWN' || code === 'FILTER_TOKEN_UNRESOLVED') {
+    // [#22161] One line; the `current_user` keys are the explanation's list.
     return (
-      'A `{…}` placeholder is saved-filter syntax, and an RLS predicate does not use it: the predicate ' +
-      `is CEL, and the caller's values are the \`current_user\` keys (${listNames(PRERESOLVED_USER_KEYS)}). ` +
-      'Write `owner == current_user.id`, not `owner == \'{current_user_id}\'`.'
+      "Write the caller's value as a `current_user` key, never a `{…}` placeholder: `owner == current_user.id`, " +
+      "not `owner == '{current_user_id}'`"
     );
   }
   if (code === 'INVALID_FIELD') {
@@ -1270,9 +1295,8 @@ function engineRefusalHint(code: string): string {
     );
   }
   return (
-    'Rewrite the comparison the engine names so it can run: a text operator (`startsWith` / `endsWith` / ' +
-    '`contains`) only on a field that holds a string, and a date or datetime field only against a value ' +
-    'its storage can read. ' + PUSHDOWN_SUBSET
+    'Rewrite the comparison the engine names: a text operator only on a field that holds a string, and a date ' +
+    'or datetime field only against a value its storage can read'
   );
 }
 
@@ -1312,14 +1336,10 @@ function referenceFindings(
       where,
       path,
       message: `${account.message} ${droppedSentence(clause)}`,
-      hint:
-        `${account.detail} Point the predicate at a column the object really declares, or delete the ` +
-        `policy if the narrowing is gone — a policy naming a column that does not exist is not ` +
-        `protection either way: it is an outage in one position and an open door in the other. If the ` +
-        `field was RENAMED, this policy has been wrong since that rename — check WHICH way before you ` +
-        `judge the blast radius, because a negated or non-leading miss has been granting, not denying. ` +
-        `If the value was meant to live on another object, RLS cannot join to it (ADR-0055) — ` +
-        `denormalise it onto "${object}" (a formula/rollup field) and test that column instead.`,
+      // [#22161] One line: the verdict's "Did you mean" names the nearest
+      // declared column, so the object's whole field list (`account.detail`)
+      // and the rename / join reasoning are the explanation's.
+      hint: UNKNOWN_FIELD_FIX,
     });
   }
 
@@ -1333,15 +1353,12 @@ function referenceFindings(
       message:
         `RLS ${clause} reads \`${variablePath}\`, which nothing pre-resolves, in a scalar position no request ` +
         `can ever fill, ${droppedClause(clause)}`,
+      // [#22161] One remedy line, naming only the fixed key set and the
+      // nearest key, so no author text can lengthen it. What each key holds,
+      // and how an app stages a membership set, are the explanation's.
       hint:
-        `Use one of the pre-resolved context values (${listNames(PRERESOLVED_USER_KEYS)})${suggestName(
-          key,
-          PRERESOLVED_USER_KEYS,
-        )} — \`current_user.organization_id\` is the tenant, \`current_user.id\` the acting user, ` +
-        `\`current_user.email\` their unique address. If "${key}" is meant to be an app-resolved set, it ` +
-        `must be staged into \`ExecutionContext.rlsMembership\` by an \`IRlsMembershipResolver\` that ` +
-        `DECLARES the key, and it can then only be tested with \`in\` (\`<field> in ${variablePath}\`), ` +
-        `never compared with \`==\`: the runtime stages membership sets as arrays and never as scalars.`,
+        `Read a pre-resolved key (${listNames(PRERESOLVED_USER_KEYS)}), or test an app-staged membership ` +
+        `set with \`in\`, never \`==\`.${suggestName(key, PRERESOLVED_USER_KEYS)}`,
     });
   }
 
@@ -1356,9 +1373,7 @@ function referenceFindings(
       where,
       path,
       message: `RLS ${clause}: ${HOLDING_VERDICT[fault.holds](fault.variable)}, ${droppedClause(clause)}`,
-      hint:
-        `${HOLDING_RULE[fault.holds]} In this predicate: ` +
-        `${fault.sites.map((site) => typeFaultRewrite(fault, site)).join('; ')}.`,
+      hint: firstAndCount(fault.sites.map((site) => typeFaultRewrite(fault, site))),
     });
   }
 
@@ -1374,12 +1389,7 @@ function referenceFindings(
       // compiled policy filter, `using` and `check` alike, so the policy is
       // dropped on every request, exactly as a TYPE fault is.
       message: `RLS ${clause} lowers to a refused comparand (${firstSentence(faced)}), ${droppedClause(clause)}`,
-      hint:
-        rewrites.length > 0
-          ? '`null` has no place inside a list or opposite an ordering operator — the platform refuses both in ' +
-            'every filter it is sent, because no two backends agree on what they match. Test for no value with ' +
-            `\`== null\` and for a value with \`!= null\`: ${rewrites.join('; ')}.`
-          : 'Rewrite the comparand the check names inside the lowerable subset. ' + PUSHDOWN_SUBSET,
+      hint: rewrites.length > 0 ? firstAndCount(rewrites) : COMPARAND_REWRITE,
     });
   }
 
@@ -1395,11 +1405,8 @@ function referenceFindings(
       path,
       message: `RLS ${clause} ${listHoldingVerdict(listComparisons)}, ${REFUSED_COMPARISON[clause]}`,
       hint:
-        'A field compared with a `json` or `multiple` field has no row-filter form: a row filter compares ' +
-        'one value with one value, and cannot test membership in a list another column holds. Compare ' +
-        'with a single-valued column, or with a literal or a `current_user` value — "one of these ' +
-        "values\" is `record.status in ['open', 'pending']` or `record.owner in current_user.org_user_ids` " +
-        '— or move the condition into a validation rule or a hook.',
+        'Compare with a single-valued column, a literal or a `current_user` value ' +
+        '(`record.owner in current_user.org_user_ids`), or move the condition into a validation rule or a hook',
     });
   }
 
@@ -1416,9 +1423,8 @@ function referenceFindings(
       path,
       message: `RLS ${clause} ${crossClassVerdict(crossClass)}, ${REFUSED_COMPARISON[clause]}`,
       hint:
-        `${CROSS_CLASS_REMEDY} To keep the rule without a second column, compare with a literal or a ` +
-        '`current_user` value, test a file field with `!= null`, or store the value you mean in a field of the ' +
-        'right type and compare that — or move the condition into a validation rule or a hook.',
+        'Compare a field only with a field of its comparison class, or with a literal or a `current_user` value; ' +
+        'if both columns do hold comparable values, fix the declaration',
     });
   }
 
@@ -1540,19 +1546,9 @@ export function validateRlsPredicateEnforceability(
             message:
               `RLS ${clause} is valid CEL but overruns the parse bound ${bound}${budget}${measured} ` +
               `(${overrun.summary}), ${droppedClause(clause)}`,
-            hint:
-              `There is no syntax or dialect error to correct here — the predicate is well-formed CEL and ` +
-              `is simply too large for ${bound}${budget}, so the fix is to make it smaller or to move the ` +
-              `work off the predicate. (1) Collapse a long \`field == a || field == b || …\` chain into a ` +
-              `single \`field in [a, b, …]\`, which is far fewer AST nodes (\`maxListElements\` is 64, so a ` +
-              `very large set needs option 2). (2) Pre-resolve the set into a membership key the runtime ` +
-              `exposes and test \`field in current_user.<key>\` (ADR-0105 D11) — one comparison whatever ` +
-              `the set size. (3) Denormalise a repeated sub-expression onto this object as a ` +
-              `formula/rollup field and test that single column. (4) Split a TOP-LEVEL \`||\` across ` +
-              `several \`rowLevelSecurity\` policies: applicable policies are OR-ed, so that is ` +
-              `equivalent — but never split a top-level \`&&\` this way, which would WIDEN access rather ` +
-              `than preserve it. Logic genuinely this large is not a row filter: move it to a hook or ` +
-              `action body (\`ScriptBody { language: 'js' }\`, the L2 sandboxed surface).`,
+            // [#22161] One line; the four options in full, and why a top-level
+            // `&&` must never be split, are the explanation's.
+            hint: OVER_BUDGET_FIX,
           });
           continue;
         }
@@ -1566,13 +1562,7 @@ export function validateRlsPredicateEnforceability(
             message:
               `RLS ${clause} does not parse as CEL, even after the legacy SQL bridge (${detail}), ` +
               droppedClause(clause),
-            hint:
-              'Author the predicate in canonical CEL (ADR-0058 D1). The bridge covers only the historic ' +
-              'SQL subset — a bare `=` and `IN` — so everything else must already be CEL: combine with ' +
-              '`&&` / `||` rather than SQL `AND` / `OR`, negate with `!`, and use `startsWith` / ' +
-              '`endsWith` / `contains` rather than `LIKE`. A subquery has no CEL spelling at all: RLS ' +
-              'cannot join (ADR-0055), so pre-resolve the set into a membership key the runtime exposes ' +
-              '(`field in current_user.<key>`, ADR-0105 D11) or denormalise the value onto this object.',
+            hint: UNPARSEABLE_FIX,
           });
           continue;
         }
@@ -1583,15 +1573,7 @@ export function validateRlsPredicateEnforceability(
           where,
           path,
           message: `RLS ${clause} is not lowerable (${refusalVerdict(detail)}), ${droppedClause(clause)}`,
-          hint:
-            'Rewrite the predicate inside the lowerable subset. ' + PUSHDOWN_SUBSET + ' Three traps in ' +
-            'particular: (1) a function call — `size(record.tags) > 0`, `has(record.x)` — is correct in an ' +
-            'object VALIDATION rule, which is INTERPRETED, and wrong here, where the predicate is ' +
-            'COMPILED to a filter; write the null test as `field != null`. (2) A related-record path ' +
-            '(`record.account.region`) is a join, which the compiler refuses by design (ADR-0055) — ' +
-            'denormalise the value onto this object (a formula/rollup field) and test that column. ' +
-            '(3) Arithmetic on a column (`amount * 2 > 100`) never lowers — precompute it into a field, ' +
-            'or compare the column against the literal directly.',
+          hint: LOWERABLE_REWRITE,
         });
       }
     });

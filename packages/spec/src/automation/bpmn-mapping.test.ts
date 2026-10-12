@@ -116,7 +116,7 @@ describe('exportConstructsToBpmn — loop', () => {
     nodes: [
       node('start', 'start'),
       node('loop1', 'loop', {
-        collection: '{items}',
+        collection: { dialect: 'cel', source: 'items' },
         iteratorVariable: 'item',
         body: { nodes: [node('work', 'script')], edges: [] },
       }),
@@ -128,7 +128,7 @@ describe('exportConstructsToBpmn — loop', () => {
   it('expands a loop into a multi-instance activity (loopCharacteristics)', () => {
     const { flow: out } = exportConstructsToBpmn(flow);
     const work = findId(out, 'work')!;
-    expect((work.config as any).bpmnLoopCharacteristics.collection).toBe('{items}');
+    expect((work.config as any).bpmnLoopCharacteristics.collection).toEqual({ dialect: 'cel', source: 'items' });
     expect((work.config as any).bpmnLoopCharacteristics.elementVariable).toBe('item');
     expect(findId(out, 'loop1')).toBeUndefined();
     expect(hasEdge(out, 'start', 'work')).toBe(true);

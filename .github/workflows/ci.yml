@@ -1066,6 +1066,15 @@ jobs:
       # second red on wall time against `timeout-minutes`. Both constants, their
       # measured basis and a self-test battery each live in the script.
       #
+      # THE RED IS A `schedule` RED ALONE (C2, both timing steps, ruling
+      # https://github.com/objectstack-ai/objectstack/issues/22949#issuecomment-6119186511):
+      # the dataset's weights are measured on the hourly `schedule` runs, so
+      # only those exit 1 on DRIFT. On `merge_group`, `pull_request`, `push`
+      # and `workflow_dispatch` the step prints the same verdict, raises the
+      # DRIFT as a `::warning::` annotation and exits 0. The event reaches the
+      # script as `--event "$GITHUB_EVENT_NAME"`, which it requires; the rule
+      # and its self-test live there (TIMING_GRADED_EVENT, timingGateMode).
+      #
       # EXECUTED WINDOWS ONLY. Measurements come from samplesFromSummary() in
       # measure-test-shard-timings.mjs, which drops cache HITs and failed
       # suites, and the prediction is summed over the same executed packages.
@@ -1073,10 +1082,11 @@ jobs:
       # predicted and vouch for a rotted dataset, so a shard whose packages all
       # replayed is NOT MEASURED, never "fast".
       #
-      # NO `if:` and NO `continue-on-error` (the red is the point), and ABOVE
-      # the attestation pair for the #6082 reason documented on the upload
-      # above: a failed unguarded step skips that pair, so a drift red also
-      # withholds this shard's attestation, the fail-closed direction. A shard
+      # NO `if:` and NO `continue-on-error` (the red is the point, and the
+      # `schedule`-only red is the script's `--event`, so neither is needed),
+      # and ABOVE the attestation pair for the #6082 reason documented on the
+      # upload above: a failed unguarded step skips that pair, so a drift red
+      # also withholds this shard's attestation, the fail-closed direction. A shard
       # with no packages runs no turbo and writes no summary; that is NOT
       # MEASURED here rather than a usage error from the script.
       #
@@ -1109,7 +1119,7 @@ jobs:
             exit 0
           fi
           node scripts/partition-test-shards.mjs --check-drift "${SUMMARIES[@]}" \
-            --label "Test Core (${{ matrix.shard }}/6)"
+            --label "Test Core (${{ matrix.shard }}/6)" --event "$GITHUB_EVENT_NAME"
 
       # Runs even when the suite failed — that is when it earns its keep. It
       # answers TWO questions about a red suite, and needs both to be able to
@@ -1486,12 +1496,12 @@ jobs:
       # ── The per-package suite-duration ratchet (#16468) ──────────────────
       #
       # A GATE, unlike the two reporting steps above: NO `continue-on-error`,
-      # so a package whose suite ran past its ceiling reds `Test Core`, naming
-      # the package and its slowest test files. The ceiling is the package's
-      # slowest executed run in the refresh window x 1.25, generated into
-      # scripts/test-shard-timings.json (`ceilings`) by the refresh lane and
-      # held by every later refresh; it rises only by a ruled entry in the
-      # script's RULED_CEILING_RAISES. A `provisional` package prints "no
+      # so on a `schedule` run a package whose suite ran past its ceiling reds
+      # `Test Core`, naming the package and its slowest test files. The
+      # ceiling is the package's slowest executed run in the refresh window
+      # x 1.25, generated into scripts/test-shard-timings.json (`ceilings`) by
+      # the refresh lane and held by every later refresh; it rises only by a
+      # ruled entry in the script's RULED_CEILING_RAISES. A `provisional` package prints "no
       # ceiling: provisional" and is not red; a package absent from the dataset
       # prints "no ceiling: new package" and is not red until the first refresh
       # after it lands gives it a ceiling, while a package the dataset knows
@@ -1505,6 +1515,20 @@ jobs:
       # samplesFromSummary, and every vitest file line); a capture that did not
       # arrive leaves its packages ungraded and says so, never red.
       #
+      # EXIT-GRADED ON `schedule` ALONE (C2, both timing steps, ruling
+      # https://github.com/objectstack-ai/objectstack/issues/22949#issuecomment-6119186511):
+      # the ceilings come from the hourly `schedule` runs, so only those red
+      # this job on a package over its ceiling. On `merge_group`,
+      # `pull_request`, `push` and `workflow_dispatch` the step prints the same
+      # table, raises each package over its ceiling as a `::warning::`
+      # annotation and exits 0; a real slowdown merged to `main` reds the next
+      # hourly run. A package whose ceiling is under the absolute floor (20s,
+      # CEILING_FLOOR_SECONDS) prints "below floor" and is never red. The
+      # event reaches the script as `--event "$GITHUB_EVENT_NAME"`, which it
+      # requires; a refusal (a malformed table or raise record) is red on every
+      # event. The rule, the floor's reading and their self-tests live in the
+      # script.
+      #
       # NOT MEASURED, exit 0, while the dataset carries no `ceilings`: they are
       # generated only where the run-summary artifacts are downloadable (the
       # refresh lane), so the first refresh after this lands writes them, and
@@ -1515,7 +1539,7 @@ jobs:
       # captured, so a red shard's packages are graded too.
       - name: Check the per-package suite-duration ceilings
         if: always()
-        run: node scripts/check-test-suite-ceilings.mjs --captures "$RUNNER_TEMP/test-timings" --label 'Test Core'
+        run: node scripts/check-test-suite-ceilings.mjs --captures "$RUNNER_TEMP/test-timings" --label 'Test Core' --event "$GITHUB_EVENT_NAME"
 
 
   # ── Temporal conformance against live, non-UTC servers (ADR-0053 D-A3) ─────

@@ -2,7 +2,7 @@
 
 /**
  * [ADR-0131 D6, C5 stage S3] The dispatcher threads NO organization into a
- * metadata write: every type, an `allowOrgOverride: true` one included, lands
+ * metadata write: every type, one of the five overlay-enabled types included, lands
  * environment-wide (`organization_id` NULL) whatever the session's active
  * organization. The per-organization overlay axis is retired; the CONTROL cases
  * that used to pin `view` landing org-scoped are the stage's pins now, and they
@@ -10,7 +10,8 @@
  *
  * History, kept below for the reverse-verification record it carries:
  * #7018 — the runtime threads the session's organization into a metadata WRITE
- * only for types the registry declares `allowOrgOverride: true`.
+ * only for types the registry declared `allowOrgOverride: true` (the flag is
+ * `allowEnvironmentOverlay` since 18 and decides no organization).
  *
  * This is the runtime half of the #6190 ruling (2026-08-09, Option A). Before
  * it, both dispatcher write sites threaded `resolveActiveOrganizationId`
@@ -297,7 +298,7 @@ const metaRow = (engine: any, type: string, name: string) =>
 // decision is ever reached, which would pass these tests for the wrong reason.
 // ---------------------------------------------------------------------------
 
-/** `allowOrgOverride: false`, `allowRuntimeCreate: true` — the #6190 specimen. */
+/** Outside the five overlay-enabled types, `allowRuntimeCreate: true` — the #6190 specimen. */
 const FLOW = {
     name: 'escalate_overdue',
     label: 'Escalate overdue tasks',
@@ -315,7 +316,7 @@ const FLOW = {
     edges: [{ id: 'e1', source: 'start', target: 'end' }],
 };
 
-/** `allowOrgOverride: true` — the control. Its org scoping must NOT change. */
+/** One of the five overlay-enabled types — the control. Its org scoping must NOT change. */
 const VIEW = {
     name: 'overdue_grid',
     label: 'Overdue',
@@ -324,7 +325,7 @@ const VIEW = {
     columns: [{ field: 'name', label: 'Name' }],
 };
 
-/** `allowOrgOverride: false` — the ADR-0045 publish-visibility specimen. */
+/** Outside the five overlay-enabled types — the ADR-0045 publish-visibility specimen. */
 const APP = { name: 'crm', label: 'CRM' };
 
 /**
@@ -412,7 +413,7 @@ describe('#7018 — the registry decides whether a metadata write carries the se
         expect(a.body.data).toMatchObject({ success: true, state: 'active' });
     });
 
-    it('⭐ [ADR-0131 D6] an `allowOrgOverride: true` type lands env-wide too, and the read serves it', async () => {
+    it('⭐ [ADR-0131 D6] an overlay-enabled type lands env-wide too, and the read serves it', async () => {
         const { engine, dispatcher } = makeStack(ACTIVE_ORG);
 
         const res = responseOf(await dispatcher.handleMetadata(`/view/${VIEW.name}`, ctx(ACTIVE_ORG), 'PUT', VIEW));
@@ -513,7 +514,8 @@ describe('#7018 — the registry decides whether a metadata write carries the se
  * spelling map, for STORAGE. The dispatcher handed the same string RAW to
  * `organizationIdForMetaWrite`, whose `declaresOrgOverride` tolerates only the
  * MANIFEST-collection spellings — incomplete by design. For the two URL-only
- * spellings of `allowOrgOverride: true` types the two answers diverged:
+ * spellings of the types the registry then declared `allowOrgOverride: true`
+ * the two answers diverged:
  *
  *   PUT /metadata/translation/:name     → org-scoped row      (correct)
  *   PUT /metadata/translations/:name    → env-wide row        (the defect)
@@ -523,7 +525,7 @@ describe('#7018 — the registry decides whether a metadata write carries the se
  * One item, two partitions, addressed by spelling. `translations` has no
  * manifest key at all; `email_template`'s manifest key is the camelCase
  * `emailTemplates`, so the snake_case plural the registry derivation adds is
- * URL-only too. Both fold to an `allowOrgOverride: true` type in storage.
+ * URL-only too. Both fold to one of those types in storage.
  *
  * The `/published` branch is the smaller second site of the same class: after
  * the layered overlay consult misses, the fallback reads the code/package
@@ -569,7 +571,7 @@ describe('#10503 · ADR-0131 D6 no spelling carries an organization through the 
     });
 
     // The two measured members of the disagreement set: URL-only spellings of
-    // `allowOrgOverride: true` types, invisible to the manifest map. Each
+    // overlay-enabled types, invisible to the manifest map. Each
     // carries a schema-VALID body — a minimal one 422s before the scoping
     // decision is ever reached, which would pass these tests for the wrong
     // reason (the lesson the specimens above this block were built on).
@@ -665,7 +667,7 @@ describe('#10503 · ADR-0131 D6 no spelling carries an organization through the 
 
     it('⛔ a NON-overridable type stays env-wide under its plural spelling too', async () => {
         // The fold must change which type is judged, never the judgement.
-        // `object` is `allowOrgOverride: false`, and an org-scoped write of it
+        // `object` is outside the five overlay-enabled types, and an org-scoped write of it
         // is exactly the phantom row #6190 stopped minting — a row cold boot
         // walks past, after which every record 404s. The singular is pinned by
         // the #7018 case above; this is the spelling the fold newly reaches.

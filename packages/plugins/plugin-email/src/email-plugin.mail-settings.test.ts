@@ -93,7 +93,7 @@ async function boot(mailValues: Record<string, Resolved>, opts: any = {}) {
     settings,
   };
   const ctx = fakeCtx(services);
-  const plugin = new EmailServicePlugin({ seedTemplates: false, ...opts });
+  const plugin = new EmailServicePlugin({ ...opts });
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
   await ctx.fire('kernel:ready');
@@ -329,7 +329,7 @@ describe('applyMailSettings — provider=resend', () => {
 describe('EmailServicePlugin constructor path (CLI / os serve)', () => {
   it('THROWS when provider=smtp has no host — a boot that cannot deliver fails loudly', async () => {
     const ctx = fakeCtx({ manifest: { register: () => {} } });
-    const plugin = new EmailServicePlugin({ provider: 'smtp', seedTemplates: false });
+    const plugin = new EmailServicePlugin({ provider: 'smtp' });
     await expect(plugin.init(ctx as never)).rejects.toThrow(/requires a host/);
   });
 
@@ -339,7 +339,6 @@ describe('EmailServicePlugin constructor path (CLI / os serve)', () => {
     const plugin = new EmailServicePlugin({
       provider: 'smtp',
       providerOptions: { host: 'smtp.aliyun.test', port: 465 },
-      seedTemplates: false,
     });
     await plugin.init(ctx as never);
     expect(transportOf(services.email as EmailService)).toBeInstanceOf(SmtpTransport);

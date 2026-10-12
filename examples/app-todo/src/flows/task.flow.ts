@@ -70,7 +70,7 @@ export const TaskReminderFlow: Flow = {
       // (`→ end`) is the after-loop continuation.
       id: 'loop_tasks', type: 'loop', label: 'Loop Through Tasks',
       config: {
-        collection: '{tasksToRemind}',
+        collection: { dialect: 'cel', source: 'tasksToRemind' },
         iteratorVariable: 'currentTask',
         // The read above is capped at `limit: 200`, so this cap is the same
         // bound stated on the side that iterates it — the engine FAILS the
@@ -176,7 +176,7 @@ export const OverdueEscalationFlow: Flow = {
       // that resolved to nothing did not match every task in the table.
       id: 'loop_overdue', type: 'loop', label: 'Loop Through Overdue Tasks',
       config: {
-        collection: '{overdueTasks}',
+        collection: { dialect: 'cel', source: 'overdueTasks' },
         iteratorVariable: 'currentTask',
         // Same bound as the read above (`limit: 200`), stated on the side
         // that iterates: a longer collection fails the node rather than

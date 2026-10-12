@@ -21,6 +21,8 @@
   <sub><b>1</b> · One definition, and the app runs &nbsp;·&nbsp; <b>2</b> · An agent creates a record over MCP &nbsp;·&nbsp; <b>3</b> · A read-only identity is refused</sub>
   <br>
   <a href="https://youtu.be/CX_FlOoOtr0"><b>▶&nbsp; Watch: ObjectStack in 90 Seconds</b></a>
+  <br>
+  <sub><a href="https://objectstack.ai/blog/the-ontology-is-the-software">Why it exists</a> &nbsp;·&nbsp; <a href="https://objectstack.ai/docs/concepts/compare">How it compares</a> &nbsp;·&nbsp; <a href="https://objectstack.ai/docs/concepts/when-to-use">When to use it</a></sub>
 </p>
 
 You build & ask with Claude Code or any coding agent: the agent writes the
@@ -87,6 +89,11 @@ ontology, not part of it, and code does not disappear: it moves into the
 runtime, as hooks, action bodies, CEL, and constrained JSX. The full account is
 [Business Ontology](https://objectstack.ai/docs/concepts/ontology); the short
 form is the [glossary entry](https://objectstack.ai/docs/getting-started/glossary#business-ontology).
+
+[How it compares](https://objectstack.ai/docs/concepts/compare) sets ObjectStack
+beside knowledge ontologies, semantic layers, operational ontologies, metadata
+platforms, and AI code generation. [When to use it](https://objectstack.ai/docs/concepts/when-to-use)
+says where it fits today and where it does not.
 
 ## The runtime runs it
 
@@ -207,7 +214,7 @@ graph held inside a vendor's system.
 > The ontology is the software. Your objects, relations, actions, permissions,
 > flows, and agent and tool definitions are your business ontology — and the
 > definition layer of the AI era should be an open protocol you own.
-> [Read why](https://objectstack.ai/blog/the-ontology-is-the-software).
+> [Read why](https://objectstack.ai/blog/the-ontology-is-the-software) · [the talk as a deck (PDF)](https://objectstack.ai/decks/the-ontology-is-the-software.pdf).
 
 ## Ship it
 

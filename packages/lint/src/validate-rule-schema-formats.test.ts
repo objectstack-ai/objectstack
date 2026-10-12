@@ -104,10 +104,11 @@ describe('validateRuleSchemaFormats — the dropped keyword goes RED (#5178)', (
     expect(explanationOf(VALIDATION_RULE_SCHEMA_UNKNOWN_FORMAT)).toContain('DROPS the keyword');
     // The fix, concretely — an author cannot act on "unknown format".
     expect(f.hint).toContain("Did you mean `format: 'email'`?");
-    // …and the full vocabulary, so a name that is merely unfamiliar is
-    // resolvable without reading ajv-formats' source.
     expect(f.hint).toContain('date-time');
-    expect(f.hint).toContain('uri-reference');
+    // …and the full vocabulary, so a name that is merely unfamiliar is
+    // resolvable without reading ajv-formats' source. [#22161] `os explain`
+    // carries it; the `fix:` line names the nearest one.
+    expect(explanationOf(VALIDATION_RULE_SCHEMA_UNKNOWN_FORMAT)).toContain('uri-reference');
   });
 
   it('is reachable on a stack the spec fully accepts — a VALUE verdict needs a green safeParse', () => {
@@ -446,5 +447,29 @@ describe('[#22161] one-line verdicts — validation-rule-json-schema-unknown-for
     ]) {
       expect(text, `explanation names ${fact}`).toContain(fact);
     }
+  });
+});
+
+// [#22161] Slice 12: the `fix:` line. One remedy line: the nearest registered
+// name, the spelling rule and `pattern`; the registered names themselves are
+// the id's `os explain` entry, written out there and held to the live set here.
+describe('[#22161] one-line fixes — validation-rule-json-schema-unknown-format', () => {
+  it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {
+    const converted = (fired as Array<{ rule: string; hint?: string }>).filter(
+      (f) => f.rule === VALIDATION_RULE_SCHEMA_UNKNOWN_FORMAT,
+    );
+    // Coverage control: both arms fired, with and without a nearest name.
+    expect(converted.some((f) => f.hint?.startsWith('Did you mean'))).toBe(true);
+    expect(converted.some((f) => f.hint?.startsWith('Use a registered name'))).toBe(true);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint!.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('`os explain` lists exactly the registered names the rule judges against', () => {
+    const text = explanationOf(VALIDATION_RULE_SCHEMA_UNKNOWN_FORMAT);
+    expect(text).toContain(`\`format\` is enforced on every write): ${registeredFormatNames().join(', ')}.`);
+    expect(text).toContain('express it with `pattern` instead');
   });
 });

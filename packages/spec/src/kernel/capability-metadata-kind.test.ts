@@ -37,7 +37,7 @@
  * resources REQUIRE them. An administrator minting a brand-new capability at
  * runtime has no place in that separation — nothing in code would ever require
  * the name, so the row is an unreferenced grant target in the authorization
- * namespace. Paired with `allowOrgOverride: false` this is #5086's CODE-ONLY
+ * namespace. Paired with `allowEnvironmentOverlay: false` this is #5086's CODE-ONLY
  * declaration, which `saveMetaItem` enforces on every kernel.
  *
  * The enforcement half lives in
@@ -80,13 +80,13 @@ describe('capability is a registered metadata kind', () => {
 
   it('has a registry entry, and it declares the kind CODE-ONLY', () => {
     // The pair is the declaration: `allowRuntimeCreate: false` AND
-    // `allowOrgOverride: false` together are #5086's "no runtime write channel
+    // `allowEnvironmentOverlay: false` together are #5086's "no runtime write channel
     // at all". Either one alone leaves a door open — which is why they are
     // asserted together rather than in two cases.
     expect(entry('capability')).toMatchObject({
       domain: 'security',
       supportsOverlay: false,
-      allowOrgOverride: false,
+      allowEnvironmentOverlay: false,
       allowRuntimeCreate: false,
     });
   });

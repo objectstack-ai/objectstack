@@ -144,7 +144,7 @@ const result = FlowRegionSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **collection** | `string \| any[]` | ✅ | Template/variable resolving to the array to iterate (an inline array is accepted) |
+| **collection** | `any[] \| { dialect: 'cel'; source: string; ast?: any; meta?: object }` | ✅ | The list the node iterates: a CEL value envelope `{ dialect: 'cel', source }` evaluated in the run's scope to a list (anything else, null included, fails the node), or an inline array of the items, iterated as written — a string is refused, a `{…}` template token or a variable's bare name alike |
 | **iteratorVariable** | `string` | optional (default: `"item"`) | Loop variable holding the current item — a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}` |
 | **indexVariable** | `string` | optional | Optional loop variable holding the current index — a name without a leading `$` (the `$` names are the flow engine's own) |
 | **maxIterations** | `integer` | optional | Hard cap on iterations (clamped to the engine ceiling) |

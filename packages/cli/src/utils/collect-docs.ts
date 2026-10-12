@@ -326,8 +326,34 @@ function markdownFilesIn(dir: string): string[] {
  * which names the packages it was matched against and never claims a fixed
  * path.
  */
-function uncollectedDocsMessage(rel: string, files: readonly string[]): string {
-  return `${rel}/ holds ${files.length} Markdown file(s) that were NOT collected: package docs are read from src/docs/ only (ADR-0046 §3.2), so these are absent from the artifact's \`docs[]\` and from every book that includes them. Move them into src/docs/ (doc names carry the package namespace prefix, so packages do not collide there), declare them inline as \`defineStack({ docs })\`, or delete them if they are not package docs. Found: ${files.join(', ')}`;
+function uncollectedDocsMessage(files: readonly string[]): string {
+  return `${uncollectedLead(files)} — package docs are read from src/docs/ only (ADR-0046 §3.2); move them there`;
+}
+
+// [#22161] A doc finding prints one verdict sentence of at most 200
+// characters. Every printer leads it with the finding's `path` — the directory
+// or file it is about — so the sentence does not repeat it, and a `DocIssue`
+// has no separate fix, so the sentence ends with the remedy. What each rule
+// counts and why lives in its `RULE_EXPLANATIONS` entry in `@objectstack/lint`,
+// behind `os explain <rule-id>`.
+
+/** How many names a doc finding quotes before it counts the rest. */
+const MAX_QUOTED_NAMES = 3;
+
+function quotedList(names: readonly string[]): string {
+  return names.length <= MAX_QUOTED_NAMES
+    ? names.join(', ')
+    : `${names.slice(0, MAX_QUOTED_NAMES).join(', ')} and ${names.length - MAX_QUOTED_NAMES} more`;
+}
+
+/** `text` cut to `limit` characters, marked `…` when it was cut — for quoting what an author wrote. */
+function clipped(text: string, limit: number): string {
+  return text.length <= limit ? text : `${text.slice(0, limit - 1)}…`;
+}
+
+/** The verdict every `docs/uncollected-directory` arm opens with: how much was dropped, and which files. */
+function uncollectedLead(files: readonly string[]): string {
+  return `${files.length} Markdown file(s) NOT collected (${quotedList(files)})`;
 }
 
 /**
@@ -528,11 +554,11 @@ function sweepPackageDocsDirectories(
       const owner = owners[0];
       const locations = locationsOf.get(owner.index) ?? [];
       if (locations.length > 1) {
-        const elsewhere = locations.filter((location) => location !== rel).map((location) => `${location}/`).join(', ');
+        const elsewhere = quotedList(locations.filter((location) => location !== rel).map((location) => `${location}/`));
         issues.push({
           severity: 'warning',
           rule: 'docs/uncollected-directory',
-          message: `${rel}/ holds ${files.length} Markdown file(s) that were NOT collected: package "${owner.id}" answers to ${locations.length} docs directories in this tree (also ${elsewhere}), so which one carries its docs is ambiguous and ⛔ this collector will not guess (ADR-0130 D4). Keep one directory per package — merge the others into it, or declare the docs inline as \`defineStack({ docs })\` on the package that owns them. Found: ${files.join(', ')}`,
+          message: `${uncollectedLead(files)} — package "${owner.id}" answers to ${locations.length} docs directories (also ${elsewhere}); keep one`,
           path: rel,
         });
         continue;
@@ -551,23 +577,23 @@ function sweepPackageDocsDirectories(
 
     if (refs.length === 0) {
       // No `packages[]` at all — the single-package shape, where "read from
-      // src/docs/ only" is still the whole truth. ⛔ Message unchanged.
+      // src/docs/ only" is still the whole truth.
       issues.push({
         severity: 'warning',
         rule: 'docs/uncollected-directory',
-        message: uncollectedDocsMessage(rel, files),
+        message: uncollectedDocsMessage(files),
         path: rel,
       });
       continue;
     }
 
-    const declared = refs.map((ref) => ref.id).join(', ');
+    const declared = quotedList(refs.map((ref) => ref.id));
     issues.push({
       severity: 'warning',
       rule: 'docs/uncollected-directory',
       message: owners.length === 0
-        ? `${rel}/ holds ${files.length} Markdown file(s) that were NOT collected: "${name}" names none of this artifact's packages, so there is no package body to attach them to (ADR-0130 D4). A per-package docs directory is matched against a package's \`id\` or the last dot-separated segment of that \`id\` — rename the directory to one of those two, declare the docs inline as \`defineStack({ docs })\` on the package that owns them, or move them into src/docs/. Declared packages: ${declared}. Found: ${files.join(', ')}`
-        : `${rel}/ holds ${files.length} Markdown file(s) that were NOT collected: "${name}" names ${owners.length} of this artifact's packages (${owners.map((o) => o.id).join(', ')}), so which package body owns these docs is ambiguous and ⛔ this collector will not guess (ADR-0130 D4). Give those packages distinct \`id\` spellings — their last dot-separated segments must differ too — or declare the docs inline as \`defineStack({ docs })\` on the one that owns them. Found: ${files.join(', ')}`,
+        ? `${uncollectedLead(files)} — "${name}" names none of this artifact's packages (${declared}); rename it after one`
+        : `${uncollectedLead(files)} — "${name}" names ${owners.length} of this artifact's packages (${quotedList(owners.map((o) => o.id))}); give them distinct ids`,
       path: rel,
     });
   }
@@ -616,7 +642,7 @@ function compileDocsDirectory(docsDir: string, relBase: string): { docs: DocItem
       issues.push({
         severity: 'warning',
         rule: 'docs/frontmatter-tags',
-        message: `Frontmatter \`tags:\` in "${entry.name}" is not a list this reader understands, so no tags were collected and a book group's \`include: { tag }\` cannot match this doc. Write either \`tags: [tutorial, beginner]\` or a block of \`- item\` lines under \`tags:\`. Found: ${unreadableTags}`,
+        message: `Frontmatter \`tags:\` is not a list this reader understands, so a book group's \`include: { tag }\` cannot match this doc; write \`tags: [a, b]\` or \`- item\` lines (found: ${clipped(unreadableTags, 48)})`,
         path: rel,
       });
     }
@@ -632,7 +658,7 @@ function compileDocsDirectory(docsDir: string, relBase: string): { docs: DocItem
         issues.push({
           severity: 'warning',
           rule: 'docs/frontmatter-tags',
-          message: `Locale variant "${entry.name}" declares frontmatter \`tags:\`, but tags belong to the doc rather than to one translation and are read from the base file "${variantMatch[1]}.md" only — these tags were not collected. Move them to the base file.`,
+          message: `Locale variant declares \`tags:\`, but tags are read from the base file "${variantMatch[1]}.md" only, so these were not collected; move them there`,
           path: rel,
         });
       }
@@ -1089,9 +1115,10 @@ export function lintDocNavTargets(stack: Record<string, unknown>, docNames: Read
           issues.push({
             severity: 'error',
             rule: 'docs/nav-target',
-            message: `App '${appName}' navigation item '${String(item.id)}' opens book "${item.book}", which does not exist in this package${s ? ` — did you mean \`${s}\`?` : '.'} `
-              + `Name a book declared in \`books\`${packageIds.size > 0 ? `, or the package id (${[...packageIds].map((id) => `"${id}"`).join(', ')}) to open the package's implicit book` : ''}; `
-              + 'or remove `book` and open a single page with `doc`.',
+            // The finding's path names the app and the item, and every printer leads with it.
+            message: `Item opens book "${item.book}", which does not exist in this package${s ? ` (did you mean \`${s}\`?)` : ''}: `
+              + `name a book in \`books\`${packageIds.size > 0 ? ` or a package id (${quotedList([...packageIds].map((id) => `"${id}"`))})` : ''}, `
+              + 'or open one page with `doc`',
             path: where,
           });
         }
@@ -1100,9 +1127,8 @@ export function lintDocNavTargets(stack: Record<string, unknown>, docNames: Read
           issues.push({
             severity: 'error',
             rule: 'docs/nav-target',
-            message: `App '${appName}' navigation item '${String(item.id)}' opens doc "${item.doc}", which does not exist in this package${s ? ` — did you mean \`${s}\`?` : '.'} `
-              + 'Name a doc this package carries — the filename stem of a `src/docs/*.md` file, or a doc declared in `docs` — '
-              + 'or remove `doc` and open the whole book with `book`.',
+            message: `Item opens doc "${item.doc}", which does not exist in this package${s ? ` (did you mean \`${s}\`?)` : ''}: `
+              + 'name a `src/docs/*.md` stem or a `docs` entry, or open the whole book with `book`',
             path: where,
           });
         }
@@ -1239,7 +1265,7 @@ function lintDocNamesAcrossOwners(
     issues.push({
       severity: 'error',
       rule: 'docs/duplicate-name',
-      message: `Doc name "${name}" is declared by ${labels.join(' and ')}. One artifact may not ship one doc name twice — rename one. Doc names are namespace-prefixed for authoring hygiene, and ADR-0130 D1 lets packages of one artifact SHARE a namespace, so the prefix does not keep these apart.`,
+      message: `Doc name "${name}" is declared by ${labels.length <= MAX_QUOTED_NAMES ? labels.join(' and ') : quotedList(labels)}; one artifact may not ship a doc name twice, so rename one`,
       path: `docs/${name}`,
     });
   }

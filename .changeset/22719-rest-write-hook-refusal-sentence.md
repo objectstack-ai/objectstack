@@ -13,7 +13,7 @@ Clause-②: no
 | routes | before | after |
 | --- | --- | --- |
 | `POST /sharing/rules`, `DELETE /sharing/rules/:idOrName`, `POST /sharing/rules/:idOrName/evaluate` | `500 RULE_*_FAILED`, flat `{ code, error }`, the wrapper | `400 VALIDATION_ERROR`, nested `{ success: false, error: { code, message } }`, the sentence |
-| `POST /security/suggested-bindings/:id/confirm` and `/dismiss`, `POST /security/permission-sets/:id/discard-overlay` | `500 SUGGESTION_*_FAILED` / `500 INTERNAL`, the wrapper | `400 VALIDATION_ERROR`, same nested `{ error: { code, message } }` shape, the sentence |
+| `POST /security/suggested-bindings/:id/confirm` and `/dismiss` | `500 SUGGESTION_*_FAILED` / `500 INTERNAL`, the wrapper | `400 VALIDATION_ERROR`, same nested `{ error: { code, message } }` shape, the sentence |
 | the nine `POST /approvals/requests/:id/*` writes (`approve`, `reject`, `recall`, `revise`, `resubmit`, `reassign`, `remind`, `request-info`, `comment`) | `500 APPROVAL_*_FAILED`, flat `{ code, error }`, the wrapper | `400 VALIDATION_ERROR`, nested, the sentence |
 | `POST /packages/publish` | `500 INTERNAL_ERROR`, the wrapper | `400 VALIDATION_ERROR`, the sentence |
 | `POST /datasources/:name/external/tables/:remote/draft` and `/import`, `/external/refresh-catalog`, `/external/validate` | `400 EXTERNAL_DATASOURCE_ERROR` / `400 EXTERNAL_IMPORT_ERROR`, the wrapper | the same status and code, the sentence |

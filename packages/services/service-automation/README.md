@@ -188,7 +188,7 @@ a CEL value envelope, and text is a `{{ }}` template.**
 | Start-node `condition` | CEL — bare, no braces | `record.amount > 500` |
 | Edge `condition` | CEL — bare, no braces | `record.status == 'open'` |
 | Decision `conditions[].expression` | CEL — bare, no braces | `order_amount > 10000` |
-| Value slots — `create_record` / `update_record` `fields`, `assignment` values, the maps handed to a callee: `subflow` / `map` `input`, `script` `inputs`, and a `screen`'s `defaults`, field `defaultValue` and `recordId`, each evaluated before the screen is served | CEL value envelope; a plain string is the literal text it spells (`recordId`'s literal is the id, a string) | `{ dialect: 'cel', source: "'Follow up on ' + record.name" }`, `'open'` |
+| Value slots — `create_record` / `update_record` `fields`, `assignment` values, the maps handed to a callee: `subflow` / `map` `input`, `script` `inputs`, a `screen`'s `defaults`, field `defaultValue` and `recordId`, each evaluated before the screen is served, and a `loop`'s (with a `body`) or `map`'s `collection` | CEL value envelope; a plain string is the literal text it spells (`recordId`'s literal is the id, a string; a `collection`'s literal is an inline array, and any string there is refused) | `{ dialect: 'cel', source: "'Follow up on ' + record.name" }`, `'open'`, `collection: { dialect: 'cel', source: 'tasks' }` |
 | Text slots — `notify` `title` / `message`, `screen` `title` / `description`, `end` `message` | Template — `{{ }}` holes (ADR-0032 §3; a single-brace token is refused) | `'Deal won: {{ record.name }}'`, `'{{ record.amount \| currency }}'` |
 
 A value slot refuses every `{…}` template token — `registerFlow()` and
@@ -208,8 +208,15 @@ Inside an object or list value, and in the legacy `assignment` shapes, an
 envelope is data: build the whole value as one envelope (a CEL map or list
 literal, its mixed values wrapped in `dyn(…)`), or move the assignment into the
 `assignments` map. Other value-like positions — a `filter`, `recipients`, an
-`http` payload, a `map` or `loop` `collection` — still read the single-brace
-dialect (`{record.id}`).
+`http` payload — still read the single-brace dialect (`{record.id}`).
+
+A `loop`'s or a `map`'s `collection` must evaluate to a list: anything else,
+`null` included, fails the node, as a token that resolved to nothing did, so a
+guard answering `[]` (`has(vars.tasks) ? vars.tasks : []`) iterates nothing
+where the list may be absent. Its bare variable name (`collection: 'tasks'`),
+which the structured `loop` and `map` never read, is refused too and named in
+an envelope. A `loop` with no `body` keeps its legacy flat-graph form, which
+reads `collection` as a bare variable name.
 
 A `subflow` or `map` `input`, and a `script`'s `inputs`, hand their values to a
 callee: each envelope is evaluated in the calling flow's scope (on a `map`, once
@@ -366,7 +373,7 @@ container's ordinary out-edges are the continuation.
   type: 'loop',
   label: 'For each task',
   config: {
-    collection: '{tasks}',      // template/variable resolving to an array
+    collection: { dialect: 'cel', source: 'tasks' }, // the list: a CEL value envelope, or an inline array
     iteratorVariable: 'task',   // current item, visible inside the body
     indexVariable: 'i',         // optional zero-based index
     maxIterations: 500,         // hard cap (clamped to the engine ceiling)

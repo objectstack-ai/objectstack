@@ -351,19 +351,6 @@ interface MemberSite {
 }
 
 /**
- * The last sentence of a measure finding's hint: the door that refuses the
- * same pair later, and with what. A dataset's pair is refused when the
- * dataset compiles; an authored cube has no compile step, and its pair is
- * refused by the analytics door when a query names the measure.
- */
-const DATASET_COMPILE_DOOR =
-  'The compile leg refuses this same pair with `400 DATASET_INVALID` before any SQL is emitted, ' +
-  'so this is the same fix made earlier.';
-const CUBE_QUERY_DOOR =
-  'The analytics door refuses this same pair on the cube with `400 INVALID_FIELD` before any SQL is ' +
-  'built, so this is the same fix made earlier.';
-
-/**
  * [#20890] The finding for a dimension that groups by a JSON-stored column,
  * in one set of words for a dataset dimension and a cube dimension alike.
  *
@@ -391,30 +378,32 @@ function jsonStoredDimensionFinding(
         ? 'Group by a field that stores one scalar value: store the part of the document you ' +
           'group on in a field of its own and point this dimension at that field, or remove ' +
           'the dimension.'
-        : `Filter by one member instead of grouping: a record query on "${leaf.object}" ` +
-          `with where { "${leaf.field}": { "$contains": VALUE } } counts or lists the records ` +
-          'that hold VALUE, one query per member. Point this dimension at a field that stores ' +
-          'one value, or remove it.',
+        : // [#22161] One remedy line; the per-member `$contains` query in full is
+          // `os explain dimension-json-stored-field-refused`.
+          'Point this dimension at a field that stores one value, or remove it; a record query on ' +
+          `"${leaf.object}" filtering "${leaf.field}" with \`$contains\` counts one member's records`,
   };
 }
 
 /**
  * The finding for a measure whose aggregate the column's declaration cannot
  * carry ({@link acceptsDeclaration} said no), in one set of words for a
- * dataset measure and a cube measure alike. `door` is the hint's last
- * sentence ({@link DATASET_COMPILE_DOOR} or {@link CUBE_QUERY_DOOR}).
+ * dataset measure and a cube measure alike.
  *
  * [#22161] One verdict sentence: the pair, the declaration and why it is
  * refused. `where` names the measure; how backends answer the pair, and each
  * aggregate's accepted types (the table's rows, written out), are
- * `os explain measure-aggregate-field-type-refused`.
+ * `os explain measure-aggregate-field-type-refused`. One remedy line, too: the
+ * aggregates this declaration accepts. Why `count` and `count_distinct` reach
+ * further, the stored-numeric route for a sum or an average, and which door
+ * refuses the same pair later (a dataset's compile, a cube's query) are the
+ * same explanation's.
  */
 function refusedMeasureFinding(
   site: MemberSite,
   aggregate: string,
   fieldType: string,
   shape: ValueShapeFieldDef,
-  door: string,
 ): DatasetMeasureAggregateFinding {
   // [#20890] The row accepts the TYPE and the declaration is what refuses:
   // a multi-capable field flagged `multiple: true` under `count_distinct`.
@@ -435,12 +424,7 @@ function refusedMeasureFinding(
     hint:
       `Either point "${aggregate}" at a field of an accepted type, or aggregate ` +
       `"${site.column}" with one its ${declaredAs(shape)} ${shape.multiple === true ? 'declaration' : 'type'} accepts: ` +
-      `${aggregatesAccepting(shape).join(', ')}. ` +
-      `\`count\` accepts every type because it reads no value, and \`count_distinct\` every ` +
-      `type but the JSON-stored ones — a field declared \`multiple: true\` among them — whose ` +
-      `values no two backends compare alike; a ` +
-      `quantity that must be added up or averaged has to be STORED as a ` +
-      `numeric field (a computed column) and aggregated as one. ${door}`,
+      `${aggregatesAccepting(shape).join(', ')}.`,
   };
 }
 
@@ -560,7 +544,6 @@ function cubeMemberFindings(cube: AnyRec, cubePath: string, graph: ObjectGraph):
         aggregate,
         column.fieldType,
         column.shape,
-        CUBE_QUERY_DOOR,
       ),
     );
   }
@@ -664,7 +647,6 @@ export function validateDatasetMeasureAggregates(stack: unknown): DatasetMeasure
           aggregate,
           fieldType,
           shape,
-          DATASET_COMPILE_DOOR,
         ),
       );
     });

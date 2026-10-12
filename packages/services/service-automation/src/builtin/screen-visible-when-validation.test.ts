@@ -129,7 +129,7 @@ describe('screen field visibleWhen validation (#4027, reproducing #3528)', () =>
       name: 'loop_flow', label: 'Loop', type: 'screen', status: 'active', version: 1,
       nodes: [
         { id: 'start', type: 'start', label: 'Start', config: {} },
-        { id: 'loop_1', type: 'loop', label: 'Loop', config: { collection: '{tasks}', iteratorVariable: 'task' } },
+        { id: 'loop_1', type: 'loop', label: 'Loop', config: { collection: { dialect: 'cel', source: 'tasks' }, iteratorVariable: 'task' } },
         { id: 'end', type: 'end', label: 'End' },
       ],
       edges: [

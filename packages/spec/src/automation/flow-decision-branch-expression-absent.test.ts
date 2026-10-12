@@ -44,7 +44,7 @@ const decision = (...branches: Node[]): Node => ({
 
 const loopAround = (inner: Node): Node => ({
   id: 'sweep', type: 'loop', label: 'Sweep',
-  config: { collection: '{items}', iteratorVariable: 'item', body: { nodes: [inner], edges: [] } },
+  config: { collection: { dialect: 'cel', source: 'items' }, iteratorVariable: 'item', body: { nodes: [inner], edges: [] } },
 });
 
 function issuesOf(flow: unknown) {
