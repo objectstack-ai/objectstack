@@ -67,7 +67,7 @@ export const SysMailAssociation = ObjectSchema.create({
       readonly: true,
       maxLength: 255,
       referenceVia: 'object_name',
-      description: 'Id of the associated record, in the object Object names',
+      description: 'Id of the associated record, in the object named by Object',
       group: 'Record',
     }),
 

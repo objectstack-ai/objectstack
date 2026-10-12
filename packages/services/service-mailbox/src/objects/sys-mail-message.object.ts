@@ -188,7 +188,7 @@ export const SysMailMessage = ObjectSchema.create({
       label: 'Match Addresses',
       required: false,
       readonly: true,
-      description: 'The participant addresses the association seam was asked about, minus the mailbox’s own address; a re-match replays exactly these',
+      description: 'The participant addresses records were matched against, minus the mailbox’s own address; a re-match replays exactly these',
       group: 'Association',
     }),
 
