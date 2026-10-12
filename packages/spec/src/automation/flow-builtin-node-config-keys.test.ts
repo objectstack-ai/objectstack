@@ -46,7 +46,7 @@ type Config = Record<string, unknown>;
 const MEASURED: Config = { function: 'summarizeCompletedTask', inputs: { taskId: { dialect: 'cel', source: 'record.id' } }, outputVariable: 'summary' };
 const SUBFLOW: Config = { flowName: 'child_flow', input: { id: { dialect: 'cel', source: 'record.id' } }, outputVariable: 'out' };
 /** The remainder's measured node: a `notify` with `bogusKey` (#21982's pass-1 report). */
-const NOTIFY: Config = { recipients: '{record.owner}', title: 'Done', message: '{summary}' };
+const NOTIFY: Config = { recipients: { dialect: 'cel', source: 'record.owner' }, title: 'Done', message: '{{ summary }}' };
 
 /** A valid config of every builtin the key arm judges — the controls each type is probed against. */
 const VALID: Readonly<Record<string, Config>> = {

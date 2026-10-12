@@ -829,6 +829,61 @@ describe('a screen\'s value slots: the refusal says what the client is served in
   });
 });
 
+describe('a notify node\'s value slots: located per position, a recipient\'s refusal says what `null` and a list add', () => {
+  it('the six positions are judged, located and labelled by the ledger — each entry of a recipients list at its index', () => {
+    expect(flowNodeValueTemplateRefusals('notify', {
+      recipients: ['team:ops', '{record.owner}', { dialect: 'cel', source: 'record.watchers' }],
+      title: 'Hi {{ record.name }}',
+      templateData: { name: '{record.name}', fixed: 'x' },
+      payload: { meta: { by: '{$User.Id}' } },
+      sourceObject: '{target}',
+      sourceId: '{record.id}',
+      actorId: '{$User.Id}',
+      actionUrl: '/x/{record.id}',
+      topic: '{t}',
+    }).map((r) => [r.path, r.label])).toEqual([
+      ['recipients[1]', 'notify recipient'],
+      ['templateData.name', 'notify templateData value'],
+      ['payload.meta.by', 'notify payload value'],
+      ['sourceObject', 'notify sourceObject'],
+      ['sourceId', 'notify sourceId'],
+      ['actorId', 'notify actorId'],
+    ]);
+  });
+
+  it('a recipient — a list entry or the whole value — names the envelope, and what `null` and a list add', () => {
+    for (const [config, at] of [
+      [{ recipients: ['u1', '{owner}'] }, 'recipients[1]'],
+      [{ recipients: '{owner}' }, 'recipients'],
+    ] as const) {
+      const [refusal] = flowNodeValueTemplateRefusals('notify', config);
+      expect(refusal!.path).toBe(at);
+      expect(refusal!.message).toContain("Write `{owner}` as { dialect: 'cel', source: 'owner' }.");
+      expect(refusal!.message).toContain(
+        `\`${at}\` names who the notification goes to: an envelope there that evaluates to \`null\` or a blank string `
+        + 'adds no recipient, as a token that resolved to nothing did, and one that evaluates to a list adds each of '
+        + 'its recipients.',
+      );
+    }
+  });
+
+  it('a `$User` path that never resolved was dropped in EVERY run; no sentence for text with holes', () => {
+    const [never] = flowNodeValueTemplateRefusals('notify', { recipients: ['{$User.Email}'] });
+    expect(never!.message).toContain('the template dropped it from the audience in every run: leaving it out keeps exactly that.');
+    const [holes] = flowNodeValueTemplateRefusals('notify', { recipients: ['team:{teamId}'] });
+    expect(holes!.message).not.toContain('names who the notification goes to');
+  });
+
+  it('only `recipients` carries it — one list: the ledger', () => {
+    const valueEntries = FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.role === 'value');
+    for (const entry of valueEntries) {
+      const [refusal] = flowNodeValueTemplateRefusals(entry.nodeType, configForEntry(entry, '{x}'));
+      const carries = /names who the notification goes to/.test(refusal!.message);
+      expect(carries, `${entry.nodeType} ${entry.path}`).toBe(`${entry.nodeType} ${entry.path}` === 'notify recipients');
+    }
+  });
+});
+
 describe('ADR-0087 D2 — no measured spelling is converted; the refusal is what meets it', () => {
   it('the whole conversion chain, retired entries included, leaves every spelling as authored', () => {
     const fields = {

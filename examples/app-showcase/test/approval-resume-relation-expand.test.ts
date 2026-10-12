@@ -420,7 +420,9 @@ describe('#7381 — approving Invoice Dual Sign-off delivers the cleared notice'
   /**
    * Reverse verification. Same harness, same seed, same decisions — only the
    * flow definition is rolled back to the shape that shipped: the hop
-   * `{record.account.owner}` with no `expand` on the start node.
+   * `record.account.owner` with no `expand` on the start node (written as the
+   * CEL value envelope a recipient takes since #19939; the shipped
+   * `{record.account.owner}` token is refused at registration now).
    *
    * Direction is RED-on-resume, and specifically red at the SECOND decision:
    * the first approval must still be accepted (the defect is downstream of the
@@ -436,7 +438,7 @@ describe('#7381 — approving Invoice Dual Sign-off delivers the cleared notice'
           return { ...n, config };
         }
         if (n.id === 'notify_cleared') {
-          return { ...n, config: { ...n.config, recipients: ['{record.account.owner}'] } };
+          return { ...n, config: { ...n.config, recipients: [{ dialect: 'cel', source: 'record.account.owner' }] } };
         }
         return n;
       }),
@@ -466,12 +468,16 @@ describe('#7381 — approving Invoice Dual Sign-off delivers the cleared notice'
       strand = (err as Error).message;
     }
 
-    // The engine's diagnostic names the template that came up empty and both
-    // remedies. Asserting the envelope, not merely "something threw": a bare
-    // throw assertion here would stay green on any unrelated failure.
+    // The engine's diagnostic names the node, the recipient's position, the
+    // missing key and the source. Asserting the envelope, not merely
+    // "something threw": a bare throw assertion here would stay green on any
+    // unrelated failure. [#19939] Under the template the hop resolved to
+    // nothing and the empty-recipients guard named it (with the `expand`
+    // remedy); as a CEL value the hop on a scalar id fails the evaluation
+    // itself, naming the key it could not read.
     expect(strand).toContain('notify_cleared');
-    expect(strand).toContain('{record.account.owner}');
-    expect(strand).toContain('expand');
+    expect(strand).toContain('recipients[0]: value expression failed to evaluate as CEL: No such key: owner');
+    expect(strand).toContain('`record.account.owner`');
 
     // And nothing was delivered — the payoff message the demo promises.
     //

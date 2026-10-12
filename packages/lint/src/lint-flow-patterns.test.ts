@@ -1658,8 +1658,9 @@ describe('#5383 — the branch-routing family reads the region’s own edges', (
 describe('#5383 — a recursive config scan does not double-report the container', () => {
   it('moves a nested double-brace finding onto the node carrying it, still exactly once', () => {
     const fnds = lintFlowPatterns(loopBodyFlow({
-      // A single-brace position (`recipients`): the notify `title` reads
-      // `{{ }}` since #22110, so a doubled brace there is no finding.
+      // A value slot (`recipients`, since #19939), where a doubled brace is
+      // no hole: the notify `title` reads `{{ }}` since #22110, so a doubled
+      // brace there is no finding.
       nodes: [{ id: 'send_reminder', type: 'notify', config: { title: 'Reminder: {{ lead.name }}', recipients: ['{{lead.owner}}'] } }],
       edges: [],
     // Scoped to this rule: the body's `notify` also trips the #14394
