@@ -251,6 +251,23 @@ describe('two locales of one email template survive a restart (#22877)', () => {
         expect(await servedSubjects(second.protocol)).toEqual({ 'en-US': 'PKG en', 'zh-CN': 'ADMIN zh' });
     });
 
+    it('a by-name reset with no member removes the canonical member\'s overlay only', async () => {
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const first = await boot(stores);
+        await first.protocol.saveMetaItem({ type: 'email_template', name: NAME, item: template('en-US', 'ADMIN en') });
+        await first.protocol.saveMetaItem({ type: 'email_template', name: NAME, item: template('zh-CN', 'ADMIN zh') });
+
+        expect(await first.protocol.deleteMetaItem({ type: 'email_template', name: NAME })).toMatchObject({ success: true, reset: true });
+        expect(overlayRows(stores).map((r) => r.bundle_member)).toEqual(['zh-CN']);
+        // At once, and after a restart: the canonical member is back on the
+        // package wording, the other member keeps its own.
+        expect(await servedSubjects(first.protocol)).toEqual({ 'en-US': 'PKG en', 'zh-CN': 'ADMIN zh' });
+        expect(await bareNameSubject(first.protocol)).toBe('PKG en');
+        const second = await boot(stores);
+        expect(await servedSubjects(second.protocol)).toEqual({ 'en-US': 'PKG en', 'zh-CN': 'ADMIN zh' });
+        expect(await bareNameSubject(second.protocol)).toBe('PKG en');
+    });
+
     it('a row stored before the member column existed is backfilled at boot from its body', async () => {
         const stores = new Map<string, Map<string, Record<string, unknown>>>();
         await boot(stores);
