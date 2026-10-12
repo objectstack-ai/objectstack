@@ -468,14 +468,16 @@ describe('#7381 — approving Invoice Dual Sign-off delivers the cleared notice'
       strand = (err as Error).message;
     }
 
-    // The engine's diagnostic names the node, the recipient's position, the
-    // missing key and the source. Asserting the envelope, not merely
-    // "something threw": a bare throw assertion here would stay green on any
-    // unrelated failure. [#19939] Under the template the hop resolved to
-    // nothing and the empty-recipients guard named it (with the `expand`
-    // remedy); as a CEL value the hop on a scalar id fails the evaluation
-    // itself, naming the key it could not read.
-    expect(strand).toContain('notify_cleared');
+    // The engine's diagnostic names the recipient's position, the missing key
+    // and the source. Asserting the envelope, not merely "something threw": a
+    // bare throw assertion here would stay green on any unrelated failure.
+    // [#19939] Under the template the hop resolved to nothing and the
+    // empty-recipients guard named it (with the `expand` remedy) in a failure
+    // the node returned, which the engine prefixes with the node's id; as a CEL
+    // value the hop on a scalar id fails the evaluation itself, naming the key
+    // it could not read, and an evaluation fault is thrown, as at every value
+    // slot, so the run's message carries no node id (its step records it).
+    expect(strand).toContain('RESUME_FAILED');
     expect(strand).toContain('recipients[0]: value expression failed to evaluate as CEL: No such key: owner');
     expect(strand).toContain('`record.account.owner`');
 
