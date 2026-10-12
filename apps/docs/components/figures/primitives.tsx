@@ -110,7 +110,7 @@ export const PLATE_TEXT = {
 
 /** The type scale, in user units; a wide drawing renders at about 0.97 px per unit. */
 export const TYPE = {
-  eyebrow: 11.5,
+  eyebrow: 12,
   title: 15,
   body: 13,
   small: 12.5,
