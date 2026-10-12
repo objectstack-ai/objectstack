@@ -3,8 +3,8 @@
 /**
  * #21322 — a hot install (`os package install <artifact>` into a RUNNING
  * `os start`) leaves the runtime in the state a restart would: the installed
- * package's record-change flow fires and its permission set is projected into
- * `sys_permission_set`, both right after the install, with no restart.
+ * package's record-change flow fires and its permission set is served by the
+ * security catalog, both right after the install, with no restart.
  *
  * ## The defect, measured on the published train and again on `main`
  *
@@ -22,6 +22,11 @@
  * plugin's declared-permission seeding) read the rehydrated package. Those
  * sweeps run once per boot; nothing re-ran them for a package that arrived
  * after it.
+ *
+ * Since ADR-0131 C3 stage 6b-2 no door writes a `sys_permission_set` row: the
+ * set is served by the security catalog from the registry, and a grant names
+ * it. What an admin grants from is `GET /meta/permission/…`, so that is what
+ * the permission-set case reads now.
  *
  * ## What each `it` reads
  *
@@ -268,7 +273,7 @@ function rowsOf(answer: Answer): any[] {
 const recordOf = (a: Answer) => a.body?.data ?? a.body?.record ?? a.body;
 
 interface Phase {
-  /** `GET /data/sys_permission_set?name=…` — the projection the admin surface grants from. */
+  /** `GET /meta/permission/…` — the set as the security catalog serves it, which the grant form lists (ADR-0131 D3). */
   permissionSet: Answer;
   /** The task the flow is driven through: created, then updated to `done`. */
   created: Answer;
@@ -279,7 +284,7 @@ interface Phase {
 
 let seq = 0;
 async function probe(live: LiveStart, token: string): Promise<Phase> {
-  const permissionSet = await http(live, 'GET', `/api/v1/data/sys_permission_set?name=${PERMISSION_SET}`, token);
+  const permissionSet = await http(live, 'GET', `/api/v1/meta/permission/${PERMISSION_SET}`, token);
 
   const taskName = `flow-probe-${++seq}`;
   const created = await http(live, 'POST', `/api/v1/data/${TASK}`, token, { name: taskName, status: 'open' });
@@ -352,10 +357,11 @@ describe('#21322: a hot install binds what the boot binds', () => {
 
   for (const name of ['install', 'restart', 'control'] as const) {
     describe(`after ${name}`, () => {
-      it('the package permission set is projected into sys_permission_set', () => {
+      it('the package permission set is served by the security catalog', () => {
         const p = phases[name]!;
         expect(p.permissionSet.status, JSON.stringify(p.permissionSet.body)).toBe(200);
-        expect(rowsOf(p.permissionSet).map((r) => r?.name)).toEqual([PERMISSION_SET]);
+        expect((p.permissionSet.body?.item ?? p.permissionSet.body?.data?.item)?.name, JSON.stringify(p.permissionSet.body))
+          .toBe(PERMISSION_SET);
       });
 
       it('the record-change flow fires: a task updated to done writes its note', () => {

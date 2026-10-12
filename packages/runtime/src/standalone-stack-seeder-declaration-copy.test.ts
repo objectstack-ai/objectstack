@@ -13,9 +13,9 @@
 // copies, and the plugin-security / plugin-sharing seeders read the registry
 // one FIRST:
 //
-//   bootstrap-declared-permissions.ts  readDeclared(ql, 'permission')     then metadataService.list
-//   (bootstrap-declared-capabilities.ts did the same for 'capability' until
-//   ADR-0131 D3 retired it: a declared capability now has no row at all)
+//   (bootstrap-declared-permissions.ts did the same for 'permission', and
+//   bootstrap-declared-capabilities.ts for 'capability', until ADR-0131 D3
+//   retired them: a declared permission set or capability now has no row at all)
 //   bootstrap-declared-sharing-rules.ts readDeclared(engine,'sharing_rule') then metadataService.list
 //
 // Triage (14491#issuecomment-5507909226) ruled the card down to four questions
@@ -383,33 +383,8 @@ describe('#14491 Q1 + Q4 — which copy the seeders consume, and which copy wins
     expect(door).toMatchObject({ isDefault: false, _packageVersion: '3.0.0' });
   });
 
-  it('⚠️ NOT ABSORBED — `sys_permission_set` persists the UN-PARSED registry copy, byte for byte', () => {
-    const reg = byName(registryCopy.permission, 'probe_agent');
-    const door = byName(doorCopy.permission, 'probe_agent');
-    const row = byName(rows.sys_permission_set, 'probe_agent');
-
-    // The decisive read: the stored authorization map is deep-equal to the
-    // registry copy's and NOT to the door's. Nothing between `readDeclared` and
-    // `tryInsert` re-parses it — `permissionSetRowFields` serialises what it
-    // was handed.
-    const storedObjects = JSON.parse(row.object_permissions);
-    expect(storedObjects).toEqual(reg.objects);
-    expect(storedObjects).not.toEqual(door.objects);
-
-    const storedRls = JSON.parse(row.row_level_security);
-    expect(storedRls).toEqual(reg.rowLevelSecurity);
-    expect(storedRls).not.toEqual(door.rowLevelSecurity);
-
-    // Spelled out key by key, so a future change to either side names itself.
-    expect(storedObjects.crm_ticket).toMatchObject({ allowRestore: true, allowPurge: false });
-    expect(storedObjects.crm_ticket).not.toHaveProperty('allowTransfer');
-    expect(storedObjects.crm_ticket).not.toHaveProperty('viewAllRecords');
-    expect(storedObjects.crm_ticket).not.toHaveProperty('modifyAllRecords');
-    expect(storedRls[0]).toMatchObject({ priority: 10 });
-
-    expect(row).toMatchObject({
-      managed_by: 'package', package_id: 'com.test.issue-14491', active: true, customized: false,
-    });
+  it('no row: a declared permission set is served by the registry and no `sys_permission_set` row is written for it (ADR-0131 D3)', () => {
+    expect(rows.sys_permission_set.filter((r: any) => r.name === 'probe_agent')).toEqual([]);
   });
 
   it('`sharing_rule`: the registry copy keeps the legacy `sharedWith.type` and `accessLevel` the door forward-converts', () => {
