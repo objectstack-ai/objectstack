@@ -787,8 +787,9 @@ describe('validateFlowTriggerReadiness', () => {
     expect(findings[0].path).toBe('flows[0].nodes[0].config.triggerType');
     // The hint steers to the supported alternatives.
     expect(findings[0].hint).toMatch(/record-after-write/);
-    expect(findings[0].hint).toMatch(
-      /multi-event arrays are deferred until two independent projects need a combination other than created-or-updated/,
+    // [#22161] Why arrays are deferred is the explanation's, one command away.
+    expect(explanationOf(FLOW_TRIGGER_UNKNOWN_EVENT)).toMatch(
+      /Multi-event arrays are deferred until two independent projects need a combination other than created-or-updated/,
     );
   });
 
@@ -1737,5 +1738,82 @@ describe('[#22161] one-line fixes — flow-time-relative-descriptor-invalid', ()
     expect(text).toContain('the same schema the trigger safeParses at bind time');
     expect(text).toContain('an unrecognized key names the declared key it was probably meant to be');
     expect(text).toContain('content/docs/references/automation/time-relative-trigger.mdx');
+  });
+});
+
+// [#22161] Slice 13: the `fix:` line of the never-fire family's other four ids
+// and of `flow-trigger-unknown-object`. Each names its remedy in one line; the
+// insert synonym and the missing "any change" token, why arrays are deferred,
+// the descriptor's optional keys and the schedule's default, the signature
+// format and that names match exactly are the ids' explanations.
+// `flow-trigger-unknown-object` gains an entry, so its `rule:` line carries the
+// `os explain` pointer.
+describe('[#22161] one-line fixes — the flow trigger ids this slice shortened', () => {
+  const ONE_LINE_FIX_IDS: readonly string[] = [
+    FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
+    FLOW_TRIGGER_UNROUTABLE,
+    FLOW_TRIGGER_UNKNOWN_EVENT,
+    FLOW_API_TRIGGER_SECRET_MISSING,
+    FLOW_TRIGGER_UNKNOWN_OBJECT,
+  ];
+
+  it('every `fix:` line the cases above fired for those ids is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => ONE_LINE_FIX_IDS.includes(f.rule));
+    // Coverage control: every id fired, and every arm with a line of its own.
+    expect([...new Set(converted.map((f) => f.rule))].sort()).toEqual([...ONE_LINE_FIX_IDS].sort());
+    for (const opening of ['Set config.objectName ', 'Set config.timeRelative.object ']) {
+      expect(converted.some((f) => f.hint.startsWith(opening)), opening).toBe(true);
+    }
+    for (const opening of ['Use record-{before,after}-', 'Use one triggerType string']) {
+      expect(converted.some((f) => f.hint.startsWith(opening)), opening).toBe(true);
+    }
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  const MOVED_FROM_FIX: Record<string, readonly string[]> = {
+    [FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE]: [
+      'exactly one of withinDays | offsetDays',
+      'an optional `filter` and `maxRecords`',
+      'daily at 08:00 UTC when omitted',
+      'content/docs/references/automation/time-relative-trigger.mdx',
+    ],
+    [FLOW_TRIGGER_UNROUTABLE]: ['`insert` is a synonym for `create`', "`type: 'autolaunched'` or `'screen'`"],
+    [FLOW_TRIGGER_UNKNOWN_EVENT]: [
+      '`insert` is a synonym for `create`',
+      'there is no "any change" token',
+      'Multi-event arrays are deferred',
+    ],
+    [FLOW_API_TRIGGER_SECRET_MISSING]: [
+      '`x-objectstack-signature` header',
+      'HMAC-SHA256',
+      '300 seconds',
+      'needs no secret',
+    ],
+    [FLOW_TRIGGER_UNKNOWN_OBJECT]: [
+      'Names match exactly',
+      '`app_candidate`, not `candidate`',
+      'another installed package',
+      'a `sys_` name is a platform object',
+    ],
+  };
+
+  it.each([...ONE_LINE_FIX_IDS])('`os explain %s` carries what its `fix:` line no longer says', (rule) => {
+    expect(explainRule(rule), `no \`os explain ${rule}\` entry`).toBeDefined();
+    const text = explanationOf(rule);
+    for (const fact of MOVED_FROM_FIX[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
+
+  it("the `fix:` line's descriptor keys are the schema's", () => {
+    // The explanation module imports nothing; the keys the time-relative line
+    // names are held to `TimeRelativeTriggerSchema` here, one per mode.
+    for (const descriptor of [
+      { object: 'task', dateField: 'due_at', withinDays: 3 },
+      { object: 'task', dateField: 'due_at', offsetDays: [7] },
+    ]) {
+      expect(TimeRelativeTriggerSchema.safeParse(descriptor).success, JSON.stringify(descriptor)).toBe(true);
+    }
   });
 });

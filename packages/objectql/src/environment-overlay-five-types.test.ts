@@ -167,6 +167,9 @@ const sysMetadataObject: ServiceObject = {
         name: { name: 'name', label: 'Name', type: 'text' as const, required: true },
         organization_id: { name: 'organization_id', label: 'Org', type: 'text' as const },
         package_id: { name: 'package_id', label: 'Package', type: 'text' as const },
+        // The bundled type's member (#22877) — `sys-metadata.object.ts` declares
+        // it, and an `email_template` write keys its row by it.
+        bundle_member: { name: 'bundle_member', label: 'Bundle Member', type: 'text' as const, maxLength: 100 },
         metadata: { name: 'metadata', label: 'Body', type: 'textarea' as const },
         checksum: { name: 'checksum', label: 'Checksum', type: 'text' as const, maxLength: 71 },
         state: { name: 'state', label: 'State', type: 'text' as const },

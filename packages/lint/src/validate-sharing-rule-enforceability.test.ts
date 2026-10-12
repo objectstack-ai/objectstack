@@ -674,8 +674,8 @@ describe('[#22161] one-line verdicts — the four ids', () => {
 // remedy sentence each; what they stopped saying — the lowerable subset and its
 // two traps, the comparison classes with their types, which mechanism replaces
 // a `current_user` read on which sharing model — is the explanation's.
-// (`sharing-rule-object-not-shareable` and `-controlled-by-parent` keep their
-// longer hints: a later slice's.)
+// (`sharing-rule-object-not-shareable` and `-controlled-by-parent` are slice
+// 13's, in the last block of this file.)
 describe('[#22161] one-line fixes — the two condition ids', () => {
   const ONE_LINE_FIX_IDS: readonly string[] = [
     SHARING_RULE_UNLOWERABLE_CONDITION,
@@ -728,5 +728,46 @@ describe('[#22161] one-line fixes — the two condition ids', () => {
 
   it.each([...ONE_LINE_FIX_IDS])('`os explain %s` carries what its `fix:` line no longer says', (rule) => {
     for (const fact of MOVED_FROM_FIX[rule]) expect(explanationOf(rule), `${rule} explanation names ${fact}`).toContain(fact);
+  });
+});
+
+// [#22161] Slice 13: the `fix:` line of the two anchor ids. Each names its two
+// honest fixes in one line; how to tell which half is wrong, why re-homing the
+// rule onto another public object fixes nothing, that the detail rows follow
+// the master and that a baseline of its own is a different decision are the
+// explanations'.
+describe('[#22161] one-line fixes — the two anchor ids', () => {
+  const ANCHOR_IDS: readonly string[] = [SHARING_RULE_OBJECT_NOT_SHAREABLE, SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT];
+
+  it('every `fix:` line the cases above fired for the two ids is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => ANCHOR_IDS.includes(f.rule));
+    // Coverage control: both ids fired, the detail id with and without a
+    // resolved master.
+    expect([...new Set(converted.map((f) => f.rule))].sort()).toEqual([...ANCHOR_IDS].sort());
+    const detail = converted.filter((f) => f.rule === SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT);
+    expect(detail.some((f) => f.hint.startsWith('Move the rule onto the master object "'))).toBe(true);
+    expect(detail.some((f) => f.hint.startsWith('Move the rule onto the master object,'))).toBe(true);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  const MOVED_FROM_FIX: Record<string, readonly string[]> = {
+    [SHARING_RULE_OBJECT_NOT_SHAREABLE]: [
+      'decide which half is wrong',
+      'ADR-0049 enforce-or-remove',
+      'moves the inertness instead of removing it',
+    ],
+    [SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT]: [
+      'the detail rows follow',
+      'that is a different decision',
+      'becomes enforceable where it stands',
+    ],
+  };
+
+  it.each([...ANCHOR_IDS])('`os explain %s` carries what its `fix:` line no longer says', (rule) => {
+    const text = explanationOf(rule);
+    for (const fact of MOVED_FROM_FIX[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
   });
 });
