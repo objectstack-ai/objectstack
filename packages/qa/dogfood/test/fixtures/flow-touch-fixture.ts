@@ -56,7 +56,7 @@ export const flowTouch: Flow = {
       label: 'Mark processed',
       config: {
         objectName: 'flow_note',
-        filter: { id: '{noteId}' },
+        filter: { id: { dialect: 'cel', source: 'noteId' } },
         fields: { status: 'processed' },
       },
     },

@@ -160,8 +160,10 @@ const RELATION_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 // The CRUD nodes whose `filter` the runtime guards (framework#3810): each calls
-// `resolveNodeFilter`, which refuses the node when interpolation erased any
-// authored condition. `create_record` is deliberately absent — it writes a
+// `resolveNodeFilter`, which refuses the node when an authored operand
+// evaluated to nothing. (Since #19939 a single-brace token at a filter operand
+// is refused before any run, by the value-slot judge; this rule still reads
+// one there until the single-brace reading retires.) `create_record` is deliberately absent — it writes a
 // payload and has no filter, so an unresolved token there is a blank value on
 // the new row, not a widened query.
 const FILTER_GUARDED_NODE_TYPES: ReadonlySet<string> = new Set([

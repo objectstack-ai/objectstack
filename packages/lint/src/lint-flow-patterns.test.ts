@@ -1781,14 +1781,18 @@ describe('lintFlowPatterns — unbounded bulk write (#5482)', () => {
       ).toHaveLength(0);
     });
 
-    it('a filter whose only condition is a TEMPLATE — that is #3810\'s fact, at run time', () => {
-      // `{record.ownr}` (a typo) interpolates to nothing and the run-time guard
-      // REFUSES the node. At authoring time the condition is written, so warning
-      // "nothing bounds this" here would be false — and would put two diagnostics
-      // on one defect, one of them wrong about what the author did.
+    // [#19939, stage S6] RE-JUDGED IN PLACE: the operand was a `{record.ownr}`
+    // token, refused at every door since S6; the run-time fact is the same for
+    // an operand envelope that evaluates to nothing.
+    it('a filter whose only operand is COMPUTED — that is #3810\'s fact, at run time', () => {
+      // An operand envelope that evaluates to nothing (a record with no owner)
+      // and the run-time guard REFUSES the node. At authoring time the
+      // condition is written, so warning "nothing bounds this" here would be
+      // false — and would put two diagnostics on one defect, one of them wrong
+      // about what the author did.
       expect(
         lintFlowPatterns(purgeFlow('delete_record', {
-          objectName: 'lead', filter: { owner: '{record.ownr}' }, multi: true,
+          objectName: 'lead', filter: { owner: CEL('record.owner') }, multi: true,
         })),
       ).toHaveLength(0);
     });
@@ -2000,7 +2004,7 @@ describe('lintFlowPatterns — unbounded bulk write (#5482)', () => {
       expect(lintFlowPatterns(loopBodyFlow({
         nodes: [{
           id: 'sweep', type: 'delete_record',
-          config: { objectName: 'campaign_member', filter: { lead_id: '{lead.id}' }, multi: true },
+          config: { objectName: 'campaign_member', filter: { lead_id: CEL('lead.id') }, multi: true },
         }],
         edges: [],
         // Scoped to this rule: a bounded write is still an uncontained one, so
@@ -2079,10 +2083,10 @@ describe('per-iteration containment (#13681 / #14394)', () => {
 
     it('flags every fallible builtin in the body, once each', () => {
       const fallible = [
-        { id: 'n1', type: 'get_record', label: 'Get', config: { objectName: 'case', filter: { id: '{currentCase.id}' } } },
+        { id: 'n1', type: 'get_record', label: 'Get', config: { objectName: 'case', filter: { id: CEL('currentCase.id') } } },
         { id: 'n2', type: 'create_record', label: 'Create', config: { objectName: 'task' } },
-        { id: 'n3', type: 'update_record', label: 'Update', config: { objectName: 'case', fields: { seen: true }, filter: { id: '{currentCase.id}' } } },
-        { id: 'n4', type: 'delete_record', label: 'Delete', config: { objectName: 'task', filter: { case_id: '{currentCase.id}' } } },
+        { id: 'n3', type: 'update_record', label: 'Update', config: { objectName: 'case', fields: { seen: true }, filter: { id: CEL('currentCase.id') } } },
+        { id: 'n4', type: 'delete_record', label: 'Delete', config: { objectName: 'task', filter: { case_id: CEL('currentCase.id') } } },
         { id: 'n5', type: 'http', label: 'Call', config: { url: 'https://example.test' } },
         { id: 'n6', type: 'notify', label: 'Notify', config: { title: 'x' } },
         { id: 'n7', type: 'connector_action', label: 'Connector', config: { connectorId: 'c', action: 'a' } },

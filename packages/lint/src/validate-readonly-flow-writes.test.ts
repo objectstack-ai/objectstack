@@ -53,7 +53,7 @@ function flowWith(
         id: 'stamp',
         type: 'update_record',
         label: 'Stamp approval',
-        config: { objectName: 'crm_opportunity', filter: { id: '{recordId}' }, fields, ...nodeConfigOverrides },
+        config: { objectName: 'crm_opportunity', filter: { id: { dialect: 'cel', source: 'recordId' } }, fields, ...nodeConfigOverrides },
       },
       { id: 'end', type: 'end' },
     ],
@@ -511,7 +511,7 @@ describe('validateReadonlyFlowWrites', () => {
       expect(validateReadonlyFlowWrites({ objects: [platformObject], flows: [create] })).toEqual([]);
       const update = {
         ...create,
-        nodes: [{ id: 'u', type: 'update_record', label: 'U', config: { objectName: platformObject.name, filter: { id: '{id}' }, fields: { verdict: 'ok' } } }],
+        nodes: [{ id: 'u', type: 'update_record', label: 'U', config: { objectName: platformObject.name, filter: { id: { dialect: 'cel', source: 'id' } }, fields: { verdict: 'ok' } } }],
       };
       const control = validateReadonlyFlowWrites({ objects: [platformObject], flows: [update] });
       expect(control).toHaveLength(1);

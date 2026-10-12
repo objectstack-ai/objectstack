@@ -27,6 +27,10 @@ import type { SemanticMigration } from '../../types.js';
 // same one); its method, durable, timeoutMs and signingSecret, which the
 // template resolved too but no shipped flow computed, are literals read as
 // written, refused with the literal's remedy like the notify literals.
+// The surface widens to each operand of a get_record, update_record and
+// delete_record node's filter: a CEL value envelope evaluated before the query,
+// whose null refuses the node as an erased condition did, beside the query
+// placeholders, which stay the query engine's and pass untouched.
 export const entry: SemanticMigration = {
   id: 'flow-value-slot-template-dialect-refused',
   // No backticks in `surface` — build-upgrade-guide renders it inside a code
@@ -39,7 +43,11 @@ export const entry: SemanticMigration = {
     + 'each field\'s defaultValue), and of a notify node (recipients, the value or each entry of a list; the '
     + 'templateData map; sourceId; and the literals sourceObject, actorId and the payload map, where a CEL '
     + 'value envelope is refused as well), and of an http node (the body; and the literals method, durable, '
-    + 'timeoutMs and signingSecret, where a CEL value envelope is refused as well) — a string value, or a '
+    + 'timeoutMs and signingSecret, where a CEL value envelope is refused as well), and of get_record, '
+    + 'update_record and delete_record nodes (each operand of the filter: a field\'s value, an operator\'s '
+    + 'comparand, each element of a list comparand, at any depth of the $and, $or and $not combinators and of a '
+    + 'nested-relation condition; a whole-string query placeholder such as {current_user_id} or {today} is not '
+    + 'refused) — a string value, or a '
     + 'string anywhere inside an array or object value, carrying a single-brace template token, the run-user '
     + 'paths beginning $User. and the date macros NOW() and TODAY() with an optional day offset included; and the '
     + 'collection of a loop node with a body and of a map node — any string value: a single-brace template token, '
@@ -93,7 +101,16 @@ export const entry: SemanticMigration = {
     + 'before the call, so the durable outbox enqueues the payload the inline call would send. Its method, durable, '
     + 'timeoutMs and signingSecret are literals, read as written: write the method, true or false, the number of '
     + 'milliseconds and the secret itself (a flow saved through the metadata API keeps the secret in the write-only '
-    + 'flow credential store), with no token and no envelope',
+    + 'flow credential store), with no token and no envelope. A filter operand of a get_record, update_record '
+    + 'or delete_record node is an envelope evaluated per run before the query — { id: { dialect: "cel", source: '
+    + '"record.id" } }, { amount: { $gt: { dialect: "cel", source: "record.cap * 2" } } }, an element of an $in '
+    + 'list — or a literal handed to the query as written; a query placeholder ({current_user_id}, '
+    + '{current_org_id}, {today}, {30_days_ago} and the other date macros) is such a literal, which the query '
+    + 'engine resolves, so it is left as written. An operand envelope that evaluates to null refuses the node, '
+    + 'as a token that resolved to nothing did, so where the value may be absent route around the node with a '
+    + 'decision rather than guarding it to null; an empty field is matched with the literal null or { $null: '
+    + 'true }. A flow variable that shares a placeholder\'s name is read with an envelope; a related field named '
+    + 'dialect is matched through an operator map, { dialect: { $eq: "x" } }',
   reason:
     'The interpolator and the CEL engine answer differently for every token spelling authored in flows, so no '
     + 'conversion is lossless (ADR-0087 D2) and none is applied. A path, an absent variable, key or list index '
@@ -138,7 +155,11 @@ export const entry: SemanticMigration = {
     + 'value\'s type and a signing secret read from a flow variable — so they are literals, and a token would '
     + 'now be sent with its braces or refused by the key\'s type, so it is refused with the literal\'s remedy; '
     + 'the build doors leave signingSecret to the run, whose credential store may hold the secret, and its parse '
-    + 'refuses it there. A flow carrying '
+    + 'refuses it there. In a CRUD filter the template resolved a whole token against the run\'s variables and '
+    + 'handed one no variable resolved on to the query engine when it was a query placeholder, so a flow '
+    + 'variable named like a placeholder shadowed it; an unresolved token erased its condition and the node was '
+    + 'refused, where under CEL an absent variable or key fails the run before the query, and a '
+    + 'guarded null refuses the node. A flow carrying '
     + 'a refused value is refused at registration, by objectstack validate and by the executor; a stored flow '
     + 'carrying one is skipped at boot with a warn naming it.',
   acceptanceCriteria:
@@ -164,8 +185,10 @@ export const entry: SemanticMigration = {
     + 'write one envelope building the whole payload, guarding each value that may be absent; for its method, '
     + 'durable, timeoutMs or signingSecret carrying a token, write the value the token stood for (a secret read '
     + 'from a flow variable is written as the secret itself, which a save through the metadata API keeps out of '
-    + 'the served definition). Re-run '
+    + 'the served definition). For a CRUD filter operand carrying a flow token, write its envelope, and route '
+    + 'around the node where the value may be absent; keep a query placeholder as written, and read a flow '
+    + 'variable named like one through an envelope. Re-run '
     + 'the flow paths that write those fields, serve those screens, iterate those lists, send those '
-    + 'notifications and make those http calls, and compare the stored and served values, the iterations, the '
-    + 'audiences and the request payloads with the ones the template produced.',
+    + 'notifications, make those http calls and run those queries, and compare the stored and served values, the iterations, the '
+    + 'audiences, the request payloads and the rows matched with the ones the template produced.',
 };
