@@ -250,8 +250,9 @@ describe('[#21716, ADR-0131 D6] pin 3 — both rows present: every request is se
 });
 
 describe('[#21716] pin 4 — a type with no per-org channel: neither the read nor the door serves an org-scoped row', () => {
-    // `page` declares `allowOrgOverride: false`, so an org-scoped row of it is
-    // pre-#6190 residue boot hydration walks past. The reads gate the
+    // `page` was outside the five types the pre-D6 doors let an organization
+    // write, so an org-scoped row of it is pre-#6190 residue boot hydration
+    // walks past. The reads gate the
     // organization away (ADR-0131 D6: no read takes one) and serve the env-wide
     // row. [ADR-0131 D6] Every org-scoped write — the removal included — is
     // refused by the org-scope door (`NOT_OVERRIDABLE`) before the `_lock` gate.

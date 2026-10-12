@@ -87,15 +87,15 @@ describe('`field` registry flags — the authorization verdict, written down', (
     // 403 `NOT_CREATABLE` instead of 200 "Saved" — in draft mode too, since the
     // inlet runs before the draft/publish branch and does not look at `mode`.
     const entry = fieldEntry()!;
-    const codeOnly = entry.allowRuntimeCreate === false && entry.allowOrgOverride === false;
+    const codeOnly = entry.allowRuntimeCreate === false && entry.allowEnvironmentOverlay === false;
     expect(codeOnly).toBe(true);
   });
 
-  it('declares `allowOrgOverride: false` — UNCHANGED, the field overlay refusal stays', () => {
+  it('declares `allowEnvironmentOverlay: false` — UNCHANGED, the field overlay refusal stays', () => {
     // Binding carry-over of the 2026-08-12 ruling. This card closed the create
     // tier; the override tier was already closed and must not move in either
     // direction as a side effect.
-    expect(fieldEntry()!.allowOrgOverride).toBe(false);
+    expect(fieldEntry()!.allowEnvironmentOverlay).toBe(false);
   });
 
   it('leaves `supportsOverlay: false` alone — flipping it would widen the DELETE gate', () => {

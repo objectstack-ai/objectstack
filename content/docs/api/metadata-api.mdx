@@ -59,7 +59,7 @@ Create or update a metadata item.
 
 Creates are gated per type: `MetadataTypeRegistryEntry.allowRuntimeCreate` decides
 whether a **brand-new** name may be minted under that type at all, separately from
-whether an item that already exists may be overlaid (`allowOrgOverride`). A type that
+whether an item that already exists may be overlaid (`allowEnvironmentOverlay`). A type that
 declines the create half still accepts updates to names that already exist, and its
 refusal — `403 NOT_CREATABLE` — names the route that does work. The flags are
 documented on

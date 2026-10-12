@@ -632,6 +632,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "多态指针伴随字段",
         helpText: "把该文本字段声明为多态指针的 id 半边：此处填写同一对象上保存目标对象名的另一个字段，目标逐行决定（ADR-0052 §5）。使用 snake_case；仅限文本字段，且与 `reference` 互斥。"
       },
+      mailAssociation: {
+        label: "匹配入站邮件",
+        helpText: "把入站邮件关联到本对象中该字段值与邮件发件人或某位收件人地址相同的记录（不区分大小写；不含邮箱自身的地址）。仅限邮箱字段。只在配置了邮箱服务的环境中生效。"
+      },
       dueLike: {
         label: "截止日期",
         helpText: "将此日期标记为截止日期：过了这个日期后，视图可将其显示为逾期（相对时间措辞与逾期颜色）。关闭或未设置：不是截止日期，也不会根据字段名推测。"

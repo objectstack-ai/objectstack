@@ -131,6 +131,14 @@ export const fieldForm = defineForm({
         { field: 'language', visibleWhen: "data.type == 'code'", helpText: 'Editor language for syntax highlighting (e.g. javascript, python, sql).' },
         { field: 'autonumberFormat', visibleWhen: "data.type == 'autonumber'", helpText: 'Literal text plus a {0000} counter, {YYYY}/{MM}/{DD}/{YYYYMMDD} date tokens in the business time zone, and {field_name} interpolation. The counter resets per rendered prefix. Omitted on an autonumber field it defaults to {0000}.' },
         { field: 'referenceVia', visibleWhen: "data.type == 'text'", helpText: 'Makes this text field the id half of a polymorphic pointer: names the SIBLING field on the same object that holds the target object name, per row (ADR-0052 §5). snake_case; text fields only, and mutually exclusive with `reference`.' },
+        // #22870 (ruling 6116489638, Q1 → A) — inbound mail association. A
+        // PARSE gate like the deadline pair below: `FieldSchema` refuses the
+        // key on every type but `email`, so the row shows exactly where it
+        // parses. Its reader is the mailbox service's ingest, which lands
+        // after this declaration; the help text says where it takes effect
+        // rather than when, and the liveness row's author warning carries the
+        // "not read yet" until that reader lands.
+        { field: 'mailAssociation', label: 'Match Inbound Mail', visibleWhen: "data.type == 'email'", helpText: "Links inbound mail to records of this object whose value in this field matches the message's sender or a recipient (case-insensitive; the mailbox's own address excluded). Email fields only. Takes effect only where a mailbox service is set up." },
         // #22227 (objectui#11815 ruling D) — the deadline semantic. Unlike the
         // meaningfulness gates above, these two ARE parse gates: `FieldSchema`
         // refuses both keys outside date / datetime (DEADLINE_FIELD_TYPES in

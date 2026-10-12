@@ -31,8 +31,9 @@
  *     / 403 AND the lock's own message (it names the clone path). The code
  *     alone would not identify the gate: ADR-0005's tier gate inside
  *     `saveMetaItem` answers with the same code for the same row, and its
- *     message instead says the type "has not opted into per-org overlay
- *     writes". Without this leg, case 2 below could pass for the wrong reason
+ *     message instead says the item "is provided by a managed package and is
+ *     sealed" (the double below throws the producer's sentence, ADR-0131 D6's
+ *     managed-content seal). Without this leg, case 2 below could pass for the wrong reason
  *     — a probe answered by a gate that is not the one under test.
  *
  *  2. THE LOCK AT THE RESTORE LEG — the same fixture, the same set, through
@@ -207,8 +208,10 @@ function makeProtocol(ql: any, declaredNames: string[], tierGate: 'open' | 'clos
     async saveMetaItem(req: { type: string; name: string; item: any }) {
       if (tierGate === 'closed' && declaredNames.includes(req.name)) {
         const err: any = new Error(
-          `[not_overridable] Metadata item 'permission/${req.name}' is provided by a code package `
-          + 'and the type has not opted into per-org overlay writes (allowOrgOverride=false).',
+          `Metadata item 'permission/${req.name}' is provided by a managed package and is sealed `
+          + 'against in-place edits. Clone it under a new name to customize it (the "Clone" action on '
+          + 'the permission set, or POST /api/v1/data/sys_permission_set with a new name). '
+          + 'See docs/adr/0126-packaged-metadata-customization-model.md.',
         );
         err.code = 'NOT_OVERRIDABLE';
         err.status = 403;

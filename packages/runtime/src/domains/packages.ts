@@ -1662,9 +1662,9 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     // producer-side rename card (option B), not a rider on this
                     // one.
                     //
-                    // [#7018 / the #6190 ruling, Option A] `app` declares
-                    // `allowOrgOverride: false`, so this flip carries no
-                    // organization — it lands env-wide, on the
+                    // [#7018 / the #6190 ruling, Option A] this flip carries
+                    // no organization — every metadata write lands env-wide
+                    // (ADR-0131 D6), on the
                     // very row boot hydrates and the App Switcher reads. An
                     // org-scoped flip was a phantom: the app looked published for
                     // the life of the process and went back to `_unpublished:

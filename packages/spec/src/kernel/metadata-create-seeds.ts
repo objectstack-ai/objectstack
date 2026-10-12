@@ -138,7 +138,7 @@ const BUILTIN_METADATA_CREATE_SEEDS: Partial<Record<MetadataType, unknown>> = {
     tools: [],
   },
   // [#5488] `api` HAD a create seed here (#5271). It was REMOVED when `api`
-  // became code-only (`allowRuntimeCreate: false` + `allowOrgOverride: false`,
+  // became code-only (`allowRuntimeCreate: false` + `allowEnvironmentOverlay: false`,
   // maintainer ruling 2026-08-07T16:59Z): a create seed exists to make a
   // runtime CREATE round-trip, and there is no longer a runtime create surface
   // for it to seed — the #5086 inlet refuses `PUT /api/v1/meta/api/:name` with
