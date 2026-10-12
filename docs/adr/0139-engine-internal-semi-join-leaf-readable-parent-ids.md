@@ -1,10 +1,16 @@
 # ADR-0139: One engine-internal semi-join leaf — "the ids of object X this caller may read" — pushed down by ObjectQL, never authorable; ADR-0055 row (a) and ADR-0056's non-goal revisited for this one leaf
 
-**Status**: Proposed (2026-10-10). **This record declares; it implements nothing.** It becomes **Accepted** on the
-maintainer's approval (`docs/adr/**` is Tier H, Prime Directive #14); the execution cards under
-[Execution plan](#execution-plan-after-acceptance) are cut after acceptance and ⛔ never before it. Until then the
-platform stays in the ruling's letter D state, and letter C (a located 400 at the bound, after objectui#12081 item 8)
-is the `domain:services` lane's interim on [#22590](https://github.com/objectstack-ai/objectstack/issues/22590).
+**Status**: Accepted (2026-10-11), accepted by the merge that landed it on `main`
+([#22707](https://github.com/objectstack-ai/objectstack/pull/22707)); proposed 2026-10-10. **Amended** (2026-10-12):
+D2's position sentence names the executor boundary — after the middleware chain and the before-hooks, immediately
+before each driver call — in place of the seam where `lowerRelationConditions` runs, which precedes the chain D4's
+emitters write into (ruling [`6121741984`](https://github.com/objectstack-ai/objectstack/issues/22861#issuecomment-6121741984)
+on [#22861](https://github.com/objectstack-ai/objectstack/issues/22861), letter A). **This record declares; it
+implements nothing.** It became **Accepted** on the maintainer's approval (`docs/adr/**` is Tier H, Prime
+Directive #14); the execution cards under [Execution plan](#execution-plan-after-acceptance) are cut after acceptance
+and ⛔ never before it. Until then the platform stayed in the ruling's letter D state, and letter C (a located 400 at
+the bound, after objectui#12081 item 8) is the `domain:services` lane's interim on
+[#22590](https://github.com/objectstack-ai/objectstack/issues/22590).
 **Decided by**: the maintainer, 「同意」 to the director seat's batch #312 item 2 (ruling
 [`6097072172`](https://github.com/objectstack-ai/objectstack/issues/22590#issuecomment-6097072172), 2026-10-10T11:34Z):
 **A is the end state, its first deliverable an ADR**; B (an unbounded `$in`) and a raised cap are ⛔ not taken. The
@@ -124,8 +130,9 @@ any position but a `$in` comparand, the engine refuses it loudly. ⛔ No second 
 
 ### D2 — ObjectQL composes the scope, once per parent object per request, fail closed
 
-At the engine's own filter seam — where `packages/objectql/src/engine.ts#lowerRelationConditions` runs today, after
-ingress parsing and the comparand doors — every `ReadableIds` leaf is replaced by its composed form, still branded,
+At the engine's executor boundary — on the final AST, after ingress parsing, the comparand doors, the middleware chain
+(`packages/objectql/src/engine.ts#executeWithMiddleware`) and the before-hooks, immediately before each driver call of
+`find`, `findOne`, `count` and `aggregate` — every `ReadableIds` leaf is replaced by its composed form, still branded,
 before any driver sees it:
 
 1. `canReadObject(P, caller)` false, a throw, or a service that exposes neither it nor `explain` ⇒ `$in: []`, FALSE on
