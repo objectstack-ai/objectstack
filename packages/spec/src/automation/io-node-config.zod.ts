@@ -806,6 +806,16 @@ const HTTP_SIGNING_SECRET_ENVELOPE_REFUSAL =
   '`signingSecret` is the HMAC-SHA256 secret that signs the request, read as written: a CEL value envelope is not '
   + 'evaluated here. Write the secret itself, or `\'\'` to send unsigned on purpose.';
 
+/**
+ * The refusal of a `{…}` token written as the WHOLE `headers` value — the
+ * 17.x spelling that resolved a map from a variable. The map itself is read as
+ * written; only its values render.
+ */
+const HTTP_HEADERS_TOKEN_REFUSAL =
+  '`headers` is a map of header name to text, read as written: a single-brace token is not resolved here, so a map '
+  + 'is not computed into it. Write the map, each value a text slot with `{{ }}` holes '
+  + '(`{ \'X-Request-Id\': \'{{ $runId }}\' }`).';
+
 /** The error map of an `http` literal's type: an envelope is refused by name, anything else by type. */
 function httpLiteralTypeError(refusal: string) {
   return (issue: { readonly input?: unknown }) => (isExpressionEnvelopeShaped(issue.input) ? refusal : undefined);
@@ -818,7 +828,8 @@ function httpLiteralTypeError(refusal: string) {
  * literal's remedy beside the type's refusal:
  *
  *  - a single-brace token (or a hole over a `$` root the engine does not bind)
- *    in `url` or a `headers` value — the text-slot judge's refusal;
+ *    in `url` or a `headers` value — the text-slot judge's refusal — and a
+ *    token written as the whole `headers` value (marked, like the literals);
  *  - a `{…}` token in `method`, `durable` or `timeoutMs` (marked
  *    `READ_AS_WRITTEN_PARAM`) and in `signingSecret` (unmarked, see above).
  */
@@ -830,6 +841,14 @@ function httpConfigRefusals(cfg: unknown, ctx: z.RefinementCtx): void {
     if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: ['url'], message: refusal });
   }
   const headers = config.headers;
+  if (typeof headers === 'string' && templateTokensOf(headers).length > 0) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['headers'],
+      message: HTTP_HEADERS_TOKEN_REFUSAL,
+      params: { [READ_AS_WRITTEN_PARAM]: true },
+    });
+  }
   if (headers !== null && typeof headers === 'object' && !Array.isArray(headers)) {
     for (const [name, value] of Object.entries(headers as Record<string, unknown>)) {
       if (typeof value !== 'string') continue;

@@ -32,7 +32,8 @@
  * [#19939] The `params` key a contract issue carries when it refuses a `{…}`
  * token — or an envelope — at a position the executor reads AS WRITTEN (a
  * `notify` node's `sourceObject`, `actorId` and `payload`; an `http` node's
- * `method`, `durable` and `timeoutMs`), never through the interpolator. The build doors' value arm (`flow-node-config-refusals.ts`,
+ * `method`, `durable` and `timeoutMs`, and its `headers` map as a whole),
+ * never through the interpolator. The build doors' value arm (`flow-node-config-refusals.ts`,
  * `builtinValueJudged`) leaves every other token-carrying value alone, since
  * only the interpolation decides what the run will see there; at a position
  * read as written the run sees exactly what the build sees, so the

@@ -398,8 +398,8 @@ interface ContractIssue {
  *    config and so refuses it at the run — unless the contract marks its
  *    issue {@link READ_AS_WRITTEN_PARAM} (#19939: a `notify` node's
  *    `sourceObject`, `actorId` and `payload`, and an `http` node's `method`,
- *    `durable` and `timeoutMs`, which the executor reads as written, never
- *    through the interpolator, so the run sees the token the build sees and
+ *    `durable` and `timeoutMs` and a token written as its whole `headers`
+ *    map, which the executor reads as written, never through the interpolator, so the run sees the token the build sees and
  *    the contract's refusal of it is the run's verdict).
  */
 function builtinValueJudged(

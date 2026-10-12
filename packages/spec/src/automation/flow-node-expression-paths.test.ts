@@ -334,6 +334,35 @@ describe('FLOW_NODE_EXPRESSION_PATHS — a notify node\'s value slots (#19939)',
 });
 
 /**
+ * #19939 (stage S5) — an `http` node's `body` is a `value` slot: ONE value,
+ * the whole payload. Its `url` and `headers` values are text slots
+ * (`flow-text-slot-template.ts`) and its `method`, `durable`, `timeoutMs` and
+ * `signingSecret` literals — the ledger declares no slot at any of them.
+ */
+describe('FLOW_NODE_EXPRESSION_PATHS — an http node\'s body (#19939)', () => {
+  const ENVELOPE = { dialect: 'cel', source: "{'id': record.id}" };
+
+  it('declares the body as the one `value` slot of an http node, read as one value', () => {
+    expect(FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.nodeType === 'http').map((e) => [e.path, e.role, e.label, e.eachElement]))
+      .toEqual([['body', 'value', 'http body', undefined]]);
+  });
+
+  it('reads the body whole — an envelope, a literal map or a list — and nothing else of the config', () => {
+    const config = {
+      url: '/x/{{ id }}', headers: { 'X-Ref': '{{ id }}' }, method: 'POST', durable: true, timeoutMs: 5, signingSecret: 's',
+    };
+    expect(resolveFlowNodeValueSlots('http', { ...config, body: ENVELOPE }).map((f) => [f.path, f.value]))
+      .toEqual([['body', ENVELOPE]]);
+    expect(resolveFlowNodeExpressions('http', { ...config, body: ENVELOPE }).map((f) => f.path)).toEqual(['body']);
+    // A literal is emitted for the template judge, never for the expression check.
+    expect(resolveFlowNodeValueSlots('http', { ...config, body: ['a', '{x}'] }).map((f) => [f.path, f.value]))
+      .toEqual([['body', ['a', '{x}']]]);
+    expect(resolveFlowNodeExpressions('http', { ...config, body: { id: '{x}' } })).toEqual([]);
+    expect(resolveFlowNodeValueSlots('http', config)).toEqual([]);
+  });
+});
+
+/**
  * #19939 (stage S2) — a `screen`'s three positions that hand a value to the
  * client are `value` slots: an object form's `defaults.*`, a field's
  * `defaultValue` (under the `fields[]` repeater) and an object form's
@@ -444,7 +473,7 @@ describe('every entry older than the value role resolves byte-identically (the r
     // moved `loop.collection` and `map.collection` from the retired
     // `flow-template` role to `value` IN PLACE (`screen.fields[].visibleWhen`
     // keeps its `predicate` row beside the screen's value rows). Stage S4
-    // appended the six `notify` value rows.
+    // appended the three `notify` value rows, and stage S5 the `http` body's.
     expect(FLOW_NODE_EXPRESSION_PATHS.map(byKey)).toEqual([
       'screen.fields[].visibleWhen (predicate)',
       'decision.conditions[].expression (predicate)',
@@ -462,6 +491,7 @@ describe('every entry older than the value role resolves byte-identically (the r
       'notify.recipients (value)',
       'notify.templateData.* (value)',
       'notify.sourceId (value)',
+      'http.body (value)',
     ]);
   });
 
