@@ -781,11 +781,14 @@ describe('FlowSchema', () => {
             config: {
               url: 'https://api.external.com/v1/data',
               method: 'POST',
+              // [#19939] Each header value is a text slot (`{{ }}` holes) and
+              // the body a value slot (a CEL envelope); a credential never goes
+              // in a header — a connector's `auth.credentialRef` carries it.
               headers: {
                 'Content-Type': 'application/json',
-                Authorization: 'Bearer {$Credential.token}',
+                'X-Request-Id': '{{ $runId }}',
               },
-              body: '{payload}',
+              body: { dialect: 'cel', source: 'payload' },
             },
           },
           {
