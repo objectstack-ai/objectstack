@@ -32,6 +32,18 @@ import {
 // installed to register the table it writes.
 import { SysNotification } from '@objectstack/platform-objects/audit';
 
+/**
+ * [#22984] Whether the engine's `ObjectQLPlugin` resolved `skipSchemaSync` (the
+ * option, else `OS_SKIP_SCHEMA_SYNC=1`). `ObjectQLPlugin.init()` publishes that
+ * value on the engine instance as an undeclared property, so it is probed here:
+ * an engine nothing published it on (a test double, a foreign engine) reads as
+ * not set. ⛔ Never a second read of the environment: the option and the env
+ * var must not disagree between the engine's boot and this service's.
+ */
+function bootSchemaSyncSkipped(engine: IDataEngine): boolean {
+    return (engine as unknown as { skipSchemaSync?: unknown }).skipSchemaSync === true;
+}
+
 export interface MessagingServicePluginOptions {
     /**
      * Register the always-on `inbox` channel during init (default `true`).
@@ -428,14 +440,20 @@ export class MessagingServicePlugin implements Plugin {
      * Creating the tables at kernel:ready makes a new env consistent from the
      * start. Idempotent (the driver only creates a table when absent), so it is
      * safe on every boot; per-object failures are isolated.
+     *
+     * [#22984] It is boot-time DDL, so it honours `skipSchemaSync` /
+     * `OS_SKIP_SCHEMA_SYNC=1` the way the engine's own boot sync does: a
+     * deployment that declared its DDL managed out-of-band ("Use after running
+     * migrations manually") gets no table created behind its back. The value is
+     * the one `ObjectQLPlugin` resolved ({@link bootSchemaSyncSkipped}); when it
+     * is set this returns before any DDL or existence probe (the flag protects a
+     * cold-start budget) and says once, at `info`, what it did not provision and
+     * why. Not `warn`: nothing is degraded, because the operator declared this.
+     * `os migrate apply`, the documented path, was measured to create all eight
+     * tables. `syncObjectSchema` itself stays ungated, because it is also how a
+     * runtime publish gives a new object its table.
      */
     private async provisionSystemTables(engine: IDataEngine, ctx: PluginContext): Promise<void> {
-        // [#12482] `syncObjectSchema?` is declared on the IDataEngine contract
-        // (optional — only engines owning drivers and DDL answer); the
-        // pre-#12482 `as unknown as` structural recovery is gone. The runtime
-        // probe stays: engines without on-demand DDL skip provisioning.
-        const sync = engine.syncObjectSchema;
-        if (typeof sync !== 'function') return;
         const objects = [
             // The L2 event is provisioned with the rest of the pipeline it
             // heads. Its table was previously created lazily by the SQL driver
@@ -451,6 +469,22 @@ export class MessagingServicePlugin implements Plugin {
             NotificationTemplate,
             HttpDelivery,
         ];
+        // [#22984] FIRST: see the docblock. One line, naming every skipped object.
+        if (bootSchemaSyncSkipped(engine)) {
+            ctx.logger.info(
+                `[messaging] ${objects.map((obj) => (obj as { name: string }).name).join(', ')} NOT provisioned at boot — ` +
+                    "the boot's schema sync is skipped (`skipSchemaSync` / OS_SKIP_SCHEMA_SYNC=1), declaring this " +
+                    "deployment's DDL managed out-of-band, so this service issues none either. `os migrate apply` creates " +
+                    'any that are missing (`os migrate plan` lists them as `create_table`).',
+            );
+            return;
+        }
+        // [#12482] `syncObjectSchema?` is declared on the IDataEngine contract
+        // (optional — only engines owning drivers and DDL answer); the
+        // pre-#12482 `as unknown as` structural recovery is gone. The runtime
+        // probe stays: engines without on-demand DDL skip provisioning.
+        const sync = engine.syncObjectSchema;
+        if (typeof sync !== 'function') return;
         for (const obj of objects) {
             try {
                 await sync.call(engine, (obj as { name: string }).name);
