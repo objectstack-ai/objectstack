@@ -380,6 +380,19 @@ const UNPROVISIONED_ANCHOR_CAUSE =
   'database owns the schema, so the platform registers these anchors without provisioning a ' +
   'column: the name resolves, but no storage stands behind it.';
 
+/**
+ * The three ways out of an unprovisioned anchor, which the one-line `fix:` of
+ * the converted anchor ids (`unprovisionedAnchorFix()`) names without the how:
+ * `sort-field-unprovisioned`, `searchable-field-unprovisioned` and
+ * `hook-body-write-unprovisioned-anchor` write it out.
+ */
+const UNPROVISIONED_ANCHOR_REMEDY =
+  'To fix it, check the remote table. If it really carries the column, declare it in the object\'s ' +
+  'own `fields`, mapped to the remote column through the external binding\'s `columnMap`, so the name ' +
+  'resolves to a column you vouch for. If it does not, drop the reference, or opt the object out of ' +
+  'the injection: `ownership: \'none\'` for the ownership anchors, `systemFields: { audit: false }` ' +
+  'for the audit family.';
+
 const DASHBOARD_FILTER_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
   rule: 'dashboard-filter-field-unprovisioned',
   covers: 'why a filter on an unprovisioned anchor matches nothing',
@@ -894,6 +907,10 @@ const HOOK_BODY_WRITE_UNKNOWN_FIELD_EXPLANATION: RuleExplanation = {
       'hook\'s input, a target another package declares — because a false positive costs an advisory ' +
       'rule more than a miss. The rule stays a warning: it reads the body through a parser, never by ' +
       'running it.',
+    'Only the literal write shapes in `HOOK_BODY_WRITE_PATTERNS` are checked: a computed key, a spread ' +
+      'and an aliased `ctx.input` are not, so a clean run does not prove every write lands. The warning ' +
+      'never blocks a build. The `fix:` line suggests the nearest declared or system column when one is ' +
+      'close.',
   ],
 };
 
@@ -906,6 +923,7 @@ const HOOK_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION: RuleExplanation = {
       'target objects, and a multi-target hook is reported only when the anchor is unprovisioned on ' +
       'every one of them: the body may branch per object, so an anchor that is real on one target is a ' +
       'legitimate write there. A `ctx.api.object(NAME)` write is judged against the object it names.',
+    UNPROVISIONED_ANCHOR_REMEDY,
   ],
 };
 
@@ -2015,6 +2033,7 @@ const SORT_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
       'of the same name is one the author vouches for, and a dotted sort name is refused by the ' +
       'ingress gate on its own. The rule is a warning because it cannot see the remote table, only ' +
       'that the platform provisions no storage.',
+    UNPROVISIONED_ANCHOR_REMEDY,
   ],
 };
 
@@ -2046,9 +2065,13 @@ const SEARCHABLE_FIELD_UNSEARCHABLE_EXPLANATION: RuleExplanation = {
       'them, otherwise the AUTO-DEFAULT set — its text-like columns (text / email / phone / url / ' +
       'autonumber / textarea / markdown / select), never a system/audit column or a hidden field. A ' +
       '`lookup` or `master_detail` column stores only the referenced record\'s id, so it is never a ' +
-      'keyword target. The verdict quotes at most three names of a declared set.',
+      'keyword target: to search by the related record\'s title, mirror it onto a stored text field ' +
+      'and declare that. Declaring `searchableFields` on the object chooses its set explicitly, and a ' +
+      'view then narrows that set, never widens it (ADR-0061). The verdict quotes at most three names ' +
+      'of a declared set.',
     VIRTUAL_FIELD_STORAGE,
-    'A formula entry is refused on EVERY surface, the object\'s own set included: measured, it ' +
+    'A formula entry is refused on EVERY surface, the object\'s own set included — the REST ingress ' +
+      'answers `400 INVALID_FIELD`, the same answer a stale entry gets: measured, it ' +
       'matched 0 rows on driver-memory, and 0 rows with no error on driver-sql. Otherwise the ' +
       'object\'s own `searchableFields` is existence-only: its declared branch scans any stored ' +
       'column, so a json or lookup column declared there is a narrow choice the engine executes, not ' +
@@ -2071,6 +2094,7 @@ const SEARCHABLE_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
     'Only a name that resolved BECAUSE it is injected is judged: an author-declared column of the ' +
       'same name is one the author vouches for. The rule is a warning because it cannot see the ' +
       'remote table, only that the platform provisions no storage.',
+    UNPROVISIONED_ANCHOR_REMEDY,
   ],
 };
 
@@ -3602,6 +3626,57 @@ const SEMANTIC_ROLE_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// ── Action placement (`validate-action-locations.ts`) ───────────────────────
+
+const ACTION_NO_PLACEMENT_EXPLANATION: RuleExplanation = {
+  rule: 'action-no-placement',
+  covers: 'where an action can be placed',
+  paragraphs: [
+    'An action renders at a location only if it DECLARES that location: every console renderer reads ' +
+      'the one predicate. An action that omits `locations`, and that no view places by name, parses, ' +
+      'publishes and is listed in Setup, and no user can ever click it — the ADR-0078 shape of a ' +
+      'declaration that renders nothing.',
+    // Held equal to `ACTION_LOCATIONS` (`@objectstack/spec/ui`) by the rule's test.
+    'The locations an action can declare: `list_toolbar`, `list_item`, `record_header`, `record_more`, ' +
+      '`record_related`, `record_section`. A list view places an action by NAME instead: naming it in ' +
+      '`bulkActions` or `bulkActionDefs` puts it on the selection bar, which the view drives, never ' +
+      '`locations` (an action that only makes sense over a selection has no single-record location). ' +
+      'A name in `rowActions` counts as placement too.',
+    '`locations: []` is the documented headless shape and is never reported: the action stays callable ' +
+      'over REST, MCP and AI and keeps its capability gate, params contract and audit trail while ' +
+      'claiming no UI surface. ADR-0110 D3 refuses an undeclared handler, so a headless declaration is ' +
+      'the legal way to expose such an action; only a MISSING key is unstated placement.',
+    'A warning, not an error: a view in another installed package can place the action by name. The ' +
+      'rule asks only whether anyone placed the action; whether a declared location is one a renderer ' +
+      'serves, and whether a name resolves (`action-name-undefined`), are other rules\' questions.',
+  ],
+};
+
+// ── Dashboard widget options (`validate-dashboard-widget-options.ts`) ───────
+// The id is `@objectstack/sdui-parser`'s diagnostic code: the rule forwards that
+// package's check unchanged, and the SDUI save gate emits the same code.
+
+const UNCONSUMED_WIDGET_OPTION_EXPLANATION: RuleExplanation = {
+  rule: 'unconsumed-widget-option',
+  covers: 'which widget options a renderer reads',
+  paragraphs: [
+    'A widget\'s `options` bag is declared open (the spec\'s `DashboardWidgetOptionsSchema` passes ' +
+      'extra keys through), so any key parses, validates and publishes, including one no renderer ' +
+      'reads. Every spec-legal widget renders through the dataset-bound path, whose read set is the ' +
+      'warning\'s list, so a key outside it styles nothing and the widget renders as if it were absent. ' +
+      'Open extras stay open; they stop being silent. The rule is a warning, at this door as at the ' +
+      'SDUI save gate, which runs the same check under the same code.',
+    'Presentation has declared homes instead: a number\'s face is the dataset measure\'s `format` and ' +
+      '`currency`, a tile\'s accent is the widget\'s `colorVariant`, and a chart\'s look is the ' +
+      'widget\'s `chartConfig`. `format` and `thresholds` in `options` are the keys most often ' +
+      'believed to work; both draw this warning.',
+    'Not reported: a widget with no `dataset` (a legacy inline form), one in the legacy `component` ' +
+      'format, an expression-valued `options`, and a widget carrying ' +
+      '`suppressWarnings: [\'unconsumed-widget-option\']`, which is how a key with a genuine consumer ' +
+      'outside the renderer says so in metadata.',
+  ],
+};
+
 // ── Rule ids `@objectstack/cli` produces ────────────────────────────────────
 // The CLI's own checks, which `os explain` reads from this one table. The CLI
 // depends on this package, so their id constants cannot be imported here:
@@ -3922,6 +3997,8 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SEED_INSERT_MODE_DUPLICATES_ON_REPLAY_EXPLANATION.rule]: SEED_INSERT_MODE_DUPLICATES_ON_REPLAY_EXPLANATION,
   [SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION.rule]: SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION,
   [SEMANTIC_ROLE_FIELD_UNPROVISIONED_EXPLANATION.rule]: SEMANTIC_ROLE_FIELD_UNPROVISIONED_EXPLANATION,
+  [ACTION_NO_PLACEMENT_EXPLANATION.rule]: ACTION_NO_PLACEMENT_EXPLANATION,
+  [UNCONSUMED_WIDGET_OPTION_EXPLANATION.rule]: UNCONSUMED_WIDGET_OPTION_EXPLANATION,
   [HOOK_BODY_NOT_LOWERABLE_EXPLANATION.rule]: HOOK_BODY_NOT_LOWERABLE_EXPLANATION,
   [HOOK_BODY_BUNDLED_FALLBACK_EXPLANATION.rule]: HOOK_BODY_BUNDLED_FALLBACK_EXPLANATION,
   [HOOK_BODY_UNPARSEABLE_EXPLANATION.rule]: HOOK_BODY_UNPARSEABLE_EXPLANATION,

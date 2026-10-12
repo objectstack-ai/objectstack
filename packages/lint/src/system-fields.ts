@@ -235,3 +235,21 @@ export function unprovisionedAnchorHint(objectName: string, field: string): stri
     `the audit family).`
   );
 }
+
+/**
+ * [#22161] The ONE-LINE form of {@link unprovisionedAnchorHint}, for a rule
+ * whose `fix:` line is one remedy: the same three ways out — vouch for the
+ * remote column by declaring it, drop the reference, opt the object out of the
+ * injection — in one clause each, and the rule's `os explain` entry
+ * (`rule-explanations.ts`) carries how (`columnMap`, `ownership: 'none'`,
+ * `systemFields: { audit: false }`). The pairing of
+ * {@link unprovisionedAnchorVerdict} with the long cause, repeated for the fix:
+ * a rule still on the long hint converges here when its `fix:` line is
+ * shortened, so the converted rules cannot drift apart.
+ */
+export function unprovisionedAnchorFix(objectName: string, field: string): string {
+  return (
+    `If the remote table carries '${field}', declare it in ${objectName}'s own fields (mapped ` +
+    `through columnMap); otherwise drop the reference or opt the object out of the injection`
+  );
+}

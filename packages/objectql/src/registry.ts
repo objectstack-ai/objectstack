@@ -4779,10 +4779,10 @@ export class SchemaRegistry {
    *
    * @param member - [#22877] For a type whose identity is a pair, the ONE
    *   bundle member whose shadow to lift, as its discriminator value. Named,
-   *   only that member's shadow goes — whether or not the package ships that
-   *   member, because the test is the one it always was: a packaged artifact
-   *   of the NAME remains, so the name stays resolvable. Omitted, the bundle's
-   *   whole shadow group, as before.
+   *   only that member's shadow goes, and only when the package ships that
+   *   member [#23074]: a packaged artifact of the MEMBER remains, so the
+   *   member stays resolvable. Omitted, the bundle's whole shadow group, when
+   *   any member's artifact remains, as before.
    */
   removeRuntimeShadow(type: string, name: string, member?: string): boolean {
     const collection = this.metadata.get(type);
@@ -4805,11 +4805,18 @@ export class SchemaRegistry {
       const { bare, local, other } = collectBundle(collection, name, disc);
       const shadows = member === undefined ? bare : entriesOfMember(bare, disc, member);
       if (shadows.length === 0) return false;
-      // The bundle's artifact, any member's: a hydrated overlay of a member
-      // the package does NOT ship still wears the bundle's artifact envelope
-      // (`_packageId`, `_provenance`), so the overlay-entry retirement that
-      // would otherwise take it refuses it as code — this tier must lift it.
-      const artifact = [...local, ...other].find(({ item }) => item?._packageId && item._packageId !== 'sys_metadata');
+      // [#23074] A named member's OWN artifact, the test this tier has always
+      // made for a name: a shadow is lifted only where a packaged artifact
+      // takes its place. An overlay of a member the package does NOT ship has
+      // none, so this tier declines, and the heal's last tier retires the
+      // entry (`removeOverlayEntry`): the protocol grafts the artifact
+      // envelope onto the shipped member alone, so that overlay is registered
+      // as the tenant row it is and the retirement takes it. (#22877 stage 2
+      // lifted it here on ANY member's artifact, because the bundle's envelope
+      // grafted onto it made the retirement refuse it as code.) The group
+      // sweep, naming no member, keeps the bundle's artifact, any member's.
+      const artifacts = member === undefined ? [...local, ...other] : entriesOfMember([...local, ...other], disc, member);
+      const artifact = artifacts.find(({ item }) => item?._packageId && item._packageId !== 'sys_metadata');
       if (!artifact) return false;
       for (const { key } of shadows) {
         collection.delete(key);
