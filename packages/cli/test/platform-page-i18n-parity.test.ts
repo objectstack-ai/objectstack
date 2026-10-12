@@ -838,8 +838,9 @@ describe('shipped platform record pages -- i18n ownership (#14817)', () => {
     const maps = RECORD_PAGES.flatMap((page) => inlineLocaleMaps(page, page.name));
 
     // Same refusal as the population floor: zero maps means the walk broke, not
-    // that the pages went monolingual.
-    expect(maps.length).toBeGreaterThanOrEqual(45);
+    // that the pages went monolingual. [#15204 B2] 44: the user page's two
+    // grant lists dropped their `add` pickers, and with them two label maps.
+    expect(maps.length).toBeGreaterThanOrEqual(44);
 
     const incomplete = maps
       .filter((m) => SHIPPED_LOCALES.some((locale) => !m.locales.includes(locale)))

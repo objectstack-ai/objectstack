@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { ObjectQLPlugin } from '@objectstack/objectql';
 import { AuditPlugin } from './audit-plugin.js';
 
 /**
@@ -42,11 +43,20 @@ function makeCtx(engine: unknown) {
   // #4887 — the log IS the deliverable for the provisioning path: its silence
   // is what made a working-but-elsewhere table read as a never-created one.
   // Capture info/warn so the tests can assert on what an operator would see.
-  const logs = { info: [] as string[], warn: [] as string[] };
+  // [#22913] …and every `error` call whole, in the contract's
+  // `error(message, error?, meta?)` shape, so a pin can count them.
+  const logs = {
+    info: [] as string[],
+    warn: [] as string[],
+    error: [] as Array<{ message: string; error: unknown; meta: Record<string, unknown> | undefined }>,
+  };
   const logger = {
     info(msg: string) { logs.info.push(String(msg)); },
     warn(msg: string) { logs.warn.push(String(msg)); },
-    error() {}, debug() {},
+    error(msg: string, error?: unknown, meta?: Record<string, unknown>) {
+      logs.error.push({ message: String(msg), error, meta });
+    },
+    debug() {},
     child() { return logger; },
   };
   const ctx = {
@@ -92,6 +102,71 @@ describe('AuditPlugin — system table provisioning', () => {
     await plugin.init(ctx);
     await plugin.start(ctx);
     await expect(fireReady()).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * [#22913] A failed provision is a DURABILITY degradation, so it is reported at
+ * `error` — once per object, never per write — and the boot is not failed.
+ *
+ * When an object's DDL throws, the boot still completes and the deployment
+ * serves as healthy while the table does not exist; for `sys_audit_log` /
+ * `sys_activity`, audited writes keep succeeding while their audit rows have
+ * nowhere to land. AGENTS.md "Degradation log levels" sends that class to
+ * `error`, with the consequence and the fix in the first line. The wording is
+ * not pinned: the pins hold the level, the count, the named object, the named
+ * remedy command and the driver's refusal in meta.
+ */
+describe('AuditPlugin — a failed provision is an error, once per object (#22913)', () => {
+  const OBJECTS = ['sys_audit_log', 'sys_activity', 'sys_comment', 'sys_comment_reaction'];
+
+  /** Every DDL succeeds except the named object's, which the driver refuses. */
+  function makeEngine(refused?: string) {
+    return {
+      async syncObjectSchema(name: string) {
+        if (name === refused) throw new Error(`there is already an index named ${name}`);
+      },
+      getDriverForObject() { return { name: 'sqlite' }; },
+      getDefaultDriverName() { return 'sqlite'; },
+    };
+  }
+
+  async function boot(refused?: string) {
+    const { ctx, logs, fireReady } = makeCtx(makeEngine(refused));
+    const plugin = new AuditPlugin();
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    // The boot is NOT failed: kernel:ready resolves.
+    await expect(fireReady()).resolves.toBeUndefined();
+    return logs;
+  }
+
+  it.each(OBJECTS)('a refused DDL for %s logs exactly one error line naming it, the remedy and the refusal', async (name) => {
+    const logs = await boot(name);
+
+    expect(logs.error).toHaveLength(1);
+    const [line] = logs.error;
+    expect(line.message).toContain(name);
+    // ② the fix, by its named subject: the command measured to create it.
+    expect(line.message).toContain('os migrate apply');
+    // One line: the first line carries both halves.
+    expect(line.message).not.toContain('\n');
+    // The driver's refusal travels in meta, never interpolated into the line.
+    expect(line.meta).toEqual({ object: name, error: `there is already an index named ${name}` });
+    // …and it is not ALSO reported at a quieter level.
+    expect(logs.warn.filter((m) => m.includes('could not provision'))).toEqual([]);
+    // The other three objects still provisioned.
+    const placement = logs.info.find((m) => m.includes('system tables provisioned'));
+    for (const other of OBJECTS.filter((o) => o !== name)) expect(placement).toContain(`${other}→sqlite`);
+    expect(placement).not.toContain(`${name}→`);
+  });
+
+  it('CONTROL: a clean provision logs no error at all', async () => {
+    const logs = await boot();
+
+    expect(logs.error).toEqual([]);
+    const placement = logs.info.find((m) => m.includes('system tables provisioned'));
+    for (const name of OBJECTS) expect(placement).toContain(`${name}→sqlite`);
   });
 });
 
@@ -231,11 +306,138 @@ describe('AuditPlugin — provisioning is audible (#4887)', () => {
     await plugin.start(ctx);
     await fireReady();
 
-    expect(logs.warn.some((m) => m.includes('could not provision sys_activity'))).toBe(true);
+    expect(logs.error.some((e) => e.message.includes('could not provision sys_activity'))).toBe(true);
     const placement = logs.info.find((m) => m.includes('system tables provisioned'));
     expect(placement).toContain('sys_audit_log→sqlite');
     expect(placement).toContain('sys_comment→sqlite');
     expect(placement).not.toContain('sys_activity');
+  });
+});
+
+/**
+ * [#22984] `skipSchemaSync` / `OS_SKIP_SCHEMA_SYNC=1` declares a deployment's
+ * DDL managed out-of-band. The engine's boot honours it, and this plugin's
+ * boot-time provisioning is DDL too, so it honours the same declaration: no
+ * DDL, no probe, one `info` line naming what it skipped. The wording is not
+ * pinned; the level, the count and the named subjects are.
+ */
+describe('AuditPlugin — boot provisioning honours skipSchemaSync (#22984)', () => {
+  const OBJECTS = ['sys_audit_log', 'sys_activity', 'sys_comment', 'sys_comment_reaction'];
+  const SKIP = 'NOT provisioned at boot';
+
+  /**
+   * Records every provisioning-relevant call (the DDL and each probe the loop
+   * makes) over the lazy-table model: `find()` throws "no such table" until
+   * `syncObjectSchema()` created it. `published` is what `ObjectQLPlugin`
+   * would have put on the engine.
+   */
+  function makeRecordingEngine(published: boolean) {
+    const tables = new Set<string>();
+    const calls: string[] = [];
+    const engine = {
+      skipSchemaSync: published,
+      async syncObjectSchema(name: string) { calls.push(`syncObjectSchema:${name}`); tables.add(name); },
+      getDriverForObject(name: string) { calls.push(`getDriverForObject:${name}`); return { name: 'sqlite' }; },
+      getDefaultDriverName() { calls.push('getDefaultDriverName'); return 'sqlite'; },
+      async find(object: string) {
+        calls.push(`find:${object}`);
+        if (!tables.has(object)) throw new Error(`no such table: ${object}`);
+        return [] as unknown[];
+      },
+    };
+    return { engine, calls };
+  }
+
+  async function boot(engine: unknown) {
+    const { ctx, logs, fireReady } = makeCtx(engine);
+    const plugin = new AuditPlugin();
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    await fireReady();
+    return logs;
+  }
+
+  it('flag set: no DDL and no probe, the tables stay absent, and ONE info line names the skip', async () => {
+    const { engine, calls } = makeRecordingEngine(true);
+    const logs = await boot(engine);
+
+    expect(calls).toEqual([]);
+    // The triage pin in this model: a table that was not there stays not there.
+    await expect(engine.find('sys_comment_reaction')).rejects.toThrow(/no such table/);
+
+    const skip = logs.info.filter((m) => m.includes(SKIP));
+    expect(skip).toHaveLength(1);
+    for (const name of OBJECTS) expect(skip[0]).toContain(name);
+    expect(skip[0]).toContain('OS_SKIP_SCHEMA_SYNC');
+    expect(skip[0]).toContain('os migrate apply');
+    // `info`, because nothing is degraded: it is not ALSO said louder, and no
+    // provisioning line claims a table. (This fake engine has no middleware
+    // seam, so the read-visibility warn is expected and is not about this.)
+    expect(logs.warn.filter((m) => /provision|syncObjectSchema/.test(m))).toEqual([]);
+    expect(logs.error).toEqual([]);
+    expect(logs.info.some((m) => m.includes('system tables provisioned'))).toBe(false);
+  });
+
+  it('CONTROL: flag published as false, every table is provisioned exactly as before', async () => {
+    const { engine, calls } = makeRecordingEngine(false);
+    const logs = await boot(engine);
+
+    expect(calls.filter((c) => c.startsWith('syncObjectSchema:'))).toEqual(OBJECTS.map((n) => `syncObjectSchema:${n}`));
+    await expect(engine.find('sys_comment_reaction')).resolves.toEqual([]);
+    expect(logs.info.some((m) => m.includes(SKIP))).toBe(false);
+    const placement = logs.info.find((m) => m.includes('system tables provisioned'));
+    for (const name of OBJECTS) expect(placement).toContain(`${name}→sqlite`);
+  });
+
+  /** Construct under a given `OS_SKIP_SCHEMA_SYNC`, which `ObjectQLPlugin` reads in its constructor. */
+  function withSkipEnv<T>(value: string | undefined, build: () => T): T {
+    const previous = process.env.OS_SKIP_SCHEMA_SYNC;
+    try {
+      if (value === undefined) delete process.env.OS_SKIP_SCHEMA_SYNC;
+      else process.env.OS_SKIP_SCHEMA_SYNC = value;
+      return build();
+    } finally {
+      if (previous === undefined) delete process.env.OS_SKIP_SCHEMA_SYNC;
+      else process.env.OS_SKIP_SCHEMA_SYNC = previous;
+    }
+  }
+
+  /**
+   * The value read is the one the REAL `ObjectQLPlugin` resolved and published
+   * on its engine: the producer here is not a stand-in, so the undeclared
+   * engine property both sides spell is pinned end to end. The last row
+   * discriminates: an explicit `skipSchemaSync: false` beats
+   * `OS_SKIP_SCHEMA_SYNC=1`, so a reader that consulted the environment itself
+   * would skip there. `registerProtocol: false` only keeps protocol assembly,
+   * which this fake context cannot host, out of `init()`.
+   */
+  it.each([
+    { label: 'option true', option: true, env: undefined, skips: true },
+    { label: 'option unset, OS_SKIP_SCHEMA_SYNC=1', option: undefined, env: '1', skips: true },
+    { label: 'option unset, env unset', option: undefined, env: undefined, skips: false },
+    { label: 'option false beats OS_SKIP_SCHEMA_SYNC=1', option: false, env: '1', skips: false },
+  ])('real ObjectQLPlugin, $label ⇒ skips: $skips', async ({ option, env, skips }) => {
+    const qlPlugin = withSkipEnv(env, () =>
+      new ObjectQLPlugin({ registerProtocol: false, ...(option === undefined ? {} : { skipSchemaSync: option }) }),
+    );
+    const { ctx, logs, fireReady } = makeCtx(undefined);
+    await qlPlugin.init(ctx);
+    const engine = ctx.getService('objectql') as { syncObjectSchema(name: string): Promise<void> };
+    const sync = vi.spyOn(engine, 'syncObjectSchema').mockResolvedValue(undefined);
+
+    const plugin = new AuditPlugin();
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    await fireReady();
+
+    const skip = logs.info.filter((m) => m.includes(SKIP));
+    if (skips) {
+      expect(sync).not.toHaveBeenCalled();
+      expect(skip).toHaveLength(1);
+    } else {
+      for (const name of OBJECTS) expect(sync).toHaveBeenCalledWith(name);
+      expect(skip).toEqual([]);
+    }
   });
 });
 

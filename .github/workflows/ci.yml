@@ -89,6 +89,28 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# ── THE TWO SPEEDS (#22998) ──────────────────────────────────────────────────
+# A `pull_request` or `merge_group` run carries the FAST SET: `Build Core`,
+# `Test Core` (affected-only) and `Build Docs`. `main`'s hourly `schedule` run,
+# its `push` runs and an on-demand `workflow_dispatch` carry the FULL BATTERY:
+# the fast set plus the four jobs below that spell
+#
+#     github.event_name != 'pull_request' && github.event_name != 'merge_group'
+#
+# in their `if:` — `temporal-conformance`, `dogfood` (three shards),
+# `dogfood-verify` and `console-pin`. Nothing is deleted: the jobs moved off the
+# per-PR path. A red in one of them is a main-red for the owning lane, and the
+# publish lane reads the full battery before its approval (release.yml's
+# `full-battery` job, `scripts/ci/scheduled-full-run.mjs --release-gate`).
+#
+# Spelled as a DENY-list of the two per-PR events on purpose — the filter
+# contract's half 1 below, applied to events: a trigger added to `on:` later
+# RUNS these jobs, and the failure direction of a wrong guess is a slower PR,
+# never a full battery that silently stopped running. `dogfood-gate` keeps
+# `if: always()` (check:shard-attestation pins it): with both legs skipped it
+# counts zero expected attestations and concludes success, exactly as on a
+# filter-skipped diff.
+
 jobs:
   filter:
     runs-on: ubuntu-latest
@@ -276,9 +298,10 @@ jobs:
             # map that objectui's OBJECTSTACK_SPEC_DIST hook and the probe derivation
             # both resolve entry by entry, and the tsup entry list that decides which
             # built file each entry points at. A head that moves them runs this gate
-            # before it enqueues. #20695 moved the migration registries to a new
-            # entry, skipped this job on every push, and went red first in the merge
-            # queue, where a check outside the required set cannot stop a merge.
+            # on the push that lands it (the job is full-battery only since #22998;
+            # see THE TWO SPEEDS above). #20695 moved the migration registries to a
+            # new entry, skipped this job on every push, and went red first in the
+            # merge queue, where a check outside the required set cannot stop a merge.
             # ⛔ Not packages/spec/**: the rest of the spec is bundled CONTENT, and
             # its lag behind a cached dist is the ruled cache design (#9667, #9706;
             # see scripts/check-console-injection.mjs).
@@ -1066,6 +1089,15 @@ jobs:
       # second red on wall time against `timeout-minutes`. Both constants, their
       # measured basis and a self-test battery each live in the script.
       #
+      # THE RED IS A `schedule` RED ALONE (C2, both timing steps, ruling
+      # https://github.com/objectstack-ai/objectstack/issues/22949#issuecomment-6119186511):
+      # the dataset's weights are measured on the hourly `schedule` runs, so
+      # only those exit 1 on DRIFT. On `merge_group`, `pull_request`, `push`
+      # and `workflow_dispatch` the step prints the same verdict, raises the
+      # DRIFT as a `::warning::` annotation and exits 0. The event reaches the
+      # script as `--event "$GITHUB_EVENT_NAME"`, which it requires; the rule
+      # and its self-test live there (TIMING_GRADED_EVENT, timingGateMode).
+      #
       # EXECUTED WINDOWS ONLY. Measurements come from samplesFromSummary() in
       # measure-test-shard-timings.mjs, which drops cache HITs and failed
       # suites, and the prediction is summed over the same executed packages.
@@ -1073,10 +1105,11 @@ jobs:
       # predicted and vouch for a rotted dataset, so a shard whose packages all
       # replayed is NOT MEASURED, never "fast".
       #
-      # NO `if:` and NO `continue-on-error` (the red is the point), and ABOVE
-      # the attestation pair for the #6082 reason documented on the upload
-      # above: a failed unguarded step skips that pair, so a drift red also
-      # withholds this shard's attestation, the fail-closed direction. A shard
+      # NO `if:` and NO `continue-on-error` (the red is the point, and the
+      # `schedule`-only red is the script's `--event`, so neither is needed),
+      # and ABOVE the attestation pair for the #6082 reason documented on the
+      # upload above: a failed unguarded step skips that pair, so a drift red
+      # also withholds this shard's attestation, the fail-closed direction. A shard
       # with no packages runs no turbo and writes no summary; that is NOT
       # MEASURED here rather than a usage error from the script.
       #
@@ -1109,7 +1142,7 @@ jobs:
             exit 0
           fi
           node scripts/partition-test-shards.mjs --check-drift "${SUMMARIES[@]}" \
-            --label "Test Core (${{ matrix.shard }}/6)"
+            --label "Test Core (${{ matrix.shard }}/6)" --event "$GITHUB_EVENT_NAME"
 
       # Runs even when the suite failed — that is when it earns its keep. It
       # answers TWO questions about a red suite, and needs both to be able to
@@ -1486,12 +1519,12 @@ jobs:
       # ── The per-package suite-duration ratchet (#16468) ──────────────────
       #
       # A GATE, unlike the two reporting steps above: NO `continue-on-error`,
-      # so a package whose suite ran past its ceiling reds `Test Core`, naming
-      # the package and its slowest test files. The ceiling is the package's
-      # slowest executed run in the refresh window x 1.25, generated into
-      # scripts/test-shard-timings.json (`ceilings`) by the refresh lane and
-      # held by every later refresh; it rises only by a ruled entry in the
-      # script's RULED_CEILING_RAISES. A `provisional` package prints "no
+      # so on a `schedule` run a package whose suite ran past its ceiling reds
+      # `Test Core`, naming the package and its slowest test files. The
+      # ceiling is the package's slowest executed run in the refresh window
+      # x 1.25, generated into scripts/test-shard-timings.json (`ceilings`) by
+      # the refresh lane and held by every later refresh; it rises only by a
+      # ruled entry in the script's RULED_CEILING_RAISES. A `provisional` package prints "no
       # ceiling: provisional" and is not red; a package absent from the dataset
       # prints "no ceiling: new package" and is not red until the first refresh
       # after it lands gives it a ceiling, while a package the dataset knows
@@ -1505,6 +1538,20 @@ jobs:
       # samplesFromSummary, and every vitest file line); a capture that did not
       # arrive leaves its packages ungraded and says so, never red.
       #
+      # EXIT-GRADED ON `schedule` ALONE (C2, both timing steps, ruling
+      # https://github.com/objectstack-ai/objectstack/issues/22949#issuecomment-6119186511):
+      # the ceilings come from the hourly `schedule` runs, so only those red
+      # this job on a package over its ceiling. On `merge_group`,
+      # `pull_request`, `push` and `workflow_dispatch` the step prints the same
+      # table, raises each package over its ceiling as a `::warning::`
+      # annotation and exits 0; a real slowdown merged to `main` reds the next
+      # hourly run. A package whose ceiling is under the absolute floor (20s,
+      # CEILING_FLOOR_SECONDS) prints "below floor" and is never red. The
+      # event reaches the script as `--event "$GITHUB_EVENT_NAME"`, which it
+      # requires; a refusal (a malformed table or raise record) is red on every
+      # event. The rule, the floor's reading and their self-tests live in the
+      # script.
+      #
       # NOT MEASURED, exit 0, while the dataset carries no `ceilings`: they are
       # generated only where the run-summary artifacts are downloadable (the
       # refresh lane), so the first refresh after this lands writes them, and
@@ -1515,7 +1562,7 @@ jobs:
       # captured, so a red shard's packages are graded too.
       - name: Check the per-package suite-duration ceilings
         if: always()
-        run: node scripts/check-test-suite-ceilings.mjs --captures "$RUNNER_TEMP/test-timings" --label 'Test Core'
+        run: node scripts/check-test-suite-ceilings.mjs --captures "$RUNNER_TEMP/test-timings" --label 'Test Core' --event "$GITHUB_EVENT_NAME"
 
 
   # ── Temporal conformance against live, non-UTC servers (ADR-0053 D-A3) ─────
@@ -1540,15 +1587,16 @@ jobs:
   # The job also carries the non-SQL half of that axis (core, formula,
   # driver-memory, driver-mongodb, service-analytics) — the other backends the
   # temporal conformance matrix holds to one standard. Its NAME still says
-  # "live PG + MySQL" on purpose: the name IS the required check, so renaming
-  # it would silently drop the gate wherever branch protection lists it — the
-  # same trap the dogfood shards note below. `check:required-contexts` pins
-  # this literal, parenthetical and all (#6865).
+  # "live PG + MySQL" on purpose: it was a required check until #22998 moved
+  # the job to the full battery, and its readers (the hourly run's red card,
+  # merge-queue triage history, every instruction that names it) find it by
+  # that literal — renaming it is a contract change, not a tidy-up.
   temporal-conformance:
     name: Temporal Conformance (live PG + MySQL)
     needs: filter
-    # See THE FILTER CONTRACT on the filter job's outputs (#4928).
-    if: ${{ !cancelled() && needs.filter.outputs.core != 'false' }}
+    # See THE FILTER CONTRACT on the filter job's outputs (#4928). Full battery
+    # only: see THE TWO SPEEDS above `jobs:` (#22998).
+    if: ${{ !cancelled() && needs.filter.outputs.core != 'false' && github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -1880,13 +1928,14 @@ jobs:
     # own in-process app; a single 4-vCPU runner needed ~7½ minutes for the
     # lot, and at 2 shards each half still ran ~7 min — the longest pole left
     # once Test Core went 3-way (#4859). vitest partitions the file list
-    # deterministically across shards; all shards must pass. Branch protection
-    # requires only the bare "Dogfood Regression Gate" context, carried by the
-    # dogfood-gate job below — the shard count can change without touching it.
+    # deterministically across shards; all shards must pass. The bare
+    # "Dogfood Regression Gate" context is carried by the dogfood-gate job
+    # below — the shard count can change without touching it.
     name: Dogfood Regression Gate (${{ matrix.shard }}/3)
     needs: filter
-    # See THE FILTER CONTRACT on the filter job's outputs (#4928).
-    if: ${{ !cancelled() && needs.filter.outputs.core != 'false' }}
+    # See THE FILTER CONTRACT on the filter job's outputs (#4928). Full battery
+    # only: see THE TWO SPEEDS above `jobs:` (#22998).
+    if: ${{ !cancelled() && needs.filter.outputs.core != 'false' && github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
     runs-on: ubuntu-latest
     # Backstop only — the stall guard on the test step is the primary detector
     # for a #4250-style hang (see Test Core). 30 min is ~6× a shard (~5 min;
@@ -2111,8 +2160,9 @@ jobs:
   dogfood-verify:
     name: Dogfood Verify CLI
     needs: filter
-    # See THE FILTER CONTRACT on the filter job's outputs (#4928).
-    if: ${{ !cancelled() && needs.filter.outputs.core != 'false' }}
+    # See THE FILTER CONTRACT on the filter job's outputs (#4928). Full battery
+    # only: see THE TWO SPEEDS above `jobs:` (#22998).
+    if: ${{ !cancelled() && needs.filter.outputs.core != 'false' && github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -2201,22 +2251,25 @@ jobs:
           overwrite: true
 
   dogfood-gate:
-    # Stable required-check name for a SHARDED job (#3622 follow-up).
+    # Stable check name for a SHARDED job (#3622 follow-up). Since #22998 its
+    # legs run in the full battery only (THE TWO SPEEDS above `jobs:`) and the
+    # context leaves the required set; on a PR or queue build both legs skip
+    # and this gate counts zero expected attestations. The history below is
+    # why the name and the `if: always()` stay.
     #
-    # Branch protection requires the context "Dogfood Regression Gate". Once
+    # Branch protection required the context "Dogfood Regression Gate". Once
     # the job became a 2-way matrix its checks publish as "Dogfood Regression
     # Gate (1/2)" / "(2/2)" — the bare context could never appear again, so
     # EVERY pull request in the repo sat permanently BLOCKED (mergeable, all
     # checks green, merge button dead). #3622's own comment called for updating
     # branch protection; keeping the contract HERE instead means a future
-    # shard-count change cannot deadlock the repo a second time — and since
-    # #6865 the bare name is pinned by `check:required-contexts` rather than
-    # only described here, so a rename fails in the ESLint job instead of in
-    # the queue.
+    # shard-count change cannot deadlock the repo a second time. From #6865
+    # until #22998 the bare name was pinned by `check:required-contexts`; it
+    # left that registry with the required set, so a rename now falsifies the
+    # prose that names it without reddening anything — treat it as contract.
     #
     # Also aggregates dogfood-verify (the CLI pass that used to ride shard 1),
-    # so the one required context still covers everything it covered before
-    # the split.
+    # so the one context still covers everything it covered before the split.
     #
     # `if: always()` + attestation counting so a legitimately skipped matrix
     # (the `filter` job says no core paths changed) still satisfies the gate —
@@ -2760,8 +2813,9 @@ jobs:
     name: Console Pin Gate
     needs: filter
     # See THE FILTER CONTRACT on the filter job's outputs (#4928). `console`,
-    # not `core` — each job keeps its own filter output.
-    if: ${{ !cancelled() && needs.filter.outputs.console != 'false' }}
+    # not `core` — each job keeps its own filter output. Full battery only: see
+    # THE TWO SPEEDS above `jobs:` (#22998).
+    if: ${{ !cancelled() && needs.filter.outputs.console != 'false' && github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:

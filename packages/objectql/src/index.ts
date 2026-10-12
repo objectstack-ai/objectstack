@@ -94,6 +94,16 @@ export {
 // stay private to the engine.
 export { findPackageHeldSecurityCatalogNames } from './registry.js';
 
+// [#15204 W2] Every `(type, name)` a manifest declares, read from the sources
+// the engine's registration seams read. Exported for the install-local door
+// (`@objectstack/cloud-connection`), which refuses a catalog-carrying package
+// under a wall (ADR-0131 D3) and must judge the declarations the engine
+// registers, not a second reading of the manifest.
+export {
+  declaredSecurityCatalogNames,
+  type DeclaredSecurityCatalogName,
+} from './security-catalog-namespace.js';
+
 
 // [#14553] The navigation-contribution group diagnostic (ADR-0029 D7,
 // ADR-0112 D6c). Exported because `os build` is the SECOND door that has to

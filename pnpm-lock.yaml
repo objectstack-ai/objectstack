@@ -769,6 +769,9 @@ importers:
       '@objectstack/metadata-protocol':
         specifier: workspace:*
         version: link:../metadata-protocol
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../objectql
       '@objectstack/runtime':
         specifier: workspace:*
         version: link:../runtime

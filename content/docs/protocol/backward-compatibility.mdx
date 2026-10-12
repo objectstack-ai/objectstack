@@ -15,20 +15,22 @@ ObjectStack follows strict backward compatibility guarantees to ensure predictab
 ## Versioning Strategy
 
 <Callout type="warn">
-**While the launch window is open, a breaking change ships as a MINOR release — not a MAJOR one.** Every published `@objectstack/*` package versions in lockstep, so the version number alone is not an upgrade-safety signal. This rule is in force today and overrides the MAJOR/MINOR mapping in the tables below wherever they disagree; read [Launch Window](#launch-window-minor-releases-can-contain-breaking-changes) at the end of this page before you plan an upgrade.
+**The 17.x minors ran under a launch-window override: a breaking change shipped as a MINOR release, not a MAJOR one.** Every published `@objectstack/*` package versions in lockstep, so the version number alone is not an upgrade-safety signal; read [Launch Window](#launch-window-minor-releases-can-contain-breaking-changes) at the end of this page before you upgrade across 17.x.
+
+**The v18 line is a major in prerelease.** Changesets is in pre mode with the tag `next`, and `scripts/check-changeset-no-major.mjs` stands aside in pre mode, so a pull request may declare a major bump. Every release cut from `main` is the next `18.0.0-next.N` on npm's `next` tag, while `latest` stays on 17.x. See [how a breaking stage lands on the v18 line](/docs/releases/v18#how-a-breaking-stage-lands-on-this-line).
 </Callout>
 
-ObjectStack follows [Semantic Versioning 2.0.0](https://semver.org/) (`MAJOR.MINOR.PATCH`). The table below describes what each component means; the launch-window rule above governs which component a breaking change actually lands in today.
+ObjectStack follows [Semantic Versioning 2.0.0](https://semver.org/) (`MAJOR.MINOR.PATCH`). The table below describes what each component means; which version a breaking change ships in depends on the line, as the callout above says.
 
 | Version Component | When Incremented | Guarantee |
 |:---|:---|:---|
 | **MAJOR** (X.0.0) | Incompatible API changes | May contain breaking changes |
-| **MINOR** (0.X.0) | New features — and, during the launch window, breaking changes | Existing code may require migration; the [release notes](/docs/releases) lead with what broke |
+| **MINOR** (0.X.0) | New features — and, in the 17.x minors, breaking changes | Existing code may require migration; the [release notes](/docs/releases) lead with what broke |
 | **PATCH** (0.0.X) | Bug fixes, backward-compatible | No behavior changes, only fixes |
 
 ### SemVer Guarantees
 
-- **Zod schemas** are part of the public API surface. Adding optional properties is a MINOR change; removing or renaming properties is a breaking change, which during the launch window also ships in a MINOR release.
+- **Zod schemas** are part of the public API surface. Adding optional properties is a MINOR change; removing or renaming properties is a breaking change, which the 17.x minors also shipped in a MINOR release.
 - **TypeScript types** inferred from Zod (`z.infer<typeof Schema>`) follow the same guarantees as their source schemas.
 - **Helper functions** (e.g., `defineStack`, `defineStudioPlugin`) maintain their call signatures within a MAJOR version.
 - **Input formats** — `defineStack()` accepts both array and map (Record) format for all named metadata collections. Both formats are guaranteed stable within a MAJOR version.
@@ -63,7 +65,7 @@ When a feature, schema property, or API is deprecated, ObjectStack follows a str
 - Code examples are updated to use the replacement
 - CLI tooling may provide automated migration commands
 
-### Phase 3: Removal (MINOR release, during the launch window)
+### Phase 3: Removal (MINOR release in 17.x, the next `18.0.0-next.N` on the v18 line)
 
 - Deprecated feature is removed from the schema
 - TypeScript types no longer include the property
@@ -77,11 +79,11 @@ Shipped examples: `17.2.0` retired `http_request_errors_total` and `sys_position
 ```mermaid
 flowchart TD
     A["Deprecation notice — feature marked deprecated (warning emitted)"] --> B["Migration period — deprecated feature keeps working, no behavior change"]
-    B --> C["Removal — retired at the boundary the ADR-0087 registry records (MINOR release, during the launch window)"]
+    B --> C["Removal — retired at the boundary the ADR-0087 registry records (MINOR release in 17.x, the next 18.0.0-next.N on the v18 line)"]
 ```
 
 <Callout type="warn">
-**No minimum survival window.** ObjectStack does not guarantee a deprecated feature survives for a fixed number of releases — [ADR-0049](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0049-no-unenforced-security-properties.md)'s dispositions for a flagged property are enforce, `experimental`, or remove, and none of them carries a dwell time. A deprecated feature is retired at the boundary the ADR-0087 registry records for it; during the launch window that removal itself lands in a MINOR release, so a MINOR bump is where you should expect a removal to arrive.
+**No minimum survival window.** ObjectStack does not guarantee a deprecated feature survives for a fixed number of releases — [ADR-0049](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0049-no-unenforced-security-properties.md)'s dispositions for a flagged property are enforce, `experimental`, or remove, and none of them carries a dwell time. A deprecated feature is retired at the boundary the ADR-0087 registry records for it; in the 17.x minors that removal itself landed in a MINOR release, so a MINOR bump was where to expect a removal to arrive. On the v18 line it lands in the next `18.0.0-next.N`.
 </Callout>
 
 ---
@@ -90,9 +92,9 @@ flowchart TD
 
 ### What Constitutes a Breaking Change
 
-Read the **Breaking?** column, not the version number: during the launch window every row below — breaking or not — ships in a MINOR or PATCH release, so the bump size does not tell you whether you have work to do.
+Read the **Breaking?** column, not the version number: in the 17.x minors every row below — breaking or not — shipped in a MINOR or PATCH release, and on the v18 line every row ships in the next `18.0.0-next.N`, so on neither line does the bump size tell you whether you have work to do.
 
-| Change Type | Breaking? | Version Impact (launch window) |
+| Change Type | Breaking? | Version Impact (17.x minors) |
 |:---|:---|:---|
 | Removing a schema property | **Yes** | MINOR |
 | Renaming a schema property | **Yes** | MINOR |
@@ -112,7 +114,7 @@ Read the **Breaking?** column, not the version number: during the launch window 
 1. **RFC (Request for Comments)** — Breaking changes are proposed as GitHub issues with the `protocol:breaking` label.
 2. **Deprecation** — The old behavior is deprecated in a MINOR release (see timeline above).
 3. **Migration Guide** — A detailed migration guide is published before the removal lands, in the release notes for the version that carries it.
-4. **Release** — During the launch window the breaking change ships in the next **MINOR** version, carrying a changeset entry marked `**BREAKING**`. `scripts/check-changeset-no-major.mjs` fails any pull request that declares a `major` bump, because under lockstep one `major` would promote all 71 published packages.
+4. **Release** — In the 17.x minors the breaking change shipped in the next **MINOR** version, carrying a changeset entry marked `**BREAKING**`, and `scripts/check-changeset-no-major.mjs` failed a pull request that declared a `major` bump, because under lockstep one `major` would promote all 71 published packages. On the v18 line it ships in the next `18.0.0-next.N`: the guard stands aside in pre mode, so a pull request may declare a major bump. See [how a breaking stage lands on the v18 line](/docs/releases/v18#how-a-breaking-stage-lands-on-this-line).
 
 ---
 
@@ -171,7 +173,7 @@ The `@objectstack/spec` package provides additional stability guarantees:
 ### Export Stability
 
 - All public exports are listed in the package's `index.ts` barrel files
-- Removing an export is always a breaking change; during the launch window it ships in a MINOR release
+- Removing an export is always a breaking change; the 17.x minors shipped it in a MINOR release, and on the v18 line it ships in the next `18.0.0-next.N`
 - Internal modules (prefixed with `_` or in `internal/` directories) are not covered by SemVer guarantees
 
 ### Runtime Behavior
@@ -185,14 +187,14 @@ The `@objectstack/spec` package provides additional stability guarantees:
 ## Launch Window: MINOR Releases Can Contain Breaking Changes
 
 <Callout type="warn">
-**This exception overrides the MAJOR/MINOR mapping above — read it before you plan an upgrade.** Every published `@objectstack/*` package versions in **lockstep**, and while the launch window is open a breaking change ships as a **MINOR** release rather than burning a MAJOR. The current release, **17.2.0**, is a MINOR and it contains a documented breaking change.
+**The 17.x minors ran under this exception — read it before you upgrade across them.** Every published `@objectstack/*` package versions in **lockstep**, and in the 17.x minors a breaking change shipped as a **MINOR** release rather than burning a MAJOR, so those minors contain documented breaking changes. The v18 line is a major in prerelease: every release cut from `main` is the next `18.0.0-next.N` on npm's `next` tag, while `latest` stays on 17.x. See [how a breaking stage lands on the v18 line](/docs/releases/v18#how-a-breaking-stage-lands-on-this-line).
 </Callout>
 
 ### Which surfaces this covers
 
-**All of them.** This is not scoped to an experimental corner or a pre-release channel: all **71** packages published from this repository belong to a single Changesets `fixed` group, so they share one version number and one policy. No published surface is exempt.
+**All of them.** It was not scoped to an experimental corner or a pre-release channel: all **71** packages published from this repository belong to a single Changesets `fixed` group, so they share one version number and one policy. No published surface was exempt.
 
-The convention is enforced rather than informal — `scripts/check-changeset-no-major.mjs` fails any pull request that introduces a `major` bump, because under lockstep a single `major` on one package would promote the entire stack.
+The convention was enforced rather than informal — `scripts/check-changeset-no-major.mjs` failed a pull request that introduced a `major` bump, because under lockstep a single `major` on one package would promote the entire stack. Changesets is now in pre mode with the tag `next`, and the guard stands aside in pre mode, so a pull request on the v18 line may declare a major bump.
 
 ### What this means for an upgrade
 
@@ -200,11 +202,11 @@ The convention is enforced rather than informal — `scripts/check-changeset-no-
 - **Pin exact versions** instead of caret ranges if you cannot review each MINOR before it lands.
 - **Diff your own metadata** across the upgrade with `os diff <before> <after> --breaking-only`.
 
-MAJOR releases do still happen — 17.0.0 was cut precisely because its breaking density was too high to carry `^16.x` consumers across on a caret range — but an individual breaking change does not, on its own, force one.
+MAJOR releases do still happen — 17.0.0 was cut precisely because its breaking density was too high to carry `^16.x` consumers across on a caret range, and the v18 line is a major in prerelease — but in the 17.x minors an individual breaking change did not, on its own, force one.
 
 ### When it stops applying
 
-The tables and deprecation timeline above now state this rule directly, so the page no longer contradicts itself. Classic SemVer — where a breaking change once again requires a MAJOR — is the settled form the project returns to once the launch window closes: the window closes at GA, and strict SemVer resumes from that point. Until it closes, **this section is the operative rule wherever any part of this page disagrees.**
+The tables and deprecation timeline above state this rule for the 17.x minors directly, beside what the v18 line does. Classic SemVer — where a breaking change once again requires a MAJOR — is the settled form the project returns to once the launch window closes: the window closes at GA, and strict SemVer resumes from that point. **For the 17.x minors, this section was the operative rule wherever any part of this page disagreed.** For the `18.0.0-next.N` prereleases, the operative rule is [how a breaking stage lands on the v18 line](/docs/releases/v18#how-a-breaking-stage-lands-on-this-line).
 
 ---
 

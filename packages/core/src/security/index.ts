@@ -279,6 +279,18 @@ export {
   type PositionBindingConversion,
 } from './position-binding-conversion.js';
 
+// ADR-0131 D3/D10 — a Setup-authored catalog row turned into the definition it
+// carries, so the upgrade ceremony (`os migrate`) can save it through the
+// metadata door. Pure; applied by the ceremony, never at boot.
+export {
+  permissionSetDefinitionFromRow,
+  type PermissionSetRowForDefinition,
+} from './permission-set-row-definition.js';
+export {
+  positionDefinitionFromRow,
+  type PositionRowForDefinition,
+} from './position-row-definition.js';
+
 // [commit f8eb73601] The measured read surface of the administrator derivation — the
 // single source `plugin-auth`'s break-glass standing-key lists correspond to.
 export {

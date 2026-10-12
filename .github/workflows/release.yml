@@ -75,6 +75,11 @@ name: Release
 #                                          still waiting for a version that is
 #                                          already on npm. Mints nothing; never
 #                                          touches a job that has started.
+#                 →  `full-battery`       (#22998) reads the newest full-battery
+#                                          runs of CI and Lint & Type Check at
+#                                          or before the version commit;
+#                                          `publish` needs it, so a red battery
+#                                          queues no approval prompt at all.
 #   workflow_dispatch → `publish`          the repair lane. Takes no version;
 #   (WITHOUT                                audits main the same way, minus the
 #    `refresh_version_pr`)                  push range (a dispatch is one human
@@ -613,14 +618,31 @@ jobs:
             exit 1
           fi
 
-          # Same four filters cut-rc.yml applies to the same surface: the fixed
-          # release paths by pattern, then the three declared lists by WHOLE-LINE
+          # The SKILL.md stamps the skill-compatibility rewriter writes (the root
+          # `version` script's last step, `--fix`), on the same terms: resolved from
+          # `stampedSkillPaths()`, derived from the walk its `--fix` writes from, and
+          # judged by `check:skill-compatibility` in the content half below.
+          SKILL_LIST="${RUNNER_TEMP}/post-version-skill-surfaces.txt"
+          if ! node --input-type=module \
+                 -e 'import { stampedSkillPaths } from "./scripts/check-skill-compatibility-version.mjs"; for (const p of stampedSkillPaths()) console.log(p);' \
+                 > "${SKILL_LIST}"; then
+            echo "::error::could not resolve stampedSkillPaths() from scripts/check-skill-compatibility-version.mjs, so the skill half of the post-version surface is unknown. Refusing to call this tree validated."
+            exit 1
+          fi
+          if [ ! -s "${SKILL_LIST}" ]; then
+            echo "::error::stampedSkillPaths() in scripts/check-skill-compatibility-version.mjs resolved EMPTY. It THROWS on a moved or empty skills directory, so an empty file here is a resolution that reported nothing while still exiting 0. Refusing to call this tree validated."
+            exit 1
+          fi
+
+          # Same five filters cut-rc.yml applies to the same surface: the fixed
+          # release paths by pattern, then the four declared lists by WHOLE-LINE
           # EXACT match, so no derived filter can accept a path its declaration
           # does not name and none needs regex-escaping.
           UNEXPECTED="$(grep -vE '(^|/)package\.json$|(^|/)CHANGELOG\.md$|^\.changeset/|^packages/spec/src/kernel/protocol-version\.ts$' "${MOVED_FILE}" \
             | grep -vxF -f "${TEMPLATE_LIST}" \
             | grep -vxF -f "${SURFACE_LIST}" \
-            | grep -vxF -f "${INDEX_LIST}" || true)"
+            | grep -vxF -f "${INDEX_LIST}" \
+            | grep -vxF -f "${SKILL_LIST}" || true)"
           if [ -n "${UNEXPECTED}" ]; then
             printf '%s\n' "${UNEXPECTED}" | sed 's/^/::error::  unexpected: /'
             echo "::error::the version pass wrote outside the reviewed post-version surface (paths above). This is the treadmill guard: a new version-time output must arrive together with the gate that judges it. Add the surface to the declaration its rewriter reads, and its gate to the content half below — deliberately, in one reviewed diff."
@@ -672,6 +694,7 @@ jobs:
           run_gate pnpm check:docs-image-tag-sync
           run_gate pnpm check:template-version-sync
           run_gate pnpm check:release-index-currency-sync
+          run_gate pnpm check:skill-compatibility
           run_gate pnpm check:nul-bytes
           run_gate pnpm check:release-notes
           run_gate pnpm check:release-page-status
@@ -963,7 +986,7 @@ jobs:
               # below reads this output, and IT stops dead on the `release`
               # environment until a required reviewer approves it.
               echo "publish-pending=true" >> "$GITHUB_OUTPUT"
-              echo "::notice::main carries @objectstack/cli@${version}, which is NOT on npm; this ${EVENT} queues its publish on the version commit ${version_commit}. A deployment is queued and is waiting for a maintainer to approve the 'release' environment."
+              echo "::notice::main carries @objectstack/cli@${version}, which is NOT on npm; this ${EVENT} queues its publish on the version commit ${version_commit}. Once the full-battery job reads the battery at or before that commit green, a deployment is queued and waits for a maintainer to approve the 'release' environment."
               {
                 echo "## Release ${version} is waiting for your approval"
                 echo
@@ -973,6 +996,8 @@ jobs:
                 echo "The **Publish ${version} to npm** job below is held at the \`release\`"
                 echo "environment gate. Nothing has been checked out, built or published —"
                 echo "GitHub holds the whole job until a required reviewer approves it."
+                echo "It starts only after **Full battery green at the version commit** finds"
+                echo "the newest full-battery runs at or before \`${version_commit}\` green."
                 echo
                 echo "**Review this before approving:** approving publishes the tree of the"
                 echo "version commit \`${version_commit}\` — the commit that brought main to"
@@ -1347,6 +1372,65 @@ jobs:
         run: node scripts/release-pending-publish.mjs sweep --workflow release.yml
 
   # ══════════════════════════════════════════════════════════════════════════
+  # PUSH LANE 4 — the full battery, read before the approval exists (#22998).
+  # Reads; never publishes, never approves, never cancels.
+  # ══════════════════════════════════════════════════════════════════════════
+  full-battery:
+    name: Full battery green at the version commit
+    # A PR or queue build carries ci.yml's FAST SET since #22998; the dogfood,
+    # temporal and console-pin legs run only on main's push, hourly and
+    # dispatch runs. So "tested before a release" is read HERE, as a gate: the
+    # newest completed `schedule` or `push` runs of `CI` and `Lint & Type
+    # Check` whose head is the version commit or a first-parent ancestor of it
+    # must both have concluded `success` (a `cancelled` run carries no
+    # verdict). The selection rule and its pins live in
+    # scripts/ci/scheduled-full-run.mjs (HALF 3), whose --self-test lint.yml
+    # runs; this job only calls it.
+    #
+    # `publish` needs this job and its `if:` opens with `success()`, so a
+    # refusal here skips `publish` before any deployment is queued: no
+    # approval prompt appears for a version whose battery is red. Recovery is
+    # the ordinary one — fix or re-run the red run at or before the version
+    # commit, then the repair dispatch re-audits and queues the publish.
+    #
+    # Same predicate as `publish`, verbatim, so the read happens exactly when
+    # a publish would be queued and on no other event; a skipped gate reads as
+    # a skipped `needs` to `publish`, whose `success()` is then false — the
+    # same fail-closed direction.
+    needs: [release-integrity]
+    if: >-
+      success() &&
+      (needs.release-integrity.outputs.publish-pending == 'true' ||
+       (github.event_name == 'workflow_dispatch' && inputs.force &&
+        !inputs.refresh_version_pr))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # `actions: read` is the run listings of ci.yml and lint.yml; `contents:
+      # read` is the checkout.
+      actions: read
+      contents: read
+    steps:
+      # `fetch-depth: 0`: "at or before the version commit" is a first-parent
+      # walk from it, and the script refuses a shallow clone rather than read a
+      # window that stops at the graft.
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Read the full battery at or before the version commit
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION_COMMIT: ${{ needs.release-integrity.outputs.version-commit }}
+        run: node scripts/ci/scheduled-full-run.mjs --release-gate --release-commit "$VERSION_COMMIT"
+
+  # ══════════════════════════════════════════════════════════════════════════
   # HUMAN LANE — the ONLY job in this repository that publishes.
   # ══════════════════════════════════════════════════════════════════════════
   publish:
@@ -1358,7 +1442,10 @@ jobs:
     # version in that failure's log was @object-ui/console@17.5.0, the vendored
     # objectui build, while the repo was publishing 17.1.0.
     name: Publish ${{ needs.release-integrity.outputs.cli-version }} to npm (awaiting approval)
-    needs: [release-integrity]
+    # `full-battery` (#22998): the publish lane refuses, before the approval
+    # prompt exists, a version whose full battery at or before the version
+    # commit is not green. `success()` below is what makes that refusal bind.
+    needs: [release-integrity, full-battery]
     # ⛔ THE barrier is now the environment, not the trigger (ADR-0125 D3).
     #
     #   An environment with NO protection rules passes AUTOMATICALLY and

@@ -12,6 +12,9 @@ export const gitConfig = {
   branch: 'main',
 };
 
+/** The essay's route: the nav's `Why` entry, and the home page's hero link and section 00. */
+export const ESSAY_URL = '/blog/the-ontology-is-the-software';
+
 export function baseOptions(): BaseLayoutProps {
   return {
     nav: {
@@ -24,8 +27,13 @@ export function baseOptions(): BaseLayoutProps {
       ),
     },
     // Every layout spreads baseOptions() — DocsLayout (docs sidebar), and HomeLayout on
-    // the home page and on /blog — so this one entry is the blog's link on all of them.
-    links: [{ text: 'Blog', url: '/blog', active: 'nested-url' }],
+    // the home page and on /blog — so these entries are the nav's links on all of them.
+    // `active` is matched against the PUBLIC pathname (`/blog/x`, never the `/en/blog/x`
+    // a post is prerendered under) — `components/root-provider.tsx` supplies it.
+    links: [
+      { text: 'Why', url: ESSAY_URL, active: 'url' },
+      { text: 'Blog', url: '/blog', active: 'nested-url' },
+    ],
     githubUrl: `https://github.com/${gitConfig.user}/${gitConfig.repo}`,
   };
 }

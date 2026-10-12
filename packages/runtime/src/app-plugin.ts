@@ -14,7 +14,11 @@ import {
     registerArtifactGrantedPermissions,
     type ArtifactGrantBinding,
 } from './security/artifact-granted-permissions.js';
-import { applyArtifactForwardConversions, assertProtocolCompat } from '@objectstack/metadata-core';
+import {
+    applyArtifactForwardConversions,
+    assertProtocolCompat,
+    type ArtifactForwardConversionResult,
+} from '@objectstack/metadata-core';
 import { resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { SeedLoaderService } from './seed-loader.js';
@@ -173,6 +177,8 @@ export class AppPlugin implements Plugin {
      * the residual-owner warning prints once, at whichever read comes first.
      */
     private codeDatasourceOwners?: Array<{ datasource: any; owner: { packageId?: string; packageVersion?: string } }>;
+    /** Memoized backing store for {@link forwardConverted} — the boot's one conversion. */
+    private bootConversion?: ArtifactForwardConversionResult<any>;
     /** When true, init/start become no-ops — env has no app payload. */
     private readonly empty: boolean = false;
     /**
@@ -237,6 +243,54 @@ export class AppPlugin implements Plugin {
      */
     private get collections(): any {
         return (this.resolvedCollections ??= resolveArtifactCollections(this.bundle));
+    }
+
+    /**
+     * [#22994] The ONE ADR-0087 forward conversion this boot runs over its
+     * definition, and the copy every registrar in this plugin takes — the
+     * `manifest` service's decomposition in `init()` (so the ObjectQL
+     * registry, which `GET /meta/<type>` lists and every reader of the
+     * flattened list — the email loader among them — reads as its code layer)
+     * and the security block in `start()`.
+     *
+     * The input is `{ ...manifest, ...collections }`, the definition the
+     * security block has converted since #12844, and for a bundle carrying no
+     * `packages[]` it is byte for byte the payload `init()` has always
+     * registered. So the registry and the security registrar read one
+     * conversion of one input, and neither reader converts again. The door's
+     * own policy function decides the window, as at the artifact door: the
+     * same bytes, the same verdict.
+     *
+     * Only the converted copy goes forward. Which SOURCE a collection came
+     * from (the manifest or the stack, #18034) is still decided on the RAW
+     * inputs, at the security block, because the conversion can rewrite a
+     * collection KEY (`roles` -> `positions`).
+     *
+     * Memoized on first read. `init()` reads it only when the bundle carries
+     * no `packages[]`: resolving that list belongs to the `manifest` service's
+     * `register()` (#15292), and `collections` would resolve it here.
+     *
+     * `debug`, not `info`: on an artifact boot the door prints its own deduped
+     * operator summary for these bytes, and the notice is a fact about the
+     * authored floor, not a degradation.
+     */
+    private forwardConverted(ctx: PluginContext): ArtifactForwardConversionResult<any> {
+        if (this.bootConversion === undefined) {
+            const collections = this.collections;
+            const manifest: any = collections?.manifest;
+            const conversion = applyArtifactForwardConversions(manifest ? { ...manifest, ...collections } : collections);
+            this.bootConversion = conversion;
+            if (conversion.notices.length > 0) {
+                ctx.logger.debug('[AppPlugin] applied ADR-0087 forward conversion to the stack definition', {
+                    pluginName: this.name,
+                    verdict: conversion.verdict,
+                    authoredFloor: conversion.authoredFloor,
+                    runtimeSpecVersion: conversion.runtimeSpecVersion,
+                    notices: conversion.notices.length,
+                });
+            }
+        }
+        return this.bootConversion;
     }
 
     /**
@@ -435,9 +489,25 @@ export class AppPlugin implements Plugin {
         
         // Register the app manifest directly via the manifest service.
         // This immediately decomposes the manifest into SchemaRegistry entries.
-        const servicePayload = this.bundle.manifest
-            ? { ...this.bundle.manifest, ...this.bundle }
-            : this.bundle;
+        //
+        // [#22994] The CONVERTED copy, AFTER the handshake above (ADR-0087 D1
+        // before D2), and the same conversion the security block in `start()`
+        // registers from — see `forwardConverted`. Registering the raw bundle
+        // here is what made `GET /meta/<type>` list an item with its retired
+        // key (`_diagnostics.valid: false`) while `GET /meta/<type>/NAME`
+        // served the artifact door's converted copy of it, and what handed the
+        // email loader a template it refuses to send.
+        //
+        // A bundle carrying `packages[]` is handed over as authored, as before:
+        // the `manifest` service registers its package BODIES, which no
+        // conversion reaches (the ADR-0087 pass walks the definition's own
+        // collections, at the artifact door too), and `forwardConverted` would
+        // resolve `packages[]` here, ahead of the `manifest` service (#15292).
+        const servicePayload = (this.bundle as { packages?: unknown }).packages === undefined
+            ? this.forwardConverted(ctx).definition
+            : this.bundle.manifest
+                ? { ...this.bundle.manifest, ...this.bundle }
+                : this.bundle;
 
         ctx.getService<{ register(m: any): void }>('manifest').register(servicePayload);
 
@@ -1116,9 +1186,6 @@ export class AppPlugin implements Plugin {
                     );
                 } else {
                     const manifestSource: any = this.collections.manifest;
-                    const rawSecurityBundle: any = manifestSource
-                        ? { ...manifestSource, ...this.collections }
-                        : this.collections;
                     // [#12844] Same bytes, same conversion policy — one funnel.
                     //
                     // A `defineStack()` module can declare an `engines.protocol`
@@ -1136,20 +1203,11 @@ export class AppPlugin implements Plugin {
                     // (a Studio re-save through `saveMetaItem`, which rejects
                     // with the current schema).
                     //
-                    // `debug`, not `info`: boot logs are long already, and the
-                    // conversion notice is a fact about the AUTHORED floor, not
-                    // a degradation.
-                    const forwardConverted = applyArtifactForwardConversions(rawSecurityBundle);
-                    if (forwardConverted.notices.length > 0) {
-                        ctx.logger.debug('[AppPlugin] applied ADR-0087 forward conversion to stack-declared security metadata', {
-                            appId,
-                            verdict: forwardConverted.verdict,
-                            authoredFloor: forwardConverted.authoredFloor,
-                            runtimeSpecVersion: forwardConverted.runtimeSpecVersion,
-                            notices: forwardConverted.notices.length,
-                        });
-                    }
-                    const securityBundle: any = forwardConverted.definition;
+                    // [#22994] Not converted HERE any more: this is the boot's
+                    // one conversion (`forwardConverted`), the copy `init()`
+                    // already handed the `manifest` service, so the registry and
+                    // this registrar cannot read two conversions of one bundle.
+                    const securityBundle: any = this.forwardConverted(ctx).definition;
                     let count = 0;
                     for (const [field, type] of SECURITY_FIELDS) {
                         const arr = securityBundle?.[field];
