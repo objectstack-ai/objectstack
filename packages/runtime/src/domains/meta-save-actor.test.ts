@@ -96,14 +96,14 @@ async function bootStore() {
     const recorded = async (name: string): Promise<Recorded> => {
         const rows = await engine.find('sys_metadata', { where: { type: 'view', name } });
         expect(rows ?? [], `one sys_metadata row for ${name}`).toHaveLength(1);
-        const history = await engine.find('sys_metadata_history', {
-            where: { type: 'view', name },
-            orderBy: [{ field: 'version', order: 'asc' }],
-        } as any);
+        const history = await engine.find('sys_metadata_history', { where: { type: 'view', name } });
         return {
             created_by: (rows as any[])[0].created_by ?? null,
             updated_by: (rows as any[])[0].updated_by ?? null,
-            recorded_by: (history ?? []).map((h: any) => h.recorded_by ?? null),
+            // Oldest save first: `version` is the per-item lineage counter.
+            recorded_by: [...(history ?? [])]
+                .sort((a: any, b: any) => Number(a.version) - Number(b.version))
+                .map((h: any) => h.recorded_by ?? null),
         };
     };
     return { protocol, recorded };
