@@ -17,8 +17,8 @@
  * because the mute was never on the injected arm.
  *
  * So case 1 runs a **lit control on the same subject in the same run** —
- * `reportCapabilityRowsUnreadable`, an #18091 site that already reaches the
- * console with no sink. A zero from this site is a reading only while that
+ * `reportThroughSink` with no sink, the one derivation every repaired site
+ * reaches the console through. A zero from this site is a reading only while that
  * control fires; if the harness ever stops capturing `console.warn`, the
  * control goes to zero too and the case fails instead of passing vacuously.
  *
@@ -43,7 +43,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { buildExistingByName } from './seed-name-lookup.js';
-import { reportCapabilityRowsUnreadable } from './seed-refusal-diagnostics.js';
+import { reportThroughSink } from './seed-refusal-sink.js';
 
 /** A driver seam that cannot answer at all — the outage arm. */
 function unreadableQl() {
@@ -102,15 +102,15 @@ describe('[#18570] batched seed existence read — its own failure is audible wi
       await buildExistingByName(unreadableQl() as any, 'sys_capability', ['alpha', 'beta']);
 
       // THE LIT CONTROL, same run, same subject (author-visible output with no
-      // sink injected): an #18091 site that already reaches the console.
-      reportCapabilityRowsUnreadable(undefined, { unreadable: 2, total: 2 });
+      // sink injected): the derivation every repaired site reaches the console through.
+      reportThroughSink(undefined, '[control] lit control', { unreadable: 2, total: 2 });
     });
 
     const lines = seen.map((args) => String(args[0]));
 
     // The control fires — so a zero from the site under repair would be a
     // reading rather than a dead harness.
-    expect(lines.filter((l) => l.includes('capability_rows_unreadable'))).toHaveLength(1);
+    expect(lines.filter((l) => l.includes('[control] lit control'))).toHaveLength(1);
 
     // And the site under repair is no longer the silent one. Pre-#18570 this
     // run produced the control line ALONE.
@@ -197,5 +197,50 @@ describe('[#18570] batched seed existence read — its own failure is audible wi
 
     expect(seen).toHaveLength(1);
     expect(String(seen[0]?.[0])).toContain(BATCHED_READ_FAILED);
+  });
+});
+
+/**
+ * [#11451, commit c33f18592] A caller that passes no `equals` predicate emits
+ * exactly the `where` key set it emitted before the predicate existed:
+ * `['name']`, not `['name']` plus `undefined`-valued keys that `toEqual`
+ * would quietly accept. `permission-set-projection.ts`' overlay pass is such
+ * a caller. The fence used to ride the declared-permission seeder's suite and
+ * is pinned here, at the function, now that the seeder is retiring.
+ *
+ * Both reads are pinned: the batched page and the per-item degradation read
+ * it falls back to. The predicate-carrying case is the positive control: it
+ * proves this instrument sees a spread key when one is there.
+ */
+describe('#11451: a caller that passes no predicate emits its old key set', () => {
+  it('the batched read emits only `name`', async () => {
+    const ql = emptyPageQl();
+    await buildExistingByName(ql as any, 'sys_permission_set', ['alpha', 'beta']);
+    expect(ql.calls).toHaveLength(1);
+    expect(Object.keys((ql.calls[0]![1] as any).where)).toEqual(['name']);
+  });
+
+  it('the per-item degradation read emits only `name`', async () => {
+    const wheres: Record<string, unknown>[] = [];
+    // The batched `$in` read is refused, so the per-item path is taken; each
+    // per-item read is recorded and answered "no such row".
+    const ql = {
+      find: async (_object: string, q?: { where?: Record<string, unknown> }) => {
+        const name = q?.where?.name;
+        if (name && typeof name === 'object' && '$in' in (name as object)) throw new Error('batched read refused (trigger)');
+        wheres.push(q?.where ?? {});
+        return [] as any[];
+      },
+    };
+    const index = await buildExistingByName(ql as any, 'sys_permission_set', ['alpha'], { warn: () => {} });
+    expect((await index.get('alpha')).status).toBe('absent');
+    expect(wheres).toHaveLength(1);
+    expect(Object.keys(wheres[0]!)).toEqual(['name']);
+  });
+
+  it('positive control: a caller that passes a predicate emits it', async () => {
+    const ql = emptyPageQl();
+    await buildExistingByName(ql as any, 'sys_permission_set', ['alpha'], undefined, undefined, { managed_by: 'platform' });
+    expect(Object.keys((ql.calls[0]![1] as any).where)).toEqual(['name', 'managed_by']);
   });
 });
