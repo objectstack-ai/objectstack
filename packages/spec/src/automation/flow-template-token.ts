@@ -6,9 +6,11 @@
  * **The single-brace `{…}` token grammar of the 17.x flow interpolator** — the
  * one reading of it the spec carries, shared by the two judges that retire it:
  * `flow-value-slot-template.ts` (the value slots, #19939) and
- * `flow-text-slot-template.ts` (the text slots, #22110) — and by the one
- * contract that refuses it at a LITERAL position, a `notify` node's
- * `sourceObject`, `actorId` and `payload` (`io-node-config.zod.ts`, #19939).
+ * `flow-text-slot-template.ts` (the text slots, #22110) — and by the two
+ * contracts that refuse it at a LITERAL position, a `notify` node's
+ * `sourceObject`, `actorId` and `payload` and an `http` node's `method`,
+ * `durable`, `timeoutMs` and `signingSecret` (`io-node-config.zod.ts`,
+ * #19939).
  *
  * Which `{…}` the interpolator substitutes (`/\{([^{}]+)\}/`), and how it
  * dispatches a token — date macro, then `$User.`, then a variable path, then
@@ -21,7 +23,7 @@
  * ## ⛔ Package-internal — NOT a public export
  *
  * Deliberately absent from `automation/index.ts`: its callers are the two
- * judges above and the notify contract, and a published copy of a retired
+ * judges above and the notify and http contracts, and a published copy of a retired
  * dialect's grammar would be a new public surface for a spelling the platform
  * is deleting.
  */
@@ -29,8 +31,9 @@
 /**
  * [#19939] The `params` key a contract issue carries when it refuses a `{…}`
  * token — or an envelope — at a position the executor reads AS WRITTEN (a
- * `notify` node's `sourceObject`, `actorId` and `payload`), never through the
- * interpolator. The build doors' value arm (`flow-node-config-refusals.ts`,
+ * `notify` node's `sourceObject`, `actorId` and `payload`; an `http` node's
+ * `method`, `durable` and `timeoutMs`, and its `headers` map as a whole),
+ * never through the interpolator. The build doors' value arm (`flow-node-config-refusals.ts`,
  * `builtinValueJudged`) leaves every other token-carrying value alone, since
  * only the interpolation decides what the run will see there; at a position
  * read as written the run sees exactly what the build sees, so the

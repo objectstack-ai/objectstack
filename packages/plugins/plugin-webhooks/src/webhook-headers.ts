@@ -32,7 +32,7 @@
  *    That is a change to the authoring envelope (`webhook.zod.ts`), which is
  *    the spec seat's surface, not this one — and it would still leave the
  *    `source: 'flow'` half of the same exposure untouched, because a flow
- *    `http` node's headers are interpolated per run and never parsed through
+ *    `http` node's headers are rendered per run and never parsed through
  *    `WebhookSchema` at all. Escalated rather than attempted here (#7986).
  *  - **Move the whole map.** Fail-closed by construction, needs no authoring
  *    change, and the cost it is accused of — "it encrypts non-sensitive headers
