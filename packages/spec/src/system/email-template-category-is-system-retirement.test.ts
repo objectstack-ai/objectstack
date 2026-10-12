@@ -439,6 +439,13 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
           if (d === '\\') { j += 2; continue; }
           if (depth === 0 && d === '`') break;
           if (d === '$' && src[j + 1] === '{') { depth += 1; j += 2; continue; }
+          // A quoted string inside an interpolation: its braces are not code.
+          if (depth > 0 && (d === '"' || d === "'")) {
+            let q = j + 1;
+            while (q < src.length && src[q] !== d && src[q] !== '\n') q += src[q] === '\\' ? 2 : 1;
+            j = q + 1;
+            continue;
+          }
           if (depth > 0 && d === '{') depth += 1;
           else if (depth > 0 && d === '}') depth -= 1;
           j += 1;
