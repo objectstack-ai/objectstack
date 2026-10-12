@@ -1523,13 +1523,13 @@
     },
     "ui/PageComponent": {
       "sites": [
-        "in.dataSource.filter.element",
+        "in.dataSource.options[0].filter.element",
         "in.type"
       ]
     },
     "ui/PageRegion": {
       "sites": [
-        "components.element.lazy.in.dataSource.filter.element",
+        "components.element.lazy.in.dataSource.options[0].filter.element",
         "components.element.lazy.in.type"
       ]
     },
