@@ -24,7 +24,7 @@ So the same stack ran different code under `kc_a` depending on whether it was bu
 ✗ Function 'kc_a' is declared twice in the `functions` array: stack.functions[0] and stack.functions[1]. …
 ```
 
-It runs in an object-less stack too, and every entry counts, byte-identical twins included. `objectstack validate`, `objectstack build` and a source boot all load the config through `defineStack`, so all three refuse it at load (`--json`: `code: 'STACK_CROSS_REFERENCE_INVALID'`, exit 1). Like every cross-reference check it is skipped under `defineStack(…, { strict: false })`.
+It runs in an object-less stack too, and every entry counts, byte-identical twins included. `objectstack validate`, `objectstack build` and a source boot all load the config through `defineStack`, so all three refuse it at load, printing that line: `objectstack validate --json` answers `valid: false` with `code: 'STACK_CROSS_REFERENCE_INVALID'` (exit 1), `objectstack build` exits 2, and `objectstack serve` exits 1 before the kernel boots. Like every cross-reference check it is skipped under `defineStack(…, { strict: false })`.
 
 **Unchanged.** The map form, which cannot author one name twice; an array whose names are distinct; the suffixed refs a build emits for an internal slot (`kc_a__2` beside `kc_a` is two names); and the cross-stack refusal in `composeStacks`.
 
@@ -39,4 +39,4 @@ It runs in an object-less stack too, and every entry counts, byte-identical twin
 
 No D2 conversion rewrites it: which entry keeps the name, and what every caller of the other one should name instead, is the author's call. Its D3 record is the semantic entry `stack-functions-array-duplicate-name-refused` (protocol 18).
 
-**Who is affected, measured.** On `main` at this change's base, no example app, fixture or test authors one name twice in a `functions` array: the four example apps author the map form or none, and every array-form fixture under `packages/` names distinct entries. Deployed metadata and other repositories were not measured.
+**Who is affected, measured.** On `main` at this change's base, no example app, fixture or test authors one name twice in a `functions` array: the four example apps author the map form or none, and every array-form fixture under `packages/` names distinct entries. `objectstack validate --json` on `examples/app-crm`, `app-todo`, `app-showcase` and `app-multi-package` answers byte-for-byte as it did without the check, apart from the `duration` value. Deployed metadata and other repositories were not measured.
