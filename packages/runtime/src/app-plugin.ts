@@ -951,18 +951,35 @@ export class AppPlugin implements Plugin {
      * that carries `matchEndpoint` serves the items, which in-tree is
      * `@objectstack/metadata`'s manager. Where the `metadata` slot holds the
      * kernel's in-memory fallback instead, the items are listed and none is
-     * served.
+     * served — so that composition is told, once per boot of this app, at
+     * `warn`, with the count and the remedy (maintainer ruling on #22989,
+     * option B; AGENTS.md "Absence must be loud"). ⛔ No second matcher: the
+     * remedy is the composition's, never a fallback match here. Read in
+     * `start()`, after every `init()` has registered its services and the
+     * kernel has injected its fallbacks, so the slot's occupant is final.
      */
     private registerDeclaredApiEndpoints(ctx: PluginContext, appId: string): void {
         if (this.securityMetadataRegistrar === 'artifact-door') return;
         if ((this.bundle as { packages?: unknown }).packages !== undefined) return;
         const apis: unknown = this.forwardConverted(ctx).definition?.apis;
         if (!Array.isArray(apis) || apis.length === 0) return;
-        let metadata: { registerInMemory?: (type: string, name: string, item: unknown) => void } | undefined;
+        let metadata: {
+            registerInMemory?: (type: string, name: string, item: unknown) => void;
+            matchEndpoint?: unknown;
+        } | undefined;
         try {
             metadata = ctx.getService('metadata');
         } catch {
             // Not registered on this kernel — handled below.
+        }
+        if (typeof metadata?.matchEndpoint !== 'function') {
+            ctx.logger.warn(
+                `[AppPlugin] app '${appId}' declares ${apis.length} api endpoint(s), but this boot's 'metadata' `
+                + 'service has no endpoint matcher (matchEndpoint), so every declared path answers '
+                + '404 ENDPOINT_NOT_FOUND. Compose @objectstack/metadata\'s MetadataPlugin on this kernel '
+                + 'to serve them.',
+                { appId, count: apis.length },
+            );
         }
         if (typeof metadata?.registerInMemory !== 'function') {
             ctx.logger.debug('[AppPlugin] no in-memory metadata registry — the stack-declared api endpoints are not registered', { appId });
