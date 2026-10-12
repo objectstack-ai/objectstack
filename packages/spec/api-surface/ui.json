@@ -406,6 +406,7 @@
     "RowColorConfigSchema (const)",
     "RowHeight (type)",
     "RowHeightSchema (const)",
+    "SECTION_HEADING_COUNT_HOLE (const)",
     "STRING_ARM_REGISTERED_TYPES (const)",
     "SelectionConfig (type)",
     "SelectionConfigParsed (type)",
