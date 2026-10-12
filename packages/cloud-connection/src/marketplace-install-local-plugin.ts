@@ -162,7 +162,12 @@ import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
 import { matchSeedRows, purgeSeedRows, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
 import type { IHttpServer, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
-import type { DeletePackageRequest, UninstallCleanupOutcome, ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import type {
+    DeletePackageRequest,
+    UninstallCleanupOutcome,
+    ObjectStackProtocolImplementation,
+    PackageWritabilityEngine,
+} from '@objectstack/metadata-protocol';
 // [ADR-0131 D6] The `unmanaged` install mode's two shared judgements, imported
 // from their producer rather than restated: the walled-posture refusal the
 // import verb raises (answered here before anything else about the package is
@@ -286,6 +291,19 @@ const INSTALL_MODE_NOT_PERMITTED_STATUS = 422;
  */
 type UnmanagedImporter = {
     importUnmanagedPackage?: ObjectStackProtocolImplementation['importUnmanagedPackage'];
+};
+
+/**
+ * [ADR-0131 D6] What the managed-after-unmanaged refusal reads off the
+ * `objectql` slot: who holds a namespace, and — through ADR-0070's one
+ * predicate, whose own structural contract this extends — whether a holder is
+ * a writable base. A narrow per-consumer interface, so the lookup carries a
+ * contract rather than erasing the slot.
+ */
+type NamespaceHoldingEngine = PackageWritabilityEngine & {
+    registry?: PackageWritabilityEngine['registry'] & {
+        getNamespaceOwners?(namespace: string): unknown;
+    };
 };
 
 /** A `{ … }` object — not an array, not null. */
@@ -2166,8 +2184,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             ? declared
             : deriveNamespaceFromPackageId(manifestId);
         if (!namespace || namespace === 'base' || namespace === 'system' || namespace === 'sys') return null;
-        let ql: any;
-        try { ql = ctx.getService('objectql'); } catch { return null; /* no data engine — nothing is held */ }
+        let ql: NamespaceHoldingEngine | undefined;
+        try { ql = ctx.getService<NamespaceHoldingEngine>('objectql'); } catch { return null; /* no data engine — nothing is held */ }
         const owners: unknown = ql?.registry?.getNamespaceOwners?.(namespace);
         if (!Array.isArray(owners)) return null;
         for (const owner of owners) {
