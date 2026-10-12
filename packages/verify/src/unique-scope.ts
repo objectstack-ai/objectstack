@@ -702,15 +702,20 @@ export async function runUniqueScopeProofs(
     };
     const probes: UniqueScopeProbeResult[] = [];
 
-    /** Write the first holder of a fresh value through `w`, and confirm it holds it. */
+    /**
+     * Write the first holder of a fresh value through `w`, and read back the
+     * value it holds. The second holder is offered THAT value: a write path
+     * that normalizes (an upper-casing hook) changes what is stored, and two
+     * records holding one value is a statement about stored values.
+     */
     const holder = async (w: Writer): Promise<{ id?: string; value?: unknown; reason?: string }> => {
       const v = await fresh(w);
       if (v.reason) return { reason: v.reason };
       const h = await create(w, c.object, { [c.field]: v.value });
       if (!h.id) return { reason: `the first holder: ${h.reason}` };
       const stored = (await row(c.object, h.id))?.[c.field];
-      if (!holds(stored, v.value)) return { reason: `the first holder as written does not hold the value (${c.field} is ${JSON.stringify(stored)})` };
-      return { id: h.id, value: v.value };
+      if (stored == null) return { reason: `the first holder as written holds no ${c.field}` };
+      return { id: h.id, value: stored };
     };
 
     const offerInsert = async (leg: UniqueScopeLeg, first: Writer, second: Writer): Promise<void> => {
