@@ -32,7 +32,7 @@
  *    every loop in the detector iterates zero times.
  *  - **Reason 2 (§1)** — `field` cannot reach the gate at all under the
  *    default posture. The type is code-only in the `packages/spec` kernel
- *    registry (`allowRuntimeCreate: false` AND `allowOrgOverride: false`), so
+ *    registry (`allowRuntimeCreate: false` AND `allowEnvironmentOverlay: false`), so
  *    the #5086 refusal one gate up answers first.
  *
  * ## ⚠️ Where each reason STOPS — measured, and the reason the trim is right

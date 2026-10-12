@@ -812,7 +812,7 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
     //
     // Keyed on an EXPLICIT `dev: true`, never on `factoryDev`'s NODE_ENV
     // default: `bootSchemaStack` passes no `dev`, and a non-deferred one-shot
-    // boot (`os meta resync --yes`, the data commands' `--apply`) runs schema
+    // boot (the data commands' `--apply`) runs schema
     // sync — under `NODE_ENV=development` it would apply safe drift its
     // operator never confirmed. The step-down keeps the default; the self-heal
     // is a serving host's declaration.

@@ -9,8 +9,9 @@
  * by its one-click "publish 4 changes" button, were each refused per item with
  * `404 [no_draft] No pending draft exists for view/... — nothing to publish.`
  *
- * `view` is `allowOrgOverride: true`, so the REST seam threads the session's
- * active organization into the publish (`organizationIdForMetaWrite`); the
+ * `view` was then declared `allowOrgOverride: true`, so the REST seam threaded
+ * the session's active organization into the publish
+ * (`organizationIdForMetaWrite`, retired with ADR-0131 D6); the
  * drafts were authored env-wide (`organization_id = NULL`), which is what
  * package/AI authoring writes, and a strict `organization_id = <org>` lookup can
  * never match them. `object` and `flow` are NOT org-overridable, which is why
@@ -174,7 +175,7 @@ function makeStubEngine() {
 
 const PKG = 'app.ops';
 
-/** `view` is `allowOrgOverride: true` — the org-overridable specimen of case B. */
+/** `view`, one of the five overlay-enabled types — the org-scoped specimen of case B before ADR-0131 D6. */
 const viewBody = (name: string) => ({
     name,
     label: 'Customers',

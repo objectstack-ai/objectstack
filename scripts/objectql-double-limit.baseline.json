@@ -552,9 +552,6 @@
     "packages/plugins/plugin-email/src/attachment-reclaim.test.ts": {
       "wrong": 1
     },
-    "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.test.ts": {
-      "unjudged": 1
-    },
     "packages/plugins/plugin-email/src/email-headers-internal.integration.test.ts": {
       "blind": 1
     },
@@ -566,12 +563,6 @@
     },
     "packages/plugins/plugin-email/src/email-plugin.queue-delivery.test.ts": {
       "wrong": 1
-    },
-    "packages/plugins/plugin-email/src/email-plugin.template-runtime-write.test.ts": {
-      "unjudged": 1
-    },
-    "packages/plugins/plugin-email/src/plugin-shutdown-detaches-template-bridge.test.ts": {
-      "unjudged": 1
     },
     "packages/plugins/plugin-hono-server/src/server-timing-e2e.test.ts": {
       "unjudged": 1

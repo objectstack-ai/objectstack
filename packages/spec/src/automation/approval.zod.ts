@@ -80,8 +80,10 @@ export const ApproverType = z.enum([
   //
   // ⛔ It POINTS at the remedy, it does not restate it. The remedy's single
   // authoritative copy is `MANAGER_ONLY_REMEDY` / `MANAGER_ONLY_ROUTES` in
-  // `packages/lint/src/validate-approval-approvers.ts`, mirrored for readers by
-  // the Approvals guide; a third copy here would be one more line to keep in
+  // `packages/lint/src/rule-explanations.ts` — the explanation
+  // `os explain approval-approvers-may-resolve-empty` prints, since the
+  // finding's `fix:` line became one sentence (#22161) — mirrored for readers
+  // by the Approvals guide; a third copy here would be one more line to keep in
   // step, and a pointer cannot drift into disagreement with what it points at.
   // ⛔ It said "that column has no product write surface" until the write
   // surface landed — the exact staleness the pointer discipline above exists to
@@ -98,11 +100,12 @@ export const ApproverType = z.enum([
   .describe(
     'Approval step approver type. `manager` is resolved from the directory rather than configured ' +
     "here: it reads the submitter's `sys_user.manager_id` at runtime, and that column is not a " +
-    'profile field an author edits, so until an operator populates it through one of the routes ' +
-    '`os lint` names, a manager step resolves to nobody and the request waits. `os lint` reports ' +
-    'that at authoring time as `approval-approvers-may-resolve-empty` and carries the graded ' +
-    'population routes and the full remedy, the node-level `onEmptyApprovers` fallback included; ' +
-    'the Approvals guide states the same remedy in prose.',
+    'profile field an author edits, so until an operator populates it, a manager step resolves to ' +
+    "nobody and the request falls to the node's `onEmptyApprovers` policy. `os lint` reports that at " +
+    'authoring time as `approval-approvers-may-resolve-empty`, and ' +
+    '`os explain approval-approvers-may-resolve-empty` carries the graded population routes and the ' +
+    'full remedy, the node-level `onEmptyApprovers` fallback included; the Approvals guide states the ' +
+    'same remedy in prose.',
   );
 export type ApproverType = z.input<typeof ApproverType>;
 

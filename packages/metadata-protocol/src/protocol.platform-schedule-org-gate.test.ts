@@ -242,7 +242,7 @@ describe('findPlatformScheduleOrgGaps — the refusal combination (#6285)', () =
                     type: 'loop',
                     label: 'For each row',
                     config: {
-                        collection: '{rows}',
+                        collection: { dialect: 'cel', source: 'rows' },
                         body: {
                             nodes: [
                                 {

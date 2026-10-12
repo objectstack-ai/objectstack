@@ -1,34 +1,28 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// #7733 — a runtime `email_template` write must materialize WITHOUT a restart.
+// #7733 — a runtime `email_template` write must reach the mail WITHOUT a
+// restart. ADR-0131 D6/D10 (ruling C on §6 Q1) changed how.
 //
-// The gap these pin. `bootDeclaredTemplates` wired its live path to
-// `metadataService.subscribe('email_template', …)`, whose only producer is
-// `MetadataManager.register()` → `notifyWatchers()`. `PUT /api/v1/meta/…` does
-// NOT go through there: the REST route calls `protocol.saveMetaItem`, which
-// persists to `sys_metadata` and then announces on ITS OWN seam —
-// `runMutationProjector` (awaited, ADR-0094) and `onMetadataMutation`
-// (fire-and-forget, #2588). `notifyWatchers` has no caller outside
-// `metadata-manager.ts`, so the plugin's watcher was registered against an
-// event the authoring path never emits: the save returned 200, the row never
-// reached `sys_email_template`, and only a restart (which re-runs the boot
-// sweep against the persisted row) materialized it.
+// The gap #7733 found: the live path listened on `metadataService.subscribe`,
+// which `PUT /api/v1/meta/…` never announces on, so a Studio save returned 200
+// and only a restart made it send. The fix then was a projector on the
+// protocol's own seam that copied each save into a `sys_email_template` row.
 //
-// So these tests drive the plugin through the seam the PUT path actually
-// announces on, and assert the OBSERVABLE effect the QA repro looked for: a
-// `sys_email_template` row, right after the write, with no restart.
-//
-// The protocol double mirrors `ObjectStackProtocolImplementation`'s two
-// registration seams and the `MetadataMutationEvent` shape it emits
-// (`{ type: <singular metadata type>, name, state: 'active'|'draft'|'deleted' }`,
-// plus `body` on the projector) — the same double every other consumer of this
-// seam is tested against (service-i18n's authored-translation sync,
-// plugin-security's permission projection).
+// Templates no longer live in rows. The plugin's loader reads the protocol's
+// layered `email_template` list at every send (`template-loader.ts`), and a
+// save is in that list the moment it lands (the protocol's registry
+// write-through). So the pins below drive the plugin through that read and
+// assert what #7733's QA repro looked for — the saved wording in the very next
+// mail — plus what replaced the projection: no seam is armed, and no
+// `sys_email_template` row is read or written.
 
 import { describe, it, expect, vi } from 'vitest';
 import { assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { EmailTemplateDefinitionSchema } from '@objectstack/spec/system';
 import { EmailServicePlugin } from './email-plugin.js';
+import { BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID } from './template-loader.js';
+import { BUILTIN_AUTH_TEMPLATES } from './templates/auth-templates.js';
+import type { EmailService } from './email-service.js';
 
 const TABLE = 'sys_email_template';
 
@@ -37,115 +31,53 @@ type AnyRecord = Record<string, any>;
 // ── doubles ────────────────────────────────────────────────────────────────
 
 /**
- * Row store with the slice of ObjectQL the template bridge and the organization
- * door touch. `update` routes through `assertEngineUpdateDispatch` so this
- * double cannot accept a dispatch shape the real engine would refuse.
+ * The slice of ObjectQL the plugin touches, recording every call by object,
+ * so "no `sys_email_template` read or write" is an assertion on calls rather
+ * than on an empty table. `update` routes through `assertEngineUpdateDispatch`
+ * so this double cannot accept a dispatch shape the real engine would refuse.
  */
 function fakeEngine(seed: AnyRecord[] = []) {
   const rows: AnyRecord[] = seed.map((r) => ({ ...r }));
-  const matches = (row: AnyRecord, cond?: AnyRecord) =>
-    !cond ||
-    Object.entries(cond).every(([k, v]) => {
-      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
-      return row[k] === v;
-    });
-  return {
+  const calls: Array<{ verb: string; object: string }> = [];
+  const engine = {
     rows,
-    _registry: { listItems: () => [] },
-    async find(object: string, q?: AnyRecord) {
-      if (object !== TABLE) return [];
-      const out = rows.filter((r) => matches(r, q?.where ?? q?.filter));
-      return typeof q?.limit === 'number' ? out.slice(0, q.limit) : out;
-    },
-    async insert(_object: string, row: AnyRecord) {
-      rows.push({ ...row });
-      return { id: row.id };
-    },
-    async update(_object: string, data: AnyRecord, options?: AnyRecord) {
-      const dispatch = assertEngineUpdateDispatch(data, options);
-      if (dispatch.kind !== 'by-id') throw new Error(`unexpected update dispatch: ${dispatch.kind}`);
-      const target = rows.find((r) => r.id === dispatch.id);
-      if (target) Object.assign(target, data);
-      return { affected: target ? 1 : 0 };
+    calls,
+    registry: { listItems: (_type: string): AnyRecord[] => [] },
+    async find(object: string) { calls.push({ verb: 'find', object }); return []; },
+    async insert(object: string, row: AnyRecord) { calls.push({ verb: 'insert', object }); return { id: row.id }; },
+    async update(object: string, data: AnyRecord, options?: AnyRecord) {
+      assertEngineUpdateDispatch(data, options);
+      calls.push({ verb: 'update', object });
+      return { affected: 0 };
     },
     registerHook() { /* organization door */ },
     unregisterHooksByPackage() { return 0; },
   };
+  return engine;
 }
 
+type FakeEngine = ReturnType<typeof fakeEngine>;
+
 /**
- * The two seams `saveMetaItem` / `publishMetaItem` / `deleteMetaItem` announce
- * on. `save`/`remove` replay what the real protocol does after persistence:
- * the awaited per-type projector first (with the just-persisted body), then the
- * fire-and-forget listeners.
+ * The protocol as the loader reads it: `getMetaItemsForExecution` answers
+ * `served` at call time — the layered list, the save already in it. The two
+ * announcement seams a projector used to arm are spies, so "nothing armed"
+ * is asserted, not assumed.
  */
-function fakeProtocol(opts: { projector?: boolean; listeners?: boolean } = {}) {
-  const withProjector = opts.projector !== false;
-  const withListeners = opts.listeners !== false;
-  const projectors = new Map<string, (evt: AnyRecord) => Promise<void>>();
-  const listeners: Array<(evt: AnyRecord) => void> = [];
-  const p: AnyRecord = {
-    projectorFailures: [] as string[],
-    async announce(evt: AnyRecord) {
-      const projector = projectors.get(evt.type);
-      if (projector) {
-        // Mirrors `runMutationProjector`: a throw is caught and reported on
-        // the write's response, never propagated to the caller.
-        try { await projector(evt); }
-        catch (e: any) { p.projectorFailures.push(String(e?.message ?? e)); }
-      }
-      for (const l of listeners) l(evt);
-      await new Promise((r) => setTimeout(r, 0)); // let a fire-and-forget path settle
+function fakeProtocol(initial: AnyRecord[] = []) {
+  const p = {
+    served: initial,
+    registerMutationProjector: vi.fn(),
+    onMetadataMutation: vi.fn(() => () => {}),
+    async getMetaItemsForExecution(request: { type: string }): Promise<{ type: string; items: AnyRecord[] }> {
+      if (request.type !== 'email_template') return { type: request.type, items: [] };
+      return { type: request.type, items: p.served.map((i) => ({ ...i })) };
     },
-    /** A `PUT /api/v1/meta/email_template/:name` that landed. */
-    save: (name: string, body: unknown, state: 'active' | 'draft' = 'active') =>
-      p.announce({ type: 'email_template', name, state, body }),
-    /** A `DELETE /api/v1/meta/email_template/:name` that landed. */
-    remove: (name: string) => p.announce({ type: 'email_template', name, state: 'deleted' }),
   };
-  if (withProjector) {
-    p.registerMutationProjector = (type: string, fn: (evt: AnyRecord) => Promise<void>) => {
-      projectors.set(type, fn);
-    };
-  }
-  if (withListeners) {
-    p.onMetadataMutation = (fn: (evt: AnyRecord) => void) => {
-      listeners.push(fn);
-      return () => {
-        const i = listeners.indexOf(fn);
-        if (i >= 0) listeners.splice(i, 1);
-      };
-    };
-  }
   return p;
 }
 
-/**
- * A metadata service shaped like `MetadataManager`: `subscribe` registers
- * cleanly (the boot log the QA run saw), and — the fact under test — the
- * runtime-write path NEVER calls it back.
- */
-function fakeMetadataService() {
-  const watchers: Array<(evt: AnyRecord) => void> = [];
-  return {
-    watchers,
-    list: () => [],
-    get: async () => undefined,
-    subscribe: (_type: string, cb: (evt: AnyRecord) => void) => {
-      watchers.push(cb);
-      return () => {};
-    },
-  };
-}
-
-/** Give the protocol double a layered `getMetaItem`, as the real one has. */
-function withEffectiveRead(
-  protocol: AnyRecord,
-  read: (name: string) => Promise<unknown>,
-): AnyRecord {
-  protocol.getMetaItem = async ({ name }: { name: string }) => read(name);
-  return protocol;
-}
+type FakeProtocol = ReturnType<typeof fakeProtocol>;
 
 function fakeCtx(services: Record<string, unknown>) {
   const hooks: Record<string, Array<() => Promise<void> | void>> = {};
@@ -164,245 +96,150 @@ function fakeCtx(services: Record<string, unknown>) {
 
 function template(over: AnyRecord = {}): AnyRecord {
   return {
-    name: 'auth.password_reset',
-    label: 'Password Reset',
-    category: 'auth',
+    name: 'ops.digest',
+    label: 'Digest',
+    category: 'notification',
     locale: 'en-US',
-    subject: 'Reset your password, {{user.name}}',
-    bodyHtml: '<p>Click <a href="{{url}}">here</a></p>',
+    subject: 'Digest for {{user.name}}',
+    bodyHtml: '<p>Hi {{user.name}}</p>',
     ...over,
   };
 }
 
 /** Boot the plugin to `kernel:ready`, as the kernel does. */
-async function boot(over: { engine?: any; protocol?: any; metadata?: any } = {}) {
+async function boot(over: { engine?: FakeEngine; protocol?: FakeProtocol | null } = {}) {
   const engine = over.engine ?? fakeEngine();
-  const protocol = 'protocol' in over ? over.protocol : fakeProtocol();
-  const metadata = over.metadata ?? fakeMetadataService();
+  const protocol = over.protocol === undefined ? fakeProtocol() : over.protocol;
+  const metadata = { subscribe: vi.fn(() => () => {}), get: vi.fn(), list: () => [] };
+  const manifests: AnyRecord[] = [];
+  const sent: Array<{ subject?: string }> = [];
   const services: Record<string, unknown> = {
-    manifest: { register: () => {} },
+    manifest: { register: (m: AnyRecord) => { manifests.push(m); } },
     objectql: engine,
     metadata,
   };
   if (protocol) services.protocol = protocol;
   const ctx = fakeCtx(services);
-  const plugin = new EmailServicePlugin({ seedTemplates: false });
+  const plugin = new EmailServicePlugin({
+    persist: false,
+    transport: {
+      async send(m: AnyRecord) { sent.push({ subject: m.subject }); return { messageId: `m${sent.length}` }; },
+    } as never,
+    defaultFrom: { address: 'no-reply@example.test' },
+  });
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
   await ctx.fire('kernel:ready');
-  return { plugin, ctx, engine, protocol, metadata };
+  const email = services.email as EmailService;
+  const send = () => email.sendTemplate({ template: 'ops.digest', to: 'ada@example.test', data: { user: { name: 'Ada' } } });
+  return { ctx, engine, protocol, metadata, manifests, sent, send };
 }
 
-const rowsOf = (engine: any, name: string) =>
-  engine.rows.filter((r: AnyRecord) => r.name === name);
+const templateTableCalls = (engine: FakeEngine) => engine.calls.filter((c) => c.object === TABLE);
 
 // ── tests ──────────────────────────────────────────────────────────────────
 
-describe('#7733 runtime email_template write materializes without a restart', () => {
-  it('materializes a PUT /meta save into sys_email_template on the protocol seam', async () => {
-    const { engine, protocol, ctx } = await boot();
+describe('#7733 a runtime email_template write reaches the next mail with no restart — through the registry read', () => {
+  it('sends a PUT /meta save on the very next send, and the next edit on the send after it', async () => {
+    const { protocol, sent, send } = await boot();
 
-    await protocol.save('auth.password_reset', template());
+    protocol!.served = [template()];
+    await send();
+    protocol!.served = [template({ subject: 'Reworded digest for {{user.name}}' })];
+    await send();
 
-    const rows = rowsOf(engine, 'auth.password_reset');
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      name: 'auth.password_reset',
-      // #7731 invariant — the loader queries by `(name, locale)`, so the row's
-      // `locale` column MUST hold the tag it is queried by.
-      locale: 'en-US',
-      subject: 'Reset your password, {{user.name}}',
-      body_html: '<p>Click <a href="{{url}}">here</a></p>',
-      managed_by: 'package',
-    });
-    expect(protocol.projectorFailures).toEqual([]);
-    expect(ctx.logger.info).toHaveBeenCalledWith(
-      expect.stringContaining('materialized from a runtime write'),
-    );
+    expect(sent.map((m) => m.subject)).toEqual(['Digest for Ada', 'Reworded digest for Ada']);
   });
 
-  it('re-materializes an edit in place rather than adding a second row', async () => {
-    const { engine, protocol } = await boot();
+  it('arms no projector, no mutation listener and no metadata subscription — there is nothing to copy', async () => {
+    const { protocol, metadata } = await boot();
 
-    await protocol.save('auth.password_reset', template());
-    await protocol.save('auth.password_reset', template({ subject: 'Reset it, {{user.name}}' }));
-
-    const rows = rowsOf(engine, 'auth.password_reset');
-    expect(rows).toHaveLength(1);
-    expect(rows[0].subject).toBe('Reset it, {{user.name}}');
+    expect(protocol!.registerMutationProjector).not.toHaveBeenCalled();
+    expect(protocol!.onMetadataMutation).not.toHaveBeenCalled();
+    expect(metadata.subscribe).not.toHaveBeenCalled();
   });
 
-  it('deactivates the materialized rows when the item is genuinely withdrawn', async () => {
-    const { engine, protocol } = await boot();
+  it('reads and writes no sys_email_template row, and leaves the rows already there exactly as they are', async () => {
+    // A customized row is the v18 migration ceremony's to promote (ruling C);
+    // this plugin neither promotes nor deletes it — and no longer sends it.
+    const seeded = [
+      { id: 'etpl_c', name: 'ops.digest', locale: 'en-US', subject: 'Data-door wording', customized: true },
+      { id: 'etpl_a', name: 'ops.digest', locale: 'zh-CN', subject: 'Admin wording', managed_by: 'admin' },
+    ];
+    const engine = fakeEngine(seeded);
+    const { protocol, sent, send } = await boot({ engine });
 
-    await protocol.save('auth.password_reset', template());
-    await protocol.remove('auth.password_reset');
+    protocol!.served = [template()];
+    await send();
 
-    expect(rowsOf(engine, 'auth.password_reset')[0].active).toBe(false);
+    expect(sent.map((m) => m.subject)).toEqual(['Digest for Ada']);
+    expect(templateTableCalls(engine)).toEqual([]);
+    expect(engine.rows).toEqual(seeded);
   });
 
-  it('re-materializes the packaged baseline a DELETE of an overlay reveals', async () => {
-    // `DELETE /meta/email_template/:name` discards a CUSTOMIZATION overlay
-    // (ADR-0005). On an artifact-backed template the packaged declaration is
-    // still shipping, so the reset must restore it — not retire it.
-    const protocol = withEffectiveRead(fakeProtocol(), async (name) =>
-      name === 'auth.password_reset'
-        ? { item: template({ subject: 'The packaged subject' }) }
-        : undefined);
-    const { engine } = await boot({ protocol });
+  it('a DELETE of an overlay sends the packaged baseline the list then serves', async () => {
+    const { protocol, sent, send } = await boot();
 
-    await protocol.save('auth.password_reset', template({ subject: 'An operator override' }));
-    await protocol.remove('auth.password_reset');
+    protocol!.served = [template({ subject: 'An operator override' })];
+    await send();
+    protocol!.served = [template({ subject: 'The packaged subject' })];
+    await send();
 
-    const rows = rowsOf(engine, 'auth.password_reset');
-    expect(rows).toHaveLength(1);
-    expect(rows[0].subject).toBe('The packaged subject');
-    expect(rows[0].active).not.toBe(false);
+    expect(sent.map((m) => m.subject)).toEqual(['An operator override', 'The packaged subject']);
   });
 
-  it('restores a baseline served WITH read decorations on it', async () => {
-    // `getMetaItem` returns a DECORATED item (`_diagnostics` from
-    // `decorateMetadataItem`, `_packageId` / `_provenance` from the registry
-    // and the overlay row). `EmailTemplateDefinitionSchema` is a strictObject
-    // that declares neither `_diagnostics` nor `_draft`, so an unstripped body
-    // would reject the very baseline the reset exists to restore.
-    //
-    // [#16152] It DOES declare the ADR-0010 envelope (`_packageId` /
-    // `_provenance` and the `_lock*` family, via `MetadataProtectionFields`) —
-    // those parse clean and are not stripped. See the `#16152` describe block
-    // below for the pins that hold that apart.
-    const protocol = withEffectiveRead(fakeProtocol(), async () => ({
-      type: 'email_template',
-      name: 'auth.password_reset',
-      item: {
-        ...template({ subject: 'The packaged subject' }),
-        _diagnostics: { valid: true },
-        _packageId: 'com.objectstack.auth',
-        // [#16152] Was `{ source: 'code' }` — an object, where
-        // `MetadataProvenanceSchema` is `z.enum(['package','org','env-forced'])`.
-        // It was never spec-legal; the blanket `_` sweep deleted it before the
-        // parse could say so, which is the silent swallow this card removes.
-        // Corrected to the spelling the rest of the repo's fixtures use.
-        _provenance: 'package',
-      },
-    }));
-    const { engine } = await boot({ protocol });
+  it('a withdrawn template stops being sent', async () => {
+    const { protocol, sent, send } = await boot();
 
-    await protocol.save('auth.password_reset', template({ subject: 'An operator override' }));
-    await protocol.remove('auth.password_reset');
+    protocol!.served = [template()];
+    await send();
+    protocol!.served = [];
 
-    const rows = rowsOf(engine, 'auth.password_reset');
-    expect(rows).toHaveLength(1);
-    expect(rows[0].subject).toBe('The packaged subject');
-    expect(rows[0].active).not.toBe(false);
+    await expect(send()).rejects.toThrow('TEMPLATE_NOT_FOUND: ops.digest');
+    expect(sent).toHaveLength(1);
   });
 
-  it('deactivates nothing when the effective read fails — a DB blip is not a withdrawal', async () => {
-    const protocol = withEffectiveRead(fakeProtocol(), async () => { throw new Error('db gone'); });
-    const { engine, metadata } = await boot({ protocol });
-    // No second source can answer either.
-    metadata.get = async () => { throw new Error('db gone'); };
+  it('a failed read fails the send — it is not a withdrawal, and it does not send the package wording', async () => {
+    const engine = fakeEngine();
+    engine.registry.listItems = () => [template({ subject: 'Package wording' })];
+    const { protocol, sent, send } = await boot({ engine });
+    protocol!.getMetaItemsForExecution = async () => { throw new Error('db gone'); };
 
-    await protocol.save('auth.password_reset', template());
-    await protocol.remove('auth.password_reset');
-
-    expect(rowsOf(engine, 'auth.password_reset')[0].active).not.toBe(false);
+    await expect(send()).rejects.toThrow('db gone');
+    expect(sent).toEqual([]);
   });
 
-  it('leaves a draft save inert — the staging buffer is not live', async () => {
-    const { engine, protocol } = await boot();
+  it('boots on a kernel with no protocol service, sending from the ObjectQL registry', async () => {
+    const engine = fakeEngine();
+    engine.registry.listItems = () => [template()];
+    const { ctx, sent, send } = await boot({ engine, protocol: null });
 
-    await protocol.save('auth.password_reset', template(), 'draft');
+    await send();
 
-    expect(engine.rows).toHaveLength(0);
-  });
-
-  it('ignores mutations of other metadata types', async () => {
-    const { engine, protocol } = await boot();
-
-    await protocol.announce({ type: 'view', name: 'v', state: 'active', body: template() });
-
-    expect(engine.rows).toHaveLength(0);
-  });
-
-  it('never clobbers an admin-authored row of the same name', async () => {
-    const engine = fakeEngine([{
-      id: 'etpl_admin',
-      name: 'auth.password_reset',
-      locale: 'en-US',
-      subject: 'Hand-written by an operator',
-      managed_by: 'admin',
-    }]);
-    const { protocol } = await boot({ engine });
-
-    await protocol.save('auth.password_reset', template());
-
-    expect(rowsOf(engine, 'auth.password_reset')).toHaveLength(1);
-    expect(rowsOf(engine, 'auth.password_reset')[0].subject).toBe('Hand-written by an operator');
-  });
-
-  it('reports a failed materialization on the write instead of throwing at the author', async () => {
-    const { protocol, ctx } = await boot();
-
-    // An item that fails `EmailTemplateDefinitionSchema` — the save persisted,
-    // the projection cannot.
-    await protocol.save('auth.broken', { name: 'auth.broken' });
-
-    expect(protocol.projectorFailures).toHaveLength(1);
-    expect(ctx.logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining('runtime email-template sync failed'),
-    );
-  });
-
-  it('falls back to onMetadataMutation when the protocol has no projector seam', async () => {
-    const protocol = fakeProtocol({ projector: false });
-    const { engine } = await boot({ protocol });
-
-    await protocol.save('auth.password_reset', template());
-
-    expect(rowsOf(engine, 'auth.password_reset')).toHaveLength(1);
-  });
-
-  it('materializes exactly once when both seams announce the same write', async () => {
-    const { engine, protocol } = await boot();
-
-    await protocol.save('auth.password_reset', template());
-
-    // Both seams fired (projector + listener); the upsert is keyed on
-    // `(name, locale)`, so the second one must find and update, not insert.
-    expect(rowsOf(engine, 'auth.password_reset')).toHaveLength(1);
-  });
-
-  it('boots, and keeps the boot sweep, on a kernel with no protocol service', async () => {
-    const { ctx, engine } = await boot({ protocol: null });
-
-    expect(engine.rows).toHaveLength(0);
+    expect(sent.map((m) => m.subject)).toEqual(['Digest for Ada']);
     expect(ctx.logger.error).not.toHaveBeenCalled();
   });
+});
 
-  it('detaches both seams on dispose', async () => {
-    const { plugin, engine, protocol } = await boot();
+describe('the built-in auth templates are code-declared items of the plugin\'s own package', () => {
+  it('registers every built-in, in every locale, through the plugin\'s manifest', async () => {
+    const { manifests } = await boot();
 
-    await plugin.dispose();
-    await protocol.save('auth.password_reset', template());
-
-    expect(engine.rows).toHaveLength(0);
+    const own = manifests.filter((m) => m.id === BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID);
+    expect(own).toHaveLength(1);
+    expect(own[0].emailTemplates).toEqual(BUILTIN_AUTH_TEMPLATES);
+    expect(own[0].emailTemplates).toHaveLength(24);
   });
 });
 
 // ── #16152 ─────────────────────────────────────────────────────────────────
 //
-// `readEffectiveTemplate` used to strip read decorations with a MODULE-LOCAL
-// copy of `stripReadDecorations` that dropped every key starting with `_`.
-// The shared list it drifted from (`spec/kernel/metadata-read-decorations.ts`)
-// carries exactly `['_diagnostics', '_draft']` and names the ADR-0010
-// protection envelope as "Deliberately NOT" a member — envelope state the
-// write path legitimately carries, allowlisted by the closed schemas so a
-// served document keeps its provenance on re-parse.
-//
-// The copy's docblock justified the blanket sweep on the claim that
-// `EmailTemplateDefinitionSchema` "declares no underscore key". These pin why
-// that claim is false and what the narrow strip must do instead.
+// The plugin strips read decorations with the SHARED `stripReadDecorations`
+// list (`['_diagnostics', '_draft']`), never a blanket `_` sweep: the ADR-0010
+// protection envelope is declared on `EmailTemplateDefinitionSchema`, and an
+// underscore key that is neither declared nor a decoration must stay loud.
+// These pins moved with the read: from the delete-reset projection to the
+// loader every send goes through.
 
 describe('#16152 read-decoration strip uses the shared list, not a blanket `_` sweep', () => {
   /** The full ADR-0010 envelope, as `MetadataProtectionFields` declares it. */
@@ -417,11 +254,6 @@ describe('#16152 read-decoration strip uses the shared list, not a blanket `_` s
   } as const;
 
   it('the schema declares the ADR-0010 envelope and rejects the read decorations', () => {
-    // The premise the deleted docblock got backwards, asserted directly
-    // against the schema rather than inferred from it. `email-template.zod.ts`
-    // spreads `MetadataProtectionFields` into its `strictObject`, so every
-    // envelope key is authorable surface here; `_diagnostics` / `_draft` are
-    // not declared anywhere in that shape, which is why they must be stripped.
     const withEnvelope = EmailTemplateDefinitionSchema.safeParse({ ...template(), ...ENVELOPE });
     expect(withEnvelope.success).toBe(true);
     // Guarding a KEY's reachability: no `unrecognized_keys` on any envelope key.
@@ -442,55 +274,21 @@ describe('#16152 read-decoration strip uses the shared list, not a blanket `_` s
     }
   });
 
-  it('re-materializes a baseline served with the FULL protection envelope on it', async () => {
-    // The envelope rides along on the layered read (`_packageId` /
-    // `_provenance` from the registry, `_lock*` from the artifact layer). It
-    // parses clean, so the reset restores the packaged baseline with no
-    // projector failure — and `mapTemplateToRow`'s closed column list is what
-    // keeps it out of the row, not a strip.
-    const protocol = withEffectiveRead(fakeProtocol(), async () => ({
-      item: {
-        ...template({ subject: 'The packaged subject' }),
-        ...ENVELOPE,
-        _diagnostics: { valid: true },
-        _draft: false,
-      },
-    }));
-    const { engine } = await boot({ protocol });
+  it('sends a template served with the FULL protection envelope and both read decorations on it', async () => {
+    const { protocol, sent, send } = await boot();
 
-    await protocol.save('auth.password_reset', template({ subject: 'An operator override' }));
-    await protocol.remove('auth.password_reset');
+    protocol!.served = [{ ...template(), ...ENVELOPE, _diagnostics: { valid: true }, _draft: false }];
+    await send();
 
-    expect(protocol.projectorFailures).toEqual([]);
-    const rows = rowsOf(engine, 'auth.password_reset');
-    expect(rows).toHaveLength(1);
-    expect(rows[0].subject).toBe('The packaged subject');
-    // `sys_email_template` declares no underscore column, and
-    // `mapTemplateToRow` projects a closed list — so the envelope cannot reach
-    // the row whatever the strip does. This is the measured reason there is no
-    // second, envelope-stripping pass beside the shared one.
-    for (const k of Object.keys(ENVELOPE)) expect(rows[0]).not.toHaveProperty(k);
+    expect(sent.map((m) => m.subject)).toEqual(['Digest for Ada']);
   });
 
   it('does not silently swallow an underscore key the schema never declared', async () => {
-    // The blanket sweep dropped EVERY `_` key before the parse, so a key that
-    // is neither a decoration nor declared — a producer's typo, a decoration
-    // added upstream and never added to the shared list — vanished and the
-    // reset reported success. That is precisely the silent-strip failure the
-    // closed schemas (#4001) exist to end, and the shared list keeps loud:
-    // the projector surfaces it on the write's own response.
-    const protocol = withEffectiveRead(fakeProtocol(), async () => ({
-      item: { ...template({ subject: 'The packaged subject' }), _notADeclaredKey: 'x' },
-    }));
-    const { engine } = await boot({ protocol });
+    const { protocol, sent, send } = await boot();
 
-    await protocol.save('auth.password_reset', template({ subject: 'An operator override' }));
-    await protocol.remove('auth.password_reset');
+    protocol!.served = [{ ...template(), _notADeclaredKey: 'x' }];
 
-    expect(protocol.projectorFailures).toHaveLength(1);
-    expect(protocol.projectorFailures[0]).toContain('_notADeclaredKey');
-    // The override row is left exactly as it was — a body the schema refuses
-    // never becomes a write.
-    expect(rowsOf(engine, 'auth.password_reset')[0].subject).toBe('An operator override');
+    await expect(send()).rejects.toThrow('_notADeclaredKey');
+    expect(sent).toEqual([]);
   });
 });

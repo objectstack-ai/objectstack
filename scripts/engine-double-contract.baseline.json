@@ -329,14 +329,6 @@
       "closes": "open the fake's update with assertEngineUpdateDispatch(data, options) and run the package's suite"
     },
     {
-      "file": "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.test.ts",
-      "verb": "update",
-      "unguarded": 1,
-      "kind": "DEBT",
-      "why": "MEASURED (#5480): the `update` slice of this gate is NEW — `resolveEngineUpdateDispatch` did not exist before #5480, so no double in the repo could route through it and the whole discovered set enters this ledger in one act. Not newly written looseness and not a raised ratchet: it is the first measurement of a contract that had no producer-side predicate to measure against, which is exactly what this script's header used to list under deliberately-not-covered (\"update's twin dispatch ... needs its own producer-side predicate extracted first\"). Discovered at line 32. The package already depends on @objectstack/objectql (`devDependencies`), so this is a one-line pin whenever a batch takes it — deferred here because #5480's slice is the producer-side predicate plus the gate that reads it, and flipping ~100 unmeasured suites red belongs in the per-package batches that follow, exactly as #5629 did for delete. WHAT THIS ENTRY DOES NOT CLAIM: unlike the #5629 delete batch above it carries NO per-file dormancy probe. Nothing here says the looseness is unexercised — only that the double is structurally free to be looser than ObjectQL.update on the shape a hand-written guard always drops (`where: { id: { $in: [...] } }` looks like an id and is a multi-row predicate) — a shape the producer refuses in `data.id` too since objectstack#5748 put the payload half through the SAME scalar test, so `data.id` still outranks `where` and `multi`, but only when it IS a scalar id.",
-      "closes": "open the fake's update with assertEngineUpdateDispatch(data, options) and run the package's suite"
-    },
-    {
       "file": "packages/plugins/plugin-email/src/email-plugin.attachment-storage.test.ts",
       "verb": "update",
       "unguarded": 1,

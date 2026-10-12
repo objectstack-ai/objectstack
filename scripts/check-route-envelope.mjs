@@ -491,6 +491,10 @@ const DISPATCHER_DOMAINS = {
   'i18n.ts': { handBuilt: 0 },
   'notifications.ts': { handBuilt: 0 },
   'packages.ts': { handBuilt: 0 },
+  // The `/security` domain's permission-set clone door (ADR-0126 §7.1), beside
+  // the activation door. Every answer goes through `deps.success` /
+  // `deps.error` / `deps.errorFromThrown`.
+  'permission-set-clone.ts': { handBuilt: 0 },
   'security.ts': { handBuilt: 0 },
   // No `storage.ts` — the `/storage` domain was retired in #4087 (it called
   // the storage contract with the wrong arity and read a Buffer as a

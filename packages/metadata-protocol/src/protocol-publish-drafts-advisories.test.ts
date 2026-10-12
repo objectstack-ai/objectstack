@@ -29,7 +29,7 @@
  * Harness: the same faithful stub engine as
  * `protocol-publish-drafts-org-scope.test.ts` (kept local — self-contained
  * harnesses are the established shape here, so two tripwires can fail
- * independently). Flows are env-wide (`flow` is `allowOrgOverride: false`),
+ * independently). Flows are env-wide (every metadata row is, ADR-0131 D6),
  * saved as package-bound drafts, published through the REAL
  * `publishPackageDrafts` — nothing on the gate path is stubbed.
  */

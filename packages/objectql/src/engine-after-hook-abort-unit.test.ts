@@ -18,6 +18,7 @@ import { describe, it, expect } from 'vitest';
 import type { Hook } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 import { bindHooksToEngine } from './hook-binder.js';
+import { HookConditionError } from './hook-wrappers.js';
 
 function makeDriver(name: string, opts: { transactional?: boolean; failParentUpdate?: boolean } = {}) {
   let stores = new Map<string, Map<string, Record<string, unknown>>>();
@@ -78,8 +79,10 @@ const noteWriter = hook('note_writer', ['afterInsert'], (ctx) => ctx.api.object(
 
 async function makeEngine(hooks: Hook[], opts: { transactional?: boolean; caseDriver?: string; failParentUpdate?: boolean } = {}) {
   const warns: string[] = [];
+  const errors: string[] = [];
   const log = () => {};
-  const engine = new ObjectQL({ logger: { debug: log, info: log, error: log, warn: (m: string) => void warns.push(String(m)) } } as any);
+  const logger = { debug: log, info: log, error: (m: string) => void errors.push(String(m)), warn: (m: string) => void warns.push(String(m)) };
+  const engine = new ObjectQL({ logger } as any);
   const driver = makeDriver('primary', opts);
   engine.registerDriver(driver, true);
   const side = makeDriver('side');
@@ -87,8 +90,8 @@ async function makeEngine(hooks: Hook[], opts: { transactional?: boolean; caseDr
   await engine.init();
   engine.registry.registerObject({ ...obj('case'), ...(opts.caseDriver ? { datasource: opts.caseDriver } : {}) } as any, '__test__');
   engine.registry.registerObject(obj('note') as any, '__test__');
-  bindHooksToEngine(engine, hooks, { packageId: 'app:t' });
-  return { engine, driver, side, warns };
+  bindHooksToEngine(engine, hooks, { packageId: 'app:t', logger });
+  return { engine, driver, side, warns, errors };
 }
 
 describe('#22782 — an aborting after* hook rolls its write back', () => {
@@ -166,5 +169,71 @@ describe('#22782 — an aborting after* hook rolls its write back', () => {
     expect(driver.begun).toHaveLength(1);
     expect(driver.rolledBack).toHaveLength(0);
     expect(driver.rowsOf('inv_line')).toHaveLength(1);
+  });
+});
+
+/**
+ * #22856 — a hook `condition` that cannot be evaluated aborts the operation
+ * whatever the hook's `onError` (#4775: the gate sits outside `onError`), and
+ * before the handler detaches for `async: true`. So an `after*` hook carrying a
+ * condition can abort its write too, and the door's unit rolls the row back.
+ */
+describe('#22856 — an after* hook carrying a condition rolls its write back when the condition cannot be evaluated', () => {
+  /** `previous` is unbound on an insert, so this condition cannot be evaluated there. */
+  const unbindable = 'previous.name != record.name';
+  /** A key `case` does not declare: unevaluable on every event. */
+  const undeclared = 'record.stauts == "x"';
+  const refusal = (p: Promise<unknown>) => p.then(() => null, (e) => e);
+  /** `noteWriter` as a `log` hook: an `abort` one would open the unit by itself. */
+  const loggedNoteWriter = hook('note_writer', ['afterInsert'], (ctx) => ctx.api.object('note').insert({ name: 'from-hook' }), { priority: 10, onError: 'log' });
+
+  it('onError: \'log\' with a condition that cannot be evaluated: refused, the row and the chain\'s ctx.api write absent', async () => {
+    const { engine, driver } = await makeEngine([loggedNoteWriter, hook('watch', ['afterInsert'], () => {}, { priority: 20, onError: 'log', condition: unbindable })]);
+    const err = await refusal(engine.insert('case', { name: 'c1' }));
+    expect(err).toBeInstanceOf(HookConditionError);
+    expect(err).toMatchObject({ hook: 'watch', event: 'afterInsert', reason: 'unevaluable' });
+    expect(driver.rowsOf('case')).toEqual([]);
+    expect(driver.rowsOf('note')).toEqual([]);
+    expect([driver.begun.length, driver.rolledBack.length]).toEqual([1, 1]);
+  });
+
+  it('onError: \'log\', afterUpdate and afterDelete: the stored row is what it was before the refused write', async () => {
+    const { engine, driver } = await makeEngine([hook('watch', ['afterUpdate', 'afterDelete'], () => {}, { onError: 'log', condition: undeclared })]);
+    const row = await engine.insert('case', { name: 'before' });
+    expect(await refusal(engine.update('case', { name: 'after' }, { where: { id: row.id } } as any))).toMatchObject({ name: 'HookConditionError', event: 'afterUpdate' });
+    expect(await refusal(engine.delete('case', { where: { id: row.id } } as any))).toMatchObject({ name: 'HookConditionError', event: 'afterDelete' });
+    expect(driver.rowsOf('case')).toMatchObject([{ id: row.id, name: 'before' }]);
+    expect([driver.begun.length, driver.rolledBack.length]).toEqual([2, 2]);
+  });
+
+  it('async: true — the condition is evaluated before the hook detaches, so it refuses the write, and the row is rolled back', async () => {
+    let ran = 0;
+    const { engine, driver } = await makeEngine([hook('later', ['afterInsert'], () => { ran += 1; }, { async: true, onError: 'log', condition: unbindable })]);
+    expect(await refusal(engine.insert('case', { name: 'c1' }))).toBeInstanceOf(HookConditionError);
+    expect(driver.rowsOf('case')).toEqual([]);
+    expect([driver.begun.length, driver.rolledBack.length, ran]).toEqual([1, 1, 0]);
+  });
+
+  it('CONTROL onError: \'log\' with a condition that evaluates: the handler throws, the error is logged, the row is stored', async () => {
+    const { engine, driver, errors } = await makeEngine([hook('watch', ['afterInsert'], boom, { onError: 'log', condition: 'record.name == "c1"' })]);
+    await engine.insert('case', { name: 'c1' });
+    await engine.insert('case', { name: 'c2' }); // FALSE: skipped
+    expect(driver.rowsOf('case')).toMatchObject([{ name: 'c1' }, { name: 'c2' }]);
+    expect(errors).toEqual(['[hook] handler failed (onError=log; suppressing)']);
+    expect(driver.rolledBack).toHaveLength(0);
+  });
+
+  it('CONTROL an abort hook with that condition: refused, the row absent — as #22782 leaves it', async () => {
+    const { engine, driver } = await makeEngine([hook('watch', ['afterInsert'], () => {}, { condition: unbindable })]);
+    expect(await refusal(engine.insert('case', { name: 'c1' }))).toBeInstanceOf(HookConditionError);
+    expect(driver.rowsOf('case')).toEqual([]);
+    expect([driver.begun.length, driver.rolledBack.length]).toEqual([1, 1]);
+  });
+
+  it('CONTROL skipped automations: the conditional hook does not run, no unit is opened, the row is stored', async () => {
+    const { engine, driver } = await makeEngine([hook('watch', ['afterInsert'], () => {}, { onError: 'log', condition: unbindable })]);
+    await engine.insert('case', { name: 'c1' }, { context: { isSystem: true, skipAutomations: true } as any });
+    expect(driver.rowsOf('case')).toMatchObject([{ name: 'c1' }]);
+    expect(driver.begun).toHaveLength(0);
   });
 });

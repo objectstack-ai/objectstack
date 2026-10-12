@@ -55,7 +55,7 @@ describe('paper metadata-customization protocol retirement', () => {
     expect(issue!.message).toMatch(/`config\.customizationPolicies`.*removed.*17/s);
     expect(issue!.message).toMatch(/Delete the key/s);
     // The live mechanisms must be named.
-    expect(issue!.message).toMatch(/allowOrgOverride/s);
+    expect(issue!.message).toMatch(/allowEnvironmentOverlay/s);
     expect(issue!.message).toMatch(/ADR-0126/s);
   });
 

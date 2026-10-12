@@ -217,10 +217,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Menciones",
         help: "Matriz JSON de los id de usuario mencionados con @ en el comentario."
       },
-      reactions: {
-        label: "Reacciones",
-        help: "Objeto JSON que asigna cada emoji a la lista de id de usuario de quienes reaccionaron."
-      },
       is_edited: {
         label: "Editado"
       },

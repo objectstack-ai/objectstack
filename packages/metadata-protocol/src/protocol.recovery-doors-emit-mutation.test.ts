@@ -535,7 +535,7 @@ describe('[#14179] door 3 — deleteMetaItem’s legacy raw-engine exit', () => 
  */
 describe('[#14179] reachability: the legacy exit is confined to bootstrap mode', () => {
     const codeOnly = DEFAULT_METADATA_TYPE_REGISTRY.filter(
-        (e) => !e.allowOrgOverride && !e.allowRuntimeCreate,
+        (e) => !e.allowEnvironmentOverlay && !e.allowRuntimeCreate,
     );
 
     it('the `useRepoPath === false` set is non-empty and none of it merges an overlay at read', () => {

@@ -81,7 +81,6 @@ const COMMANDS_DIR = resolve(HERE, '../src/commands');
  * --stored` rather than `migrate meta`.
  */
 const FAMILY: Record<string, string[]> = {
-  'meta resync': [],
   // Its bare form boots: it takes the `os migrate plan` shape (`deferSchemaDdl`
   // + `readOnlyProbe`), so a fixture with no database file is opened as an
   // empty in-memory one rather than being brought into existence. No table

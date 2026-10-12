@@ -377,7 +377,12 @@ function checkChartDrillDown(
       // its rename. What the schema adds after that is
       // `os explain react-chart-drilldown-invalid`'s.
       `${at}: ${schemaRefusalHead(issue.message)}`,
-      'The drill config is declared by ChartDrillDownSchema (@objectstack/spec/ui) — the rejection above carries the fix.',
+      // [#22161] The remedy itself, in one line: it used to say "the
+      // rejection above carries the fix", and the verdict above no longer
+      // carries the schema's prescription for a key real on another surface
+      // (the explanation names each such key).
+      'Correct the drillDown key or value the verdict names to ChartDrillDownSchema (@objectstack/spec/ui): use ' +
+        'the rename it suggests, or delete a key that is real only on another surface',
     );
   }
 }
@@ -460,9 +465,10 @@ function checkChartAggregate(
       'warning',
       REACT_CHART_AGGREGATE_INVALID,
       'aggregate.groupBy is not set, so the aggregate returns ONE ungrouped row and the chart plots a single point.',
-      'Add aggregate.groupBy (a field name, or { field, dateGranularity } to bucket dates) to give the chart a category axis. ' +
-        'An ungrouped single-value chart is NOT a supported <ObjectChart> shape — groupBy stays required, and a single number belongs in an object-metric block instead. ' +
-        'This stays a warning rather than an error only because promoting it is its own step.',
+      // [#22161] One line, the ruling kept; why it is still only a warning is
+      // the explanation's.
+      'Add aggregate.groupBy (a field name, or { field, dateGranularity } to bucket dates): an ungrouped chart is ' +
+        'NOT a supported shape, and a single number belongs in an object-metric block instead',
     );
   }
 
@@ -482,7 +488,11 @@ function checkChartAggregate(
       issue.code === 'invalid_union'
         ? `${at} matches no accepted form: ${unionRefusal(issue as LintZodIssue, raw)}`
         : `${at}: ${schemaRefusalHead(describeIssue(issue, raw))}`,
-      'The aggregate is declared by ChartAggregateSchema (@objectstack/spec/ui) — the rejection above carries the fix.',
+      // [#22161] The remedy itself, in one line (it said "the rejection above
+      // carries the fix"; the verdict no longer carries the schema's
+      // prescription for a key real one layer out — the explanation does).
+      'Correct the aggregate key or value the verdict names to ChartAggregateSchema (@objectstack/spec/ui): use ' +
+        'the rename it suggests, or move a key that is real one layer out to that layer',
     );
   }
 }

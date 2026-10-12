@@ -355,7 +355,7 @@ describe('decision edge branching — exclusive by default, inclusive by declara
                     {
                         id: 'sweep', type: 'loop' as const, label: 'Sweep',
                         config: {
-                            collection: '{leads}',
+                            collection: { dialect: 'cel', source: 'leads' },
                             iteratorVariable: 'lead',
                             body: {
                                 nodes: [

@@ -1,7 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { SysComment } from './index.js';
+import { MIGRATIONS_BY_MAJOR } from '@objectstack/spec/migrations';
+import { SysComment, SysCommentReaction } from './index.js';
 
 /**
  * #4756 — `sys_comment.visibility` / `sys_comment.reply_count` are RETIRED
@@ -70,5 +71,55 @@ describe('sys_comment — retired fields stay retired (#4756)', () => {
     expect(Object.keys(fields)).toContain('parent_id');
     // `visibility` → the record-level permissions of what `thread_id` names.
     expect(Object.keys(fields)).toContain('thread_id');
+  });
+});
+
+/**
+ * #22573 — `sys_comment.reactions` is RETIRED (maintainer ruling A on #22505,
+ * as amended: the column retires and its stored reactions are not migrated;
+ * the delegated judgment: no read-only aggregate takes its place).
+ *
+ * A reaction is its reactor's own `sys_comment_reaction` record, so nothing
+ * about reactions lives on the comment row, stored or computed on read. Unlike
+ * the two #4756 removals above, this one carries an ADR-0087 D3 record of its
+ * own, because a client really wrote the column: the semantic entry is what an
+ * upgrading author is shown, and the data door's `INVALID_FIELD` refusal is
+ * the enforcement (pinned in `sys-comment-reactions-door.integration.test.ts`).
+ */
+const REACTIONS_RECORD_ID = 'sys-comment-reactions-column-retired';
+const REACTIONS_PRESCRIPTION =
+  'a reaction is its reactor\'s own `sys_comment_reaction` record; nothing about reactions is '
+  + 'stored or computed on the comment row (ruling A on #22505, as amended; #22573)';
+
+describe('sys_comment — reactions stays retired (#22573)', () => {
+  it('sys_comment declares no reactions field, and no index, highlight or title names it', () => {
+    const object = SysComment as {
+      fields?: Record<string, unknown>;
+      indexes?: Array<{ fields?: string[] }>;
+      highlightFields?: string[];
+      titleFormat?: string;
+      nameField?: string;
+      displayNameField?: string;
+    };
+    expect(
+      Object.keys(object.fields ?? {}),
+      `sys_comment.reactions was retired — ${REACTIONS_PRESCRIPTION}`,
+    ).not.toContain('reactions');
+    expect((object.indexes ?? []).flatMap((i) => i.fields ?? [])).not.toContain('reactions');
+    expect(object.highlightFields ?? []).not.toContain('reactions');
+    expect(object.titleFormat ?? '').not.toContain('reactions');
+    expect([object.nameField, object.displayNameField]).not.toContain('reactions');
+  });
+
+  it('the retirement record names it: a D3 semantic entry on the protocol-18 step', () => {
+    const entry = MIGRATIONS_BY_MAJOR[18]?.semantic.find((e) => e.id === REACTIONS_RECORD_ID);
+    expect(entry, `the ADR-0087 D3 record \`${REACTIONS_RECORD_ID}\` is missing from step 18`).toBeDefined();
+    expect(entry!.surface.startsWith('sys_comment.reactions ')).toBe(true);
+    expect(entry!.replacement).toContain('sys_comment_reaction');
+  });
+
+  it('keeps the replacement the record points at: one sys_comment_reaction row per comment, emoji and user', () => {
+    const fields = Object.keys((SysCommentReaction as { fields?: Record<string, unknown> }).fields ?? {});
+    expect(fields).toEqual(expect.arrayContaining(['comment_id', 'emoji', 'user_id']));
   });
 });

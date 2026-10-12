@@ -92,7 +92,7 @@ Port resolution is the same for `os dev` and `os start` (both spawn `os serve`):
 |:--------|:-------------|
 | `os data create` / `get` / `query` / `update` / `delete` | Record-level CRUD against a running server (there is no `os data seed` / `export` / `import` — seed data in the `data:` collection loads automatically at boot) |
 | `os diff` | Compare two ObjectStack config files and detect breaking changes |
-| `os meta register` / `os meta resync` | Register (create/update) metadata on a target server / re-sync it (there is no `os meta apply`) |
+| `os meta register` | Register (create/update) metadata on a target server (there is no `os meta apply`) |
 | `os migrate plan` / `os migrate apply` | Dry-run / apply physical-DB drift reconciliation from metadata (forward-only — no batch rollback; `os rollback` was removed) |
 
 ## Environments & deploy

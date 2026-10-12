@@ -61,10 +61,10 @@ const META = '/api/v1/meta';
 const ORG_A = 'org_alpha';
 const ORG_B = 'org_beta';
 
-/** `allowOrgOverride: false` — the door must reduce the organization away. */
+/** Outside the five overlay-enabled types — the door must reduce the organization away. */
 const NON_OVERRIDABLE = 'object';
 
-/** `allowOrgOverride: true`, and the type that takes the CACHED arm. */
+/** One of the five overlay-enabled types, and the type that takes the CACHED arm. */
 const OVERRIDABLE = 'view';
 
 const NAME = 'shared_document';

@@ -603,20 +603,22 @@ const RESOLUTION_CONTROLS = [
       + 'half this change reaches past when it replaces what that walk falls back TO.',
   },
   {
-    file: 'packages/plugins/plugin-email/src/email-plugin.ts',
-    callee: 'update',
-    enclosing: 'upsertTemplate',
-    resolvesIn: 'EmailServicePlugin',
+    file: 'packages/services/service-analytics/src/analytics-service.ts',
+    callee: 'execute',
+    enclosing: 'answerDataset',
+    resolvesIn: 'FallbackDelegateStrategy',
     why:
-      'Departure ONE — one declaration, unchanged — and this site was CHOSEN BY MEASUREMENT, after an '
-      + 'ablation showed the two controls above stay green when that departure is removed. Exactly 7 '
-      + 'call sites in the scan root depend on it; this is one of the four whose callee is in '
-      + '`WRITE_SHAPED_CALLEES`. `update` has a single body in this file, declared as a method of an '
-      + 'object literal, so the object literal is its scope and is NOT on this call site\'s ancestor '
-      + 'chain — a strict lexical resolver DECLINES the hop. This control does not claim the hop is '
-      + 'semantically right (the call is `(engine as any).update(...)`, whose receiver `calleePath` '
-      + 'erases). It pins the INVARIANT that this repair touches only COLLISIONS: tighten past that '
-      + 'and this goes red, forcing the census delta to be re-measured instead of narrowed in silence.',
+      'Departure ONE — one declaration, unchanged. Re-chosen BY MEASUREMENT when the site this control '
+      + 'used to pin (`EmailServicePlugin.upsertTemplate`\'s `update()` in plugin-email) was deleted with '
+      + 'the template seed it belonged to. Measured on the scan root then: 21 call sites resolve through '
+      + 'this departure and NONE of them has a callee in `WRITE_SHAPED_CALLEES` any more (control leg: the '
+      + 'deleted plugin-email file, probed alone, answered its two write-shaped sites). Here `execute` has '
+      + 'a single body in this file, a method of `FallbackDelegateStrategy`, so the class is its scope and '
+      + 'is NOT on this call site\'s ancestor chain — a strict lexical resolver DECLINES the hop. This '
+      + 'control does not claim the hop is semantically right (the calls are `new DatasetExecutor(…)'
+      + '.execute(…)`, whose receiver `calleePath` erases). It pins the INVARIANT that this repair touches '
+      + 'only COLLISIONS: tighten past that and this goes red, forcing the census delta to be re-measured '
+      + 'instead of narrowed in silence.',
   },
 ];
 

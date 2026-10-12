@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 232 |
-| Object name statically decidable | 157 |
-| Object name chosen at run time | 75 |
-| Against a tenancy-enabled object | 156 |
+| Write call sites | 227 |
+| Object name statically decidable | 155 |
+| Object name chosen at run time | 72 |
+| Against a tenancy-enabled object | 154 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 171 |
+| Threading a tenant context | 166 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 53 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 127 |
+| Threading a decidably elevated context | 122 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 97 |
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-11 at `5d0a4a152`.
+Measured on 2026-10-11 at `be55432f6`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 633 |
+| tracked non-test sources scanned | 632 |
 | engine-shaped types recognised | 72 |
 | declared objects in the registry | 117 |
-| same-named calls subtracted as non-engine | 162 |
+| same-named calls subtracted as non-engine | 161 |
 
 ## Every site
 
@@ -150,12 +150,8 @@ Measured on 2026-10-11 at `5d0a4a152`.
 | `packages/plugins/plugin-auth/src/session-tombstone.ts` | `update` | `objectName` | undecidable | options unreadable | 1 |
 | `packages/plugins/plugin-auth/src/sso-client-secret.ts` | `update` | `sys_sso_provider` | disabled | elevated | 1 |
 | `packages/plugins/plugin-email/src/attachment-reclaim.ts` | `update` | `sys_email` | enabled | elevated | 1 |
-| `packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts` | `insert` | `object` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts` | `update` | `object` | undecidable | elevated | 2 |
 | `packages/plugins/plugin-email/src/email-plugin.ts` | `insert` | `sys_email` | enabled | elevated | 1 |
 | `packages/plugins/plugin-email/src/email-plugin.ts` | `update` | `sys_email` | enabled | elevated | 1 |
-| `packages/plugins/plugin-email/src/email-plugin.ts` | `insert` | `sys_email_template` | enabled | elevated | 1 |
-| `packages/plugins/plugin-email/src/email-plugin.ts` | `update` | `sys_email_template` | enabled | elevated | 1 |
 | `packages/plugins/plugin-pinyin-search/src/companion-projection.ts` | `update` | `schema.name` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/auto-org-admin-grant.ts` | `delete` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/auto-org-admin-grant.ts` | `insert` | `object` | undecidable | elevated | 1 |

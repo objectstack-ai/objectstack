@@ -134,9 +134,10 @@ describe('builtin node configSchemas — designer parity (#3304)', () => {
    *    would emit the entire FlowNode/FlowEdge definition nested here, and the
    *    designer would try to render a property form for a sub-graph that is
    *    edited on the CANVAS.
-   *  - **Zod-only constraints stay out of the form.** `collection` is
-   *    `z.string().min(1)` and `iteratorVariable` is `.default('item')`, yet the
-   *    form publishes neither `minLength` nor `default`.
+   *  - **Zod-only constraints stay out of the form.** `iteratorVariable` is
+   *    `.min(1).default('item')`, yet the form publishes neither `minLength`
+   *    nor `default` (and `collection`, a list or a CEL envelope since #19939,
+   *    publishes neither arm's shape).
    *
    * So these are not redundant copies pending de-duplication; they are a
    * different artifact with a different job (drive a form vs. validate a value),
@@ -164,9 +165,13 @@ describe('builtin node configSchemas — designer parity (#3304)', () => {
       }
     }
 
-    it('loop: template collection, bounded iterations, opaque body', () => {
+    // [#19939] `collection` is a value slot (a CEL value envelope or an inline
+    // array): `xExpression: 'value'` and no `type`, where it was a single-brace
+    // `'template'` string until stage S3.
+    it('loop: value-slot collection, bounded iterations, opaque body', () => {
       const schema = schemaOf(engine2, 'loop');
-      expect(schema.properties?.collection?.xExpression).toBe('template');
+      expect(schema.properties?.collection?.xExpression).toBe('value');
+      expect(schema.properties?.collection?.type).toBeUndefined();
       expect(schema.properties?.maxIterations?.type).toBe('integer');
       expect(schema.properties?.maxIterations?.minimum).toBe(1);
       expect(schema.properties?.maxIterations?.maximum).toBe(LOOP_MAX_ITERATIONS_CEILING);
@@ -174,10 +179,11 @@ describe('builtin node configSchemas — designer parity (#3304)', () => {
     });
 
     it('loop: the form does NOT carry the Zod-only string constraints', () => {
-      // `LoopConfigSchema.collection` is `z.string().min(1)` and
-      // `iteratorVariable` is `.default('item')`. Generating the form from that
-      // Zod would publish `minLength: 1` / `default: 'item'`, which this form has
-      // never advertised. Pinned so such a change is a decision, not a side effect.
+      // `LoopConfigSchema.iteratorVariable` is `.min(1).default('item')`, and
+      // `collection` was `z.string().min(1)` until #19939 made it a list or a
+      // CEL envelope. Generating the form from that Zod would publish
+      // `minLength: 1` / `default: 'item'`, which this form has never
+      // advertised. Pinned so such a change is a decision, not a side effect.
       const schema = schemaOf(engine2, 'loop');
       expect(schema.properties?.collection?.minLength).toBeUndefined();
       expect(schema.properties?.iteratorVariable?.minLength).toBeUndefined();

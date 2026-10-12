@@ -459,21 +459,16 @@ export function validateReadonlyHookWrites(
             `body's ${call} writes readonly field '${w.field}', silently stripped on a non-system trigger` +
             (isCreate ? `, ${READONLY_INSERT_STRIP_OUTCOME}` : '') +
             loc.messageSuffix,
+          // [#22161] One remedy line per verb: the two routes and the
+          // refusal of sudo(). Why runAs: 'system' lands the write, why the
+          // own-hook stamp survives, why sudo() is a TypeError from a body,
+          // and the drop-the-field / drop-readonly alternatives are
+          // `os explain hook-api-update-readonly-field`.
           hint: isCreate
-            ? `Seeding a readonly column at create time is a SYSTEM act. To keep writing it from here, ` +
-              `declare runAs: 'system' on this hook: the strip skips a system context, so the write lands, ` +
-              `and the triggering user is still stamped on the record. Or stamp it on '${objectName}''s OWN ` +
-              `beforeInsert hook - ctx.input.${w.field} = ... is a server value and survives the strip. ` +
-              `Note that ctx.api.sudo() is NOT an option from a body: sudo() lives on the in-process ` +
-              `ScopedContext and is not marshalled into the sandbox, so calling it here is a TypeError at ` +
-              `run time. Otherwise drop '${w.field}' from this payload, or drop readonly:true from the field.`
-            : `If automation is meant to maintain '${w.field}', stamp it on the record's OWN hook - ` +
-              `ctx.input.${w.field} = ... in beforeInsert/beforeUpdate survives the strip, and is the ` +
-              `recommended shape. To keep writing it CROSS-OBJECT from here, declare runAs: 'system' on ` +
-              `this hook: the strip skips a system context, so the write lands, and the triggering user ` +
-              `is still stamped on the record. Note that ctx.api.sudo() is NOT an option from a body: ` +
-              `sudo() lives on the in-process ScopedContext and is not marshalled into the sandbox, so ` +
-              `calling it here is a TypeError at run time. Otherwise drop readonly:true from '${w.field}'.`,
+            ? `Declare runAs: 'system' on this hook, or stamp it in the beforeInsert hook of '${objectName}' ` +
+              `(ctx.input.${w.field} = ...); ctx.api.sudo() is no option from a body`
+            : `Stamp it on the record's OWN hook (ctx.input.${w.field} = ... in beforeInsert/beforeUpdate), or ` +
+              `declare runAs: 'system' on this hook; ctx.api.sudo() is no option from a body`,
         });
       } else if (meta.readonlyWhen && !isCreate) {
         reported.add(dedupeKey);
@@ -490,14 +485,14 @@ export function validateReadonlyHookWrites(
           message:
             `body's ${call} writes readonlyWhen field '${w.field}', silently stripped ${READONLY_WHEN_STRIP_SCOPE}` +
             loc.messageSuffix,
+          // [#22161] One remedy line: the two routes, and the refusal of
+          // elevation. Why a derived value lands on a locked record, why no
+          // system context waives the lock, why sudo() is a TypeError from a
+          // body, and the drop-the-field alternative are
+          // `os explain hook-api-update-readonly-when-field`.
           hint:
-            `Either confirm this call only targets records whose readonlyWhen predicate is FALSE, or ` +
-            `derive '${w.field}' in a beforeUpdate hook on '${objectName}' - a hook-derived value is not ` +
-            `caller-supplied and does land, even on a locked record. Elevation is not a workaround here: ` +
-            `a system context does not waive the conditional lock (unlike the static readonly strip), so ` +
-            `neither runAs: 'system' nor ctx.api.sudo() helps - and sudo() is not marshalled into the ` +
-            `sandbox in any case (calling it from a body is a TypeError at run time). Otherwise ` +
-            `drop '${w.field}' from this payload. This warning never blocks a build.`,
+            `Derive '${w.field}' in a beforeUpdate hook on '${objectName}', or target only records whose ` +
+            `readonlyWhen predicate is FALSE; runAs: 'system' and sudo() do not waive this lock`,
         });
       }
     }

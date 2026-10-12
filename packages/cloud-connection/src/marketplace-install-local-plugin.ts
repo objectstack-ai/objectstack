@@ -121,7 +121,19 @@ import {
     protocolIncompatibleAnswer,
     ProtocolIncompatibleError,
     type ProtocolIncompatibleDiagnostic,
+    // [#15204 W2] ADR-0131 D3's one predicate, asked here per declared catalog
+    // type: the same sentence, the same rung, as every catalog write door.
+    walledCatalogWriteVerdict,
+    SECURITY_CATALOG_TYPES,
 } from '@objectstack/metadata-core';
+// [#15204 W2] The engine's own reading of what a manifest declares, and of
+// what the running registry holds under a package, so this door judges the
+// declarations the engine registers and not a second reading of them.
+import {
+    declaredSecurityCatalogNames,
+    findPackageHeldSecurityCatalogNames,
+    type DeclaredSecurityCatalogName,
+} from '@objectstack/objectql';
 import { resolveCloudUrl } from './cloud-url.js';
 import { resolveMarketplacePublicBaseUrl } from './marketplace-public-url.js';
 import { join } from 'node:path';
@@ -399,6 +411,20 @@ function organizationWallActive(ctx: PluginContext): boolean {
  */
 const NO_ACTIVE_ORGANIZATION_CODE = 'PERMISSION_DENIED';
 const NO_ACTIVE_ORGANIZATION_STATUS = 403;
+
+/**
+ * [#15204 W2] What an admitted mutating request carries past
+ * `requireInstallCapability`: the acting user, plus the two inputs ADR-0131
+ * D3's refusal needs, both off the admission's single authorization read.
+ */
+interface InstallAdmission {
+    ok: true;
+    userId: string;
+    /** The caller's ADR-0095 posture rung. */
+    callerPosture: unknown;
+    /** The EFFECTIVE tenancy posture; `undefined` when no `tenancy` service is registered. */
+    tenancyPosture: TenancyPosture | undefined;
+}
 
 /** The sample-data doors that seed or purge under the caller's active organization. */
 type SampleDataDoor = 'install' | 'reseed' | 'purge';
@@ -1115,6 +1141,19 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const manifestId = declaredId.data;
         if (inlineManifest) packageId = manifestId;
 
+        // [#15204 W2] ADR-0131 D3: under a wall, a package whose incoming or
+        // installed version carries a catalog item is the operator's to
+        // install, upgrade or replace. Asked before any later step of this
+        // install reads or writes anything.
+        {
+            const installed = this.ledger.read(manifestId).entry?.manifest;
+            const walled = this.refuseWalledCatalogPackage(
+                c, ctx, 'Installing', manifestId, admission,
+                installed === undefined ? [manifest] : [manifest, installed],
+            );
+            if (walled) return walled;
+        }
+
         // 1c. [#21762] ⭐ ADR-0087 D1'S PROTOCOL HANDSHAKE, before anything is
         //     registered, written or synced: the same `assertProtocolCompat`
         //     the other package-install door (`POST /api/v1/packages`) and the
@@ -1636,6 +1675,16 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         }
         if (!this.ledger.has(manifestId)) {
             return c.json({ success: false, error: { code: 'RESOURCE_NOT_FOUND', message: `No marketplace install for ${manifestId}.` } }, 404);
+        }
+        // [#15204 W2] ADR-0131 D3: under a wall, uninstalling a package that
+        // carries a catalog item is the operator's: it removes those items
+        // from every organization's catalog. Asked before the ledger is touched.
+        {
+            const walled = this.refuseWalledCatalogPackage(
+                c, ctx, 'Uninstalling', manifestId, admission,
+                [this.ledger.read(manifestId).entry?.manifest],
+            );
+            if (walled) return walled;
         }
         try {
             this.ledger.remove(manifestId);
@@ -2800,7 +2849,14 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     private resolveInstallPrincipal = async (
         c: any,
         ctx: PluginContext,
-    ): Promise<{ userId: string; systemPermissions: string[] } | null> => {
+    ): Promise<{
+        userId: string;
+        systemPermissions: string[];
+        /** [#15204 W2] The ADR-0095 posture rung the resolver derived. */
+        posture?: unknown;
+        /** [#15204 W2] The EFFECTIVE tenancy posture this admission resolved. */
+        tenancyPosture?: TenancyPosture;
+    } | null> => {
         const headers = c?.req?.raw?.headers;
         if (!headers) return null;
         try {
@@ -2841,6 +2897,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             return {
                 userId: String(authz.userId),
                 systemPermissions: Array.isArray(authz.systemPermissions) ? authz.systemPermissions : [],
+                posture: authz.posture,
+                tenancyPosture,
             };
         } catch (err) {
             // [commit 6a180e42d] `null` here means "nobody is authenticated", which is
@@ -2889,7 +2947,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         c: any,
         ctx: PluginContext,
         action: string,
-    ): Promise<{ ok: true; userId: string } | { ok: false; response: Response }> => {
+    ): Promise<InstallAdmission | { ok: false; response: Response }> => {
         const principal = await this.resolveInstallPrincipal(c, ctx);
         if (!principal) return { ok: false, response: this.refuseUnauthenticated(c) };
         if (!principal.systemPermissions.includes(INSTALL_LOCAL_CAPABILITY)) {
@@ -2908,7 +2966,101 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 }, 403),
             };
         }
-        return { ok: true, userId: principal.userId };
+        return {
+            ok: true,
+            userId: principal.userId,
+            callerPosture: principal.posture,
+            tenancyPosture: principal.tenancyPosture,
+        };
+    };
+
+    /**
+     * [#15204 W2] ADR-0131 D3 at the package door: under a wall the security
+     * catalog is the platform operator's, and a package that declares a
+     * position, a permission set or a capability is the operator's instrument.
+     *
+     * Measured on `main` before this refusal: an organization's
+     * `manage_metadata` holder (rung `TENANT_ADMIN`) upgraded an
+     * operator-installed package at a new version, adding `manage_users` to a
+     * permission set another organization's member held, and that member
+     * resolved `manage_users` next; the same holder's uninstall took the set
+     * away from them. `refuseSecurityCatalogNameConflicts` refuses only a
+     * SHADOW of a name another holder has, never a write by the package that
+     * holds it.
+     *
+     * So the WHOLE package is refused, before any write, when any of
+     * `manifests` (the incoming version, the installed one, or both) declares
+     * a catalog item, or the running registry holds one under `manifestId`.
+     * A partial install is not well-formed: a package is registered whole.
+     * The decision is {@link walledCatalogWriteVerdict}'s, never restated. It
+     * is asked FIRST, for the first catalog type: its answer does not vary
+     * across catalog types, so when it admits this caller (under `single`,
+     * with no `tenancy` service, or for the `PLATFORM_ADMIN` rung) nothing is
+     * read and the door behaves exactly as before. Only a refused caller's
+     * package is read, and the refusal names the first type it declares. A
+     * package with no catalog item is admitted. The answer is the sibling
+     * refusals' envelope, `403 FORBIDDEN`.
+     */
+    private refuseWalledCatalogPackage = (
+        c: any,
+        ctx: PluginContext,
+        action: string,
+        manifestId: string,
+        admission: InstallAdmission,
+        manifests: readonly unknown[],
+    ): Response | null => {
+        const verdictFor = (type: string) => walledCatalogWriteVerdict({
+            type,
+            tenancyPosture: admission.tenancyPosture,
+            callerPosture: admission.callerPosture,
+        });
+        if (verdictFor(SECURITY_CATALOG_TYPES[0]!).allowed) return null;
+        const declared = this.catalogItemsOf(ctx, manifestId, manifests);
+        if (declared.length === 0) return null;
+        for (const type of SECURITY_CATALOG_TYPES) {
+            if (!declared.some((item) => item.type === type)) continue;
+            const verdict = verdictFor(type);
+            if (verdict.allowed) continue;
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] refused ${action} ${manifestId} for ${admission.userId}: `
+                + `the package carries security catalog items under the '${admission.tenancyPosture}' posture (ADR-0131 D3)`,
+            );
+            return c.json({
+                success: false,
+                error: {
+                    code: 'FORBIDDEN',
+                    message: `${action} "${manifestId}" is refused: the package carries security catalog items. ${verdict.message}`,
+                    details: { manifestId, catalogItems: declared },
+                },
+            }, 403);
+        }
+        return null;
+    };
+
+    /**
+     * [#15204 W2] Every catalog item `manifests` declare, plus every position
+     * and permission-set name the running registry holds under `manifestId`
+     * (a package the registry holds outside this door's ledger, such as a
+     * writable runtime package an operator authored items into). Read-only.
+     */
+    private catalogItemsOf = (
+        ctx: PluginContext,
+        manifestId: string,
+        manifests: readonly unknown[],
+    ): DeclaredSecurityCatalogName[] => {
+        const out = new Map<string, DeclaredSecurityCatalogName>();
+        const add = (item: DeclaredSecurityCatalogName) => out.set(`${item.type}:${item.name}`, item);
+        for (const manifest of manifests) for (const item of declaredSecurityCatalogNames(manifest)) add(item);
+        let registry: Parameters<typeof findPackageHeldSecurityCatalogNames>[0] | undefined;
+        try {
+            registry = (ctx.getService('objectql') as { registry?: typeof registry } | undefined)?.registry;
+        } catch { /* no data engine: the manifests are the whole reading */ }
+        if (registry) {
+            for (const held of findPackageHeldSecurityCatalogNames(registry)) {
+                if (held.packageIds.includes(manifestId)) add({ type: held.catalogType, name: held.name });
+            }
+        }
+        return [...out.values()];
     };
 
     /**

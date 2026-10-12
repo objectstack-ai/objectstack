@@ -83,7 +83,7 @@ async function boot(mailValues: Record<string, Resolved>, opts: any = {}) {
     }),
   };
   const ctx = fakeCtx(services);
-  const plugin = new EmailServicePlugin({ provider: 'log', seedTemplates: false, ...opts });
+  const plugin = new EmailServicePlugin({ provider: 'log', ...opts });
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
   await ctx.fire('kernel:ready');
@@ -101,7 +101,6 @@ describe('EmailServicePlugin.init — declared default sender', () => {
   it('refuses to boot with the exact OS_EMAIL_FROM shape that shipped the defect', async () => {
     const plugin = new EmailServicePlugin({
       provider: 'log',
-      seedTemplates: false,
       defaultFrom: { name: 'ObjectOS Local', address: 'noreply@localhost' },
     });
     await expect(plugin.init(ctxFor() as never)).rejects.toThrow(/noreply@localhost/);
@@ -110,7 +109,6 @@ describe('EmailServicePlugin.init — declared default sender', () => {
   it('names the consequence and the fix, not just the address', async () => {
     const plugin = new EmailServicePlugin({
       provider: 'log',
-      seedTemplates: false,
       defaultFrom: 'noreply@localhost',
     });
     const err = await plugin.init(ctxFor() as never).then(
@@ -125,7 +123,7 @@ describe('EmailServicePlugin.init — declared default sender', () => {
   });
 
   it('refuses an address with no domain at all', async () => {
-    const plugin = new EmailServicePlugin({ provider: 'log', seedTemplates: false, defaultFrom: 'noreply' });
+    const plugin = new EmailServicePlugin({ provider: 'log', defaultFrom: 'noreply' });
     await expect(plugin.init(ctxFor() as never)).rejects.toThrow(/not a valid email address/);
   });
 
@@ -133,14 +131,13 @@ describe('EmailServicePlugin.init — declared default sender', () => {
     const ctx = ctxFor();
     const plugin = new EmailServicePlugin({
       provider: 'log',
-      seedTemplates: false,
       defaultFrom: { name: 'ObjectOS Local', address: 'no-reply@objectstack.local' },
     });
     await expect(plugin.init(ctx as never)).resolves.toBeUndefined();
   });
 
   it('boots with NO declared sender — callers may always pass input.from', async () => {
-    const plugin = new EmailServicePlugin({ provider: 'log', seedTemplates: false });
+    const plugin = new EmailServicePlugin({ provider: 'log' });
     await expect(plugin.init(ctxFor() as never)).resolves.toBeUndefined();
   });
 });

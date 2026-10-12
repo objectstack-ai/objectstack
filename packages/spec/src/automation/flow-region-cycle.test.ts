@@ -60,7 +60,7 @@ function importEagerly(first: string, second: string): string {
        const flow = FlowSchema.parse({
          name: 'c', label: 'C', type: 'schedule',
          nodes: [{ id: 'l', type: 'loop', label: 'L', config: {
-           collection: '{rows}', iteratorVariable: 'row',
+           collection: { dialect: 'cel', source: 'rows' }, iteratorVariable: 'row',
            body: { nodes: [{ id: 'n', type: 'log', label: 'N' }],
                    edges: [{ id: 'b', source: 'n', target: 'n', condition: 'row.x > 1' }] },
          } }],

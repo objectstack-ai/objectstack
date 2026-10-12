@@ -2234,7 +2234,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'customizationPolicies` / `.mergeStrategy` and `MetadataManagerConfig.persistence.'
       + 'overlayWritable` are retiredKey tombstones (no D2 conversion — plugin/manager '
       + 'configs are not stack collection members, the additionalTypes reasoning). The '
-      + 'customization that actually ships: ADR-0005\'s org overlay and ADR-0126\'s '
+      + 'customization that actually ships: ADR-0005\'s environment overlay and ADR-0126\'s '
       + 'packaged-metadata model.',
   },
   {
@@ -2260,6 +2260,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'seeded once from `DEFAULT_METADATA_TYPE_REGISTRY` and never merged with it, so '
       + 'authoring it configured nothing. A kind enters the live set as a side effect of '
       + 'registering an item of that kind.',
+  },
+  {
+    id: 'metadata-type-registry-allow-org-override-renamed',
+    order: 94,
+    text:
+      'It also renames the metadata type registry\'s `allowOrgOverride` to '
+      + '`allowEnvironmentOverlay`, on `DEFAULT_METADATA_TYPE_REGISTRY` and on the '
+      + '`GET /meta/types` wire field that projects it, in one landing and with no window in '
+      + 'which both spellings are accepted or served: ADR-0131 D6 retired the per-organization '
+      + 'overlay axis, and the flag now decides one environment-scope question at every door — '
+      + 'whether an environment may overlay an item a managed package ships. The old key is a '
+      + 'retiredKey tombstone registered in RETIRED_KEYS_BY_MAJOR[18] with one D3 semantic entry '
+      + 'and no D2 conversion: no manifest, stack or stored row can carry a registry entry. Every '
+      + 'value is unchanged.',
   },
   {
     id: 'object-grid-default-filters-retired',

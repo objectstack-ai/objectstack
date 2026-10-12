@@ -91,7 +91,7 @@ const PARENT_VARIABLES = [
 /** The three positions: node type, the map's key, a config with the map put in. */
 const POSITIONS = [
   ['subflow', 'input', (map: Record<string, unknown>) => ({ flowName: 'child', outputVariable: 'out', input: map })],
-  ['map', 'input', (map: Record<string, unknown>) => ({ flowName: 'child', collection: '{rows}', outputVariable: 'out', input: map })],
+  ['map', 'input', (map: Record<string, unknown>) => ({ flowName: 'child', collection: { dialect: 'cel', source: 'rows' }, outputVariable: 'out', input: map })],
   ['script', 'inputs', (map: Record<string, unknown>) => ({ function: 'echo', outputVariable: 'out', inputs: map })],
 ] as const;
 
@@ -153,7 +153,7 @@ describe('2. each prescribed envelope is evaluated in the parent\'s scope and ha
     engine.registerFlow('parent', flowWith('parent', {
       id: 'n', type: 'map',
       config: {
-        flowName: 'child', collection: '{rows}', outputVariable: 'out',
+        flowName: 'child', collection: { dialect: 'cel', source: 'rows' }, outputVariable: 'out',
         input: { owner: { dialect: 'cel', source: 'item.owner' }, row: { dialect: 'cel', source: 'item' } },
       },
     }, PARENT_VARIABLES));
@@ -227,7 +227,7 @@ describe('3. the callee\'s default: the guarded form SUPPLIES `null`, which wins
     const engine = makeEngine();
     engine.registerFlow('child', echoChild('child', [{ name: 'd', defaultValue: 'dflt' }]));
     engine.registerFlow('parent', flowWith('parent', {
-      id: 'n', type: 'map', config: { flowName: 'child', collection: '{rows}', outputVariable: 'out', input: { d: GUARDED } },
+      id: 'n', type: 'map', config: { flowName: 'child', collection: { dialect: 'cel', source: 'rows' }, outputVariable: 'out', input: { d: GUARDED } },
     }, PARENT_VARIABLES));
     const run = await engine.execute('parent', { params: { rows: [1] } } as any);
     expect(run.success, run.error).toBe(true);

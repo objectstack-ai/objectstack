@@ -51,7 +51,8 @@
  * pinned class-wide by `retired-key-migrate-sentence.test.ts` over in
  * `packages/spec`. A copy here would be a second wording free to drift from the
  * parse-time one the same author sees through the other door, so the hint is
- * resolved from `ObjectPermissionSchema`'s own shape at call time. An
+ * resolved from `ObjectPermissionSchema`'s own shape at call time — [#22161]
+ * and cut to its remedy sentence ({@link retiredKeyRemedy}), never retyped. An
  * unresolvable prescription yields NO finding rather than a hint this module
  * invented — the same refusal to invent that `lintLivenessProperties` applies
  * to an unreadable ledger (which since #19276 it also REPORTS once, rather than
@@ -110,6 +111,27 @@ export function retiredKeyPrescription(key: string): string | null {
 }
 
 /**
+ * [#22161] The `fix:` line, cut from the retirement's own prescription: its
+ * "Delete the key" sentence up to its end, and up to its first ` — ` when the
+ * whole sentence would run past 200 characters (both keys' do: the clause after
+ * the dash, on what stays denied, is the explanation's). It cuts and never
+ * rewrites, so the single-wording discipline above holds; a prescription with
+ * no such sentence is returned whole rather than replaced by an invented line.
+ */
+export function retiredKeyRemedy(prescription: string): string {
+  const at = prescription.search(/\bdelete the key\b/i);
+  if (at < 0) return prescription;
+  let remedy = prescription.slice(at);
+  const stop = remedy.indexOf('. ');
+  remedy = stop >= 0 ? remedy.slice(0, stop) : remedy.replace(/\.$/, '');
+  if (remedy.length > 200) {
+    const dash = remedy.indexOf(' — ');
+    if (dash > 0) remedy = remedy.slice(0, dash);
+  }
+  return remedy.charAt(0).toUpperCase() + remedy.slice(1);
+}
+
+/**
  * Flag every authored object-permission entry carrying a retired lifecycle
  * key at its inert residue value. Advisory only — returns findings, never
  * throws, never emits `error`.
@@ -131,8 +153,8 @@ export function validateRetiredPermissionResidue(stack: AnyRec): RetiredPermissi
         // compares. `0`/`''`/`null` are NOT this value and are refused at the
         // parse with the prescription already attached.
         if (entry[key] !== residue) continue;
-        const hint = retiredKeyPrescription(key);
-        if (hint === null) continue;
+        const prescription = retiredKeyPrescription(key);
+        if (prescription === null) continue;
         findings.push({
           rule: PERMISSION_RETIRED_LIFECYCLE_RESIDUE,
           severity: 'warning',
@@ -144,7 +166,7 @@ export function validateRetiredPermissionResidue(stack: AnyRec): RetiredPermissi
           message:
             `sets \`${key}: ${JSON.stringify(residue)}\`, the retired default of a key removed in ` +
             '@objectstack/spec 17, which the parse strips in silence, so this line grants nothing',
-          hint,
+          hint: retiredKeyRemedy(prescription),
         });
       }
     }

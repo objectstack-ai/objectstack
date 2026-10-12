@@ -11,7 +11,7 @@
  * `plugin-auth` owns the SENDING half (that it goes out, to the old address,
  * without gating — `change-email-delete-user-wiring.test.ts`). This file owns
  * the AUTHORING half: that the row exists in each locale, that it is
- * seeded/resolvable rather than merely exported, and that the prose obeys the
+ * registered/resolvable rather than merely exported, and that the prose obeys the
  * ruling's two content constraints.
  *
  * Every expectation is written as a literal. Deriving the locale set or the
@@ -44,8 +44,8 @@ describe('#8019 — auth.email_change_notice ships in all four locales', () => {
     expect(new Set(rows.map((t) => t.name))).toEqual(new Set([TEMPLATE_NAME]));
   });
 
-  it('is seeded with the built-in auth templates, so the send path can resolve it', () => {
-    // Exported-but-unseeded would pass every other assertion here and still
+  it('is registered with the built-in auth templates, so the send path can resolve it', () => {
+    // Exported-but-unregistered would pass every other assertion here and still
     // throw TEMPLATE_NOT_FOUND on the first real change-email request.
     const seeded = BUILTIN_AUTH_TEMPLATES.filter((t) => t.name === TEMPLATE_NAME);
     expect(seeded.map((t) => t.locale).sort()).toEqual([...SUPPORTED_LOCALES].sort());
