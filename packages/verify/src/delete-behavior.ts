@@ -44,11 +44,12 @@
 // control on the other direction: a delete that reached a record it was not
 // asked about is a contradiction too, whatever the declaration says.
 //
-// Fixtures are synthesized the way the CRUD family synthesizes its records
-// (`deriveCrudCases` / `fillRelationalRefs`), and created through the REST
-// door as the same caller. A field whose holder or target cannot be built from
-// the app's metadata is reported `not-derivable` with the reason; a fixture the
-// app refuses at run time leaves the probe `not-run`, with the refusal.
+// Fixtures reuse the values the CRUD family synthesizes (`deriveCrudCases` /
+// `fillRelationalRefs`), cut down to the fields the object requires (see
+// `fixtureBody`), and are created through the REST door as the same caller. A
+// field whose holder or target cannot be built from the app's metadata is
+// reported `not-derivable` with the reason; a fixture the app refuses at run
+// time leaves the probe `not-run`, with the refusal.
 //
 // ## Attribution is the control
 //
@@ -273,17 +274,44 @@ function uniqueFields(objectDef: any): Set<string> {
   return out;
 }
 
-/** The body with every unique-constrained value made distinct by `n`, so fixtures do not collide. */
-function variedBody(body: Record<string, unknown>, objectDef: any, n: number): Record<string, unknown> {
+const DAY_MS = 86_400_000;
+
+/** A synthesized `date` / `datetime` value moved `days` later, in the same spelling. */
+function laterBy(value: unknown, days: number): unknown {
+  if (typeof value !== 'string' || days === 0) return value;
+  const at = Date.parse(value);
+  if (Number.isNaN(at)) return value;
+  const moved = new Date(at + days * DAY_MS).toISOString();
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? moved.slice(0, 10) : moved;
+}
+
+/**
+ * The smallest record of `objectDef` the CRUD derivation can offer: the values
+ * `deriveCrudCases` synthesized for the fields the object REQUIRES (its
+ * required relations already filled), and nothing else, so every optional
+ * field takes the app's own default instead of a synthesized value that some
+ * rule of the app may refuse. Two adjustments keep fixtures from colliding with
+ * each other and with the commonest record rules, and decide nothing about the
+ * delete: each `date` / `datetime` value is one day later than the one declared
+ * before it (a "starts before it ends" rule holds), and each unique-constrained
+ * value is made distinct by `n`.
+ */
+function fixtureBody(body: Record<string, unknown>, objectDef: any, n: number): Record<string, unknown> {
   const unique = uniqueFields(objectDef);
-  const out: Record<string, unknown> = { ...body };
-  for (const [name, value] of Object.entries(body)) {
-    if (!unique.has(name)) continue;
-    if (typeof value === 'number') out[name] = value + n;
-    else if (typeof value === 'string') {
-      const at = value.indexOf('@');
-      out[name] = at > 0 ? `${value.slice(0, at)}-${n}${value.slice(at)}` : `${value}-${n}`;
+  const out: Record<string, unknown> = {};
+  let dates = 0;
+  for (const [name, def] of Object.entries<any>(objectDef?.fields ?? {})) {
+    if (def?.required !== true || !(name in body)) continue;
+    let value = body[name];
+    if (def?.type === 'date' || def?.type === 'datetime') value = laterBy(value, dates++);
+    if (unique.has(name)) {
+      if (typeof value === 'number') value = value + n;
+      else if (typeof value === 'string') {
+        const at = value.indexOf('@');
+        value = at > 0 ? `${value.slice(0, at)}-${n}${value.slice(at)}` : `${value}-${n}`;
+      }
     }
+    out[name] = value;
   }
   return out;
 }
@@ -447,7 +475,7 @@ export async function runDeleteBehaviorProofs(
     }
     const { body, missing } = fillRelationalRefs(c, createdIds);
     if (missing) return { reason: missing };
-    const row = { ...variedBody(body, objectDefs.get(object), ++variant), ...overrides };
+    const row = { ...fixtureBody(body, objectDefs.get(object), ++variant), ...overrides };
     let res: Response;
     try {
       res = await stack.apiAs(token, 'POST', `/data/${object}`, row);
