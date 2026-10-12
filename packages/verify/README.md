@@ -96,7 +96,8 @@ probed through the system door only, which keeps an explicit value. Without
 cross-organization leg is reported **not run**, with the reason, on the
 report's `boot` — run it org-scoped to prove that `true` / `'organization'`
 lets two organizations hold one value (the walled boot needs a declared
-membership policy, `OS_AUTH_MEMBERSHIP_POLICY`). A refusal proves the
+membership policy: the `auth.membership_policy` setting or
+`OS_AUTH_MEMBERSHIP_POLICY`). A refusal proves the
 collision only when it is the platform's unique refusal and it is this field's:
 it names the field, or it names none (a per-organization constraint is an
 expression index, which the driver reports by index name) and the same record
