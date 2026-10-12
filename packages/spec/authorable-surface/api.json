@@ -955,6 +955,7 @@
     "api/ImportUnmanagedPackageResponse:namespace",
     "api/ImportUnmanagedPackageResponse:sourcePackageId",
     "api/ImportUnmanagedPackageResponse:sourceVersion",
+    "api/ImportUnmanagedPackageResponse:strippedLocks",
     "api/ImportUnmanagedPackageResponse:targetPackageId",
     "api/ImportValidationConfig:dateFormat",
     "api/ImportValidationConfig:deduplication",

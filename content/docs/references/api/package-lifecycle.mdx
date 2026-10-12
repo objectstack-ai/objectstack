@@ -144,6 +144,7 @@ const result = DiscardPackageDraftsResponseSchema.parse(data);
 | **namespace** | `string` | ✅ | The base's namespace — the SOURCE package's, kept so every copied object name stays valid. |
 | **copiedCount** | `number` | ✅ | How many items were copied. |
 | **copied** | `{ type: string; name: string }[]` | ✅ | Every item that was copied, in the order it was written. |
+| **strippedLocks** | `{ type: string; name: string; lock: Enum<'no-overlay' \| 'no-delete' \| 'full'>; reason?: string }[]` | ✅ | Every protection lock the package shipped on a copied item and the copy does not keep, in the order the items were written. Empty when the package locked nothing. |
 
 ### Nested Shape: `ImportUnmanagedPackageResponse.copied[number]`
 
@@ -151,6 +152,15 @@ const result = DiscardPackageDraftsResponseSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **type** | `string` | ✅ | Metadata type of the copied item. |
 | **name** | `string` | ✅ | Name of the copied item. |
+
+### Nested Shape: `ImportUnmanagedPackageResponse.strippedLocks[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type of the copied item. |
+| **name** | `string` | ✅ | Name of the copied item. |
+| **lock** | `Enum<'no-overlay' \| 'no-delete' \| 'full'>` | ✅ | The `_lock` the package shipped on the item. The copy carries no lock. |
+| **reason** | `string` | optional | The `_lockReason` the package gave, verbatim. Absent when it gave none. |
 
 
 ---
