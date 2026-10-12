@@ -7,8 +7,19 @@ import {
   CONSUMED_WIDGET_OPTION_KEYS,
   UNCONSUMED_WIDGET_OPTION,
 } from '@objectstack/sdui-parser';
-import { validateDashboardWidgetOptions } from './validate-dashboard-widget-options.js';
+import { validateDashboardWidgetOptions as validateDashboardWidgetOptionsUnrecorded } from './validate-dashboard-widget-options.js';
 import { AUTHORING_COMMANDS, authoringRulesFor, runAuthoringRules } from './authoring-rules.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Every direct call below records what it fired, and the last cases
+// in this file hold each recorded `fix:` line to one line of at most 200
+// characters. Run the whole file: those cases read what the cases above fired.
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
+const validateDashboardWidgetOptions: typeof validateDashboardWidgetOptionsUnrecorded = (...args) => {
+  const findings = validateDashboardWidgetOptionsUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 type AnyRec = Record<string, unknown>;
 
@@ -131,5 +142,36 @@ describe('the registry runs it on all three authoring commands', () => {
     );
     expect(hits).toHaveLength(1);
     expect(hits[0]).toMatchObject({ severity: 'warning', path: 'dashboards[0].widgets[0].options' });
+  });
+});
+
+// [#22161] Slice 14: the `fix:` line names the remedy and the declared homes in
+// one line; which home serves what, the keys most often believed to work and the
+// `suppressWarnings` escape are `os explain unconsumed-widget-option`, an entry
+// this id gains.
+describe('[#22161] one-line fix — unconsumed-widget-option', () => {
+  it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === UNCONSUMED_WIDGET_OPTION);
+    // Coverage control: the id fired.
+    expect(converted.length).toBeGreaterThan(0);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('`os explain unconsumed-widget-option` carries what the `fix:` line no longer says', () => {
+    const entry = explainRule(UNCONSUMED_WIDGET_OPTION);
+    expect(entry, 'no `os explain unconsumed-widget-option` entry').toBeDefined();
+    const text = entry!.paragraphs.join('\n');
+    for (const fact of [
+      "a number's face is the dataset measure's `format` and `currency`",
+      "a tile's accent is the widget's `colorVariant`",
+      "a chart's look is the widget's `chartConfig`",
+      "`suppressWarnings: ['unconsumed-widget-option']`",
+      'SDUI save gate',
+    ]) {
+      expect(text, `explanation names ${fact}`).toContain(fact);
+    }
   });
 });

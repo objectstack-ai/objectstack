@@ -93,14 +93,14 @@ import { findClosestMatches, formatSuggestion } from '@objectstack/spec/shared';
 import {
   createSourceFileChecked,
   describeParseFailure,
-  PARSE_FAILURE_HINT,
+  PARSE_FAILURE_FIX,
   type SourceParseFailure,
 } from './checked-parse.js';
 
 import {
   SYSTEM_FIELDS,
   indexUnprovisionedAnchors,
-  unprovisionedAnchorHint,
+  unprovisionedAnchorFix,
   unprovisionedAnchorVerdict,
 } from './system-fields.js';
 import { recordsOf } from './object-graph.js';
@@ -1096,7 +1096,7 @@ export function validateHookBodyWrites(
         // [#22161] One verdict sentence; what a partially recovered tree means
         // for the checks is `os explain hook-body-source-unparseable`.
         message: `${bodyParseFailureVerdict(extracted.parseFailure)}${loc.messageSuffix}`,
-        hint: PARSE_FAILURE_HINT,
+        hint: PARSE_FAILURE_FIX,
       });
     }
 
@@ -1155,7 +1155,7 @@ export function validateHookBodyWrites(
             message:
               unprovisionedAnchorWriteVerdict(anchorObj, w.field, `the body's write to its input`) +
               loc.messageSuffix,
-            hint: unprovisionedAnchorHint(anchorObj, w.field),
+            hint: unprovisionedAnchorFix(anchorObj, w.field),
           });
           continue;
         }
@@ -1201,7 +1201,7 @@ export function validateHookBodyWrites(
             message:
               unprovisionedAnchorWriteVerdict(w.object, w.field, `the body's ${w.method ?? 'update'}(…) write`) +
               loc.messageSuffix,
-            hint: unprovisionedAnchorHint(w.object, w.field),
+            hint: unprovisionedAnchorFix(w.object, w.field),
           });
           continue;
         }
@@ -1240,10 +1240,7 @@ function unionCandidates(targetSets: ReadonlyArray<Set<string> | undefined>): st
 /** Did-you-mean (declared + system columns as candidates) plus the fix. */
 function fixHint(field: string, declared: string[]): string {
   const suggestion = formatSuggestion(findClosestMatches(field, [...declared, ...IMPLICIT_FIELDS]));
-  return (
-    (suggestion ? `${suggestion} ` : '') +
-    `Fix the field name, or declare '${field}' on the object. Only the literal write patterns in ` +
-    `HOOK_BODY_WRITE_PATTERNS are checked — computed keys, spreads and aliased input are not — and this ` +
-    `warning never blocks a build.`
-  );
+  // [#22161] One remedy line; which write shapes are checked, and that the
+  // warning never blocks a build, are `os explain hook-body-write-unknown-field`.
+  return `${suggestion ? `${suggestion} ` : ''}Fix the field name, or declare '${field}' on the object`;
 }

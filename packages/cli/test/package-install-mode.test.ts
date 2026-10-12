@@ -13,6 +13,10 @@
  *  - an unmanaged answer prints what was copied, where and from what — and
  *    none of the managed install's lines (hot-load, the cached manifest that
  *    "re-registers on every boot"), which are not true of a copy;
+ *  - each protection lock the copy dropped prints as one line,
+ *    `TYPE.NAME: LOCK — REASON` (the reason verbatim, the dash and reason
+ *    absent when the package gave none); an answer with no lock, or from a
+ *    runtime that states none, prints no lock line;
  *  - asking for `unmanaged` and getting an answer without it (a runtime that
  *    predates the mode installed the package MANAGED) exits 1, saying so;
  *  - a refusal prints its code beside its status, as every refusal does.
@@ -117,6 +121,41 @@ describe('os package install --install-mode (ADR-0131 D6)', () => {
     expect(out).toContain('sample data was not loaded');
     expect(out).not.toContain('Package installed into the running kernel');
     expect(out).not.toContain('re-registers on every');
+  });
+
+  it('prints each lock the copy dropped as `TYPE.NAME: LOCK — REASON`, the reason verbatim', async () => {
+    stubRuntime({
+      ok: true,
+      status: 200,
+      body: {
+        success: true,
+        data: {
+          ...UNMANAGED_ANSWER,
+          strippedLocks: [
+            { type: 'dashboard', name: 'pipeline_dashboard', lock: 'full', reason: 'Board-pack figures — edit the source package.' },
+            { type: 'app', name: 'crm_app', lock: 'no-delete' },
+          ],
+        },
+      },
+    });
+    const { out, exit } = await runInstall(['--install-mode', 'unmanaged']);
+    expect(exit).toBeUndefined();
+    expect(out).toMatch(/Locks removed:\s+2/);
+    const lines = out.split('\n').map((line) => line.trim());
+    expect(lines).toContain('dashboard.pipeline_dashboard: full — Board-pack figures — edit the source package.');
+    expect(lines).toContain('app.crm_app: no-delete');
+  });
+
+  it('prints no lock line when the copy dropped none, nor for a runtime that states no list', async () => {
+    for (const data of [{ ...UNMANAGED_ANSWER, strippedLocks: [] }, UNMANAGED_ANSWER]) {
+      stubRuntime({ ok: true, status: 200, body: { success: true, data } });
+      const { out, exit } = await runInstall(['--install-mode', 'unmanaged']);
+      expect(exit).toBeUndefined();
+      expect(out).toMatch(/Package copied into the environment \(unmanaged\)/);
+      expect(out).not.toContain('Locks removed');
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
   });
 
   it('CONTROL: a managed answer prints as it always did', async () => {
