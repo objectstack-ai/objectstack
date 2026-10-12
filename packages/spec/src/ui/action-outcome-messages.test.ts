@@ -12,6 +12,9 @@
  * runner default) and the `${result.*}` INTERPOLATION are the console's — the
  * reader is objectstack-ai/objectui#11344, a later link of the same ruling,
  * carried from the pin this repo builds against (`.objectui-sha` =
+ * `088e0f705`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
  * `e5311165a`, re-read there 2026-10-12:
  * every objectui file this record cites is byte-identical across the hop from
  * `499799502` (`git diff --quiet`), so every anchor held unmoved. At

@@ -79,6 +79,8 @@ import {
     OVERLAY_INDEX_NAMES,
     OVERLAY_TABLE,
     buildOverlayDuplicateProbeSql,
+    buildOverlayDuplicateProbeSqlWithoutMember,
+    buildOverlayMemberPresenceSql,
     overlayIndexKeyParts,
     type OverlayIndexState,
 } from './overlay-index.js';
@@ -253,6 +255,31 @@ const SEAM_NO_ANSWER_DETAIL =
     'the raw-SQL seam returned no result set — a seam that cannot answer is not a seam that answered "no rows"';
 
 /**
+ * [#22877] The overlay indexes' listing on a store whose `sys_metadata`
+ * predates the member column — the migration's own two statements
+ * (`overlay-index.ts`), keyed by the index they describe.
+ *
+ * This command boots read-only, so against an install the new version has not
+ * served yet the column does not exist and the full listing cannot run. The
+ * duplicates that will block the rebuild are still there: every such row is
+ * the empty member, so the migration's member-less listing finds them. The
+ * entry then carries the statement that actually ran as its `duplicateSql`, so
+ * the query an operator copies out of the report is one their database
+ * answers. Held here rather than on the descriptor, so the report document's
+ * shape is unchanged.
+ */
+const BEFORE_MEMBER_COLUMN: Readonly<Record<string, { columnPresenceSql: string; duplicateSql: string }>> = {
+    [OVERLAY_INDEX_NAMES.active]: {
+        columnPresenceSql: buildOverlayMemberPresenceSql(),
+        duplicateSql: buildOverlayDuplicateProbeSqlWithoutMember('active'),
+    },
+    [OVERLAY_INDEX_NAMES.draft]: {
+        columnPresenceSql: buildOverlayMemberPresenceSql(),
+        duplicateSql: buildOverlayDuplicateProbeSqlWithoutMember('draft'),
+    },
+};
+
+/**
  * Run one probe.
  *
  * The presence question is asked FIRST and its refusal is read as absence — the
@@ -278,13 +305,25 @@ async function runProbe(exec: IndexExec, probe: RuntimeIndexProbe): Promise<Runt
         return { ...probe, status: 'table-absent', groups: [] };
     }
 
+    // [#22877] A table that predates the overlay key's member column is
+    // listed by the member-less statement — see BEFORE_MEMBER_COLUMN.
+    let duplicateSql = probe.duplicateSql;
+    const beforeColumn = BEFORE_MEMBER_COLUMN[probe.index];
+    if (beforeColumn !== undefined) {
+        try {
+            if (!isResultSet(await exec(beforeColumn.columnPresenceSql))) return unreadable(SEAM_NO_ANSWER_DETAIL);
+        } catch {
+            duplicateSql = beforeColumn.duplicateSql;
+        }
+    }
+
     let rows: Array<Record<string, unknown>>;
     try {
-        const result = await exec(probe.duplicateSql);
-        if (!isResultSet(result)) return unreadable(SEAM_NO_ANSWER_DETAIL);
+        const result = await exec(duplicateSql);
+        if (!isResultSet(result)) return { ...unreadable(SEAM_NO_ANSWER_DETAIL), duplicateSql };
         rows = normalizeRows(result);
     } catch (error) {
-        return unreadable(operatorFacingErrorText(error));
+        return { ...unreadable(operatorFacingErrorText(error)), duplicateSql };
     }
 
     const groups: RuntimeIndexDuplicateGroup[] = rows.map((row) => {
@@ -298,7 +337,7 @@ async function runProbe(exec: IndexExec, probe: RuntimeIndexProbe): Promise<Runt
     });
     groups.sort((a, b) => groupSortKey(a).localeCompare(groupSortKey(b)));
 
-    return { ...probe, status: groups.length > 0 ? 'blocked' : 'clear', groups };
+    return { ...probe, duplicateSql, status: groups.length > 0 ? 'blocked' : 'clear', groups };
 }
 
 /**

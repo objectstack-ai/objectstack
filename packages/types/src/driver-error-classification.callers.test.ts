@@ -418,6 +418,10 @@ const OPERATOR_TEXT_CALLERS: Readonly<Record<string, { readonly calls: number; r
     calls: 1,
     sentinelPin: 'packages/cli/src/commands/db/clean.operator-text-21418.test.ts',
   },
+  'packages/metadata-protocol/src/migrations/overlay-index.ts': {
+    calls: 1,
+    sentinelPin: 'packages/metadata-protocol/src/migrations/raw-exec-operator-detail-16657.test.ts',
+  },
   'packages/metadata-protocol/src/migrations/partial-index-probe.ts': {
     calls: 2,
     sentinelPin: 'packages/metadata-protocol/src/migrations/raw-exec-operator-detail-16657.test.ts',

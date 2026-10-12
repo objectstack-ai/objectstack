@@ -310,13 +310,13 @@ export function validateReadonlyActionWrites(stack: AnyRec): ReadonlyActionWrite
         message:
           `body's ${call} writes readonlyWhen field '${w.field}', silently stripped ${READONLY_WHEN_STRIP_SCOPE} ` +
           `even though an action body runs elevated`,
+        // [#22161] One remedy line: the two routes, and why sudo() is none.
+        // Why a hook-written value lands on a locked record, the drop-the-field
+        // alternative and that the warning never blocks a build are
+        // `os explain action-api-update-readonly-when-field`.
         hint:
-          `Elevation is not a workaround here: an action body is already system-elevated and the ` +
-          `readonlyWhen lock still applies, so ctx.api.sudo() changes nothing. Either confirm this call ` +
-          `only targets records whose readonlyWhen predicate is FALSE, or derive '${w.field}' in a ` +
-          `beforeUpdate hook on '${objectName}' (a hook-written value is not caller-supplied and does land, ` +
-          `even on a locked record). Otherwise drop '${w.field}' from this payload. This warning never ` +
-          `blocks a build.`,
+          `Derive '${w.field}' in a beforeUpdate hook on '${objectName}', or target only records whose ` +
+          `readonlyWhen predicate is FALSE; the body is already system-elevated, so sudo() changes nothing`,
       });
     }
   }

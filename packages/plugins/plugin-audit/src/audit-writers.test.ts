@@ -686,6 +686,106 @@ describe('audit writers — enable.activities opt-out gate (#2707)', () => {
   });
 });
 
+/**
+ * [#22961] A user's own write to their own per-user UI-state row writes the
+ * ledger row and no activity row. Every other writer keeps today's rows.
+ *
+ * The rows below are the console's "recently visited" write as the real engine
+ * hands it to this hook: the session subject is the owner, and both `result`
+ * and the bound `previous` carry the full row with its `user_id`.
+ */
+describe('audit writers — a user\'s own per-user UI-state write is not mirrored (#22961)', () => {
+  const SCHEMA = {
+    sys_audit_log: SINGLE_TENANT.sys_audit_log,
+    sys_activity: SINGLE_TENANT.sys_activity,
+    sys_user_preference: ['id', 'user_id', 'key', 'value'],
+    crm_lead: ['id', 'name'],
+  };
+  const OWNER = 'u_alice';
+  const PREF = { id: 'pref-1', user_id: OWNER, key: 'ui.recent', value: [] as unknown[] };
+  const rowsOn = (created: CapturedRow[], table: string, object: string) =>
+    created.filter((c) => c.object === table && c.row.object_name === object);
+
+  const OWN_WRITES = [
+    { event: 'afterInsert', action: 'create', ctx: { input: { id: PREF.id }, result: PREF } },
+    {
+      event: 'afterUpdate',
+      action: 'update',
+      ctx: { input: { id: PREF.id }, previous: PREF, result: { ...PREF, value: [{ id: 'acc-1' }] } },
+    },
+    { event: 'afterDelete', action: 'delete', ctx: { input: { id: PREF.id }, previous: PREF, result: { id: PREF.id } } },
+  ] as const;
+
+  for (const w of OWN_WRITES) {
+    it(`the owner's own ${w.action} writes the sys_audit_log row and no sys_activity row`, async () => {
+      const { engine, fire, created } = makeEngine(SCHEMA);
+      installAuditWriters(engine as any, 'test.audit');
+
+      await fire(w.event, { object: 'sys_user_preference', ...w.ctx, session: { userId: OWNER } });
+
+      const ledger = rowsOn(created, 'sys_audit_log', 'sys_user_preference');
+      expect(ledger).toHaveLength(1);
+      expect(ledger[0].row.action).toBe(w.action);
+      expect(ledger[0].row.user_id).toBe(OWNER);
+      expect(ledger[0].row.record_id).toBe(PREF.id);
+      expect(created.filter((c) => c.object === 'sys_activity')).toHaveLength(0);
+    });
+  }
+
+  it('CONTROL: the same user\'s write to an ordinary audited object keeps its activity row', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMA);
+    installAuditWriters(engine as any, 'test.audit');
+
+    await fire('afterUpdate', {
+      object: 'crm_lead',
+      input: { id: 'lead-1' },
+      previous: { id: 'lead-1', name: 'Acme' },
+      result: { id: 'lead-1', name: 'Acme Corp' },
+      session: { userId: OWNER },
+    });
+
+    expect(rowsOn(created, 'sys_audit_log', 'crm_lead')).toHaveLength(1);
+    const activity = rowsOn(created, 'sys_activity', 'crm_lead');
+    expect(activity).toHaveLength(1);
+    expect(activity[0].row.actor_id).toBe(OWNER);
+  });
+
+  const OTHER_WRITERS = [
+    // An organization admin editing the row from Setup's User Preferences grid.
+    { who: 'a write by another user (an admin)', session: { userId: 'u_admin' }, previous: PREF, result: PREF, actor: 'u_admin' },
+    // A system or service write: no acting user at all.
+    { who: 'a system write with no user', session: { isSystem: true }, previous: PREF, result: PREF, actor: null },
+    // The owner moving the row to someone else: not purely their own row.
+    {
+      who: 'the owner moving the row to another user',
+      session: { userId: OWNER },
+      previous: PREF,
+      result: { ...PREF, user_id: 'u_bob' },
+      actor: OWNER,
+    },
+  ] as const;
+
+  for (const w of OTHER_WRITERS) {
+    it(`CONTROL: on a user's preference row, ${w.who} keeps its activity row`, async () => {
+      const { engine, fire, created } = makeEngine(SCHEMA);
+      installAuditWriters(engine as any, 'test.audit');
+
+      await fire('afterUpdate', {
+        object: 'sys_user_preference',
+        input: { id: PREF.id },
+        previous: w.previous,
+        result: { ...w.result, value: [{ id: 'acc-2' }] },
+        session: w.session,
+      });
+
+      expect(rowsOn(created, 'sys_audit_log', 'sys_user_preference')).toHaveLength(1);
+      const activity = rowsOn(created, 'sys_activity', 'sys_user_preference');
+      expect(activity).toHaveLength(1);
+      expect(activity[0].row.actor_id).toBe(w.actor);
+    });
+  }
+});
+
 describe('audit writers — enable.feeds server-side enforcement (#2707)', () => {
   const SCHEMA = {
     sys_audit_log: SINGLE_TENANT.sys_audit_log,
