@@ -2882,55 +2882,77 @@ export function verifyRuntimeInterfaceOnly(refs, { rev, cwd, packages }) {
     }
 
     // (4) no metadata surface references it
-    const word = new RegExp(`\\b${symbol}\\b`);
-    let refused = false;
-    for (const [hitPath, rawText] of surfaces()) {
-      if (hitPath === path || !word.test(rawText)) continue;
-      // PROSE IS NOT A REFERENCE. The raw hit above is the cheap filter; the
-      // question this step actually asks is about CODE, so every decision below
-      // reads the file with its comment spans blanked. `maskComments` (never
-      // `stripComments`) because this branch REPORTS a line back to the author, and
-      // blanking is the projection that keeps line numbers and offsets aligned with
-      // the file on disk. A docblock that NAMES a runtime type is documentation --
-      // it puts nothing in a schema and gives `objectstack migrate meta` nothing to
-      // reach. Strings are deliberately left standing: see the header.
-      const hitText = maskComments(rawText);
-      if (!word.test(hitText)) continue;
-      // A file that declares the name itself is a HOMONYM, not a reference -- the
-      // measured `PackagePublishResult` pair in the header is exactly this case.
-      if (declaresLocally(hitText, symbol)) continue;
-      const specifiers = importSpecifiersFor(hitText, symbol);
-      const pkgs = packages();
-      if (specifiers.length > 0) {
-        if (!specifiers.some((s) => specifierNamesModule(s, hitPath, path, pkgs))) continue; // imported from elsewhere
-        problems.push(
-          `\`runtime-interface-only ${ref}\` is false: ${hitPath} (${metadataSurfaceKind(hitPath)})\n` +
-          `      IMPORTS \`${symbol}\` from the module that declares it.\n` +
-          '      A runtime interface pulled into a metadata surface HAS a metadata surface, wherever it\n' +
-          '      was declared. That is what step 4 of the predicate exists to catch.',
-        );
-        refused = true;
-        break;
-      }
-      const line = (hitText.split(/\r?\n/).find((l) => word.test(l)) ?? '').trim();
+    const hit = metadataSurfaceReference(symbol, path, surfaces(), packages);
+    if (hit?.kind === 'import') {
       problems.push(
-        `\`runtime-interface-only ${ref}\` cannot be verified: ${hitPath} (${metadataSurfaceKind(hitPath)})\n` +
+        `\`runtime-interface-only ${ref}\` is false: ${hit.hitPath} (${metadataSurfaceKind(hit.hitPath)})\n` +
+        `      IMPORTS \`${symbol}\` from the module that declares it.\n` +
+        '      A runtime interface pulled into a metadata surface HAS a metadata surface, wherever it\n' +
+        '      was declared. That is what step 4 of the predicate exists to catch.',
+      );
+      continue;
+    }
+    if (hit?.kind === 'mention') {
+      problems.push(
+        `\`runtime-interface-only ${ref}\` cannot be verified: ${hit.hitPath} (${metadataSurfaceKind(hit.hitPath)})\n` +
         `      mentions \`${symbol}\` IN CODE while neither declaring nor importing it:\n` +
-        `        ${line.slice(0, 140)}\n` +
+        `        ${hit.line.slice(0, 140)}\n` +
         '      Unresolvable, so refused rather than assumed unrelated (#4690). If it truly is a\n' +
         '      different symbol, the honest disposition is one that can be checked.\n' +
         '      Comment spans were already excluded before this scan, so the line above is not a\n' +
         '      docblock naming the type in prose -- that alone never refuses this category.',
       );
-      refused = true;
-      break;
+      continue;
     }
-    if (refused) continue;
 
     verified.push({ ref, kind: decl.kind });
   }
 
   return { problems, verified };
+}
+
+/**
+ * Step 4 of `runtime-interface-only`, as a reading: the first metadata surface that
+ * REFERENCES `symbol` in code, or null.
+ *
+ * Shared, not copied: `runtime-export-retired` (#22918) asks the same question of
+ * a retired export at the merge base, and two spellings of "is this a reference?"
+ * would drift the way #12881 measured one of them drifting from the other.
+ *
+ * @param {string} symbol the bare name scanned for
+ * @param {string} declPath the repo-relative file that DECLARES it -- the module an
+ *   import must name to count, and the one file that is never its own reference
+ * @param {Map<string, string>} surfaceTexts path -> text of every metadata surface
+ * @param {() => Map<string, {private: boolean, file: string}>} packages workspace
+ *   manifests, read only when an import has to be attributed to a package
+ * @returns {{ kind: 'import', hitPath: string } | { kind: 'mention', hitPath: string, line: string } | null}
+ */
+export function metadataSurfaceReference(symbol, declPath, surfaceTexts, packages) {
+  const word = new RegExp(`\\b${symbol}\\b`);
+  for (const [hitPath, rawText] of surfaceTexts) {
+    if (hitPath === declPath || !word.test(rawText)) continue;
+    // PROSE IS NOT A REFERENCE. The raw hit above is the cheap filter; the
+    // question this step actually asks is about CODE, so every decision below
+    // reads the file with its comment spans blanked. `maskComments` (never
+    // `stripComments`) because this branch REPORTS a line back to the author, and
+    // blanking is the projection that keeps line numbers and offsets aligned with
+    // the file on disk. A docblock that NAMES a runtime type is documentation --
+    // it puts nothing in a schema and gives `objectstack migrate meta` nothing to
+    // reach. Strings are deliberately left standing: see the header.
+    const hitText = maskComments(rawText);
+    if (!word.test(hitText)) continue;
+    // A file that declares the name itself is a HOMONYM, not a reference -- the
+    // measured `PackagePublishResult` pair in the header is exactly this case.
+    if (declaresLocally(hitText, symbol)) continue;
+    const specifiers = importSpecifiersFor(hitText, symbol);
+    if (specifiers.length > 0) {
+      const pkgs = packages();
+      if (!specifiers.some((s) => specifierNamesModule(s, hitPath, declPath, pkgs))) continue; // imported from elsewhere
+      return { kind: 'import', hitPath };
+    }
+    return { kind: 'mention', hitPath, line: (hitText.split(/\r?\n/).find((l) => word.test(l)) ?? '').trim() };
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
