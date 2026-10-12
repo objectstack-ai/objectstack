@@ -10,8 +10,8 @@
  * ruled on the D6 execution card, 2026-10-11): every metadata item is copied
  * ONCE into the environment ledger, becomes this environment's own metadata,
  * which the next save edits, and never follows an upgrade. The package's
- * protection lock is not copied: see "The lock is not copied" below. The
- * orchestration —
+ * protection lock is not copied, in either spelling: see "The lock is not
+ * copied" below. The orchestration —
  * reading the store, minting the base, writing each item through
  * `saveMetaItem`, deleting the base when a write fails — is
  * `ObjectStackProtocolImplementation.importUnmanagedPackage` (`protocol.ts`).
@@ -58,24 +58,34 @@
  *    …) is read by the BOOT of the stack that declares it, never by an install
  *    of a package, in either mode.
  *
- * ## The lock is not copied, and each one dropped is named
+ * ## The lock is not copied, in either spelling, and each one dropped is named
  *
- * An item a package ships may carry an ADR-0010 §3.3 protection lock — the
- * `_lock` / `_lockReason` / `_lockSource` keys every metadata type declares.
- * The save door keeps those keys on purpose (a lock an administrator authors
- * on an environment item binds), so a copy written with them answered the next
- * save `403 ITEM_LOCKED`, against D6's "editable in Studio like anything
- * authored there". The ruling on the D6 lock fork (record 6119681934, letter
- * A) settles it: the package permitted `unmanaged` through its `installModes`,
- * so it chose to let environments take editable copies, and a lock whose
- * source is the package has nothing to stand on once the package is no longer
- * the authority. So the plan writes every item without those three keys
+ * An item a package ships may carry an ADR-0010 protection lock in two
+ * spellings: the private envelope every metadata type declares (`_lock`,
+ * `_lockReason`, `_lockSource`, `_lockDocsUrl`; §3.3), and the author-facing
+ * `protection: { lock, reason, docsUrl }` block the managed loader translates
+ * into that envelope (Phase 4.3). The save door keeps the envelope on purpose
+ * (a lock an administrator authors on an environment item binds), so a copy
+ * written with it answered the next save `403 ITEM_LOCKED`, against D6's
+ * "editable in Studio like anything authored there"; the block it stored
+ * verbatim and bound nothing, so the vendor's lock vanished unnamed. The
+ * ruling on the D6 lock fork (record 6119681934, letter A) settles both: the
+ * package permitted `unmanaged` through its `installModes`, so it chose to let
+ * environments take editable copies, and a lock whose source is the package
+ * has nothing to stand on once the package is no longer the authority. So the
+ * plan writes every item without its lock, in either spelling
  * ({@link stripUnmanagedImportLock}), and the import's answer lists each lock
- * it dropped with the package's reason (`strippedLocks`), so an administrator
- * reads why the vendor locked an item before editing it. ⛔ Not silent: a lock
- * that binds (`no-overlay`, `no-delete`, `full`) is always listed. A lock
- * family the spec's declarations refuse is not stripped: it reaches the save
- * door as declared, and is refused there as before.
+ * it dropped with the package's reason (`strippedLocks`) — the lock a managed
+ * install would have bound, so an administrator reads why the vendor locked an
+ * item before editing it. ⛔ Not silent: a lock that binds (`no-overlay`,
+ * `no-delete`, `full`) is always listed.
+ *
+ * Two things are left exactly as the save door judges them today, so no
+ * refusal of the import changes: a lock the spec's declarations refuse (it
+ * reaches the door as declared, and is refused there), and a `protection`
+ * block on a type whose schema does not declare one (`action`, `hook`, `page`:
+ * the door refuses it as an unrecognized key). Which types declare the block
+ * is asked of the save door's own schema resolver, never of a list.
  *
  * The classification of every key is spec's
  * ({@link UNMANAGED_INSTALL_KEY_DISPOSITIONS}, `@objectstack/spec/kernel`), the
@@ -94,7 +104,7 @@ import {
     MetadataProtectionFields,
 } from '@objectstack/spec/kernel';
 import type { ImportUnmanagedPackageResponse } from '@objectstack/spec/api';
-import { METADATA_ITEM_NAME_PATTERN, PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
+import { METADATA_ITEM_NAME_PATTERN, PLURAL_TO_SINGULAR, applyProtection } from '@objectstack/spec/shared';
 import { ASSEMBLED_VIEW_ITEMS_KEY, expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec/ui';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { resolveTenancyPosture } from '@objectstack/types';
@@ -120,7 +130,7 @@ export interface UnmanagedImportItem {
     name: string;
     /** The manifest key it came from. */
     key: string;
-    /** The body as the package declared it, less its protection lock ({@link stripUnmanagedImportLock}). */
+    /** The body as the package declared it, less its protection lock in either spelling ({@link stripUnmanagedImportLock}). */
     body: Record<string, unknown>;
     /** The view names a container expands into (empty for every other item). */
     expands: readonly string[];
@@ -148,28 +158,52 @@ export interface UnmanagedImportPlan {
 export type UnmanagedImportStrippedLock = ImportUnmanagedPackageResponse['strippedLocks'][number];
 
 /**
- * The ADR-0010 lock keys an unmanaged copy does not carry, each judged by the
- * declaration every metadata type spreads (`MetadataProtectionFields`). The
- * three keys the ruling on the D6 lock fork names, and no more.
+ * The ADR-0010 envelope keys an unmanaged copy does not carry, each judged by
+ * the declaration every metadata type spreads (`MetadataProtectionFields`):
+ * the three the ruling on the D6 lock fork names, and `_lockDocsUrl`, the
+ * fourth member of the same lock family, which means nothing once `_lock` is
+ * gone.
  */
-const STRIPPED_LOCK_KEYS = {
+const STRIPPED_ENVELOPE_KEYS = {
     _lock: MetadataProtectionFields._lock,
     _lockReason: MetadataProtectionFields._lockReason,
     _lockSource: MetadataProtectionFields._lockSource,
+    _lockDocsUrl: MetadataProtectionFields._lockDocsUrl,
 } as const;
 
+/** The author-facing lock block (ADR-0010 Phase 4.3), stripped where the item's type declares it. */
+const PROTECTION_KEY = 'protection';
+
+/** The slice of a declaration the strip asks: does it admit this value? */
+export interface DeclaredValueJudge {
+    safeParse(value: unknown): { success: boolean };
+}
+
 /**
- * [ADR-0131 D6, ADR-0010 §3.3] An item's body as its unmanaged copy is written:
- * without `_lock`, `_lockReason` and `_lockSource`, and the lock it dropped,
- * when that lock binds (`no-overlay`, `no-delete`, `full`), with the package's
- * `_lockReason` verbatim when it gave one. `'none'` declares no lock, so
- * nothing is reported for it, nor for an item that carries none of the keys.
+ * [ADR-0131 D6, ADR-0010 §3.3 and Phase 4.3] An item's body as its unmanaged
+ * copy is written: without its lock in either spelling — the envelope keys
+ * ({@link STRIPPED_ENVELOPE_KEYS}) and, on a type whose schema declares one,
+ * the `protection` block — and the lock it dropped, when that lock binds
+ * (`no-overlay`, `no-delete`, `full`).
  *
- * A lock family the spec's declarations refuse (`_lock: 'locked'`, a reason
- * that is not a string) is returned UNTOUCHED, with no report: the save door
- * judges the body as the package declared it and refuses it, as it did before
- * this strip existed. Stripping it first would turn that refusal into a copy
- * of a body nobody validated.
+ * The lock reported is the one a MANAGED install of the same body would bind,
+ * computed by the managed loader's own translation (`applyProtection`) on a
+ * scratch copy of the lock keys, never re-derived here. That translation lets
+ * the block win: a body carrying both `_lock` and `protection` is bound — and
+ * so reported — once, with the block's `lock` and `reason`. `'none'` declares
+ * no lock, so nothing is reported for it, nor for an item that carries no lock.
+ *
+ * Handed on UNTOUCHED, with no report, so the save door judges the body as the
+ * package declared it and refuses it as before:
+ *  - a lock key whose value its declaration refuses (`_lock: 'locked'`, a
+ *    reason that is not a string, a malformed `protection` block);
+ * and left in place:
+ *  - a `protection` block on a type whose schema does not declare one
+ *    (`protectionDeclaration` absent) — the door refuses it as an
+ *    unrecognized key, as it always did.
+ *
+ * @param protectionDeclaration The schema the save door judges `protection` by
+ *   on this item's type, or `undefined` when the type declares no such key.
  *
  * Returns the SAME body when there is nothing to strip.
  */
@@ -177,13 +211,32 @@ export function stripUnmanagedImportLock(
     type: string,
     name: string,
     body: Record<string, unknown>,
+    protectionDeclaration?: DeclaredValueJudge,
 ): { body: Record<string, unknown>; stripped?: UnmanagedImportStrippedLock } {
-    const keys = Object.keys(STRIPPED_LOCK_KEYS) as Array<keyof typeof STRIPPED_LOCK_KEYS>;
-    if (!keys.some((key) => key in body)) return { body };
-    if (!keys.every((key) => STRIPPED_LOCK_KEYS[key].safeParse(body[key]).success)) return { body };
-    const { _lock: lock, _lockReason: reason, _lockSource: _source, ...rest } = body;
-    // Past the parse above, `_lock` is absent or one of the four declared
-    // states, and every state but `'none'` refuses a save or a delete.
+    const envelopeKeys = (Object.keys(STRIPPED_ENVELOPE_KEYS) as Array<keyof typeof STRIPPED_ENVELOPE_KEYS>)
+        .filter((key) => key in body);
+    const block = protectionDeclaration !== undefined && PROTECTION_KEY in body;
+    if (envelopeKeys.length === 0 && !block) return { body };
+    if (!envelopeKeys.every((key) => STRIPPED_ENVELOPE_KEYS[key].safeParse(body[key]).success)) return { body };
+    if (block && !protectionDeclaration.safeParse(body[PROTECTION_KEY]).success) return { body };
+
+    // The lock a managed install would bind: the loader's own translation, run
+    // on a scratch object holding only the lock keys, so nothing it stamps
+    // (`_provenance`, `_lockSource`) reaches the copy.
+    const scratch: Record<string, unknown> = {};
+    for (const key of ['_lock', '_lockReason'] as const) if (body[key] !== undefined) scratch[key] = body[key];
+    if (block && body[PROTECTION_KEY] !== undefined) scratch[PROTECTION_KEY] = body[PROTECTION_KEY];
+    applyProtection(scratch);
+    const lock = scratch._lock;
+    const reason = scratch._lockReason;
+
+    const rest: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(body)) {
+        if (key in STRIPPED_ENVELOPE_KEYS || (block && key === PROTECTION_KEY)) continue;
+        rest[key] = value;
+    }
+    // Past the parses above, the bound lock is absent or one of the four
+    // declared states, and every state but `'none'` refuses a save or a delete.
     if (lock === undefined || lock === 'none') return { body: rest };
     return {
         body: rest,
@@ -289,6 +342,12 @@ export function planUnmanagedImport(
         targetName?: string;
         isRuntimeCreatable: (type: string) => boolean;
         loadOrderOf: (type: string) => number;
+        /**
+         * The schema the save door judges `protection` by on a type, or
+         * `undefined` when that type's schema declares no such key — read off
+         * the door's own resolver, so this module keeps no list of types.
+         */
+        protectionDeclarationOf: (type: string) => DeclaredValueJudge | undefined;
     },
 ): UnmanagedImportPlan {
     // The source id, parsed through its declaration — the sentence is the
@@ -399,7 +458,9 @@ export function planUnmanagedImport(
     // 6119681934). After the sort, so the list reads in the order items land.
     const strippedLocks: UnmanagedImportStrippedLock[] = [];
     const items = enumerateItems(manifest, options.loadOrderOf, namespace).map((item) => {
-        const { body, stripped } = stripUnmanagedImportLock(item.type, item.name, item.body);
+        const { body, stripped } = stripUnmanagedImportLock(
+            item.type, item.name, item.body, options.protectionDeclarationOf(item.type),
+        );
         if (stripped) strippedLocks.push(stripped);
         return body === item.body ? item : { ...item, body };
     });

@@ -260,11 +260,12 @@ export const ImportUnmanagedPackageRequestSchema = lazySchema(() => z.object({
  * read — a failure is a thrown ADR-0112 error, never a partial answer.
  *
  * `strippedLocks` is the copy's one loss, stated rather than silent (ADR-0131
- * D6 and ADR-0010 §3.3; the ruling on the D6 lock fork, record 6119681934): a
- * copy is the environment's own metadata, so the package's protection lock
- * (`_lock`, `_lockReason`, `_lockSource`) is not copied, and each lock dropped
- * is listed with the reason the package gave, so an administrator reads why
- * the vendor locked the item before editing it.
+ * D6 and ADR-0010 §3.3 / Phase 4.3; the ruling on the D6 lock fork, record
+ * 6119681934): a copy is the environment's own metadata, so the package's
+ * protection lock is not copied, in either spelling — the `_lock` envelope or
+ * a `protection` block — and each lock dropped is listed as a managed install
+ * would have bound it, with the reason the package gave, so an administrator
+ * reads why the vendor locked the item before editing it.
  */
 export const ImportUnmanagedPackageResponseSchema = lazySchema(() => z.object({
   sourcePackageId: z.string().describe('The id of the package the items were copied from.'),
@@ -286,10 +287,10 @@ export const ImportUnmanagedPackageResponseSchema = lazySchema(() => z.object({
     type: z.string().describe('Metadata type of the copied item.'),
     name: z.string().describe('Name of the copied item.'),
     lock: MetadataLockSchema.exclude(['none']).describe(
-      'The `_lock` the package shipped on the item. The copy carries no lock.',
+      'The lock the package shipped on the item — its `protection` block\'s `lock`, else its `_lock`. The copy carries no lock.',
     ),
     reason: z.string().optional().describe(
-      'The `_lockReason` the package gave, verbatim. Absent when it gave none.',
+      'The reason the package gave for that lock, verbatim. Absent when it gave none.',
     ),
   })).describe(
     'Every protection lock the package shipped on a copied item and the copy does not keep, in the order the '

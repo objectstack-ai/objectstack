@@ -56,10 +56,11 @@
  *              writable base in the environment ledger
  *              (`importUnmanagedPackage`): the environment's own metadata,
  *              which the next save edits, followed by no upgrade. The
- *              package's protection lock (`_lock`) is not copied: the answer's
- *              `strippedLocks` names each lock dropped, with the package's
- *              `_lockReason` (ADR-0010 §3.3; the ruling on the D6 lock fork,
- *              record 6119681934);
+ *              package's protection lock is not copied, in either spelling
+ *              (`_lock`, or a `protection` block on a type that declares
+ *              one): the answer's `strippedLocks` names each lock dropped,
+ *              with the package's reason (ADR-0010 §3.3 and Phase 4.3; the
+ *              ruling on the D6 lock fork, record 6119681934);
  *              nothing is registered, ledgered or rehydrated under the
  *              package's id, and its sample data is not loaded. Refused
  *              `409 UNMANAGED_INSTALL_WALLED_POSTURE` on a deployment whose
@@ -2277,8 +2278,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *  - `installedFrom` — the source package id and version, for information
      *    only (ADR-0131 D6: "provenance recorded for information only") — is
      *    on the answer and on the operator log line, at `info`;
-     *  - `strippedLocks` — every protection lock the package shipped and the
-     *    copy does not keep, with the package's reason — is the verb's own
+     *  - `strippedLocks` — every protection lock the package shipped, in
+     *    either spelling, and the copy does not keep, with the package's
+     *    reason — is the verb's own
      *    list, relayed as the verb states it, so the installer reads why the
      *    vendor locked an item before editing it.
      */

@@ -25,7 +25,8 @@
  *     upgrade, and
  *     refused by a runtime whose tenancy posture walls organizations. Only for
  *     a package whose manifest's `installModes` permits it. The package's
- *     protection locks are not copied; each one dropped is printed as
+ *     protection locks are not copied, in either spelling; each one dropped
+ *     is printed as
  *     `<type>.<name>: <lock> — <reason>`.
  *
  * "Source" and "mode" are two words for two questions on purpose: where the

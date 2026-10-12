@@ -805,6 +805,59 @@ function resolveOverlaySchema(type: string, _item: unknown): z.ZodTypeAny | null
 }
 
 /**
+ * [ADR-0131 D6, ADR-0010 Phase 4.3] The schema the save door judges `key` by on
+ * an item of `type` — read off {@link resolveOverlaySchema}, the door's own
+ * resolver, so no list of which types declare which key is kept anywhere — or
+ * `undefined` when that schema declares no such key (or the type has none).
+ *
+ * Read structurally: the object shapes the schema parses to, through the
+ * wrappers the registered types use (lazy, pipe, union, intersection and the
+ * optional family). A union declares the key when any member does. A schema
+ * this walk cannot read answers `undefined`, which leaves the key to the save
+ * door's own verdict — the direction that changes no refusal.
+ *
+ * The unmanaged import asks it for `protection`: only a type that declares the
+ * block has one to strip (`stripUnmanagedImportLock`); on any other type the
+ * save door judges the block exactly as it did before.
+ */
+export function overlaySchemaDeclaredKey(type: string, key: string): z.ZodTypeAny | undefined {
+    return declaredKeySchema(resolveOverlaySchema(type, undefined), key, 0);
+}
+
+function declaredKeySchema(schema: unknown, key: string, depth: number): z.ZodTypeAny | undefined {
+    if (!schema || depth > 12) return undefined;
+    const def = (schema as { _zod?: { def?: Record<string, any> } })._zod?.def;
+    switch (def?.type) {
+        case 'object': {
+            const shape = (schema as { shape?: Record<string, unknown> }).shape ?? def.shape ?? {};
+            return Object.prototype.hasOwnProperty.call(shape, key) ? shape[key] as z.ZodTypeAny : undefined;
+        }
+        case 'lazy':
+            return declaredKeySchema(def.getter?.(), key, depth + 1);
+        case 'pipe':
+            return declaredKeySchema(def.in, key, depth + 1) ?? declaredKeySchema(def.out, key, depth + 1);
+        case 'intersection':
+            return declaredKeySchema(def.left, key, depth + 1) ?? declaredKeySchema(def.right, key, depth + 1);
+        case 'union':
+            for (const option of (def.options ?? []) as unknown[]) {
+                const found = declaredKeySchema(option, key, depth + 1);
+                if (found) return found;
+            }
+            return undefined;
+        case 'optional':
+        case 'nullable':
+        case 'default':
+        case 'prefault':
+        case 'readonly':
+        case 'nonoptional':
+        case 'catch':
+            return declaredKeySchema(def.innerType, key, depth + 1);
+        default:
+            return undefined;
+    }
+}
+
+/**
  * [#21658, #21689] The save door's refusal of a `hook` that carries no `body`:
  * such a hook can never run once this door has stored it. One predicate, two
  * shapes it meets, one envelope: a hook whose `handler` names a function, and a
@@ -24503,10 +24556,12 @@ export class ObjectStackProtocolImplementation implements
      * door a Studio edit takes — so every copied item is environment metadata
      * from its first byte: owned by the base, `organization_id` NULL, served
      * `_provenance: 'org'`, edited by the next save, and followed by no
-     * upgrade. The package's protection lock (`_lock`, `_lockReason`,
-     * `_lockSource`) is not copied, and the answer's `strippedLocks` names each
-     * lock dropped with the package's reason (ADR-0010 §3.3; the ruling on the
-     * D6 lock fork, record 6119681934 — `stripUnmanagedImportLock`).
+     * upgrade. The package's protection lock is not copied, in either
+     * spelling — the `_lock` envelope (`_lock`, `_lockReason`, `_lockSource`,
+     * `_lockDocsUrl`) or, on a type that declares it, the `protection` block —
+     * and the answer's `strippedLocks` names each lock dropped with the
+     * package's reason (ADR-0010 §3.3 and Phase 4.3; the ruling on the D6 lock
+     * fork, record 6119681934 — `stripUnmanagedImportLock`).
      * The managed mode is the package install; this verb is what that
      * install's manifest service is to it, and no more (see
      * `package-unmanaged-install.ts` for what is copied, what is refused, and
@@ -24579,6 +24634,9 @@ export class ObjectStackProtocolImplementation implements
             ...(declared.data.targetName !== undefined ? { targetName: declared.data.targetName } : {}),
             // The save door's own predicate — registry-only, the hatch unread.
             isRuntimeCreatable: (type) => ObjectStackProtocolImplementation.isRuntimeCreateAllowed(type),
+            // The save door's own schema, asked which types declare the
+            // `protection` block the copy strips (ADR-0010 Phase 4.3).
+            protectionDeclarationOf: (type) => overlaySchemaDeclaredKey(type, 'protection'),
             loadOrderOf: (type) =>
                 DEFAULT_METADATA_TYPE_REGISTRY.find((entry) => entry.type === type)?.loadOrder ?? Number.MAX_SAFE_INTEGER,
         });
