@@ -337,3 +337,87 @@ describe('MessagingServicePlugin — boot provisioning honours skipSchemaSync (#
         }
     });
 });
+
+/**
+ * [#22985] A failed boot provision is a DURABILITY degradation, so it is
+ * reported at `error` — once per object, never per write — and the boot is not
+ * failed.
+ *
+ * When an object's DDL throws, the boot still completes and the deployment
+ * serves as healthy while the table does not exist; the pipeline tables are
+ * written as a side effect of actions (an approval step, an @mention) that
+ * complete without them. AGENTS.md "Degradation log levels" sends that class to
+ * `error`, with the consequence and the fix in the first line. The wording is
+ * not pinned: the pins hold the level, the count, the named object, the named
+ * remedy command and the driver's refusal in meta.
+ */
+describe('MessagingServicePlugin — a failed provision is an error, once per object (#22985)', () => {
+    const OBJECTS = [
+        'sys_notification', 'sys_inbox_message', 'sys_notification_receipt', 'sys_notification_delivery',
+        'sys_notification_preference', 'sys_notification_subscription', 'sys_notification_template', 'sys_http_delivery',
+    ];
+
+    /** Every DDL succeeds except the named object's, which the driver refuses. */
+    async function boot(refused?: string) {
+        const synced: string[] = [];
+        const engine = {
+            async syncObjectSchema(name: string) {
+                if (name === refused) throw new Error(`there is already an index named ${name}`);
+                synced.push(name);
+            },
+        };
+        const services = new Map<string, unknown>([['data', engine], ['manifest', { register() {} }]]);
+        const readyHooks: Array<() => Promise<void> | void> = [];
+        const logs = {
+            warn: [] as string[],
+            error: [] as Array<{ message: string; error: unknown; meta: Record<string, unknown> | undefined }>,
+        };
+        const logger = {
+            info() {},
+            warn(msg: string) { logs.warn.push(String(msg)); },
+            error(msg: string, error?: unknown, meta?: Record<string, unknown>) {
+                logs.error.push({ message: String(msg), error, meta });
+            },
+            debug() {},
+            child() { return logger; },
+        };
+        const ctx = {
+            logger,
+            getService(name: string) { return services.get(name); },
+            registerService(name: string, svc: unknown) { services.set(name, svc); },
+            hook(event: string, fn: () => Promise<void> | void) {
+                if (event === 'kernel:ready') readyHooks.push(fn);
+            },
+        } as any;
+        await new MessagingServicePlugin({ reliableDelivery: false }).init(ctx);
+        // The boot is NOT failed: kernel:ready resolves.
+        await expect((async () => { for (const fn of readyHooks) await fn(); })()).resolves.toBeUndefined();
+        return { logs, synced };
+    }
+
+    it.each(OBJECTS)('a refused DDL for %s logs exactly one error line naming it, the remedy and the refusal', async (name) => {
+        const { logs, synced } = await boot(name);
+
+        expect(logs.error).toHaveLength(1);
+        const [line] = logs.error;
+        expect(line.message).toContain(name);
+        // ② the fix, by its named subject: the command measured to create it.
+        expect(line.message).toContain('os migrate apply');
+        // One line: the first line carries both halves.
+        expect(line.message).not.toContain('\n');
+        // The driver's refusal travels in meta, never interpolated into the line.
+        expect(line.meta).toEqual({ object: name, error: `there is already an index named ${name}` });
+        // …and it is not ALSO reported at a quieter level.
+        expect(logs.warn.filter((m) => m.includes('could not provision'))).toEqual([]);
+        // The other seven objects still provisioned.
+        expect(synced).toEqual(OBJECTS.filter((o) => o !== name));
+    });
+
+    it('CONTROL: a clean provision logs no error at all', async () => {
+        const { logs, synced } = await boot();
+
+        expect(logs.error).toEqual([]);
+        expect(logs.warn.filter((m) => m.includes('could not provision'))).toEqual([]);
+        expect(synced).toEqual(OBJECTS);
+    });
+});

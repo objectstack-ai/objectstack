@@ -49,8 +49,8 @@ below, and it is left open deliberately rather than hidden — see
 ## Which `isSystem` this page is about
 
 Three unrelated declarations share the identifier. **This page documents only the
-first.** The others are ordinary metadata fields on a stored document and have
-nothing to do with elevation. (A fourth, `Environment.isSystem` — a
+first.** The others are metadata keys on a stored document (one of them now
+retired) and have nothing to do with elevation. (A fourth, `Environment.isSystem` — a
 platform-infrastructure environment, not user data — left this repo with the
 `@objectstack/spec/cloud` subpath in #16325 and is declared in the cloud repo.)
 
@@ -58,7 +58,7 @@ platform-infrastructure environment, not user data — left this repo with the
 |:---|:---|:---:|
 | `ExecutionContext.isSystem` — `packages/spec/src/kernel/execution-context.zod.ts#isSystem` | The elevation flag on an operation's context | ✅ |
 | `Object.isSystem` — `packages/spec/src/data/object.zod.ts#isSystem` | Marks a **system object** (protected from deletion; defaults its org-wide sharing to `public` when no `sharingModel` is set) | ❌ |
-| `EmailTemplate.isSystem` — `packages/spec/src/system/email-template.zod.ts#isSystem` | Built-in template; tenants may override but should not delete | ❌ |
+| `EmailTemplate.isSystem` — `packages/spec/src/system/email-template.zod.ts#isSystem` | A retired key: a `retiredKey()` tombstone, which the parse refuses with a migration note | ❌ |
 
 The collision is a genuine hazard rather than a naming nit: `Object.isSystem`
 changes an object's **default sharing**, and `ExecutionContext.isSystem` changes

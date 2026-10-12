@@ -2230,9 +2230,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       label: {
         label: "Label"
       },
-      category: {
-        label: "Category"
-      },
       locale: {
         label: "Locale",
         helpText: "BCP-47 tag — e.g. en-US, zh-CN"
@@ -2264,10 +2261,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       active: {
         label: "Active",
         helpText: "When unchecked, sendTemplate() returns TEMPLATE_INACTIVE."
-      },
-      isSystem: {
-        label: "Is System",
-        helpText: "Built-in template; tenants may override but should not delete."
       }
     }
   },

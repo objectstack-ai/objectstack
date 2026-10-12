@@ -412,7 +412,7 @@ export const NON_READ_ANCHORS = [
   {
     file: 'packages/spec/src/system/email-template.zod.ts',
     symbol: 'isSystem',
-    why: 'EmailTemplate.isSystem -- unrelated metadata field',
+    why: 'EmailTemplate.isSystem -- an unrelated metadata key, now a retiredKey() tombstone',
   },
   // `Environment.isSystem` (`packages/spec/src/cloud/environment.zod.ts`) was the
   // fourth row until #16325 removed the `@objectstack/spec/cloud` subpath; the

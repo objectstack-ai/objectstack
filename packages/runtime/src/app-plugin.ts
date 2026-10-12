@@ -498,11 +498,13 @@ export class AppPlugin implements Plugin {
         // served the artifact door's converted copy of it, and what handed the
         // email loader a template it refuses to send.
         //
-        // A bundle carrying `packages[]` is handed over as authored, as before:
-        // the `manifest` service registers its package BODIES, which no
-        // conversion reaches (the ADR-0087 pass walks the definition's own
-        // collections, at the artifact door too), and `forwardConverted` would
-        // resolve `packages[]` here, ahead of the `manifest` service (#15292).
+        // A bundle carrying `packages[]` is handed over as it arrived, as before:
+        // `forwardConverted` would resolve `packages[]` here, ahead of the
+        // `manifest` service (#15292). Its package BODIES are already converted
+        // when the bundle came through `loadArtifactBundle`, which runs the
+        // ADR-0087 pass once over every body at load (#23027); a bundle handed
+        // to this plugin by any other route reaches the `manifest` service as
+        // authored.
         const servicePayload = (this.bundle as { packages?: unknown }).packages === undefined
             ? this.forwardConverted(ctx).definition
             : this.bundle.manifest
@@ -912,6 +914,79 @@ export class AppPlugin implements Plugin {
         );
     }
 
+    /**
+     * [#22989] The config door's registrar of the stack's declared `apis`
+     * endpoints: each item goes into the metadata service's in-memory registry
+     * by the route and the ADR-0010 stamp the code-defined datasources take in
+     * `start()` (`registerInMemory` + `applyProtection`). So the endpoint
+     * matcher's one index (`MetadataManager.listForIndex('api')`) holds them on
+     * this door as it holds them on the artifact door, whose
+     * `ARTIFACT_FIELD_TO_TYPE` maps `apis` to `api`. Before this a config boot
+     * registered them into the ObjectQL registry alone (`manifest.register` in
+     * `init()`), which the matcher never reads, so every declared path answered
+     * the transport's `404 ENDPOINT_NOT_FOUND` while the artifact boot of the
+     * same stack matched it.
+     *
+     * The items are the boot's ONE forward-converted copy
+     * ({@link forwardConverted}), the copy `init()` handed the `manifest`
+     * service: ⛔ never the raw bundle, ⛔ never a second conversion. Each is
+     * copied before it is stamped, because `applyProtection` writes in place and
+     * the converted definition shares its items with the ObjectQL registry (and,
+     * when nothing converts, with the caller's config module).
+     *
+     * The owner is the stack's own manifest (`artifactPackageId`, the key
+     * `registerApp` installs the package under, and its `version`): the pair
+     * the artifact door stamps on the single-package branch (ADR-0130 D7).
+     *
+     * A bundle carrying `packages[]` is left alone. Its top-level residual,
+     * `api` items included, is registered by {@link registerUnclaimedTopLevel};
+     * a package BODY's item would need the body walk, which reads bodies no
+     * conversion reaches rather than this boot's converted copy.
+     *
+     * One registrar per boot, declared by the composition, with the guard
+     * {@link registerUnclaimedTopLevel} uses: under
+     * `securityMetadataRegistrar: 'artifact-door'` the door registers every
+     * `api` item (strict-parsed and stamped) and this does nothing, so an
+     * artifact boot registers each item exactly once.
+     *
+     * ⛔ This gives no composition an endpoint matcher. Only a metadata service
+     * that carries `matchEndpoint` serves the items, which in-tree is
+     * `@objectstack/metadata`'s manager. Where the `metadata` slot holds the
+     * kernel's in-memory fallback instead, the items are listed and none is
+     * served.
+     */
+    private registerDeclaredApiEndpoints(ctx: PluginContext, appId: string): void {
+        if (this.securityMetadataRegistrar === 'artifact-door') return;
+        if ((this.bundle as { packages?: unknown }).packages !== undefined) return;
+        const apis: unknown = this.forwardConverted(ctx).definition?.apis;
+        if (!Array.isArray(apis) || apis.length === 0) return;
+        let metadata: { registerInMemory?: (type: string, name: string, item: unknown) => void } | undefined;
+        try {
+            metadata = ctx.getService('metadata');
+        } catch {
+            // Not registered on this kernel — handled below.
+        }
+        if (typeof metadata?.registerInMemory !== 'function') {
+            ctx.logger.debug('[AppPlugin] no in-memory metadata registry — the stack-declared api endpoints are not registered', { appId });
+            return;
+        }
+        const sys = this.bundle.manifest || this.bundle;
+        const owner = {
+            packageId: artifactPackageId(sys),
+            packageVersion: typeof sys?.version === 'string' ? sys.version : undefined,
+        };
+        let count = 0;
+        for (const api of apis as Array<Record<string, unknown> | null | undefined>) {
+            const name = api?.name;
+            if (typeof name !== 'string' || name.length === 0) continue;
+            metadata.registerInMemory('api', name, applyProtection({ ...api }, owner));
+            count += 1;
+        }
+        if (count > 0) {
+            ctx.logger.info('Registered stack-declared api endpoints in metadata registry', { appId, count });
+        }
+    }
+
     start = async (ctx: PluginContext) => {
         if (this.empty) {
             ctx.logger.debug('[AppPlugin] empty env — no app payload, skipping start', {
@@ -1020,6 +1095,10 @@ export class AppPlugin implements Plugin {
                 error: (err as Error)?.message ?? String(err),
             });
         }
+
+        // [#22989] The stack's declared `apis`, by the same route — see
+        // `registerDeclaredApiEndpoints`.
+        this.registerDeclaredApiEndpoints(ctx, appId);
 
         // Auto-connect declared datasources (ADR-0062 D1/D2/D5). The metadata
         // registration above only makes a datasource *visible*; to make its

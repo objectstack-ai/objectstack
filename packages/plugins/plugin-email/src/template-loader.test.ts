@@ -47,7 +47,6 @@ function declared(over: AnyRecord = {}): AnyRecord {
   return {
     name: 'auth.password_reset',
     label: 'Password Reset',
-    category: 'auth',
     subject: AUTHORED,
     bodyHtml: '<p>Click <a href="{{url}}">here</a></p>',
     variables: [{ name: 'url', type: 'string', required: true }],
@@ -212,7 +211,7 @@ describe('createRegistryEmailTemplateLoader — which item wins one (name, local
 describe('createRegistryEmailTemplateLoader — the render input', () => {
   it('omits optional keys rather than nulling them, so the text part is derived only when no bodyText was authored', async () => {
     const loader = createRegistryEmailTemplateLoader({
-      protocol: layeredProtocol([declared({ name: 'ops.digest', category: 'notification', variables: [] })]),
+      protocol: layeredProtocol([declared({ name: 'ops.digest', variables: [] })]),
     });
 
     const found = await loader.load('ops.digest', 'en-US');
