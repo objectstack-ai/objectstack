@@ -5,7 +5,13 @@ import { createHash } from 'node:crypto';
 import { checkProtocolCompat } from '@objectstack/metadata-core';
 import type { ObjectStackManifest } from '@objectstack/spec/kernel';
 import type { IDataEngine } from '@objectstack/spec/contracts';
-import { ensurePackageTable, PACKAGE_TABLE_STATEMENTS, resolvePackageTableDialect } from './package-table.js';
+import {
+  ensurePackageTable,
+  PACKAGE_TABLE_COLUMNS,
+  PACKAGE_TABLE_STATEMENTS,
+  probePackageTable,
+  resolvePackageTableDialect,
+} from './package-table.js';
 
 export interface PackageMetadata {
   objects?: any[];
@@ -342,6 +348,59 @@ function isSeamUnreadable(error: unknown): boolean {
 }
 
 /**
+ * [#23022] Whether the engine's `ObjectQLPlugin` resolved `skipSchemaSync` (the
+ * option, else `OS_SKIP_SCHEMA_SYNC=1`). `ObjectQLPlugin.init()` publishes that
+ * value on the engine instance as an undeclared property (#22984), so it is
+ * probed here: an engine nothing published it on (a test double, a foreign
+ * engine) reads as not set. ⛔ Never a second read of the environment: the
+ * option and the env var must not disagree between the engine's boot and this
+ * plugin's.
+ */
+function bootSchemaSyncSkipped(engine: IDataEngine): boolean {
+  return (engine as unknown as { skipSchemaSync?: unknown }).skipSchemaSync === true;
+}
+
+/**
+ * [#23022] The ONE line `start()` prints when that flag is set, at `info`: the
+ * operator declared this, so nothing is degraded. If the table is in fact
+ * missing, a publish reports the missing-table failure on the write that needs
+ * it.
+ */
+const PACKAGE_TABLE_SKIPPED_LINE =
+  'PackageServicePlugin: sys_packages NOT provisioned at boot — the boot\'s schema sync is skipped '
+  + '(`skipSchemaSync` / OS_SKIP_SCHEMA_SYNC=1), declaring this deployment\'s DDL managed out-of-band, so this '
+  + 'plugin issues none either. `os migrate apply` creates it when it is missing (`os migrate plan` lists it as '
+  + '`create_table`).';
+
+/**
+ * [#23022] The kernel service under which `init()` declares the storage this
+ * plugin owns outside the object model, for `os migrate plan` / `apply`
+ * (`packages/cli/src/utils/schema-migrate.ts` reads it by this name).
+ *
+ * Why a service, and why from `init()`: a migrate boot composes this plugin for
+ * its declarations only — `init()` runs, `start()` and every lifecycle hook do
+ * not — and `sys_packages` is not an object, so the driver's deferred sync that
+ * plans and creates every object's table never sees it (`package-table.ts`
+ * says why it cannot be one). Deliberately a service name rather than an
+ * export, so it adds no name to this package's declared surface; the CLI's
+ * integration test boots this real plugin through the migrate funnel, which is
+ * what holds the two ends together.
+ */
+const PACKAGE_STORAGE_SERVICE = 'package.storage';
+
+/** [#23022] What {@link PACKAGE_STORAGE_SERVICE} answers with. */
+interface PackageStorageDeclaration {
+  /** The table, as a `create_table` line names it. */
+  readonly table: 'sys_packages';
+  /** Its columns, in DDL order. */
+  readonly columns: readonly string[];
+  /** Read-only: `true` present, `false` absent, `undefined` could not tell (`probePackageTable`). */
+  present(): Promise<boolean | undefined>;
+  /** Create the table and its index when absent — the boot's own `ensurePackageTable`. */
+  ensure(): Promise<void>;
+}
+
+/**
  * Package Management Service Plugin
  *
  * Provides package publishing, retrieval, and management capabilities.
@@ -351,6 +410,23 @@ export class PackageServicePlugin implements Plugin {
   name = 'package-service';
 
   async init(ctx: PluginContext): Promise<void> {
+    // [#23022] Declare `sys_packages` where a migrate boot can see it. The
+    // engine is resolved when the declaration is USED, never here: `init()`
+    // may run before the engine's plugin has registered it.
+    const engine = (): IDataEngine => {
+      const objectql = ctx.getService<IDataEngine>('objectql');
+      if (!objectql || !objectql.execute) {
+        throw new Error('ObjectQL service with execute() support is required for the sys_packages table');
+      }
+      return objectql;
+    };
+    const storage: PackageStorageDeclaration = {
+      table: 'sys_packages',
+      columns: PACKAGE_TABLE_COLUMNS,
+      present: () => probePackageTable(engine()),
+      ensure: async () => { await ensurePackageTable(engine()); },
+    };
+    ctx.registerService(PACKAGE_STORAGE_SERVICE, storage);
     // Service will be registered in start() after ObjectQL is available
     ctx.logger.debug('Package service plugin initialized');
   }
@@ -371,18 +447,31 @@ export class PackageServicePlugin implements Plugin {
     // never created on MySQL and nothing above `debug` said so. "Already
     // exists" is no longer an error at all (see `ensurePackageTable`), so
     // anything arriving here is a real refusal, and the start fails with it.
-    try {
-      await this.ensureTable(objectql, logger);
-    } catch (error) {
-      logger.error(
-        'Failed to create the sys_packages table — the database refused the DDL. This plugin\'s start() fails and '
-          + 'no `package` service is registered: under the kernel\'s default rollback the boot fails, and a kernel '
-          + 'that continues past a failed plugin installs packages in memory only. The refusal is attached here and '
-          + 'in the driver\'s log line; make the database accept it (its permissions, or a dialect the driver '
-          + 'names), then restart.',
-        error as Error,
-      );
-      throw error;
+    //
+    // [#23022] FIRST: a deployment that declared its DDL managed out-of-band
+    // (`skipSchemaSync` / OS_SKIP_SCHEMA_SYNC=1, "use after running migrations
+    // manually") gets none from here either — the value the engine's own boot
+    // resolved, as `plugin-audit` and `service-messaging` read it (#22984). No
+    // existence probe either: the flag protects a cold-start budget. Safe only
+    // because the documented path covers the table: `os migrate plan` lists it
+    // and `os migrate apply` creates it, through the declaration `init()`
+    // registers above. The service below is still registered.
+    if (bootSchemaSyncSkipped(objectql)) {
+      logger.info(PACKAGE_TABLE_SKIPPED_LINE);
+    } else {
+      try {
+        await this.ensureTable(objectql, logger);
+      } catch (error) {
+        logger.error(
+          'Failed to create the sys_packages table — the database refused the DDL. This plugin\'s start() fails and '
+            + 'no `package` service is registered: under the kernel\'s default rollback the boot fails, and a kernel '
+            + 'that continues past a failed plugin installs packages in memory only. The refusal is attached here and '
+            + 'in the driver\'s log line; make the database accept it (its permissions, or a dialect the driver '
+            + 'names), then restart.',
+          error as Error,
+        );
+        throw error;
+      }
     }
 
     // Create the package service
