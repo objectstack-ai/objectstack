@@ -110,6 +110,10 @@ export * from './stack.zod';
 
 // DX Helper Functions (re-exported for convenience)
 export { defineView, defineForm, defineViewItem, isAggregatedViewContainer, expandViewContainer, expandViewContainerWithDiagnostics } from './ui/view.zod';
+// [#22934] Which object an aggregated `views` container binds to — the registrars'
+// slot key, and the identity the stack's same-stack duplicate-entry refusal reads.
+// `@objectstack/metadata` re-exports this declaration under the same name.
+export { deriveViewContainerObject } from './ui/view-container-object';
 // [#5320] The assembled-manifest view channel: the `viewItems:` vocabulary, its
 // producer-side partition, and the shared container classifier the registration
 // loop's `views:` tighten judges by.

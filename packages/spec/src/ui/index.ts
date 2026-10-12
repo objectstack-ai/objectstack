@@ -21,6 +21,9 @@ export * from './responsive.zod';
 export * from './app.zod';
 export * from './bulk-action.zod';
 export * from './view.zod';
+// [#22934] Which object an aggregated `views` container binds to (moved from
+// `@objectstack/metadata`, which re-exports it under the same name).
+export * from './view-container-object';
 // [#14556] List-view grouping is SERVER-SIDE (ruling A on objectui#7189): the
 // group header aggregate query and the per-group row page, compiled from the
 // view's `grouping` + column summaries + composed filter in the query AST's
