@@ -214,7 +214,7 @@ const result = ActionButtonPropsSchema.parse(data);
 | **type** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional (default: `"script"`) | Action functionality type — the dispatch route. The declarative single-record field write is not a type: it is `operation: 'update'` + `patch` on the default `script` route. |
 | **name** | `string` | optional | Machine name (lowercase snake_case) |
 | **label** | `string \| Record<string, string>` | optional | Display label |
-| **target** | `string` | optional | URL, Script Name, Flow ID, or API Endpoint. Supports $`{param.X}` and $`{ctx.X}` interpolation. |
+| **target** | `string` | optional | URL, Script Name, Flow ID, or API Endpoint. Supports $`{param.X}` and $`{ctx.X}` interpolation. For type:'url': an http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ — every other scheme and a protocol-relative //host are refused. |
 | **openIn** | `Enum<'self' \| 'new-tab'>` | optional | For type:'url' — where to open `target`. 'new-tab' opens a new browser tab; 'self' navigates in place. When omitted, external/absolute URLs open in a new tab and relative URLs navigate in place. Static execution option — keep it OUT of `params` (which is user-input-collection only). |
 | **method** | `Enum<'POST' \| 'PATCH' \| 'PUT' \| 'DELETE'>` | optional | HTTP method for type:"api" actions. Defaults to POST. |
 | **params** | `{ name?: string; field?: string; objectOverride?: string; label?: string \| Record<string, string>; … }[]` | optional | Input parameters required from user — an ActionParam[] DEFINITION array, never a payload map (a static request body goes in `bodyExtra`). |
