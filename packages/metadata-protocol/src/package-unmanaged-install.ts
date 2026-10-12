@@ -9,9 +9,9 @@
  * it upgrades, and nothing it ships may be edited. UNMANAGED (the spelling
  * ruled on the D6 execution card, 2026-10-11): every metadata item is copied
  * ONCE into the environment ledger, becomes this environment's own metadata,
- * which the next save edits (an item shipped with an authored `_lock` keeps
- * that lock as written today, and a follow-up on #15213 strips it per
- * #22971's ruling A), and never follows an upgrade. The orchestration —
+ * which the next save edits, and never follows an upgrade. The package's
+ * protection lock is not copied: see "The lock is not copied" below. The
+ * orchestration —
  * reading the store, minting the base, writing each item through
  * `saveMetaItem`, deleting the base when a write fails — is
  * `ObjectStackProtocolImplementation.importUnmanagedPackage` (`protocol.ts`).
@@ -58,6 +58,25 @@
  *    …) is read by the BOOT of the stack that declares it, never by an install
  *    of a package, in either mode.
  *
+ * ## The lock is not copied, and each one dropped is named
+ *
+ * An item a package ships may carry an ADR-0010 §3.3 protection lock — the
+ * `_lock` / `_lockReason` / `_lockSource` keys every metadata type declares.
+ * The save door keeps those keys on purpose (a lock an administrator authors
+ * on an environment item binds), so a copy written with them answered the next
+ * save `403 ITEM_LOCKED`, against D6's "editable in Studio like anything
+ * authored there". The ruling on the D6 lock fork (record 6119681934, letter
+ * A) settles it: the package permitted `unmanaged` through its `installModes`,
+ * so it chose to let environments take editable copies, and a lock whose
+ * source is the package has nothing to stand on once the package is no longer
+ * the authority. So the plan writes every item without those three keys
+ * ({@link stripUnmanagedImportLock}), and the import's answer lists each lock
+ * it dropped with the package's reason (`strippedLocks`), so an administrator
+ * reads why the vendor locked an item before editing it. ⛔ Not silent: a lock
+ * that binds (`no-overlay`, `no-delete`, `full`) is always listed. A lock
+ * family the spec's declarations refuse is not stripped: it reaches the save
+ * door as declared, and is refused there as before.
+ *
  * The classification of every key is spec's
  * ({@link UNMANAGED_INSTALL_KEY_DISPOSITIONS}, `@objectstack/spec/kernel`), the
  * one table `defineStack` also reads to refuse a package that permits
@@ -72,7 +91,9 @@ import {
     deriveNamespaceFromPackageId,
     UNMANAGED_INSTALL_KEY_DISPOSITIONS,
     unmanagedInstallValueCarries,
+    MetadataProtectionFields,
 } from '@objectstack/spec/kernel';
+import type { ImportUnmanagedPackageResponse } from '@objectstack/spec/api';
 import { METADATA_ITEM_NAME_PATTERN, PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { ASSEMBLED_VIEW_ITEMS_KEY, expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec/ui';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
@@ -99,7 +120,7 @@ export interface UnmanagedImportItem {
     name: string;
     /** The manifest key it came from. */
     key: string;
-    /** The body as the package declared it. */
+    /** The body as the package declared it, less its protection lock ({@link stripUnmanagedImportLock}). */
     body: Record<string, unknown>;
     /** The view names a container expands into (empty for every other item). */
     expands: readonly string[];
@@ -115,6 +136,64 @@ export interface UnmanagedImportPlan {
     /** The manifest the new base is installed with. */
     baseManifest: Record<string, unknown>;
     items: UnmanagedImportItem[];
+    /** Every lock the items were stripped of, in write order — the answer's `strippedLocks`. */
+    strippedLocks: UnmanagedImportStrippedLock[];
+}
+
+/**
+ * One protection lock an item was shipped with and its copy does not keep — an
+ * entry of the answer's `strippedLocks`, typed from that one declaration
+ * (`ImportUnmanagedPackageResponseSchema`), never restated here.
+ */
+export type UnmanagedImportStrippedLock = ImportUnmanagedPackageResponse['strippedLocks'][number];
+
+/**
+ * The ADR-0010 lock keys an unmanaged copy does not carry, each judged by the
+ * declaration every metadata type spreads (`MetadataProtectionFields`). The
+ * three keys the ruling on the D6 lock fork names, and no more.
+ */
+const STRIPPED_LOCK_KEYS = {
+    _lock: MetadataProtectionFields._lock,
+    _lockReason: MetadataProtectionFields._lockReason,
+    _lockSource: MetadataProtectionFields._lockSource,
+} as const;
+
+/**
+ * [ADR-0131 D6, ADR-0010 §3.3] An item's body as its unmanaged copy is written:
+ * without `_lock`, `_lockReason` and `_lockSource`, and the lock it dropped,
+ * when that lock binds (`no-overlay`, `no-delete`, `full`), with the package's
+ * `_lockReason` verbatim when it gave one. `'none'` declares no lock, so
+ * nothing is reported for it, nor for an item that carries none of the keys.
+ *
+ * A lock family the spec's declarations refuse (`_lock: 'locked'`, a reason
+ * that is not a string) is returned UNTOUCHED, with no report: the save door
+ * judges the body as the package declared it and refuses it, as it did before
+ * this strip existed. Stripping it first would turn that refusal into a copy
+ * of a body nobody validated.
+ *
+ * Returns the SAME body when there is nothing to strip.
+ */
+export function stripUnmanagedImportLock(
+    type: string,
+    name: string,
+    body: Record<string, unknown>,
+): { body: Record<string, unknown>; stripped?: UnmanagedImportStrippedLock } {
+    const keys = Object.keys(STRIPPED_LOCK_KEYS) as Array<keyof typeof STRIPPED_LOCK_KEYS>;
+    if (!keys.some((key) => key in body)) return { body };
+    if (!keys.every((key) => STRIPPED_LOCK_KEYS[key].safeParse(body[key]).success)) return { body };
+    const { _lock: lock, _lockReason: reason, _lockSource: _source, ...rest } = body;
+    // Past the parse above, `_lock` is absent or one of the four declared
+    // states, and every state but `'none'` refuses a save or a delete.
+    if (lock === undefined || lock === 'none') return { body: rest };
+    return {
+        body: rest,
+        stripped: {
+            type,
+            name,
+            lock: lock as UnmanagedImportStrippedLock['lock'],
+            ...(typeof reason === 'string' ? { reason } : {}),
+        },
+    };
 }
 
 /** One reason a body cannot be imported, naming the key that carries it. */
@@ -315,7 +394,15 @@ export function planUnmanagedImport(
         );
     }
 
-    const items = enumerateItems(manifest, options.loadOrderOf, namespace);
+    // Each item as its copy is written: without the package's lock, every
+    // lock dropped listed in write order (the D6 lock-fork ruling, record
+    // 6119681934). After the sort, so the list reads in the order items land.
+    const strippedLocks: UnmanagedImportStrippedLock[] = [];
+    const items = enumerateItems(manifest, options.loadOrderOf, namespace).map((item) => {
+        const { body, stripped } = stripUnmanagedImportLock(item.type, item.name, item.body);
+        if (stripped) strippedLocks.push(stripped);
+        return body === item.body ? item : { ...item, body };
+    });
     const sourceVersion = stringKey(manifest, 'version');
     const baseManifest: Record<string, unknown> = {
         ...identity,
@@ -330,6 +417,7 @@ export function planUnmanagedImport(
         targetPackageId,
         baseManifest,
         items,
+        strippedLocks,
     };
 }
 

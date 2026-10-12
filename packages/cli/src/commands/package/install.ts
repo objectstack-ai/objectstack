@@ -24,7 +24,9 @@
  *     a new writable base: the environment's own metadata, followed by no
  *     upgrade, and
  *     refused by a runtime whose tenancy posture walls organizations. Only for
- *     a package whose manifest's `installModes` permits it.
+ *     a package whose manifest's `installModes` permits it. The package's
+ *     protection locks are not copied; each one dropped is printed as
+ *     `<type>.<name>: <lock> — <reason>`.
  *
  * "Source" and "mode" are two words for two questions on purpose: where the
  * package comes from, and how it is installed.
@@ -263,6 +265,21 @@ export default class PackageInstall extends Command {
         printKV('  Runtime',   runtime);
         if (typeof data.targetPackageId === 'string') printKV('  Base', data.targetPackageId);
         if (typeof data.copiedCount === 'number') printKV('  Items copied', String(data.copiedCount));
+        // [ADR-0131 D6, ADR-0010 §3.3] Every lock the package shipped and the
+        // copy does not keep, one line each, with the package's reason
+        // verbatim (the D6 lock-fork ruling's own spelling, record 6119681934)
+        // — so the installer reads why the vendor locked an item before
+        // editing it. A runtime that predates the list states none: nothing
+        // is printed, and nothing is guessed.
+        const strippedLocks: Array<{ type?: unknown; name?: unknown; lock?: unknown; reason?: unknown }> =
+          Array.isArray(data.strippedLocks) ? data.strippedLocks : [];
+        if (strippedLocks.length > 0) {
+          printKV('  Locks removed', `${strippedLocks.length} — the package locked these items; the copy is editable`);
+          for (const entry of strippedLocks) {
+            const reason = typeof entry.reason === 'string' ? ` — ${entry.reason}` : '';
+            console.log(`    ${String(entry.type)}.${String(entry.name)}: ${String(entry.lock)}${reason}`);
+          }
+        }
         const from = data.installedFrom;
         if (from && typeof from.packageId === 'string') {
           printKV('  Installed from', typeof from.version === 'string' ? `${from.packageId}@${from.version}` : from.packageId);

@@ -39,6 +39,7 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { MetadataLockSchema } from '../kernel/metadata-protection.zod';
 
 // Ruling 5A — the `/api` re-export of the one existing declaration. The
 // schema (and its type) stay declared in `system/metadata-persistence.zod.ts`
@@ -257,6 +258,13 @@ export const ImportUnmanagedPackageRequestSchema = lazySchema(() => z.object({
  * and a write that fails deletes the base, so a returned answer always means
  * every item was copied. There is no `failed[]` and no `success` verdict to
  * read — a failure is a thrown ADR-0112 error, never a partial answer.
+ *
+ * `strippedLocks` is the copy's one loss, stated rather than silent (ADR-0131
+ * D6 and ADR-0010 §3.3; the ruling on the D6 lock fork, record 6119681934): a
+ * copy is the environment's own metadata, so the package's protection lock
+ * (`_lock`, `_lockReason`, `_lockSource`) is not copied, and each lock dropped
+ * is listed with the reason the package gave, so an administrator reads why
+ * the vendor locked the item before editing it.
  */
 export const ImportUnmanagedPackageResponseSchema = lazySchema(() => z.object({
   sourcePackageId: z.string().describe('The id of the package the items were copied from.'),
@@ -274,6 +282,19 @@ export const ImportUnmanagedPackageResponseSchema = lazySchema(() => z.object({
     type: z.string().describe('Metadata type of the copied item.'),
     name: z.string().describe('Name of the copied item.'),
   })).describe('Every item that was copied, in the order it was written.'),
+  strippedLocks: z.array(z.object({
+    type: z.string().describe('Metadata type of the copied item.'),
+    name: z.string().describe('Name of the copied item.'),
+    lock: MetadataLockSchema.exclude(['none']).describe(
+      'The `_lock` the package shipped on the item. The copy carries no lock.',
+    ),
+    reason: z.string().optional().describe(
+      'The `_lockReason` the package gave, verbatim. Absent when it gave none.',
+    ),
+  })).describe(
+    'Every protection lock the package shipped on a copied item and the copy does not keep, in the order the '
+    + 'items were written. Empty when the package locked nothing.',
+  ),
 }));
 
 export type DiscardPackageDraftsResponse = z.input<typeof DiscardPackageDraftsResponseSchema>;

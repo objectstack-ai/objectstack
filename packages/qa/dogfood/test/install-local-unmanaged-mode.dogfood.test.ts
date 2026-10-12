@@ -15,7 +15,13 @@
 //   P1 (`single`, one database file across a restart)
 //     - the install answers 200: the copy, its new base and `installedFrom`;
 //     - every copied item is served by `GET /meta` and saved by `PUT` (its own
-//       served body sent back) — editable shown by a write;
+//       served body sent back) — editable shown by a write, the two items the
+//       fixture LOCKS included (ADR-0010 §3.3: a `full` lock with a reason, a
+//       `no-delete` lock without one);
+//     - the package's locks are not copied: no copied row carries `_lock`,
+//       `_lockReason` or `_lockSource`, each copied item is served unlocked,
+//       and the answer's `strippedLocks` names both, in write order, the
+//       reason verbatim (the ruling on the D6 lock fork, record 6119681934);
 //     - every copied row is owned by the new base, `organization_id` NULL;
 //     - nothing under the source id: no install-ledger entry, no registry
 //       package; the translation bundles arrive as `translation` items;
@@ -31,7 +37,9 @@
 //   P2 (`isolated`, its own boot)
 //     - the unmanaged install is refused with the ADR-0112 code and status,
 //       naming the posture, and writes nothing; positive control: the managed
-//       install of the same artifact on the same boot answers 200.
+//       install of the same artifact on the same boot answers 200;
+//     - the lock control: that MANAGED install keeps the package's locks — the
+//       locked dashboard is served `full`, with the package's reason.
 //
 // Boots fixture stacks of its own, so it stays out of `SHARED_SHOWCASE`.
 
@@ -65,13 +73,36 @@ async function json(res: Response): Promise<Answer> {
   return { status: res.status, body: await res.json().catch(() => null) };
 }
 
+/** The two items the fixture locks (ADR-0010 §3.3) — the CRM ships no lock of its own. */
+const LOCKED_DASHBOARD = 'pipeline_dashboard';
+const LOCKED_APP = 'crm_app';
+const DASHBOARD_LOCK_REASON = 'The pipeline figures feed the board pack — edit the source package instead.';
+
+/**
+ * The CRM stack with two protection locks authored on it, BEFORE the build, so
+ * the build's own parse judges them: the pipeline dashboard locked `full` with
+ * a reason, and the app locked `no-delete` with none.
+ */
+function lockedCrmStack(): Record<string, unknown> {
+  const stack = crmStack as unknown as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+  const lockOne = (items: any[], name: string, lock: Record<string, unknown>) => { // eslint-disable-line @typescript-eslint/no-explicit-any
+    if (!items.some((item) => item?.name === name)) throw new Error(`fixture: the CRM ships no '${name}' to lock`);
+    return items.map((item) => (item?.name === name ? { ...item, ...lock } : item));
+  };
+  return {
+    ...stack,
+    dashboards: lockOne(stack.dashboards, LOCKED_DASHBOARD, { _lock: 'full', _lockReason: DASHBOARD_LOCK_REASON }),
+    apps: lockOne(stack.apps, LOCKED_APP, { _lock: 'no-delete' }),
+  };
+}
+
 /**
  * The install body `os package install <artifact>.json [--install-mode …]`
- * sends: the CRM example's built artifact, its manifest declaring both modes,
- * `id` / `version` hoisted beside it.
+ * sends: the CRM example's built artifact — two of its items locked — its
+ * manifest declaring both modes, `id` / `version` hoisted beside it.
  */
 function installBody(opts: { installMode?: 'managed' | 'unmanaged'; version?: string } = {}): Record<string, unknown> {
-  const { artifact } = buildShapedArtifact(crmStack as unknown as Record<string, unknown>);
+  const { artifact } = buildShapedArtifact(lockedCrmStack());
   const manifest: Record<string, unknown> = {
     ...(artifact.manifest as Record<string, unknown>),
     installModes: BOTH,
@@ -119,7 +150,7 @@ describe('dogfood: the unmanaged install mode on `single` — P1 and P3 (ADR-013
 
   let install: Answer;
   let copied: Item[] = [];
-  let reads: Array<Item & { status: number; provenance: unknown }> = [];
+  let reads: Array<Item & { status: number; provenance: unknown; lock: unknown; editable: unknown }> = [];
   let saves: Array<Item & { status: number; body: unknown }> = [];
   let rowsAfterInstall = new Map<string, any>(); // eslint-disable-line @typescript-eslint/no-explicit-any
   let sourcePackageAfterInstall: unknown;
@@ -160,7 +191,10 @@ describe('dogfood: the unmanaged install mode on `single` — P1 and P3 (ADR-013
     for (const item of copied) {
       const read = await json(await stack.apiAs(token, 'GET', `/meta/${item.type}/${item.name}`));
       const served = servedItem(read);
-      reads.push({ ...item, status: read.status, provenance: served?._provenance });
+      const envelope = read.body?.data ?? read.body;
+      reads.push({
+        ...item, status: read.status, provenance: served?._provenance, lock: envelope?.lock, editable: envelope?.editable,
+      });
     }
     rowsAfterInstall = await copiedRows(ql, copied);
     // Editable, shown by a write: each item's own served body, sent back.
@@ -261,6 +295,31 @@ describe('dogfood: the unmanaged install mode on `single` — P1 and P3 (ADR-013
   it('P1: every copied item is saved by PUT — its own served body, sent back', () => {
     const refused = saves.filter((s) => s.status !== 200);
     expect(refused, JSON.stringify(refused, null, 1)).toEqual([]);
+    // The two items the package locked are among them: the copy is editable.
+    expect(saves.map((s) => `${s.type}/${s.name}`)).toEqual(expect.arrayContaining([
+      `dashboard/${LOCKED_DASHBOARD}`, `app/${LOCKED_APP}`,
+    ]));
+  });
+
+  it('P1: the package\'s locks are not copied — no copied row carries one, and every copied item is served unlocked', () => {
+    const lockedRows = [...rowsAfterInstall]
+      .filter(([, row]) => {
+        const body = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+        return ['_lock', '_lockReason', '_lockSource'].some((key) => body && key in body);
+      })
+      .map(([key]) => key);
+    expect(lockedRows).toEqual([]);
+    const servedLocked = reads.filter((r) => (r.lock !== undefined && r.lock !== 'none') || r.editable === false);
+    expect(servedLocked, JSON.stringify(servedLocked)).toEqual([]);
+  });
+
+  it('P1: the answer names each lock it dropped, in write order, with the package\'s reason verbatim', () => {
+    const position = (type: string, name: string) => copied.findIndex((i) => i.type === type && i.name === name);
+    const expected = [
+      { type: 'dashboard', name: LOCKED_DASHBOARD, lock: 'full', reason: DASHBOARD_LOCK_REASON },
+      { type: 'app', name: LOCKED_APP, lock: 'no-delete' },
+    ].sort((a, b) => position(a.type, a.name) - position(b.type, b.name));
+    expect(install.body?.data?.strippedLocks).toEqual(expected);
   });
 
   it('P1: every copied row is owned by the NEW base, with organization_id NULL', () => {
@@ -334,6 +393,7 @@ describe('dogfood: the unmanaged install mode on `isolated` — P2 (ADR-0131 D6)
   let baseRowsAfterRefusal: number;
   let ledgerAfterRefusal: string[];
   let managed: Answer;
+  let managedLockedDashboard: Answer;
 
   beforeAll(async () => {
     storageDir = mkdtempSync(join(tmpdir(), 'dogfood-unmanaged-isolated-'));
@@ -353,6 +413,7 @@ describe('dogfood: the unmanaged install mode on `isolated` — P2 (ADR-0131 D6)
 
     // Positive control on the same boot: the managed install of the same artifact.
     managed = await json(await stack.apiAs(token, 'POST', ROUTE, installBody({ installMode: 'managed' })));
+    managedLockedDashboard = await json(await stack.apiAs(token, 'GET', `/meta/dashboard/${LOCKED_DASHBOARD}`));
   }, 300_000);
 
   afterAll(async () => {
@@ -381,5 +442,13 @@ describe('dogfood: the unmanaged install mode on `isolated` — P2 (ADR-0131 D6)
     expect(managed.status, JSON.stringify(managed.body)).toBe(200);
     expect(managed.body?.data?.manifestId).toBe(CRM);
     expect(managed.body?.data).not.toHaveProperty('installMode');
+    expect(managed.body?.data).not.toHaveProperty('strippedLocks');
+  });
+
+  it('lock control: the MANAGED install keeps the package\'s lock — the dashboard is served locked, with its reason', () => {
+    expect(managedLockedDashboard.status, JSON.stringify(managedLockedDashboard.body)).toBe(200);
+    expect(managedLockedDashboard.body?.data).toMatchObject({
+      lock: 'full', lockReason: DASHBOARD_LOCK_REASON, editable: false, deletable: false,
+    });
   });
 });

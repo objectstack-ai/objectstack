@@ -24502,9 +24502,11 @@ export class ObjectStackProtocolImplementation implements
      * the environment ledger, through {@link saveMetaItem} — the same save
      * door a Studio edit takes — so every copied item is environment metadata
      * from its first byte: owned by the base, `organization_id` NULL, served
-     * `_provenance: 'org'`, edited by the next save (an item shipped with an
-     * authored `_lock` keeps that lock as written today, and a follow-up on
-     * #15213 strips it per #22971's ruling A), and followed by no upgrade.
+     * `_provenance: 'org'`, edited by the next save, and followed by no
+     * upgrade. The package's protection lock (`_lock`, `_lockReason`,
+     * `_lockSource`) is not copied, and the answer's `strippedLocks` names each
+     * lock dropped with the package's reason (ADR-0010 §3.3; the ruling on the
+     * D6 lock fork, record 6119681934 — `stripUnmanagedImportLock`).
      * The managed mode is the package install; this verb is what that
      * install's manifest service is to it, and no more (see
      * `package-unmanaged-install.ts` for what is copied, what is refused, and
@@ -24692,6 +24694,9 @@ export class ObjectStackProtocolImplementation implements
             namespace,
             copiedCount: copied.length,
             copied,
+            // Planned before the base existed; every item was written, so every
+            // lock listed was dropped from a copy that now exists.
+            strippedLocks: plan.strippedLocks,
         };
     }
 
