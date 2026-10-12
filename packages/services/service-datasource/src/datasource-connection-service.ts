@@ -652,11 +652,29 @@ export class DatasourceConnectionService {
       // equals by the fail-fast policy below (both mean "no fallback
       // driver"); they were unequal only here. `syncObjectSchema` is
       // idempotent, so an object in both lists is harmless.
+      //
+      // [#22985] A refusal here is reported at `error`, once per object per
+      // connect: see {@link objectStorageSyncFailureLine}. Both kinds of bound
+      // object end up registered and served with no working storage while the
+      // datasource answers `connected`, which is the durability class AGENTS.md
+      // "Degradation log levels" sends to `error`. The connect is deliberately
+      // NOT failed: one object's DDL refusal must not take every other object
+      // on the datasource down with it.
       for (const objectName of [...(opts.objects ?? []), ...(opts.mappedObjects ?? [])]) {
         try {
           await engine.syncObjectSchema?.(objectName);
         } catch (err) {
-          this.logger?.warn?.(`datasource '${name}': syncObjectSchema('${objectName}') failed: ${errMsg(err)}`);
+          // `warn` is the contract's required channel and `error` its optional
+          // one, so the fallback is spelled out: never `error?.(…)`, which
+          // prints nothing against a sink that has no `error`.
+          const logger = this.logger;
+          if (logger) {
+            (logger.error ?? logger.warn).call(logger, objectStorageSyncFailureLine(name, objectName), {
+              datasource: name,
+              object: objectName,
+              error: errMsg(err),
+            });
+          }
         }
       }
 
@@ -1005,4 +1023,32 @@ function toSpec(record: ConnectableDatasource): DatasourceConnectionSpec {
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * [#22985] The ONE line `connect()` prints when a bound object's
+ * `syncObjectSchema` throws — at `error`, carrying both halves AGENTS.md
+ * "Degradation log levels" asks of a durability degradation: ① the
+ * consequence, and that the deployment keeps looking healthy; ② the fix.
+ *
+ * Both kinds of bound object are covered, because the catch cannot tell them
+ * apart and both land in the same place: a managed object's DDL never ran, so
+ * its table/columns do not exist, and a federated object's binding to its
+ * remote table was never installed, so its reads resolve to a table named
+ * after the object. Either way the object stays registered and served while
+ * this datasource answers `connected`. The remedy is the one the code path
+ * gives: this loop runs inside `connectDeclared`, which every boot calls, so a
+ * restart re-runs the sync once the refusal is resolved. `os migrate` is not
+ * named, because it plans only the primary datasource and its telemetry
+ * sibling, never a datasource an app declares.
+ */
+function objectStorageSyncFailureLine(datasource: string, objectName: string): string {
+  return (
+    `datasource '${datasource}': object '${objectName}' has NO working storage here — its schema sync was refused, ` +
+    'so a managed object\'s table/columns were not created or altered, and a federated object is not bound to its ' +
+    `remote table. The datasource still reports connected and '${objectName}' stays registered and served, so reads ` +
+    'and writes against it fail, or hit a table named after the object, while the deployment looks healthy. ' +
+    "Fix: resolve the driver's refusal (in this record's meta), then restart: every boot re-runs this sync when it " +
+    'connects the declared datasource.'
+  );
 }

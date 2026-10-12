@@ -581,6 +581,21 @@ const FAILURE_PROPAGATION_SITES = new Map([
                 + 'baseline in #4754).',
         },
     ],
+    [
+        'packages/cli/src/utils/schema-migration-plugins.ts::measureComposedCoverage',
+        {
+            callees: [['failures.set', 'effect']],
+            why:
+                "`failures` is this function's per-refusal outcome recorder: every entry becomes one note of the "
+                + 'RETURNED report (`The driver REFUSED schema registration for N object(s) (<refusal>); those '
+                + 'objects are NOT in the plan below.`), beside `coverage.reasons.failed`, and `os migrate plan` / '
+                + '`apply` print those notes and mark the plan PARTIAL. So the caller is told, per refusal, which '
+                + 'objects the plan did not examine. It is not a durability seam at all: this pass runs only on a '
+                + 'boot that DEFERRED its DDL, so the `syncObjectSchema` it guards registers metadata in memory and '
+                + 'writes nothing. Declared here because the vocabulary is a name and the name reaches this catch '
+                + "(#22985); `schema-migration-plugins.test.ts` pins the refusal note and the failed count.",
+        },
+    ],
 ]);
 
 // ─────────────────────────────────────────────────────────────────────────────
