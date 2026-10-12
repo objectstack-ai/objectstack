@@ -2306,11 +2306,13 @@ function collectDuplicateFunctionNameErrors(config: ObjectStackDefinition): stri
  * - `docs`: `os validate` and `os build` refused the pair (`docs/duplicate-name`)
  *   while a source boot kept the last.
  *
- * The identity is the string the registrars key an entry by: `name` for 25
- * collections, the extended object (`extend`) for `objectExtensions`, and for
- * `views` the slot every registrar files the entry under — an aggregated
- * container under the object it binds to ({@link deriveViewContainerObject}),
- * any other entry under its own `name`, falling back to the same derivation.
+ * The identity is the string the registrars key an entry by: `name` for 24
+ * collections, the `(name, locale)` pair for `emailTemplates` (an i18n bundle
+ * is one name across several locales), the extended object (`extend`) for
+ * `objectExtensions`, and for `views` the slot every registrar files the entry
+ * under — an aggregated container under the object it binds to
+ * ({@link deriveViewContainerObject}), any other entry under its own `name`,
+ * falling back to the same derivation.
  * An entry with no readable identity claims no slot and is not counted.
  *
  * Deliberately NOT in the table, each for a reason that is not "nobody looked":
@@ -2325,8 +2327,11 @@ function collectDuplicateFunctionNameErrors(config: ObjectStackDefinition): stri
  * map-supported collection reaches this check already normalized (key → `name`,
  * an explicit `name` winning), so two map keys whose entries spell one `name`
  * collide here too. Cross-package reuse of a name is untouched (ADR-0048 §3.4):
- * a composed project carries each package's collections in its own
- * `packages[i]` body, never at the top level this check reads.
+ * a multi-package project (`composeStacks(…, { manifest: 'preserve' })`)
+ * carries each package's collections in its own `packages[i]` body, which this
+ * check does not read. The same-package case is the one §3.4 leaves to
+ * authoring-time hygiene (`os lint`'s duplicate-name advisory); it is refused
+ * here at the contract, as the action-key check already does for actions.
  */
 interface SameStackEntryIdentity {
   /** The identity the registrars key this collection's entries by, or `undefined` when an entry has none. */
@@ -2376,7 +2381,29 @@ const SAME_STACK_ENTRY_IDENTITY = Object.freeze({
   datasets: lastWinsByName('Dataset', 'datasets'),
   flows: lastWinsByName('Flow', 'flows'),
   jobs: lastWinsByName('Job', 'jobs'),
-  emailTemplates: lastWinsByName('Email template', 'email templates'),
+  // An i18n bundle is one `name` across several `locale` tags, so the identity
+  // is the pair — the registry's `ITEM_KEY_DISCRIMINATORS` entry, keyed as
+  // `name@locale` with an untagged entry keyed as the floor tag (the schema's
+  // own default). Two entries collide only on one name AND one locale.
+  emailTemplates: {
+    identity: (entry) => {
+      const name = readEntryName(entry);
+      if (name === undefined) return undefined;
+      const locale = (entry as { locale?: unknown }).locale;
+      const tag = typeof locale === 'string' && locale.trim() ? locale.trim() : EMAIL_TEMPLATE_FLOOR_LOCALE;
+      return `${name}@${tag}`;
+    },
+    subject: (key) => {
+      const at = key.lastIndexOf('@');
+      return `Email template '${key.slice(0, at)}' for locale '${key.slice(at + 1)}'`;
+    },
+    consequence: () =>
+      'The runtime keys email templates by name and locale, so only the last of these entries is kept ' +
+      'for that locale and the others are silently dropped.',
+    remedy: () =>
+      'Rename one of them, give each its own `locale` (one entry per locale is an i18n bundle), or merge ' +
+      'them into a single entry.',
+  },
   books: lastWinsByName('Book', 'books'),
   positions: lastWinsByName('Position', 'positions'),
   permissions: lastWinsByName('Permission set', 'permission sets'),

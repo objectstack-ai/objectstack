@@ -16,9 +16,10 @@
  * docs                                    : os validate / os build refuse (docs/duplicate-name), a source boot keeps the last
  * ```
  *
- * The identity is what the registrars key an entry by: `name` (25 keys),
- * `extend` (`objectExtensions`), and for `views` the object an aggregated
- * container binds to (`deriveViewContainerObject`). Out of the table, each
+ * The identity is what the registrars key an entry by: `name` (24 keys),
+ * `(name, locale)` (`emailTemplates`, whose i18n bundle is one name across
+ * several locales), `extend` (`objectExtensions`), and for `views` the object
+ * an aggregated container binds to (`deriveViewContainerObject`). Out of the table, each
  * for its own reason: `plugins`, `agents`, `picklistExtensions`, and `actions`
  * / `functions`, which have their own checks (`stack-duplicate-action-key`,
  * `stack-duplicate-function-name`).
@@ -119,7 +120,14 @@ const BATCH: readonly Row[] = [
   byName('datasets', 'Dataset', dataset),
   byName('flows', 'Flow', flow),
   byName('jobs', 'Job', { name: 'dupe_job', label: 'Job', schedule: { type: 'interval', intervalMs: 60000 }, body: { language: 'js', source: 'return 1;', capabilities: [] } }),
-  byName('emailTemplates', 'Email template', { name: 'dupe_mail', label: 'Mail', subject: 'Hi', bodyHtml: '<p>Hello</p>' }),
+  {
+    // An i18n bundle is one name across several locales: the identity is the
+    // pair, an untagged entry keyed as the floor tag `en-US`.
+    ...byName('emailTemplates', 'Email template', { name: 'dupe_mail', label: 'Mail', subject: 'Hi', bodyHtml: '<p>Hello</p>' }),
+    identity: 'dupe_mail',
+    sameIdentity: (e) => ({ ...e, label: 'Second', locale: 'en-US' }),
+    subject: "Email template 'dupe_mail' for locale 'en-US'",
+  },
   byName('books', 'Book', { name: 'dupe_book', label: 'Book', groups: [] }),
   byName('positions', 'Position', { name: 'dupe_pos', label: 'Pos' }),
   byName('permissions', 'Permission set', { name: 'dupe_perm', label: 'Perm', objects: {} }),
@@ -371,6 +379,20 @@ describe('defineStack - CONTROL: distinct identities and the out-of-batch collec
       expect(out[row.key].map((e) => e.name)).toEqual(Object.keys(map));
     },
   );
+
+  it('emailTemplates: one name across several locales is an i18n bundle, not a duplicate', () => {
+    const mail = (locale?: string) => ({
+      name: 'dupe_mail',
+      label: `Mail ${locale ?? 'floor'}`,
+      ...(locale === undefined ? {} : { locale }),
+      subject: 'Hi',
+      bodyHtml: '<p>Hello</p>',
+    });
+    expect(refusal({ manifest, objects: [thing], emailTemplates: [mail(), mail('zh-CN'), mail('ja-JP')] })).toBeNull();
+    const r = refusal({ manifest, objects: [thing], emailTemplates: [mail(), mail('zh-CN'), mail('zh-CN')] });
+    expectCrossReferenceEnvelope(r, 1);
+    findingFor(r, 'emailTemplates', "Email template 'dupe_mail' for locale 'zh-CN'", [1, 2]);
+  });
 
   it('the cross-scope action pair — one global, one object-bound, one name — stays accepted', () => {
     const act = { name: 'dupe_go', label: 'Go', type: 'script' as const, target: 'noop' };
