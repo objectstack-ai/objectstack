@@ -324,10 +324,8 @@ describe('[#22161] one-line verdicts', () => {
 describe('[#22161] one-line fixes', () => {
   it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {
     expect(fired.some((f) => f.message.includes('holds a list'))).toBe(true);
-    // The three ids this slice converted (the other two RLS ids keep their
-    // longer hints: a later slice's).
-    const converted = ['rls-predicate-unenforceable', 'rls-predicate-over-budget', 'rls-predicate-unknown-field'];
-    for (const f of fired.filter((x) => converted.includes(x.rule))) {
+    // Every RLS id: slice 11 converted three, slice 12 the other two.
+    for (const f of fired.filter((x) => x.rule.startsWith('rls-predicate-'))) {
       expect(f.hint, f.rule).not.toContain('\n');
       expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
     }

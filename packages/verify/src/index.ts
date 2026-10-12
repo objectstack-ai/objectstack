@@ -3,9 +3,10 @@
 // @objectstack/verify — public API.
 //
 // Boot any ObjectStack app in-process and verify it through the real HTTP
-// stack. Two proof families, both app-agnostic (derived from your metadata):
-//   - data fidelity   : runCrudVerification — author → write → read → assert
-//   - authorization   : runRlsProofs        — "you can't write what you can't read"
+// stack. Three proof families, all app-agnostic (derived from your metadata):
+//   - data fidelity   : runCrudVerification     — author → write → read → assert
+//   - authorization   : runRlsProofs            — "you can't write what you can't read"
+//   - value shape     : runReferenceShapeProofs — "a reference refuses a value that is not a record id"
 
 export { bootStack, bootStackOnce } from './harness.js';
 export type { VerifyStack, BootOptions } from './harness.js';
@@ -56,6 +57,28 @@ export type {
   RlsPositionCoverage,
   RlsProofOptions,
 } from './rls.js';
+
+// ADR-0104 D1 — the reference-value shape family: every client-writable
+// reference field refuses a value its declared stored shape refuses, asked of
+// the engine through the REST door and the system door.
+export {
+  deriveReferenceShapeCases,
+  referenceShapeProbeValue,
+  runReferenceShapeProofs,
+  formatReferenceShapeReport,
+  REFERENCE_SHAPE_PROBE_ID,
+} from './reference-shape.js';
+export type {
+  ReferenceShapeCase,
+  ReferenceShapeDoor,
+  ReferenceShapeOperation,
+  ReferenceShapeProbeKind,
+  ReferenceShapeProbeResult,
+  ReferenceShapeFieldStatus,
+  ReferenceShapeFieldResult,
+  ReferenceShapeReport,
+  ReferenceShapeProofOptions,
+} from './reference-shape.js';
 
 // ADR-0060 — reusable conformance-ledger helper (static complement to the
 // runtime harness): classify every declarable property, fail closed on drift.

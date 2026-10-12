@@ -111,7 +111,9 @@ describe('validateEmptyCombinators — the literal shapes are refused', () => {
     expect(findings[0].severity).toBe('error');
     expect(findings[0].path).toBe(WIDGET_PATH);
     expect(findings[0].message).toContain('matches EVERY row');
-    expect(findings[0].hint).toContain('DELETE the key');
+    expect(findings[0].hint).toContain('Delete the key to express "no filter"');
+    // [#22161] Why the absent key is the spelling is `os explain`.
+    expect(explainRule(FILTER_EMPTY_NODE)!.paragraphs.join('\n')).toContain('DELETE the key');
   });
 
   it('refuses a `{}` branch of `$or` by naming the branches it kills', () => {
@@ -126,7 +128,10 @@ describe('validateEmptyCombinators — the literal shapes are refused', () => {
     // Absorption, not narrowing — the distinction #5297 was filed about.
     expect(findings[0].message).toContain('ABSORBS');
     expect(findings[0].message).toContain('matches EVERY row');
-    expect(findings[0].hint).toContain('NARROW');
+    // [#22161] The one-line `fix:` deletes the branch; why the runtime absorbs
+    // rather than narrows is `os explain`.
+    expect(findings[0].hint).toContain('Delete the empty branch');
+    expect(explainRule(FILTER_EMPTY_NODE)!.paragraphs.join('\n')).toContain('silently narrow the scope');
   });
 
   it('refuses a `{}` branch of `$and` with the AND identity wording', () => {
@@ -184,8 +189,8 @@ describe('validateEmptyCombinators — what it leaves alone', () => {
   });
 
   it('says nothing about the declared match-none spelling it prescribes', () => {
-    // The hint tells authors to write `{ $in: [] }` when they really do want
-    // zero rows. A rule that then rejected its own prescription would be worse
+    // The explanation tells authors to write `{ $in: [] }` when they really do
+    // want zero rows. A rule that then rejected its own prescription would be worse
     // than no rule at all.
     expect(validateEmptyCombinators(widgetStack({ stage: { $in: [] } }))).toEqual([]);
   });
@@ -446,8 +451,8 @@ describe('[#22161] one-line verdicts — filter-empty-combinator, filter-empty-n
 
 // [#22161] Slice 11: the `fix:` line. `filter-empty-combinator` names its
 // remedy in one line per shape; the declared match-none spelling and the
-// programmatic-producer note are its explanation's. (`filter-empty-node` keeps
-// its longer root-arm hint: a later slice's.)
+// programmatic-producer note are its explanation's. (`filter-empty-node` is
+// slice 12's, in the block below.)
 describe('[#22161] one-line fixes — filter-empty-combinator', () => {
   it('every `fix:` line of the id the cases above fired is one line of at most 200 characters', () => {
     const converted = fired.filter((f) => f.rule === FILTER_EMPTY_COMBINATOR);
@@ -465,5 +470,29 @@ describe('[#22161] one-line fixes — filter-empty-combinator', () => {
     const text = explainRule(FILTER_EMPTY_COMBINATOR)!.paragraphs.join('\n');
     expect(text).toContain('`{ <field>: { $in: [] } }` is the declared spelling');
     expect(text).toContain('A PROGRAMMATIC producer that loops to zero operands keeps the runtime identity unchanged');
+  });
+});
+
+// [#22161] Slice 12: the `fix:` line of `filter-empty-node`, one remedy line
+// per position; why the absent key is the spelling, the declared match-none
+// spelling and why the runtime absorbs are its explanation's.
+describe('[#22161] one-line fixes — filter-empty-node', () => {
+  it('every `fix:` line of the id the cases above fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === FILTER_EMPTY_NODE);
+    // Coverage control: all three positions fired.
+    for (const opening of ['An EMPTY filter node', 'An EMPTY branch (`{}`) of a `$or`', 'An EMPTY branch (`{}`) of a `$and`']) {
+      expect(converted.some((f) => f.message.startsWith(opening)), opening).toBe(true);
+    }
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('`os explain` carries what the `fix:` lines no longer say', () => {
+    const text = explainRule(FILTER_EMPTY_NODE)!.paragraphs.join('\n');
+    expect(text).toContain('only the absent key says so to the next reader');
+    expect(text).toContain('`{ <field>: { $in: [] } }` is the declared spelling');
+    expect(text).toContain('which is why the runtime absorbs');
   });
 });

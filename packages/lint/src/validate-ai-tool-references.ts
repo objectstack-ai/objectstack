@@ -239,18 +239,16 @@ export function validateAiToolReferences(stack: AnyRec): AiToolRefFinding[] {
             : `Tool "${ref}" resolves to no stack, platform or materialised action tool, so the ` +
               `runtime drops it and the agent cannot call it.` +
               suggest(ref, universe),
+        // [#22161] One remedy line per arm. That a UI-only action stays
+        // human-driven by design, the ADR-0109 default path, the family
+        // prefixes the runtime materialises (written out there and held to
+        // `PLATFORM_TOOL_FAMILY_PREFIXES` by this rule's test) and the
+        // runtime-plugin exception are `os explain ai-skill-tool-unresolved`.
         hint: unexposed
-          ? `Either opt "${unexposed}" in — set \`ai: { exposed: true, description: '…' }\` (≥40 ` +
-            `chars, LLM-facing) and give it a headless type — or drop the reference and have the ` +
-            `skill's instructions recommend the UI action instead. A \`modal\`/\`form\`/\`url\` ` +
-            `action stays human-driven by design; that is a legitimate answer, not a gap.`
-          : `Back "${ref}" with a real executable: declare a declarative action (or flow), opt it ` +
-            `in with \`ai.exposed: true\` + \`ai.description\`, and reference its materialised ` +
-            `tool (\`action_<name>\` — the ADR-0109 default path, no tool record needed); or ` +
-            `reference a platform tool by its registered name; or remove the reference and the ` +
-            `instructions that mention it. Ignore this only if a runtime plugin outside the ` +
-            `platform registry provides "${ref}". Family prefixes materialised by the runtime: ` +
-            `${PLATFORM_TOOL_FAMILY_PREFIXES.join(', ')}.`,
+          ? `Opt "${unexposed}" in with \`ai: { exposed: true, description: '…' }\` and a headless type, or ` +
+            `drop the reference and have the instructions recommend the UI action`
+          : `Back "${ref}" with an opted-in action (\`ai.exposed: true\`, tool \`action_<name>\`) or a ` +
+            `registered platform tool, or remove it and the instructions that mention it`,
       });
     }
   }
