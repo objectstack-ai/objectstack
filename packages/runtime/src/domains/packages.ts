@@ -424,10 +424,13 @@ function requireReadCapability(deps: DomainHandlerDeps, context: HttpProtocolCon
  * The items are read where the delete reads them: `deletePackage` removes the
  * `sys_metadata` rows bound to the package, and those rows are not held under
  * the package in the running registry, so the stored rows are what is asked.
- * The decision is {@link walledCatalogWriteVerdict}'s, once per stored catalog
- * type: under `single`, with no `tenancy` service, for `isSystem` or for the
- * `PLATFORM_ADMIN` rung it admits, and a package without catalog rows never
- * reaches it. The answer is this domain's `403` (`PERMISSION_DENIED`).
+ * The decision is {@link walledCatalogWriteVerdict}'s, never restated. It is
+ * asked FIRST, for the first catalog type: its answer does not vary across
+ * catalog types, so when it admits this caller (under `single`, with no
+ * `tenancy` service, for `isSystem` or for the `PLATFORM_ADMIN` rung) nothing
+ * is read and the delete behaves exactly as before. Only a refused caller's
+ * package is read, and a package without catalog rows is admitted. The answer
+ * is this domain's `403` (`PERMISSION_DENIED`).
  */
 async function refuseWalledCatalogPackageDelete(
     deps: DomainHandlerDeps,
@@ -435,6 +438,15 @@ async function refuseWalledCatalogPackageDelete(
     qlService: Pick<IObjectQLEngine, 'find'> | null | undefined,
     packageId: string,
 ): Promise<HttpDispatcherResult | null> {
+    const ec: any = context?.executionContext;
+    const tenancyPosture = await readEffectiveTenancyPosture(deps, context);
+    const verdictFor = (type: string) => walledCatalogWriteVerdict({
+        type,
+        tenancyPosture,
+        isSystem: ec?.isSystem === true,
+        callerPosture: ec?.posture,
+    });
+    if (verdictFor(SECURITY_CATALOG_TYPES[0]!).allowed) return null;
     if (typeof qlService?.find !== 'function') return null;
     let rows: unknown;
     try {
@@ -448,16 +460,9 @@ async function refuseWalledCatalogPackageDelete(
         if (typeof type === 'string' && isSecurityCatalogType(type)) storedTypes.add(type);
     }
     if (storedTypes.size === 0) return null;
-    const ec: any = context?.executionContext;
-    const tenancyPosture = await readEffectiveTenancyPosture(deps, context);
     for (const type of SECURITY_CATALOG_TYPES) {
         if (!storedTypes.has(type)) continue;
-        const verdict = walledCatalogWriteVerdict({
-            type,
-            tenancyPosture,
-            isSystem: ec?.isSystem === true,
-            callerPosture: ec?.posture,
-        });
+        const verdict = verdictFor(type);
         if (!verdict.allowed) {
             return {
                 handled: true,

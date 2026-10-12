@@ -2992,11 +2992,14 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * `manifests` (the incoming version, the installed one, or both) declares
      * a catalog item, or the running registry holds one under `manifestId`.
      * A partial install is not well-formed: a package is registered whole.
-     * The decision is {@link walledCatalogWriteVerdict}'s, asked once per
-     * declared type and never restated: under `single`, with no `tenancy`
-     * service, or for the `PLATFORM_ADMIN` rung it admits, and a package with
-     * no catalog item never reaches it. The answer is the sibling refusals'
-     * envelope, `403 FORBIDDEN`.
+     * The decision is {@link walledCatalogWriteVerdict}'s, never restated. It
+     * is asked FIRST, for the first catalog type: its answer does not vary
+     * across catalog types, so when it admits this caller (under `single`,
+     * with no `tenancy` service, or for the `PLATFORM_ADMIN` rung) nothing is
+     * read and the door behaves exactly as before. Only a refused caller's
+     * package is read, and the refusal names the first type it declares. A
+     * package with no catalog item is admitted. The answer is the sibling
+     * refusals' envelope, `403 FORBIDDEN`.
      */
     private refuseWalledCatalogPackage = (
         c: any,
@@ -3006,15 +3009,17 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         admission: InstallAdmission,
         manifests: readonly unknown[],
     ): Response | null => {
+        const verdictFor = (type: string) => walledCatalogWriteVerdict({
+            type,
+            tenancyPosture: admission.tenancyPosture,
+            callerPosture: admission.callerPosture,
+        });
+        if (verdictFor(SECURITY_CATALOG_TYPES[0]!).allowed) return null;
         const declared = this.catalogItemsOf(ctx, manifestId, manifests);
         if (declared.length === 0) return null;
         for (const type of SECURITY_CATALOG_TYPES) {
             if (!declared.some((item) => item.type === type)) continue;
-            const verdict = walledCatalogWriteVerdict({
-                type,
-                tenancyPosture: admission.tenancyPosture,
-                callerPosture: admission.callerPosture,
-            });
+            const verdict = verdictFor(type);
             if (verdict.allowed) continue;
             ctx.logger?.warn?.(
                 `[MarketplaceInstallLocal] refused ${action} ${manifestId} for ${admission.userId}: `
