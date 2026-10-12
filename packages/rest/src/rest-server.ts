@@ -304,68 +304,9 @@ type TransportScopedMetaRequest<R> = R & { environmentId?: string };
  */
 type LegacyFormViewsRequest = TransportScopedMetaRequest<GetMetaItemsRequest> & { legacyFormOrganizationId?: string };
 
-/**
- * [#15866] The DATA doors' sibling of {@link TransportScopedMetaRequest}, and
- * the reason it is a SECOND alias rather than a widening of the first: the data
- * routes layer on TWO server-side members, and only one of them is the meta
- * doors' transport key.
- *
- *   - `environmentId` — identical to the meta case and covered by the same
- *     ruling (2026-08-18, commit 2a29caa53): `resolveProtocol(environmentId)` picks the
- *     target kernel BEFORE the call, `@objectstack/metadata-protocol`'s data
- *     methods never read it off the request, and `protocol.zod.ts` records the
- *     exclusion schema-side. The doors still spread it (long-standing wire
- *     shape), so it is declared here rather than smuggled past the compiler.
- *   - `context` — the SERVER-DERIVED execution context from
- *     {@link RestServer.resolveExecCtx}. The implementation genuinely reads it
- *     (`findData`/`getData`/`createData`/`updateData`/`deleteData` all declare
- *     `context?: any` and forward it so the RBAC/RLS middleware can enforce),
- *     so unlike `environmentId` it IS consumed — but it still must not join the
- *     request schema, because that schema is the catalog's published
- *     `requestSchema` and a CALLER-supplied `context` is a privilege escalation:
- *     `metadata-protocol.findData` deletes any inbound `context` unconditionally
- *     for exactly that reason (`if (opCtx.context?.isSystem) return next()`
- *     skips the whole RLS/FLS/CRUD chain). Declared-here is what keeps it
- *     server-only AND compiled.
- *
- * ⛔ Never add a third member here to make a literal fit. A key a caller may
- * send belongs in the spec schema; a key the door invents belongs in neither.
- * What this buys is the guard #15866 was filed for: a field ADDED to
- * `DeleteDataRequestSchema` / `UpdateDataRequestSchema` (and their siblings)
- * as REQUIRED now reddens this file at build, naming the door that would
- * otherwise have gone on not sending it.
- *
- * ⚠️ Scope of the restored check, stated so it is not overread: these handlers
- * declare `req: any`, so every key sourced from `req` is `any` on the way in.
- * What the compiler regains here is the KEY SET — an undeclared member (TS2353)
- * and a missing required member (TS2739/TS2741) — not the value types of keys
- * read off the request bag.
- *
- * ⭐ [#16337] The one slot this alias could NOT cover is now covered too, and
- * the helper that covered for it is gone. #15866 left three server-built
- * `findData` literals — the import-job listing, the export chunk loop and the
- * public reference picker — speaking the UNDECLARED wire dialect (`$filter`,
- * `$top`, `$skip`, `$orderby`, `$expand`, `filters`, `select`, `sort`) and
- * routed them through a `wireDialectQuery` helper that cast the `query` member
- * to `FindDataRequest['query']`. All three now build the CANONICAL QueryAST
- * (`object`, `where`, `orderBy`, `limit`, `offset`, `fields`, `expand`), so the
- * `query` slot compiles against the declared contract like every other member
- * and the helper has been retired with this card.
- *
- * ⚠️ The rewrite is a spelling change ONLY, and that is measurable rather than
- * asserted: `@objectstack/metadata-protocol`'s `findData` folds every alias
- * spelling onto the canonical key by the spec's own table
- * (`RPC_QUERY_ALIAS_SLOTS`) and moves the value verbatim, so both dialects
- * reach `engine.find` as the same option bag. `rest-server-canonical-query-ast
- * .test.ts` drives the before/after pairs through the real normalizer and
- * asserts that equality, so a future edit that changes the option bag while
- * still compiling reddens there.
- *
- * ⛔ Server-built means server-built: the wire aliases stay accepted at the
- * HTTP door for CALLERS. Declaring them there is #16066's spec half and is not
- * this file's business.
- */
-export type ServerScopedDataRequest<R> = R & { environmentId?: string; context?: unknown };
+// [#23050 slice 1] `ServerScopedDataRequest`, the data doors' request envelope, moved to
+// `data-action-routes.ts` (imported below): exporting it from this file for that module
+// changed the published `dist/*.d.ts` by one line, and a second copy is not an option.
 
 import {
     buildFieldMetaMap,
@@ -375,7 +316,7 @@ import {
     type ExportFieldMeta,
 } from './export-format.js';
 // [#23050 slice 1] The data-action routes' body moved to its own module — see its header.
-import { registerDataActionEndpoints, type DataActionRouteHost } from './data-action-routes.js';
+import { registerDataActionEndpoints, type DataActionRouteHost, type ServerScopedDataRequest } from './data-action-routes.js';
 // [#17551] The `POST …/analytics/dataset/query` door parse — the half of the
 // analytics family this route never had. See the module header for the
 // measurement that decides its shape.

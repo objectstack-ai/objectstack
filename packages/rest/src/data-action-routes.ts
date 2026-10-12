@@ -36,7 +36,10 @@
  *   field rather than inheriting this sentence.
  * - Module-level helpers stay in `rest-server.ts` and are imported from it.
  *   They are exported there for this module only; the package entry does not
- *   re-export them, so the published surface does not move.
+ *   re-export them, so the published surface does not move. The one exception
+ *   is the `ServerScopedDataRequest` type, which moved HERE instead: exporting
+ *   a type alias from `rest-server.ts` was measured to change the published
+ *   declaration file, where exporting a function or a constant does not.
  */
 
 import type {
@@ -84,8 +87,74 @@ import {
     readDeclaredQueryNumber,
     rowsToCsv,
     type RestServer,
-    type ServerScopedDataRequest,
 } from './rest-server.js';
+
+// [#23050 slice 1] Moved here from `rest-server.ts`, verbatim, because this module is
+// the first one outside that file to need it: exporting it from there changed the
+// published `dist/*.d.ts`. The CRUD, form and batch doors still in `rest-server.ts`
+// import it from here.
+/**
+ * [#15866] The DATA doors' sibling of {@link TransportScopedMetaRequest}, and
+ * the reason it is a SECOND alias rather than a widening of the first: the data
+ * routes layer on TWO server-side members, and only one of them is the meta
+ * doors' transport key.
+ *
+ *   - `environmentId` — identical to the meta case and covered by the same
+ *     ruling (2026-08-18, commit 2a29caa53): `resolveProtocol(environmentId)` picks the
+ *     target kernel BEFORE the call, `@objectstack/metadata-protocol`'s data
+ *     methods never read it off the request, and `protocol.zod.ts` records the
+ *     exclusion schema-side. The doors still spread it (long-standing wire
+ *     shape), so it is declared here rather than smuggled past the compiler.
+ *   - `context` — the SERVER-DERIVED execution context from
+ *     {@link RestServer.resolveExecCtx}. The implementation genuinely reads it
+ *     (`findData`/`getData`/`createData`/`updateData`/`deleteData` all declare
+ *     `context?: any` and forward it so the RBAC/RLS middleware can enforce),
+ *     so unlike `environmentId` it IS consumed — but it still must not join the
+ *     request schema, because that schema is the catalog's published
+ *     `requestSchema` and a CALLER-supplied `context` is a privilege escalation:
+ *     `metadata-protocol.findData` deletes any inbound `context` unconditionally
+ *     for exactly that reason (`if (opCtx.context?.isSystem) return next()`
+ *     skips the whole RLS/FLS/CRUD chain). Declared-here is what keeps it
+ *     server-only AND compiled.
+ *
+ * ⛔ Never add a third member here to make a literal fit. A key a caller may
+ * send belongs in the spec schema; a key the door invents belongs in neither.
+ * What this buys is the guard #15866 was filed for: a field ADDED to
+ * `DeleteDataRequestSchema` / `UpdateDataRequestSchema` (and their siblings)
+ * as REQUIRED now reddens this file at build, naming the door that would
+ * otherwise have gone on not sending it.
+ *
+ * ⚠️ Scope of the restored check, stated so it is not overread: these handlers
+ * declare `req: any`, so every key sourced from `req` is `any` on the way in.
+ * What the compiler regains here is the KEY SET — an undeclared member (TS2353)
+ * and a missing required member (TS2739/TS2741) — not the value types of keys
+ * read off the request bag.
+ *
+ * ⭐ [#16337] The one slot this alias could NOT cover is now covered too, and
+ * the helper that covered for it is gone. #15866 left three server-built
+ * `findData` literals — the import-job listing, the export chunk loop and the
+ * public reference picker — speaking the UNDECLARED wire dialect (`$filter`,
+ * `$top`, `$skip`, `$orderby`, `$expand`, `filters`, `select`, `sort`) and
+ * routed them through a `wireDialectQuery` helper that cast the `query` member
+ * to `FindDataRequest['query']`. All three now build the CANONICAL QueryAST
+ * (`object`, `where`, `orderBy`, `limit`, `offset`, `fields`, `expand`), so the
+ * `query` slot compiles against the declared contract like every other member
+ * and the helper has been retired with this card.
+ *
+ * ⚠️ The rewrite is a spelling change ONLY, and that is measurable rather than
+ * asserted: `@objectstack/metadata-protocol`'s `findData` folds every alias
+ * spelling onto the canonical key by the spec's own table
+ * (`RPC_QUERY_ALIAS_SLOTS`) and moves the value verbatim, so both dialects
+ * reach `engine.find` as the same option bag. `rest-server-canonical-query-ast
+ * .test.ts` drives the before/after pairs through the real normalizer and
+ * asserts that equality, so a future edit that changes the option bag while
+ * still compiling reddens there.
+ *
+ * ⛔ Server-built means server-built: the wire aliases stay accepted at the
+ * HTTP door for CALLERS. Declaring them there is #16066's spec half and is not
+ * this file's business.
+ */
+export type ServerScopedDataRequest<R> = R & { environmentId?: string; context?: unknown };
 
 /**
  * The `RestServer` members {@link registerDataActionEndpoints} reads — every
