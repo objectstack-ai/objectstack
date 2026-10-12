@@ -232,6 +232,6 @@ describe('[#22985] a refused object-storage sync on publish is an error, once', 
 
         expect(res.success).toBe(true);
         expect(syncedObjects).toEqual(['ticket']);
-        expect(spy.error.mock.calls.filter((args) => String(args[0]).includes(HEADLINE))).toEqual([]);
+        expect(spy.error).not.toHaveBeenCalled();
     });
 });
