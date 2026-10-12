@@ -28,7 +28,6 @@ export function baseOptions(): BaseLayoutProps {
     },
     // Every layout spreads baseOptions() — DocsLayout (docs sidebar), and HomeLayout on
     // the home page and on /blog — so these entries are the nav's links on all of them.
-    // `Why` is one post, so it lights on that URL alone; `Blog` lights on every post.
     links: [
       { text: 'Why', url: ESSAY_URL, active: 'url' },
       { text: 'Blog', url: '/blog', active: 'nested-url' },
