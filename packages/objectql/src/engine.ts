@@ -275,6 +275,7 @@ import { deriveViewContainerObject } from '@objectstack/metadata/view-container'
 // registrar and `os validate` both call.
 import { viewContainerNameRefusal } from './view-container-name-refusal.js';
 import { bindHooksToEngine } from './hook-binder.js';
+import { declaredHookCondition } from './hook-wrappers.js';
 import { validateRecord, validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
@@ -401,9 +402,10 @@ export interface AdmittedValueShapeViolationTally {
  * in, and an in-engine audit hook depends on landing inside it.
  *
  * Four ordinary paths open such a unit around the dispatch:
- *   - the write door itself, when the object has a blocking metadata-bound
- *     `after*` hook whose `onError` is `abort` — so that abort rolls the row
- *     back as `HookSchema.onError` says (#22782, `opensAfterAbortUnit`);
+ *   - the write door itself, when the object has a metadata-bound `after*`
+ *     hook that can abort — blocking with `onError` `abort`, or carrying a
+ *     `condition` — so that abort rolls the row back as `HookSchema.onError`
+ *     says (#22782, #22856, `opensAfterAbortUnit`);
  *   - a by-id {@link ObjectQL.delete} whose cascade is `'atomic'` — each
  *     dependent's own `afterDelete` fires inside the wrap the parent opened,
  *     and the parent's row removal can still refuse afterwards (#7413). The
@@ -4697,9 +4699,13 @@ export class ObjectQL implements IObjectQLEngine {
    * dispatch can ABORT and no unit is open, so the abort rolls back what
    * `HookSchema.onError` says: the row and every `ctx.api` write the chain made. "Can abort"
    * is a metadata-bound hook (`meta` — the only entries with a declared
-   * `onError`) on `event` for `object`, blocking (not `async`), `onError`
-   * `abort` (the default), automations not skipped. Hook count and order are
-   * untouched (#7413); only the boundary around them moves.
+   * `onError`) on `event` for `object`, automations not skipped, that either
+   * is blocking (not `async`) with `onError` `abort` (the default), or carries
+   * a `condition` (#22856): a condition that cannot be evaluated aborts the
+   * operation whatever `onError` says, and before an `async` hook detaches
+   * (#4775, `HookConditionError`), so it is read by the wrapper's own
+   * {@link declaredHookCondition}. Hook count and order are untouched (#7413);
+   * only the boundary around them moves.
    *
    * No unit — the pre-#22782 path — when one is open (ambient or threaded: the
    * caller's unit decides; a threaded handle whose unit has closed is not open,
@@ -4714,7 +4720,8 @@ export class ObjectQL implements IObjectQLEngine {
     if ((threaded !== undefined && !this.isClosedUnitHandle(threaded)) || this.txStore.getStore()?.transaction !== undefined) return false;
     if ((context as { skipAutomations?: unknown } | undefined)?.skipAutomations) return false;
     const aborting = (this.hooks.get(event) ?? []).some((entry) =>
-      entry.meta && !entry.meta.async && (entry.meta.onError ?? 'abort') === 'abort' && hookMatchesObject(entry, object));
+      entry.meta && hookMatchesObject(entry, object)
+      && ((!entry.meta.async && (entry.meta.onError ?? 'abort') === 'abort') || declaredHookCondition(entry.meta) !== undefined));
     if (!aborting) return false;
     const defaultDriver = this.defaultDriver ? this.drivers.get(this.defaultDriver) : undefined;
     try {
@@ -8563,11 +8570,25 @@ export class ObjectQL implements IObjectQLEngine {
    * still resolves from an org-bound caller, and a NULL-organization row passes
    * the driver's `OR … IS NULL` term.
    *
+   * ## …except a master-detail header, which the caller must be able to read (#22519)
+   *
+   * A `master_detail` field names the detail's HEADER, and a write of a detail
+   * whose header the caller cannot read answers exactly what a write naming a
+   * header that exists nowhere answers. Nothing upstream of this check settles
+   * that: ADR-0055 §3 gates a detail write on its header (master edit) only for
+   * a `controlled_by_parent` detail, so an elevated probe alone would tell such
+   * a caller "exists" apart from "exists nowhere". So for a `master_detail`
+   * field the caller's read door is asked first ({@link masterDetailHeaderExists}),
+   * and a header it does not return is `reference_not_found`. ⛔ A plain
+   * `lookup` keeps the elevated probe above, unchanged.
+   *
    * Fails OPEN when the target cannot be checked (unregistered object, no
    * driver, a probe that throws): an integrity check that cannot run must not
    * invent a rejection, and the alternative — refusing every write to an object
    * whose target lives on an unreachable datasource — converts a connectivity
-   * problem into data loss.
+   * problem into data loss. A master-detail header's read door that fails is
+   * the exception: it did not return the header, so the header is missing
+   * (see {@link masterDetailHeadersCallerReads}).
    */
   private async assertReferencesResolve(
     schema: any,
@@ -8636,7 +8657,10 @@ export class ObjectQL implements IObjectQLEngine {
       for (const v of values) {
         if (v === null || v === undefined || v === '') continue;
         if (typeof v === 'object') continue;
-        const resolved = await this.referenceExists(target, v, context);
+        // [#22519] A master-detail header must also be one the caller can read.
+        const resolved = def?.type === 'master_detail'
+          ? await this.masterDetailHeaderExists(target, v, context)
+          : await this.referenceExists(target, v, context);
         if (resolved === false) {
           failures.push(buildFieldError(
             {
@@ -8687,6 +8711,83 @@ export class ObjectQL implements IObjectQLEngine {
       return !!row;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * [#22519] The write's reference check for a `master_detail` field: does `id`
+   * name a header THIS CALLER can read? The write's two header reads, as
+   * {@link resolveMasterDetailParent} reads them: the caller's read door
+   * ({@link masterDetailHeadersCallerReads}), then the elevated, tenant-kept
+   * {@link referenceExists} for a header it returned. A header the read door
+   * does not return is `false` — `reference_not_found`, exactly as a header
+   * that exists nowhere.
+   *
+   * `null` (fail-open) only where {@link referenceExists} answers it, and for
+   * an unregistered master, which has no read door to ask either. Never reached
+   * by a SYSTEM caller: {@link assertReferencesResolve} returns before it.
+   *
+   * ⛔ `master_detail` only — the plain `lookup` probe is not this rule's.
+   */
+  private async masterDetailHeaderExists(
+    target: string,
+    id: unknown,
+    context: ExecutionContext | undefined,
+  ): Promise<boolean | null> {
+    const master = this.resolveObjectName(target);
+    if (!this._registry.getObject(master)) return null;
+    const readable = await this.masterDetailHeadersCallerReads(master, [id], context);
+    if (!readable.has(String(id))) return false;
+    return this.referenceExists(target, id, context);
+  }
+
+  /**
+   * [#22519] Read 1 of the write's master-detail header read: which of `ids`
+   * the caller's READ DOOR returns — one `find` for the whole batch, under the
+   * caller's own context, so every enforcement layer in the middleware chain
+   * (RBAC, RLS, sharing, row scope) answers it, as it answers the preview's
+   * first read ({@link resolvePreviewParents}). Projected to `id`: what the
+   * header HOLDS is read 2's question, never this one's.
+   *
+   * A header it does not return binds as a header that exists nowhere binds:
+   * the reference check answers `reference_not_found` for it
+   * ({@link masterDetailHeaderExists}), and the write's header resolution
+   * leaves `parent` unbound for it ({@link resolveMasterDetailParent},
+   * {@link resolveMasterDetailParents}). A read that fails — a refusal of the
+   * read itself included — returned no header, so every header binds as
+   * missing, as the preview binds them and as the write's own failed header
+   * read does; ⛔ never as readable.
+   *
+   * A SYSTEM caller (seed replay, boot) has no read door to ask: every id goes
+   * straight to read 2, and its write resolves exactly as before.
+   */
+  private async masterDetailHeadersCallerReads(
+    master: string,
+    ids: ReadonlyArray<unknown>,
+    context: ExecutionContext | undefined,
+  ): Promise<ReadonlySet<string>> {
+    const asked = new Map<string, unknown>();
+    for (const id of ids) if (id != null) asked.set(String(id), id);
+    if (context?.isSystem || asked.size === 0) return new Set(asked.keys());
+    // One id is asked by equality, the predicate shape the elevated probe
+    // already sends; a batch by `$in`, as read 2 of the batch reads it.
+    const values = [...asked.values()];
+    try {
+      const rows = await this.find(master, {
+        where: { id: values.length === 1 ? values[0] : { $in: values } },
+        fields: ['id'],
+        context,
+      } as EngineQueryOptions) as Array<Record<string, unknown>>;
+      const served = new Set<string>();
+      for (const row of Array.isArray(rows) ? rows : []) {
+        if (row?.id != null && asked.has(String(row.id))) served.add(String(row.id));
+      }
+      return served;
+    } catch (err) {
+      this.logger?.warn?.('the caller\'s read of the master-detail header failed — the header binds as a missing header', {
+        object: master, error: err,
+      });
+      return new Set();
     }
   }
 
@@ -8797,15 +8898,41 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * The header id comes from the payload first, then the prior row: a write that
    * REPOINTS the detail at another master must be judged against the master it
-   * is landing on, not the one it is leaving. Read ELEVATED: the lock is a
-   * data-integrity property of the header's state, not of the caller's
-   * visibility of it, and the caller's right to touch this detail at all was
-   * already settled upstream (RLS / `controlled_by_parent`, ADR-0055) before the
-   * write reached the strip.
+   * is landing on, not the one it is leaving.
+   *
+   * ## Two reads: may the caller see the header, then what it holds (#22519)
+   *
+   * A write of a detail whose header the caller cannot read answers exactly
+   * what a write naming a header that exists nowhere answers — for every
+   * detail, `controlled_by_parent` or not, on insert, update (a repoint
+   * included) and the bulk paths. The caller's right to write the detail does
+   * NOT settle its right to read the header: ADR-0055 §3 gates a detail write
+   * on its header (master edit, which implies read) only for a
+   * `controlled_by_parent` detail, and a detail with a sharing model of its own
+   * meets no header check on write. So the header is read twice, each read
+   * answering one question, in the shape the preview reads it in
+   * ({@link resolvePreviewParents}):
+   *
+   *  1. ⛔ MAY THIS CALLER SEE THE HEADER — the read door, under the caller's
+   *     own context ({@link masterDetailHeadersCallerReads}). A header it does
+   *     not return binds as a missing header binds: `null`, so a parent-scoped
+   *     `requiredWhen` / `readonlyWhen` meets an unbound `parent`, and the
+   *     reference check answers `reference_not_found` for it
+   *     ({@link masterDetailHeaderExists}).
+   *  2. WHAT THE HEADER HOLDS — the write's own ELEVATED read below, for a
+   *     header read 1 returned only. The lock is a data-integrity property of
+   *     the header's state, so a header the caller can read is judged on its
+   *     STORED values, a column field-level security hides from or masks for
+   *     this caller included: author-defined integrity rules run on true data.
+   *     The preview's per-column masking is the preview's own, not the write's.
+   *
+   * A SYSTEM caller (seed replay, boot) asks no read door: read 2 alone, as
+   * before.
    *
    * ## The elevation keeps the tenant wall (#19837)
    *
-   * That argument is about row-level VISIBILITY, never about TENANCY, so the
+   * Read 2's argument is about the VALUES of a header the caller may see, never
+   * about TENANCY, so the
    * read runs under {@link ObjectQL.referenceCheckContext} — the `sudo()`-shaped
    * `{ ...context, isSystem: true }` both reference checks share — and never a
    * bare `{ isSystem: true }`. The bare spelling carried no `tenantId`, so the
@@ -8823,8 +8950,9 @@ export class ObjectQL implements IObjectQLEngine {
    * NULL-organization header passes the driver's `OR … IS NULL` term. A system
    * caller with no `tenantId` (seed replay, boot) still reads unscoped.
    *
-   * `null` on any failure — no relation, no id, header gone or outside the
-   * caller's tenant scope, read threw. It is NOT read as "unlocked": an
+   * `null` on any failure — no relation, no id, header not returned by the
+   * caller's read door, header gone or outside the caller's tenant scope, read
+   * threw. It is NOT read as "unlocked": an
    * unresolved binding leaves `parent` unbound, and `isReadonlyWhenLocked`
    * treats a predicate that needs it as LOCKED.
    *
@@ -8842,6 +8970,11 @@ export class ObjectQL implements IObjectQLEngine {
     if (!rel) return null;
     const parentId = masterIdOf(rel.fk, data, priorRow);
     if (parentId == null) return null;
+    // [#22519] 1. The caller's read door: a header it does not return binds as
+    // a missing header binds.
+    const readable = await this.masterDetailHeadersCallerReads(rel.master, [parentId], context);
+    if (!readable.has(String(parentId))) return null;
+    // 2. The write's own elevated, tenant-kept read, for a header read 1 returned.
     try {
       const row = await this.findOne(rel.master, { where: { id: parentId }, context: ObjectQL.referenceCheckContext(context) } as any);
       // `null` stays `null` — the fail-CLOSED signal (#4889) is the ABSENCE of
@@ -8877,6 +9010,11 @@ export class ObjectQL implements IObjectQLEngine {
    * for the same reason: a header outside the caller's tenant scope gets no
    * entry here, so it binds as absent rather than lending its fields to a
    * `parent.*` predicate.
+   *
+   * [#22519] The same two reads as the single-id twin, each once for the batch:
+   * the caller's read door ({@link masterDetailHeadersCallerReads}), then the
+   * elevated read for the headers it returned only. A header the read door does
+   * not return gets no entry, so it binds as a missing header binds.
    */
   private async resolveMasterDetailParents(
     schema: any,
@@ -8893,10 +9031,14 @@ export class ObjectQL implements IObjectQLEngine {
       if (id != null) ids.add(String(id));
     }
     if (ids.size === 0) return unbound;
+    // [#22519] 1. The caller's read door, once for the batch.
+    const readable = await this.masterDetailHeadersCallerReads(rel.master, [...ids], context);
+    if (readable.size === 0) return unbound;
     const byId = new Map<string, Record<string, unknown>>();
     try {
+      // 2. The write's own elevated, tenant-kept read, for the headers read 1 returned.
       const rows = await this.find(rel.master, {
-        where: { id: { $in: [...ids] } },
+        where: { id: { $in: [...readable] } },
         context: ObjectQL.referenceCheckContext(context),
       } as any) as Array<Record<string, unknown>>;
       // [#6457] One declared-field lookup for the whole batch, then one shallow
@@ -8934,12 +9076,10 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * ## Read under the caller's access, not elevated
    *
-   * The write reads the header ELEVATED ({@link resolveMasterDetailParents}):
-   * the caller's right to write the detail was settled by the write's gates
-   * before the header is read. The preview runs none of those gates, so a
-   * header read elevated here would answer a predicate over a row the caller
+   * A header read elevated here would answer a predicate over a row the caller
    * may not read. Two reads, each answering one question, as the preview's
-   * stored-row read does:
+   * stored-row read does — and, since #22519, as the write's own header read
+   * does ({@link resolveMasterDetailParent}):
    *
    *  1. ⛔ MAY THIS CALLER SEE THE HEADER — the READ DOOR, under the caller's
    *     own context, one `find` for the whole batch. A header it does not
@@ -8948,10 +9088,12 @@ export class ObjectQL implements IObjectQLEngine {
    *     failed read binds every header as missing, as the write's own failed
    *     header read does.
    *  2. WHAT THE WRITE WOULD JUDGE — the write's own header read
-   *     ({@link resolveMasterDetailParents}), for the headers read 1 returned
-   *     only.
+   *     ({@link resolveMasterDetailParents}, whose own read door returns the
+   *     same headers), for the headers read 1 returned only.
    *
-   * ⛔ A header column is kept only where the read door served this caller
+   * ⛔ The column rule is the preview's own; the write judges a header the
+   * caller can read on its stored values. A header column is kept only where
+   * the read door served this caller
    * that very value ({@link servedAsStored}); every other column, hidden or
    * served transformed (a partial mask keeps the key and replaces the value),
    * is judged as empty: the header is materialised over the master's declared
@@ -9031,9 +9173,10 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * ## Read under SYSTEM authority, like `parent` and for a related reason
    *
-   * {@link resolveMasterDetailParent} reads as SYSTEM because a master-detail
-   * lock is a property of the header's state, not of the caller's visibility of
-   * it. This read is the same shape: a validation rule's output is a pass/fail
+   * {@link resolveMasterDetailParent} reads a header's VALUES as SYSTEM (once
+   * the caller's read door has returned that header, #22519) because a
+   * master-detail lock is a property of the header's state, not of the caller's
+   * visibility of its columns. This read is the same shape: a validation rule's output is a pass/fail
    * the SYSTEM enforces, not data handed to the caller — categorically unlike
    * an access-control rule, which is why RLS predicates are excluded from this
    * capability altogether. Reading as the acting user instead made the rule
@@ -13572,10 +13715,10 @@ export class ObjectQL implements IObjectQLEngine {
    * pre-check. A preview that bound neither refused, as unevaluable, rows the
    * write admits. So the preview binds both, from the same view and under the
    * same gate as the write (an object with no parent-scoped `requiredWhen`
-   * reads no header). ⛔ Unlike the write, it reads the header under the
-   * caller's own access ({@link resolvePreviewParents}): a header the caller
-   * cannot read binds as a missing one, and a header column the read door
-   * served transformed or not at all is judged as empty.
+   * reads no header). It reads the header under the caller's own access, as
+   * the write does since #22519 ({@link resolvePreviewParents}): a header the
+   * caller cannot read binds as a missing one. ⛔ Unlike the write, a header
+   * column the read door served transformed or not at all is judged as empty.
    *
    * Nothing is written and no sequence is consumed. Reads do happen: the
    * stored row above, the master-detail headers, and the related rows a
@@ -13856,10 +13999,10 @@ export class ObjectQL implements IObjectQLEngine {
     // update also binds the header the stored row hangs off as
     // `previousParent`, the header the write's ADR-0113 pre-check reads.
     //
-    // ⛔ Read under the caller's access, unlike the write, which reads the
-    // header elevated: see {@link resolvePreviewParents}. A header the caller
-    // cannot read binds as a missing header binds, and a header column the
-    // read door did not serve this caller as stored is judged as empty.
+    // ⛔ Read under the caller's access, as the write reads it since #22519:
+    // see {@link resolvePreviewParents}. A header the caller cannot read binds
+    // as a missing header binds; unlike the write, a header column the read
+    // door did not serve this caller as stored is judged as empty.
     //
     // Named limit: the update's `readonlyWhen` judgement of the FK itself
     // (`settleMasterDetailLanding` ①) is not run, the limit `readonlyWhen`
