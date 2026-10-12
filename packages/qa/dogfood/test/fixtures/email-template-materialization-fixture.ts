@@ -43,7 +43,6 @@ export const EtNote = ObjectSchema.create({
 export const etPasswordReset = defineEmailTemplateDefinition({
   name: 'auth.password_reset',
   label: 'ET Password Reset',
-  category: 'auth',
   subject: 'Authored reset for {{user.name}}',
   bodyHtml: '<p>Authored body: <a href="{{url}}">reset</a></p>',
   variables: [{ name: 'url', type: 'string', required: true }],

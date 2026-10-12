@@ -235,7 +235,7 @@
         "emptyState": {
           "status": "live",
           "evidence": "packages/cli/src/utils/i18n-extract.ts",
-          "note": "objectui: ListView empty-state panel (audit L15); CLI i18n extract emits _views.<view>.emptyState keys (spec CHANGELOG)."
+          "note": "objectui: ListView empty-state panel (audit L15); CLI i18n extract emits _views.<view>.emptyState keys (spec CHANGELOG). [#23004] This blanket `live` verdict does NOT cover `emptyState.link`, which is PLANNED: declared ahead of its renderer, contract first, and marked `[PLANNED — not yet rendered]` in its describe. Measured at objectui 7af0ab3: ListView hands ListEmptyState `title`, `message` and `icon` only (ListView.tsx:5688-5696), and nothing in objectui reads `emptyState.link`. Renderer half and carrier: objectstack-ai/objectui#12270. The walk does not read the marker, because `view/list.emptyState` is a recorded undrilled container (undrilled-containers.baseline.json); drilling it is the route to a gate-read `planned` row."
         },
         "aria": {
           "status": "live",

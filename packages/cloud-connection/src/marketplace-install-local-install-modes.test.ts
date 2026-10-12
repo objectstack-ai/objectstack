@@ -16,7 +16,9 @@
  *    control of a managed install on the same posture;
  *  - the `unmanaged` branch calls the import with ONE flat package body and the
  *    installer as actor, and runs none of the managed install's steps
- *    (register, ledger, sync); the answer names the base and `installedFrom`;
+ *    (register, ledger, sync); the answer names the base and `installedFrom`,
+ *    and relays the import's `strippedLocks` — each protection lock the copy
+ *    dropped, with the package's reason — as the import states it;
  *    the import's refusals are relayed with their own code, status and
  *    `details`, a 5xx's message withheld;
  *  - a managed install of a package whose namespace a WRITABLE base holds is
@@ -82,6 +84,7 @@ async function mount(dir: string, opts: {
         namespace: request.manifest.namespace,
         copiedCount: 2,
         copied: [{ type: 'object', name: 'crm_lead' }, { type: 'view', name: 'crm_lead_open' }],
+        strippedLocks: [],
     })));
     const state = opts.registry ?? {};
     const services: Record<string, any> = {
@@ -312,6 +315,33 @@ describe('install-local — the `unmanaged` branch is the import, and nothing of
         const info = h.logger.info.mock.calls.map((call: any[]) => String(call[0])).join('\n');
         expect(info).toContain("installed com.example.crm unmanaged: 2 item(s) copied into the environment base 'com.example.crm-copy'");
         expect(info).toContain('installed from com.example.crm@4.0.0');
+    });
+
+    it('relays each protection lock the copy dropped, as the import states it — the package\'s reason verbatim', async () => {
+        const strippedLocks = [
+            { type: 'view', name: 'crm_lead_open', lock: 'full', reason: 'Board-pack figures — edit the source package.' },
+            { type: 'app', name: 'crm', lock: 'no-delete' },
+        ];
+        const h = await mount(dir, {
+            importer: async (request: any) => ({
+                sourcePackageId: request.manifest.id,
+                targetPackageId: `${request.manifest.id}-copy`,
+                namespace: request.manifest.namespace,
+                copiedCount: 3,
+                copied: [{ type: 'object', name: 'crm_lead' }, { type: 'view', name: 'crm_lead_open' }, { type: 'app', name: 'crm' }],
+                strippedLocks,
+            }),
+        });
+        const res = await h.install({ manifest: crm({ installModes: BOTH }), installMode: 'unmanaged' });
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(res.payload.data.strippedLocks).toEqual(strippedLocks);
+    });
+
+    it('a copy that dropped no lock answers an empty `strippedLocks`', async () => {
+        const h = await mount(dir);
+        const res = await h.install({ manifest: crm({ installModes: BOTH }), installMode: 'unmanaged' });
+        expect(res.status).toBe(200);
+        expect(res.payload.data.strippedLocks).toEqual([]);
     });
 
     it('a package with no seed data answers no `seeded` at all', async () => {

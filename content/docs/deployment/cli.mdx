@@ -1924,6 +1924,8 @@ os verify --app ./objectstack.config.ts --rls  # Also prove the cross-owner RLS 
 os verify --rls --multi-tenant --json          # Org-scoped boot, structured report
 os verify --reference-shapes                   # Also prove reference fields refuse non-id values
 os verify --delete-behaviors                   # Also prove each declared deleteBehavior is what a delete does
+os verify --unique-scopes --multi-tenant       # Also prove each declared unique collides where its scope says
+os verify --parent-write-reach                 # Also prove each controlled_by_parent detail write follows its master
 ```
 
 1. **Author-time rules.** The rule registry `os validate` runs, over the stack
@@ -1966,6 +1968,53 @@ os verify --delete-behaviors                   # Also prove each declared delete
    `excluded` rather than compared, because an engine rule decides their
    outcome, not the declaration. It is opt-in, and a `tree` field's delete is
    not honoured today, so an app that declares one would fail.
+   With `--unique-scopes`, another fresh boot proves that every field declared
+   `unique` collides as its scope says: per field, a first record holds a value
+   and a second one is offered it, by insert and by update, through the REST
+   door and the system door. Within one organization the second holder must be
+   refused with the platform's unique refusal, attributed to the field (it
+   names the field, or it names none, the same record with only that value
+   changed is admitted, and no unique `indexes[]` entry covers the field). With
+   `--multi-tenant` the run also provisions a second organization (`signUp`,
+   then `POST /auth/organization/create`) and offers it the value: a
+   `true` or `'organization'` field must admit it, and a `'global'` field, or
+   any field of an object with no organization column, must refuse it. Without
+   `--multi-tenant` there is one organization, so that leg is reported **not
+   run** with the reason rather than skipped. The scope is read as the spec's
+   parse of the field states it (an `autonumber` that authors no `unique`
+   states `'organization'`); a field the caller cannot set — `readonly`,
+   `system`, a runtime-issued `autonumber` — is probed through the system door
+   only. A second holder met wrongly fails the run; a refusal that is not the
+   field's own constraint (an app hook's dedupe, a rule, a permission) is
+   reported inconclusive, never proven.
+   With `--parent-write-reach`, another fresh boot proves ADR-0055's write rule
+   for every object declared `controlled_by_parent` (exactly one
+   `master_detail` field names its master): editing, deleting or creating a
+   detail is admitted exactly when the caller holds that verb on the detail's
+   object **and** can edit its master. The first half is read from the
+   server's effective permissions for the caller (`/auth/me/permissions`); the
+   second is measured, by an empty update of the master as the caller, which
+   runs every write gate the master has — for a master that is itself
+   controlled by its parent, the gate above it too. The writes go through the
+   engine as the signed-in caller (the insert, update and delete by id the
+   REST data route makes, with the caller's context), where a refusal keeps
+   the object and the operation it names — the REST envelope names the
+   route's object whatever was refused; the system door bypasses
+   authorization and is not asked. They are made by three verifier
+   personas whose permission sets the run registers from the app's own objects
+   (the master's root by the all-records grant `modifyAllRecords` with the
+   detail's every verb; the master readable but not editable; the all-records
+   grant with no detail delete) and by one persona per declared position, each
+   under a master chain another principal owns and one it owns. A write whose
+   answer disagrees fails the run, and so does a persona that could not be
+   provisioned; a refusal that is not the platform's `403 PERMISSION_DENIED`
+   naming the detail and the operation (a rule, a hook's own code, a refusal
+   on another object) is reported inconclusive, never proven. An object
+   with two `master_detail` fields, none, or a chain at the write gate's depth
+   bound is reported `excluded`. Today's engine refuses every write to a detail
+   two levels below its root master (a line under a quote under an account),
+   even where the caller edits the middle master, so an app that declares such
+   a chain fails the run.
    `--multi-tenant` boots org-scoped so tenant-isolation RLS policies
    apply; a walled tenancy posture (`OS_TENANCY_POSTURE` set to `isolated` or
    `group`) asks for the same boot.
@@ -1994,7 +2043,10 @@ document carries depends on where the run ended:
   package of the artifact), or the schema issues when the stack does not parse.
 - **Reached the runtime stage:** the report — `app`, `config`, `multiTenant`,
   `crud`, `rls` (with `--rls`), `referenceShapes` (with `--reference-shapes`),
-  `deleteBehaviors` (with `--delete-behaviors`) and `hardFailures`, the count
+  `deleteBehaviors` (with `--delete-behaviors`), `uniqueScopes` (with
+  `--unique-scopes`; its `boot` names the legs the run could prove),
+  `parentWriteReach` (with `--parent-write-reach`; its `personas` name who
+  wrote and who could not be provisioned) and `hardFailures`, the count
   the exit status is read from.
 - **Could not run:** `{ "error": "<sentence>" }`, plus `code` and `httpStatus`
   when the failure carries them.

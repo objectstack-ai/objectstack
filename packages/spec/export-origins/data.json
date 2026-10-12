@@ -892,6 +892,7 @@
     "lowerFilterCondition": "src/data/filter-lowering.ts#lowerFilterCondition (function)",
     "markFilterSubtreeProvenance": "src/data/filter-subtree-provenance.ts#markFilterSubtreeProvenance (function)",
     "matchesLikePattern": "src/data/filter.zod.ts#matchesLikePattern (function)",
+    "materializeTreeSelfReferences": "src/data/object.zod.ts#materializeTreeSelfReferences (function)",
     "missingFieldValues": "src/data/autonumber-format.ts#missingFieldValues (function)",
     "nextUtcCalendarDay": "src/data/calendar-day.ts#nextUtcCalendarDay (function)",
     "normalizeFilterComparandTypes": "src/data/filter-comparand-type.ts#normalizeFilterComparandTypes (function)",

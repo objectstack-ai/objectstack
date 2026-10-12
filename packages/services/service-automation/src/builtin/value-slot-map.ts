@@ -82,9 +82,10 @@ export function resolveValueSlotMap(
  * {@link resolveValueSlotMap}, for a slot that holds a single value rather than
  * a map: since #19939 a `screen` field's `defaultValue` and an object form's
  * `recordId` (`fields[].defaultValue`, `recordId` in the ledger), evaluated
- * before the screen goes on the wire — and a `notify` node's `recipients` (the
+ * before the screen goes on the wire — a `notify` node's `recipients` (the
  * value, or each entry of a list) and `sourceId`, evaluated before the
- * notification is handed on. The map resolver calls this per key, so
+ * notification is handed on — and an `http` node's `body`, evaluated once
+ * before the call, either mode. The map resolver calls this per key, so
  * the dispatch by shape is spelled once: an envelope-shaped value is evaluated
  * by `AutomationEngine.evaluateValueEnvelope` (`where` names it in a refusal
  * or a fault, `fields[0].defaultValue`), and every other value is a literal,

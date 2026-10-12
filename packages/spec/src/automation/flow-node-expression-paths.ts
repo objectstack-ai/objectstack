@@ -153,6 +153,13 @@ export type FlowNodeExpressionRole =
    * `actorId` and `payload` are literals, read as written: no flow computed
    * them, so no slot is built there, and a `{…}` token in one is refused by
    * the contract (`NotifyConfigSchema`).
+   *
+   * And for an `http` node's `body` — the payload it sends, evaluated before
+   * either mode (the inline call and the durable outbox send the same one).
+   * Its `url` and `headers` values are text slots
+   * (`flow-text-slot-template.ts`), and its `method`, `durable`, `timeoutMs`
+   * and `signingSecret` are literals, read as written, whose `{…}` token the
+   * contract refuses (`HttpConfigSchema`).
    */
   | 'value';
 
@@ -238,10 +245,10 @@ export interface FlowNodeExpressionPath {
  *
  * Also deliberately absent: the config values that still INTERPOLATE
  * `{token}` templates — the positions the #19939 retirement has not reached
- * yet (an `http` body, a CRUD `filter` value, and so on) — and the TEXT slots,
- * which render `{{ }}` holes since #22110 (a notify `title` / `message` and,
- * since #19939, its `actionUrl`, a screen `title` / `description`, an `end`
- * `message`; their one judge and list is
+ * yet (a CRUD `filter` value) — and the TEXT slots, which render `{{ }}`
+ * holes since #22110 (a notify `title` / `message` and, since #19939, its
+ * `actionUrl` and an http node's `url` and `headers` values, a screen
+ * `title` / `description`, an `end` `message`; their one judge and list is
  * `flow-text-slot-template.ts`). Those are text-with-holes,
  * the shape essentially every node config string has, already covered
  * generically (`validate-flow-template-paths`, the CLI flow linter's
@@ -294,6 +301,11 @@ export interface FlowNodeExpressionPath {
  * marker). `recipients` carries {@link FlowNodeExpressionPath.eachElement}:
  * it is one value or a list of them, and each element of a list is a value
  * slot of its own.
+ *
+ * So is, since #19939, an `http` node's `body` — one value, the whole payload
+ * (a CEL map literal builds an object), declared through the spec Zod channel
+ * (`HttpConfigSchema` in `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`; the
+ * descriptor offers `body` with no marker).
  */
 export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
   {
@@ -494,6 +506,22 @@ export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
     path: 'sourceId',
     role: 'value',
     label: 'notify sourceId',
+  },
+  {
+    // [#19939] An `http` node's request body (#11182 ruling D; ADR-0032
+    // Decision 2): ONE value, the whole payload — a CEL value envelope the
+    // executor evaluates in the run's scope (a CEL map literal builds an
+    // object), or a literal sent as written. Evaluated once, before either
+    // mode, so the inline call and the durable outbox send the same payload.
+    // Declared through the spec Zod channel (`HttpConfigSchema`, carried to
+    // the ratchet by `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`): the descriptor
+    // offers `body` with no marker. Its `url` and `headers` values are TEXT
+    // slots (`flow-text-slot-template.ts`), and its `method`, `durable`,
+    // `timeoutMs` and `signingSecret` are literals.
+    nodeType: 'http',
+    path: 'body',
+    role: 'value',
+    label: 'http body',
   },
 ];
 

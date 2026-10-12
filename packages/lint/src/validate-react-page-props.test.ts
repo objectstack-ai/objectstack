@@ -478,7 +478,9 @@ describe('validateReactPageProps — <ListView> searchableFields (#4329)', () =>
     expect(f[0].path).toBe('pages[0].source › searchableFields[1]');
     expect(f[0].message).toContain('"email"');
     expect(f[0].message).toContain('crm_account');
-    expect(f[0].hint).toContain('400 INVALID_FIELD');
+    // [#22161] One remedy line (the shared core's); why a stale entry is a 400
+    // is `os explain searchable-field-unknown`.
+    expect(f[0].hint).toBe('Fix the name, or add "email" to crm_account.fields');
   });
 
   it('suggests the real field when the stale name is close to one', () => {

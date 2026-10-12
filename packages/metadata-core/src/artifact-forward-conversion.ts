@@ -111,6 +111,38 @@
  * Cross-major gaps are the protocol *handshake*'s jurisdiction
  * (`checkProtocolCompat`) and refuse before conversion could matter.
  *
+ * ## Reach — the definition's own collections AND every package body
+ *
+ * A multi-package artifact (ADR-0130 D4, option B) carries its collections in
+ * `packages[i].manifest`, each an ASSEMBLED package body
+ * (`AssembledPackageBodySchema`) that the strict parse gates entry by entry —
+ * in `ObjectStackDefinitionSchema` and in `resolveArtifactPackageOrder` alike.
+ * Since the 2026-09-22 addendum to D4 the definition's top level carries no
+ * copy of them. So the same walk runs over each body as a second root: the
+ * same `applyConversions` call, the same registry, the same window. ⛔ Never a
+ * second walk with its own entry list — a body would then answer a different
+ * question than the definition it travels in.
+ *
+ * A body is a stack-shaped root: where its manifest half and its collection
+ * half declare the same key (`objects`, `datasources`, `permissions`), the
+ * collection wins (the precedence table on `AssembledPackageBodySchema`), and
+ * those are exactly the keys the registry walks at a definition's top level.
+ * The one entry that reads a manifest (`manifest-permissions-string-list-removed`)
+ * reaches `packages[i].manifest` from the definition root itself, which runs
+ * first; a body has no `manifest` key for it to read again.
+ *
+ * The window is the ARTIFACT's — decided once from the definition's own
+ * `engines.protocol` — and a body's own `engines.protocol` is not read. The
+ * floor stands in for when the artifact was built (see above), and one
+ * `os build` serializes every body of one artifact together (ADR-0130 D1: one
+ * artifact, one atomic delivery). The same reading gates the boot: the
+ * artifact-boot handshake judges the artifact's own `manifest` (`AppPlugin`,
+ * `assertArtifactProtocolCompatible` in `@objectstack/runtime`). A per-body
+ * window would also split the two copies of one definition that an artifact
+ * built before that addendum carries (top level and body) into two answers.
+ * Notices from a body are located from the definition root
+ * (`packages[1].manifest.dashboards[0].refreshIntervalSeconds`).
+ *
  * ## The one class the window does NOT admit — default flips
  *
  * The window above is a RESCUE: without it an artifact carrying a key the
@@ -193,7 +225,10 @@ export interface ArtifactConversionNotice {
   from: string;
   /** The canonical token/shape it was converted to. */
   to: string;
-  /** Where in the stack it applied, e.g. `permissions[0].objects.crm_ticket.allowPurge`. */
+  /**
+   * Where in the stack it applied, e.g. `permissions[0].objects.crm_ticket.allowPurge`;
+   * inside a package body, from the definition's root (`packages[1].manifest.dashboards[0]…`).
+   */
   path: string;
   /** Derived, human-facing one-liner. */
   message: string;
@@ -500,14 +535,66 @@ export function applyArtifactForwardConversions<T>(
   }
 
   const notices: ArtifactConversionNotice[] = [];
-  const converted = applyConversions(definition as Record<string, unknown>, {
-    includeRetired: true,
-    excludeConversionIds,
-    onNotice: (n) => {
-      notices.push(n);
-      options.onNotice?.(n);
-    },
-  }) as T;
+  // ONE walk — the registry's whole chain, under the one window decided above —
+  // run over every root this definition carries: its own collections first,
+  // then each `packages[i].manifest` body (see "Reach" in the module doc). A
+  // body's notice is located under its package, so a boot log names the body.
+  const replay = (root: Record<string, unknown>, at: string): Record<string, unknown> =>
+    applyConversions(root, {
+      includeRetired: true,
+      excludeConversionIds,
+      onNotice: (n) => {
+        const notice = at === '' ? n : locateUnder(n, at);
+        notices.push(notice);
+        options.onNotice?.(notice);
+      },
+    });
+  const converted = replayPackageBodies(replay(definition as Record<string, unknown>, ''), replay) as T;
 
   return { definition: converted, verdict, authoredFloor, runtimeSpecVersion, notices, replayedRetirements };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Run `replay` over each `packages[i].manifest` body (ADR-0130 D4) of an
+ * already-converted definition. Copy-on-write at both levels: an entry whose
+ * body converts nothing keeps its reference, and the definition keeps its own
+ * when no body converted. A `packages` that is not an array, an entry that is
+ * not an object, and a body that is not an object are left exactly as given —
+ * this never gates; `resolveArtifactPackageOrder` (`@objectstack/core`) is the
+ * refusal for each of those shapes.
+ */
+function replayPackageBodies(
+  definition: Record<string, unknown>,
+  replay: (root: Record<string, unknown>, at: string) => Record<string, unknown>,
+): Record<string, unknown> {
+  const packages = definition.packages;
+  if (!Array.isArray(packages)) return definition;
+  let touched = false;
+  const next = packages.map((entry: unknown, i: number) => {
+    if (!isRecord(entry) || !isRecord(entry.manifest)) return entry;
+    const body = replay(entry.manifest, `packages[${i}].manifest`);
+    if (body === entry.manifest) return entry;
+    touched = true;
+    return { ...entry, manifest: body };
+  });
+  return touched ? { ...definition, packages: next } : definition;
+}
+
+/**
+ * A notice emitted inside a package body, located from the definition's root:
+ * `path` gains the body's prefix, and so does the one place `message` quotes
+ * that path (`applyConversions` writes it as ` at <path>: `). Every other field
+ * is the conversion's own.
+ */
+function locateUnder(notice: ArtifactConversionNotice, at: string): ArtifactConversionNotice {
+  const path = `${at}.${notice.path}`;
+  return {
+    ...notice,
+    path,
+    message: notice.message.replace(` at ${notice.path}: `, () => ` at ${path}: `),
+  };
 }

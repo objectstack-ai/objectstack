@@ -144,6 +144,7 @@ const result = DiscardPackageDraftsResponseSchema.parse(data);
 | **namespace** | `string` | ✅ | The base's namespace — the SOURCE package's, kept so every copied object name stays valid. |
 | **copiedCount** | `number` | ✅ | How many items were copied. |
 | **copied** | `{ type: string; name: string }[]` | ✅ | Every item that was copied, in the order it was written. |
+| **strippedLocks** | `{ type: string; name: string; lock: Enum<'no-overlay' \| 'no-delete' \| 'full'>; reason?: string }[]` | ✅ | Every protection lock the package shipped on a copied item and the copy does not keep, in the order the items were written. Empty when the package locked nothing. |
 
 ### Nested Shape: `ImportUnmanagedPackageResponse.copied[number]`
 
@@ -151,6 +152,15 @@ const result = DiscardPackageDraftsResponseSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **type** | `string` | ✅ | Metadata type of the copied item. |
 | **name** | `string` | ✅ | Name of the copied item. |
+
+### Nested Shape: `ImportUnmanagedPackageResponse.strippedLocks[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type of the copied item. |
+| **name** | `string` | ✅ | Name of the copied item. |
+| **lock** | `Enum<'no-overlay' \| 'no-delete' \| 'full'>` | ✅ | The lock the package shipped on the item — its `protection` block's `lock`, else its `_lock`. The copy carries no lock. |
+| **reason** | `string` | optional | The reason the package gave for that lock, verbatim. Absent when it gave none. |
 
 
 ---
@@ -174,7 +184,7 @@ const result = DiscardPackageDraftsResponseSchema.parse(data);
 | **aiModel** | `string` | optional | AI model that authored the change, when recorded. |
 | **parentCommitId** | `string` | optional | The commit this one chains from, when recorded. |
 | **itemCount** | `number` | ✅ | How many items the commit touched. |
-| **items** | `{ type: string; name: string; existedBefore: boolean; prevVersion: number \| null }[]` | ✅ | The items the commit touched. |
+| **items** | `{ type: string; name: string; member?: string; existedBefore: boolean; … }[]` | ✅ | The items the commit touched. |
 | **createdAt** | `string` | optional | When the commit was made (ISO-8601 string), when recorded. |
 
 

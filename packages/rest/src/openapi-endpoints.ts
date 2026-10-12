@@ -90,6 +90,7 @@
  */
 
 import { ApiEndpointSchema, type ApiEndpoint } from '@objectstack/spec/api';
+import { stripReadDecorations } from '@objectstack/spec/kernel';
 
 /** The slice of an OpenAPI document this module reads and rewrites. */
 export interface OpenApiDocumentLike {
@@ -317,6 +318,17 @@ export function buildEndpointOperation(
  * was chosen there: it is total, deterministic across nodes and boots, and it
  * must produce the SAME winner, or the document would name an endpoint the
  * runtime does not run.
+ *
+ * The items may be SERVED documents, so the read-time decorations come off
+ * before the closed parse (#23083). Where no endpoint matcher is reachable the
+ * caller hands over `protocol.getMetaItems` output as-is, and that read stamps
+ * `_diagnostics` on every `api` item: `ApiEndpointSchema` is closed, so it
+ * refused the platform's own badge by name and every valid declaration was
+ * omitted and logged as one to fix. The strip is the spec's declared list
+ * (`METADATA_READ_DECORATIONS`, the same one the seed door strips for #15591),
+ * ⛔ never a blanket `_` prefix: the ADR-0010 envelope (`_packageId`,
+ * `_provenance`, …) is allowlisted by the schema and parses as it always did,
+ * and any other unknown key is still refused.
  */
 export function selectDocumentableEndpoints(
   items: readonly unknown[],
@@ -325,16 +337,19 @@ export function selectDocumentableEndpoints(
   const byRoute = new Map<string, ApiEndpoint>();
 
   for (const item of items) {
-    const parsed = ApiEndpointSchema.safeParse(item);
+    const parsed = ApiEndpointSchema.safeParse(stripReadDecorations(item));
     if (!parsed.success) {
       const declaredName =
         item && typeof item === 'object' && typeof (item as { name?: unknown }).name === 'string'
           ? (item as { name: string }).name
           : '<unnamed>';
+      // Says only what this reader knows. It does not speak for the endpoint
+      // matcher: that reader judges its own stored item after peeling the
+      // storage envelope, so it can serve what this parse refuses — and where
+      // the caller found no matcher to ask, there is none to speak for.
       logger.error(
         `[REST] stored api item '${declaredName}' does not satisfy ApiEndpointSchema — it is OMITTED ` +
-          `from the OpenAPI document. The endpoint matcher excludes it too, so the route it declares ` +
-          `answers 404; fix the declaration rather than the document.`,
+          `from the OpenAPI document; fix the declaration rather than the document.`,
         { issues: parsed.error.issues },
       );
       continue;

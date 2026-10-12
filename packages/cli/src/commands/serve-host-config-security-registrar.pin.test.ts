@@ -117,10 +117,16 @@ describe('#14397 — `os dev` over a HOST config composes ONE registrar for stac
         expect(source).toContain(
             "if (isDev && flags.server && !plugins.some((p: any) => p?.constructor?.name === 'MetadataPlugin')) {",
         );
-        // Exactly one MetadataPlugin is constructed in this file, and it is
-        // that value — a second construction site is a second decision.
-        expect(count('new MetadataPlugin(')).toBe(1);
-        expect(source).toContain('devArtifactDoor = new MetadataPlugin({');
+        // Exactly one ARTIFACT door is constructed in this file, and it is that
+        // value — a second artifact-door construction site is a second
+        // decision. The file's only other MetadataPlugin is the artifact-less
+        // host-config door (#22989), which exists only when this one does not
+        // and names no artifact; `serve-host-config-metadata-door.pin.test.ts`
+        // holds it to that.
+        expect(count('new MetadataPlugin(')).toBe(2);
+        expect(count('devArtifactDoor = new MetadataPlugin({')).toBe(1);
+        expect(count('hostConfigMetadataDoor = new MetadataPlugin({')).toBe(1);
+        expect(count("artifactSource: { mode: 'local-file', path: hmrArtifactPath },")).toBe(1);
         // The path still comes from the supervisor's own channel, never from
         // `<cwd>/dist/objectstack.json` by accident.
         expect(source).toContain(
@@ -145,9 +151,11 @@ describe('#14397 — `os dev` over a HOST config composes ONE registrar for stac
         expect(buildAt).toBeGreaterThan(-1);
         expect(gateAt).toBeLessThan(buildAt);
         // A missing artifact is not a silent downgrade: the warning names the
-        // path, and says the wrap keeps the collections.
+        // path, and says the wrap keeps the collections. What it names as lost
+        // is the artifact RELOAD: since #22989 that boot composes the
+        // artifact-less host-config door, which mounts the dev SSE endpoint.
         expect(source).toContain(
-            '`  ⚠ Dev metadata-HMR endpoint not enabled: no compiled artifact at ${hmrArtifactPath}`',
+            '`  ⚠ Dev artifact reload not enabled: no compiled artifact at ${hmrArtifactPath}`',
         );
         expect(source).toContain('Stack-declared security metadata stays with the app wrap');
     });

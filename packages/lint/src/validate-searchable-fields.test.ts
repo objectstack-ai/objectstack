@@ -29,7 +29,7 @@ const SEARCH_IDS: readonly string[] = [
   SEARCHABLE_FIELD_UNSEARCHABLE,
   SEARCHABLE_FIELD_UNPROVISIONED,
 ];
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateSearchableFields: typeof validateSearchableFieldsUnrecorded = (...args) => {
   const findings = validateSearchableFieldsUnrecorded(...args);
   fired.push(...findings);
@@ -100,13 +100,16 @@ describe('validateSearchableFields — object declaration', () => {
     expect(validateSearchableFields(staleStack)[0].severity).toBe('error');
   });
 
-  it('explains the fix and names the fields that do exist', () => {
+  it('names the fix, and the near miss on the verdict', () => {
     const [finding] = validateSearchableFields(staleStack);
 
-    expect(finding.hint).toContain('billing_email');
-    // The declaration is echoed verbatim by clients as `$searchFields`, so the
-    // hint must say why this is not merely a quietly narrowed search.
-    expect(finding.hint).toContain('400 INVALID_FIELD');
+    // [#22161] One remedy line; the field roster is not echoed, because the
+    // verdict's "Did you mean" names the field that does exist.
+    expect(finding.hint).toBe('Fix the name, or add "email" to crm_account.fields');
+    expect(finding.message).toContain('Did you mean "billing_email"?');
+    // The declaration is echoed verbatim by clients as `$searchFields`, so why
+    // this is not merely a quietly narrowed search is `os explain`'s.
+    expect(explanationOf(SEARCHABLE_FIELD_UNKNOWN)).toContain('`400 INVALID_FIELD`');
   });
 
   it('suggests the renamed field when the stale name is close to a real one', () => {
@@ -864,7 +867,10 @@ describe('[#6674] validateSearchableFields — a virtual formula entry', () => {
     // The fix is a STORED mirror — the same prescription #6673 put on the
     // neighbouring hints, and the only one that can work here.
     expect(findings[0].hint).toContain('stored text field');
-    expect(findings[0].hint).toContain('400 INVALID_FIELD');
+    // [#22161] The ingress gate's answer is `os explain`'s.
+    expect(explanationOf(SEARCHABLE_FIELD_UNSEARCHABLE)).toContain(
+      'the REST ingress answers `400 INVALID_FIELD`, the same answer a stale entry gets',
+    );
   });
 
   it('flags it on a list view narrowing too', () => {
@@ -1114,5 +1120,47 @@ describe('[#22161] one-line verdicts — the three searchable ids', () => {
     expect(explanationOf(SEARCHABLE_FIELD_UNSEARCHABLE)).toContain(`(${types})`);
     expect([...SEARCH_VIRTUAL_TYPES]).toEqual(['formula']);
     expect(explanationOf(SEARCHABLE_FIELD_UNSEARCHABLE)).toContain('`formula` alone');
+  });
+});
+
+// [#22161] Slice 14: the `fix:` line of the three ids. Each names its remedy in
+// one line; why a stale or inadmissible entry is a 400 on list search, that a
+// view narrows the object's set and never widens it, that a reference column
+// stores only an id, and how to vouch for or opt out of an unprovisioned anchor
+// are the explanations'. The field roster is not echoed: the verdict's "Did you
+// mean" names the near miss.
+describe('[#22161] one-line fixes — the three searchable ids', () => {
+  it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {
+    // Coverage control: every arm fired — both unknown arms, the anchor, and
+    // the four unsearchable arms (virtual, outside a declared set, a reference
+    // column and any other type outside the auto-default set).
+    const hints = fired.map((f) => f.hint);
+    expect(hints.some((h) => h.startsWith('Fix the name, or add "')), 'unknown name').toBe(true);
+    expect(hints.some((h) => h.startsWith("'search' scans this object's own columns only")), 'dotted').toBe(true);
+    expect(hints.some((h) => h.startsWith("If the remote table carries '")), 'anchor').toBe(true);
+    expect(hints.some((h) => h.startsWith('Mirror the computed value')), 'virtual').toBe(true);
+    expect(hints.some((h) => h.startsWith('Add "') && h.includes('.searchableFields')), 'declared set').toBe(true);
+    expect(hints.some((h) => h.includes("to search by the related record's title")), 'reference').toBe(true);
+    expect(hints.some((h) => h.endsWith('or target a text-like field instead')), 'other type').toBe(true);
+    for (const f of fired) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  const MOVED_FROM_FIX: Record<string, readonly string[]> = {
+    [SEARCHABLE_FIELD_UNKNOWN]: ['`$searchFields`', '`400 INVALID_FIELD`'],
+    [SEARCHABLE_FIELD_UNSEARCHABLE]: [
+      'never widens it (ADR-0061)',
+      "stores only the referenced record's id",
+      'chooses its set explicitly',
+      'the same answer a stale entry gets',
+    ],
+    [SEARCHABLE_FIELD_UNPROVISIONED]: ['`columnMap`', "`ownership: 'none'`", '`systemFields: { audit: false }`'],
+  };
+
+  it.each([...SEARCH_IDS])('`os explain %s` carries what its `fix:` line no longer says', (rule) => {
+    const text = explanationOf(rule);
+    for (const fact of MOVED_FROM_FIX[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
   });
 });

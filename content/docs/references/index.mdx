@@ -32,8 +32,8 @@ counts are sums of the rows they head. Regenerate with
 | [Security Protocol](/docs/references/security) | 5 | 30 | Permission sets, row-level security, sharing rules, tenancy posture. |
 | [Shared Protocol](/docs/references/shared) | 10 | 31 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
-| [System Protocol](/docs/references/system) | 35 | 278 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
-| [UI Protocol](/docs/references/ui) | 16 | 166 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
+| [System Protocol](/docs/references/system) | 35 | 277 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
+| [UI Protocol](/docs/references/ui) | 16 | 167 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
 | **Total** | **196** | **1524** | 14 protocol modules |
 
 ---
@@ -317,7 +317,7 @@ Studio designer metadata — the authoring surfaces for the protocols above.
 
 ## System Protocol
 
-**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **35 pages, 278 schemas**
+**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **35 pages, 277 schemas**
 
 The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance.
 
@@ -334,7 +334,7 @@ The runtime environment — logging, jobs, cache, metrics, notifications, i18n a
 | [`disaster-recovery.zod.ts`](/docs/references/system/disaster-recovery) | `BackupConfig`, `BackupRetention`, `BackupStrategy`, `DisasterRecoveryPlan`, `FailoverConfig`, `FailoverMode`, `RPO`, `RTO` |
 | [`doc.zod.ts`](/docs/references/system/doc) | `Doc` |
 | [`email-config.zod.ts`](/docs/references/system/email-config) | `EmailAddressConfig`, `EmailProvider`, `EmailServiceConfig`, `StackEmailConfig`, `StackEmailProviderOptions` |
-| [`email-template.zod.ts`](/docs/references/system/email-template) | `EmailTemplateDefinition`, `EmailTemplateDefinitionCategory`, `EmailTemplateDefinitionVariable` |
+| [`email-template.zod.ts`](/docs/references/system/email-template) | `EmailTemplateDefinition`, `EmailTemplateDefinitionVariable` |
 | [`encryption.zod.ts`](/docs/references/system/encryption) | `EncryptionAlgorithm`, `EncryptionConfig`, `FieldEncryption`, `KeyManagementProvider`, `KeyRotationPolicy` |
 | [`environment-artifact.zod.ts`](/docs/references/system/environment-artifact) | `Sha256Digest` |
 | [`http-server.zod.ts`](/docs/references/system/http-server) | `MiddlewareConfig`, `MiddlewareType`, `RouteHandlerMetadata` |
@@ -363,7 +363,7 @@ The runtime environment — logging, jobs, cache, metrics, notifications, i18n a
 
 ## UI Protocol
 
-**Source:** `packages/spec/src/ui/` · **Import:** `@objectstack/spec/ui` · **16 pages, 166 schemas**
+**Source:** `packages/spec/src/ui/` · **Import:** `@objectstack/spec/ui` · **16 pages, 167 schemas**
 
 Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer.
 
@@ -380,7 +380,7 @@ Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI lay
 | [`expression-bindable-text-keys.zod.ts`](/docs/references/ui/expression-bindable-text-keys) | `ExpressionBindableTextKey` |
 | [`i18n.zod.ts`](/docs/references/ui/i18n) | `AriaProps`, `I18nLabel`, `InlineLocaleMap` |
 | [`notification.zod.ts`](/docs/references/ui/notification) | `NotificationPosition`, `NotificationSeverity`, `NotificationType` |
-| [`page.zod.ts`](/docs/references/ui/page) | `ElementDataSource`, `InterfacePageConfig`, `Page`, `PageComponent`, `PageComponentType`, `PagePrint`, `PageRegion`, `PageType`, `PageVariable` |
+| [`page.zod.ts`](/docs/references/ui/page) | `ElementApiDataSource`, `ElementDataSource`, `InterfacePageConfig`, `Page`, `PageComponent`, `PageComponentType`, `PagePrint`, `PageRegion`, `PageType`, `PageVariable` |
 | [`report.zod.ts`](/docs/references/ui/report) | `JoinedReportBlock`, `Report`, `ReportChart`, `ReportSort`, `ReportType` |
 | [`responsive.zod.ts`](/docs/references/ui/responsive) | `ResponsiveStyles`, `StyleMap` |
 | [`sharing.zod.ts`](/docs/references/ui/sharing) | `SharingConfig` |

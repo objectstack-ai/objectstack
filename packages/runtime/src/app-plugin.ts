@@ -294,6 +294,29 @@ export class AppPlugin implements Plugin {
     }
 
     /**
+     * [#23029] One COLLECTION of the boot's converted copy
+     * ({@link forwardConverted}), for the datasource readers that used to read
+     * it off the RAW {@link collections}: the code-defined registration and its
+     * owners, the reserved-name check and `connectDeclared`'s input. A turso
+     * `config.timeout` or a memory `config.persistence.autoSaveInterval`
+     * authored by 17.x tooling is renamed by the conversion; read raw, the
+     * driver found no `*Ms` key and fell back to its default with no notice.
+     * (Job scheduling takes the whole copy: see `start()`.)
+     *
+     * WHICH source the collection comes from is still decided on the raw
+     * inputs, as the security block decides it (#18034). The converted copy is
+     * `{ ...manifest, ...collections }`, so where the stack declares no such
+     * collection it would hand over the MANIFEST's key of that name — for
+     * `datasources` and `objects` the glob-pattern lists `ManifestSchema`
+     * declares, which these readers have never read. Where the stack declares
+     * it, the stack wins the spread, so the value is the stack's own, converted.
+     */
+    private convertedCollection(ctx: PluginContext, key: 'datasources' | 'objects'): any {
+        if ((this.collections as Record<string, unknown> | null | undefined)?.[key] === undefined) return undefined;
+        return this.forwardConverted(ctx).definition?.[key];
+    }
+
+    /**
      * The enforcer this artifact's consent records were registered on, or
      * `undefined` when the artifact declared no `grantedPermissions` key.
      *
@@ -498,11 +521,13 @@ export class AppPlugin implements Plugin {
         // served the artifact door's converted copy of it, and what handed the
         // email loader a template it refuses to send.
         //
-        // A bundle carrying `packages[]` is handed over as authored, as before:
-        // the `manifest` service registers its package BODIES, which no
-        // conversion reaches (the ADR-0087 pass walks the definition's own
-        // collections, at the artifact door too), and `forwardConverted` would
-        // resolve `packages[]` here, ahead of the `manifest` service (#15292).
+        // A bundle carrying `packages[]` is handed over as it arrived, as before:
+        // `forwardConverted` would resolve `packages[]` here, ahead of the
+        // `manifest` service (#15292). Its package BODIES are already converted
+        // when the bundle came through `loadArtifactBundle`, which runs the
+        // ADR-0087 pass once over every body at load (#23027); a bundle handed
+        // to this plugin by any other route reaches the `manifest` service as
+        // authored.
         const servicePayload = (this.bundle as { packages?: unknown }).packages === undefined
             ? this.forwardConverted(ctx).definition
             : this.bundle.manifest
@@ -784,11 +809,12 @@ export class AppPlugin implements Plugin {
      *
      *  - `packages` ABSENT: the artifact is its one package's body, so every
      *    datasource takes the manifest's id, the key `registerApp` installs the
-     *    package under. The list is `this.collections.datasources`, the one
-     *    this registration has always read (D7).
+     *    package under. The list is the stack's `datasources` (D7), read off
+     *    the boot's converted copy ({@link convertedCollection}, #23029).
      *  - `packages` PRESENT: each body's datasources take THAT body's id
      *    (`artifactPackageId`, the one spelling `registerApp` keys on), in the
-     *    order `resolveArtifactPackageOrder` gives. ⛔ Never the artifact's
+     *    order `resolveArtifactPackageOrder` gives, over the converted copy's
+     *    bodies (#23029: the conversion replays every body). ⛔ Never the artifact's
      *    top-level manifest id on every entry: on a composed artifact that id
      *    is one member's, and stamping it everywhere hands one package another
      *    package's datasources (#14599). ⛔ Never a name-to-package index over
@@ -823,7 +849,7 @@ export class AppPlugin implements Plugin {
             packageVersion: typeof body?.version === 'string' ? body.version : undefined,
         });
         const own = coordsOf(this.bundle.manifest || this.bundle);
-        const declared = listOf(this.collections.datasources);
+        const declared = listOf(this.convertedCollection(ctx, 'datasources'));
 
         if ((this.bundle as { packages?: unknown }).packages === undefined) {
             return declared.map((datasource) => ({ datasource, owner: own }));
@@ -831,7 +857,7 @@ export class AppPlugin implements Plugin {
 
         const owned: Array<{ datasource: any; owner: { packageId?: string; packageVersion?: string } }> = [];
         const claimed = new Set<unknown>();
-        for (const body of resolveArtifactPackageOrder(this.bundle)) {
+        for (const body of resolveArtifactPackageOrder(this.forwardConverted(ctx).definition)) {
             const owner = coordsOf(body);
             for (const datasource of listOf((body as { datasources?: unknown } | null)?.datasources)) {
                 claimed.add(datasource?.name);
@@ -912,6 +938,96 @@ export class AppPlugin implements Plugin {
         );
     }
 
+    /**
+     * [#22989] The config door's registrar of the stack's declared `apis`
+     * endpoints: each item goes into the metadata service's in-memory registry
+     * by the route and the ADR-0010 stamp the code-defined datasources take in
+     * `start()` (`registerInMemory` + `applyProtection`). So the endpoint
+     * matcher's one index (`MetadataManager.listForIndex('api')`) holds them on
+     * this door as it holds them on the artifact door, whose
+     * `ARTIFACT_FIELD_TO_TYPE` maps `apis` to `api`. Before this a config boot
+     * registered them into the ObjectQL registry alone (`manifest.register` in
+     * `init()`), which the matcher never reads, so every declared path answered
+     * the transport's `404 ENDPOINT_NOT_FOUND` while the artifact boot of the
+     * same stack matched it.
+     *
+     * The items are the boot's ONE forward-converted copy
+     * ({@link forwardConverted}), the copy `init()` handed the `manifest`
+     * service: ⛔ never the raw bundle, ⛔ never a second conversion. Each is
+     * copied before it is stamped, because `applyProtection` writes in place and
+     * the converted definition shares its items with the ObjectQL registry (and,
+     * when nothing converts, with the caller's config module).
+     *
+     * The owner is the stack's own manifest (`artifactPackageId`, the key
+     * `registerApp` installs the package under, and its `version`): the pair
+     * the artifact door stamps on the single-package branch (ADR-0130 D7).
+     *
+     * A bundle carrying `packages[]` is left alone. Its top-level residual,
+     * `api` items included, is registered by {@link registerUnclaimedTopLevel};
+     * a package BODY's item would need the body walk, which reads bodies no
+     * conversion reaches rather than this boot's converted copy.
+     *
+     * One registrar per boot, declared by the composition, with the guard
+     * {@link registerUnclaimedTopLevel} uses: under
+     * `securityMetadataRegistrar: 'artifact-door'` the door registers every
+     * `api` item (strict-parsed and stamped) and this does nothing, so an
+     * artifact boot registers each item exactly once.
+     *
+     * ⛔ This gives no composition an endpoint matcher. Only a metadata service
+     * that carries `matchEndpoint` serves the items, which in-tree is
+     * `@objectstack/metadata`'s manager. Where the `metadata` slot holds the
+     * kernel's in-memory fallback instead, the items are listed and none is
+     * served — so that composition is told, once per boot of this app, at
+     * `warn`, with the count and the remedy (maintainer ruling on #22989,
+     * option B; AGENTS.md "Absence must be loud"). ⛔ No second matcher: the
+     * remedy is the composition's, never a fallback match here. Read in
+     * `start()`, after every `init()` has registered its services and the
+     * kernel has injected its fallbacks, so the slot's occupant is final.
+     */
+    private registerDeclaredApiEndpoints(ctx: PluginContext, appId: string): void {
+        if (this.securityMetadataRegistrar === 'artifact-door') return;
+        if ((this.bundle as { packages?: unknown }).packages !== undefined) return;
+        const apis: unknown = this.forwardConverted(ctx).definition?.apis;
+        if (!Array.isArray(apis) || apis.length === 0) return;
+        let metadata: {
+            registerInMemory?: (type: string, name: string, item: unknown) => void;
+            matchEndpoint?: unknown;
+        } | undefined;
+        try {
+            metadata = ctx.getService('metadata');
+        } catch {
+            // Not registered on this kernel — handled below.
+        }
+        if (typeof metadata?.matchEndpoint !== 'function') {
+            ctx.logger.warn(
+                `[AppPlugin] app '${appId}' declares ${apis.length} api endpoint(s), but this boot's 'metadata' `
+                + 'service has no endpoint matcher (matchEndpoint), so every declared path answers '
+                + '404 ENDPOINT_NOT_FOUND. Compose @objectstack/metadata\'s MetadataPlugin on this kernel '
+                + 'to serve them.',
+                { appId, count: apis.length },
+            );
+        }
+        if (typeof metadata?.registerInMemory !== 'function') {
+            ctx.logger.debug('[AppPlugin] no in-memory metadata registry — the stack-declared api endpoints are not registered', { appId });
+            return;
+        }
+        const sys = this.bundle.manifest || this.bundle;
+        const owner = {
+            packageId: artifactPackageId(sys),
+            packageVersion: typeof sys?.version === 'string' ? sys.version : undefined,
+        };
+        let count = 0;
+        for (const api of apis as Array<Record<string, unknown> | null | undefined>) {
+            const name = api?.name;
+            if (typeof name !== 'string' || name.length === 0) continue;
+            metadata.registerInMemory('api', name, applyProtection({ ...api }, owner));
+            count += 1;
+        }
+        if (count > 0) {
+            ctx.logger.info('Registered stack-declared api endpoints in metadata registry', { appId, count });
+        }
+    }
+
     start = async (ctx: PluginContext) => {
         if (this.empty) {
             ctx.logger.debug('[AppPlugin] empty env — no app payload, skipping start', {
@@ -967,8 +1083,11 @@ export class AppPlugin implements Plugin {
         // divert every unbound object to a fresh connection. Contract-first:
         // reject at load, loudly (outside the lenient catch below), instead of
         // letting the collision produce undefined routing.
+        //
+        // [#23029] This check, the registration and `connectDeclared` below
+        // all read the boot's converted copy (`convertedCollection`).
         {
-            const dsDefs = this.collections.datasources;
+            const dsDefs = this.convertedCollection(ctx, 'datasources');
             const declared = Array.isArray(dsDefs)
                 ? dsDefs
                 : dsDefs && typeof dsDefs === 'object'
@@ -986,7 +1105,7 @@ export class AppPlugin implements Plugin {
             }
         }
         try {
-            const dsDefs = this.collections.datasources;
+            const dsDefs = this.convertedCollection(ctx, 'datasources');
             const dsList = Array.isArray(dsDefs)
                 ? dsDefs
                 : dsDefs && typeof dsDefs === 'object'
@@ -1021,6 +1140,10 @@ export class AppPlugin implements Plugin {
             });
         }
 
+        // [#22989] The stack's declared `apis`, by the same route — see
+        // `registerDeclaredApiEndpoints`.
+        this.registerDeclaredApiEndpoints(ctx, appId);
+
         // Auto-connect declared datasources (ADR-0062 D1/D2/D5). The metadata
         // registration above only makes a datasource *visible*; to make its
         // federated objects *queryable* with zero app boilerplate, build + open
@@ -1036,7 +1159,7 @@ export class AppPlugin implements Plugin {
         // so the kernel's init-all-then-start-all ordering guarantees the
         // connection service was already registered during init.
         try {
-            const dsDefs = this.collections.datasources;
+            const dsDefs = this.convertedCollection(ctx, 'datasources');
             const dsList: any[] = Array.isArray(dsDefs)
                 ? dsDefs
                 : dsDefs && typeof dsDefs === 'object'
@@ -1063,7 +1186,8 @@ export class AppPlugin implements Plugin {
                     connection = undefined;
                 }
                 if (typeof connection?.connectDeclared === 'function') {
-                    const objects = Array.isArray(this.collections.objects) ? this.collections.objects : [];
+                    const declaredObjects = this.convertedCollection(ctx, 'objects');
+                    const objects = Array.isArray(declaredObjects) ? declaredObjects : [];
                     const results = await connection.connectDeclared({
                         datasources: dsList,
                         objects,
@@ -1373,10 +1497,20 @@ export class AppPlugin implements Plugin {
         // `fnMap[job.handler]` only: a job's sandboxed `body` was skipped at
         // warn, and ignored when a `handler` stood beside it. The binder runs
         // the body, and the body wins. See `./app-artifact-handlers.ts`.
+        //
+        // [#23029] Handed the boot's converted copy (`forwardConverted`), the
+        // definition the `manifest` service registered, so a job authored with
+        // the retired `timeout` is scheduled with its `timeoutMs`. Read raw, the
+        // scheduler found no `timeoutMs` and the job ran under the adapter's
+        // default with no notice. `collectBundleJobs`' rule is unmoved on that
+        // copy: the stack's `jobs` win the spread, and the legacy
+        // `manifest.jobs` is read only when the stack declares none. A `handler`
+        // job's `ctx.bundle` is that copy too.
         try {
-            if (collectBundleJobs(this.bundle).length > 0) {
+            const jobsDefinition = this.forwardConverted(ctx).definition;
+            if (collectBundleJobs(jobsDefinition).length > 0) {
                 ctx.hook('kernel:ready', async () => {
-                    await scheduleAppArtifactJobs(ctx, this.bundle, { appId, ql, source: 'AppPlugin' });
+                    await scheduleAppArtifactJobs(ctx, jobsDefinition, { appId, ql, source: 'AppPlugin' });
                 });
             }
         } catch (err: any) {
