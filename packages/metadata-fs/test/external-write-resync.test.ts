@@ -168,7 +168,7 @@ describe('FileSystemRepository — external writes survive a lost watcher event 
     // The backstop must be indistinguishable from the fast path: a subscriber
     // cannot be made to care which one noticed.
     expect(created[0]!.source).toBe('fs');
-    expect(created[0]!.actor).toBe('fs');
+    expect(created[0]!.actor).toBeNull();
     expect(created[0]!.parentHash).toBeNull();
 
     // ── update ───────────────────────────────────────────────────────────
