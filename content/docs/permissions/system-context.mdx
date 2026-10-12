@@ -360,12 +360,12 @@ still holds equal to the census on every pull request:
 | Appearances of the bare identifier `isSystem` in non-test sources | 813 | — |
 | — parsed as a declaration | 28 | ✅ |
 | — parsed as an object-literal / type key (producers and option objects) | 310 | — |
-| — parsed as a property **read** | 129 | ✅ |
+| — parsed as a property **read** | 130 | ✅ |
 | — parsed in some other syntactic position (a local, a cast, a conditional) | 9 | ✅ |
 | — the remainder: text inside comments and string literals | 358 | — |
 | Of those reads: reads of one of the unrelated metadata fields | 5 | ✅ |
-| Of those reads: reads of `ExecutionContext.isSystem` | **124** | ✅ |
-| — behaviour-bearing (rows 1–61 above) | 121 | ✅ |
+| Of those reads: reads of `ExecutionContext.isSystem` | **125** | ✅ |
+| — behaviour-bearing (rows 1–61 above) | 122 | ✅ |
 | — carry the flag onward only (rows 62–64 above) | 3 | ✅ |
 | Packages containing at least one elevation read | **20** | ✅ |
 | Files containing at least one elevation read | 58 | ✅ |
