@@ -24485,8 +24485,9 @@ export class ObjectStackProtocolImplementation implements
      * door a Studio edit takes — so every copied item is environment metadata
      * from its first byte: owned by the base, `organization_id` NULL, served
      * `_provenance: 'org'`, edited by the next save (an item shipped with an
-     * authored `_lock` keeps that lock), and followed by no
-     * upgrade. The managed mode is the package install; this verb is what that
+     * authored `_lock` keeps that lock as written today, and a follow-up on
+     * #15213 strips it per #22971's ruling A), and followed by no upgrade.
+     * The managed mode is the package install; this verb is what that
      * install's manifest service is to it, and no more (see
      * `package-unmanaged-install.ts` for what is copied, what is refused, and
      * what is left to the door).

@@ -56,13 +56,16 @@
  *              writable base in the environment ledger
  *              (`importUnmanagedPackage`): the environment's own metadata,
  *              which the next save edits (an item shipped with an authored
- *              `_lock` keeps that lock on the copy), followed by no upgrade;
+ *              `_lock` keeps that lock on the copy as written today, and a
+ *              follow-up on #15213 strips it per #22971's ruling A),
+ *              followed by no upgrade;
  *              nothing is registered, ledgered or rehydrated under the
  *              package's id, and its sample data is not loaded. Refused
  *              `409 UNMANAGED_INSTALL_WALLED_POSTURE` on a deployment whose
  *              REQUESTED tenancy posture walls organizations: after the
- *              payload check and steps 1b–1c (package id, protocol
- *              handshake; none of them writes), before any write.
+ *              payload check, step 1b (package id), the ADR-0131 D3
+ *              walled-catalog refusal and step 1c (protocol handshake),
+ *              none of which writes, and before any write.
  *          A mode the package's `installModes` does not permit answers
  *          `422 INSTALL_MODE_NOT_PERMITTED`, before any write.
  *
@@ -1317,10 +1320,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }, refusal.status);
         }
 
-        // 1e. [ADR-0131 D6] ⭐ THE INSTALL MODE — after the payload, id and
-        //     handshake checks and before every other judgement of the package
-        //     and any write, because nothing an author changes in the
-        //     package answers either refusal:
+        // 1e. [ADR-0131 D6] ⭐ THE INSTALL MODE — after the payload, id, D3
+        //     walled-catalog and handshake checks and before every other
+        //     judgement of the package and any write, because nothing an
+        //     author changes in the package answers either refusal:
         //       - the package must PERMIT the requested mode: its manifest's
         //         `installModes`, parsed by reference
         //         (`ManifestSchema.shape.installModes`) and read through the one

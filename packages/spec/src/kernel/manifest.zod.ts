@@ -408,10 +408,10 @@ export function manifestIdRefusal(key: string, input: unknown): string {
  *    ledger, under a new writable base whose id differs from the package's.
  *    From then on it is the environment's own metadata and the next save
  *    edits it, except that an item shipped with an authored protection lock
- *    (`_lock`) keeps that lock on the copy (an open question on #15213); it
- *    follows no upgrade. A deployment whose
- *    tenancy posture walls organizations (`group`, `isolated`) refuses it,
- *    whatever the package permits.
+ *    (`_lock`) keeps that lock on the copy as written today, and a follow-up
+ *    on #15213 strips it per #22971's ruling A; it follows no upgrade. A
+ *    deployment whose tenancy posture walls organizations (`group`,
+ *    `isolated`) refuses it, whatever the package permits.
  *
  * The spelling is the maintainer's ruling B on the D6 execution card
  * (2026-10-11): `managed` and `unmanaged` are the two states of one property,

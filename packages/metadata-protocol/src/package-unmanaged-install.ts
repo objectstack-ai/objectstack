@@ -10,7 +10,8 @@
  * ruled on the D6 execution card, 2026-10-11): every metadata item is copied
  * ONCE into the environment ledger, becomes this environment's own metadata,
  * which the next save edits (an item shipped with an authored `_lock` keeps
- * that lock), and never follows an upgrade. The orchestration —
+ * that lock as written today, and a follow-up on #15213 strips it per
+ * #22971's ruling A), and never follows an upgrade. The orchestration —
  * reading the store, minting the base, writing each item through
  * `saveMetaItem`, deleting the base when a write fails — is
  * `ObjectStackProtocolImplementation.importUnmanagedPackage` (`protocol.ts`).
