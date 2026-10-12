@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { ArrowRight, Check } from 'lucide-react';
 import { Bricolage_Grotesque, IBM_Plex_Mono } from 'next/font/google';
 import { HomeLayout } from 'fumadocs-ui/layouts/home';
-import { baseOptions, gitConfig } from '@/lib/layout.shared';
+import { baseOptions, ESSAY_URL, gitConfig } from '@/lib/layout.shared';
 import { absoluteUrl, HERO_COVER } from '@/lib/site';
 import {
   APACHE_2_0_URL,
@@ -16,6 +16,7 @@ import {
   type JsonLdNode,
 } from '@/lib/structured-data';
 import { YouTubeEmbed } from '@/components/youtube-embed';
+import { OntologyRunsFigure } from '@/components/figures';
 
 /** The 90-second overview — the same video the README's hero cover links to. */
 const OVERVIEW_VIDEO_ID = 'CX_FlOoOtr0';
@@ -122,6 +123,13 @@ function homeGraph(): JsonLdNode[] {
   ];
 }
 
+/** Section 00's three sentences, verbatim from the maintainer's ruling. */
+const IDEA: string[] = [
+  'An enterprise is definition plus execution. When execution is nearly free, it is its definition.',
+  'What the model lacks is not intelligence: a world, hands, and a fence.',
+  'An ontology written clearly enough is software. Models change; the ontology stays.',
+];
+
 const VOCABULARY: { tag: string; title: string; copy: string }[] = [
   { tag: 'object', title: 'Objects & fields', copy: 'Typed schemas with relations, validation, formulas, and files.' },
   { tag: 'permission', title: 'Permissions', copy: 'RBAC plus row- and field-level security, enforced by the runtime.' },
@@ -223,6 +231,15 @@ export default function HomePage() {
             metadata small enough for AI to hold whole: agents read it whole, reason it whole,
             refactor it whole.
           </p>
+          <p className="mt-5">
+            <Link
+              href={ESSAY_URL}
+              className="inline-flex items-center gap-1 font-medium text-fd-foreground underline underline-offset-4 transition-colors hover:text-fd-primary"
+            >
+              Why the ontology is the software
+              <ArrowRight className="size-4" />
+            </Link>
+          </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <Link
               href="/docs/getting-started"
@@ -304,6 +321,40 @@ export default function HomePage() {
             the agent&apos;s mistakes at authoring time, and the runtime derives the database,
             REST API, UI, and MCP server — permissions and audit enforced on every call.
           </p>
+        </section>
+
+        {/* ── 00 · the idea ────────────────────────────────────── */}
+        <section className="relative mx-auto w-full max-w-6xl px-6 py-16 md:py-20">
+          <div className="flex items-baseline gap-4 border-t border-fd-border pt-8">
+            <span className="text-xs tracking-[0.18em] text-fd-muted-foreground uppercase" style={{ fontFamily: 'var(--l-mono)' }}>
+              00 · The idea
+            </span>
+          </div>
+          <h2 className="mt-4 max-w-2xl text-3xl font-bold tracking-tight md:text-4xl" style={{ fontFamily: 'var(--l-display)' }}>
+            Why code recedes
+          </h2>
+          {/* The figure's caption takes its spacing and colour from the blog's prose
+              styles there; this page has no prose wrapper, so the wrapper sets them. */}
+          <div className="mx-auto mt-10 max-w-4xl [&_figcaption]:mt-3 [&_figcaption]:text-sm [&_figcaption]:text-fd-muted-foreground">
+            <OntologyRunsFigure caption="The ontology is not the design document for the software; the runtime runs it directly." />
+          </div>
+          <div className="mt-10 grid gap-8 md:grid-cols-3">
+            {IDEA.map((line) => (
+              <div key={line}>
+                <div className="h-px bg-fd-border" aria-hidden />
+                <p className="mt-4 text-lg font-semibold text-pretty" style={{ fontFamily: 'var(--l-display)' }}>
+                  {line}
+                </p>
+              </div>
+            ))}
+          </div>
+          <Link
+            href={ESSAY_URL}
+            className="mt-8 inline-flex items-center gap-2 text-sm font-medium underline underline-offset-4 transition-colors hover:text-fd-primary"
+          >
+            Read the essay
+            <ArrowRight className="size-4" />
+          </Link>
         </section>
 
         {/* ── 01 · the loop ────────────────────────────────────── */}
@@ -455,14 +506,7 @@ export default function HomePage() {
               The ontology is the software. Your objects, relations, actions, permissions, and
               flows are your business ontology — views, dashboards, apps, and translations are
               projections of it, and the definition layer of the AI era should be an open
-              protocol you own. Read the long form:{' '}
-              <Link
-                href="/blog/the-ontology-is-the-software"
-                className="inline-flex items-center gap-1 font-medium text-fd-foreground underline underline-offset-4 transition-colors hover:text-fd-primary"
-              >
-                The Ontology Is the Software
-                <ArrowRight className="size-3.5" />
-              </Link>
+              protocol you own.
             </p>
             <p className="mt-3 text-sm text-fd-muted-foreground">
               ObjectStack is build &amp; ask with Claude Code. Rather build &amp; ask online —
