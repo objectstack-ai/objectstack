@@ -42,6 +42,7 @@ import {
 } from './grant-permission-set-name.js';
 import { runOneTimeGrantPermissionSetNameBackfill } from './grant-permission-set-name-backfill.js';
 import { createPositionWriteThrough } from './position-write-through.js';
+import { createWalledCatalogDataDoorRefusal, WALLED_CATALOG_OBJECT_TYPES } from './walled-catalog-data-door.js';
 import { runOneTimePositionEnvironmentBackfill } from './position-environment-backfill.js';
 import { reportCatalogReferences } from './catalog-reference-report.js';
 import {
@@ -4357,6 +4358,21 @@ export class SecurityPlugin implements Plugin {
         '[security] the ObjectQL engine exposes no hook registry — a sys_user_permission_set write naming a ' +
           'permission set the security catalog does not hold is NOT refused',
       );
+    }
+
+    // [ADR-0131 D3] Under a wall the security catalog is the platform
+    // operator's: a non-system write on `sys_position`, `sys_permission_set` or
+    // `sys_capability` by anyone below the `PLATFORM_ADMIN` rung is refused
+    // `403 PERMISSION_DENIED`, with the metadata door's own verdict and
+    // sentence. Registered AFTER the security middleware (a caller who may not
+    // write the table keeps its CRUD refusal) and BEFORE the permission-set
+    // write-through below (a refused write is never translated into a metadata
+    // save). Inert under `single`. See `walled-catalog-data-door.ts`.
+    {
+      const walledCatalogDataDoor = createWalledCatalogDataDoorRefusal({ getPosture: () => this.tenancyPosture });
+      for (const object of Object.keys(WALLED_CATALOG_OBJECT_TYPES)) {
+        ql.registerMiddleware(walledCatalogDataDoor, { object });
+      }
     }
 
     // [ADR-0094] Data-door write-through: every non-system CRUD write on
