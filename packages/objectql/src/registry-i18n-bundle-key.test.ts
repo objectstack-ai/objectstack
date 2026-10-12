@@ -272,10 +272,14 @@ describe('SchemaRegistry — i18n bundle keys (#7730)', () => {
       expect(registry.getItem<any>('email_template', 'auth.welcome', undefined, 'zh-CN')?.subject).toBe('packaged zh');
       expect(registry.getItem<any>('email_template', 'auth.welcome', undefined, 'en-US')?.subject).toBe('overlay en');
 
-      // A member the package does NOT ship: its shadow is lifted all the same
-      // (a packaged artifact of the name remains), and nothing else moves.
-      registry.registerItem('email_template', tpl('auth.welcome', 'ja-JP', { subject: 'overlay ja' }), 'name');
-      expect(registry.removeRuntimeShadow('email_template', 'auth.welcome', 'ja-JP')).toBe(true);
+      // [#23074] A member the package does NOT ship: no artifact of that
+      // member takes its place, so the shadow heal declines, and the
+      // overlay-entry retirement takes it, the tenant row it is (the protocol
+      // registers it with no artifact envelope). Nothing else moves.
+      registry.registerItem('email_template', tpl('auth.welcome', 'ja-JP', { subject: 'overlay ja', _provenance: 'org' }), 'name');
+      expect(registry.removeRuntimeShadow('email_template', 'auth.welcome', 'ja-JP')).toBe(false);
+      expect(registry.getItem<any>('email_template', 'auth.welcome', undefined, 'ja-JP')?.subject).toBe('overlay ja');
+      expect(registry.removeOverlayEntry('email_template', 'auth.welcome', 'ja-JP')).toBe(true);
       expect(registry.getItem<any>('email_template', 'auth.welcome', undefined, 'ja-JP')).toBeUndefined();
       expect(registry.getItem<any>('email_template', 'auth.welcome', undefined, 'en-US')?.subject).toBe('overlay en');
 

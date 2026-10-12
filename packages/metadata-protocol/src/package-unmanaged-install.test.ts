@@ -16,7 +16,11 @@
  *  - a follow-up save on a copied item succeeds: editability shown by a
  *    write, not by a flag;
  *  - a runtime-uncreatable type or code is refused before any write, and the
- *    `OS_METADATA_WRITABLE` hatch does not open it.
+ *    `OS_METADATA_WRITABLE` hatch does not open it;
+ *  - the package's protection lock is not copied (ADR-0010 §3.3; the ruling on
+ *    the D6 lock fork, record 6119681934): a locked item's copy carries no
+ *    `_lock` / `_lockReason` / `_lockSource`, the next save edits it, and the
+ *    answer's `strippedLocks` names each lock dropped with its reason.
  *
  * Refusals are asserted as the envelope an HTTP boundary answers with
  * (`resolveThrownHttpError`), never as a bare throw.
@@ -29,14 +33,16 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ImportUnmanagedPackageResponseSchema } from '@objectstack/spec/api';
-import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
+import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema, listMetadataTypeSchemaTypes } from '@objectstack/spec/kernel';
+import { applyProtection } from '@objectstack/spec/shared';
 import { resolveThrownHttpError } from '@objectstack/types';
 import {
     UNMANAGED_IMPORT_COLLECTIONS,
     planUnmanagedImport,
+    stripUnmanagedImportLock,
     unmanagedTranslationItemName,
 } from './package-unmanaged-install.js';
-import { ObjectStackProtocolImplementation } from './protocol.js';
+import { ObjectStackProtocolImplementation, overlaySchemaDeclaredKey } from './protocol.js';
 import { resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
 
 type Row = Record<string, any>;
@@ -196,8 +202,12 @@ const registryCreatable = (type: string) =>
     DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === type)?.allowRuntimeCreate ?? true;
 const registryLoadOrder = (type: string) =>
     DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === type)?.loadOrder ?? Number.MAX_SAFE_INTEGER;
+/** The save door's own answer to "does this type declare `protection`", as the verb asks it. */
+const protectionDeclarationOf = (type: string) => overlaySchemaDeclaredKey(type, 'protection');
 const plan = (body: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
-    planUnmanagedImport(body, { isRuntimeCreatable: registryCreatable, loadOrderOf: registryLoadOrder, ...extra });
+    planUnmanagedImport(body, {
+        isRuntimeCreatable: registryCreatable, loadOrderOf: registryLoadOrder, protectionDeclarationOf, ...extra,
+    });
 
 const ENV_KEYS = ['OS_TENANCY_POSTURE', 'OS_MULTI_ORG_ENABLED', 'OS_METADATA_WRITABLE'] as const;
 const saved: Record<string, string | undefined> = {};
@@ -366,6 +376,200 @@ describe('planUnmanagedImport — what the body alone answers', () => {
     });
 });
 
+/** The vendor's reasons, verbatim — punctuation and all, since the answer quotes them. */
+const VIEW_LOCK_REASON = 'Board-pack figures — edit the source package, not this view.';
+const OBJECT_LOCK_REASON = 'The lead pipeline reads these fields; edit the source package.';
+const PROTECTION = { lock: 'no-overlay', reason: OBJECT_LOCK_REASON, docsUrl: 'https://example.com/crm/locks' };
+
+/**
+ * The CRM body with three locks authored on it, in both spellings: the object
+ * through the author-facing `protection` block (its type declares one), the
+ * view through the `_lock` envelope with a reason and a docs link, the app
+ * through `_lock` alone.
+ */
+function lockedCrmBody(extra: Record<string, unknown> = {}): Record<string, unknown> {
+    return crmBody({
+        objects: [{
+            name: 'crm_lead',
+            label: 'Lead',
+            sharingModel: 'private',
+            fields: { title: { type: 'text', label: 'Title' } },
+            protection: PROTECTION,
+        }],
+        views: [{
+            name: 'crm_lead_open',
+            label: 'Open leads',
+            object: 'crm_lead',
+            viewKind: 'list',
+            columns: [{ field: 'title', label: 'Title' }],
+            _lock: 'full',
+            _lockReason: VIEW_LOCK_REASON,
+            _lockSource: 'artifact',
+            _lockDocsUrl: 'https://example.com/crm/view-lock',
+        }],
+        apps: [{ name: 'crm', label: 'CRM', _lock: 'no-delete' }],
+        ...extra,
+    });
+}
+
+/** The keys of either lock spelling a copied body must not carry. */
+const LOCK_KEYS = ['_lock', '_lockReason', '_lockSource', '_lockDocsUrl', 'protection'];
+
+/** The lock a MANAGED install binds for these lock keys — the loader's own translation, the oracle. */
+function managedBinding(keys: Record<string, unknown>): { lock: unknown; reason: unknown } {
+    const scratch = structuredClone(keys);
+    applyProtection(scratch, { packageId: 'com.example.crm' });
+    return { lock: scratch._lock, reason: scratch._lockReason };
+}
+
+describe('stripUnmanagedImportLock — the package\'s lock is not copied, in either spelling (ADR-0010)', () => {
+    it('drops the `_lock` envelope — `_lockDocsUrl` included — and names the lock with the package\'s reason verbatim', () => {
+        const body = {
+            name: 'crm_lead_open', label: 'Open',
+            _lock: 'full', _lockReason: VIEW_LOCK_REASON, _lockSource: 'package', _lockDocsUrl: 'https://example.com/why',
+        };
+        const out = stripUnmanagedImportLock('view', 'crm_lead_open', body);
+        expect(out.body).toEqual({ name: 'crm_lead_open', label: 'Open' });
+        expect(out.stripped).toEqual({ type: 'view', name: 'crm_lead_open', lock: 'full', reason: VIEW_LOCK_REASON });
+        // The package's body is not mutated: the plan hands on a new one.
+        expect(body._lock).toBe('full');
+    });
+
+    it('names a lock the package gave no reason for without a `reason`', () => {
+        const out = stripUnmanagedImportLock('app', 'crm', { name: 'crm', _lock: 'no-delete' });
+        expect(out.body).toEqual({ name: 'crm' });
+        expect(out.stripped).toEqual({ type: 'app', name: 'crm', lock: 'no-delete' });
+    });
+
+    it('drops a `protection` block on a type that declares one — its `docsUrl` with it — and names its lock and reason', () => {
+        const body = { name: 'crm_lead', label: 'Lead', protection: PROTECTION };
+        const out = stripUnmanagedImportLock('object', 'crm_lead', body, protectionDeclarationOf('object'));
+        expect(out.body).toEqual({ name: 'crm_lead', label: 'Lead' });
+        expect(out.stripped).toEqual({ type: 'object', name: 'crm_lead', lock: 'no-overlay', reason: OBJECT_LOCK_REASON });
+        expect(body.protection).toBe(PROTECTION);
+    });
+
+    it('both spellings on one item: ONE entry, the lock a managed install binds — measured on the loader\'s translation', () => {
+        // The pair a managed install sees: `applyProtection` writes the
+        // block's `lock` and `reason` over the envelope's. Measured here, not
+        // assumed — the strip reports exactly what this oracle binds.
+        const keys = { _lock: 'full', _lockReason: VIEW_LOCK_REASON, protection: { lock: 'no-delete', reason: OBJECT_LOCK_REASON } };
+        expect(managedBinding(keys)).toEqual({ lock: 'no-delete', reason: OBJECT_LOCK_REASON });
+        const out = stripUnmanagedImportLock('view', 'crm_lead_open', { name: 'crm_lead_open', ...keys }, protectionDeclarationOf('view'));
+        expect(out.body).toEqual({ name: 'crm_lead_open' });
+        expect(out.stripped).toEqual({ type: 'view', name: 'crm_lead_open', ...managedBinding(keys) });
+    });
+
+    it('`none` declares no lock, in either spelling: the keys go, and nothing is named', () => {
+        expect(stripUnmanagedImportLock('app', 'crm', { name: 'crm', _lock: 'none', _lockReason: 'nothing to explain' }))
+            .toEqual({ body: { name: 'crm' } });
+        expect(stripUnmanagedImportLock(
+            'app', 'crm', { name: 'crm', _lock: 'full', protection: { lock: 'none', reason: 'open on purpose' } }, protectionDeclarationOf('app'),
+        )).toEqual({ body: { name: 'crm' } });
+    });
+
+    it('an item that carries no lock is handed on as the SAME body, and nothing is named', () => {
+        const body = { name: 'crm', label: 'CRM' };
+        const out = stripUnmanagedImportLock('app', 'crm', body, protectionDeclarationOf('app'));
+        expect(out.body).toBe(body);
+        expect(out.stripped).toBeUndefined();
+    });
+
+    it('a lock either spelling\'s declaration refuses is handed on untouched, for the save door to judge', () => {
+        for (const body of [
+            { name: 'crm', _lock: 'locked' },
+            { name: 'crm', _lock: 'full', _lockReason: 42 },
+            { name: 'crm', _lock: 'full', _lockSource: 'vendor' },
+            { name: 'crm', _lock: 'full', _lockDocsUrl: 7 },
+            { name: 'crm', protection: { lock: 'full' } },
+            { name: 'crm', protection: { lock: 'sealed', reason: 'r' } },
+        ]) {
+            const out = stripUnmanagedImportLock('app', 'crm', body, protectionDeclarationOf('app'));
+            expect(out.body).toBe(body);
+            expect(out.stripped).toBeUndefined();
+        }
+    });
+
+    it('a `protection` block on a type that declares none stays where it is — the save door refuses it as before', () => {
+        expect(protectionDeclarationOf('page')).toBeUndefined();
+        const out = stripUnmanagedImportLock(
+            'page', 'crm_page', { name: 'crm_page', _lock: 'full', protection: PROTECTION }, protectionDeclarationOf('page'),
+        );
+        // The envelope still goes; the block, which the type does not declare, is the door's to refuse.
+        expect(out.body).toEqual({ name: 'crm_page', protection: PROTECTION });
+        expect(out.stripped).toEqual({ type: 'page', name: 'crm_page', lock: 'full' });
+    });
+});
+
+describe('overlaySchemaDeclaredKey — which types declare `protection`, asked of the save door\'s own schema', () => {
+    /** Whether the type's schema answers a bare `protection` block with an unrecognized-key refusal. */
+    function refusesProtection(type: string): boolean {
+        const result = getMetadataTypeSchema(type)!.safeParse({ protection: PROTECTION });
+        const names = (issues: any[]): boolean => issues.some((issue) =>
+            (issue.code === 'unrecognized_keys' && issue.path.length === 0 && issue.keys.includes('protection'))
+            || (Array.isArray(issue.errors) && issue.errors.some((branch: any[]) => names(branch))));
+        return !result.success && names(result.error.issues);
+    }
+    const types = listMetadataTypeSchemaTypes();
+
+    it('every registered type is answered, and the answer never contradicts the schema\'s own verdict', () => {
+        const declaring = types.filter((type) => overlaySchemaDeclaredKey(type, 'protection') !== undefined);
+        // A population floor, so a walk that read nothing cannot pass.
+        expect(declaring.length).toBeGreaterThanOrEqual(10);
+        for (const type of types) {
+            if (overlaySchemaDeclaredKey(type, 'protection') !== undefined) {
+                expect(refusesProtection(type), `${type} is answered as declaring \`protection\` but refuses it`).toBe(false);
+            }
+            if (refusesProtection(type)) {
+                expect(overlaySchemaDeclaredKey(type, 'protection'), `${type} refuses \`protection\` but is answered as declaring it`).toBeUndefined();
+            }
+        }
+    });
+
+    it('the three types measured refusing the block answer `undefined`; types that declare it answer its schema', () => {
+        for (const type of ['action', 'hook', 'page']) {
+            expect(refusesProtection(type)).toBe(true);
+            expect(overlaySchemaDeclaredKey(type, 'protection')).toBeUndefined();
+        }
+        for (const type of ['object', 'view', 'app', 'dashboard', 'dataset']) {
+            expect(overlaySchemaDeclaredKey(type, 'protection')?.safeParse(PROTECTION).success).toBe(true);
+        }
+    });
+});
+
+describe('planUnmanagedImport — the locks it strips', () => {
+    it('plans every item without its lock in either spelling, and lists each lock in write order', () => {
+        const p = plan(lockedCrmBody());
+        expect(p.items.map((i) => `${i.type}/${i.name}`)).toEqual(['object/crm_lead', 'view/crm_lead_open', 'app/crm']);
+        for (const item of p.items) {
+            expect(Object.keys(item.body).filter((key) => LOCK_KEYS.includes(key))).toEqual([]);
+        }
+        expect(p.strippedLocks).toEqual([
+            { type: 'object', name: 'crm_lead', lock: 'no-overlay', reason: OBJECT_LOCK_REASON },
+            { type: 'view', name: 'crm_lead_open', lock: 'full', reason: VIEW_LOCK_REASON },
+            { type: 'app', name: 'crm', lock: 'no-delete' },
+        ]);
+    });
+
+    it('a package that locks nothing lists nothing', () => {
+        expect(plan(crmBody()).strippedLocks).toEqual([]);
+    });
+
+    it('a package-level `metadataDefaults` lock never reaches the import: no package body declares the key, so it is refused', () => {
+        // ADR-0010 §3.2 designs a package-wide default lock the loader would
+        // resolve into each item's `_lock`. No schema declares
+        // `metadataDefaults` today, so a body carrying it is refused whole. If
+        // the key is ever declared (and classified for this import), this pin
+        // reddens: a lock resolved from it must then be stripped too.
+        let err: any;
+        try { plan(crmBody({ metadataDefaults: { lock: 'full', lockReason: 'Vendor default' } })); } catch (e) { err = e; }
+        const envelope = resolveThrownHttpError(err);
+        expect(envelope.status).toBe(422);
+        expect(envelope.code).toBe('UNMANAGED_INSTALL_UNCOPYABLE');
+        expect(err.details.findings.map((f: any) => f.key)).toEqual(['metadataDefaults']);
+    });
+});
+
 describe('importUnmanagedPackage — the verb', () => {
     it('copies every item into a NEW base: package_id = the base, organization_id NULL, nothing under the source id', async () => {
         const { protocol, table, packages } = makeProtocol();
@@ -379,6 +583,8 @@ describe('importUnmanagedPackage — the verb', () => {
             namespace: 'crm',
             copiedCount: 2,
             copied: [{ type: 'object', name: 'crm_lead' }, { type: 'view', name: 'crm_lead_open' }],
+            // The package locks nothing, so the copy dropped nothing.
+            strippedLocks: [],
         });
         const rows = table('sys_metadata').map((r) => `${r.type}/${r.name}@${r.package_id}|org=${r.organization_id}|${r.state}`);
         expect(rows.sort()).toEqual([
@@ -464,6 +670,83 @@ describe('importUnmanagedPackage — the verb', () => {
         expect(object.success).toBe(true);
         const objectRow = table('sys_metadata').find((r) => r.type === 'object' && r.name === 'crm_lead' && r.state === 'active');
         expect(Object.keys(JSON.parse(objectRow!.metadata).fields)).toEqual(['title', 'source']);
+    });
+
+    it('names each lock it dropped, in write order, with the package\'s reason verbatim — under the answer\'s declaration', async () => {
+        const { protocol } = makeProtocol();
+        const result = await protocol.importUnmanagedPackage({ manifest: lockedCrmBody() });
+        expect(ImportUnmanagedPackageResponseSchema.parse(result)).toEqual(result);
+        expect(result.strippedLocks).toEqual([
+            { type: 'object', name: 'crm_lead', lock: 'no-overlay', reason: OBJECT_LOCK_REASON },
+            { type: 'view', name: 'crm_lead_open', lock: 'full', reason: VIEW_LOCK_REASON },
+            { type: 'app', name: 'crm', lock: 'no-delete' },
+        ]);
+    });
+
+    it('writes no copied row with a lock key, in either spelling — `_lockDocsUrl` and the `protection` block included', async () => {
+        const { protocol, table } = makeProtocol();
+        await protocol.importUnmanagedPackage({ manifest: lockedCrmBody() });
+        const rows = table('sys_metadata').filter((r) => r.package_id === 'com.example.crm-copy');
+        expect(rows.map((r) => `${r.type}/${r.name}`).sort()).toEqual(['app/crm', 'object/crm_lead', 'view/crm_lead_open']);
+        const lockKeys = rows.flatMap((r) => Object.keys(JSON.parse(r.metadata))
+            .filter((key) => LOCK_KEYS.includes(key))
+            .map((key) => `${r.type}/${r.name}.${key}`));
+        expect(lockKeys).toEqual([]);
+    });
+
+    it('the next save edits the copy of the item the package locked `full` — the save door admits it', async () => {
+        const { protocol, table } = makeProtocol();
+        await protocol.importUnmanagedPackage({ manifest: lockedCrmBody() });
+        const edited = await protocol.saveMetaItem({
+            type: 'view',
+            name: 'crm_lead_open',
+            packageId: 'com.example.crm-copy',
+            item: {
+                name: 'crm_lead_open',
+                label: 'Open leads (edited)',
+                object: 'crm_lead',
+                viewKind: 'list',
+                columns: [{ field: 'title', label: 'Title' }],
+            },
+        });
+        expect(edited.success).toBe(true);
+        const row = table('sys_metadata').find((r) => r.type === 'view' && r.name === 'crm_lead_open' && r.state === 'active');
+        expect(JSON.parse(row!.metadata).label).toBe('Open leads (edited)');
+    });
+
+    it('the copy of the item the package locked `no-delete` deletes', async () => {
+        const { protocol } = makeProtocol();
+        await protocol.importUnmanagedPackage({ manifest: lockedCrmBody() });
+        const removed = await protocol.deleteMetaItem({ type: 'app', name: 'crm' });
+        expect(removed.success).toBe(true);
+    });
+
+    it('a `protection` block on a type that declares none is still refused by the save door — INVALID_METADATA / 422, rolled back', async () => {
+        const { protocol, packages, table } = makeProtocol();
+        const err = await refusalOf(() => protocol.importUnmanagedPackage({
+            manifest: crmBody({ pages: [{ name: 'crm_page', label: 'Page', type: 'app', regions: [], protection: PROTECTION }] }),
+        }));
+        const envelope = resolveThrownHttpError(err);
+        expect(envelope.status).toBe(422);
+        expect(envelope.code).toBe('INVALID_METADATA');
+        expect(err.message).toContain("page 'crm_page' could not be written");
+        expect(err.message).toContain('`protection`');
+        expect(packages.size).toBe(0);
+        expect(table('sys_metadata').filter((r) => r.package_id === 'com.example.crm-copy')).toEqual([]);
+    });
+
+    it('a lock family the spec refuses is not stripped: the save door refuses that item as before — INVALID_METADATA / 422, rolled back', async () => {
+        const { protocol, packages, table } = makeProtocol();
+        const err = await refusalOf(() => protocol.importUnmanagedPackage({
+            manifest: crmBody({ apps: [{ name: 'crm', label: 'CRM', _lock: 'locked' }] }),
+        }));
+        const envelope = resolveThrownHttpError(err);
+        expect(envelope.status).toBe(422);
+        expect(envelope.code).toBe('INVALID_METADATA');
+        expect(err.message).toContain("app 'crm' could not be written");
+        expect(err.message).toContain('_lock');
+        expect(packages.size).toBe(0);
+        expect(table('sys_metadata').filter((r) => r.package_id === 'com.example.crm-copy')).toEqual([]);
     });
 
     for (const posture of ['isolated', 'group', 'nonsense']) {
