@@ -3450,7 +3450,7 @@ const METADATA_ARRAY_KEYS = [
   // decides "a code package ships this" from exactly that entry
   // (`isArtifactBacked` → `getArtifactItem`), so a save over a package's
   // position took the runtime-create tier and was accepted, although the type
-  // registry declares `position` `allowOrgOverride: false`. With the entry
+  // registry declares `position` `allowEnvironmentOverlay: false`. With the entry
   // present the door's type-level refusal covers it like every other
   // `security`-domain type (`engine-security-catalog-package-door.test.ts`).
   // `roles` stays in the list as the inert retired spelling it already was.
@@ -9169,23 +9169,40 @@ export class ObjectQL implements IObjectQLEngine {
    * `evaluateValidationRules` as `related`. When no rule traverses anything the
    * schema says so up front and this costs NOTHING — no query, no closure work
    * — which is what bounds the N+1: one hop, only the fields a rule names, one
-   * batched read per reference field per write, and only when a rule asks.
+   * batched read per reference field per write (two for a caller that is not
+   * SYSTEM where a read door bounds the rows, below), and only when a rule asks.
    *
-   * ## Read under SYSTEM authority, like `parent` and for a related reason
+   * ## Which related rows a caller's rule may read, and how their values are read
    *
-   * {@link resolveMasterDetailParent} reads a header's VALUES as SYSTEM (once
-   * the caller's read door has returned that header, #22519) because a
-   * master-detail lock is a property of the header's state, not of the caller's
-   * visibility of its columns. This read is the same shape: a validation rule's output is a pass/fail
-   * the SYSTEM enforces, not data handed to the caller — categorically unlike
-   * an access-control rule, which is why RLS predicates are excluded from this
-   * capability altogether. Reading as the acting user instead made the rule
-   * unauthorable for exactly the persona it exists to constrain.
+   * The VALUES are read as SYSTEM: a validation rule's output is a pass/fail the
+   * SYSTEM enforces, not data handed to the caller — categorically unlike an
+   * access-control rule, which is why RLS predicates are excluded from this
+   * capability altogether. Reading the columns as the acting user instead made
+   * the rule unauthorable for exactly the persona it exists to constrain. What
+   * bounds that elevation is the PROJECTION: only the columns the predicate
+   * names, intersected with the related object's declared fields. ⛔ Never the
+   * whole row.
    *
-   * What bounds the elevation is the PROJECTION: only the
-   * columns the predicate names, intersected with the related object's declared
-   * fields. ⛔ Never the whole row. On a related object no organization wall
-   * scopes, the own read of any caller that is not SYSTEM also bounds the ROWS.
+   * Which ROWS a caller that is not SYSTEM may have read is a different
+   * question, answered before any value is read:
+   *
+   *  - ⛔ Through a `master_detail` FK the related row is the detail's HEADER,
+   *    and ruling A on #22519 holds here as on the write's own header read
+   *    ({@link resolveMasterDetailParent}): an unreadable header is a header
+   *    that exists nowhere (#22892). The caller's read door first, under the
+   *    caller's own context ({@link masterDetailHeadersCallerReads}); a header
+   *    it does not return is `unresolved`, exactly as a header that exists
+   *    nowhere is, so the rule's answer never depends on what an unreadable
+   *    header holds. The elevated, tenant-kept read follows for the headers the
+   *    door returned only, and a header the caller CAN read is judged on its
+   *    stored values, as the write judges it.
+   *  - On a related object no organization wall scopes, the own read of the
+   *    caller bounds the rows, and any other id is `unreadable`, stored or not.
+   *  - ⛔ A plain `lookup` to a walled object keeps the tenant-kept elevated read
+   *    alone: no ruling extends the header rule to it.
+   *
+   * A SYSTEM caller (seed replay, boot) asks no read door: the elevated read
+   * alone, as before.
    *
    * ## An unresolved row is left UNAVAILABLE, and it says which kind
    *
@@ -9317,25 +9334,40 @@ export class ObjectQL implements IObjectQLEngine {
         // declared fields above. ⛔ Never the whole row.
         //
         // The accepted cost, recorded so nobody widens it by accident: a caller
-        // can INFER a value they cannot see by observing which writes refuse.
-        // The value itself never appears — not in the row handed to CEL beyond
-        // the predicate's own use of it, and not in the refusal text, which
-        // names the field and the rule and never the value.
+        // can INFER a value they cannot see by observing which writes refuse —
+        // a column hidden from them on a row they may read, or a column of a
+        // row a plain `lookup` names on a walled object. The value itself never
+        // appears — not in the row handed to CEL beyond the predicate's own use
+        // of it, and not in the refusal text, which names the field and the
+        // rule and never the value. [#22892] ⛔ Never what a master-detail
+        // header the caller cannot read holds: the door below answers first.
         //
         // ⛔ No organization wall scopes a related object with no tenant column
         // (e.g. `sys_user`), `tenancy.enabled: false` or `external`, so for a
         // caller that is not SYSTEM its rows are the ones its OWN read returns,
         // through every enforcement layer; any other id is 'unreadable', stored or not.
         let ownRead: Set<string> | undefined;
+        let readSet: ReadonlySet<string> = ids;
         if (bound && (isFederatedObject(targetSchema) || resolveTenantFieldName(targetSchema) === null)) {
           const own = await this.find(target, {
             where: { id: { $in: [...ids] } }, fields: ['id'], context: caller as EngineQueryOptions['context'],
           }) as Array<Record<string, unknown>>;
           ownRead = new Set((Array.isArray(own) ? own : []).flatMap((r) => (r?.id == null ? [] : [String(r.id)])));
           if (ownRead.size === 0) { resolved.set(fk, { object: target, byId: new Map(), ownRead }); continue; }
+          readSet = ownRead;
+        } else if (bound && (fields[fk] as { type?: unknown } | undefined)?.type === 'master_detail') {
+          // [#22892] Through a master-detail FK the related row is the detail's
+          // HEADER, and ruling A on #22519 holds here as on the write's own
+          // header read: the caller's read door first, under the caller's own
+          // context. A header it does not return gets no row below and no
+          // `ownRead`, so it is `unresolved`, exactly as a header that exists
+          // nowhere is, whatever it holds. A failed door read returned no
+          // header, so every header is missing.
+          readSet = await this.masterDetailHeadersCallerReads(target, [...ids], caller);
+          if (readSet.size === 0) { resolved.set(fk, { object: target, byId: new Map() }); continue; }
         }
         const query: EngineQueryOptions = {
-          where: { id: { $in: [...(ownRead ?? ids)] } },
+          where: { id: { $in: [...readSet] } },
           fields: [...new Set(['id', ...named])],
           context: { ...(context as Record<string, unknown> ?? {}), isSystem: true } as EngineQueryOptions['context'],
         };

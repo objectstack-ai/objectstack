@@ -594,6 +594,10 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     // A boolean facet of this date field: it declares the field a deadline
     // (#22227) and names no field.
     dueLike: keep,
+    // A boolean facet of this email field: it marks the field as a
+    // correspondent address for inbound-mail matching (#22870) and names no
+    // field.
+    mailAssociation: keep,
     // Names of ANOTHER object's fields — that object's projection governs them.
     // `displayField` / `descriptionField` / `lookupColumns` / `lookupFilters`
     // name fields of the `reference` target (the lookup picker reads them);

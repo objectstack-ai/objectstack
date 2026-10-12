@@ -165,18 +165,20 @@ const itemNamed = (listed: { items?: unknown[] }, name: string): any =>
     (listed?.items ?? []).find((i) => (i as { name?: string })?.name === name);
 
 describe('#6602 — the premise, read from the registry rather than restated', () => {
-    it('view is the specimen: a legitimately per-org-overridable type', () => {
-        // If a later ruling closes this flag, the leak this file pins stops
-        // being reachable through the overlay tier and the whole file should
-        // be re-read, not repaired.
+    it('view is the specimen: an overlay-enabled type, the tier the per-org leak rode before ADR-0131 D6', () => {
+        // If a later ruling closes this flag, the overlay tier this file drives
+        // is no longer reachable for `view` and the whole file should be
+        // re-read, not repaired. The flag decides no organization since
+        // ADR-0131 D6 (it was spelled `allowOrgOverride` while it did); the
+        // seam below still refuses an org-scoped row whoever produces one.
         expect(DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === 'view')).toMatchObject({
-            allowOrgOverride: true,
+            allowEnvironmentOverlay: true,
         });
         // `flow` reaches the same seam through the OTHER write tier: not
-        // per-org overridable (#6283 / commit 474f131cf) but still runtime-creatable,
+        // overlay-enabled (#6283 / commit 474f131cf) but still runtime-creatable,
         // which is the tier a Studio-authored flow uses.
         expect(DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === 'flow')).toMatchObject({
-            allowOrgOverride: false,
+            allowEnvironmentOverlay: false,
             allowRuntimeCreate: true,
         });
     });

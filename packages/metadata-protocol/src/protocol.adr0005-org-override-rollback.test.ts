@@ -4,7 +4,7 @@
  * Commit ee58392e1 — the nine ADR-0005 whitelist divergences, rolled back. The WRITE
  * PATH now says what the ADR's amendment table has said since 2026-05-22.
  *
- * `DEFAULT_METADATA_TYPE_REGISTRY` carried `allowOrgOverride: true` on nine
+ * `DEFAULT_METADATA_TYPE_REGISTRY` carried `allowEnvironmentOverlay: true` on nine
  * rows the ADR-0005 tenant-customizable whitelist
  * (`docs/adr/0005-metadata-customization-overlay.md:53-64`) never granted:
  *
@@ -17,7 +17,8 @@
  *     model providers; treat like flows."
  *   • `dataset` / `book` / `position` — absent from the table entirely, and
  *     the amendment's closing rule assigns absentees their default: "The
- *     default for any new metadata type is `allowOrgOverride: false`",
+ *     default for any new metadata type is `allowOrgOverride: false`" (the
+ *     ADR's spelling; the key is `allowEnvironmentOverlay` since 18),
  *     admission requiring (a) an overlay schema `resolveOverlaySchema()`
  *     accepts and (b) a WRITTEN render-only rationale. (a) holds for every
  *     registered type since the schema registry unified
@@ -82,7 +83,7 @@
  * ---------------------------------------------------------------------------
  * Reverse verification, direction predicted BEFORE running
  * ---------------------------------------------------------------------------
- * Restoring `allowOrgOverride: true` on any single rolled-back row (the run
+ * Restoring `allowEnvironmentOverlay: true` on any single rolled-back row (the run
  * recorded below used `skill`) must turn that type's declaration pin, its
  * derived-set pin, and its two refusal cases red, while every other type's
  * cases and the `view`/`dashboard`/`report` controls stay green — the
@@ -218,7 +219,7 @@ const VIEW = {
 
 const entry = (type: string) => DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === type);
 
-describe('#6483 — the nine ADR-0005 divergences: allowOrgOverride rolled back to false', () => {
+describe('#6483 — the nine ADR-0005 divergences: allowEnvironmentOverlay rolled back to false', () => {
     // ── the declaration ───────────────────────────────────────────────────
 
     it.each(ROLLED_BACK)('the registry declares %s non-overridable, runtime-create untouched', (type) => {
@@ -226,7 +227,7 @@ describe('#6483 — the nine ADR-0005 divergences: allowOrgOverride rolled back 
         // as the flag going false: the rollback closes per-org shadowing of
         // PACKAGED items, not runtime authoring of new ones.
         expect(entry(type)).toMatchObject({
-            allowOrgOverride: false,
+            allowEnvironmentOverlay: false,
             allowRuntimeCreate: true,
         });
     });
@@ -235,12 +236,12 @@ describe('#6483 — the nine ADR-0005 divergences: allowOrgOverride rolled back 
         // Same self-contradiction #6283 rolled back on `flow`: the loader
         // cannot merge an overlay of this type, so per-org write permission
         // authorized writes nothing could ever read back (#6190).
-        expect(entry('action')).toMatchObject({ supportsOverlay: false, allowOrgOverride: false });
+        expect(entry('action')).toMatchObject({ supportsOverlay: false, allowEnvironmentOverlay: false });
     });
 
     it('the ADR-0005 whitelist controls (view/dashboard/report) are untouched', () => {
         for (const type of CONTROLS) {
-            expect(entry(type)).toMatchObject({ supportsOverlay: true, allowOrgOverride: true });
+            expect(entry(type)).toMatchObject({ supportsOverlay: true, allowEnvironmentOverlay: true });
         }
     });
 
@@ -248,7 +249,7 @@ describe('#6483 — the nine ADR-0005 divergences: allowOrgOverride rolled back 
         // Prime Directive #8: `OVERLAY_ALLOWED_TYPES` is DERIVED from this
         // registry in both `protocol.ts` and `sys-metadata-repository.ts`.
         const derived = new Set(
-            DEFAULT_METADATA_TYPE_REGISTRY.filter((e) => e.allowOrgOverride).map((e) => e.type),
+            DEFAULT_METADATA_TYPE_REGISTRY.filter((e) => e.allowEnvironmentOverlay).map((e) => e.type),
         );
         for (const type of ROLLED_BACK) expect(derived.has(type), type).toBe(false);
         for (const type of CONTROLS) expect(derived.has(type), type).toBe(true);

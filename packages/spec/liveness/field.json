@@ -245,6 +245,14 @@
       "evidence": "packages/metadata-protocol/src/seed-loader.ts (load step 4.5 collects declared pointer pairs; loadDataset derives a per-row reference through the sibling column and routes it through the shared resolution loop — same probes, pass-2 deferral, loud refusal); packages/plugins/plugin-audit/src/objects/sys-activity.object.ts (record_id via object_name, source_id via source_object)",
       "note": "[#11339] Polymorphic pointer pair (ADR-0052 §5 ActivityPointer): marks a text field as the id half whose target object the SIBLING column names per row. Consumer (seed-time natural-key resolution + loud refusal of unresolvable/un-addressable pointers) lands in the same PR (ADR-0049 declare = enforce; the maskingRule precedent). Authoring contradictions refused at parse (text-only, exclusive with reference) and create (sibling must be declared). Proven in packages/metadata-protocol/src/seed-loader-pointer-pair.test.ts and packages/spec/src/data/field.test.ts."
     },
+    "mailAssociation": {
+      "status": "planned",
+      "verifiedAt": "2026-10-12",
+      "authorWarn": true,
+      "authorHint": "Keep it: no mailbox service reads this yet; it takes effect when the mailbox capability ships.",
+      "evidence": "packages/spec/src/data/field.zod.ts#mailAssociation (the parse-time door: the FieldSchema superRefine refuses the key on every type but `email`, beside the `referenceVia` checks); packages/spec/src/data/field-mail-association.test.ts (the accept and refuse pins)",
+      "note": "PLANNED — declared ahead of its one reader by the card's own sequencing (#22870 PR 1 of 2; ruling 6116489638, Q1 → A: the inbound-mail association seam is a declared field-level key, valid only on `type: 'email'`). The card's constraint: \"Declared = enforced. Every key this card adds must get its runtime reader in the sibling ingest card, or it is not added. Liveness rows start `planned` and leave it when the reader lands.\" The reader is the mailbox service's ingest and re-match (the sibling ingest card #22871, Blocked-by #22870), which matches every flagged email field in the mailbox's organization against a message's participant addresses and records one association per match. No reader in this repo today, measured at 018b077fb before this change: `git grep mailAssociation -- packages` answers 0 hits (control: `referenceVia` answers 12 in field.zod.ts alone). `authorWarn` per enforce-or-mark (the externalSharingModel / page.print shape): an author who sets it is told no mailbox service reads it yet. Flip to `live` when the ingest lands, citing its matcher symbol, and drop `authorWarn` / `authorHint` in that same edit."
+    },
     "autonumberFormat": {
       "status": "live",
       "verifiedAt": "2026-08-28",

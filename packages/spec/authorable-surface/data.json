@@ -353,6 +353,7 @@
     "data/Field:lookupColumns",
     "data/Field:lookupFilters",
     "data/Field:lookupPageSize",
+    "data/Field:mailAssociation",
     "data/Field:maskingRule",
     "data/Field:max",
     "data/Field:maxLength",

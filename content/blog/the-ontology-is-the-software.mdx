@@ -54,6 +54,8 @@ API documentation, four places that drift independently. The codebase is not the
 business; it is the business's translation into the only form a computer could
 run.
 
+<OneDefinitionFigure caption="Where the definition lives today, and what it looks like written down once." />
+
 Here is the same sentence written once, as ObjectStack reads it:
 
 ```ts
@@ -109,6 +111,8 @@ What remains in the application itself is small and declared: hooks and action
 bodies, CEL expressions in formulas and predicates, constrained JSX for custom
 pages that is parsed into a UI tree and never executed as code.
 
+<OntologyRunsFigure caption="The ontology is not the design document for the software; the runtime runs it directly." />
+
 **The whole system becomes small enough to be held.** The bundled example CRM in
 this repository — accounts, contacts, leads, opportunities, activities, views, a
 dashboard, a lead-conversion flow, permission sets, actions, translations — is
@@ -146,6 +150,8 @@ the same time.
 Andrej Karpathy's framing of the third generation of software is that the
 context window is the program. For enterprise software, we think the program is
 the ontology, and the context window is where it is read.
+
+<ThreeInterfacesFigure caption="The interface changed three times; the user, until now, was always a person." />
 
 ## Four promises, four mechanisms
 
@@ -217,6 +223,8 @@ existing systems onto business concepts so that an agent can reason about them.
 They are read-mostly, and the systems they describe live elsewhere. Our ontology
 *is* the system; federating an external datasource into it is possible,
 read-only by default, and early.
+
+<ThreeRoutesFigure caption="Three places to keep what an enterprise knows. Outside the model, models change and the ontology stays." />
 
 **Not Salesforce's metadata, either, though that is the closest ancestor.**
 Weissman and Bobrowski's 2009 paper on the Force.com multitenant architecture

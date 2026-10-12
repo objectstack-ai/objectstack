@@ -1712,7 +1712,7 @@
         {
           "name": "showCompleted",
           "type": "boolean",
-          "description": "Include completed activities (sys_activity type \"completed\", which surfaces as a task item). Off by default."
+          "description": "Include completed activities (sys_activity type \"completed\", which surfaces as a task item). Off by default. A milestone row (metadata.kind \"milestone\") is not a completed activity and shows either way."
         },
         {
           "name": "unifiedTimeline",

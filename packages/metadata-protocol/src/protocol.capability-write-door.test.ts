@@ -28,7 +28,7 @@
  * The three doors, and which one each case is about
  * ---------------------------------------------------------------------------
  * `capability` is CODE-ONLY (`allowRuntimeCreate: false` +
- * `allowOrgOverride: false`, ADR-0066 D1 — packages DEFINE capabilities). That
+ * `allowEnvironmentOverlay: false`, ADR-0066 D1 — packages DEFINE capabilities). That
  * makes the ORDER inside `saveMetaItem` load-bearing, and this file pins the
  * order rather than asserting a 422 that the real code never reaches:
  *

@@ -87,7 +87,7 @@ import { isOriginGatedType, packagedBaseRegimeRow } from './packaged-base-regime
  * control-plane kernel, derived from the registry and never listed by hand
  * (Prime Directive #8): no read-time overlay merge (`supportsOverlay: false`,
  * so #6960's carve-out does not reach it) and no per-org write door
- * (`allowOrgOverride: false`, so `assertAllowed` refuses), but a runtime write
+ * (`allowEnvironmentOverlay: false`, so `assertAllowed` refuses), but a runtime write
  * channel (`allowRuntimeCreate: true`) — which is what puts `useRepoPath` true
  * and routes the delete into the repository in the first place.
  *
@@ -100,7 +100,7 @@ import { isOriginGatedType, packagedBaseRegimeRow } from './packaged-base-regime
  * `protocol.code-defined-datasource-door.test.ts`.
  */
 const REPO_REFUSED_TYPES: readonly string[] = DEFAULT_METADATA_TYPE_REGISTRY
-    .filter((e) => !e.supportsOverlay && !e.allowOrgOverride && e.allowRuntimeCreate)
+    .filter((e) => !e.supportsOverlay && !e.allowEnvironmentOverlay && e.allowRuntimeCreate)
     .filter((e) => !isOriginGatedType(e.type))
     .map((e) => e.type)
     .sort();
@@ -112,7 +112,7 @@ const REPO_REFUSED_TYPES: readonly string[] = DEFAULT_METADATA_TYPE_REGISTRY
  * path ungated on purpose). This is how the second re-wrap exit is reached.
  */
 const CODE_ONLY_TYPES: readonly string[] = DEFAULT_METADATA_TYPE_REGISTRY
-    .filter((e) => !e.supportsOverlay && !e.allowOrgOverride && !e.allowRuntimeCreate)
+    .filter((e) => !e.supportsOverlay && !e.allowEnvironmentOverlay && !e.allowRuntimeCreate)
     .map((e) => e.type)
     .sort();
 

@@ -236,7 +236,7 @@ describe('saveMetaItem response conforms to SaveMetaItemResponseSchema (#5745)',
         // PR #5782 after being proved unreachable; the gate that made it
         // unreachable is the one exercised here, and it is still what keeps a
         // second, receipt-less write path from appearing. A type declaring
-        // neither `allowOrgOverride` nor `allowRuntimeCreate` (`agent`, `job`)
+        // neither `allowEnvironmentOverlay` nor `allowRuntimeCreate` (`agent`, `job`)
         // is refused outright rather than persisted without a receipt.
         //
         // This is the tripwire for the `required` decision: if that gate is
@@ -305,9 +305,9 @@ describe('saveMetaItem carries the runtime authoring gate\'s advisories (#4717 â
     it('a save whose only defect is advisory succeeds AND reports the finding', async () => {
         const p = await makeProtocol();
         const raw: any = await p.saveMetaItem({
-            // Env-wide, not org-scoped: the registry declares
-            // `allowOrgOverride: false` for `flow`, so an org-scoped write is
-            // refused 403 NOT_OVERRIDABLE long before the authoring gate runs.
+            // Env-wide, not org-scoped: the protocol refuses every org-scoped
+            // write (ADR-0131 D6), so an org-scoped write is refused 403
+            // NOT_OVERRIDABLE long before the authoring gate runs.
             type: 'flow', name: 'nightly_purge', item: advisoryFlow(),
         });
 

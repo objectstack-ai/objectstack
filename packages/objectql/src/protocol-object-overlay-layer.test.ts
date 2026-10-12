@@ -42,7 +42,7 @@ import { assertEngineFindOnePredicate } from './engine-findone-predicate.js';
  *
  * ## The cost D9.6 declares, and the second gate it also reaches
  *
- * With the predicate honest, `object`'s `allowOrgOverride: false` is enforced
+ * With the predicate honest, `object`'s `allowEnvironmentOverlay: false` is enforced
  * CONSISTENTLY rather than only on the first write. D9.6 states that for
  * `saveMetaItem`; the same predicate feeds `deleteMetaItem`'s two-tier
  * authorization and `SysMetadataRepository.assertAllowed`, so a tenant overlay
@@ -420,7 +420,7 @@ describe('ADR-0029 D9.7 — the delete is a SUBTRACTION, and #7012\'s guard is r
      * A CONTROL-PLANE kernel skips `deleteMetaItem`'s two-tier authorization
      * entirely (`environmentId === undefined`) — but not the repository's
      * `assertAllowed`, which is topology-independent and refuses an
-     * `override-artifact` delete of a type without `allowOrgOverride`. Pinned
+     * `override-artifact` delete of a type without `allowEnvironmentOverlay`. Pinned
      * so "the tenant gate is skipped" is never mistaken for "ungated".
      * [ADR-0131 D6] With the hatch open too: the repository no longer lets the
      * hatch reach an `override-artifact` delete (it used to subtract here).

@@ -30,9 +30,9 @@ import { RestServer } from './rest-server.js';
 const META = '/api/v1/meta';
 const ORG = 'org_alpha';
 
-/** `allowOrgOverride: true` — until ADR-0131 D6, written into the caller's organization. */
+/** One of the five overlay-enabled types — until ADR-0131 D6, written into the caller's organization. */
 const OVERRIDABLE = 'views';
-/** `allowOrgOverride: false` — always written environment-wide. */
+/** Outside the five — always written environment-wide. */
 const ENV_WIDE = 'object';
 
 function mockServer() {

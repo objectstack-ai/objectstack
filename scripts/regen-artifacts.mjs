@@ -53,7 +53,9 @@ export const ROOT_OWNER = '@objectstack/spec-monorepo';
  *
  * `mixed` is the third answer those two lists could not express. A file can be
  * mixed AND still belong here, when the generated half is unreachable by any text
- * merge (`content/docs/permissions/system-context.mdx` is the measured case) — but
+ * merge (`content/docs/permissions/system-context.mdx` was the measured case, routed
+ * from #13646 until #22927 retired the census totals that were its last generated
+ * half; no row carries `mixed` today) — but
  * then "defer" is only correct for the merges where the discarded side changed
  * nothing but the generated half. The value NAMES that equivalence, and
  * `git-merge-regen.mjs` holds the mapping from the name to the comparator; an
@@ -230,117 +232,16 @@ export const REGEN_ARTIFACTS = Object.freeze([
     gen: 'gen:liveness-counts',
     check: 'check:liveness',
   },
-  // #13646. The elevation census page, and the first row here owned by ROOT tooling
-  // rather than by `packages/spec` (the owner field #13585 added exists for exactly
-  // this). It was routed as a generated `file:line` anchor table, and since #15921
-  // it carries no line anchors at all: the argument below is kept as the record of
-  // why the row exists, in the past tense, and "Today" at the end of this block is
-  // the current state.
-  //
-  // ⚠️ The row is the FILE, not `content/docs/permissions/**`, and the difference
-  // is safety rather than tidiness. Its routed sibling `content/docs/references/**`
-  // is a whole generated tree; `content/docs/permissions/` is 22 hand-written prose
-  // pages with ONE generated page among them, so the directory glob would hand 21
-  // prose files to a driver that resolves to OURS — laundering away a sibling's
-  // prose edit, which is the exact trade the migration registry was kept out of
-  // this table for while it was committed. The glob is recorded in NOT_DRIVER_MANAGED below.
-  //
-  // Why it was routed here (#13646, while the page carried `file:line` anchors): two
-  // PRs that each ran `--fix` against their own tree wrote correct-for-themselves
-  // line numbers into the same rows, and the merged tree's correct values equalled
-  // NEITHER side — measured on #13625's merge, where the five conflicted anchors
-  // resolved to `4408/5771/6019/6382/6575` against branch `4407/5770/…` and main
-  // `4284/5647/…`. A text merge could not reach that answer from either input, so it
-  // was a deferral-and-regenerate shape.
-  //
-  // ⚠️ #14064 CORRECTED the safety argument this row used to carry, and the
-  // correction is why it is the one row with a `mixed` field. The old text said the
-  // deferral is safe *because* `check-system-context-census.mjs` re-derives the
-  // census from the tree on every PR. That argument was TRUE and it covered HALF of
-  // what the driver discards. The gate re-derived the census and the anchors; it
-  // re-derives no prose, because the prose is derived from nothing. So the argument's
-  // domain and the risk surface did not coincide, and the gap was not theoretical
-  // (#14064's measurements, taken while the page still carried line anchors):
-  //
-  //   - The driver never writes `%A`, so the side left behind is OURS and the side
-  //     dropped is always THEIRS — i.e. always main's already-landed work, never the
-  //     branch's (measured on #14036: `git merge` exit 0, zero markers, output blob
-  //     byte-identical to the branch head, all 16 of main's re-anchorings gone).
-  //   - A PROSE-ONLY drop passes every check. Measured by deleting a 3-line
-  //     anchor-free paragraph from the merged tree and running ten doc-family gates
-  //     (`check-system-context-census`, `check:doc-anchors`, `check:doc-authoring`,
-  //     `check:docs-single-h1`, `check:corpus-claim-drift`, `check:docs-audit-scope`,
-  //     `check:role-word`, `check-doc-frontmatter`, `check-docs-section-name`,
-  //     `check-doc-route-spelling`): ten exit 0 over silently deleted documentation.
-  //   - It was not a rare path. main rewrote this page about every 75 minutes, so any
-  //     PR touching it and older than an hour met the driver by construction.
-  //
-  // ⭐ #14064 kept the routing, and its argument was right about the page it
-  // measured: the merged tree's correct anchors were on NEITHER side (measured on
-  // #13625 — five conflicted anchors resolved to 4408/5771/6019/6382/6575 against
-  // branch 4407/5770/… and main 4284/5647/…), so no text merge and no hand merge
-  // could reach them. Moving this row to NOT_DRIVER_MANAGED would have bought the
-  // prose back by handing a page that conflicted hourly to a human who could not
-  // resolve it correctly. The census over every routed path said that trade was
-  // worse than it looked: of the last 25 main commits to this page when that was
-  // measured, 24 changed nothing but anchor line numbers — the case the driver
-  // handled correctly and cheaply — and exactly 1 touched prose.
-  //
-  // ⇒ So the row kept its routing and declared WHEN the deferral is lossless.
-  // `mixed` names the equivalence: two revisions equal after
-  // `blankAnchorLineNumbers` differed only in the anchor numbers `--fix` re-derived
-  // then, and dropping either lost nothing. `git-merge-regen.mjs` refuses to defer
-  // silently when they are not equal, so the 1-in-25 prose case became a text merge
-  // or a loud conflict instead of a silent deletion, and the 24-in-25 anchor case
-  // kept #13646's win. This is still the field to reach for when the NEXT mixed
-  // artifact arrives — a whole-file generator needs no `mixed`, because there is
-  // nothing on its page a regeneration cannot restore.
-  //
-  // ⭐ Today (since #15921): every citation on the page is a `path#symbol` anchor
-  // (`scripts/symbol-anchors.mjs`), which does not move when its file grows, and the
-  // census gate reports a surviving line number as a finding. So
-  // `blankAnchorLineNumbers` finds nothing to blank, and the `'line-anchors'`
-  // comparator is the IDENTITY on this page — measured on #16612,
-  // `extractLineAnchors(page).length === 0` and
-  // `blankAnchorLineNumbers(page) === page`.
-  // A deferral is proven lossless only when THEIRS equals the ancestor or OURS byte
-  // for byte, so every real edit — prose, an anchor, a declared count — takes the
-  // text-merge branch, or conflicts loudly. That is by design, not a degraded mode:
-  // it is the safe half of #14064's trade, and what it gives up is the 24-in-25
-  // renumbering case, which can no longer occur because there are no numbers left to
-  // renumber. A clean text merge is still recorded as owing
-  // `gen:system-context-census`, which `pre-commit` collects.
-  //
-  // ⛔ Keep `mixed: 'line-anchors'` anyway. The field is not only the comparator's
-  // name; it is what routes this row through the lossless check at all. Without it
-  // the driver takes the unconditional deferral every wholly-generated row takes —
-  // keep OURS, drop THEIRS — and that is the silent deletion #14064 closed. Measured
-  // on #16612 in a throwaway repo with this driver, ours and theirs making
-  // non-overlapping edits: field present ⇒ text-merged, the incoming paragraph kept;
-  // field deleted ⇒ `git merge` exit 0, no markers, the incoming paragraph gone. It
-  // is also the row `endToEndMixed()` in `git-merge-regen.mjs --self-test` exercises,
-  // and that self-test reports "nothing to prove", and passes, once no row carries
-  // `mixed`.
-  //
-  // No `readsDist`/`readsSchemaTree`: the census is an AST walk over `src/`, so a
-  // merged tree is the whole prerequisite. `gen` still cannot launder a POPULATION
-  // change into a row nobody wrote: a site that arrived or vanished needs a human
-  // to add or drop its table row, and `--fix` does not touch table rows. #16919
-  // narrowed what stays a REFUSAL, though — `--fix` now regenerates every
-  // `DECLARED_COUNTS` sentence (the headline, the decomposition table, the ruling
-  // quote, …) straight from the census, the same computation the COUNTS check
-  // already runs, applied as a write instead of a comparison. So a merge that
-  // silently produced a wrong SUM (the shape #16919 was filed over — two branches
-  // each correctly bump the same sentence, text-merge clean, and the merged total
-  // is neither side's number) is repaired by running the generator on the merged
-  // tree, not by a human re-deriving and re-typing the number by hand.
-  {
-    path: 'content/docs/permissions/system-context.mdx',
-    gen: 'gen:system-context-census',
-    check: 'check:system-context-census',
-    owner: ROOT_OWNER,
-    mixed: 'line-anchors',
-  },
+  // #13646 → #22927. `content/docs/permissions/system-context.mdx`, the elevation
+  // census page, was the row here: the first one owned by ROOT tooling and the one
+  // row with `mixed: 'line-anchors'` (#14064 measured a whole-side deferral dropping
+  // its prose). Its generated half was its `file:line` anchors until #15921 made
+  // them `path#symbol`, then its census totals until #22927's ruling took those off
+  // the page with `gen:system-context-census`. Nothing on it is generated, so it is
+  // no artifact and has no row; it text-merges like the prose around it, and
+  // `check:system-context-census` still re-derives the census on every PR. The
+  // measurements this row carried are in `git log -p scripts/regen-artifacts.mjs`.
+
   // #13335 / #13731. The per-skill reference index — one row per `packages/spec`
   // source module, rendered whole by `gen:skill-refs`. Nine tracked files today,
   // matched as a SEGMENT glob so a tenth skill arrives routed instead of arriving
@@ -356,7 +257,7 @@ export const REGEN_ARTIFACTS = Object.freeze([
   //
   // Both sides are correct-for-themselves projections of their own tree, and the
   // merged tree's index equals NEITHER — the same "no text merge can reach the
-  // answer" property that put the elevation census page above here. The correct
+  // answer" property that once put the elevation census page in this table. The correct
   // resolution #13335 records by hand (take either side, commit the merge,
   // regenerate, let `check:skill-refs` prove it) is exactly what this row plus
   // `os-regen-merge.sh` step 4 do mechanically.
@@ -517,14 +418,13 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
     path: 'content/docs/permissions/**',
     why:
       'the DIRECTORY is not what #13646 routed, and recording that is the point of this ledger. '
-      + '22 of its 23 pages are hand-written permissions prose; exactly one — `system-context.mdx`, '
-      + 'declared above — is routed, as a MIXED row (a generated `file:line` anchor table when it was '
-      + 'routed; today its anchors are `path#symbol` ones and only its declared counts are '
-      + 'generated). Routing the tree the way its sibling '
+      + 'Its pages are hand-written permissions prose. One — `system-context.mdx` — was routed as a '
+      + 'MIXED file from #13646 until #22927 retired the census totals that were its last generated '
+      + 'half; it is plain prose now and is routed nowhere. Routing the tree the way its sibling '
       + '`content/docs/references/**` is routed reads as symmetry and is not: that sibling is '
-      + 'generated whole, this one would defer 21 prose files to OURS and lose the other side\'s '
-      + 'edits silently. Route the generated FILE; leave the neighbours to text-merge, which is '
-      + 'correct for prose and always was.',
+      + 'generated whole, this one would defer every prose page to OURS and lose the other side\'s '
+      + 'edits silently. Should a generated page arrive here, route that FILE and leave its '
+      + 'neighbours to text-merge, which is correct for prose and always was.',
   },
   // ── #13731: the remaining generators, one recorded disposition each ──────────
   {

@@ -223,14 +223,14 @@ withdrawing the **grant**.
 ## `capability` is code-only
 
 `capability` is a registered metadata kind, and its registry entry declares
-`allowRuntimeCreate: false` **and** `allowOrgOverride: false`. Together those
+`allowRuntimeCreate: false` **and** `allowEnvironmentOverlay: false`. Together those
 are the code-only declaration, so:
 
 ```
 PUT /api/v1/meta/capability/:name
   → 403  NOT_CREATABLE
     "Metadata type 'capability' is code-only: the metadata-type registry
-     declares allowRuntimeCreate=false and allowOrgOverride=false, so it
+     declares allowRuntimeCreate=false and allowEnvironmentOverlay=false, so it
      cannot be created through the runtime metadata API … on any kernel.
      Declare it in source (**/*.capability.ts) and redeploy."
 ```
