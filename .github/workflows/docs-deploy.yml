@@ -1,0 +1,228 @@
+name: Docs Deploy
+
+# The ONE path by which the docs site (Vercel project `objectstack`, Root
+# Directory `apps/docs`) reaches production.
+#
+# ## Why the build runs here and not on Vercel
+#
+# Vercel bills Build CPU Minutes, and it bills them for deployments that do not
+# end up building anything. Measured on 2026-10-12 against this project: ~600
+# deployments a day, ~533 of them Git-integration PREVIEW deployments for
+# `claude/*`, `gh-readonly-queue/*`, `board-archive*` and `changeset-release/*`
+# branches. Each one cloned the monorepo, ran the old Ignored Build Step script
+# for ~25 s and was then canceled — and was still billed: billed CPU-minutes
+# divided by production-build wall-minutes came out at 12–15, more than the
+# 8-vCPU build machine can produce on its own, so the canceled ones are in the
+# bill. They were ~40% of this project's cost; the ~34 production builds a day
+# that pushes to `main` triggered were most of the rest. Build CPU Minutes were
+# 97% of the team's invoice.
+#
+# The maintainer's ruling, verbatim and untranslated:
+# 「文档站应该只有主分支需要部署，而且应该用免费的」 — only `main` deploys the docs,
+# and on free compute. This repository is public, so a standard
+# `ubuntu-latest` runner costs nothing. So this job builds the site on that
+# runner with `vercel build` and uploads the result with
+# `vercel deploy --prebuilt`: Vercel stores and serves it and builds nothing.
+# `apps/docs/vercel.json` turns the Git integration's deployments off
+# (`git.deploymentEnabled: false`), so no branch push creates a Vercel
+# deployment at all — billed, canceled or otherwise.
+#
+# ## Failure direction: a silent skip is the worst outcome
+#
+# A run that cannot deploy goes RED, never green-and-skipped. The site going
+# quietly stale with no error anywhere is exactly what the old Ignored Build
+# Step script was written around ("a wrong skip silently stops publishing
+# documentation"), and moving the build here does not change which direction
+# is the dangerous one. In particular a missing `VERCEL_TOKEN` secret (an
+# objectstack-ai organization secret; a repository secret of the same name
+# resolves identically) is an `::error::` and a failed run, never a notice:
+# unlike an optional mirror, this job IS the publishing path, and without it
+# nothing else publishes the docs.
+
+on:
+  schedule:
+    # Every six hours, at :43 past 00, 06, 12 and 18 UTC. The maintainer's
+    # decision: the docs refresh at most six hours behind `main`, and
+    # "Run workflow" on this workflow's Actions page (workflow_dispatch below)
+    # publishes `main` immediately when that is too slow. Builds cost nothing
+    # here at any frequency; four a day (against ~87 commits a day on `main`)
+    # keeps this job from competing with CI for runners and needs no
+    # paths-filter list to keep in step with what the site is built from.
+    #
+    # The HOURS keep out of this repository's crowded scheduled windows, read
+    # from `grep -rn 'cron:' .github/workflows/` on the day this landed: 01–05
+    # UTC carry most of the nightlies (stale, CodeQL, validate-deps,
+    # rerun-safety, coverage, the release-coverage and required-set patrols,
+    # the smokes and nightly tiers), 07 carries showcase-smoke, and the board
+    # snapshot owns :07 of 02, 08, 14 and 20. Of the six six-hour sets, only
+    # 0/6/12/18 and 1/7/13/19 have hours with nothing scheduled after :00; the
+    # first is taken because its :00 neighbours are short (release.yml's
+    # version-pr refresh, prerelease-pin-watch at 06:00, the hourly ci/lint
+    # runs), while 07:00 starts the showcase smoke. The MINUTE is off the top of
+    # the hour for the reason every patrol here gives: scheduled runs queue
+    # behind everyone else's :00 cron.
+    #
+    # This job spends almost nothing of the per-repository GITHUB_TOKEN budget
+    # (the checkout, and no API reads), so unlike the board readers it is not
+    # placed against that pool.
+    #
+    # ⚠️ GitHub delays scheduled runs under load and occasionally drops one. For
+    # docs that costs one more interval of staleness, which a dispatch buys back.
+    - cron: '43 0,6,12,18 * * *'
+  workflow_dispatch: {}
+
+# Read the tree, nothing else. Vercel is reached with VERCEL_TOKEN, not with
+# any GitHub scope.
+permissions:
+  contents: read
+
+# One production deploy at a time, and the newest one wins. Cancelling an
+# in-flight run is safe HERE, unlike a backup: every run builds the tip of
+# `main`, which contains everything an earlier run would have published, so a
+# cancelled run loses nothing a later run does not deliver.
+concurrency:
+  group: docs-deploy-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build the docs site and deploy it to Vercel production
+    runs-on: ubuntu-latest
+    # A forced docs build (spec generators + `next build`) measures ~4 minutes
+    # on this runner class in ci.yml's Build Docs job; the rest is install and
+    # upload.
+    timeout-minutes: 30
+    env:
+      # Which Vercel project receives the deployment. These are identifiers,
+      # not credentials; with both set, the CLI needs no `.vercel/project.json`
+      # in the repository and no interactive `vercel link`.
+      VERCEL_ORG_ID: team_06nvlGKZCkwhzdXmRdxeCNnB
+      VERCEL_PROJECT_ID: prj_KbPkuEVCj8viErlaC0wBUgMIYZWe
+      # Pinned, so a CLI release cannot change how production is built between
+      # two runs of an unchanged tree. Moving it is a reviewed edit here.
+      VERCEL_CLI_VERSION: '60.1.3'
+    steps:
+      # The maintainer's ruling is "only main deploys". `schedule` always runs
+      # on the default branch, but `workflow_dispatch` offers a branch picker,
+      # and a dispatch from any other ref would publish that branch to
+      # production. Refused loudly rather than skipped: a skip reads as a
+      # successful run of the button somebody just pressed.
+      - name: Refuse any ref but main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Docs Deploy publishes to PRODUCTION and runs only from main; this run is on ${GITHUB_REF}. Re-run it with 'main' selected in the branch picker."
+          exit 1
+
+      # Checked before anything is built, so a missing credential costs seconds
+      # rather than a full build, and it fails RED: see the header.
+      - name: Require the Vercel token
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [ -z "${VERCEL_TOKEN:-}" ]; then
+            echo "::error::The secret VERCEL_TOKEN is not visible to this run, so the docs site cannot be deployed and production is NOT being updated. It is provided as an objectstack-ai ORGANIZATION secret: check that it still exists and that this repository is in its repository access list (org Settings -> Secrets and variables -> Actions). To replace it, create a token at vercel.com -> Account Settings -> Tokens scoped to the Object Stack team, and store it as VERCEL_TOKEN there (or as a repository secret of the same name). Then re-run this workflow."
+            exit 1
+          fi
+          echo "VERCEL_TOKEN is set."
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
+
+      # The same key ci.yml's jobs use, so a scheduled run restores the store
+      # CI already saved for this lockfile instead of downloading it again.
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      # `vercel build` runs vercel.json's `installCommand` again; with the tree
+      # already installed from the frozen lockfile that pass has nothing to do,
+      # and a lockfile problem fails HERE, under its own name.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # ## Every Vercel command runs from the REPOSITORY ROOT, not apps/docs
+      #
+      # The project's Root Directory setting (`apps/docs`) comes down with
+      # `vercel pull`, and the CLI applies it relative to the directory it is
+      # run from: `vercel build` builds `<cwd>/<rootDirectory>` and writes
+      # `<cwd>/.vercel/output`, and `vercel deploy` checks that
+      # `<cwd>/<rootDirectory>` exists before uploading `<cwd>/.vercel/output`
+      # (read from vercel/vercel's packages/cli build and deploy commands). Run
+      # from `apps/docs`, the same setting would point at `apps/docs/apps/docs`.
+      # From the root, the build reads `apps/docs/vercel.json` and runs its
+      # `installCommand` / `buildCommand` with `apps/docs` as the working
+      # directory — the same command, in the same place, that ci.yml's Build
+      # Docs gate reads out of that file and runs on every docs PR.
+      - name: Pull the production project settings
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: npx --yes "vercel@${VERCEL_CLI_VERSION}" pull --yes --environment=production --token="$VERCEL_TOKEN"
+
+      - name: Build the site (vercel build --prod)
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          # Build THIS tree, never replay one. A fresh runner has no local turbo
+          # cache and this job passes no remote-cache credentials, so nothing
+          # could be replayed today; forcing keeps that true if either ever
+          # changes, for the reason ci.yml's Build Docs step gives: a replayed
+          # `.next` would publish a stale site and report success.
+          TURBO_FORCE: 'true'
+        run: npx --yes "vercel@${VERCEL_CLI_VERSION}" build --prod --token="$VERCEL_TOKEN"
+
+      # An exit code of 0 is not proof that the docs app was built — see
+      # ci.yml's "Assert the docs app actually built" for the measured case of a
+      # build command that matched no package and exited 0. Assert both the
+      # Next.js build and the Build Output API directory the upload reads.
+      - name: Assert the build produced a deployable output
+        run: |
+          set -euo pipefail
+          if [ ! -f apps/docs/.next/BUILD_ID ]; then
+            echo "::error file=apps/docs/vercel.json::vercel build exited 0 but produced no apps/docs/.next/BUILD_ID - the docs app was not built, so nothing is deployed."
+            exit 1
+          fi
+          if [ ! -f .vercel/output/config.json ]; then
+            echo "::error::vercel build exited 0 but wrote no .vercel/output/config.json at the repository root - there is no prebuilt output to deploy."
+            exit 1
+          fi
+          echo "Built docs app: BUILD_ID=$(cat apps/docs/.next/BUILD_ID)"
+
+      - name: Deploy the prebuilt output to production
+        id: deploy
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          # stdout is the deployment URL and nothing else; progress goes to
+          # stderr. `set -e` fails the step on a non-zero exit before the URL
+          # is used.
+          url=$(npx --yes "vercel@${VERCEL_CLI_VERSION}" deploy --prebuilt --prod --token="$VERCEL_TOKEN")
+          echo "url=${url}" >> "$GITHUB_OUTPUT"
+          echo "Deployed: ${url}"
+
+      - name: Publish the run to the summary
+        if: always()
+        run: |
+          {
+            echo "### Docs Deploy — ${{ job.status }}"
+            echo
+            echo "Commit: \`${{ github.sha }}\` (${{ github.event_name }})"
+            echo
+            echo "Deployment: ${{ steps.deploy.outputs.url || 'none (the run stopped before the deploy step finished)' }}"
+          } >> "$GITHUB_STEP_SUMMARY"

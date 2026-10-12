@@ -632,6 +632,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Reference Via",
         helpText: "Makes this text field the id half of a polymorphic pointer: names the SIBLING field on the same object that holds the target object name, per row (ADR-0052 §5). snake_case; text fields only, and mutually exclusive with `reference`."
       },
+      mailAssociation: {
+        label: "Match Inbound Mail",
+        helpText: "Links inbound mail to records of this object whose value in this field matches the message's sender or a recipient (case-insensitive; the mailbox's own address excluded). Email fields only. Takes effect only where a mailbox service is set up."
+      },
       dueLike: {
         label: "Deadline",
         helpText: "Marks this date as a deadline: once it has passed, views may show it as overdue (relative wording and an overdue colour). Off or unset: not a deadline, and nothing is guessed from the field's name."

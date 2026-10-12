@@ -1183,11 +1183,14 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // 669 since the position form offers `permissionSets` (ADR-0131 D3/D4),
       // the sets a position distributes — one new row label, authored in all
       // three locales.
-      // 667 since #22876: the email-template form's `category` select and
+      // 670 since the field form offers `mailAssociation` on email fields, the
+      // inbound-mail correspondent flag — one new row label, authored in all
+      // three locales.
+      // 668 since #22876: the email-template form's `category` select and
       // `isSystem` checkbox left with their keys (both retired — nothing read
       // either), taking their two labels — authored in all three locales — out
       // of the catalog.
-      expect(translated.length, `${locale} positive control`).toBe(667);
+      expect(translated.length, `${locale} positive control`).toBe(668);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the
