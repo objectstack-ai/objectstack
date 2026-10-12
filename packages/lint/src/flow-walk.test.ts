@@ -162,7 +162,7 @@ describe('walkFlowNodes', () => {
   it('keeps a config key that is a region slot on some OTHER node type', () => {
     const flow = {
       nodes: [
-        { id: 'post', type: 'http', config: { url: 'https://x.example', body: { amount: '{record.amount}' } } },
+        { id: 'post', type: 'http', config: { url: 'https://x.example', body: { dialect: 'cel', source: "{'amount': record.amount}" } } },
       ],
     };
     const [walked] = walkFlowNodes(flow, 'flows[0]');

@@ -1555,7 +1555,12 @@ export default class MigrateMeta extends Command {
         : await protocol.migrateStoredMetadata({
             apply,
             ...(flags.type && flags.type.length > 0 ? { types: flags.type } : {}),
-            actor: 'os migrate meta --stored',
+            // [#23068] No `actor`: this command opens the database directly,
+            // with no session, so it has no user id to give — and the actor
+            // lands in `recorded_by` / `updated_by`, `lookup('sys_user')`
+            // columns, where only a user id or `null` belongs. Omitted, the
+            // rows record `null` ("system-initiated", #4556); the pass names
+            // itself on `source: 'migrate-stored'`.
           });
       const clean = storedMigrationClean(report);
       if (!clean) exitCode = 1;

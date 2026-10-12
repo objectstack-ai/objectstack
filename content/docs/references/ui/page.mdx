@@ -1,7 +1,7 @@
 ---
 title: Page schema — UI Protocol property reference
 navTitle: Page
-description: "Page schemas of the ObjectStack UI Protocol: ElementDataSource, InterfacePageConfig and 7 more — each property with its type, default and a TypeScript example."
+description: "Page schemas of the ObjectStack UI Protocol: ElementApiDataSource, ElementDataSource and 8 more — each property with its type, default and a TypeScript example."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -13,12 +13,34 @@ description: "Page schemas of the ObjectStack UI Protocol: ElementDataSource, In
 ## TypeScript Usage
 
 ```typescript
-import { ElementDataSourceSchema, InterfacePageConfigSchema, PageSchema, PageComponentSchema, PageComponentType, PagePrintSchema, PageRegionSchema, PageTypeSchema, PageVariableSchema } from '@objectstack/spec/ui';
-import type { ElementDataSource, InterfacePageConfig, Page, PageComponent, PageComponentType, PagePrint, PageRegion, PageType, PageVariable } from '@objectstack/spec/ui';
+import { ElementApiDataSourceSchema, ElementDataSourceSchema, InterfacePageConfigSchema, PageSchema, PageComponentSchema, PageComponentType, PagePrintSchema, PageRegionSchema, PageTypeSchema, PageVariableSchema } from '@objectstack/spec/ui';
+import type { ElementApiDataSource, ElementDataSource, InterfacePageConfig, Page, PageComponent, PageComponentType, PagePrint, PageRegion, PageType, PageVariable } from '@objectstack/spec/ui';
 
 // Validate data
-const result = ElementDataSourceSchema.parse(data);
+const result = ElementApiDataSourceSchema.parse(data);
 ```
+
+---
+
+## ElementApiDataSource
+
+[PLANNED — not yet rendered] API binding of a page element: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the selected value, which the element reads as `data` in its expression holes and its `visibleWhen`. The console's generic stat, usage-bar and checklist blocks are the planned readers; until they ship, the binding parses and no block reads it.
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
+
+### Nested Shape: `ElementApiDataSource.read`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **url** | `string` | ✅ | Same-origin API path the element reads — it opens with a single `/`, e.g. `/api/v1/cloud/home`. An absolute URL of any scheme, a protocol-relative `//host`, a backslash read as a slash, a space or control character, and a relative path are refused at parse. No credential is written here: the console reads the endpoint with its own signed-in fetch. |
+| **method** | `'GET'` | optional | HTTP method of the read — `GET`, the only method a page element's read is sent with |
+
 
 ---
 
@@ -270,7 +292,7 @@ View filter rule
 | **responsiveStyles** | `{ large?: Record<string, string \| number>; medium?: Record<string, string \| number>; small?: Record<string, string \| number>; xsmall?: Record<string, string \| number> }` | optional | Per-breakpoint scoped style maps (ADR-0065) |
 | **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — component rendered only when TRUE. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user` — one object, three spellings), and page state as `page.<var>`. The shipping renderer additionally mounts `features`, `os.user` and binds `data` to the data-source ADAPTER here — renderer behaviour, NOT contract-guaranteed (ADR-0068 rules the user object only). ⚠️ `data` is surface-dependent: on a `page:tabs` item `visibleWhen` it is the record ROW instead. e.g. "page.selectedProjectId != ''" |
 | **visibility** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse. |
-| **dataSource** | `{ object: string; view?: string; filter?: object[]; sort?: object[]; … }` | optional | Per-element data binding for multi-object pages |
+| **dataSource** | `{ object: string; view?: string; filter?: object[]; sort?: object[]; … } \| { provider: 'api'; read: object; path?: string }` | optional | Per-element data binding: an object binding `{ object, view?, filter?, sort?, limit? }` that overrides the page object, or an API binding `{ provider: 'api', read: { url }, path? }` that reads one same-origin endpoint |
 | **responsive** | `never` | optional | [REMOVED] `page.components[].responsive` was removed in @objectstack/spec 17 (ADR-0049 D2) — no renderer ever read it, so per-breakpoint layout overrides (columns/order/visibility) parsed, validated, and then did nothing. Delete the key. For breakpoint behaviour that IS applied, use the sibling `responsiveStyles` (ADR-0065) — per-breakpoint CSS maps compiled to id-scoped CSS at render, e.g. `responsiveStyles: { xsmall: { display: 'none' } }` to hide a component on the narrowest screens. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
@@ -283,7 +305,7 @@ View filter rule
 | **small** | `Record<string, string \| number>` | optional | Applied at ≤ small breakpoint |
 | **xsmall** | `Record<string, string \| number>` | optional | Applied at ≤ xsmall breakpoint |
 
-### Nested Shape: `PageComponent.dataSource`
+### Nested Shape: `PageComponent.dataSource[option 1]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -292,6 +314,16 @@ View filter rule
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Additional filter criteria — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in ComponentPropsMap shares; AND-combined with the filter of the named view. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sort order |
 | **limit** | `integer` | optional | Max records to display |
+
+### Nested Shape: `PageComponent.dataSource[option 2]`
+
+[PLANNED — not yet rendered] API binding of a page element: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the selected value, which the element reads as `data` in its expression holes and its `visibleWhen`. The console's generic stat, usage-bar and checklist blocks are the planned readers; until they ship, the binding parses and no block reads it.
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
 
 ### Nested Shape: `PageComponent.aria`
 
@@ -399,7 +431,7 @@ Print declaration: paper size, orientation, margins, the running header and foot
 | **responsiveStyles** | `{ large?: Record<string, string \| number>; medium?: Record<string, string \| number>; small?: Record<string, string \| number>; xsmall?: Record<string, string \| number> }` | optional | Per-breakpoint scoped style maps (ADR-0065) |
 | **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — component rendered only when TRUE. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user` — one object, three spellings), and page state as `page.<var>`. The shipping renderer additionally mounts `features`, `os.user` and binds `data` to the data-source ADAPTER here — renderer behaviour, NOT contract-guaranteed (ADR-0068 rules the user object only). ⚠️ `data` is surface-dependent: on a `page:tabs` item `visibleWhen` it is the record ROW instead. e.g. "page.selectedProjectId != ''" |
 | **visibility** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse. |
-| **dataSource** | `{ object: string; view?: string; filter?: object[]; sort?: object[]; … }` | optional | Per-element data binding for multi-object pages |
+| **dataSource** | `{ object: string; view?: string; filter?: object[]; sort?: object[]; … } \| { provider: 'api'; read: object; path?: string }` | optional | Per-element data binding: an object binding `{ object, view?, filter?, sort?, limit? }` that overrides the page object, or an API binding `{ provider: 'api', read: { url }, path? }` that reads one same-origin endpoint |
 | **responsive** | `never` | optional | [REMOVED] `page.components[].responsive` was removed in @objectstack/spec 17 (ADR-0049 D2) — no renderer ever read it, so per-breakpoint layout overrides (columns/order/visibility) parsed, validated, and then did nothing. Delete the key. For breakpoint behaviour that IS applied, use the sibling `responsiveStyles` (ADR-0065) — per-breakpoint CSS maps compiled to id-scoped CSS at render, e.g. `responsiveStyles: { xsmall: { display: 'none' } }` to hide a component on the narrowest screens. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
