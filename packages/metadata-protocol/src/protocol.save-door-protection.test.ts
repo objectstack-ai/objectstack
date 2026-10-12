@@ -268,7 +268,7 @@ describe('the server-stated rewrites strip the block instead — a row stored be
     for (const rewrite of rewrites) {
         it(`${rewrite.face}: the rewrite lands, and the row carries no \`protection\``, async () => {
             const { protocol, stored } = makeProtocol();
-            const item = app.body({ protection: LOCK });
+            const item: Record<string, unknown> = app.body({ protection: LOCK });
             const result = await protocol.saveMetaItem({ type: app.type, name: app.name, item, ...rewrite.extra });
             expect(result.success).toBe(true);
             const [row] = stored(app.type, app.name).filter((r) => r.state === 'active');
