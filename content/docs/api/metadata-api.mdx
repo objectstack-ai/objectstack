@@ -129,15 +129,15 @@ other caller is refused `403 PERMISSION_DENIED` (ADR-0131 D3).
 
 The package's other write verbs follow the same rule under a wall, judged by
 the items each one acts on:
-- `POST /packages/:id/publish-drafts` and `POST /packages/:id/revert`, by the
-  package's pending drafts;
+- `POST /packages/:id/publish-drafts`, `POST /packages/:id/discard-drafts` and
+  `POST /packages/:id/revert`, by the package's pending drafts;
 - `POST /packages/:id/rollback`, by the commits it would undo;
 - `POST /packages/:id/commits/:commitId/revert`, by that commit's own items,
   whatever package the URL names;
-- `POST /packages/:id/duplicate`, by the source's items;
+- `POST /packages/:id/duplicate`, by the source's published items it copies;
 - `POST /packages/:id/adopt-orphans`, by the environment's orphaned rows.
 
-When those items include a position or a permission set, only the platform
+When those items include a position, a permission set or a capability, only the platform
 operator may run the verb.
 
 ### `PATCH /packages/:id/enable`

@@ -13,10 +13,10 @@ export const entry: SemanticMigration = {
   // code span AND a table cell.
   surface:
     'on a group or isolated deployment, by a caller below the platform operator, on the runtime '
-    + 'dispatcher: POST /api/v1/packages/:id/publish-drafts and /revert when the package has a pending '
-    + 'position or permission-set draft; /rollback when a commit it would undo touched one; '
+    + 'dispatcher: POST /api/v1/packages/:id/publish-drafts, /discard-drafts and /revert when the package has a pending '
+    + 'position, permission-set or capability draft; /rollback when a commit it would undo touched one; '
     + '/commits/:commitId/revert when that commit touched one, whatever package the URL names; '
-    + '/duplicate when the source holds one; and /adopt-orphans when the orphaned rows include one',
+    + '/duplicate when the published rows it copies hold one; and /adopt-orphans when the orphaned rows include one',
   replacement:
     'the platform operator (the `PLATFORM_ADMIN` rung, the deployment\'s declared '
     + '`OS_PLATFORM_OWNER_EMAIL` owner) runs those verbs on catalog-carrying packages; a package whose '
@@ -35,11 +35,12 @@ export const entry: SemanticMigration = {
     'On an isolated or group deployment, the operator publishes a permission set in a writable '
     + 'package twice (the second adding manage_users) and leaves a third draft pending; another '
     + 'organization\'s member holds the set. An organization owner holding manage_metadata inside '
-    + 'their own organization then calls publish-drafts, revert, rollback to the first commit, '
+    + 'their own organization then calls publish-drafts, discard-drafts, revert, rollback to the first commit, '
     + 'commits/<second>/revert (also under a URL naming their own package), duplicate and, from a '
     + 'package of their own, adopt-orphans: each answers 403 PERMISSION_DENIED naming the posture, '
     + 'the draft stays pending, nothing is copied or rebound, and the member resolves exactly what it '
-    + 'resolved before. The same owner runs every verb on a package of their own whose items carry no '
+    + 'resolved before. The same owner runs every verb but adopt-orphans (which reads the '
+    + 'environment\'s orphans, not the package) on a package of their own whose items carry no '
     + 'catalog item with 200; the platform operator runs every verb on the catalog-carrying package '
     + 'with 200; and on a single deployment a manage_metadata holder runs them exactly as before.',
 };
