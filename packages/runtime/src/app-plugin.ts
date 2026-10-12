@@ -301,7 +301,9 @@ export class AppPlugin implements Plugin {
      * `config.timeout` or a memory `config.persistence.autoSaveInterval`
      * authored by 17.x tooling is renamed by the conversion; read raw, the
      * driver found no `*Ms` key and fell back to its default with no notice.
-     * (Job scheduling takes the whole copy: see `start()`.)
+     * [#23090] `loadTranslations` reads the stack's own `translations` through
+     * it too. (Job scheduling and the hook binder take the whole copy: see
+     * `start()`.)
      *
      * WHICH source the collection comes from is still decided on the raw
      * inputs, as the security block decides it (#18034). The converted copy is
@@ -311,7 +313,7 @@ export class AppPlugin implements Plugin {
      * declares, which these readers have never read. Where the stack declares
      * it, the stack wins the spread, so the value is the stack's own, converted.
      */
-    private convertedCollection(ctx: PluginContext, key: 'datasources' | 'objects'): any {
+    private convertedCollection(ctx: PluginContext, key: 'datasources' | 'objects' | 'translations'): any {
         if ((this.collections as Record<string, unknown> | null | undefined)?.[key] === undefined) return undefined;
         return this.forwardConverted(ctx).definition?.[key];
     }
@@ -1476,7 +1478,39 @@ export class AppPlugin implements Plugin {
         // register additional hooks/functions/actions for advanced cases — both
         // coexist on the engine (the binder only replaces what it owns,
         // `app:<appId>`).
-        bindAppArtifactHandlers(ql, this.bundle, { appId, logger: ctx.logger, source: 'AppPlugin' });
+        //
+        // [#23090] Handed the boot's converted copy (`forwardConverted`), not
+        // the raw bundle, so a hook authored with the retired `timeout` binds
+        // with its `timeoutMs`. Read raw, the engine's hook wrapper found no
+        // `timeoutMs` and the hook ran with no time limit and no notice.
+        //
+        // The binder's collectors read the copy's top level AND its nested
+        // `manifest` (the `manifest.hooks` / `.functions` / `.actions` /
+        // `.objects` legs below). The copy is `{ ...manifest, ...collections }`:
+        // where the stack declares no such list, the spread lifted the
+        // manifest's list to the top level, converted, while the nested
+        // `manifest` still carries the raw original, so a renamed hook would
+        // bind twice, once bounded and once not. For each list the spread
+        // lifted (decided on the RAW collections, as #18034 decides the
+        // source), the nested `manifest` the binder reads points at the copy's
+        // converted list, which the collectors' reference de-duplication reads
+        // once. Where the stack declares its own list, the stack wins the
+        // spread and the copy holds no converted manifest list, so that one is
+        // read raw, as before: there is no second pass.
+        const handlerSource: any = this.forwardConverted(ctx).definition;
+        let handlerDefinition: any = handlerSource;
+        const nestedManifest: any = handlerSource?.manifest;
+        if (nestedManifest !== null && typeof nestedManifest === 'object') {
+            for (const key of ['hooks', 'functions', 'actions', 'objects'] as const) {
+                if (nestedManifest[key] === undefined || nestedManifest[key] === handlerSource[key]) continue;
+                if (Object.prototype.hasOwnProperty.call(this.collections, key)) continue;
+                if (handlerDefinition === handlerSource) {
+                    handlerDefinition = { ...handlerSource, manifest: { ...nestedManifest } };
+                }
+                handlerDefinition.manifest[key] = handlerSource[key];
+            }
+        }
+        bindAppArtifactHandlers(ql, handlerDefinition, { appId, logger: ctx.logger, source: 'AppPlugin' });
 
         // [ADR-0110 D5] The action-governance inventory used to hang off a
         // `kernel:ready` hook HERE. Moved to ObjectQLPlugin: AppPlugin is
@@ -2201,14 +2235,31 @@ export class AppPlugin implements Plugin {
             // Service not registered — handled below
         }
 
-        // Collect translation bundles early to determine if we have data
+        // Collect translation bundles early to determine if we have data.
+        //
+        // [#23090] Read off the boot's converted copy (`forwardConverted`), so
+        // the retired translation keys (a per-app `settings` group, a page
+        // component's `submitLabel`, a dashboard widget's `subCaption`) are not
+        // served. Read raw, the i18n service served all three, and the
+        // `settings` group still filled the gaps in the platform's own copy.
+        // WHICH lists are merged is still decided on the RAW inputs, as before:
+        //   - the stack's own list, its value taken from the copy
+        //     (`convertedCollection`);
+        //   - a different `manifest.translations` list. Where the stack
+        //     declares no `translations`, the copy's `{ ...manifest,
+        //     ...collections }` spread lifted this very list to the top level,
+        //     converted, and that is what is read. Where the stack declares its
+        //     own, the stack wins the spread and the copy holds no converted
+        //     manifest list, so it is read raw, as before: no second pass.
         const bundles: Array<Record<string, unknown>> = [];
-        if (Array.isArray(this.collections.translations)) {
-            bundles.push(...this.collections.translations);
+        const stackTranslations = this.convertedCollection(ctx, 'translations');
+        if (Array.isArray(stackTranslations)) {
+            bundles.push(...stackTranslations);
         }
         const manifest = this.bundle.manifest || this.bundle;
         if (manifest && Array.isArray(manifest.translations) && manifest.translations !== this.collections.translations) {
-            bundles.push(...manifest.translations);
+            const lifted = !Object.prototype.hasOwnProperty.call(this.collections, 'translations');
+            bundles.push(...(lifted ? this.forwardConverted(ctx).definition.translations : manifest.translations));
         }
 
         if (!i18nService) {
