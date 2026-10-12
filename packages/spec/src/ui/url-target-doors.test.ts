@@ -15,6 +15,12 @@
  *   it `'url'`), untouched on every other type.
  * - `ActionSchema.onSuccess.navigate` — judged on every value; a template that
  *   opens with `${` keeps the predicate's own rule and is left to the hop.
+ * - The page action rows — `action:button` / `action:icon` (`actionType:
+ *   'url'`) and an `action:group` / `action:menu` member (`type: 'url'`) —
+ *   judged on the url executor only. A page's `properties` bag is outside the
+ *   stack parse; `os validate` judges it through its props gate, whose reading
+ *   of these rows `@objectstack/lint`'s `validate-component-props-url-target`
+ *   test pins.
  *
  * Each refusal is pinned by its Zod issue path and its first sentence, through
  * the schema AND through the stack parse `os validate` runs, so the reach is
@@ -25,6 +31,7 @@ import { describe, it, expect } from 'vitest';
 
 import { ObjectStackDefinitionSchema, defineStack } from '../stack.zod';
 import { ActionSchema } from './action.zod';
+import { ActionButtonPropsSchema, ActionIconPropsSchema, ComponentPropsMap } from './component.zod';
 import { DashboardHeaderActionSchema } from './dashboard.zod';
 
 const HEADER_SUBJECT =
@@ -144,5 +151,47 @@ describe('`onSuccess.navigate` is judged by the shared set', () => {
 
     const accepted = ObjectStackDefinitionSchema.safeParse(stack('/apps/crm/tasks/${result.id}'));
     expect(accepted.success, JSON.stringify(issuesOf(accepted))).toBe(true);
+  });
+});
+
+// ===========================================================================
+// 3. The page action rows (`component.zod.ts`)
+// ===========================================================================
+
+type Row = 'action:button' | 'action:icon' | 'action:group member' | 'action:menu member';
+
+/** Each row: how to parse one, and the subject its refusal opens with. */
+const ROWS: ReadonlyArray<readonly [Row, (fields: Record<string, unknown>) => ReturnType<typeof issuesOf>, PropertyKey[], string]> = [
+  ['action:button', (f) => issuesOf(ActionButtonPropsSchema.safeParse({ label: 'Open', ...f })), ['target'],
+    "An `action:button`'s `target` (`actionType: 'url'`)"],
+  ['action:icon', (f) => issuesOf(ActionIconPropsSchema.safeParse({ label: 'Open', ...f })), ['target'],
+    "An `action:icon`'s `target` (`actionType: 'url'`)"],
+  ['action:group member', (f) => issuesOf(ComponentPropsMap['action:group'].safeParse({ actions: [{ label: 'Open', ...f }] })),
+    ['actions', 0, 'target'], "An `action:group` member's `target` (`type: 'url'`)"],
+  ['action:menu member', (f) => issuesOf(ComponentPropsMap['action:menu'].safeParse({ actions: [{ label: 'Open', ...f }] })),
+    ['actions', 0, 'target'], "An `action:menu` member's `target` (`type: 'url'`)"],
+];
+
+/** The executor key a row spells: a node's `actionType`, a member's `type`. */
+const executor = (row: Row, value: string) => (row.endsWith('member') ? { type: value } : { actionType: value });
+
+describe('the page action rows judge a url `target` by the shared set', () => {
+  it.each(ROWS)('REFUSAL: %s with a url executor and `javascript:alert(1)` is refused at `target`', (row, parse, path, subject) => {
+    const issues = parse({ ...executor(row, 'url'), target: 'javascript:alert(1)' });
+    expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', path]]);
+    expect(firstSentence(issues[0].message)).toBe(`${subject}${JAVASCRIPT_REST}`);
+  });
+
+  it.each(ROWS)('ACCEPTED CONTROL: %s with a url executor and an admitted target parses', (row, parse) => {
+    for (const target of ['https://example.com/docs', '/apps/crm', 'mailto:sales@example.com']) {
+      expect(parse({ ...executor(row, 'url'), target }), `${row} ${target}`).toEqual([]);
+    }
+  });
+
+  it.each(ROWS)('CONTROL: %s on a non-url executor, or with none, leaves `target` alone', (row, parse) => {
+    for (const value of ['flow', 'script', 'api', 'modal']) {
+      expect(parse({ ...executor(row, value), target: 'convert_lead' }), `${row} ${value}`).toEqual([]);
+    }
+    expect(parse({ target: 'convert_lead' }), `${row} with no executor`).toEqual([]);
   });
 });
