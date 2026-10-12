@@ -38,7 +38,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ObjectStackProtocolImplementation, resetEnvWritableMetadataTypes } from '@objectstack/metadata-protocol';
 import {
     SysMetadataAuditObject,
@@ -50,6 +50,7 @@ import { ObjectQL } from './engine.js';
 
 const PKG = 'com.acme.mail';
 const NAME = 'acme.welcome';
+const DIGEST = 'acme.digest';
 
 const template = (locale: string, subject: string): Record<string, unknown> => ({
     name: NAME,
@@ -64,7 +65,17 @@ function mailManifest(): Record<string, unknown> {
     return {
         id: PKG,
         name: 'acme_mail',
-        emailTemplates: [template('en-US', 'PKG en'), template('zh-CN', 'PKG zh')],
+        // A versioned package, as a real install is: its items carry the
+        // package's protection envelope (`_packageId`, `_provenance`), which a
+        // hydrated overlay of them is grafted with.
+        version: '1.0.0',
+        emailTemplates: [
+            template('en-US', 'PKG en'), template('zh-CN', 'PKG zh'),
+            // [#22877 stage 2] A second template the package ships in `en-US`
+            // only, as the showcase ships its templates: a `zh-CN` overlay of
+            // it customizes a member no artifact ships.
+            { ...template('en-US', 'PKG digest en'), name: DIGEST },
+        ],
     };
 }
 
@@ -146,7 +157,11 @@ function makeMemoryDriver(stores: Map<string, Map<string, Record<string, unknown
  * One boot over `stores`: engine, package, protocol, then the hydration
  * `ObjectQLPlugin.start()` runs. Called twice over the same stores = a restart.
  */
-async function boot(stores: Map<string, Map<string, Record<string, unknown>>>) {
+async function boot(
+    stores: Map<string, Map<string, Record<string, unknown>>>,
+    /** [#22877] `'control-plane'` boots a kernel with no environment, whose registry a save writes through to. */
+    kernel: 'environment' | 'control-plane' = 'environment',
+) {
     const engine = new ObjectQL();
     engine.registerDriver(makeMemoryDriver(stores), true);
     await engine.init();
@@ -154,7 +169,9 @@ async function boot(stores: Map<string, Map<string, Record<string, unknown>>>) {
         engine.registry.registerObject(o as any, 'test-package');
     }
     engine.registerApp(mailManifest());
-    const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_prod');
+    const protocol = new ObjectStackProtocolImplementation(
+        engine, () => new Map(), kernel === 'environment' ? 'env_prod' : undefined,
+    );
     const load = await protocol.loadMetaFromDb();
     return { engine, protocol, load };
 }
@@ -286,5 +303,266 @@ describe('two locales of one email template survive a restart (#22877)', () => {
         await second.protocol.saveMetaItem({ type: 'email_template', name: NAME, item: template('zh-CN', 'ADMIN zh') });
         expect(overlayRows(stores).map((r) => r.id)).toEqual(['legacy_zh']);
         expect(await servedSubjects(second.protocol)).toEqual({ 'en-US': 'PKG en', 'zh-CN': 'ADMIN zh' });
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stage 2 — the by-name member selector (ruling 6116165299, Q2 i)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// GET, DELETE, publish, history and revert by name accept ONE member of the
+// bundle (`member`, the discriminator's value); absent, the canonical member.
+// A wrong value is a located 400. One lineage counter per `(org, type, name)`
+// is shared by the bundle; history and revert are filtered by member, and a
+// revert to another member's version answers `404 VERSION_NOT_FOUND` (the
+// seat's answers 6118224899). Same harness as above: real engine, real
+// protocol, and a restart is a second boot over the same stores.
+
+const T = 'email_template';
+
+const subjectOf = async (protocol: ObjectStackProtocolImplementation, member?: string) =>
+    ((await protocol.getMetaItem({ type: T, name: NAME, ...(member !== undefined ? { member } : {}) })) as any)?.item?.subject;
+
+/** The registry's own entry for one member — what a peer, a send or a bare-name engine read is served. */
+const registrySubject = (engine: ObjectQL, member: string) =>
+    (engine.registry.getItem<any>(T, NAME, undefined, member))?.subject;
+
+/** Save both locales, then restart, so the second boot's registry holds both hydrated overlays. */
+async function bootWithBothSaved(stores: Map<string, Map<string, Record<string, unknown>>>) {
+    const first = await boot(stores);
+    await first.protocol.saveMetaItem({ type: T, name: NAME, item: template('en-US', 'ADMIN en') });
+    await first.protocol.saveMetaItem({ type: T, name: NAME, item: template('zh-CN', 'ADMIN zh') });
+    return boot(stores);
+}
+
+/** The located 400 the selector's one reading raises, whichever door asked it. */
+async function expectSelectorRefusal(call: Promise<unknown>, sentence: RegExp) {
+    const err: any = await call.then(() => undefined, (e: unknown) => e);
+    expect(err, 'expected the selector to be refused').toBeDefined();
+    expect(err.status).toBe(400);
+    expect(err.code).toBe('VALIDATION_ERROR');
+    expect(String(err.message)).toMatch(sentence);
+}
+
+describe('the by-name doors address ONE member by the selector (#22877, stage 2)', () => {
+    it('GET: each member by name; absent and the canonical value both answer the canonical member', async () => {
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const { protocol } = await bootWithBothSaved(stores);
+        expect(await subjectOf(protocol)).toBe('ADMIN en');
+        expect(await subjectOf(protocol, 'en-US')).toBe('ADMIN en');
+        expect(await subjectOf(protocol, 'zh-CN')).toBe('ADMIN zh');
+        // Trimmed, as the stored member was.
+        expect(await subjectOf(protocol, ' zh-CN ')).toBe('ADMIN zh');
+    });
+
+    it('GET: a member nobody stored answers the code layer\'s member; one no layer holds answers nothing', async () => {
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const { protocol } = await boot(stores);
+        await protocol.saveMetaItem({ type: T, name: NAME, item: template('en-US', 'ADMIN en') });
+        expect(await subjectOf(protocol, 'zh-CN')).toBe('PKG zh');
+        const absent: any = await protocol.getMetaItem({ type: T, name: NAME, member: 'fr-FR' });
+        expect(absent?.item).toBeUndefined();
+    });
+
+    it('DELETE by member: resetting zh-CN removes its row only, and the en-US overlay stays served — the registry included', async () => {
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const { engine, protocol } = await bootWithBothSaved(stores);
+        expect(registrySubject(engine, 'en-US')).toBe('ADMIN en');
+        expect(registrySubject(engine, 'zh-CN')).toBe('ADMIN zh');
+
+        expect(await protocol.deleteMetaItem({ type: T, name: NAME, member: 'zh-CN' })).toMatchObject({ success: true, reset: true });
+        expect(overlayRows(stores).map((r) => r.bundle_member ?? null)).toEqual([null]);
+        // The reset member is back on the package wording; the other member's
+        // overlay is still the registry's entry — not swept with the group.
+        expect(registrySubject(engine, 'zh-CN')).toBe('PKG zh');
+        expect(registrySubject(engine, 'en-US')).toBe('ADMIN en');
+        expect(await servedSubjects(protocol)).toEqual({ 'en-US': 'ADMIN en', 'zh-CN': 'PKG zh' });
+        expect(await subjectOf(protocol, 'zh-CN')).toBe('PKG zh');
+
+        const after = await boot(stores);
+        expect(await servedSubjects(after.protocol)).toEqual({ 'en-US': 'ADMIN en', 'zh-CN': 'PKG zh' });
+        expect(registrySubject(after.engine, 'en-US')).toBe('ADMIN en');
+    });
+
+    it('DELETE by member of a member NO artifact ships: its overlay leaves the registry, and the canonical overlay stays', async () => {
+        // The package ships `acme.digest` in `en-US` only (the showcase's
+        // shape). The hydrated `zh-CN` overlay wears the bundle's artifact
+        // envelope, so the heal must lift it as that member's shadow; leaving
+        // it kept serving the reset wording until the next boot.
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const first = await boot(stores);
+        await first.protocol.saveMetaItem({ type: T, name: DIGEST, item: { ...template('en-US', 'ADMIN digest en'), name: DIGEST } });
+        await first.protocol.saveMetaItem({ type: T, name: DIGEST, item: { ...template('zh-CN', 'ADMIN digest zh'), name: DIGEST } });
+        const { engine, protocol } = await boot(stores);
+        const digestEntry = (member: string) => engine.registry.getItem<any>(T, DIGEST, undefined, member)?.subject;
+        expect(digestEntry('zh-CN')).toBe('ADMIN digest zh');
+
+        expect(await protocol.deleteMetaItem({ type: T, name: DIGEST, member: 'zh-CN' })).toMatchObject({ success: true, reset: true });
+        expect(digestEntry('zh-CN')).toBeUndefined();
+        expect(digestEntry('en-US')).toBe('ADMIN digest en');
+        const listed: any = await protocol.getMetaItemsForExecution({ type: T });
+        const digest = (listed?.items ?? []).filter((it: any) => it?.name === DIGEST).map((it: any) => `${it.locale}:${it.subject}`);
+        expect(digest).toEqual(['en-US:ADMIN digest en']);
+    });
+
+    it('DELETE with no member (the reverse): the canonical member is reset and the zh-CN overlay stays registered', async () => {
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const { engine, protocol } = await bootWithBothSaved(stores);
+        expect(await protocol.deleteMetaItem({ type: T, name: NAME })).toMatchObject({ success: true, reset: true });
+        expect(overlayRows(stores).map((r) => r.bundle_member)).toEqual(['zh-CN']);
+        expect(registrySubject(engine, 'en-US')).toBe('PKG en');
+        expect(registrySubject(engine, 'zh-CN')).toBe('ADMIN zh');
+        expect(await subjectOf(protocol)).toBe('PKG en');
+    });
+
+    it('publish by member: a zh-CN draft goes live by name; CONTROL the bare publish finds no canonical draft', async () => {
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const { protocol } = await boot(stores);
+        await protocol.saveMetaItem({ type: T, name: NAME, item: template('zh-CN', 'DRAFT zh'), mode: 'draft' });
+
+        const bare: any = await protocol.publishMetaItem({ type: T, name: NAME }).then(() => undefined, (e: unknown) => e);
+        expect(bare?.code).toBe('NO_DRAFT');
+        expect(await protocol.publishMetaItem({ type: T, name: NAME, member: 'zh-CN' })).toMatchObject({ success: true });
+        expect(await servedSubjects(protocol)).toEqual({ 'en-US': 'PKG en', 'zh-CN': 'DRAFT zh' });
+        expect(await subjectOf(protocol, 'zh-CN')).toBe('DRAFT zh');
+        expect(await subjectOf(protocol)).toBe('PKG en');
+    });
+
+    it('history and revert by member: one shared counter, each member its own events; another member\'s version is VERSION_NOT_FOUND', async () => {
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const { protocol } = await boot(stores);
+        await protocol.saveMetaItem({ type: T, name: NAME, item: template('en-US', 'ADMIN en') });
+        await protocol.saveMetaItem({ type: T, name: NAME, item: template('zh-CN', 'ADMIN zh 1') });
+        await protocol.saveMetaItem({ type: T, name: NAME, item: template('zh-CN', 'ADMIN zh 2') });
+
+        const zh = (await protocol.historyMetaItem({ type: T, name: NAME, member: 'zh-CN' })).events;
+        const en = (await protocol.historyMetaItem({ type: T, name: NAME })).events;
+        expect(zh).toHaveLength(2);
+        expect(en).toHaveLength(1);
+        // One lineage counter per name: the versions interleave and never collide.
+        const versions = [...en, ...zh].map((e) => e.version);
+        expect(new Set(versions).size).toBe(3);
+
+        const [zhFirst] = zh;
+        expect(await protocol.rollbackMetaItem({ type: T, name: NAME, toVersion: zhFirst!.version!, member: 'zh-CN' }))
+            .toMatchObject({ success: true, restoredFromVersion: zhFirst!.version });
+        expect(await servedSubjects(protocol)).toEqual({ 'en-US': 'ADMIN en', 'zh-CN': 'ADMIN zh 1' });
+
+        const crossed: any = await protocol.rollbackMetaItem({ type: T, name: NAME, toVersion: en[0]!.version!, member: 'zh-CN' })
+            .then(() => undefined, (e: unknown) => e);
+        expect(crossed?.code).toBe('VERSION_NOT_FOUND');
+        expect(crossed?.status).toBe(404);
+    });
+
+    it('CONTROL: a revert by the bare name reverts the canonical member to its own version, and leaves zh-CN', async () => {
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const { protocol } = await boot(stores);
+        await protocol.saveMetaItem({ type: T, name: NAME, item: template('en-US', 'ADMIN en 1') });
+        await protocol.saveMetaItem({ type: T, name: NAME, item: template('zh-CN', 'ADMIN zh') });
+        await protocol.saveMetaItem({ type: T, name: NAME, item: template('en-US', 'ADMIN en 2') });
+        const [enFirst] = (await protocol.historyMetaItem({ type: T, name: NAME })).events;
+        expect(await protocol.rollbackMetaItem({ type: T, name: NAME, toVersion: enFirst!.version! })).toMatchObject({ success: true });
+        expect(await servedSubjects(protocol)).toEqual({ 'en-US': 'ADMIN en 1', 'zh-CN': 'ADMIN zh' });
+    });
+
+    it('a wrong selector is a located 400 on every door, and nothing is read or written', async () => {
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const { protocol } = await bootWithBothSaved(stores);
+        const before = JSON.stringify(Array.from(stores.get('sys_metadata')!.values()));
+        const noMembers = /^The "member" selector names a bundle member, and a 'view' item has none/;
+        const view = { type: 'view', name: 'task_grid', member: 'zh-CN' };
+        await expectSelectorRefusal(protocol.getMetaItem(view), noMembers);
+        await expectSelectorRefusal(protocol.deleteMetaItem(view), noMembers);
+        await expectSelectorRefusal(protocol.publishMetaItem(view), noMembers);
+        await expectSelectorRefusal(protocol.historyMetaItem(view), noMembers);
+        await expectSelectorRefusal(protocol.rollbackMetaItem({ ...view, toVersion: 1 }), noMembers);
+
+        await expectSelectorRefusal(protocol.deleteMetaItem({ type: T, name: NAME, member: '' }), /^The "member" selector is blank\./);
+        await expectSelectorRefusal(
+            protocol.getMetaItem({ type: T, name: NAME, member: 'x'.repeat(101) }),
+            /^The "member" selector is 101 characters long; a stored 'email_template' member holds at most 100/,
+        );
+        expect(JSON.stringify(Array.from(stores.get('sys_metadata')!.values()))).toBe(before);
+    });
+});
+
+describe('the package-batch doors and the cluster fan-out carry the member (#22877, stage 2)', () => {
+    /** A zh-CN draft bound to the package, beside an en-US active overlay that has none. */
+    async function bootWithZhDraft(stores: Map<string, Map<string, Record<string, unknown>>>) {
+        const booted = await boot(stores);
+        await booted.protocol.saveMetaItem({ type: T, name: NAME, item: template('en-US', 'ADMIN en') });
+        await booted.protocol.saveMetaItem({ type: T, name: NAME, item: template('zh-CN', 'DRAFT zh'), mode: 'draft', packageId: PKG });
+        return booted;
+    }
+    const draftRows = (stores: Map<string, Map<string, Record<string, unknown>>>) =>
+        Array.from(stores.get('sys_metadata')?.values() ?? [])
+            .filter((r) => r.type === T && r.name === NAME && r.state === 'draft');
+
+    it('publishPackageDrafts: the zh-CN draft alone is promoted as zh-CN, and en-US is untouched', async () => {
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const { protocol } = await bootWithZhDraft(stores);
+        expect(draftRows(stores).map((r) => r.bundle_member)).toEqual(['zh-CN']);
+
+        const out: any = await protocol.publishPackageDrafts({ packageId: PKG });
+        expect(out, JSON.stringify(out)).toMatchObject({ success: true, publishedCount: 1, failedCount: 0 });
+        expect(draftRows(stores)).toEqual([]);
+        expect(await servedSubjects(protocol)).toEqual({ 'en-US': 'ADMIN en', 'zh-CN': 'DRAFT zh' });
+    });
+
+    it('revertCommit: the revert of that publish removes the zh-CN row it created and leaves en-US', async () => {
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const { protocol } = await bootWithZhDraft(stores);
+        const published: any = await protocol.publishPackageDrafts({ packageId: PKG });
+        expect(published.commitId, JSON.stringify(published)).toBeTruthy();
+
+        const reverted: any = await protocol.revertCommit({ commitId: published.commitId });
+        expect(reverted, JSON.stringify(reverted)).toMatchObject({ success: true, revertedCount: 1 });
+        expect(overlayRows(stores).map((r) => r.bundle_member ?? null)).toEqual([null]);
+        expect(await servedSubjects(protocol)).toEqual({ 'en-US': 'ADMIN en', 'zh-CN': 'PKG zh' });
+        // The timeline serves the declared item, with no `member` key.
+        const commits: any[] = await (protocol as any).listCommits({ packageId: PKG });
+        for (const c of commits) for (const it of c.items) expect(Object.keys(it).sort()).toEqual(['existedBefore', 'name', 'prevVersion', 'type']);
+    });
+
+    it('discardPackageDrafts: the zh-CN draft is discarded as zh-CN', async () => {
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const { protocol } = await bootWithZhDraft(stores);
+        const out: any = await protocol.discardPackageDrafts({ packageId: PKG });
+        expect(out, JSON.stringify(out)).toMatchObject({ success: true, discardedCount: 1, failedCount: 0 });
+        expect(draftRows(stores)).toEqual([]);
+        expect(await servedSubjects(protocol)).toEqual({ 'en-US': 'ADMIN en', 'zh-CN': 'PKG zh' });
+        // The public draft list keeps its declared header (no `member`).
+        const listed: any = await protocol.listDrafts({ packageId: PKG });
+        expect(listed.drafts).toEqual([]);
+    });
+
+    it('the cluster fan-out: a peer converges on the member a write changed, and a member reset heals only that member', async () => {
+        // Control-plane replicas: their registry takes the write-through a
+        // converging peer re-runs (an environment kernel keeps a non-object
+        // overlay out of it until the next boot, #6602).
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const subscribers: Array<(msg: { payload: unknown }) => void> = [];
+        const bus: any = {
+            subscribe: (_channel: string, handler: (msg: { payload: unknown }) => void) => {
+                subscribers.push(handler);
+                return () => {};
+            },
+            publish: async (_channel: string, payload: unknown) => {
+                for (const handler of subscribers) handler({ payload });
+            },
+        };
+        const writer = await boot(stores, 'control-plane');
+        const peer = await boot(stores, 'control-plane');
+        writer.protocol.attachMetadataMutationPubSub(bus, 'writer');
+        peer.protocol.attachMetadataMutationPubSub(bus, 'peer');
+
+        await writer.protocol.saveMetaItem({ type: T, name: NAME, item: template('en-US', 'ADMIN en') });
+        await writer.protocol.saveMetaItem({ type: T, name: NAME, item: template('zh-CN', 'ADMIN zh') });
+        await vi.waitFor(() => expect(registrySubject(peer.engine, 'zh-CN')).toBe('ADMIN zh'));
+        expect(registrySubject(peer.engine, 'en-US')).toBe('ADMIN en');
+
+        await writer.protocol.deleteMetaItem({ type: T, name: NAME, member: 'zh-CN' });
+        await vi.waitFor(() => expect(registrySubject(peer.engine, 'zh-CN')).toBe('PKG zh'));
+        expect(registrySubject(peer.engine, 'en-US')).toBe('ADMIN en');
     });
 });

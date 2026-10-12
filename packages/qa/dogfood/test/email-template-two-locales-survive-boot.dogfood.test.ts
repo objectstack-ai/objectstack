@@ -26,7 +26,11 @@
 //   - after a cold boot each locale still sends its own wording, and the
 //     by-name read serves the canonical member's;
 //   - CONTROL: a locale nobody saved keeps the package wording, and a
-//     single-locale re-save is still one row per member.
+//     single-locale re-save is still one row per member;
+//   - [#22877 stage 2] the by-name member selector: `?member=zh-CN` reads
+//     that locale's wording, `DELETE ?member=zh-CN` resets that locale alone
+//     and, after a cold boot, each locale serves the expected wording; a
+//     misspelled or misplaced selector is a located 400.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
@@ -81,8 +85,8 @@ describe('[#22877] two locales of one email template survive a cold boot (showca
         return sent.at(-1)?.subject;
     };
     /** `GET /meta/email_template/:name` — the served document, unwrapped, `_`-decorations dropped. */
-    const metaBody = async (): Promise<{ status: number; body: Record<string, unknown> }> => {
-        const read = await call('GET', `/meta/email_template/${NAME}`);
+    const metaBody = async (query = ''): Promise<{ status: number; body: Record<string, unknown> }> => {
+        const read = await call('GET', `/meta/email_template/${NAME}${query}`);
         const doc = read.json?.data ?? read.json?.item ?? read.json;
         const body: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(((doc?.item ?? doc) ?? {}) as Record<string, unknown>)) {
@@ -162,5 +166,34 @@ describe('[#22877] two locales of one email template survive a cold boot (showca
         await restart();
         expect(await sendSubject('en-US')).toBe('Done (admin, English): Ship it');
         expect(await sendSubject('zh-CN')).toBe('已完成（管理员中文）（二）：Ship it');
+    }, 180_000);
+
+    it('[stage 2] one locale is read and reset by name with the member selector, and each locale serves its wording after a cold boot', async () => {
+        // State from the cases above: `en-US` and `zh-CN` both customized.
+        expect(await metaBody('?member=zh-CN')).toMatchObject({ status: 200, body: { subject: ADMIN_ZH.replace('：', '（二）：') } });
+        expect(await metaBody('?member=en-US')).toMatchObject({ status: 200, body: { subject: ADMIN_EN } });
+
+        const reset = await call('DELETE', `/meta/email_template/${NAME}?member=zh-CN`);
+        expect(reset.status, JSON.stringify(reset.json)).toBe(200);
+        expect(reset.json).toMatchObject({ success: true, reset: true });
+        expect(await overlayRows()).toEqual([{ member: null, subject: ADMIN_EN }]);
+        // The package ships `en-US` only, so `zh-CN` now falls to the floor —
+        // the admin's English, untouched by the reset.
+        expect(await sendSubject('zh-CN')).toBe('Done (admin, English): Ship it');
+
+        await restart();
+        expect(await sendSubject('en-US')).toBe('Done (admin, English): Ship it');
+        expect(await sendSubject('zh-CN')).toBe('Done (admin, English): Ship it');
+        expect(await metaBody()).toMatchObject({ status: 200, body: { subject: ADMIN_EN } });
+        // Nothing stores or ships `zh-CN` now: the read answers it as absent.
+        expect((await metaBody('?member=zh-CN')).status).toBe(404);
+
+        // A located 400 for a misspelled selector, and for one on a type with no members.
+        const misspelled = await call('GET', `/meta/email_template/${NAME}?memeber=zh-CN`);
+        expect(misspelled.status).toBe(400);
+        expect(misspelled.json?.error?.code).toBe('VALIDATION_ERROR');
+        const noMembers = await call('DELETE', `/meta/view/${NAME}?member=zh-CN`);
+        expect(noMembers.status, JSON.stringify(noMembers.json)).toBe(400);
+        expect(JSON.stringify(noMembers.json)).toContain('selector names a bundle member');
     }, 180_000);
 });
