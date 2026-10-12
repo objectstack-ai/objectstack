@@ -752,7 +752,7 @@ describe('audit writers — a user\'s own per-user UI-state write is not mirrore
 
   const OTHER_WRITERS = [
     // An organization admin editing the row from Setup's User Preferences grid.
-    { who: "another user's write (an admin)", session: { userId: 'u_admin' }, previous: PREF, result: PREF, actor: 'u_admin' },
+    { who: 'a write by another user (an admin)', session: { userId: 'u_admin' }, previous: PREF, result: PREF, actor: 'u_admin' },
     // A system or service write: no acting user at all.
     { who: 'a system write with no user', session: { isSystem: true }, previous: PREF, result: PREF, actor: null },
     // The owner moving the row to someone else: not purely their own row.
