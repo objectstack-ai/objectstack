@@ -11,10 +11,10 @@ A host config is a stack whose `plugins` holds plugin instances: `examples/app-s
 
 `os serve` now composes a `MetadataPlugin` with no artifact on a host-config boot that has none (when `os dev`'s artifact door does not compose and `plugins` holds no `MetadataPlugin` of its own). What an upgrading host author meets on that boot, measured on the showcase before and after:
 
-- `GET /api/v1/meta/<type>` answers byte-for-byte the same for every type it served before (22 types read, including `app`, `view`, `page`, `dashboard`, `flow`, `position` and `permission`).
+- `GET /api/v1/meta/TYPE` answers byte-for-byte the same for every type it served before (22 types read, including `app`, `view`, `page`, `dashboard`, `flow`, `position` and `permission`).
 - `GET /api/v1/openapi.json` now documents the declared endpoints the boot serves; before, it listed none of them.
 - No new database table: the `sys_metadata` storage tables were already provisioned, and no row is written at boot.
-- Nothing is written into the project directory at boot. The metadata repository is rooted at the served app's directory, not at the directory the command was run from.
+- The door writes nothing into the project directory at boot. Its metadata repository is rooted at the served app's directory, not at the directory the command was run from.
 - The door reads none of the stack and primes nothing from the filesystem (`bootstrap: 'lazy'`), so `positions` / `permissions` / `capabilities` / `sharingRules` keep exactly one registrar.
 - The dev-only `GET /api/v1/dev/metadata-events` stays unmounted unless `NODE_ENV=development`. Under `os serve --dev` with no compiled artifact it is now mounted, as it is on every other config's dev boot.
 - With a remote cluster driver, the metadata service's cross-node cache invalidation (`metadata.changed`) now attaches; the boot warning that it was disabled is gone.
