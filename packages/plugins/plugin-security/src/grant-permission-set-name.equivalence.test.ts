@@ -240,7 +240,7 @@ const GOLDEN: Record<'single' | 'isolated', unknown> = {
       permissions: ['mcp_agent_data_read'],
       positions: [],
       principalKind: 'agent',
-      systemPermissions: ['manage_org_users', 'setup.access', 'setup.write'],
+      systemPermissions: ['manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
     },
     member: {
       accessible_org_ids: ['org_eq'],
@@ -258,7 +258,7 @@ const GOLDEN: Record<'single' | 'isolated', unknown> = {
       permissions: ['organization_admin_no_bypass'],
       positions: ['everyone', 'org_owner'],
       posture: 'TENANT_ADMIN',
-      systemPermissions: ['manage_org_users', 'setup.access', 'setup.write'],
+      systemPermissions: ['manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
     },
     platformAdmin: {
       accessible_org_ids: [],
@@ -268,7 +268,7 @@ const GOLDEN: Record<'single' | 'isolated', unknown> = {
       positions: ['everyone', 'platform_admin'],
       posture: 'PLATFORM_ADMIN',
       systemPermissions: [
-        'manage_metadata', 'manage_platform_settings', 'manage_sharing', 'manage_users',
+        'manage_mailboxes', 'manage_metadata', 'manage_platform_settings', 'manage_sharing', 'manage_users',
         'setup.access', 'setup.write', 'studio.access', 'view_all_audit_log',
       ],
     },
@@ -279,7 +279,7 @@ const GOLDEN: Record<'single' | 'isolated', unknown> = {
       permissions: ['mcp_agent_data_read'],
       positions: [],
       principalKind: 'agent',
-      systemPermissions: ['manage_org_users', 'setup.access', 'setup.write'],
+      systemPermissions: ['manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
     },
     member: {
       accessible_org_ids: ['org_eq'],
@@ -297,7 +297,7 @@ const GOLDEN: Record<'single' | 'isolated', unknown> = {
       permissions: ['organization_admin'],
       positions: ['everyone', 'org_owner'],
       posture: 'TENANT_ADMIN',
-      systemPermissions: ['manage_org_users', 'setup.access', 'setup.write'],
+      systemPermissions: ['manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
     },
     platformAdmin: {
       accessible_org_ids: [],
@@ -307,7 +307,7 @@ const GOLDEN: Record<'single' | 'isolated', unknown> = {
       positions: ['everyone', 'platform_admin'],
       posture: 'PLATFORM_ADMIN',
       systemPermissions: [
-        'manage_metadata', 'manage_platform_settings', 'manage_sharing', 'manage_users',
+        'manage_mailboxes', 'manage_metadata', 'manage_platform_settings', 'manage_sharing', 'manage_users',
         'setup.access', 'setup.write', 'studio.access', 'view_all_audit_log',
       ],
     },

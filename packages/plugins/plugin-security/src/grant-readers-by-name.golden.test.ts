@@ -357,7 +357,7 @@ const SINGLE: unknown = {
         permissions: ['organization_admin_no_bypass'],
         positions: ['everyone', 'org_owner'],
         posture: 'TENANT_ADMIN',
-        systemPermissions: ['manage_org_users', 'setup.access', 'setup.write'],
+        systemPermissions: ['manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
         tabPermissions: null,
       },
       reconcile: { action: 'noop' },
@@ -371,6 +371,7 @@ const SINGLE: unknown = {
         positions: ['everyone', 'platform_admin'],
         posture: 'PLATFORM_ADMIN',
         systemPermissions: [
+          'manage_mailboxes',
           'manage_metadata',
           'manage_platform_settings',
           'manage_sharing',
@@ -448,7 +449,7 @@ const WALLED: unknown = {
         permissions: ['organization_admin'],
         positions: ['everyone', 'org_owner'],
         posture: 'TENANT_ADMIN',
-        systemPermissions: ['manage_org_users', 'setup.access', 'setup.write'],
+        systemPermissions: ['manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
         tabPermissions: null,
       },
       reconcile: { action: 'noop' },
@@ -462,6 +463,7 @@ const WALLED: unknown = {
         positions: ['everyone', 'platform_admin'],
         posture: 'PLATFORM_ADMIN',
         systemPermissions: [
+          'manage_mailboxes',
           'manage_metadata',
           'manage_platform_settings',
           'manage_sharing',
