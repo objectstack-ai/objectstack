@@ -2094,8 +2094,9 @@ function mutationEventMember(type: string, member: string | null | undefined): {
  * `sys_metadata_commit.items` stores it: `member` is the bundle member the
  * item is, for a type whose identity is a pair, and is absent for the
  * canonical member and every type with no members — so the plan of every
- * other item is stored byte-identical to what it was. The commit timeline
- * serves the declared four keys only ({@link ObjectStackProtocolImplementation.listCommits}).
+ * other item is stored byte-identical to what it was. [#23073] The commit
+ * timeline serves it on every item of a bundled type, the canonical member
+ * spelled out ({@link ObjectStackProtocolImplementation.listCommits}).
  */
 type CommitPlanItem = { type: string; name: string; existedBefore: boolean; prevVersion: number | null; member?: string };
 
@@ -22806,6 +22807,13 @@ export class ObjectStackProtocolImplementation implements
      * only its own `label` ([#22200]), the one member a draft-only item can be
      * shown by other than its machine name, passed through from
      * {@link SysMetadataRepository.listDrafts} as the repository projects it.
+     *
+     * [#23073] `member` tells two drafts of one bundle apart (ruling
+     * 6116165299, letter A: each member is addressable by name). It is the
+     * repository header's stored member, the column the package-batch doors
+     * promote and discard by, with the canonical member spelled out, as the
+     * by-name doors' `member` selector takes it back
+     * ({@link bundleMemberDiscriminator}); absent for a type with no members.
      */
     async listDrafts(request?: {
         packageId?: string;
@@ -22814,6 +22822,8 @@ export class ObjectStackProtocolImplementation implements
         drafts: Array<{
             type: string;
             name: string;
+            /** [#23073] The bundle member the draft is (`'zh-CN'`, the canonical `'en-US'`); absent for a type with no members. */
+            member?: string;
             /** The draft body's own top-level `label`, as authored; `null` when it declares none. */
             label: I18nLabel | null;
             packageId: string | null;
@@ -22828,10 +22838,15 @@ export class ObjectStackProtocolImplementation implements
             ...(request?.type ? { type: PLURAL_TO_SINGULAR[request.type] ?? request.type } : {}),
             ...(request?.packageId ? { packageId: request.packageId } : {}),
         });
-        // [#22877] The declared header (`ListDraftsResponseSchema`): the
-        // repository's `member` is the package-batch doors' reading, not part of
-        // this list's contract, and is not served on it.
-        return { drafts: drafts.map(({ member: _member, ...header }) => header) };
+        // [#23073] The declared header (`ListDraftsResponseSchema`), with the
+        // row's stored member on every draft of a bundled type: absent there
+        // means the canonical member, which is spelled out here.
+        return {
+            drafts: drafts.map(({ member: stored, ...header }) => {
+                const member = bundleMemberDiscriminator(header.type, stored);
+                return member === undefined ? header : { ...header, member };
+            }),
+        };
     }
 
     /**
@@ -25388,7 +25403,12 @@ export class ObjectStackProtocolImplementation implements
         aiModel?: string;
         parentCommitId?: string;
         itemCount: number;
-        items: Array<{ type: string; name: string; existedBefore: boolean; prevVersion: number | null }>;
+        /**
+         * [#23073] `member` — the bundle member the item is (`'zh-CN'`, the
+         * canonical `'en-US'`), as the stored revert plan records it; absent
+         * for a type with no members.
+         */
+        items: Array<{ type: string; name: string; member?: string; existedBefore: boolean; prevVersion: number | null }>;
         createdAt?: string;
     }>> {
         try {
@@ -25418,9 +25438,14 @@ export class ObjectStackProtocolImplementation implements
                 ...(r.ai_model ? { aiModel: r.ai_model } : {}),
                 ...(r.parent_commit_id ? { parentCommitId: r.parent_commit_id } : {}),
                 itemCount: typeof r.item_count === 'number' ? r.item_count : 0,
-                // [#22877] The declared item (`ListPackageCommitsResponseSchema`):
-                // a plan item's stored `member` is `revertCommit`'s reading.
-                items: this.parseCommitItems(r.items).map(({ member: _member, ...item }) => item),
+                // [#23073] The declared item (`ListPackageCommitsResponseSchema`),
+                // with the plan item's stored member — the one `revertCommit`
+                // acts on — on every item of a bundled type: absent there means
+                // the canonical member, which is spelled out here.
+                items: this.parseCommitItems(r.items).map(({ member: stored, ...item }) => {
+                    const member = bundleMemberDiscriminator(item.type, stored);
+                    return member === undefined ? item : { ...item, member };
+                }),
                 // [#14038] Canonicalise the ONE driver materialisation this
                 // column is measured to produce (a valid JS `Date`, on
                 // Postgres/MySQL); every other shape — including an

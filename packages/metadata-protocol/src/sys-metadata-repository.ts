@@ -1514,8 +1514,9 @@ export class SysMetadataRepository implements MetadataRepository {
        * identity is a pair (`'zh-CN'` of an `email_template`) — its stored
        * `bundle_member`. Absent for the canonical member and for every type
        * with no members. The package-batch doors read it so each draft is
-       * promoted or discarded as the member it is; it is a header of THIS
-       * repository, and the protocol's draft list does not serve it.
+       * promoted or discarded as the member it is. [#23073] The protocol's
+       * draft list serves it on every draft of a bundled type, the canonical
+       * member spelled out.
        */
       member?: string;
     }>

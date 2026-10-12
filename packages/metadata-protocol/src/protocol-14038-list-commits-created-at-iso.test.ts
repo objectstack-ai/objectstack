@@ -79,6 +79,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
+import { ListPackageCommitsResponseSchema } from '@objectstack/spec/api';
 
 /** Canonical instant text — exactly what `Date.prototype.toISOString` emits. */
 const ISO_Z = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -210,5 +211,36 @@ describe('[#14038] listCommits emits the ISO-8601 string createdAt is declared a
             // this card had quietly chosen a rendering for the contested shape.
             expect(commits[0]!.createdAt).toBe(invalid as unknown as string);
         });
+    });
+});
+
+describe('[#23073] a plan item carries the bundle member it is', () => {
+    it('two languages of one email_template are two items with distinct `member`, read off the stored plan; a name-only type carries no `member` key', async () => {
+        // The plan stores no `member` for the canonical member (absent = `en-US`)
+        // and the value for any other one — what `revertCommit` acts on.
+        const row = {
+            ...commitRow(SQLITE_TEXT),
+            item_count: 3,
+            items: JSON.stringify([
+                { type: 'email_template', name: 'acme.welcome', existedBefore: true, prevVersion: 2 },
+                { type: 'email_template', name: 'acme.welcome', existedBefore: false, prevVersion: null, member: 'zh-CN' },
+                { type: 'object', name: 'acct', existedBefore: true, prevVersion: 3 },
+            ]),
+        };
+        const p = new ObjectStackProtocolImplementation(engineWithCommits([row]));
+
+        const commits = await p.listCommits({ packageId: 'pkg_crm' });
+
+        const items = commits[0]!.items;
+        expect(items).toEqual([
+            { type: 'email_template', name: 'acme.welcome', member: 'en-US', existedBefore: true, prevVersion: 2 },
+            { type: 'email_template', name: 'acme.welcome', member: 'zh-CN', existedBefore: false, prevVersion: null },
+            { type: 'object', name: 'acct', existedBefore: true, prevVersion: 3 },
+        ]);
+        expect(items[2]).not.toHaveProperty('member');
+
+        const parsed = ListPackageCommitsResponseSchema.safeParse({ commits });
+        expect(parsed.success).toBe(true);
+        if (parsed.success) expect(parsed.data.commits).toEqual(commits);
     });
 });
