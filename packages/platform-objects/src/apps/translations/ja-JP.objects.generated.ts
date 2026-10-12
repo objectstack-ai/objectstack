@@ -2948,6 +2948,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           user: "ユーザー"
         }
       },
+      bundle_member: {
+        label: "Bundle Member",
+        help: "Bundle member (e.g. the locale of an email template) this overlay row customizes. Null = the canonical member."
+      },
       metadata: {
         label: "メタデータ",
         help: "JSON シリアライズされたメタデータペイロード"

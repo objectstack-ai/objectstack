@@ -67,7 +67,7 @@
     "kernel/MetadataQuery:pageSize = 50",
     "kernel/MetadataQuery:sortBy = \"name\"",
     "kernel/MetadataQuery:sortOrder = \"asc\"",
-    "kernel/MetadataTypeRegistryEntry:allowOrgOverride = false",
+    "kernel/MetadataTypeRegistryEntry:allowEnvironmentOverlay = false",
     "kernel/MetadataTypeRegistryEntry:allowRuntimeCreate = true",
     "kernel/MetadataTypeRegistryEntry:executionPinned = false",
     "kernel/MetadataTypeRegistryEntry:loadOrder = 100",

@@ -32,6 +32,11 @@ import {
 // `OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES` — same value it read before,
 // no re-ruling of the package cohort as a side effect of #7020.
 import { OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES } from '@objectstack/metadata-core';
+// [#15204 W2] ADR-0131 D3's one predicate, asked by the package delete below
+// per stored catalog type, never restated here.
+import { SECURITY_CATALOG_TYPES, isSecurityCatalogType, walledCatalogWriteVerdict } from '@objectstack/metadata-core';
+import { readEffectiveTenancyPosture } from './activation-gate.js';
+import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 // [#21727] ADR-0087 D1's protocol handshake and the brand predicate for its
 // refusal. The install branch asks the predicate ahead of its generic catch,
 // and its no-protocol fallback runs the same handshake.
@@ -404,6 +409,73 @@ function requireReadCapability(deps: DomainHandlerDeps, context: HttpProtocolCon
  * id still falls through to the route's own 404 rather than being re-labelled
  * 422 (and so this gate never becomes an existence oracle of its own).
  */
+/**
+ * [#15204 W2] ADR-0131 D3 at `DELETE /packages/:id`: under a wall the security
+ * catalog is the platform operator's, so deleting a package that carries a
+ * position or a permission set is too.
+ *
+ * Measured before this refusal, under `isolated` and `group`: the operator
+ * created a writable runtime package and saved a permission set into it
+ * (`PUT /meta/permission/:name?package=`); another organization's member held
+ * that set; an organization's `manage_metadata` holder (rung `TENANT_ADMIN`)
+ * deleted the package, `200`, and the set left the catalog and the member's
+ * grants. The capability gate above checks no rung.
+ *
+ * The items are read where the delete reads them: `deletePackage` removes the
+ * `sys_metadata` rows bound to the package, and those rows are not held under
+ * the package in the running registry, so the stored rows are what is asked.
+ * The decision is {@link walledCatalogWriteVerdict}'s, never restated. It is
+ * asked FIRST, for the first catalog type: its answer does not vary across
+ * catalog types, so when it admits this caller (under `single`, with no
+ * `tenancy` service, for `isSystem` or for the `PLATFORM_ADMIN` rung) nothing
+ * is read and the delete behaves exactly as before. Only a refused caller's
+ * package is read, and a package without catalog rows is admitted. The answer
+ * is this domain's `403` (`PERMISSION_DENIED`).
+ */
+async function refuseWalledCatalogPackageDelete(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    qlService: Pick<IObjectQLEngine, 'find'> | null | undefined,
+    packageId: string,
+): Promise<HttpDispatcherResult | null> {
+    const ec: any = context?.executionContext;
+    const tenancyPosture = await readEffectiveTenancyPosture(deps, context);
+    const verdictFor = (type: string) => walledCatalogWriteVerdict({
+        type,
+        tenancyPosture,
+        isSystem: ec?.isSystem === true,
+        callerPosture: ec?.posture,
+    });
+    if (verdictFor(SECURITY_CATALOG_TYPES[0]!).allowed) return null;
+    if (typeof qlService?.find !== 'function') return null;
+    let rows: unknown;
+    try {
+        rows = await qlService.find('sys_metadata', { where: { package_id: packageId }, context: { isSystem: true } });
+    } catch (e) {
+        return { handled: true, response: deps.errorFromThrown(e, 500) };
+    }
+    const storedTypes = new Set<string>();
+    for (const row of Array.isArray(rows) ? rows : []) {
+        const type = (row as { type?: unknown } | null)?.type;
+        if (typeof type === 'string' && isSecurityCatalogType(type)) storedTypes.add(type);
+    }
+    if (storedTypes.size === 0) return null;
+    for (const type of SECURITY_CATALOG_TYPES) {
+        if (!storedTypes.has(type)) continue;
+        const verdict = verdictFor(type);
+        if (!verdict.allowed) {
+            return {
+                handled: true,
+                response: deps.error(
+                    `Deleting package "${packageId}" is refused: the package carries security catalog items. ${verdict.message}`,
+                    403,
+                ),
+            };
+        }
+    }
+    return null;
+}
+
 function requireWritablePackage(
     deps: DomainHandlerDeps,
     engine: unknown,
@@ -1538,9 +1610,9 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     // producer-side rename card (option B), not a rider on this
                     // one.
                     //
-                    // [#7018 / the #6190 ruling, Option A] `app` declares
-                    // `allowOrgOverride: false`, so this flip carries no
-                    // organization — it lands env-wide, on the
+                    // [#7018 / the #6190 ruling, Option A] this flip carries
+                    // no organization — every metadata write lands env-wide
+                    // (ADR-0131 D6), on the
                     // very row boot hydrates and the App Switcher reads. An
                     // org-scoped flip was a phantom: the app looked published for
                     // the life of the process and went back to `_unpublished:
@@ -2033,7 +2105,13 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // the next restart.
             const readOnly = requireWritablePackage(deps, qlService, id, 'delete'); if (readOnly) return readOnly;
             // [ADR-0131 D6/D12] No organization: an uninstall is environment-wide
-            // by construction, and who may uninstall is the operator gate above.
+            // by construction. The gate above checks the `manage_metadata`
+            // capability (or `isSystem`) and no posture rung, so under a wall an
+            // organization's holder passes it. [#15204 W2] What makes the delete
+            // the operator's under a wall is the catalog refusal below (ADR-0131
+            // D3), for a package that carries a position or a permission set.
+            const walled = await refuseWalledCatalogPackageDelete(deps, _context, qlService, id);
+            if (walled) return walled;
             const protocol = await resolveProtocol(deps, _context);
             const persists = Boolean(protocol && typeof protocol.deletePackage === 'function');
 

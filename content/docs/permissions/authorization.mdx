@@ -256,7 +256,7 @@ one of two doors, each writing only what it owns:
   admin-door **edit of a set whose definition ships as a code artifact is
   refused with `403 not_overridable`**, loudly, at the moment of the write:
   the ADR-0094 write-through still translates the edit into a metadata save,
-  but `permission` declares `allowOrgOverride: false` (ADR-0005's security
+  but `permission` declares `allowEnvironmentOverlay: false` (ADR-0005's security
   row — overlays of the authorization surface would create silent privilege
   drift), so the tier gate refuses it and no env-scope overlay is minted. The
   supported channel is the one ADR-0086 two-doors always named: **edit the

@@ -21,7 +21,7 @@
  * `_provenance: 'package'` on any body handed to `registerObject` with a
  * package id and no provenance of its own; `getArtifactItem` reads exactly
  * that, `isArtifactBacked` turns true, and `object` declares
- * `allowOrgOverride: false` — so the NEXT save of the object the user just
+ * `allowEnvironmentOverlay: false` — so the NEXT save of the object the user just
  * created answers `403 not_overridable`. The B-minimal counter-example below
  * reproduces that on the real registry, so the stamp is pinned by the failure
  * it prevents rather than by a comment.

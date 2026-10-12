@@ -344,7 +344,7 @@ describe('#8769 · publish addressed with a manifest-absent plural resolves the 
 // B — the permissive PLUGIN branch is no longer taken for a declared type
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// `field` declares `allowOrgOverride: false, allowRuntimeCreate: false` — it is
+// `field` declares `allowEnvironmentOverlay: false, allowRuntimeCreate: false` — it is
 // not draftable at all. Unfolded, `'fields'` is in neither
 // `STATIC_REGISTRY_TYPES` nor `RUNTIME_CREATE_ALLOWED_TYPES` (both index the
 // manifest plural, which `field` does not have), and

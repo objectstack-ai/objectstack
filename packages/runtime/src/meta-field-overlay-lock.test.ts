@@ -3,7 +3,7 @@
 /**
  * #7743 — the `field` overlay lock, pinned at the LIVE ROUTE.
  *
- * The registry declares `field` with `allowOrgOverride: false`, and a field a
+ * The registry declares `field` with `allowEnvironmentOverlay: false`, and a field a
  * code package ships is an artifact. Yet
  * `PUT /api/v1/meta/field/showcase_task.title` answered **200**
  * `state:'active'`, and the row read back with `_diagnostics.valid=true` —
@@ -549,7 +549,7 @@ describe('#7743 — PUT /meta/field/<object>.<field> honours the registry overla
         expect(metaRow(engine, 'object', PACKAGED_OBJECT.name)).toBeUndefined();
     });
 
-    it('CONTROL — `view` is still ACCEPTED (allowOrgOverride: true)', async () => {
+    it('CONTROL — `view` is still ACCEPTED (allowEnvironmentOverlay: true)', async () => {
         const { engine, dispatcher } = makeStack();
 
         const res = responseOf(await dispatcher.handleMetadata(
@@ -560,7 +560,7 @@ describe('#7743 — PUT /meta/field/<object>.<field> honours the registry overla
         expect(metaRow(engine, 'view', VIEW.name)).toBeDefined();
     });
 
-    it('CONTROL — `dashboard` is still ACCEPTED (allowOrgOverride: true)', async () => {
+    it('CONTROL — `dashboard` is still ACCEPTED (allowEnvironmentOverlay: true)', async () => {
         const { engine, dispatcher } = makeStack();
 
         const res = responseOf(await dispatcher.handleMetadata(
@@ -573,7 +573,7 @@ describe('#7743 — PUT /meta/field/<object>.<field> honours the registry overla
 
     it('CONTROL — `job` is still refused as code-only, with its own sentence', async () => {
         // `job` is the OTHER tier (`allowRuntimeCreate: false` AND
-        // `allowOrgOverride: false`), refused by #5086's block before this
+        // `allowEnvironmentOverlay: false`), refused by #5086's block before this
         // card's predicate is consulted at all. Same code, different reason —
         // pinned so a change to one tier cannot quietly move the other.
         const { engine, dispatcher } = makeStack();

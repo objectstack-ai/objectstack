@@ -30,8 +30,8 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * provider), masks it on every read path, and only the privileged
  * `resolveSecretField()` dereferences it, at verification and execution time.
  *
- * Env-wide, like the engine's flow map, which keys flows by bare name: a flow
- * declares `allowOrgOverride: false`, so its stored rows are env-wide too.
+ * Env-wide, like the engine's flow map, which keys flows by bare name: every
+ * metadata row is env-wide (ADR-0131 D6), a flow's stored rows included.
  *
  * Writers: the automation plugin's credential channel (the metadata save door,
  * the publish promotion, a delete, the one-time migration), under a system

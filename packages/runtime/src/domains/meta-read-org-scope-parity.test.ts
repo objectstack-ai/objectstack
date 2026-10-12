@@ -37,9 +37,10 @@
  * ## The protocol double
  *
  * It models the read gate `metadata-protocol` applied before ADR-0131 D6
- * (an organization reached a read only for a type the registry declared
- * `allowOrgOverride`), so a transport that still handed down an organization
- * would be answered that organization's overlay — the double is the detector.
+ * (an organization reached a read only for one of the five overlay-enabled
+ * types, whose registry flag was then spelled `allowOrgOverride`), so a
+ * transport that still handed down an organization would be answered that
+ * organization's overlay — the double is the detector.
  * The real protocol reads no organization at all since D6; what this file
  * measures is that neither transport sends one.
  */
@@ -76,13 +77,18 @@ const ENV_DRAFTS: any[] = [{ type: 'view', name: 'env_board', label: 'Env board 
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 
-/** The types the registry declares `allowOrgOverride` — the pre-D6 gate the double models. */
-const ORG_OVERRIDABLE = new Set<string>(DEFAULT_METADATA_TYPE_REGISTRY.filter((e) => e.allowOrgOverride).map((e) => e.type));
+/**
+ * The set the pre-D6 gate the double models scoped to an organization: the five
+ * overlay-enabled types. Read off today's `allowEnvironmentOverlay`, which marks
+ * the same five and decides no organization (ADR-0131 D6) — it is the set, not
+ * the meaning, that the double borrows.
+ */
+const PRE_D6_ORG_SCOPED = new Set<string>(DEFAULT_METADATA_TYPE_REGISTRY.filter((e) => e.allowEnvironmentOverlay).map((e) => e.type));
 
 function protocolDouble() {
     const gate = (type: string, organizationId: unknown) => {
         const t = canonicalMetaUrlType(type);
-        return typeof organizationId === 'string' && ORG_OVERRIDABLE.has(t) ? organizationId : undefined;
+        return typeof organizationId === 'string' && PRE_D6_ORG_SCOPED.has(t) ? organizationId : undefined;
     };
     const resolve = (type: string, name: string, organizationId: unknown) => {
         const t = canonicalMetaUrlType(type);

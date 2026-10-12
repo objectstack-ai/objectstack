@@ -28,11 +28,11 @@ const META = '/api/v1/meta';
 const ORG_A = 'org_alpha';
 const ORG_B = 'org_beta';
 
-/** The five types the registry declares `allowOrgOverride: true`. */
-const ORG_OVERRIDABLE = ['view', 'dashboard', 'report', 'translation', 'email_template'] as const;
+/** The five overlay-enabled types — the doors' org-scoped set before ADR-0131 D6. */
+const PRE_D6_ORG_SCOPED = ['view', 'dashboard', 'report', 'translation', 'email_template'] as const;
 
 /**
- * `allowOrgOverride: false` **and** `allowRuntimeCreate: true` — the
+ * Outside the five **and** `allowRuntimeCreate: true` — the
  * combination that makes this the discriminating control rather than
  * decoration. Its writes have always landed ENV-WIDE, even for a session with
  * an active org, so its history lives in the env partition. A type that could
@@ -353,7 +353,7 @@ describe('#13406 · ADR-0131 D6 the /history and /diff read doors read the envir
     beforeEach(() => { b = boot(); });
 
     describe('⭐ fixture first — an org-active author\'s PUT logs environment-wide', () => {
-        it.each(ORG_OVERRIDABLE)(
+        it.each(PRE_D6_ORG_SCOPED)(
             '%s: a PUT under an active org appends an ENV history row, and none org-scoped',
             async (type) => {
                 const written = await b.put(type, 'authored_at_runtime');
@@ -366,7 +366,7 @@ describe('#13406 · ADR-0131 D6 the /history and /diff read doors read the envir
     });
 
     describe('/history serves the environment change log to every caller', () => {
-        it.each(ORG_OVERRIDABLE)('%s: the events come back for the author\'s org, another org and none', async (type) => {
+        it.each(PRE_D6_ORG_SCOPED)('%s: the events come back for the author\'s org, another org and none', async (type) => {
             await b.put(type, 'authored_at_runtime');
             await b.put(type, 'authored_at_runtime', MARKER_2);
             expect(b.historyRowsFor(type, 'authored_at_runtime', null).length).toBe(2);
@@ -401,7 +401,7 @@ describe('#13406 · ADR-0131 D6 the /history and /diff read doors read the envir
     });
 
     describe('/diff resolves the environment revisions', () => {
-        it.each(ORG_OVERRIDABLE)('%s: ?from=1&to=2 compares the two revisions, for every caller', async (type) => {
+        it.each(PRE_D6_ORG_SCOPED)('%s: ?from=1&to=2 compares the two revisions, for every caller', async (type) => {
             await b.put(type, 'two_revisions');
             await b.put(type, 'two_revisions', MARKER_2);
             expect(b.historyRowsFor(type, 'two_revisions', null).map((h) => h.version)).toEqual([1, 2]);

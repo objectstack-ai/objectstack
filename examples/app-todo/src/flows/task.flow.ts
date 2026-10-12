@@ -98,11 +98,11 @@ export const TaskReminderFlow: Flow = {
                       // logged a line and reported success.
                       id: 'send_reminder', type: 'notify', label: 'Send Reminder',
                       config: {
-                        recipients: '{currentTask.owner}',
+                        recipients: { dialect: 'cel', source: 'has(currentTask.owner) ? currentTask.owner : null' },
                         title: 'Task due tomorrow: {{ currentTask.subject }}',
                         message: 'Due {{ currentTask.due_date }} · priority {{ currentTask.priority }}.',
                         sourceObject: 'todo_task',
-                        sourceId: '{currentTask.id}',
+                        sourceId: { dialect: 'cel', source: 'currentTask.id' },
                       },
                     },
                   ],
@@ -210,7 +210,7 @@ export const OverdueEscalationFlow: Flow = {
                     {
                       id: 'notify_owner', type: 'notify', label: 'Notify Task Owner',
                       config: {
-                        recipients: '{currentTask.owner}',
+                        recipients: { dialect: 'cel', source: 'has(currentTask.owner) ? currentTask.owner : null' },
                         title: 'URGENT: task overdue — {{ currentTask.subject }}',
                         // `days_overdue` is the formula field the record
                         // projection carries (#18584); the loop binding this
@@ -218,7 +218,7 @@ export const OverdueEscalationFlow: Flow = {
                         message: 'Due {{ currentTask.due_date }}, {{ currentTask.days_overdue }} day(s) overdue.',
                         severity: 'critical',
                         sourceObject: 'todo_task',
-                        sourceId: '{currentTask.id}',
+                        sourceId: { dialect: 'cel', source: 'currentTask.id' },
                       },
                     },
                   ],

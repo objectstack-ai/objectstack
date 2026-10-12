@@ -47,7 +47,7 @@ import { explainRule } from './rule-explanations.js';
 // the pin covers every firing variant this suite exercises, not a chosen few.
 // Run the whole file: that case reads what the cases above fired.
 const SHORTENED_RULE_IDS: readonly string[] = [ACTION_API_UPDATE_READONLY_WHEN_FIELD];
-const firedShortened: Array<{ rule: string; message: string }> = [];
+const firedShortened: Array<{ rule: string; message: string; hint: string }> = [];
 const validateReadonlyActionWrites: typeof validateReadonlyActionWritesUnrecorded = (...args) => {
   const findings = validateReadonlyActionWritesUnrecorded(...args);
   for (const f of findings) if (SHORTENED_RULE_IDS.includes(f.rule)) firedShortened.push(f);
@@ -585,5 +585,32 @@ describe('[#22161] one-line verdicts — the rule id this file shortened', () =>
     expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
     const text = explanation!.paragraphs.join('\n');
     for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
+});
+
+// [#22161] Slice 13: the `fix:` line names the two routes and why sudo() is
+// none, in one line; why a hook-written value lands on a locked record, the
+// drop-the-field alternative and that the warning never blocks a build are the
+// explanation's.
+describe('[#22161] one-line fixes — action-api-update-readonly-when-field', () => {
+  it('every `fix:` line the cases above fired for that id is one line of at most 200 characters', () => {
+    // Coverage control: the id fired.
+    expect(firedShortened.some((f) => f.rule === ACTION_API_UPDATE_READONLY_WHEN_FIELD)).toBe(true);
+    for (const f of firedShortened) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('`os explain` carries what the `fix:` line no longer says', () => {
+    const text = explainRule(ACTION_API_UPDATE_READONLY_WHEN_FIELD)!.paragraphs.join('\n');
+    for (const fact of [
+      'does land, even on a locked record',
+      '`ctx.api.sudo()` changes nothing',
+      'otherwise drop the field from the payload',
+      'The warning never blocks a build',
+    ]) {
+      expect(text, `explanation names ${fact}`).toContain(fact);
+    }
   });
 });

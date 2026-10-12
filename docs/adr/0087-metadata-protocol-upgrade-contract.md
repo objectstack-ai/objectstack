@@ -730,6 +730,8 @@ gate's log and its `--list` output.
 <!-- adr-0087: not-required (runtime-interface-only <path>#<Symbol>[, ...]) <why> -->
 <!-- adr-0087: not-required (type-surface-only <path>#<Symbol>[, ...]) <why> -->
 <!-- adr-0087: not-required (type-surface-only <path>#<a>.<b>.<member>[, ...]) <why> -->
+<!-- adr-0087: not-required (runtime-export-retired <package>#<Export>[, ...]) <why> -->
+<!-- adr-0087: not-required (runtime-export-retired <package>#<Type>.<member>[, ...]) <why> -->
 ```
 
 **The vocabulary is closed, and every exemption is re-verified on every run** — an
@@ -739,8 +741,9 @@ avoid. `registered` must name ids that resolve *and* are new in the diff;
 `already-registered` requires the named ids to pre-date the merge base;
 `no-migration-prescription` is refused by a body that carries a migration
 prescription; `runtime-interface-only` is the subject of the rest of this
-addendum; and `type-surface-only` — the sixth, added 2026-08-30 — is the subject of
-the addendum after it. The checks live in
+addendum; `type-surface-only` — the sixth, added 2026-08-30 — is the subject of
+the addendum after it; and `runtime-export-retired` — the seventh, added 2026-10-12 —
+is the subject of the addendum after that. The checks live in
 [`scripts/check-adr-0087-registration.mjs`](../../scripts/check-adr-0087-registration.mjs),
 which is also where each one's measured history is written down.
 
@@ -969,6 +972,143 @@ their PR touched.
 lands, per the ruling, and one of them (`declare-search-clone-response-contracts`)
 fails predicates 2 and 3 outright — it bumps `@objectstack/spec` and adds
 `packages/spec/src/api/protocol.zod.ts`, so it is not a member of this class.
+
+## Addendum (2026-10-12) — the seventh category: a published runtime EXPORT retirement (#22918)
+
+The vocabulary above gained a seventh answer, with two operand kinds that may be
+mixed in one marker:
+
+```text
+<!-- adr-0087: not-required (runtime-export-retired <package>#<Export>[, ...]) <why> -->
+<!-- adr-0087: not-required (runtime-export-retired <package>#<Type>.<member>[, ...]) <why> -->
+```
+
+### The dead end it closes
+
+The worked example is `.changeset/15205-email-templates-resolve-registry.md` (PR
+#22875, merged as `7de0265fc7`). It retires nine exports of
+`@objectstack/plugin-email` and two members of its exported
+`EmailServicePluginOptions`, and gives each retired name the one-line FROM → TO fix a
+removal owes, written as six arrowless `- FROM … TO …` list lines. Every disposition
+was closed to it on the facts but one:
+
+| disposition | outcome |
+|---|---|
+| `registered` / `already-registered` | closed on the facts — no ledger id covers these paths and the diff adds none, and `objectstack migrate meta` has nothing to rewrite in host code. |
+| `not-required (unpublished)` | refused — every bumped package publishes. |
+| `not-required (runtime-interface-only …)` | refused — it reads an exported type declaration at HEAD, and a retired export has none. |
+| `not-required (type-surface-only …)` | refused — nothing narrowed off `any`. |
+| `not-required (no-migration-prescription)` | admitted — but only because the detector reads an arrow or a framed table, and these lines carry neither. |
+
+So the exemption was held by a detector **miss**, the shape D7 retires, and the
+changeset's own marker asked for a ruling. The class recurs with ADR-0131's v18
+retirements. Measured on the stock at `018b077fb`: 131 declared-breaking changesets,
+83 of them on `no-migration-prescription`; arrowless `FROM … TO` lines naming code
+appear in 6 changesets, 4 declared-breaking, and the detector reads none of them —
+15205 is the one that holds the catch-all, the other three are `registered`.
+
+### D9 — a retired published runtime export is compiler-carried, and the gate proves the retirement with the compiler
+
+The channel argument is D7's and D8's: the affected party is a TypeScript consumer,
+the compiler reports the break at their own import (`TS2305 … has no exported
+member`) or at the object literal that still passes a removed option, and the ledger
+has no metadata to rewrite.
+
+**Operands.** `<package>#<Export>` names a retired export of the package's published
+entry; `<package>#<Type>.<member>` names a retired member of an exported type — the
+dotted spelling `type-surface-only` already uses. The **package** is named, never a
+file: "reachable from the published entry" is a fact about the package, and a
+declaration can move between files without the export moving. ⛔ A member is addressed
+by that **canonical spelling only**. The gate parses no constructor argument and no
+object literal: a FROM side written `new EmailServicePlugin({ seedTemplates: false })`
+names `EmailServicePlugin`, never `EmailServicePluginOptions.seedTemplates`.
+
+An author may claim the category when, for every operand, all three of these hold —
+re-verified on every run and checked by name (`retired-from-entry`,
+`no-metadata-surface`, `from-operands-named`):
+
+1. **retired-from-entry** — an export is reachable from the package's published entry
+   at the merge base and absent at HEAD; for a member, its type is reachable at the
+   base, the member is present on it there (`getPropertiesOfType`), and it is absent
+   at HEAD while the type is still exported. The reading is the **TypeScript
+   compiler's**: a Program over the package's source entry at each rev, and
+   `getExportsOfModule` on the entry's symbol, so `export *` resolves. The entry is
+   located through the package's `exports` map (read with `resolveTypesEntry`, the
+   readme-exports gate's reader, imported rather than re-written) and tsup's
+   convention: the declaration entry `dist/index.d.ts` — or the `.d.mts` / `.d.cts`
+   twin tsup writes beside it, which is where `@objectstack/spec`'s `import`
+   condition lands — is generated from `src/index.ts`. A private package has no
+   published entry (`unpublished` is its disposition).
+2. **no-metadata-surface** — at the merge base, no operand is declared in a
+   `*.zod.ts`, under `packages/spec/src/contracts/` or in an object definition, none
+   is a Zod projection, and no metadata surface references it in code: the D7
+   primitives, read at the **base** because the operand is gone at HEAD.
+3. **from-operands-named** — the FROM → TO block names **exactly** the named
+   operands, each spelled as in the marker (`Type.member` for a member): every FROM
+   operand is a named one, and every named one has a FROM side.
+
+⛔ **A published package whose entry cannot be mapped is refused, loudly and by name —
+never guessed.** Measured at `018b077fb`, 4 of 70 published packages:
+`@objectstack/client-react` (no `src/index.ts`), and `@objectstack/console`,
+`@objectstack/skills` and `create-objectstack` (no types entry). Absence is proven,
+not assumed, the same way: an `export *` the reader cannot follow refuses an absence
+claim at HEAD (a name could sit behind it), and so does a type whose member set at
+HEAD depends on something the reader cannot resolve. A re-export of another workspace
+package's root entry is followed through the same mapping.
+
+**The deviation accepted with the ruling.** A merge base has no build output (`dist/`
+is gitignored), so predicate 1 compiles the **source** entry that generates the
+public `.d.ts`, not the `.d.ts` itself. For the question "which names does the
+package export" the two agree.
+
+**It inherits the `no-migration-prescription` refusal — more finely, never less.**
+Unlike `type-surface-only` it is not exempt. Predicate 3 reads the FROM side of every
+rewrite the body writes — a `FROM … TO …` line, an arrow `X → Y` (or `X → delete`),
+the FROM column of a `| FROM | TO |` or `| Wrote | Write instead |` table — then sets
+exactly those lines aside and runs the same prescription detector over what is left.
+Anything it still finds is refused: a rewrite table with no FROM column, a vertical
+FROM / TO pair, a FROM → TO label over anything not read. Nothing the detector refuses
+today becomes claimable unless every operand it rests on was proven retired by
+predicates 1 and 2 — and the arrowless block the detector cannot see is read here
+instead of waved through.
+
+### The worked example under this category
+
+Its lines 25–28 name the nine retired exports, and the gate accepts that half under
+this marker (the self-test carries their text). Its lines 29–30 write the two retired
+options as `new EmailServicePlugin({ … })`, which names the still-exported
+`EmailServicePlugin`: under this marker they are refused as out of range. Those two
+lines are the reason the member limb exists — without it a mixed retirement keeps
+half its claim on a detector miss — and the reason the member is spelled canonically
+(`EmailServicePluginOptions.seedTemplates`). The changeset itself is merged and is
+**not re-graded**: it stays on `no-migration-prescription`. New retirements use this
+category.
+
+### Not taken
+
+- **Exports only** — a mixed retirement would keep its member half on the catch-all,
+  held by a detector miss: the shape D7 retires.
+- **Members resolved from constructor arguments** (`new X({ option })` read back to
+  the options type) — the fragile half, and unneeded once the spelling is canonical.
+- **The existing detector alone** — it reads no arrowless line, so the class would be
+  admitted by the same miss.
+- **A one-hop text reader of the entry that refuses `export *`** — a second export
+  resolver beside the compiler, and its blind spot refuses honest claims.
+- **Per-package export snapshots** — a new family of generated artifacts with its own
+  gate; a new gate defaults to no.
+
+### What this does not decide
+
+**The completeness of the claim.** Like `registered`, `runtime-interface-only` and
+`type-surface-only`, the gate judges the operands named, not every export the diff
+removed.
+
+**A subpath entry or a static member.** Only the root entry is read, and a member is
+read on a class's instance type; anything else is refused rather than assumed.
+
+**The detector.** `no-migration-prescription`'s refusal and the detector's arrow rule
+are unchanged; the arrowless line stays outside the detector's reach, stated as such
+in the gate's residual-blind-spot paragraph, and is read only by this category.
 
 ## Addendum (2026-09-13) — the artifact-ingestion door opens a versioned window (#12772)
 

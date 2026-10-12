@@ -427,7 +427,7 @@
         "publish: POST /api/v1/packages/<id>/publish-drafts; then GET /api/v1/meta/view/os_qa_view_<runid>/published and capture it",
         "verify in the console that the published view is live for showcase_task (reload, open the view switcher)",
         "denied side A: attempt the same runtime create targeting the read-only CODE package; capture the refusal (expect writable_package_required — ADR-0070 D1)",
-        "denied side B: attempt a PUT overlay against a PACKAGED object item (type 'object' has allowOrgOverride: false); capture the refusal (expect HTTP 403 not_overridable)",
+        "denied side B: attempt a PUT overlay against a PACKAGED object item (type 'object' has allowEnvironmentOverlay: false); capture the refusal (expect HTTP 403 not_overridable)",
         "Studio browser half: create a new record page via Studio bound to an object and capture the PUT /api/v1/meta/page/... it issues"
       ],
       "acceptance": [
@@ -456,9 +456,9 @@
           "evidence": "the refusal response"
         },
         {
-          "clause": "DENY side of the overlay gate: a per-org overlay write against a type with allowOrgOverride unset (object/field) answers HTTP 403 not_overridable, while view/dashboard (the ADR-0005 Phase 1 opt-ins) accept",
+          "clause": "DENY side of the overlay gate: an overlay write against a type with allowEnvironmentOverlay unset (object/field) answers HTTP 403 not_overridable, while view/dashboard (the ADR-0005 Phase 1 opt-ins) accept",
           "oracle": "api",
-          "verify": "the object-targeting PUT returns 403 not_overridable (contract stated on allowOrgOverride in packages/spec/src/kernel/metadata-plugin.zod.ts); the view PUT from the happy path succeeded",
+          "verify": "the object-targeting PUT returns 403 not_overridable (contract stated on allowEnvironmentOverlay in packages/spec/src/kernel/metadata-plugin.zod.ts); the view PUT from the happy path succeeded",
           "evidence": "both responses side by side"
         },
         {
@@ -489,7 +489,7 @@
       },
       "source": [
         "packages/runtime/src/route-ledger.ts (PUT /meta/:type/:name, GET /meta/_drafts, GET /meta/:type/:name/published, POST /packages/:id/publish-drafts)",
-        "packages/spec/src/kernel/metadata-plugin.zod.ts#allowOrgOverride (allowOrgOverride 403 not_overridable contract; validateOnWrite; registry flags per type)",
+        "packages/spec/src/kernel/metadata-plugin.zod.ts#allowEnvironmentOverlay (allowEnvironmentOverlay 403 not_overridable contract; validateOnWrite; registry flags per type)",
         "ADR-0070 via packages/qa/dogfood/test/package-first-authoring.dogfood.test.ts#WRITABLE_PACKAGE_REQUIRED (the runtime create into a loaded code package refused, with its writable-base control beside it — re-pointed #18104: the lower-case spelling survives here only inside a test title and comments; the code this test actually pins is the SCREAMING_SNAKE one, ADR-0112)",
         "ADR-0033 (drafts / publish)"
       ],
@@ -1684,7 +1684,7 @@
       "steps": [
         "additive half — CROSS-REF, do not duplicate: platform-core.metadata-registry-serving owns the overlay steps (its steps 7-8 / clauses 5-6): the three AccountExtension fields present in the MERGED GET /api/v1/meta/object/showcase_account, rendering on the form, and a loyalty_tier + csat_score write round-tripping through /api/v1/data/showcase_account. Cite that item's verdicts when the same run scored them; otherwise drive exactly those steps here",
         "capture the BEFORE image for the refusal half: GET /api/v1/meta/object/showcase_account and keep the full served field inventory",
-        "in-place refusal, door 1 (org-overlay): PUT /api/v1/meta/object/showcase_account with the served body plus ONE added field qa_inplace_probe_<runid> and NO ?package= → expect 403 NOT_OVERRIDABLE (type 'object' is not in the ADR-0005 overlay opt-ins; the refusal names allowRuntimeCreate/allowOrgOverride and the OS_METADATA_WRITABLE escape hatch — packages/metadata-protocol/src/protocol.ts)",
+        "in-place refusal, door 1 (org-overlay): PUT /api/v1/meta/object/showcase_account with the served body plus ONE added field qa_inplace_probe_<runid> and NO ?package= → expect 403 NOT_OVERRIDABLE (type 'object' is not in the ADR-0005 overlay opt-ins; the refusal names allowRuntimeCreate/allowEnvironmentOverlay and the OS_METADATA_WRITABLE escape hatch — packages/metadata-protocol/src/protocol.ts)",
         "in-place refusal, door 2 (package write): repeat the same PUT with ?package=com.example.showcase (the showcase's read-only code package) → expect the read-only-base refusal (403 ITEM_LOCKED class — the same door access-security.owd-save-gate's control leg measured on stock, #9477); record WHICH door answered and the exact status + code, reading declaredCode where the wire code is a mapped generic",
         "after both refusals: re-GET /api/v1/meta/object/showcase_account and diff against step 2 — byte-identical; qa_inplace_probe_ absent, the three extension fields still present",
         "record the Regime E provenance posture: the extension arrived AS A PACKAGE — it registers as an 'extend' contributor (packages/objectql/src/engine.ts) folded over the base at resolution (mergeObjectDefinitions), the base package's authored definition is never edited, and package identity supplies provenance and upgrade isolation (ADR-0126 §3: 'the customization IS a package', install-grain not per-org)"

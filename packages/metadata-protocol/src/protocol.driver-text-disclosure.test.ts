@@ -153,13 +153,13 @@ function expectNothingLeaked(payload: unknown, dialectText: string): void {
  * with nothing to keep in sync.
  */
 const REPO_PATH_TYPE = DEFAULT_METADATA_TYPE_REGISTRY
-    .filter((e) => e.allowOrgOverride || e.allowRuntimeCreate)
+    .filter((e) => e.allowEnvironmentOverlay || e.allowRuntimeCreate)
     .map((e) => e.type)
     .sort()[0]!;
 
-/** Code-only (`allowRuntimeCreate: false` and `allowOrgOverride: false`) — the legacy raw-engine path #5264 kept alive. */
+/** Code-only (`allowRuntimeCreate: false` and `allowEnvironmentOverlay: false`) — the legacy raw-engine path #5264 kept alive. */
 const LEGACY_PATH_TYPE = DEFAULT_METADATA_TYPE_REGISTRY
-    .filter((e) => !e.allowOrgOverride && !e.allowRuntimeCreate)
+    .filter((e) => !e.allowEnvironmentOverlay && !e.allowRuntimeCreate)
     .map((e) => e.type)
     .sort()[0]!;
 

@@ -155,6 +155,8 @@ export interface AuditWriterOptions {
  * Skip rules avoid recursion and noise:
  *  - Never audit the audit/activity tables themselves.
  *  - Never audit session/presence/auth tables (high-frequency, low value).
+ *  - A user's own write to their own per-user UI-state row writes the ledger
+ *    row and no activity row (`PER_USER_UI_STATE_OWNER_FIELD`).
  *  - Read-only operations (`afterFind`) are not audited BY THIS WRITER. Since
  *    #8992 the `read` action has its own writer in `read-audit.ts`, installed
  *    separately and only over the objects a deployment opts in: record-detail
@@ -259,6 +261,67 @@ const SKIP_OBJECTS = new Set<string>([
  * docblock already states one paragraph up, now across two files.
  */
 export const AUDIT_EXCLUDED_OBJECTS: string[] = [...SKIP_OBJECTS];
+
+/**
+ * [#22961] Per-user UI-state objects: the ledger row stays, and the activity
+ * mirror is skipped for the owning user's OWN write only.
+ *
+ * The rule: what reaches a user's bell is another actor's act or something the
+ * user needs, never the user's own UI state. A `sys_activity` row reaches the
+ * bell (its Activity tab lists the newest rows the caller may read). A per-user
+ * UI-state row is re-saved by the client as a side effect of using the
+ * interface, and RLS keeps it private to its user, so the one reader of its
+ * activity row is the user who just caused it. Mirrored, every navigation came
+ * back as `Updated User Preference "ui.recent"`, and a fresh user's bell held
+ * nothing else.
+ *
+ *  - CLOSED and DECLARED: an object is a member only by being listed here,
+ *    mapped to the field that names its owning user. ⛔ Never a name heuristic.
+ *    No spec key means "per-user UI state"; `enable.activities: false` mutes
+ *    every writer, which is wider than this rule.
+ *  - OWN WRITES ONLY: the user the activity row would name (`actor_id`) must be
+ *    the owner on every side of the row the write carries. Another actor's
+ *    write keeps its activity row: an organization admin editing the row from
+ *    Setup's User Preferences grid (`modifyAllRecords` passes the self-only
+ *    RLS), a system write with no user, a write that moves the row to another
+ *    owner.
+ *  - ACTIVITY ONLY: the `sys_audit_log` row is written exactly as before. That
+ *    is why this is not `SKIP_OBJECTS`, which drops the ledger row too and is
+ *    the `AUDIT_EXCLUDED_OBJECTS` list the hook registration and `read-audit.ts`
+ *    share.
+ *
+ * Membership as measured: the console keeps all of its per-user UI state
+ * (`ui.recent`, `ui.favorites`, `ui.flow.palette.recents`) on
+ * `sys_user_preference`, and no other per-user UI-state object exists. A new
+ * one joins by a line here.
+ */
+const PER_USER_UI_STATE_OWNER_FIELD: ReadonlyMap<string, string> = new Map([
+  ['sys_user_preference', 'user_id'],
+]);
+
+/**
+ * Whether this write is a user's own write to their own per-user UI-state row
+ * ({@link PER_USER_UI_STATE_OWNER_FIELD}): the object is listed, an acting user
+ * is known, and every side of the row that names an owner names that user.
+ * A side without the owner field (a delete's result is often just `{ id }`) is
+ * not evidence either way; no side naming an owner at all answers `false`.
+ */
+function isOwnUiStateWrite(
+  object: string,
+  actorUserId: string | undefined,
+  before: unknown,
+  after: unknown,
+): boolean {
+  const ownerField = PER_USER_UI_STATE_OWNER_FIELD.get(object);
+  if (!ownerField || !actorUserId) return false;
+  const owners: string[] = [];
+  for (const side of [before, after]) {
+    if (!side || typeof side !== 'object') continue;
+    const owner = (side as Record<string, unknown>)[ownerField];
+    if (owner !== undefined && owner !== null) owners.push(String(owner));
+  }
+  return owners.length > 0 && owners.every((owner) => owner === actorUserId);
+}
 
 /** Fields that are noise in diffs (always change, never user-meaningful). */
 const NOISE_FIELDS = new Set<string>([
@@ -2012,6 +2075,11 @@ export function installAuditWriters(
     // lever for activity-row growth (ADR-0057). The compliance audit row is
     // NOT gated — sys_audit_log capture stays unconditional.
     const activitiesEnabled = getObjectDef(ctx.object)?.enable?.activities !== false;
+    // [#22961] A user's own write to their own per-user UI-state row is not
+    // mirrored either (PER_USER_UI_STATE_OWNER_FIELD states the rule). Judged
+    // on `userId`, the same value `actor_id` would carry. The ledger row is
+    // untouched.
+    const mirrorsActivity = activitiesEnabled && !isOwnUiStateWrite(ctx.object, userId, before, after);
     // [#22510, #22527] The name and avatar of the user `actor_id` names — the
     // SAME `userId`, so the columns cannot disagree about who acted — from one
     // memoized `sys_user` read. Read only when an activity row will be
@@ -2019,7 +2087,7 @@ export function installAuditWriters(
     // actor `null`, and rendering it as "System" (with its icon) is the UI's
     // rule, not data this writer persists.
     const actor: ActorSnapshot =
-      activitiesEnabled && userId ? await resolveActorSnapshot(api, userId) : NO_ACTOR_SNAPSHOT;
+      mirrorsActivity && userId ? await resolveActorSnapshot(api, userId) : NO_ACTOR_SNAPSHOT;
 
     const activityRow: Record<string, any> = {
       type: activityType,
@@ -2055,7 +2123,7 @@ export function installAuditWriters(
       activityRow.organization_id = tenantId ?? null;
     }
 
-    const activityRowToWrite = activitiesEnabled ? activityRow : undefined;
+    const activityRowToWrite = mirrorsActivity ? activityRow : undefined;
     // [#21262] The ledger row is written first; the writer advances this
     // before the activity row, so after a throw it names the refused table.
     const progress: AuditTrailWriteProgress = { writing: 'sys_audit_log' };

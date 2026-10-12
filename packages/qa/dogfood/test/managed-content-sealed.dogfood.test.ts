@@ -129,7 +129,7 @@ describe('[ADR-0131 D6] managed content is sealed — the hatch opens nothing a 
         const r = await call('GET', '/meta/types');
         const entries = (r.json.data?.entries ?? r.json.entries ?? []) as Json[];
         const flow = entries.find((e) => e?.type === 'flow');
-        expect(flow).toMatchObject({ allowOrgOverride: true, overrideSource: 'env' });
+        expect(flow).toMatchObject({ allowEnvironmentOverlay: true, overrideSource: 'env' });
     });
 
     it('PUT of a managed flow, object (a field relabelled), field, permission set and position — 403, no row', async () => {
