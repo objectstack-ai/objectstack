@@ -24,7 +24,7 @@
  *   forwards (and `noUnusedLocals` still sees a member that only this body
  *   reads as read).
  * - A METHOD is handed over as a closure that calls it on the server at call
- *   time (`(...a) => this.enforceAuth(...a)`), never as a bound or copied
+ *   time (`(...a) => this.member(...a)`), never as a bound or copied
  *   function. A method replaced on the instance or its prototype after the
  *   routes are registered — a test double, a spy — is therefore still the one
  *   the body reaches, exactly as before the move.
