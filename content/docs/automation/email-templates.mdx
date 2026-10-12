@@ -168,11 +168,11 @@ the localizable path:
 ```
 
 - `template` names the bundle. The delivery path resolves `(name, locale)`
-  against `sys_email_template` at delivery time and renders subject/body from
-  that row. **The locale is resolved per recipient, after fan-out**: the
+  among the email templates at delivery time and renders subject/body from
+  that member. **The locale is resolved per recipient, after fan-out**: the
   recipient's own `sys_user.locale` when set, else the deployment default
   (`II18nService.getDefaultLocale()`) — so two recipients of one notification
-  whose `locale` columns differ receive different rows of the same bundle
+  whose `locale` columns differ receive different members of the same bundle
   (maintainer ruling, 2026-09-01). A recipient whose column is empty or unset
   always falls back to the deployment default; no value ever dead-letters a
   delivery. A `payload.locale` set by the producer — the pre-ruling single
@@ -215,24 +215,26 @@ instead of duplicating it.
 
 Worth knowing, because it explains what an administrator can and cannot change.
 
-`sendTemplate` resolves rows of the `sys_email_template` platform object, not
-your source files. At boot the email plugin **materializes** every declared
-`email_template` into that object — validating each one through the canonical
-schema first, so a malformed template is a warning rather than a broken boot.
-Runtime saves are materialized on the same seam, so a Studio edit takes effect
-without a restart.
+`sendTemplate` resolves the `email_template` **metadata** itself, by
+`(name, locale)`, at every send — the same item `GET /api/v1/meta/email_template`
+serves. Three populations live there: the built-in auth templates the email
+plugin declares, the templates your app declares, and the ones saved in Studio,
+which land at environment level and override a declaration of the same
+`(name, locale)`. A template your app declares overrides the built-in copy of
+its `(name, locale)`; the built-in still serves the locales your app leaves out.
+Each template is validated through the canonical schema when it is resolved, so
+a malformed one fails its send loudly instead of falling through to the
+built-in copy.
 
-Change a template's wording in **Studio** — the `email_template` metadata. The
-`sys_email_template` rows themselves are closed to organization writes: a create
-or an edit through the data API is refused `403 PERMISSION_DENIED`, and only the
-platform writes them, from the built-in templates and the `email_template`
-metadata.
+Change a template's wording in **Studio** — the `email_template` metadata. A
+save is live on the very next send, with no restart.
 
-Materialization is **seed-not-clobber**. Declared templates carry package
-provenance and are re-seeded on every boot, but a row an administrator created
-or edited before that door closed is never overwritten. That is also the reason
-a source change that "does not take effect" is usually such a customized row
-winning, not a failed seed.
+The `sys_email_template` platform object is no longer read or written by the
+send path. It keeps the rows earlier releases wrote, and it is closed to
+organization writes: a create or an edit through the data API is refused
+`403 PERMISSION_DENIED`. A row an administrator customized before that door
+closed is not what sends; the v18 upgrade promotes such rows to
+environment-level templates.
 
 `bodyText` is optional: when you omit it the service derives a plain-text
 alternative by stripping tags from the rendered HTML. Authoring one explicitly

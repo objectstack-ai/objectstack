@@ -1677,7 +1677,7 @@ export async function reconcilePermissionSetProjection(
             '`sys_permission_set` records with NO metadata definition backing them, and the one-time backfill ' +
             'did not write one. Nothing will look broken: the records still list in Setup and the evaluator ' +
             'still resolves them from the table — but the definitions are absent from the metadata store, so a ' +
-            'metadata-driven re-provision (fresh environment, package reinstall, `meta resync`) recreates none ' +
+            'metadata-driven re-provision (fresh environment, package reinstall) recreates none ' +
             'of them, and every boot retries and fails identically. Fix: make the record body spec-valid — the ' +
             'error below names the offending key; `permissionSetBodyFromRow()` already drops storage columns ' +
             '(`active`, timestamps, provenance), so a rejection here means the stored facet JSON itself is ' +

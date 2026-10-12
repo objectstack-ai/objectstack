@@ -264,7 +264,7 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     // both recorded here, neither in the help text.
                     template: {
                         type: 'string',
-                        description: 'Email template name (sys_email_template.name) — the localizable content path: resolved by (name, locale) at delivery time, rendering subject/body from that row. The locale is resolved per recipient, after fan-out: the recipient\'s own sys_user.locale when set, else the deployment default locale — so recipients whose personal languages differ receive different rows of the same bundle. The node\'s payload.locale is not consulted. Mutually exclusive with inline title/message.',
+                        description: 'Email template name (the email template\'s name) — the localizable content path: resolved by (name, locale) at delivery time among the email templates (built-in, declared by an app, or authored in Studio), rendering subject/body from that member. The locale is resolved per recipient, after fan-out: the recipient\'s own sys_user.locale when set, else the deployment default locale — so recipients whose personal languages differ receive different members of the same bundle. The node\'s payload.locale is not consulted. Mutually exclusive with inline title/message.',
                     },
                     templateData: {
                         type: 'object',

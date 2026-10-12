@@ -7067,7 +7067,7 @@ export class SqlDriver implements IDataDriver {
    * Put a file-backed SQLite database in WAL mode (#3941).
    *
    * ObjectStack's normal shape is **several processes on one file**: a dev
-   * server, `os migrate`, `os meta resync`, a test run. SQLite's built-in
+   * server, `os migrate`, a test run. SQLite's built-in
    * default — `journal_mode = delete`, a rollback journal — is the worst mode
    * for that, in two measured ways:
    *

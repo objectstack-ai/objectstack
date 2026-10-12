@@ -259,12 +259,10 @@ const orgUnits = SeedSchema.parse({
   ],
 });
 
-// [#2926 ②] Position ↔ permission-set bindings are NOT seeded here: the seed
-// loader runs before the security bootstrap creates the sys_position /
-// sys_permission_set rows, so the required name references cannot resolve.
-// They are ensured imperatively on kernel:bootstrapped instead (after every
-// kernel:ready handler, incl. the security bootstrap, has settled) — see
-// `src/security/bind-position-sets.ts` (wired via `onEnable`).
+// [#2926 ②, ADR-0131 D3/D4] Position ↔ permission-set bindings are NOT seeded
+// here: each position declares the sets it distributes in `permissionSets`
+// (`src/security/positions.ts`), and the authorization resolver reads them
+// from the definition — no binding row exists to seed.
 
 const teams = defineSeed(Team, {
   mode: 'upsert',

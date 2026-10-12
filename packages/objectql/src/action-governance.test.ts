@@ -217,10 +217,13 @@ describe('runActionGovernanceInventory — the router registry rung (#14123)', (
         expect(message).not.toMatch(/REFUSED at dispatch/);
         expect(message).not.toMatch(/there is no opt-out/);
         expect(message).not.toMatch(/drop the registration/);
-        expect(message).toMatch(/it did not dispatch/);
-        expect(message).toMatch(/object-embedded `actions\[\]`/);
-        expect(message).toMatch(/the engine registry standalone `action` items/);
-        expect(message).toMatch(/the metadata service `action` rows/);
+        // [#22161] One line of at most 200 characters, so the sources are named
+        // short and the expectation is stated as one, not as a measurement.
+        expect(message).toMatch(/expected, not measured, to answer 404/);
+        expect(message).toMatch(/object `actions\[\]`/);
+        expect(message).toMatch(/the registry/);
+        expect(message).toMatch(/the metadata service/);
+        expect(message.length).toBeLessThanOrEqual(200);
     });
 
     it('leaves the OTHER warning byte-identical — a registry item is not folded into the declaration set', async () => {

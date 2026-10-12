@@ -123,20 +123,21 @@ describe('checkHookBodyLowering', () => {
       // The wrong-remedy failure is worse than none: there is nothing to inline
       // `Intl` from, so an author (or a code-writing model) told to inline it
       // lands on a second broken shape. The remedy sentence is chosen from the
-      // refusal's own `nodeOnlyIdentifiers`, never re-derived here.
+      // refusal's own `nodeOnlyIdentifiers`, never re-derived here. [#22161]
+      // The remedy is the finding's `fix:` line; the verdict stays one sentence.
       const [issue] = checkHookBodyLowering({ hooks: [nodeOnlyGlobalHook] });
-      expect(issue.message).toContain('provided by the Node host');
-      expect(issue.message).toContain('cannot be inlined');
-      expect(issue.message).toContain('string handler ref');
-      expect(issue.message).toContain('validation rule');
-      expect(issue.message).not.toContain('Inline the value(s) into the handler');
+      expect(issue.fix).toContain('provided by the Node host');
+      expect(issue.fix).toContain('cannot be inlined');
+      expect(issue.fix).toContain('string handler ref');
+      expect(issue.fix).toContain('validation rule');
+      expect(issue.fix).not.toContain('Inline the value(s) into the handler');
     });
 
     it('leaves the module-scope remedy exactly as it was', () => {
       // The reverse leg: the sentence commit ada3834ad wrote must not have been rewritten for
       // every author by a branch added for one new sub-case.
       const [issue] = checkHookBodyLowering({ hooks: [freeIdentifierHook] });
-      expect(issue.message).toContain('Inline the value(s) into the handler, or reach them through `ctx`.');
+      expect(issue.fix).toBe('Inline the value(s) into the handler, or reach them through `ctx`.');
       expect(issue.message).not.toContain('provided by the Node host');
     });
   });
