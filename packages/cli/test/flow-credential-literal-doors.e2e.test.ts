@@ -13,7 +13,9 @@
  *
  * Two fixtures, one flow each: LIT carries three literals (a header, a url
  * query parameter, a nested connector input); DARK is the same flow with
- * `{var}` templates in those three positions, and must stay silent. Every
+ * templates in those three positions — a `{{ var }}` hole at the http url and
+ * header (text slots, where a single-brace token is refused since #19939), a
+ * `{var}` token at the connector input — and must stay silent. Every
  * value is a probe sentinel, not a credential.
  *
  * Integration tier: it spawns the source CLI (`packages/cli/vitest-tiers.ts`).
@@ -68,10 +70,10 @@ const stackOf = (literal: boolean) => ({
           config: {
             url: literal
               ? `https://example.invalid/hook?api_key=${SENTINELS[1]}`
-              : 'https://example.invalid/hook?api_key={api_token}',
+              : 'https://example.invalid/hook?api_key={{ api_token }}',
             method: 'POST',
             headers: {
-              Authorization: literal ? `Bearer ${SENTINELS[0]}` : 'Bearer {api_token}',
+              Authorization: literal ? `Bearer ${SENTINELS[0]}` : 'Bearer {{ api_token }}',
               'X-Trace-Label': 'plain-value',
             },
           },

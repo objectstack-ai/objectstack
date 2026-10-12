@@ -24,14 +24,13 @@ Like `LoopConfigSchema` / `ParallelConfigSchema` / `TryCatchConfigSchema`,
 these are **live execute-time contracts**: each executor `parse()`s its
 config against its schema before running (`service-automation`'s
 `parse-config.ts`), so type and `required` violations refuse the node as a
-guard (not routable via `fault` edges). `notify` parses the RAW stored
-config — its text slots carry `{{ }}` holes and its value slots a CEL value
+guard (not routable via `fault` edges). Both parse the RAW stored config —
+their text slots carry `{{ }}` holes and their value slots a CEL value
 envelope or a literal (#19939), so both pass, a `{token}` in either is
 refused, and the post-evaluation guards still own "resolved to nothing".
-`http` parses the
-INTERPOLATED config, because that is the shape
-its executor reads — a `{token}` in a typed slot (`timeoutMs`, `durable`)
-resolves to its real type first.
+Until #19939 `http` parsed its INTERPOLATED config, so a `{token}` in a
+typed slot (`timeoutMs`, `durable`) resolved to its real type first; those
+keys are literals now, read as written, and a token there is refused.
 
 ## Unknown keys — closed here too, as of #4001 批 9
 
@@ -79,13 +78,13 @@ const result = HttpConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **url** | `string` | ✅ | Target URL |
-| **method** | `string` | optional | HTTP method (default GET; POST when durable) |
-| **headers** | `Record<string, string>` | optional | Request headers. The flow definition, this map included, is served to every member who can read flows, so never put a credential here: declare a connector whose `auth` is `bearer` or `api-key` (a header), with `auth.credentialRef` naming the secret, and call it from a `connector_action` node. |
-| **body** | `any` | optional | Request body (JSON-serialised) |
-| **durable** | `boolean` | optional | Fire-and-forget via the durable outbox (retry/dead-letter) instead of inline request/response |
-| **timeoutMs** | `number` | optional | Per-request timeout (ms) |
-| **signingSecret** | `string` | optional | HMAC-SHA256 secret → X-Objectstack-Signature |
+| **url** | `string` | ✅ | Target URL, rendered per run with `{{ }}` holes (`https://api.example.com/v1/orders/{{ record.id }}`); a single-brace `{token}` is refused |
+| **method** | `string` | optional | HTTP method (default GET; POST when durable) — a literal, read as written: a single-brace `{token}` is not resolved here and is refused |
+| **headers** | `Record<string, string>` | optional | Request headers, each value rendered per run with `{{ }}` holes (`X-Request-Id: {{ $runId }}`); a single-brace `{token}` is refused, and a header that renders to no text is not sent. The flow definition, this map included, is served to every member who can read flows, so never put a credential here: declare a connector whose `auth` is `bearer` or `api-key` (a header), with `auth.credentialRef` naming the secret, and call it from a `connector_action` node. |
+| **body** | `any` | optional | Request body (JSON-serialised) — a CEL value envelope `{ dialect: 'cel', source }` evaluated per run to the payload (a CEL map literal builds an object: `"{'id': record.id, 'text': dyn('Done: ' + record.title)}"`, a text or a literal beside a field read wrapped in `dyn(…)`, since a map's values share one type), or a literal sent as written; a `{…}` template token in a string of a literal is refused |
+| **durable** | `boolean` | optional | Fire-and-forget via the durable outbox (retry/dead-letter) instead of inline request/response — a literal `true` or `false`, read as written |
+| **timeoutMs** | `number` | optional | Per-request timeout (ms) — a literal number, read as written |
+| **signingSecret** | `string` | optional | HMAC-SHA256 secret → X-Objectstack-Signature — the secret itself, read as written (a single-brace `{token}` is not resolved here and is refused); `''` sends unsigned on purpose |
 
 
 ---

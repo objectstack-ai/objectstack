@@ -81,7 +81,7 @@ const scanControl = () => ({
           Authorization: `Bearer ${S.controlHeader1}`,
           'X-Api-Key': S.controlHeader2,
           'X-Plain': 'plain-value', // control: not a credential
-          'X-Auth-Token': '{run_token}', // control: a template, not a literal
+          'X-Auth-Token': '{{ run_token }}', // control: a template, not a literal
         },
       },
     },
@@ -125,7 +125,7 @@ const probeFlow = () => ({
           Authorization: `Bearer ${S.topAuthz}`,
           'x-api-key': S.topApiKey,
           'X-Trace-Label': 'p5-control-header-value', // control: not a credential
-          'X-Templated-Auth': 'Bearer {api_token}', // control: a template
+          'X-Templated-Auth': 'Bearer {{ api_token }}', // control: a template
         },
         // The DECLARED credential slot — withheld by the read projection, not
         // an open map, so not this rule's position.
@@ -266,10 +266,10 @@ describe('flow-credential-literal — what draws nothing', () => {
               id: 'call',
               type: 'http',
               config: {
-                url: 'https://example.invalid/x?api_key={api_token}&page=2',
+                url: 'https://example.invalid/x?api_key={{ api_token }}&page=2',
                 headers: {
-                  Authorization: 'Bearer {api_token}',
-                  'X-Auth-Token': '{run_token}',
+                  Authorization: 'Bearer {{ api_token }}',
+                  'X-Auth-Token': '{{ run_token }}',
                   'Content-Type': 'application/json',
                   'X-Trace-Label': 'plain-value',
                 },

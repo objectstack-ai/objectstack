@@ -21389,7 +21389,9 @@ export class ObjectStackProtocolImplementation implements
      *   are about to write (the same conversion). It is empty by construction,
      *   and there is no author here for a confirmation prompt to reach.
      * - `source: 'migrate-stored'` — so a history diff distinguishes a
-     *   canonicalization pass from an edit someone made.
+     *   canonicalization pass from an edit someone made. This is the ONLY
+     *   place the pass names itself: `actor` (below) is the user who ran it
+     *   or nobody, never a label (#23068).
      *
      * ## What it lists and never writes
      *
@@ -21483,7 +21485,16 @@ export class ObjectStackProtocolImplementation implements
         apply?: boolean;
         /** Restrict to these metadata types (singular or plural spelling). */
         types?: string[];
-        /** Recorded as the writer on the history + audit rows. */
+        /**
+         * The id of the user running the pass — omit it when no user is
+         * (a CLI run against the database, an `isSystem` caller). It becomes
+         * each rewrite's `PutOptions.actor`, so it lands in
+         * `sys_metadata_history.recorded_by` and the row's `updated_by`, both
+         * `lookup('sys_user')`: omitted, they record `null`, #4556's
+         * "system-initiated". ⛔ Never a label naming the door or the pass —
+         * that is a reference to no user, and `source: 'migrate-stored'`
+         * already says where the write came from (#23068).
+         */
         actor?: string;
         /**
          * Canonicalize a stored `flow` body (#4454). **Optional override** —
@@ -21815,7 +21826,10 @@ export class ObjectStackProtocolImplementation implements
                     packageId,
                     force: true,
                     source: 'migrate-stored',
-                    actor: request.actor ?? 'migrate-stored',
+                    // [#23068] The user who ran the pass, or none — and none
+                    // reaches `PutOptions.actor` as `null` (`saveMetaItem`'s
+                    // #4556 default). The pass's name is on `source` above.
+                    ...(request.actor ? { actor: request.actor } : {}),
                 });
                 record({ ...base, notices: flattened, todos: flattenedTodos, outcome: 'rewritten' });
             } catch (e: any) {

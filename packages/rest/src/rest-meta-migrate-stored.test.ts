@@ -174,10 +174,21 @@ describe('POST /meta/_migrate-stored — preview by default', () => {
     expect(migrateStoredMetadata.mock.calls[0][0]).not.toHaveProperty('canonicalizeFlow');
   });
 
-  it('attributes the run to the caller — history and audit rows answer "who ran it"', async () => {
+  // [#23068] The actor lands in `sys_metadata_history.recorded_by` and the
+  // rewritten row's `updated_by`, both `lookup('sys_user')`: the caller's user
+  // id exactly, or nothing — never the route's name, which the pass already
+  // records on `source: 'migrate-stored'`.
+  it('attributes the run to the caller\'s user id, and to nothing else — history rows answer "who ran it"', async () => {
     const { route, migrateStoredMetadata } = boot(admin);
     await run(route, {});
-    expect(migrateStoredMetadata.mock.calls[0][0].actor).toContain('admin');
+    expect(migrateStoredMetadata.mock.calls[0][0].actor).toBe('admin');
+  });
+
+  it('a caller with no user (isSystem) runs it as nobody — no actor, never a label', async () => {
+    const { route, migrateStoredMetadata } = boot({ isSystem: true });
+    const out = await run(route, { apply: true });
+    expect(out.getStatus()).toBe(200);
+    expect(migrateStoredMetadata.mock.calls[0][0]).not.toHaveProperty('actor');
   });
 
   it('returns the report unwrapped', async () => {

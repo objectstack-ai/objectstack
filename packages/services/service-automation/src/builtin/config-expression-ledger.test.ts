@@ -387,6 +387,19 @@ describe('configSchema ↔ expression-ledger reconciliation (#4027)', () => {
     ]);
   });
 
+  /**
+   * [#19939, stage S5] An `http` node's `body` is a `value` slot declared on
+   * the spec Zod channel (`HttpConfigSchema`, carried by
+   * `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`): the descriptor offers `body` as an
+   * untyped input with no marker. Its `url` and `headers` values are text
+   * slots, which the ledger does not carry, and its `method`, `durable`,
+   * `timeoutMs` and `signingSecret` are literals, which no channel declares.
+   */
+  it('http declares its one value slot on the spec Zod channel alone, and none on its descriptor', () => {
+    expect(declaredFromDescriptors().filter((d) => d.nodeType === 'http')).toEqual([]);
+    expect(declaredFromSchemalessConfigs().filter((d) => d.nodeType === 'http').map(key)).toEqual(['http.body (value)']);
+  });
+
   it('map keeps `collection` on its descriptor channel beside the new `input.*` — one slot, one channel', () => {
     expect(declaredFromDescriptors().filter((d) => d.nodeType === 'map').map(key)).toEqual(['map.collection (value)']);
     expect(declaredFromSchemalessConfigs().filter((d) => d.nodeType === 'map').map(key)).toEqual(['map.input.* (value)']);

@@ -15,15 +15,15 @@
  *
  * ## Where each executor calls this
  *
- * At the executor's **natural read point**, which is not the same for all:
- * `http` interpolates its whole config first and reads the result, so it
- * parses POST-interpolation (its contract describes the interpolated shape —
- * a `{token}` in a typed slot resolves to its value's real type before the
- * contract sees it); everyone else reads the raw stored config key-by-key and
- * parses it as stored, where `{token}` templates are still strings and the
- * string-typed contract slots accept them. `loop` additionally exempts its
- * legacy flat-graph path (no `config.body`) — that shape predates the
- * ADR-0031 construct the contract describes.
+ * At the executor's **natural read point**: every executor parses the raw
+ * stored config as stored, before it renders a text slot or evaluates a value
+ * slot — `http` too since #19939, after its credential channel supplies a held
+ * `signingSecret` (until then it interpolated its whole config first and
+ * parsed the result, so a `{token}` in a typed slot resolved to its value's
+ * real type before the contract saw it; a `{…}` token is refused at every
+ * position now). `loop` additionally exempts its legacy flat-graph path (no
+ * `config.body`) — that shape predates the ADR-0031 construct the contract
+ * describes.
  *
  * ## Why failure is a guard refusal, not a routable error
  *
