@@ -5484,6 +5484,30 @@ export function selfTest({ tier = 'full' } = {}) {
   t('a term this cannot read refuses the WHOLE expression', jobFilterOutputRefs("${{ github.event_name == 'push' || needs.f.outputs.a != 'false' }}") === null);
   t('an if: naming no filter output at all yields no population', jobFilterOutputRefs("${{ github.ref == 'refs/heads/main' }}") === null);
   t('an absent if: is not an expression', jobFilterOutputRefs(null) === null);
+  // #22998: the full-battery clause ci.yml's moved jobs carry discriminates
+  // EVENTS, not paths — stripped exactly as spelled, and only as the last
+  // conjunct; every near-miss still refuses the whole expression.
+  const FULL_BATTERY = "github.event_name != 'pull_request' && github.event_name != 'merge_group'";
+  t(
+    'the full-battery event clause is stripped like !cancelled(): the job still judges its filter output',
+    jobFilterOutputRefs(`\${{ !cancelled() && needs.filter.outputs.console != 'false' && ${FULL_BATTERY} }}`)?.map((r) => `${r.job}.${r.output}`).join() === 'filter.console',
+  );
+  t(
+    '...but only as spelled: the two events reordered refuse',
+    jobFilterOutputRefs("${{ needs.f.outputs.a != 'false' && github.event_name != 'merge_group' && github.event_name != 'pull_request' }}") === null,
+  );
+  t(
+    '...one excluded event alone refuses — it is not the full-battery clause',
+    jobFilterOutputRefs("${{ needs.f.outputs.a != 'false' && github.event_name != 'pull_request' }}") === null,
+  );
+  t(
+    '...a positive event term refuses — it says when the job runs, not that a PR never does',
+    jobFilterOutputRefs("${{ needs.f.outputs.a != 'false' && github.event_name == 'push' }}") === null,
+  );
+  t(
+    '...and the clause in front of the filter output is not the stripped spelling either',
+    jobFilterOutputRefs(`\${{ ${FULL_BATTERY} && needs.f.outputs.a != 'false' }}`) === null,
+  );
 
   const fixturePops = jobPathPopulations(jobFilterWf, 'fixture.yml');
   t(
@@ -7289,7 +7313,8 @@ export function selfTest({ tier = 'full' } = {}) {
       // bare diff-scoped run declares the two step-`env:` values it does not need.
       'scripts/check-issue-citations.mjs:204 local-env',
       'scripts/cli-build-prerequisite.mjs:111 inherited-population',
-      'scripts/pm/check-expected-skips.mjs:131 self-test-reads',
+      // 131 -> 133 (#22998): the header gained two lines naming the full-battery-only jobs.
+      'scripts/pm/check-expected-skips.mjs:133 self-test-reads',
       'scripts/pm/dispatch-gates.mjs:736 inherited-population',
     ].join(' · '),
     censusRows.join(' · '),

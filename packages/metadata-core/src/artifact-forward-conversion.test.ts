@@ -24,6 +24,7 @@ import {
   resolveInstalledSpecVersion,
   type ArtifactConversionNotice,
 } from './artifact-forward-conversion.js';
+import { checkProtocolCompat } from './protocol-handshake.js';
 
 // ── Mirror pin ───────────────────────────────────────────────────────────────
 // `ArtifactConversionNotice` is a structural mirror of the spec root's
@@ -191,7 +192,14 @@ describe('applyArtifactForwardConversions — the versioned window (#12772)', ()
   });
 
   it('REFUSES the amnesty for an artifact authored at a NEWER spec than the runtime', () => {
-    const def = legacyPermissionDefinition('^18.0.0');
+    // "Newer" is a floor past the label AND every `retiredAfter`, and not the
+    // first release of a major. This pin used to spell it `^18.0.0`, which was
+    // hypothetical when it was written; on this tree 18 is the runtime's own
+    // protocol, and a `^18` artifact on a runtime labelled below 18.0.0 is the
+    // v18-prerelease case the major-step half opens for (#23001, block below).
+    const newer = currentSurfaceFloor('17.2.0');
+    expect(newer.endsWith('.0.0'), `${newer} must not be the first release of a major`).toBe(false);
+    const def = legacyPermissionDefinition(`^${newer}`);
     const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.2.0' });
     expect(result.verdict).toBe('authored-current');
     expect(result.definition).toBe(def);
@@ -666,6 +674,190 @@ describe('[#20390] the per-entry window — an artifact built by the last releas
 });
 
 /**
+ * [#23001] The major-step half — a `^18` artifact built during the v18
+ * prerelease boots on a later runtime.
+ *
+ * During the prerelease the protocol constant reads 18 while the package label
+ * still names the last 17.x release, and every retirement landing then is
+ * stamped at or below that label (spec's census). A `^18` floor is 18.0.0:
+ * above every one of those stamps, so the per-entry half never opened for it,
+ * and an artifact built before a prerelease retirement met the tombstone and
+ * rolled the boot back.
+ *
+ * Measured before choosing the rule:
+ * - Reading (i), a build stamp: the artifact carries none. `os build` writes
+ *   the parsed stack, its docs and an optional `runtimeModule`, and nothing
+ *   naming the spec or CLI that built it, so telling "built before this entry"
+ *   apart would need a new artifact field.
+ * - Reading (ii), idempotence: every retired step-18 entry rewrites only its
+ *   own old shape. That is what the door now relies on, and the whole-step
+ *   block below pins both of its directions over every entry's own fixture pair.
+ *
+ * The subject is `declared-index-unique-scope`, a step-18 retirement stamped at
+ * the prerelease label, whose old shape — bare `unique: true` on a declared
+ * index — the strict parse at the door refuses. (#22990's email-template keys,
+ * the case #22994 measured at the boot, join step 18 with their own fixture
+ * pair, and the whole-step pins cover them the day they land.)
+ */
+describe('[#23001] the major-step half — a ^18 artifact built during the v18 prerelease boots on a later runtime', () => {
+  const SUBJECT = 'declared-index-unique-scope';
+
+  /** The subject's old shape under a `^18` floor: what a prerelease build from before the retirement carries. */
+  const builtDuringPrerelease = (protocolRange: string, unique: unknown = true) => ({
+    manifest: {
+      id: 'com.example.prerelease-probe', namespace: 'pre', name: 'prerelease_probe', version: '1.0.0', type: 'app',
+      engines: { protocol: protocolRange },
+    },
+    objects: [{
+      name: 'pre_contact', label: 'Contact',
+      fields: { email: { type: 'text', label: 'Email' } },
+      indexes: [{ name: 'pre_contact_email', fields: ['email'], unique }],
+    }],
+  });
+
+  const issuePaths = (value: unknown): string[] => {
+    const parsed = ObjectStackDefinitionSchema.safeParse(value);
+    return parsed.success ? [] : parsed.error.issues.map((i) => i.path.join('.')).sort();
+  };
+
+  /** The prerelease labels (before and after the first version pass) and GA, each at or below the floor. */
+  const AT_OR_BELOW_THE_FLOOR = ['17.7.0', '18.0.0-next.0', '18.0.0'] as const;
+
+  it('premise: the subject belongs to step 18, the per-entry half alone cannot open it for ^18, and this tree refuses its old shape', () => {
+    const subject = ALL_CONVERSIONS.find((c) => c.id === SUBJECT);
+    expect(subject?.toMajor).toBe(18);
+    expect(subject?.retiredFromLoadPath).toBe(true);
+    expect(compareVersions('18.0.0', subject!.retiredAfter!), 'floor 18.0.0 is above the stamp').toBe(1);
+    expect(issuePaths(builtDuringPrerelease('^18'))).toEqual(['objects.0.indexes.0.unique']);
+    expect(issuePaths(builtDuringPrerelease('^18', 'global'))).toEqual([]);
+  });
+
+  // Done, first half: built before the retirement, it boots, the entry named.
+  for (const label of AT_OR_BELOW_THE_FLOOR) {
+    it(`runtime labelled ${label}: the subject replays, its notice names it, and the strict parse passes`, () => {
+      const def = builtDuringPrerelease('^18');
+      const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: label });
+
+      expect(result.verdict).toBe('converted-major-step');
+      expect(result.authoredFloor).toBe('18.0.0');
+      expect(result.notices.map((n) => [n.conversionId, n.path, n.from, n.to])).toEqual([
+        [SUBJECT, 'objects[0].indexes[0].unique', 'true', 'global'],
+      ]);
+      expect((result.definition as ReturnType<typeof builtDuringPrerelease>).objects[0]!.indexes[0]!.unique).toBe('global');
+      expect(issuePaths(result.definition)).toEqual([]);
+      // The per-entry half's own list: only entries stamped at or above the
+      // floor, never the step it opened on the floor's reason.
+      expect(new Map(result.replayedRetirements.map((r) => [r.conversionId, r.retiredAfter]))).toEqual(openedByRule('18.0.0'));
+    });
+  }
+
+  it('from 18.0.1 on, the same artifact converts through the label half — the rule reduces to the old one', () => {
+    const result = applyArtifactForwardConversions(builtDuringPrerelease('^18'), { runtimeSpecVersion: '18.0.1' });
+    expect(result.verdict).toBe('converted-forward');
+    expect(result.replayedRetirements).toEqual([]);
+    expect(result.notices.map((n) => n.conversionId)).toEqual([SUBJECT]);
+    expect(issuePaths(result.definition)).toEqual([]);
+  });
+
+  // Done, second half: built after the retirement, it is unchanged.
+  it('a ^18 artifact built after the retirement is unchanged: the window is open, nothing fires, the same reference comes back', () => {
+    for (const label of AT_OR_BELOW_THE_FLOOR) {
+      const def = builtDuringPrerelease('^18', 'global');
+      const bytes = JSON.stringify(def);
+      const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: label });
+      // ⭐ ANTI-VACUITY: the major-step half really is open on this input.
+      expect(result.verdict, label).toBe('converted-major-step');
+      expect(result.notices, label).toEqual([]);
+      expect(result.definition, label).toBe(def);
+      expect(JSON.stringify(result.definition), label).toBe(bytes);
+    }
+  });
+
+  it('the half opens only for a first release: a ^18.0.1 floor on a prerelease runtime still meets the tombstone', () => {
+    const def = builtDuringPrerelease('^18.0.1');
+    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.7.0' });
+    expect(result.verdict).toBe(openedByRule('18.0.1').size > 0 ? 'converted-retired-after' : 'authored-current');
+    expect(result.notices.map((n) => n.conversionId)).not.toContain(SUBJECT);
+    expect(issuePaths(result.definition)).toEqual(['objects.0.indexes.0.unique']);
+  });
+
+  // CONTROL: a 17.x floor keeps #20390's per-entry verdict on this tree's own label.
+  it('CONTROL — a ^17.7.0 floor on a 17.7.0 label keeps the per-entry verdict, and an older step-18 retirement still meets its tombstone', () => {
+    const def = legacyPermissionDefinition('^17.7.0');
+    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.7.0' });
+    const expected = openedByRule('17.7.0');
+    expect(result.verdict).toBe(expected.size > 0 ? 'converted-retired-after' : 'authored-current');
+    expect(new Map(result.replayedRetirements.map((r) => [r.conversionId, r.retiredAfter]))).toEqual(expected);
+    // `permission-allow-restore-purge-removed` is in step 18 too, retired long
+    // before 17.7.0: a 17.7.0 floor postdates it, so it is NOT replayed.
+    expect(result.notices).toEqual([]);
+    expect(result.definition).toBe(def);
+    expect(def.permissions[0]!.objects.crm_ticket).toHaveProperty('allowRestore');
+  });
+
+  // CONTROL: the protocol-18 handshake, untouched — it refuses ^17 before any conversion could matter.
+  it('CONTROL — the protocol-18 handshake still refuses a ^17 artifact, prescribing the migration, and admits ^18', () => {
+    const refused = checkProtocolCompat({ id: 'com.example.prerelease-probe', engines: { protocol: '^17' } }, '18.0.0');
+    expect(refused.status).toBe('incompatible');
+    if (refused.status !== 'incompatible') return;
+    expect(refused.diagnostic.code).toBe('OS_PROTOCOL_INCOMPATIBLE');
+    expect(refused.diagnostic.migrateCommand).toBe('objectstack migrate meta --from 17');
+    expect(checkProtocolCompat({ id: 'com.example.prerelease-probe', engines: { protocol: '^18' } }, '18.0.0').status).toBe('ok');
+  });
+
+  /**
+   * Reading (ii), both directions, over EVERY retired step-18 entry rather than
+   * a sample — each entry's own fixture pair, carried in a `^18` manifest (no
+   * conversion reads a manifest's `engines`), on a runtime labelled 17.7.0.
+   */
+  describe('reading (ii) over the whole step — every retired step-18 entry, both directions', () => {
+    const STEP_18 = ALL_CONVERSIONS.filter((c) => c.toMajor === 18 && c.retiredFromLoadPath === true);
+
+    const inCaretEighteen = (stack: Record<string, unknown>): Record<string, unknown> => {
+      const manifest = (stack.manifest ?? {}) as Record<string, unknown>;
+      const engines = (manifest.engines ?? {}) as Record<string, unknown>;
+      return { ...stack, manifest: { ...manifest, engines: { ...engines, protocol: '^18' } } };
+    };
+
+    it('the step carries the subject, and the door refuses its default flips by id', () => {
+      expect(STEP_18.map((c) => c.id)).toContain(SUBJECT);
+      expect(STEP_18.filter((c) => DOOR_DEFAULT_FLIPS.includes(c.id)).map((c) => c.id)).toEqual([
+        'flow-decision-mode-inclusive-explicit',
+      ]);
+    });
+
+    // Built BEFORE: each entry's old shape replays to exactly its canonical shape.
+    for (const entry of STEP_18) {
+      const flip = DOOR_DEFAULT_FLIPS.includes(entry.id);
+      it(`${entry.id}: ${flip ? 'a default flip — never replayed, even with the step open' : 'built before it, a ^18 artifact converts to its canonical fixture'}`, () => {
+        const before = inCaretEighteen(structuredClone(entry.fixture.before));
+        const result = applyArtifactForwardConversions(before, { runtimeSpecVersion: '17.7.0' });
+        expect(result.verdict).toBe('converted-major-step');
+        if (flip) {
+          expect(result.notices.map((n) => n.conversionId)).not.toContain(entry.id);
+          expect(result.definition).toBe(before);
+          return;
+        }
+        expect(result.definition).toEqual(inCaretEighteen(structuredClone(entry.fixture.after)));
+        expect(result.notices).toHaveLength(entry.fixture.expectedNotices);
+        for (const n of result.notices) expect(n.conversionId).toBe(entry.id);
+      });
+    }
+
+    // Built AFTER: over every entry's canonical fixture, the whole replayed step changes nothing.
+    for (const entry of STEP_18) {
+      it(`${entry.id}: built after it, a ^18 artifact comes back by reference with the whole step replayed over it`, () => {
+        const after = inCaretEighteen(structuredClone(entry.fixture.after));
+        const result = applyArtifactForwardConversions(after, { runtimeSpecVersion: '17.7.0' });
+        expect(result.verdict).toBe('converted-major-step');
+        expect(result.notices.map((n) => `${n.conversionId} at ${n.path}`)).toEqual([]);
+        expect(result.definition).toBe(after);
+      });
+    }
+  });
+});
+
+/**
  * #15429 — the second member of the DEFAULT-FLIP class this door refuses.
  *
  * `flow-decision-mode-inclusive-explicit` writes `mode: 'inclusive'` onto an
@@ -754,6 +946,24 @@ describe('the artifact door never writes `mode: inclusive` onto an authored excl
     expect(result.verdict).toBe('converted-retired-after');
     expect(verdictNodeOf(result.definition).config).toBeUndefined();
     expect(result.notices.map((n) => n.conversionId)).not.toContain(ID);
+  });
+
+  /**
+   * [#23001] Nor does the major-step half. The entry belongs to step 18
+   * (`toMajor: 18`), so a `^18` floor on a runtime labelled below 18.0.0 opens
+   * every OTHER retired entry of that step — and the refusal list is read
+   * before `toMajor` exactly as it is before `retiredAfter`.
+   */
+  it('stays refused inside the major-step half too — the refusal list is read before toMajor', () => {
+    expect(ALL_CONVERSIONS.find((c) => c.id === ID)?.toMajor, 'the entry is in step 18').toBe(18);
+    const def = twoBranchDecisionDefinition('^18');
+    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.7.0' });
+
+    // ⭐ ANTI-VACUITY: the major-step half really is open on this input.
+    expect(result.verdict).toBe('converted-major-step');
+    expect(verdictNodeOf(result.definition).config).toBeUndefined();
+    expect(result.notices.map((n) => n.conversionId)).not.toContain(ID);
+    expect(result.definition).toBe(def);
   });
 
   it('floor ^99.0.0 — the window is shut and nothing is replayed at all', () => {

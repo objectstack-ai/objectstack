@@ -1,7 +1,7 @@
 ---
 title: Manifest schema — Kernel Protocol reference
 navTitle: Manifest
-description: "Manifest schemas of the ObjectStack Kernel Protocol: Manifest, ManifestPermissions and 5 more — each property with its type, default and a TypeScript example."
+description: "Manifest schemas of the ObjectStack Kernel Protocol: InstallMode, Manifest and 6 more — each property with its type, default and a TypeScript example."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -13,12 +13,24 @@ description: "Manifest schemas of the ObjectStack Kernel Protocol: Manifest, Man
 ## TypeScript Usage
 
 ```typescript
-import { ManifestSchema, ManifestPermissionsSchema, PluginEnginesSchema, PluginIntegritySchema, PluginPackagingSchema, PluginPermissionsSchema, PluginRuntimeSchema } from '@objectstack/spec/kernel';
-import type { ManifestPermissions, PluginEngines, PluginIntegrity, PluginPackaging, PluginPermissions, PluginRuntime } from '@objectstack/spec/kernel';
+import { InstallModeSchema, ManifestSchema, ManifestPermissionsSchema, PluginEnginesSchema, PluginIntegritySchema, PluginPackagingSchema, PluginPermissionsSchema, PluginRuntimeSchema } from '@objectstack/spec/kernel';
+import type { InstallMode, ManifestPermissions, PluginEngines, PluginIntegrity, PluginPackaging, PluginPermissions, PluginRuntime } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = ManifestSchema.parse(data);
+const result = InstallModeSchema.parse(data);
 ```
+
+---
+
+## InstallMode
+
+Install mode: managed (registered as code, upgradeable, sealed) | unmanaged (copied once into the environment as its own metadata, no upgrade)
+
+### Allowed Values
+
+* `managed`
+* `unmanaged`
+
 
 ---
 
@@ -34,6 +46,7 @@ const result = ManifestSchema.parse(data);
 | **version** | `string` | ✅ | Package version (SemVer 2.0.0 — e.g. 1.2.3, 2.0.0-beta.1, 1.0.0+20230101) |
 | **type** | `Enum<'plugin' \| 'ui' \| 'driver' \| 'server' \| 'app' \| 'theme' \| 'agent' \| 'objectql' \| 'module' \| 'gateway' \| 'adapter'>` | ✅ | Type of package |
 | **scope** | `Enum<'cloud' \| 'system' \| 'project'>` | optional (default: `"project"`) | Deployment scope: cloud \| system \| project |
+| **installModes** | `Enum<'managed' \| 'unmanaged'>[]` | optional | Install modes this package permits (ADR-0131 D6): managed \| unmanaged. Absent means ['managed']. |
 | **name** | `string` | ✅ | Human-readable package name |
 | **description** | `string` | optional | Package description |
 | **permissions** | `{ services?: string[]; hooks?: string[]; network?: string[]; fs?: string[] }` | optional | Required permissions at the AUTHORING stage: the structured plugin block `{ services, hooks, network, fs }` (ADR-0025 §3.2) — the legacy flat string list is retired — and at the assembled stage the same key is the ADR-0090 `PermissionSet[]` collection instead (`AssembledPackageBodySchema`) |

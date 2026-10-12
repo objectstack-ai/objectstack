@@ -5,7 +5,8 @@
  *
  * ## What was wrong
  *
- * `defineStack` has seven refusal sites. After #14552 one of them — the
+ * `defineStack` had seven refusal sites (ADR-0131 D6 adds the eighth, the
+ * `unmanaged` install mode's). After #14552 one of them — the
  * cross-reference refusal, pinned in `stack-cross-reference-envelope.test.ts`
  * — carried `code` / `status`; the other six threw `new Error(message)` with
  * both `undefined`. A consumer that had learned to branch on `error.code`
@@ -151,6 +152,22 @@ const rows: Array<{
     accepted: { manifest, objects: [task], requires: ['automation', 'triggers'], flows: [recordFlow] },
     finding: "flow 'task_fanout' declares a 'record_change' trigger",
   },
+  {
+    site: 'unmanaged install mode — `unmanaged` permitted on a package the copy cannot write (ADR-0131 D6)',
+    code: 'STACK_UNMANAGED_INSTALL_UNCOPYABLE',
+    header: 'defineStack unmanaged install-mode validation failed',
+    refused: {
+      manifest: { ...manifest, installModes: ['managed', 'unmanaged'] },
+      objects: [task],
+      functions: { probe_noop: () => undefined },
+    },
+    accepted: {
+      manifest: { ...manifest, installModes: ['managed'] },
+      objects: [task],
+      functions: { probe_noop: () => undefined },
+    },
+    finding: '`functions` is code',
+  },
 ];
 
 describe('every defineStack refusal carries an ADR-0112 envelope', () => {
@@ -220,18 +237,18 @@ describe('every defineStack refusal carries an ADR-0112 envelope', () => {
     });
   });
 
-  describe('census over all seven refusal sites', () => {
+  describe('census over all eight refusal sites', () => {
     const crossReference = { manifest, objects: [task], data: [{ object: 'missing_object', records: [] }] };
     const everySite = [...rows.map((r) => r.refused), { manifest: {} }, crossReference];
 
-    it('seven sites, seven distinct STACK_* codes, every status 422', () => {
+    it('eight sites, eight distinct STACK_* codes, every status 422', () => {
       const envelopes = everySite.map((config) => refusal(config));
       for (const envelope of envelopes) {
         expect(envelope).toBeInstanceOf(Error);
         expect(envelope?.code).toMatch(/^STACK_[A-Z_]+$/);
         expect(envelope?.status).toBe(422);
       }
-      expect(new Set(envelopes.map((e) => e?.code)).size).toBe(7);
+      expect(new Set(envelopes.map((e) => e?.code)).size).toBe(8);
       expect(envelopes.map((e) => e?.code)).toContain('STACK_CROSS_REFERENCE_INVALID');
     });
 
