@@ -7019,8 +7019,76 @@ jobs:
       # comment): the nested group dirs and apps/ (docs) need their own globs.
       # Examples and the downstream contract keep their dedicated steps below —
       # they are distinct gates, not bulk coverage.
+      #
+      # ── WHICH PACKAGES, PER EVENT (#23017) ──
+      # The three filters are the UNIVERSE. `schedule`, `push`,
+      # `workflow_dispatch` and any other event type-check all of it (the full
+      # battery, #22998). `pull_request` / `merge_group` type-check what their
+      # diff affects, plus dependents, through ci.yml Test Core's selector
+      # (same diff base, same cross-package test union, same fall-back to the
+      # full list), intersected with the universe. Not the cache alone: the
+      # restore above already reaches main's seed, but nearly every package
+      # depends on spec, so one spec commit between seed and run moves nearly
+      # every typecheck hash (PR run 38239402273 replayed 138 of 139 tasks; its
+      # merge group 38242582445, 0 of 74 typecheck tasks).
+      # ⛔ A changed repo-root file (Markdown excepted), or a `scripts/` file a
+      # package.json script runs, means the whole universe: `turbo ls
+      # --affected` selects ZERO packages for a root package.json,
+      # pnpm-workspace.yaml, .npmrc or root-importer lockfile change (turbo
+      # 2.11.5). ⛔ An empty selection exits here: `turbo run typecheck` with no
+      # `--filter` runs the whole workspace. Selection decides which packages
+      # run; the package-local turbo cache still decides which execute.
       - name: Type check workspace packages
-        run: pnpm exec turbo run typecheck --filter='./packages/*' --filter='./packages/*/*' --filter='./apps/*'
+        env:
+          OS_SHARD_EVENT_NAME: ${{ github.event_name }}
+          OS_SHARD_PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          OS_SHARD_PR_PINNED_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          OS_SHARD_MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        run: |
+          set -euo pipefail
+          UNIVERSE=(--filter='./packages/*' --filter='./packages/*/*' --filter='./apps/*')
+          WHOLE=''
+          case "$OS_SHARD_EVENT_NAME" in
+            pull_request|merge_group) ;;
+            *) WHOLE="the '$OS_SHARD_EVENT_NAME' event carries the full battery" ;;
+          esac
+          if [ -z "$WHOLE" ]; then
+            rm -f "$RUNNER_TEMP/turbo-ls.json" "$RUNNER_TEMP/changed-files.txt"
+            bash scripts/ci/select-shard-packages.sh
+            if [ ! -s "$RUNNER_TEMP/changed-files.txt" ]; then
+              WHOLE='the selector left no changed-file list (missing or empty), so the root-level rule cannot be judged'
+            else
+              { git grep -h -o -E '(\.\./)+scripts/[A-Za-z0-9._/-]+' -- \
+                  'packages/*/package.json' 'packages/*/*/package.json' 'apps/*/package.json' || true; } \
+                | sed -E 's#^(\.\./)+##' | sort -u > "$RUNNER_TEMP/package-script-tools.txt"
+              ROOT_FILE=$(grep -m1 -v -e / -e '\.md$' "$RUNNER_TEMP/changed-files.txt" || true)
+              TOOL_FILE=$(grep -m1 -Fx -f "$RUNNER_TEMP/package-script-tools.txt" "$RUNNER_TEMP/changed-files.txt" || true)
+              if [ -n "$ROOT_FILE" ]; then
+                WHOLE="root-level change: $ROOT_FILE"
+              elif [ -n "$TOOL_FILE" ]; then
+                WHOLE="a script the packages' own package.json scripts run changed: $TOOL_FILE"
+              fi
+            fi
+          fi
+          if [ -n "$WHOLE" ]; then
+            echo "Type-checking the whole workspace -- $WHOLE."
+            pnpm exec turbo run typecheck "${UNIVERSE[@]}"
+            exit 0
+          fi
+          pnpm exec turbo ls "${UNIVERSE[@]}" --output=json > "$RUNNER_TEMP/typecheck-universe.json"
+          jq -r --slurpfile sel "$RUNNER_TEMP/turbo-ls.json" \
+            '($sel[0].packages.items | map(.name)) as $s | .packages.items[].name | select(. as $n | any($s[]; . == $n))' \
+            "$RUNNER_TEMP/typecheck-universe.json" > "$RUNNER_TEMP/typecheck-selected.txt"
+          mapfile -t SELECTED < "$RUNNER_TEMP/typecheck-selected.txt"
+          if [ "${#SELECTED[@]}" -eq 0 ]; then
+            echo "No workspace package is affected by this diff -- nothing to type-check."
+            exit 0
+          fi
+          echo "Type-checking ${#SELECTED[@]} affected package(s) of the universe:"
+          printf '  %s\n' "${SELECTED[@]}"
+          FILTERS=()
+          for P in "${SELECTED[@]}"; do FILTERS+=("--filter=$P"); done
+          pnpm exec turbo run typecheck "${FILTERS[@]}"
 
       # Seed the shared Turbo cache from main only (see the restore step above).
       #

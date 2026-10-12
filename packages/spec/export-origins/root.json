@@ -173,6 +173,7 @@
     "defineView": "src/ui/view.zod.ts#defineView (function)",
     "defineViewItem": "src/ui/view.zod.ts#defineViewItem (function)",
     "defineWebhook": "src/automation/webhook.zod.ts#defineWebhook (function)",
+    "deriveViewContainerObject": "src/ui/view-container-object.ts#deriveViewContainerObject (function)",
     "expandViewContainer": "src/ui/view.zod.ts#expandViewContainer (function)",
     "expandViewContainerWithDiagnostics": "src/ui/view.zod.ts#expandViewContainerWithDiagnostics (function)",
     "expression": "src/shared/expression.zod.ts#expression (function)",

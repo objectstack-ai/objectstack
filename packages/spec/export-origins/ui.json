@@ -496,6 +496,7 @@
     "defineView": "src/ui/view.zod.ts#defineView (function)",
     "defineViewItem": "src/ui/view.zod.ts#defineViewItem (function)",
     "deriveColumnSummary": "src/ui/view-grouping-query.ts#deriveColumnSummary (function)",
+    "deriveViewContainerObject": "src/ui/view-container-object.ts#deriveViewContainerObject (function)",
     "diagnoseViewMetadata": "src/ui/view.zod.ts#diagnoseViewMetadata (function)",
     "expandViewContainer": "src/ui/view.zod.ts#expandViewContainer (function)",
     "expandViewContainerWithDiagnostics": "src/ui/view.zod.ts#expandViewContainerWithDiagnostics (function)",

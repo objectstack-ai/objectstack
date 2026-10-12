@@ -511,6 +511,7 @@
     "defineView (function)",
     "defineViewItem (function)",
     "deriveColumnSummary (function)",
+    "deriveViewContainerObject (function)",
     "diagnoseViewMetadata (function)",
     "expandViewContainer (function)",
     "expandViewContainerWithDiagnostics (function)",
