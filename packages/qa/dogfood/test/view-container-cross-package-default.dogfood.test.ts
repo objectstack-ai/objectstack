@@ -171,7 +171,7 @@ describe('dogfood: a bare-list container on another package\'s object leaves its
     expect((await byName('os_qa_shadow_probe')).list).toEqual(probe('os_qa_shadow_probe').list);
 
     // 7. Delete the probe: the packaged default is still what both doors answer.
-    const deleted = await stack.apiAs(token, 'DELETE', `/meta/view/os_qa_shadow_probe?package=${REPAIR}`);
+    const deleted = await stack.apiAs(token, 'DELETE', '/meta/view/os_qa_shadow_probe');
     expect(deleted.status).toBe(200);
     await expectDefaultUnchangedOnBothDoors();
   });
@@ -225,7 +225,7 @@ describe('dogfood: a bare-list container on another package\'s object leaves its
     expect(own[0].isDefault).toBeUndefined();
     await expectOnlyThePackagedListDefault();
 
-    const deleted = await stack.apiAs(token, 'DELETE', `/meta/view/os_qa_keyed_probe?package=${REPAIR}`);
+    const deleted = await stack.apiAs(token, 'DELETE', '/meta/view/os_qa_keyed_probe');
     expect(deleted.status).toBe(200);
     await expectDefaultUnchangedOnBothDoors();
   });
