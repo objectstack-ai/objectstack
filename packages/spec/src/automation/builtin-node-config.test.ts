@@ -582,8 +582,9 @@ describe('assignment value contract — a CEL envelope beside literals; the `{to
     // descriptor") other readers depend on.
     // #19938 — the CRUD write map joined through the same channel; #19939 —
     // the `map` node's per-item `input` map, then the `screen`'s prefill and
-    // record id, then the `notify` node's computed values.
-    expect(Object.keys(LEDGER_DECLARED_NODE_CONFIG_SCHEMAS)).toEqual(['assignment', 'create_record', 'update_record', 'map', 'screen', 'notify']);
+    // record id, then the `notify` node's computed values, then the `http`
+    // node's body.
+    expect(Object.keys(LEDGER_DECLARED_NODE_CONFIG_SCHEMAS)).toEqual(['assignment', 'create_record', 'update_record', 'map', 'screen', 'notify', 'http']);
     expect(Object.keys(SCHEMALESS_NODE_CONFIG_SCHEMAS).sort()).toEqual(['decision', 'script', 'subflow']);
     const projected = getSchemalessNodeConfigJsonSchemas().assignment as
       { properties?: Record<string, { additionalProperties?: Record<string, unknown> }> };

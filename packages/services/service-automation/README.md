@@ -188,8 +188,8 @@ a CEL value envelope, and text is a `{{ }}` template.**
 | Start-node `condition` | CEL — bare, no braces | `record.amount > 500` |
 | Edge `condition` | CEL — bare, no braces | `record.status == 'open'` |
 | Decision `conditions[].expression` | CEL — bare, no braces | `order_amount > 10000` |
-| Value slots — `create_record` / `update_record` `fields`, `assignment` values, the maps handed to a callee: `subflow` / `map` `input`, `script` `inputs`, a `screen`'s `defaults`, field `defaultValue` and `recordId`, each evaluated before the screen is served, a `loop`'s (with a `body`) or `map`'s `collection`, and a `notify` node's `recipients` (each entry of a list), `templateData` values and `sourceId` (its `sourceObject`, `actorId` and `payload` are literals, read as written; a `{…}` token there is refused) | CEL value envelope; a plain string is the literal text it spells (`recordId`'s literal is the id, a string; a `collection`'s literal is an inline array, and any string there is refused; a recipient entry that evaluates to a list adds each of its recipients) | `{ dialect: 'cel', source: "'Follow up on ' + record.name" }`, `'open'`, `collection: { dialect: 'cel', source: 'tasks' }` |
-| Text slots — `notify` `title` / `message` / `actionUrl`, `screen` `title` / `description`, `end` `message` | Template — `{{ }}` holes (ADR-0032 §3; a single-brace token is refused) | `'Deal won: {{ record.name }}'`, `'{{ record.amount \| currency }}'` |
+| Value slots — `create_record` / `update_record` `fields`, `assignment` values, the maps handed to a callee: `subflow` / `map` `input`, `script` `inputs`, a `screen`'s `defaults`, field `defaultValue` and `recordId`, each evaluated before the screen is served, a `loop`'s (with a `body`) or `map`'s `collection`, a `notify` node's `recipients` (each entry of a list), `templateData` values and `sourceId` (its `sourceObject`, `actorId` and `payload` are literals, read as written; a `{…}` token there is refused), and an `http` node's `body`, evaluated once before the call (its `method`, `durable`, `timeoutMs` and `signingSecret` are literals, read as written; a `{…}` token there is refused) | CEL value envelope; a plain string is the literal text it spells (`recordId`'s literal is the id, a string; a `collection`'s literal is an inline array, and any string there is refused; a recipient entry that evaluates to a list adds each of its recipients) | `{ dialect: 'cel', source: "'Follow up on ' + record.name" }`, `'open'`, `collection: { dialect: 'cel', source: 'tasks' }` |
+| Text slots — `notify` `title` / `message` / `actionUrl`, `http` `url` and each `headers` value, `screen` `title` / `description`, `end` `message` | Template — `{{ }}` holes (ADR-0032 §3; a single-brace token is refused) | `'Deal won: {{ record.name }}'`, `'{{ record.amount \| currency }}'` |
 
 A value slot refuses every `{…}` template token — `registerFlow()` and
 `objectstack validate` name its CEL spelling. A date macro is its CEL string
@@ -207,8 +207,9 @@ form, on the UTC calendar:
 Inside an object or list value, and in the legacy `assignment` shapes, an
 envelope is data: build the whole value as one envelope (a CEL map or list
 literal, its mixed values wrapped in `dyn(…)`), or move the assignment into the
-`assignments` map. Other value-like positions — a `filter`, `recipients`, an
-`http` payload — still read the single-brace dialect (`{record.id}`).
+`assignments` map — an `http` `body` included: `{ dialect: 'cel', source:
+"{'id': record.id, 'text': dyn('Done: ' + record.title)}" }`. A `filter` still reads
+the single-brace dialect (`{record.id}`).
 
 A `loop`'s or a `map`'s `collection` must evaluate to a list: anything else,
 `null` included, fails the node, as a token that resolved to nothing did, so a

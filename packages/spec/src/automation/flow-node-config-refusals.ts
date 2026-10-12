@@ -280,21 +280,20 @@ function authoredAt(config: Readonly<Record<string, unknown>>, path: ReadonlyArr
 }
 
 /**
- * [#21898] The builtin node types whose executor parses its contract AFTER
- * interpolating the whole config — today `http` alone (`builtin/http-nodes.ts`:
- * `parseNodeConfig(…, interpolate(raw, …))`). Its contract describes the
- * INTERPOLATED shape, so a `{token}` anywhere may change what the contract
- * sees — a sole token resolves to its value's real type — and a rule, which may
- * read keys other than the one its issue names, is judged only on a config that
- * carries no token at all. Every other builtin parses its config as authored.
- */
-const PARSED_AFTER_INTERPOLATION: ReadonlySet<string> = new Set(['http']);
-
-/**
  * [#21898] Builtin config keys whose run-time value may not be the authored
  * one: `http.signingSecret` — a secret the write-only flow credential channel
  * holds takes the literal's place before the parse (`builtin/http-nodes.ts`),
- * so the build cannot know what the contract will see there.
+ * so the build cannot know what the contract will see there. (#19939) Its
+ * `{…}` token refusal is therefore the executor's parse alone: the build
+ * judges nothing at this key.
+ *
+ * (#19939) Every builtin now parses its config AS AUTHORED. `http` was the one
+ * that parsed AFTER interpolating its whole config, so a `{token}` anywhere
+ * could change what its contract saw and a rule of it was judged only on a
+ * config carrying no token; since #19939 its executor interpolates nothing
+ * (its `url` and `headers` are text slots, its `body` a value slot, the rest
+ * literals) and parses the config it was handed, after this key's credential
+ * channel — so that carve-out went with it.
  */
 const RUN_RESOLVED_KEYS: Readonly<Record<string, readonly string[]>> = { http: ['signingSecret'] };
 
@@ -398,12 +397,10 @@ interface ContractIssue {
  *    its pre-interpolation type, even where the executor parses the authored
  *    config and so refuses it at the run — unless the contract marks its
  *    issue {@link READ_AS_WRITTEN_PARAM} (#19939: a `notify` node's
- *    `sourceObject`, `actorId` and `payload`, which the executor reads as
- *    written, never through the interpolator, so the run sees the token the
- *    build sees and the contract's refusal of it is the run's verdict);
- *  - for a contract parsed after interpolation ({@link
- *    PARSED_AFTER_INTERPOLATION}), a rule (`custom`) when the config carries a
- *    token anywhere.
+ *    `sourceObject`, `actorId` and `payload`, and an `http` node's `method`,
+ *    `durable` and `timeoutMs` and a token written as its whole `headers`
+ *    map, which the executor reads as written, never through the interpolator, so the run sees the token the build sees and
+ *    the contract's refusal of it is the run's verdict).
  */
 function builtinValueJudged(
   nodeType: string,
@@ -417,7 +414,6 @@ function builtinValueJudged(
   if ((RUN_RESOLVED_KEYS[nodeType] ?? []).includes(issue.path[0] as string)) return false;
   if (issue.code === 'custom' && issue.params?.[READ_AS_WRITTEN_PARAM] === true) return true;
   if (carriesInterpolationToken(authoredAt(authored, issue.path))) return false;
-  if (PARSED_AFTER_INTERPOLATION.has(nodeType) && issue.code === 'custom' && carriesInterpolationToken(authored)) return false;
   return true;
 }
 
@@ -680,10 +676,12 @@ function unrecognizedKeysOf(issue: { readonly code: string }): readonly string[]
  * Where the build cannot read the config whole, it reads only what is sound,
  * and each such type is named here, not skipped in silence:
  *
- *  - `http` parses AFTER interpolating its whole config, so a value is judged
- *    only when nothing inside it carries a `{token}` (its interpolation is then
- *    the identity), a rule only when the whole config carries none, and
- *    `signingSecret` never (the credential channel may supply it);
+ *  - `http`'s `signingSecret` is never judged: the write-only credential
+ *    channel may supply what the run signs with ({@link RUN_RESOLVED_KEYS}).
+ *    (#19939) Until its executor stopped interpolating, `http` was read only
+ *    in part here — a value only when nothing inside it carried a `{token}`, a
+ *    rule only when the whole config carried none — because it parsed AFTER
+ *    interpolating its whole config;
  *  - `loop` parses only with a `body` (`parsedWhen`), so a legacy flat-graph
  *    loop is judged on key membership alone (#21982: nothing reads an
  *    undeclared key on either path, and registration refused one there

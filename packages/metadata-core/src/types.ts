@@ -99,7 +99,7 @@ export const MetadataItemSchema = z.object({
   body: z.record(z.string(), z.unknown()).describe('Canonical Zod-normalised spec'),
   hash: z.string().regex(/^sha256:[0-9a-f]{64}$/).describe('sha256(canonicalize(body, ref.type))'),
   parentHash: z.string().nullable().describe('Hash this version was derived from; null for first version'),
-  authoredBy: z.string().nullable().describe('Identity of the writer (user id, "cli", "ai:claude", …); null = system-initiated, no actor'),
+  authoredBy: z.string().nullable().describe('Identity of the writer: the acting user id, as PutOptions.actor records it; null = system-initiated, no actor — never a label such as "system" or "cli"'),
   authoredAt: z.string().describe('ISO-8601 timestamp'),
   message: z.string().optional().describe('Optional commit message'),
   seq: z.number().int().nonnegative().describe('Sequence number this write produced in the org log'),
