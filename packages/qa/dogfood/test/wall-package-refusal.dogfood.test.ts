@@ -237,16 +237,30 @@ for (const posture of ['isolated', 'group'] as const) {
       expect(deleted.status, await deleted.clone().text()).toBe(200);
     });
 
-    it('CONTROL: the platform operator upgrades, deletes and uninstalls the catalog-carrying packages', async () => {
+    it('CONTROL: the platform operator installs, upgrades and uninstalls a catalog-carrying package, and deletes one at /packages', async () => {
+      // Its own packages, so this control reads the same whatever the refusal
+      // pins above did to OP_PKG and RT_PKG.
+      const pkg = 'com.w2.operator2';
+      const opSet = 'w2_operator2_set';
+      const installed = await h.stack.apiAs(h.operator, 'POST', INSTALL_LOCAL, packageBody(pkg, '1.0.0', { permissions: [set(opSet, [])] }));
+      expect(installed.status, await installed.clone().text()).toBe(200);
+      await h.ql.insert('sys_user_permission_set', { user_id: h.userB, permission_set: opSet, organization_id: h.orgB },
+        { context: { ...SYS, tenantId: h.orgB } });
       const upgraded = await h.stack.apiAs(h.operator, 'POST', INSTALL_LOCAL,
-        packageBody(OP_PKG, '1.1.0', { permissions: [set(OP_SET, ['manage_users'])] }));
+        packageBody(pkg, '1.1.0', { permissions: [set(opSet, ['manage_users'])] }));
       expect(upgraded.status, await upgraded.clone().text()).toBe(200);
       expect((await bGrants()).systemPermissions).toContain('manage_users');
-      const deleted = await h.stack.apiAs(h.operator, 'DELETE', `/packages/${RT_PKG}`);
-      expect(deleted.status, await deleted.clone().text()).toBe(200);
-      const removed = await h.stack.apiAs(h.operator, 'DELETE', `${INSTALL_LOCAL}/${OP_PKG}`);
+      const removed = await h.stack.apiAs(h.operator, 'DELETE', `${INSTALL_LOCAL}/${pkg}`);
       expect(removed.status, await removed.clone().text()).toBe(200);
-      expect((await bGrants()).permissions).not.toEqual(expect.arrayContaining([OP_SET]));
+      expect((await bGrants()).permissions).not.toContain(opSet);
+
+      const rt = 'com.w2.runtime2';
+      const created = await h.stack.apiAs(h.operator, 'POST', '/packages', { id: rt, name: 'w2 runtime 2', version: '1.0.0', type: 'app' });
+      expect(created.status, await created.clone().text()).toBe(201);
+      const authored = await h.stack.apiAs(h.operator, 'PUT', `/meta/permission/w2_runtime2_set?package=${rt}`, set('w2_runtime2_set', []));
+      expect(authored.status, await authored.clone().text()).toBe(200);
+      const deleted = await h.stack.apiAs(h.operator, 'DELETE', `/packages/${rt}`);
+      expect(deleted.status, await deleted.clone().text()).toBe(200);
     });
   });
 }
