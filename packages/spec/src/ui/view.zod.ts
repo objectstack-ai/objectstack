@@ -1810,8 +1810,8 @@ const emptyStateLinkSchema = () => strictObject({
       'Where the link goes — a target a `type: \'url\'` action opens: an in-app path that starts with `/` '
       + 'or `./` (such as `/docs/connect`), or an address that opens with `http://`, `https://` or '
       + '`mailto:`. Any other scheme, a protocol-relative `//host`, a bare relative path and a tab, line '
-      + 'feed or carriage return are refused at parse; a target that opens with `${` is judged when it is '
-      + 'clicked, after interpolation.',
+      + 'feed or carriage return are refused at parse; a template that opens with `${…}`, such as '
+      + '`${ctx.origin}/docs`, is judged when it is clicked, after interpolation.',
     ),
 });
 
