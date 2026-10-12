@@ -471,7 +471,9 @@ read_regen_patterns() {
 # .gitattributes and to that field both ways, and pins a rerun fixture on every mixed row.
 #   whole  its generator renders the ENTIRE file — nothing on disk survives into it;
 #   mixed  a generated half plus hand-written rows no regeneration restores.
-# Measured at the generators (2026-10-11): `gen:system-context-census` alone edits in place.
+# Measured at the generators (2026-10-11): `gen:system-context-census` alone edited in place,
+# and it retired with that page's route (#22927) — no pattern is `mixed` today, so the
+# self-test drives the mixed limb on a SYNTHETIC pattern until a real one arrives.
 OS_REGEN_CLASSES='
 packages/spec/liveness/state-counts/**                       whole
 packages/spec/authorable-surface/**                          whole
@@ -485,7 +487,6 @@ packages/spec/declaration-map/**                             whole
 packages/spec/api-surface-signatures.json                    whole
 docs/audits/2026-07-unknown-key-strictness-ledger.counts/**  whole
 content/docs/references/**                                   whole
-content/docs/permissions/system-context.mdx                  mixed
 skills/*/references/_index.md                                whole
 skills/objectstack-ui/references/react-blocks.md             whole
 scripts/platform-object-tenancy-census.json                  whole
@@ -2423,12 +2424,23 @@ mode_self_test() {
   st_whole="$(printf '%s\n' "$OS_REGEN_CLASSES" | awk '$2 == "whole" { print $1; exit }')"
   { cat "$st_repo/.gitattributes"; printf 'docs/new-generated/** merge=os-regen\n'; } > "$tmp/attrs-new"
   awk -v p="$st_whole" '$1 != p' "$st_repo/.gitattributes" > "$tmp/attrs-stale"
+  # The third leg adds one SYNTHETIC mixed route to the table and to .gitattributes, so a
+  # driver without mixed rows has at least one row to mismatch even while no real pattern
+  # is mixed — otherwise '' would equal '' and the control would fire on nothing.
+  st_mixed_fx='docs/fixture/mixed-census.mdx'
+  { cat "$st_repo/.gitattributes"; printf '%s merge=os-regen\n' "$st_mixed_fx"; } > "$tmp/attrs-mixed"
+  st_classes_mixed="$OS_REGEN_CLASSES$st_mixed_fx mixed
+"
   st_case 'control: a new route reds unclassified, a dropped one stale, a driver without mixed rows mismatched' \
-    "$(os_regen_class_problems "$tmp/attrs-new" "$st_drv" | tr '\n' ';')|$(os_regen_class_problems "$tmp/attrs-stale" "$st_drv" | tr '\n' ';')|$(os_regen_class_problems "$st_repo/.gitattributes" '' | tr '\n' ';')" \
-    "unclassified docs/new-generated/**;|stale $st_whole;|$(printf '%s\n' "$OS_REGEN_CLASSES" | awk '$2 == "mixed" { print "mixed-mismatch " $1 }' | sort | tr '\n' ';')"
+    "$(os_regen_class_problems "$tmp/attrs-new" "$st_drv" | tr '\n' ';')|$(os_regen_class_problems "$tmp/attrs-stale" "$st_drv" | tr '\n' ';')|$(OS_REGEN_CLASSES="$st_classes_mixed" os_regen_class_problems "$tmp/attrs-mixed" '' | tr '\n' ';')" \
+    "unclassified docs/new-generated/**;|stale $st_whole;|$(printf '%s\n' "$st_classes_mixed" | awk '$2 == "mixed" { print "mixed-mismatch " $1 }' | sort | tr '\n' ';')"
 
   # --- 13. THE CARD, once per MIXED row: a branch-edited hand row main never touched, a
   #         conflict elsewhere, the merge committed, the rerun — and main advanced meanwhile.
+  #         With no MIXED row in the table (none since #22927), the synthetic pattern of the
+  #         control above stands in, so the mixed limb is never left unexercised.
+  st_mixed_list="$(printf '%s\n' "$OS_REGEN_CLASSES" | awk '$2 == "mixed" { print $1 }')"
+  [ -n "$st_mixed_list" ] || st_mixed_list="$st_mixed_fx"
   st_mixed_runs=0
   while IFS= read -r st_mx <&3; do
     st_mixed_runs=$((st_mixed_runs + 1))
@@ -2442,14 +2454,14 @@ mode_self_test() {
     st_case "$st_mx: main advanced past the record, and the branch-only path keeps the branch bytes" \
       "$(printf '%s' "$out" | grep -c 'origin/main has ADVANCED' || true)/$(git show HEAD:gen/branchonly.txt)" '1/branchonly v1-BRANCH'
     cd "$here"
-  done 3< <(printf '%s\n' "$OS_REGEN_CLASSES" | awk '$2 == "mixed" { print $1 }')
-  st_case 'the table names at least one MIXED pattern, and every one ran its fixture' \
+  done 3< <(printf '%s\n' "$st_mixed_list")
+  st_case 'every MIXED pattern ran its fixture, and at least one ran (the synthetic one when the table names none)' \
     "$([ "$st_mixed_runs" -gt 0 ] && echo "$st_mixed_runs")" \
-    "$(printf '%s\n' "$OS_REGEN_CLASSES" | awk '$2 == "mixed"' | grep -c . || true)"
+    "$(printf '%s\n' "$st_mixed_list" | grep -c . || true)"
 
   # --- 13a. THE DISCRIMINATING MUTATIONS for 13: each fix's ONE line put back, and exactly
   #          its own half of the card comes back. Same perl/\Q..\E replacement 6b–11b use.
-  st_mx="$(printf '%s\n' "$OS_REGEN_CLASSES" | awk '$2 == "mixed" { print $1; exit }')"
+  st_mx="$(printf '%s\n' "$st_mixed_list" | awk 'NF { print $1; exit }')"
   for st_mut in \
     'mixed|          case "$mixed_edited" in|          case "" in|0/1/0/branchonly v1-BRANCH' \
     'ref|"$merge_base" "$main_side" -- "${regen_paths[@]}")$NL"|"$merge_base" origin/main -- "${regen_paths[@]}")$NL"|0/0/1/branchonly v0'; do

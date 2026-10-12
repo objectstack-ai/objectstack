@@ -24,7 +24,7 @@
       "status": "live",
       "verifiedAt": "2026-10-10",
       "evidence": "objectui: packages/app-shell/src/views/metadata-admin/SchemaForm.tsx (the item page renders each property of the type's served schema, `scope` included, for a capability read from `GET /api/v1/meta/capability/:name`; read at the pinned `.objectui-sha` 20c6d351ad) — display",
-      "note": "platform vs org decides whether holding the capability is a global power or one scoped to the caller's organization — the same distinction PLATFORM_CAPABILITIES carries on the curated side. Not display: it is the field that would be escalated if a tenant could overlay a package-shipped declaration, which is why the #5961 registry entry sets `supportsOverlay: false` / `allowOrgOverride: false`. 2026-08-28: RE-ANCHORED (commit 8f10a79f7) and REPOINTED — `:124` had rotted onto `unchanged: number;`, the counter field itself (see the `label` entry). Re-closed by hand against 8cb96ec41."
+      "note": "platform vs org decides whether holding the capability is a global power or one scoped to the caller's organization — the same distinction PLATFORM_CAPABILITIES carries on the curated side. Not display: it is the field that would be escalated if a tenant could overlay a package-shipped declaration, which is why the #5961 registry entry sets `supportsOverlay: false` / `allowEnvironmentOverlay: false`. 2026-08-28: RE-ANCHORED (commit 8f10a79f7) and REPOINTED — `:124` had rotted onto `unchanged: number;`, the counter field itself (see the `label` entry). Re-closed by hand against 8cb96ec41."
     },
     "packageId": {
       "status": "live",

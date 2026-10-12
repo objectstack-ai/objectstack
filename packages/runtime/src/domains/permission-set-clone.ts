@@ -68,11 +68,18 @@
  * stay with `manage_metadata` holders). ⛔ No new gate, and ⛔ not the ADR-0126
  * §5 activation gate: a clone creates a new artifact and takes nothing away
  * from any tenant, exactly as the flow clone door reasons.
+ *
+ * Then, as at every catalog write door, the walled catalog refusal
+ * (`walledCatalogWriteVerdict`, ADR-0131 D3): under `isolated` / `group` the
+ * catalog is shared by every organization, so the clone is the platform
+ * operator's. That is D3's own refusal ("the server refuses anyway"), not a new
+ * gate; under `single` it is inert.
  */
 
 import { METADATA_READ_DECORATIONS, MetadataProtectionFields } from '@objectstack/spec/kernel';
 import { SnakeCaseIdentifierSchema } from '@objectstack/spec/shared';
-import { metaWriteCapabilityVerdict } from '@objectstack/metadata-core';
+import { metaWriteCapabilityVerdict, walledCatalogWriteVerdict } from '@objectstack/metadata-core';
+import { readEffectiveTenancyPosture } from './activation-gate.js';
 import { securityCatalogReaderOf, type SecurityCatalogEntry } from '@objectstack/core';
 import type { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { validationFailure } from '../validation-failure.js';
@@ -235,6 +242,21 @@ export async function handlePermissionSetCloneWrite(
     });
     if (!verdict.allowed) {
         return { handled: true, response: deps.error(verdict.message, 403) };
+    }
+    // [ADR-0131 D3] The walled catalog refusal, the metadata door's own and
+    // asked right after its capability gate, exactly as the dispatcher's
+    // `PUT /meta` asks it: a clone creates an environment permission set, so
+    // under `isolated` / `group` only the platform operator rung (or the engine
+    // itself) makes one. Inert under `single`. Before any read, so a refused
+    // caller learns nothing about the source or the target name.
+    const walled = walledCatalogWriteVerdict({
+        type: PERMISSION_METADATA_TYPE,
+        tenancyPosture: await readEffectiveTenancyPosture(deps, context),
+        isSystem: ec?.isSystem === true,
+        callerPosture: ec?.posture,
+    });
+    if (!walled.allowed) {
+        return { handled: true, response: deps.error(walled.message, 403) };
     }
 
     try {

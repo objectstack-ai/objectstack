@@ -7,7 +7,7 @@
  * exactly two agents (`ask`, `build`), the surface the user is in binds one,
  * and third parties extend the platform by authoring **skills**, never
  * `*.agent.ts`. The `agent` metadata type carries the decision
- * (`allowRuntimeCreate: false, allowOrgOverride: false`), and the runtime
+ * (`allowRuntimeCreate: false, allowEnvironmentOverlay: false`), and the runtime
  * enforces it on both paths — `listAgents()` filters non-platform records out
  * of the catalog, and `loadAgent()` refuses them outright (cloud#904), so a
  * stack-authored agent 404s on chat and cannot be pinned via

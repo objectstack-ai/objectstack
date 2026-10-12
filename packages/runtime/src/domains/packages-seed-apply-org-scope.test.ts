@@ -25,9 +25,11 @@
  *
  * `getMetaItem` reads no organization at all (ADR-0131 D6: every metadata
  * read is environment → code; before it, commit d5cbb44f3's gate already
- * dropped an organization for `seed`, which declares `allowOrgOverride:
- * false`). ⇒ `{ type:'seed', name, organizationId }` and `{ type:'seed', name }`
- * differ in a field the callee provably drops.
+ * dropped an organization for `seed`, one of the types outside the five that
+ * gate scoped to an organization: `seed` declares `allowEnvironmentOverlay:
+ * false`, then spelled `allowOrgOverride`). ⇒ `{ type:'seed', name,
+ * organizationId }` and `{ type:'seed', name }` differ in a field the callee
+ * provably drops.
  *
  * ⛔ The repair is NOT to restore org-awareness to this read. An org-scoped
  * `seed` row is the unhydratable phantom `reportUnhydratableOrgScopedRows`
@@ -403,7 +405,7 @@ describe('#15068 · 1 · the two rungs resolve to one read', () => {
     it('`seed` is non-overridable — and since ADR-0131 D6 no read takes an organization', () => {
         // The registry fact the card rests on, read from the registry rather
         // than restated.
-        expect(DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === 'seed')?.allowOrgOverride)
+        expect(DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === 'seed')?.allowEnvironmentOverlay)
             .toBe(false);
     });
 

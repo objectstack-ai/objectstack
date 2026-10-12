@@ -162,7 +162,8 @@ export const SysJob = ObjectSchema.create({
     // its rows up by `where: { name }` with no organization dimension — a
     // per-organization key would make that lookup ambiguous rather than fix
     // anything. The `job` metadata type is closed to tenants on all three
-    // flags (`allowOrgOverride: false` — "no per-org job fork" — plus
+    // flags (`allowEnvironmentOverlay: false` — "no environment fork of a
+    // packaged job" — plus
     // `allowRuntimeCreate: false` and `supportsOverlay: false`), and `enable`
     // below advertises no generic write verb at all. ADR-0120's S5 inventory
     // names `sys_job.name` outright as one of the engine idempotency keys that

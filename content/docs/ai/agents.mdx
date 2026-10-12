@@ -117,7 +117,7 @@ assistant to *write* your metadata and never run. Same word, two layers.
 </Callout>
 
 `*.agent.ts` is **closed to third parties** — the `agent` metadata type is
-`allowRuntimeCreate:false, allowOrgOverride:false`, reserved for the two platform
+`allowRuntimeCreate:false, allowEnvironmentOverlay:false`, reserved for the two platform
 agents and platform-owned subagents (ADR-0063 §2). To give the `ask` agent a new
 capability you author an agent **skill** (`*.skill.ts`). Every skill declares
 `surface: 'ask' | 'build' | 'both'`, and an agent's tool set is the **union of its
@@ -240,7 +240,7 @@ LLM-callable.
 The agent definitions below illustrate agent **anatomy** — how an `AgentSchema`
 record is shaped (that schema and the `defineAgent` factory are part of the open
 `@objectstack/spec/ai` package). Note that the `agent` metadata type is
-`allowRuntimeCreate:false` / `allowOrgOverride:false` (ADR-0063 §2): the **cloud /
+`allowRuntimeCreate:false` / `allowEnvironmentOverlay:false` (ADR-0063 §2): the **cloud /
 Enterprise** in-product runtime honors only the two platform agents `ask` and
 `build`, so you do not ship a custom agent *to that runtime* — you extend it by
 authoring a **skill** (open metadata) that attaches to `ask`. In the open edition,

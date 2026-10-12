@@ -6,7 +6,7 @@
  *
  * `saveMetaItem`'s package door (`refusePackagedBaseOverride`) refuses an
  * in-place write onto an item a code package ships, on a type with no per-org
- * overlay channel (`allowOrgOverride: false`). It used to be asked only on an
+ * overlay channel (`allowEnvironmentOverlay: false`). It used to be asked only on an
  * environment kernel (`environmentId !== undefined`); a host-config kernel —
  * the CLI's assembler, the showcase's boot shape — met the same predicate only
  * at the repository write (`SysMetadataRepository.assertAllowed`, the first
@@ -27,7 +27,7 @@
  *  2. controls, unchanged: an environment-local object with a gate-refused or
  *     a spec-refused body still answers `422 INVALID_METADATA` on both
  *     kernels; a packaged item of a type that allows overlays
- *     (`allowOrgOverride: true`) is still judged by the gates; [ADR-0131 D6]
+ *     (`allowEnvironmentOverlay: true`) is still judged by the gates; [ADR-0131 D6]
  *     a packaged object with the `OS_METADATA_WRITABLE` hatch open is not —
  *     managed content is sealed, so it answers the package door like row 1;
  *  3. every type in `DEFAULT_METADATA_TYPE_REGISTRY`: the same packaged
@@ -302,7 +302,7 @@ describe('[#22220] controls: the gates still judge what the door does not refuse
 
 describe('[#22220] every registry type: one packaged publish, one envelope, on both kernels', () => {
     const governed = new Set(
-        DEFAULT_METADATA_TYPE_REGISTRY.filter((e) => !e.allowOrgOverride && e.allowRuntimeCreate).map((e) => e.type),
+        DEFAULT_METADATA_TYPE_REGISTRY.filter((e) => !e.allowEnvironmentOverlay && e.allowRuntimeCreate).map((e) => e.type),
     );
 
     for (const { type } of DEFAULT_METADATA_TYPE_REGISTRY) {

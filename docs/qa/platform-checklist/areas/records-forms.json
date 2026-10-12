@@ -4386,7 +4386,7 @@
           "two organizations on one environment, each with its own signed-in persona, sharing one app whose object has a picklist-bound field"
         ],
         "knownGaps": [
-          "NOT DECLARED: the per-organization overlay is phase 2 of the picklist design. The picklist row of packages/spec/src/kernel/metadata-plugin.zod.ts#DEFAULT_METADATA_TYPE_REGISTRY carries `allowOrgOverride: false`, the one opt-in ADR-0005 allows for an organization overlay, and ruling 5904864936 on #18164 defers the overlay to its own sub-issue, filed when a customer requirement measures it. Nothing here can run until that sub-issue lands the overlay. Package-level extension (phase 1) is records-forms.picklist-shared-across-objects"
+          "NOT DECLARED: the per-organization overlay is phase 2 of the picklist design. The picklist row of packages/spec/src/kernel/metadata-plugin.zod.ts#DEFAULT_METADATA_TYPE_REGISTRY carries `allowEnvironmentOverlay: false`, the one opt-in ADR-0005 allows for an organization overlay, and ruling 5904864936 on #18164 defers the overlay to its own sub-issue, filed when a customer requirement measures it. Nothing here can run until that sub-issue lands the overlay. Package-level extension (phase 1) is records-forms.picklist-shared-across-objects"
         ]
       },
       "negative": [
@@ -4397,7 +4397,7 @@
       "source": [
         "#18164 design of record (comment 5715762696), item 4 (a per-organization overlay of the picklist shape, additive only, whose allowance was left to the maintainer as an open point) and item 6 (the verification sentence: org A adds a value, A writes it, B is refused)",
         "#18164 ruling 5904864936 (the overlay stays deferred to its own sub-issue on a measured customer requirement) and #19518 Scope 5 (not declared in the spec layer)",
-        "docs/adr/0005-metadata-customization-overlay.md (`allowOrgOverride` on the type registry is the only org-overlay opt-in)"
+        "docs/adr/0005-metadata-customization-overlay.md (`allowEnvironmentOverlay` on the type registry is the only org-overlay opt-in)"
       ],
       "history": [
         {

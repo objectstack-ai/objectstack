@@ -274,7 +274,7 @@ describe('SysMetadataRepository', () => {
 
     // ── whitelist enforcement (mirrors PR-10a, at the repo layer) ───
 
-    it('put refuses non-allowOrgOverride types (trigger)', async () => {
+    it('put refuses non-allowEnvironmentOverlay types (trigger)', async () => {
         await expect(
             repo.put(
                 { org: 'org_alpha', type: 'trigger', name: 'on_insert' },
@@ -284,7 +284,7 @@ describe('SysMetadataRepository', () => {
         ).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
     });
 
-    it('put refuses non-allowOrgOverride types (datasource)', async () => {
+    it('put refuses non-allowEnvironmentOverlay types (datasource)', async () => {
         await expect(
             repo.put(
                 { org: 'org_alpha', type: 'datasource', name: 'analytics' },
@@ -361,7 +361,7 @@ describe('SysMetadataRepository', () => {
 
     it('put still refuses plugin-registered type without runtime-only intent', async () => {
         // intent defaults to 'override-artifact'; that path requires
-        // allowOrgOverride, which plugin-registered types do not get
+        // allowEnvironmentOverlay, which plugin-registered types do not get
         // automatically. Keeps the artifact-shadowing security boundary
         // intact for plugin types until they explicitly opt in.
         await expect(
@@ -702,7 +702,7 @@ describe('SysMetadataRepository', () => {
         // `intent: 'runtime-only'` — a whole-app build stages a BRAND-NEW app
         // (nothing artifact-backed under this name), which is exactly the
         // intent the protocol layer computes for it. Required since commit ee58392e1
-        // rolled `app`'s `allowOrgOverride` back to `false` (ADR-0005): the
+        // rolled `app`'s `allowEnvironmentOverlay` back to `false` (ADR-0005): the
         // repository's default `override-artifact` intent now 403s for `app`,
         // while the runtime-create tier this write actually belongs to stays
         // open (`allowRuntimeCreate: true`).

@@ -1059,18 +1059,19 @@ async function sweepSelective(failOrdinal: number, doc: any, type: string) {
 const listRow = (rows: Row[]) =>
     rows.find((r) => r.route.startsWith('GET ') && r.route.endsWith('/meta/:type'));
 
-// An ORG-OVERRIDABLE type, so the org-scope question is not vacuous — asserted
-// against the registry in the first CONTROL rather than trusted here.
+// One of the five overlay-enabled types — the set an organization reached a
+// read for before ADR-0131 D6 — so the org-scope question is not vacuous;
+// asserted against the registry in the first CONTROL rather than trusted here.
 const ORG_SCOPED_TYPE = 'dashboard';
 const ORG_SCOPED_DOC = { name: 'ops', type: 'dashboard', widgets: [] };
 
 describe('[#13538] §9 a PARTIAL outage is not served as an org-unscoped 200', () => {
-    it('CONTROL: this section drives an ORG-OVERRIDABLE type; the type §8 drives is env-wide BY DESIGN', () => {
+    it('CONTROL: this section drives an overlay-enabled type (org-scoped before D6); the type §8 drives is env-wide BY DESIGN', () => {
         // The second half is why §8's green is not coverage of this card: on
         // `object` no organization was ever read, so no fault model whatsoever
         // could make §8 observe an org-scope difference on the type it sweeps.
         const declares = (type: string) =>
-            DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === type)?.allowOrgOverride === true;
+            DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === type)?.allowEnvironmentOverlay === true;
         expect({ driven: declares(ORG_SCOPED_TYPE), section8: declares(OBJECT_DOC.type) })
             .toEqual({ driven: true, section8: false });
     });

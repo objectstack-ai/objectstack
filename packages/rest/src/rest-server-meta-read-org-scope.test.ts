@@ -34,18 +34,20 @@ const ORG_A = 'org_alpha';
 const ORG_B = 'org_beta';
 
 /**
- * The five types the registry declares `allowOrgOverride: true`. Listed as
+ * The five overlay-enabled types — those the registry declared
+ * `allowOrgOverride: true` while that flag scoped a read to an organization
+ * (`allowEnvironmentOverlay` since 18, which decides no organization). Listed as
  * literals rather than derived, deliberately: the point of the card is that all
  * five must be SERVED, so a registry change that drops one should turn this red
  * and be looked at, not silently shrink the pin's coverage.
  */
-const ORG_OVERRIDABLE = ['view', 'dashboard', 'report', 'translation', 'email_template'] as const;
+const PRE_D6_ORG_SCOPED = ['view', 'dashboard', 'report', 'translation', 'email_template'] as const;
 
 /** The two whose REST branches differ — the trap, named. */
 const CACHED_ARM = 'view';        // takes `getMetaItemCached`
 const UNCACHED_ARM = 'dashboard'; // bypasses it via `isDashboardType`
 
-/** `allowOrgOverride: false` — must keep reading env-wide, never org-scoped. */
+/** Outside the five — must keep reading env-wide, never org-scoped. */
 const NON_OVERRIDABLE = 'object';
 
 /** The value every read assertion looks for. */
@@ -419,7 +421,7 @@ describe('#9454 · ADR-0131 D6 every REST /meta read door serves what the write 
     beforeEach(() => { b = boot(); });
 
     describe('write-then-read agreement on one boot, both branches', () => {
-        it.each(ORG_OVERRIDABLE)(
+        it.each(PRE_D6_ORG_SCOPED)(
             '%s: the 200 state:active receipt is answered by the direct GET',
             async (type) => {
                 const written = await b.put(type, 'authored_at_runtime');
@@ -433,7 +435,7 @@ describe('#9454 · ADR-0131 D6 every REST /meta read door serves what the write 
             },
         );
 
-        it.each(ORG_OVERRIDABLE)(
+        it.each(PRE_D6_ORG_SCOPED)(
             '%s: the listing contains it too',
             async (type) => {
                 await b.put(type, 'authored_at_runtime');
@@ -456,7 +458,7 @@ describe('#9454 · ADR-0131 D6 every REST /meta read door serves what the write 
     });
 
     describe('⭐ the row is environment-wide, and so is who it is served to', () => {
-        it.each(ORG_OVERRIDABLE)('%s: an org-active author\'s write persists with organization_id NULL', async (type) => {
+        it.each(PRE_D6_ORG_SCOPED)('%s: an org-active author\'s write persists with organization_id NULL', async (type) => {
             const written = await b.put(type, 'partitioned');
             expect(written.status, `PUT answered ${written.status} ${JSON.stringify(written.body)}`).toBe(200);
             expect(storedRowsFor(b.rows, type, 'partitioned', null).length, 'nothing landed env-wide').toBe(1);
@@ -561,7 +563,7 @@ describe('#13753 · ADR-0131 D6 GET /meta/diagnostics sweeps the environment par
     let b: ReturnType<typeof boot>;
     beforeEach(() => { b = boot(); });
 
-    it.each(ORG_OVERRIDABLE)('%s: an org-active author\'s item is counted by the ?type= arm', async (type) => {
+    it.each(PRE_D6_ORG_SCOPED)('%s: an org-active author\'s item is counted by the ?type= arm', async (type) => {
         const written = await b.put(type, 'authored_at_runtime');
         expect(written.status, `PUT /${type} was not accepted`).toBe(200);
         const swept = await b.diagnostics({ type });

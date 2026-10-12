@@ -44,7 +44,7 @@
  * Positions hold one name per deployment (ADR-0048 addendum, N.2), and a write
  * with no package provenance over a package-held name stays under ADR-0005
  * overlay precedence (N.3): `position` takes no environment overlay
- * (`allowOrgOverride: false`), so the metadata door refuses that save with its
+ * (`allowEnvironmentOverlay: false`), so the metadata door refuses that save with its
  * locked-base refusal (`403 NOT_OVERRIDABLE`). A Setup **create**, or a
  * **rename into** such a name, is now answered with that same refusal, and the
  * row write is undone — before this stage the write-through stood down and the

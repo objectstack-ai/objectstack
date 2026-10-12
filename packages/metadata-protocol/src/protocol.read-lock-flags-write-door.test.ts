@@ -37,7 +37,7 @@
  * that does not persist) is not a lock verdict and is not read as one.
  *
  * Out of the table, deliberately: the six code-only types (`allowRuntimeCreate`
- * and `allowOrgOverride` both false) have no org-owned arm, because no runtime
+ * and `allowEnvironmentOverlay` both false) have no org-owned arm, because no runtime
  * door can author an item of those types (`NOT_CREATABLE`). Their packaged arm
  * is in the table like every other type's.
  *
@@ -252,7 +252,7 @@ interface Row {
 }
 
 const CODE_ONLY = new Set(
-    DEFAULT_METADATA_TYPE_REGISTRY.filter((e) => !e.allowOrgOverride && !e.allowRuntimeCreate).map((e) => e.type),
+    DEFAULT_METADATA_TYPE_REGISTRY.filter((e) => !e.allowEnvironmentOverlay && !e.allowRuntimeCreate).map((e) => e.type),
 );
 
 async function measure(kernel: Kernel, arm: Arm, type: string): Promise<Row> {

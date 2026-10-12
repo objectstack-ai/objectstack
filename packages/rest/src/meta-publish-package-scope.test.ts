@@ -65,7 +65,7 @@ const PUBLISH = `${META}/:type/:name/publish`;
 const ORG = 'org_alpha';
 const PKG = 'app.projects';
 
-/** `allowOrgOverride: true`, so the org limb is stable across these cases. */
+/** One of the five overlay-enabled types, so the org limb is stable across these cases. */
 const TYPE = 'views';
 
 function mockServer() {
