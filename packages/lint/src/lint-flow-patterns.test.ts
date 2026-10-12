@@ -173,7 +173,7 @@ describe('lintFlowPatterns — date-equality in query filter (#1874)', () => {
       expect(lintFlowPatterns(filterFlow({ status: 'open', due_date: { $lt: CEL('today()') } }))).toHaveLength(0);
     });
     it('equality against a non-time value (status, interpolated id)', () => {
-      expect(lintFlowPatterns(filterFlow({ status: 'active', id: '{record.id}' }))).toHaveLength(0);
+      expect(lintFlowPatterns(filterFlow({ status: 'active', id: CEL('record.id') }))).toHaveLength(0);
       expect(lintFlowPatterns(filterFlow({ amount: { $eq: CEL('record.threshold') } }))).toHaveLength(0);
     });
   });

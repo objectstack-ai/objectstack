@@ -43,6 +43,7 @@ import {
   getSchemalessNodeConfigJsonSchemas,
 } from './schemaless-node-config.zod.js';
 import { VALUE_SLOT_TEMPLATE_REFUSAL } from './flow-value-slot-template.js';
+import { flowNodeConfigRefusals } from './flow-node-config-refusals.js';
 
 interface Parseable { safeParse(v: unknown): { success: boolean; error?: { issues: ReadonlyArray<{ code: string; message: string }> } } }
 
@@ -984,6 +985,18 @@ describe('CRUD `filter` operands — value slots; the query placeholders stay (#
     const issues = issuesOf(schema, { owner: { $eq: { dialect: 'cel', source: '   ' } } });
     expect(issues.map((i) => [i.code, ['filter', ...i.path.slice(1)].join('.')])).toEqual([['custom', 'filter.owner.$eq.source']]);
     expect(issues[0]!.message.startsWith(VALUE_ENVELOPE_REFUSAL)).toBe(true);
+  });
+
+  it.each(contracts)('%s: the build doors\' value arm leaves an operand\'s envelope and token to their own judges — one finding, never two', (type) => {
+    const extra = type === 'update_record' ? { fields: { stage: 'x' } } : {};
+    // The envelope pass (`registerFlow`, `objectstack validate`) refuses the
+    // malformed envelope, and the value-slot judge the token; the contract arm
+    // must not report either a second time.
+    expect(flowNodeConfigRefusals(type, { objectName: 'deal', filter: { owner: { $eq: { dialect: 'cel', source: '   ' } } }, ...extra })).toEqual([]);
+    expect(flowNodeConfigRefusals(type, { objectName: 'deal', filter: { owner: '{record.owner}' }, ...extra })).toEqual([]);
+    // CONTROL: a filter that is not a map is still the contract's to refuse.
+    expect(flowNodeConfigRefusals(type, { objectName: 'deal', filter: 'open', ...extra }).map((r) => [r.code, r.path]))
+      .toEqual([['node-config-refused-by-contract', 'filter']]);
   });
 
   it.each(contracts)('%s declares the operands to the expression ledger on `filter`, once', (type, schema) => {
