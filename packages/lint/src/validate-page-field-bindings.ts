@@ -74,6 +74,15 @@ export const PAGE_FIELD_UNPROVISIONED = 'page-field-unprovisioned';
  * sits with the family's advisory findings rather than gating.
  */
 export const PAGE_SECTION_GROUP_UNKNOWN = 'page-section-group-unknown';
+/**
+ * [#23013] A section's `count.field` resolves to a declared field that holds
+ * ONE value, so the heading's `{{ count }}` can only ever read 0 or 1. The key
+ * counts a multi-value field's values (`isMultiValueField`, the spec's one
+ * answer to that question), and a count over a scalar renders a confident
+ * number that means nothing — so this gates (`error`), like the existence
+ * miss on the same key (`page-field-unknown`, `counted`).
+ */
+export const PAGE_SECTION_COUNT_NOT_MULTI_VALUE = 'page-section-count-not-multi-value';
 
 export type PageFieldSeverity = 'error' | 'warning';
 
@@ -115,7 +124,10 @@ import {
   sectionGroupRefs,
   type SectionGroupRef,
 } from './object-field-groups.js';
-import { recordsOf } from './object-graph.js';
+import { indexObjectGraph, recordsOf, resolveFieldPath, type ObjectGraph } from './object-graph.js';
+// [#23013] The one answer to "does this field hold several values?" — the
+// predicate storage, the aggregate answer and the generator already ask.
+import { isMultiValueField } from '@objectstack/spec/data';
 
 function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
@@ -296,6 +308,82 @@ export function componentSectionGroupRefs(
   return refs;
 }
 
+/**
+ * [#23013] The `count.field` references a component's sections hold — the
+ * field each section heading counts. Same `nestedSections` descriptor as
+ * {@link componentFieldRefs} and {@link componentSectionGroupRefs}, a third
+ * question asked of the same sections, and kept apart from the first because
+ * a miss here fails differently: a section's `fields[]` entry that resolves to
+ * nothing is skipped by the renderer, while a heading that counts nothing
+ * reads 0 on every record (see {@link FieldRefConsequence} `counted`).
+ *
+ * Off-spec input is survived, not thrown on: a non-object `count` or a
+ * non-string `field` yields nothing (the component-props pass reports the
+ * shape).
+ */
+export function componentSectionCountRefs(
+  type: string,
+  props: AnyRec,
+  basePath: string,
+  sep = '.',
+): FieldRef[] | null {
+  const spec = COMPONENT_FIELD_SPECS[type];
+  if (!spec) return null;
+  const refs: FieldRef[] = [];
+  for (const key of spec.nestedSections ?? []) {
+    const sections = Array.isArray(props[key]) ? (props[key] as unknown[]) : [];
+    for (let si = 0; si < sections.length; si++) {
+      const section = sections[si];
+      if (!isRec(section) || !isRec(section.count)) continue;
+      const name = strName(section.count.field);
+      if (name) refs.push({ name, path: `${basePath}${sep}${key}[${si}].count.field` });
+    }
+  }
+  return refs;
+}
+
+/**
+ * [#23013] The second question a counted field raises once it EXISTS: does it
+ * hold several values? Asked only of a leaf the object graph resolves (`ok`) —
+ * existence stays {@link checkFieldRefs}'s question, so a name that resolves to
+ * nothing is reported once, there, and never twice. A dotted path is skipped
+ * for the same reason {@link checkFieldRefs} skips it (the spec refuses one at
+ * parse), and so is a leaf whose definition carries no `type` (the driver's
+ * `id`: not answerable here, which is not the same as single-valued).
+ */
+export function checkSectionCountRefs(
+  refs: readonly FieldRef[],
+  objectName: string | undefined,
+  graph: ObjectGraph,
+  where: string,
+): PageFieldFinding[] {
+  const findings: PageFieldFinding[] = [];
+  if (!objectName) return findings;
+  for (const ref of refs) {
+    if (ref.name.includes('.')) continue;
+    const verdict = resolveFieldPath(graph, objectName, ref.name);
+    if (verdict.kind !== 'ok') continue;
+    const type = verdict.meta?.type;
+    if (type === undefined) continue;
+    if (isMultiValueField({ type, multiple: verdict.meta?.multiple === true })) continue;
+    findings.push({
+      severity: 'error',
+      rule: PAGE_SECTION_COUNT_NOT_MULTI_VALUE,
+      where,
+      path: ref.path,
+      message:
+        `field "${ref.name}" on object "${objectName}" is a single-value \`${type}\` field, so the ` +
+        'section heading\'s `{{ count }}` can only ever read 0 or 1 — a number that looks like a ' +
+        'count and is not one.',
+      hint:
+        'Count a multi-value field: `multiselect`, `checkboxes` or `tags`, or a `select`, `lookup`, ' +
+        '`user`, `file` or `image` field declared with `multiple: true`. To show a single value, list ' +
+        'the field in the section\'s `fields` instead.',
+    });
+  }
+  return findings;
+}
+
 /** A `record:related_list` props bag, split by which object each batch resolves against. */
 export interface RelatedListFieldRefs {
   /** The related (child) object this list renders — `properties.objectName`. */
@@ -372,8 +460,36 @@ export function indexObjectFields(stack: AnyRec): Map<string, Set<string>> {
  *   indistinguishable from "there is no data" — the silent-zero failure
  *   `filter-token-unknown` and `validate-flow-template-paths`' filter-position
  *   call both gate on. Gating.
+ * - `counted` [#23013]: the name is the field a section heading COUNTS
+ *   (`sections[].count.field`). Nothing is skipped: the heading still renders,
+ *   with a count of 0 on every record — a number indistinguishable from a
+ *   record that really holds no values, the same silent-zero shape as
+ *   `queried`. Gating.
  */
-export type FieldRefConsequence = 'skipped' | 'queried';
+export type FieldRefConsequence = 'skipped' | 'queried' | 'counted';
+
+/** What a miss does, per consequence — one table so message and severity cannot drift. */
+const FIELD_REF_MISS: Readonly<Record<FieldRefConsequence, { unknown: string; unprovisioned: string }>> = {
+  skipped: {
+    unknown: 'the component silently skips it, so it never renders.',
+    unprovisioned: ' — the component renders it, blank, on every record.',
+  },
+  queried: {
+    unknown:
+      'it is used in a QUERY, so the predicate can never match: the surface ' +
+      'renders an empty result that looks exactly like "there is no data".',
+    unprovisioned:
+      ' — it is used in a QUERY, so the predicate can never match a real value: on ' +
+      'SQLite it silently degrades to constant-false and the surface renders an empty ' +
+      'result that looks exactly like "there is no data".',
+  },
+  counted: {
+    unknown:
+      'it is the field a section heading COUNTS, so the heading reads 0 on every record — ' +
+      'a count that looks exactly like "this record holds no values".',
+    unprovisioned: ' — it is the field a section heading counts, so the heading reads 0 on every record.',
+  },
+};
 
 /**
  * Check one batch of refs against `objectName`'s declared fields.
@@ -436,27 +552,20 @@ export function checkFieldRefs(
           message:
             `field "${ref.name}" resolves on object "${objectName}", but ` +
             `${unprovisionedAnchorCause(objectName, ref.name)}` +
-            (consequence === 'queried'
-              ? ' — it is used in a QUERY, so the predicate can never match a real value: on ' +
-                'SQLite it silently degrades to constant-false and the surface renders an empty ' +
-                'result that looks exactly like "there is no data".'
-              : ' — the component renders it, blank, on every record.'),
+            FIELD_REF_MISS[consequence].unprovisioned,
           hint: unprovisionedAnchorHint(objectName, ref.name),
         });
       }
       continue;
     }
     findings.push({
-      severity: consequence === 'queried' ? 'error' : 'warning',
+      severity: consequence === 'skipped' ? 'warning' : 'error',
       rule: PAGE_FIELD_UNKNOWN,
       where,
       path: ref.path,
       message:
         `field "${ref.name}" is not a field on object "${objectName}" — ` +
-        (consequence === 'queried'
-          ? 'it is used in a QUERY, so the predicate can never match: the surface ' +
-            'renders an empty result that looks exactly like "there is no data".'
-          : 'the component silently skips it, so it never renders.'),
+        FIELD_REF_MISS[consequence].unknown,
       hint:
         `Fix the field name, or add "${ref.name}" to ${objectName}. ` +
         `References must match the object's field names exactly.` +
@@ -478,6 +587,9 @@ export function validatePageFieldBindings(stack: AnyRec): PageFieldFinding[] {
   const unprovisionedAnchors = indexUnprovisionedAnchors(stack);
   // [#13855] object name → its declared field-group keys, for `section.group`.
   const objectFieldGroups = indexObjectFieldGroups(stack);
+  // [#23013] Field DEFINITIONS (type, `multiple`), for the one question a
+  // name index cannot answer: is a counted field multi-valued?
+  const objectGraph = indexObjectGraph(stack);
 
   const pages = recordsOf(stack.pages);
   for (let pi = 0; pi < pages.length; pi++) {
@@ -523,6 +635,17 @@ export function validatePageFieldBindings(stack: AnyRec): PageFieldFinding[] {
           PAGE_SECTION_GROUP_UNKNOWN,
         ),
       );
+
+      // [#23013] The third question, about the field a section heading
+      // COUNTS: does it exist (the shared existence core, `counted`, which
+      // gates), and once it does, is it multi-valued?
+      const countRefs = componentSectionCountRefs(type, props, base) ?? [];
+      if (countRefs.length > 0) {
+        findings.push(
+          ...checkFieldRefs(countRefs, objectName, objectFields, where, 'counted', unprovisionedAnchors),
+          ...checkSectionCountRefs(countRefs, objectName, objectGraph, where),
+        );
+      }
     }
 
     // ── interfaceConfig (list pages) ──
