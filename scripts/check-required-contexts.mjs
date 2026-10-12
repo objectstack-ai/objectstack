@@ -913,6 +913,37 @@ function pinSteps(job) {
 }
 
 /**
+ * The jobs whose verdict the required `lint` context (`Lint & Repo Gates`) carries, as
+ * `[id, job]` pairs: the `lint` job itself and, since #22991 made it an aggregate, every lane
+ * it BOTH declares in `OS_AGGREGATOR_MEMBERS` AND lists in `needs:`.
+ *
+ * Both, not either. A lane that is only declared is not waited on, and a lane that is only in
+ * `needs:` is the roster drift `check:aggregator-roster` reds — so neither is a place the
+ * pin may live and still be called wired. Read from the parsed document, never from text, for
+ * the reasons `pinSteps` lists. An unreadable document or a missing `lint` job answers no
+ * jobs at all, so every presence assertion over it goes red rather than vacuously green.
+ *
+ * @param {unknown} doc a parsed lint.yml
+ * @returns {Array<[string, Record<string, unknown>]>}
+ */
+function jobsCarriedByLint(doc) {
+  const jobs = doc && typeof doc === 'object' ? doc.jobs : undefined;
+  if (!jobs || typeof jobs !== 'object') return [];
+  const lint = jobs.lint;
+  if (!lint || typeof lint !== 'object') return [];
+  const carried = [['lint', lint]];
+  const env = lint.env && typeof lint.env === 'object' ? lint.env : {};
+  const declared = String(env.OS_AGGREGATOR_MEMBERS ?? '').trim().split(/\s+/).filter(Boolean);
+  const needs = Array.isArray(lint.needs) ? lint.needs.map(String) : typeof lint.needs === 'string' ? [lint.needs] : [];
+  for (const id of declared) {
+    if (!needs.includes(id)) continue;
+    const job = jobs[id];
+    if (job && typeof job === 'object') carried.push([id, job]);
+  }
+  return carried;
+}
+
+/**
  * Judge a registry against already-parsed workflows.
  *
  * Pure: every input is an argument, so `--self-test` exercises the real
@@ -3115,9 +3146,11 @@ async function selfTest() {
     // A PRESENCE assertion about a required context's own wiring, which makes
     // its error direction a silent GREEN: whatever satisfies it wrongly leaves
     // this gate reporting that the pin runs while it does not. `pinSteps` reads
-    // `jobs.lint.steps` and asks each step's `run:` whether it INVOKES the
-    // script; the three text shapes that used to satisfy this are catalogued
-    // there and pinned below in both directions.
+    // a job's steps and asks each step's `run:` whether it INVOKES the script;
+    // the three text shapes that used to satisfy this are catalogued there and
+    // pinned below in both directions. Since #22991 the `lint` job is an
+    // aggregate that runs no gate itself, so "the required job" is the set
+    // `jobsCarriedByLint` reads: `lint` and the lanes it declares AND needs.
     battery('is the pin WIRED into the required job?');
     const lintDoc = parse(sources['lint.yml']);
     const lintJob = lintDoc?.jobs?.lint;
@@ -3129,11 +3162,15 @@ async function selfTest() {
       'wiring: lint.yml must declare a readable `lint` job — this pin cannot say anything about a job it could not read (#4690)',
     );
     /** The seam the fixtures below pin: lint.yml SOURCE in, "is the pin wired" out. */
-    const pinWiredIn = (source) => pinSteps(parse(source)?.jobs?.lint).length > 0;
+    const pinWiredIn = (source) => jobsCarriedByLint(parse(source)).some(([, job]) => pinSteps(job).length > 0);
     assert(
       pinWiredIn(sources['lint.yml']),
-      'wiring: lint.yml\'s `lint` job (the "Lint & Repo Gates" context) must run `pnpm check:required-contexts` — an unwired pin verifies nothing (#4690)',
+      'wiring: lint.yml\'s `lint` job (the "Lint & Repo Gates" context), or a lane it declares and needs, must run `pnpm check:required-contexts` — an unwired pin verifies nothing (#4690)',
     );
+    /** Every carried job that hosts the pin, with the pin steps it hosts. */
+    const hosts = jobsCarriedByLint(lintDoc)
+      .map(([id, job]) => ({ id, job, steps: pinSteps(job) }))
+      .filter((h) => h.steps.length > 0);
     // Unchanged in intent (#10877 left this one alone deliberately: it is an
     // ABSENCE assertion and was never satisfiable by prose), but it consumed
     // the text slice above, so it is re-homed onto the same structural read.
@@ -3142,8 +3179,15 @@ async function selfTest() {
     // does not get pinned. Non-vacuous because the presence assertion above
     // establishes there is at least one.
     assert(
-      pinSteps(lintJob).every((step) => !Object.prototype.hasOwnProperty.call(step, 'if')),
+      hosts.every((h) => h.steps.every((step) => !Object.prototype.hasOwnProperty.call(step, 'if'))),
       'wiring: the required-context pin step must carry NO `if:` — whatever a condition reads is a way for a PR to arrange that this pin does not run on it',
+    );
+    // …and, since the pin moved into a lane (#22991), neither may the LANE: a job-level `if:` is
+    // the same arrangement one level up, and it is the one a step-level read cannot see. The
+    // aggregate itself is exempt by construction — its `if: always()` is what makes it report.
+    assert(
+      hosts.every((h) => h.id === 'lint' || !Object.prototype.hasOwnProperty.call(h.job, 'if')),
+      'wiring: the lane hosting the required-context pin must carry NO job-level `if:` — a skipped lane is a pin that did not run',
     );
 
     // ── the wiring recognizer, in BOTH directions ────────────────────────────
@@ -3218,8 +3262,53 @@ async function selfTest() {
           '        run: pnpm typecheck',
         ),
       ),
-      `wiring: the pin running in a job that is NOT \`lint\` does not wire \`Lint & Repo Gates\` (#10877)`,
+      `wiring: the pin running in a job that is NOT \`lint\`, nor a lane \`lint\` aggregates, does not wire \`Lint & Repo Gates\` (#10877)`,
     );
+    // (q) ⭐ #22991: the pin in a LANE of the `lint` aggregate — declared AND needed — is wired.
+    // The checked-in lint.yml is this shape; the fixture pins the reading apart from it.
+    const aggregateFixture = ({ declare, need, laneIf = null }) =>
+      lintFixture(
+        '  lint:',
+        '    name: Lint & Repo Gates',
+        ...(need ? ['    needs: [lint-lane]'] : []),
+        ...(declare ? ['    env:', '      OS_AGGREGATOR_MEMBERS: lint-lane'] : []),
+        '    if: always()',
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        '      - name: Verify every lint lane succeeded',
+        '        run: node verify.mjs',
+        '  lint-lane:',
+        ...(laneIf ? [`    if: ${laneIf}`] : []),
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        '      - name: Required-context name pin',
+        `        run: pnpm ${PIN_SCRIPT}`,
+      );
+    assert(
+      pinWiredIn(aggregateFixture({ declare: true, need: true })),
+      `wiring: the pin in a lane the \`lint\` aggregate declares AND needs IS wiring (#22991)`,
+    );
+    // (r) …but a lane that is only DECLARED is not waited on: the aggregate can report before
+    // it ends, so its pin is not part of the verdict.
+    assert(
+      !pinWiredIn(aggregateFixture({ declare: true, need: false })),
+      'wiring: the pin in a lane the aggregate declares but does not need is NOT wiring (#22991)',
+    );
+    // (s) …and a lane that is only NEEDED is the roster drift `check:aggregator-roster` reds;
+    // this gate does not call a lane wired that the roster gate calls a defect.
+    assert(
+      !pinWiredIn(aggregateFixture({ declare: false, need: true })),
+      'wiring: the pin in a lane the aggregate needs but does not declare is NOT wiring (#22991)',
+    );
+    // (t) the job-level `if:` on the hosting lane, read the way the live assertion above reads it.
+    {
+      const laneIfDoc = parse(aggregateFixture({ declare: true, need: true, laneIf: "github.event_name != 'pull_request'" }));
+      const laneHosts = jobsCarriedByLint(laneIfDoc).filter(([, job]) => pinSteps(job).length > 0);
+      assert(
+        laneHosts.length === 1 && Object.prototype.hasOwnProperty.call(laneHosts[0][1], 'if'),
+        'wiring: a job-level `if:` on the lane hosting the pin is SEEN by the hosts read (#22991) — the live no-`if:` assertion depends on it',
+      );
+    }
     // (n) the genuine article, spelled the way lint.yml spells it.
     assert(
       pinWiredIn(lintJobFixture('      - name: Required-context name pin', `        run: pnpm ${PIN_SCRIPT}`)),
@@ -3239,14 +3328,14 @@ async function selfTest() {
     const wiring = pkg.scripts?.['check:required-contexts'] ?? '';
     assert(/check-required-contexts\.mjs --self-test/.test(wiring), 'wiring: `check:required-contexts` must run this file\'s --self-test first');
     assert(/check-required-contexts\.mjs(?! --self-test)/.test(wiring), 'wiring: `check:required-contexts` must also run the real pin, not only the self-test');
-    // The pin lives in a job it also pins. That is deliberate and worth stating:
-    // renaming the gate-family job turns this gate red under the NEW name, while
-    // the old required context stops reporting — the PR is blocked from both
-    // sides. That is also why the #9325 rename could not be self-serve: the
+    // The pin lives under a context it also pins — in a lane of the `lint` aggregate since
+    // #22991. That is deliberate and worth stating: renaming the aggregate turns this gate red
+    // under the NEW name, while the old required context stops reporting — the PR is blocked
+    // from both sides. That is also why the #9325 rename could not be self-serve: the
     // repo-side half is checkable here, the Settings half is not reachable at all.
     assert(
       REQUIRED_CONTEXTS.some((entry) => entry.workflow === 'lint.yml' && entry.job === 'lint'),
-      'wiring: the job this gate runs in is itself registered, so a rename of it cannot be the one rename nothing notices',
+      'wiring: the aggregate this gate runs under is itself registered, so a rename of it cannot be the one rename nothing notices',
     );
     // The instruction-surface scan must be wired into the PIN, not only into
     // this self-test — a scan only the self-test exercises is #4690's phantom
