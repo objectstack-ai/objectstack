@@ -48,7 +48,7 @@ type Issue = { code: string; path: PropertyKey[]; message: string };
 const issuesOf = (r: { success: boolean; error?: { issues: unknown[] } }): Issue[] =>
   (r.success ? [] : (r.error?.issues ?? [])) as Issue[];
 
-const MANIFEST = { id: 'com.example.url_doors', name: 'url_doors', version: '1.0.0', type: 'app' };
+const MANIFEST = { id: 'com.example.doors', name: 'doors', version: '1.0.0', type: 'app' };
 
 // ===========================================================================
 // 1. DashboardHeaderActionSchema.actionUrl
