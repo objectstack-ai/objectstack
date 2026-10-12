@@ -159,20 +159,33 @@ export function rewriteObjectNamePrefix(
 }
 
 /**
- * Any `name: '<oldNs>_…'` literal still present after a rewrite — i.e. metadata
- * the scaffolded project will be rejected for. Each entry is `file:line`
- * relative to `dir`, plus the offending text.
+ * Any `name: '<oldNs>_…'` literal still present after a rewrite that does NOT
+ * also carry the `<newNs>_` prefix — i.e. metadata the scaffolded project will
+ * be rejected for. Each entry is `file:line` relative to `dir`, plus the
+ * offending text.
+ *
+ * Both halves of the predicate are needed. A new namespace may itself begin
+ * with `<oldNs>_` (project `blank-probe` → namespace `blank_probe` under the
+ * `blank` template), and then every CORRECTLY rewritten name (`blank_probe_note`)
+ * carries the old prefix too; testing the old prefix alone reports the rewrite
+ * as stale and refuses a valid project. A name under `<newNs>_` satisfies the
+ * `${namespace}_${shortName}` rule whatever else it starts with, so it is
+ * never stale. One predicate for every template namespace — no name is special.
+ * Judged per literal, so a correct name cannot hide a stale one on its line.
  */
 export function findStaleNamespacePrefixes(
   dir: string,
   oldNs: string,
+  newNs: string,
 ): { file: string; line: number; text: string }[] {
-  const re = namePrefixRe(oldNs, '');
+  const oldRe = namePrefixRe(oldNs, 'g');
+  const newRe = namePrefixRe(newNs, '');
   const stale: { file: string; line: number; text: string }[] = [];
   for (const file of tsFiles(dir)) {
     const lines = fs.readFileSync(file, 'utf8').split('\n');
     for (let i = 0; i < lines.length; i++) {
-      if (re.test(lines[i])) {
+      const literals = [...lines[i].matchAll(oldRe)].map((m) => m[0]);
+      if (literals.some((literal) => !newRe.test(literal))) {
         stale.push({
           file: path.relative(dir, file),
           line: i + 1,

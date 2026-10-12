@@ -242,7 +242,9 @@ one of two doors, each writing only what it owns:
   CRUD) is transparently redirected into an env-scope metadata save
   (`saveMetaItem`), and the data record is a **pure projection** the platform
   re-derives on every metadata mutation (awaited — no staleness window) and at
-  boot. Deleting an artifact-backed set through this door **resets** it to its
+  boot. Under a `group` or `isolated` tenancy posture that Setup write is the
+  platform operator's: anyone else is refused `403 PERMISSION_DENIED` before the
+  redirect (ADR-0131 D3). Deleting an artifact-backed set through this door **resets** it to its
   declared body rather than removing it; renaming through the data door is
   rejected (the name is the metadata identity — clone instead). Subject
   assignments remain plain config rows, unchanged.
