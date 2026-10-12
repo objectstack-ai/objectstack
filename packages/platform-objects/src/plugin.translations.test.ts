@@ -153,6 +153,30 @@ describe('PlatformObjectsPlugin: a host translation bundle wins over the platfor
     expect(i18n.t(PLURAL, 'zh-CN')).toBe(platform('zh-CN').pluralLabel);
   });
 
+  it('on that late path too, the authored overlay of a plugin ordered after this one is never written in', async () => {
+    const ctx = makeCtx();
+    const plugin = new PlatformObjectsPlugin();
+    await plugin.init(ctx);
+    // The next plugin's init() wires the authored-translation sync (as AppPlugin does).
+    let i18n: ReturnType<typeof createMemoryI18n> | undefined;
+    ctx.hook('kernel:ready', () => {
+      i18n?.replaceAuthoredTranslations({
+        'zh-CN': { objects: { sys_organization: { pluralLabel: '已编写' } } },
+      });
+    });
+    await plugin.start(ctx); // no i18n service yet
+    i18n = createMemoryI18n();
+    ctx.registerService('i18n', i18n);
+    i18n.loadTranslations('zh-CN', HOST_ZH);
+
+    await ctx._flush('kernel:ready');
+    expect(i18n.t(PLURAL, 'zh-CN')).toBe('已编写');
+    expect(i18n.t(LABEL, 'zh-CN')).toBe('工作区');
+
+    i18n.replaceAuthoredTranslations({});
+    expect(i18n.t(PLURAL, 'zh-CN')).toBe(platform('zh-CN').pluralLabel);
+  });
+
   it('loads each bundle once per service: the kernel:ready backstop adds nothing after start()', async () => {
     const ctx = makeCtx();
     const real = createMemoryI18n();
