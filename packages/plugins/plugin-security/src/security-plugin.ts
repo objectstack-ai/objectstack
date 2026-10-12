@@ -4503,13 +4503,15 @@ export class SecurityPlugin implements Plugin {
           }
           // [#2747] When the owning package is uninstalled, revoke its data-plane permission
           // rows (package-owned sets + their position/user bindings + the
-          // package's suggestion rows) so grants die with the package — the
-          // "no ghost grants" clause of ADR-0090 D5.
+          // package's suggestion rows) and the grants naming the sets it
+          // declared (`args.declared`, captured by the door before it withdrew
+          // the package) so grants die with the package — the "no ghost
+          // grants" clause of ADR-0090 D5.
           if (protocol && typeof protocol.registerUninstallCleanup === 'function') {
             protocol.registerUninstallCleanup(
               'security.package-permissions',
-              async (args: { packageId: string }) => {
-                const r = await cleanupPackagePermissions(ql, args.packageId, ctx.logger);
+              async (args: { packageId: string; declared?: { permission?: string[] } }) => {
+                const r = await cleanupPackagePermissions(ql, args.packageId, ctx.logger, args.declared);
                 // [#22801 → A] The package's acceptance rows are gone with it;
                 // `everyone` is derived again without its sets.
                 await this.declareEveryone(ctx.logger);

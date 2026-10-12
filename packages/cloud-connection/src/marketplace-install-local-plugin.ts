@@ -148,7 +148,8 @@ import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
 import { matchSeedRows, purgeSeedRows, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
 import type { IHttpServer, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
-import type { DeletePackageRequest, UninstallCleanupOutcome } from '@objectstack/metadata-protocol';
+import type { DeletePackageRequest, UninstallCleanupOutcome, UninstallDeclared } from '@objectstack/metadata-protocol';
+import { captureUninstallDeclared } from '@objectstack/metadata-protocol';
 
 const ROUTE_BASE = '/api/v1/marketplace/install-local';
 
@@ -171,7 +172,7 @@ const ROUTE_BASE = '/api/v1/marketplace/install-local';
  */
 type UninstallCleanupRunner = {
     runUninstallCleanups?(
-        request: Pick<DeletePackageRequest, 'packageId' | 'actor'>,
+        request: Pick<DeletePackageRequest, 'packageId' | 'actor'> & { declared?: UninstallDeclared },
     ): Promise<UninstallCleanupOutcome[]>;
 };
 
@@ -1706,13 +1707,19 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // `metadata:reloaded` in that window would re-project the very sets
         // they had just selected and removed. The cleanups lose nothing by
         // going second: `deletePackage` already runs every registered cleanup
-        // after its withdrawal, and the one registered today
-        // (`security.package-permissions`) selects by package id in the store,
-        // never through the registry.
+        // after its withdrawal, and `security.package-permissions` reads no
+        // registry: it selects by package id in the store, and by the names
+        // handed to it. [ADR-0090 D5] Those names are captured just before the
+        // withdrawal releases them — synchronously, so still no `await` before
+        // it, at the same point and through the same helper as
+        // `deletePackage` — and the cleanup revokes the grants naming them.
+        let registry: unknown;
+        try { registry = ctx.getService<IObjectQLEngine>('objectql')?.registry; } catch { /* no data engine — nothing registered */ }
+        const declared = captureUninstallDeclared(registry, manifestId);
         const withdrawal = this.withdrawFromRunningKernel(ctx, manifestId);
         const cleanups = [
             ...(withdrawal ? [withdrawal] : []),
-            ...await this.runUninstallCleanups(ctx, manifestId, admission.userId),
+            ...await this.runUninstallCleanups(ctx, manifestId, admission.userId, declared),
         ];
         ctx.logger?.info?.(
             `[MarketplaceInstallLocal] uninstalled ${manifestId} (cached manifest removed; `
@@ -1839,6 +1846,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         ctx: PluginContext,
         manifestId: string,
         actor: string,
+        declared?: UninstallDeclared,
     ): Promise<UninstallCleanupOutcome[]> => {
         let protocol: UninstallCleanupRunner | undefined;
         try { protocol = ctx.getService<UninstallCleanupRunner>('protocol'); } catch { /* no protocol service */ }
@@ -1855,7 +1863,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             );
         } else {
             try {
-                outcomes = await protocol.runUninstallCleanups({ packageId: manifestId, actor });
+                outcomes = await protocol.runUninstallCleanups({ packageId: manifestId, actor, ...(declared ? { declared } : {}) });
             } catch (err: any) {
                 ctx.logger?.warn?.(`[MarketplaceInstallLocal] the uninstall cleanups of ${manifestId} could not be run: ${err?.message ?? err}`);
                 outcomes = notRun('the uninstall cleanups could not be run');

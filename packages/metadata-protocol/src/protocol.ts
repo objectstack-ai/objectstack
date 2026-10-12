@@ -5149,7 +5149,67 @@ export type PublishMaterializer = (args: {
 export type UninstallCleanup = (args: {
     packageId: string;
     actor?: string;
+    /**
+     * What the package declared, read from the registry just before the door
+     * withdrew it ({@link captureUninstallDeclared}). Optional: absent when the
+     * registry did not hold the package or cannot answer, and a cleanup that
+     * does not read it behaves as before.
+     */
+    declared?: UninstallDeclared;
 }) => Promise<{ success: boolean; removed: number; error?: string }>;
+
+/**
+ * [ADR-0090 D5, ADR-0131 D4] The security-catalog names an uninstalled package
+ * held. A grant names its set, and the package's sets are served from the
+ * registry, not stored, so after the withdrawal nothing else knows them.
+ */
+export interface UninstallDeclared {
+    /** The permission-set names the package held. */
+    permission?: string[];
+}
+
+/**
+ * Capture what `packageId` declared, for {@link UninstallCleanup}'s `declared`
+ * — the ONE capture both uninstall doors (`deletePackage` and install-local's
+ * `DELETE`) call, at the same point: after the uninstall is decided and just
+ * BEFORE `registry.uninstallPackage`, which releases the names. The withdrawal
+ * still precedes the cleanups (#21576); only what they are handed grows.
+ *
+ * Two sources, unioned: the names the registry says the package holds (an
+ * installed package's claims and item slots), and the `permission` rows of the
+ * package's `sys_metadata` the door already read (`stored`). The second is
+ * what names a writable base's sets (ADR-0070): an item authored into a base
+ * is stored, and the registry holds it in the bare slot with no `_packageId`
+ * (provenance `org`, measured), so the registry alone cannot attribute it to
+ * the base.
+ *
+ * `undefined` when neither source names a set — so a package that declared
+ * none hands its cleanups exactly the request they had before.
+ */
+export function captureUninstallDeclared(
+    registry: unknown,
+    packageId: string,
+    stored?: ReadonlyArray<{ type?: unknown; name?: unknown } | null | undefined>,
+): UninstallDeclared | undefined {
+    const names = new Set<string>();
+    const held = (registry as { securityCatalogNamesHeldBy?: (id: string, type: 'permission') => unknown } | null | undefined)
+        ?.securityCatalogNamesHeldBy;
+    if (typeof held === 'function') {
+        try {
+            const fromRegistry = held.call(registry, packageId, 'permission');
+            if (Array.isArray(fromRegistry)) {
+                for (const n of fromRegistry) if (typeof n === 'string' && n !== '') names.add(n);
+            }
+        } catch { /* the registry could not say; the stored rows still can */ }
+    }
+    if (stored) {
+        for (const row of stored) {
+            const type = row?.type;
+            if ((type === 'permission' || type === 'permissions') && typeof row?.name === 'string' && row.name !== '') names.add(row.name);
+        }
+    }
+    return names.size > 0 ? { permission: [...names] } : undefined;
+}
 
 /** Per-cleanup outcome reported on the `deletePackage` response. */
 export interface UninstallCleanupOutcome {
@@ -5950,7 +6010,7 @@ export class ObjectStackProtocolImplementation implements
      * does — and never swallows it.
      */
     async runUninstallCleanups(
-        request: Pick<DeletePackageRequest, 'packageId' | 'actor'>,
+        request: Pick<DeletePackageRequest, 'packageId' | 'actor'> & { declared?: UninstallDeclared },
     ): Promise<UninstallCleanupOutcome[]> {
         const cleanups: UninstallCleanupOutcome[] = [];
         for (const [name, cleanup] of this.uninstallCleanups) {
@@ -5958,6 +6018,7 @@ export class ObjectStackProtocolImplementation implements
                 const r = await cleanup({
                     packageId: request.packageId,
                     ...(request.actor ? { actor: request.actor } : {}),
+                    ...(request.declared ? { declared: request.declared } : {}),
                 });
                 cleanups.push({
                     name,
@@ -23990,6 +24051,11 @@ export class ObjectStackProtocolImplementation implements
         // registry that lacks that method, or a throw nothing asked ahead of
         // time: it is logged, not fatal, because the durable row is already
         // gone and the next boot is clean either way.
+        //
+        // [ADR-0090 D5] What the package declared is captured first: the
+        // withdrawal releases its names, and the cleanups below revoke the
+        // grants that name them.
+        const declared = captureUninstallDeclared((this.engine as any)?.registry, request.packageId, rows);
         try {
             (this.engine as any)?.registry?.uninstallPackage?.(request.packageId);
         } catch (e) {
@@ -24006,7 +24072,7 @@ export class ObjectStackProtocolImplementation implements
         // a security condition) is visible to the caller, never silent.
         // [#21490] Through the registry's one runner, which install-local's
         // uninstall door calls too.
-        const cleanups = await this.runUninstallCleanups(request);
+        const cleanups = await this.runUninstallCleanups({ ...request, ...(declared ? { declared } : {}) });
 
         return {
             success: failed.length === 0 && deleted.length > 0,
