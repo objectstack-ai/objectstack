@@ -210,8 +210,6 @@
     "EmailServiceConfigParsed": "src/system/email-config.zod.ts#EmailServiceConfigParsed (type)",
     "EmailServiceConfigSchema": "src/system/email-config.zod.ts#EmailServiceConfigSchema (const)",
     "EmailTemplateDefinition": "src/system/email-template.zod.ts#EmailTemplateDefinition (type)",
-    "EmailTemplateDefinitionCategory": "src/system/email-template.zod.ts#EmailTemplateDefinitionCategory (type)",
-    "EmailTemplateDefinitionCategorySchema": "src/system/email-template.zod.ts#EmailTemplateDefinitionCategorySchema (const)",
     "EmailTemplateDefinitionParsed": "src/system/email-template.zod.ts#EmailTemplateDefinitionParsed (type)",
     "EmailTemplateDefinitionSchema": "src/system/email-template.zod.ts#EmailTemplateDefinitionSchema (const)",
     "EmailTemplateDefinitionVariable": "src/system/email-template.zod.ts#EmailTemplateDefinitionVariable (type)",

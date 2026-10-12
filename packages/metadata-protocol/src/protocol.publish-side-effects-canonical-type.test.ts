@@ -55,7 +55,7 @@
 //       this helper calling `syncObjectSchema` with the folded
 //       spelling, rather than passing for want of an assertion)
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions, imported from
 // `@objectstack/metadata-core` and NOT from `@objectstack/objectql`: objectql
 // depends on this package, so that import would close a dependency cycle turbo
@@ -103,7 +103,7 @@ function matchesWhere(r: Row, where: Record<string, unknown>): boolean {
     return true;
 }
 
-function makeStubEngine() {
+function makeStubEngine(refused: ReadonlySet<string> = new Set()) {
     const rows = new Map<string, Row>();
     const historyRows: HistoryRow[] = [];
     let nextId = 0;
@@ -183,7 +183,9 @@ function makeStubEngine() {
         async transaction<T>(cb: (ctx: unknown, info: { owned: boolean }) => Promise<T>): Promise<T> {
             return cb(undefined, { owned: true });
         },
+        // [#22985] A name in `refused` is the driver refusing that object's DDL.
         syncObjectSchema: vi.fn(async (name: string) => {
+            if (refused.has(name)) throw new Error(`there is already an index named ${name}`);
             syncedObjects.push(name);
             return true;
         }),
@@ -200,8 +202,8 @@ function makeStubEngine() {
     return { engine, rows, syncedObjects };
 }
 
-function makeProtocol() {
-    const { engine, rows, syncedObjects } = makeStubEngine();
+function makeProtocol(refused?: ReadonlySet<string>) {
+    const { engine, rows, syncedObjects } = makeStubEngine(refused);
     const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_prod') as any;
     return { protocol, rows, syncedObjects, engine };
 }
@@ -325,5 +327,80 @@ describe('[#8820] publish Phase 2 resolves the object table from the folded type
         await protocol.publishMetaItem({ type: 'objects', name: 'ticket' });
 
         expect(seen).toEqual(['object/ticket']);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// [#22985] A REFUSED storage sync on publish is an `error`, once — and the
+// publish is not failed.
+// ---------------------------------------------------------------------------
+// `ensureObjectStorage` runs after the publish has been written and registered,
+// so when the driver refuses its `syncObjectSchema` the publish still answers
+// success and the object is served with no table behind it. From the outside
+// nothing looks wrong, which is the class AGENTS.md "Degradation log levels"
+// sends to `error`. The wording is not pinned: the pins hold the level, the
+// count, the named object, the named remedies and the driver's refusal as its
+// own argument — and the "looks healthy" half, as the publish verdict the
+// caller reads. Driven through this file's stub because it is the one that
+// already carries the publish path end to end.
+
+/** The fragment an operator greps for; the rest of the wording is not pinned. */
+const REFUSED_HEADLINE = 'its storage was NOT created or altered';
+
+describe('[#22985] a refused object-storage sync on publish is an error, once', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    function spyConsole() {
+        return {
+            error: vi.spyOn(console, 'error').mockImplementation(() => {}),
+            warn: vi.spyOn(console, 'warn').mockImplementation(() => {}),
+        };
+    }
+
+    async function publish(protocol: any, name: string) {
+        await protocol.saveMetaItem({
+            type: 'object', name, item: objectBody(name), packageId: PKG, mode: 'draft',
+        });
+        return protocol.publishMetaItem({ type: 'object', name });
+    }
+
+    it('the publish still answers success, and exactly one error line names the object, the remedy and the refusal', async () => {
+        const spy = spyConsole();
+        const { protocol, syncedObjects } = makeProtocol(new Set(['ticket']));
+
+        const res = await publish(protocol, 'ticket');
+
+        // The half that makes it the durability class: the caller is told the
+        // publish succeeded, while the storage it was published for is absent.
+        expect(res.success).toBe(true);
+        expect(syncedObjects).toEqual([]);
+
+        const reports = spy.error.mock.calls.filter((args) => String(args[0]).includes(REFUSED_HEADLINE));
+        expect(reports).toHaveLength(1);
+        const [message, refusal] = reports[0];
+        expect(message).toContain("object 'ticket'");
+        // ② the fix, by its named subjects.
+        expect(message).toContain('publish the object again');
+        expect(message).toContain('restart');
+        // One line: the first line carries both halves, and the driver's
+        // refusal rides as its own argument rather than inside it.
+        expect(message).not.toContain('\n');
+        expect(message).not.toContain('there is already an index');
+        expect(refusal).toBe('there is already an index named ticket');
+        // …and it is not ALSO reported at a quieter level.
+        expect(spy.warn.mock.calls.filter((args) => /table sync failed|ticket/.test(String(args[0])))).toEqual([]);
+    });
+
+    it('CONTROL: a publish whose sync succeeds logs no error at all', async () => {
+        const spy = spyConsole();
+        const { protocol, syncedObjects } = makeProtocol();
+
+        const res = await publish(protocol, 'ticket');
+
+        expect(res.success).toBe(true);
+        expect(syncedObjects).toEqual(['ticket']);
+        expect(spy.error).not.toHaveBeenCalled();
     });
 });

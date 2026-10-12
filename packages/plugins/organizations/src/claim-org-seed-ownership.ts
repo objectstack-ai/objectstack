@@ -19,6 +19,21 @@
  * Scoped to a single org (`organization_id = organizationId`) so it never
  * touches another tenant's rows. Idempotent: only NULL-owned rows are updated.
  * `managedBy` and `sys_*` tables are skipped.
+ *
+ * ## [#23008] The claim dispatches no automation
+ *
+ * Re-owning a seed row is attribution, the step that completes the seed, not a
+ * user event, so every write runs under {@link CLAIM_WRITE_CTX} — the same
+ * context its single-tenant twin `claimSeedOwnership` adopted (#22067). The
+ * engine reads `skipAutomations` in two places: the hook dispatch skips every
+ * hook bound FROM METADATA (an app's lifecycle hooks), and it implies
+ * `skipTriggers`, so the record-change trigger dispatches no flow — no approval
+ * opens and no notification goes out for the claim. Hooks plugins register in
+ * code carry no metadata binding and still run on every claimed row: the audit
+ * writer, capability gates and the sharing projection. The opt-out never
+ * bypasses audit or sharing (#2922).
+ *
+ * The real-engine half of this is `claim-org-seed-ownership-dispatch.pin.test.ts`.
  */
 
 import type { ServiceObject } from '@objectstack/spec/data';
@@ -32,7 +47,30 @@ interface ClaimOwnershipOptions {
   };
 }
 
+/**
+ * The context of the claim's per-object READ: system-elevated, nothing more.
+ *
+ * The flag stays off the read on purpose. A read starts no record-change flow,
+ * and a metadata-bound `beforeFind` hook is an app's read-filter seam: keeping
+ * it in force keeps the row set the claim selects equal to what every other
+ * system read of that object sees.
+ */
 const SYSTEM_CTX = { isSystem: true };
+
+/**
+ * The context of the claim's WRITE: system-elevated, with metadata-bound
+ * automation off. See "The claim dispatches no automation" above.
+ *
+ * `skipAutomations` alone, never a narrower flag. It is the spec's one spelling
+ * of "skip metadata hooks AND record-change flows, keep code-registered hooks"
+ * (`ExecutionContext`, `@objectstack/spec/kernel`), and `skipTriggers` alone
+ * would leave the app's metadata hooks firing on every claimed row.
+ *
+ * A plain literal, like {@link SYSTEM_CTX}: `pnpm check:tenant-audit-census`
+ * reads `isSystem` off it statically and does not see through a `satisfies`
+ * wrapper.
+ */
+const CLAIM_WRITE_CTX = { isSystem: true, skipAutomations: true };
 
 function hasField(schema: ServiceObject, field: string): boolean {
   const fields: any = (schema as any)?.fields;
@@ -48,7 +86,8 @@ function hasField(schema: ServiceObject, field: string): boolean {
  *   (a) are not `managedBy` (skip sys_/auth/platform tables),
  *   (b) are not `sys_*`-namespaced,
  *   (c) declare BOTH `owner_id` and `organization_id`,
- * and updates the org's unowned rows as `isSystem`. Returns a per-object summary.
+ * and updates the org's unowned rows as `isSystem` with `skipAutomations`.
+ * Returns a per-object summary.
  */
 export async function claimOrgSeedOwnership(
   ql: OrgScopingEngine,
@@ -92,7 +131,7 @@ export async function claimOrgSeedOwnership(
       for (const row of list) {
         if (!row?.id) continue;
         try {
-          await ql.update(schema.name, { id: row.id, owner_id: ownerUserId }, { context: SYSTEM_CTX });
+          await ql.update(schema.name, { id: row.id, owner_id: ownerUserId }, { context: CLAIM_WRITE_CTX });
           updated += 1;
         } catch (e) {
           logger?.warn?.(`[org-scoping] claimOrgSeedOwnership failed for ${schema.name}:${row.id}`, {

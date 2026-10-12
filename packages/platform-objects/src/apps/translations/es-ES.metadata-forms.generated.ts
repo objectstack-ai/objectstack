@@ -2230,9 +2230,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       label: {
         label: "Etiqueta"
       },
-      category: {
-        label: "Categoría"
-      },
       locale: {
         label: "Configuración regional",
         helpText: "Etiqueta BCP-47, p. ej. en-US, zh-CN"
@@ -2264,10 +2261,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       active: {
         label: "Activo",
         helpText: "Si no está marcado, sendTemplate() devuelve TEMPLATE_INACTIVE."
-      },
-      isSystem: {
-        label: "Integrado del sistema",
-        helpText: "Plantilla integrada; los tenants pueden sobrescribirla, pero no deberían eliminarla."
       }
     }
   },
