@@ -220,6 +220,30 @@ export function readActivationBody(
 }
 
 /**
+ * The deployment's EFFECTIVE tenancy posture for this request, read the way
+ * {@link refuseUngrantedActivationWrite} reads it (the reasoning lives in that
+ * function's body): `undefined` when no `tenancy` service is registered — the
+ * same deployment shape as `single` — and a loud
+ * `AuthzStoreUnavailableError('tenancy')` when one is registered and cannot
+ * answer, because the posture is an authorization input and was never decided.
+ * [ADR-0131 D3] The metadata door's walled catalog refusal reads it through
+ * this same function, so the two posture-conditional gates of this transport
+ * cannot read two different postures.
+ */
+export async function readEffectiveTenancyPosture(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): Promise<ReturnType<typeof effectiveTenancyPosture>> {
+    try {
+        return effectiveTenancyPosture(
+            await deps.resolveServiceOrLoud(context, 'tenancy', context.environmentId),
+        );
+    } catch (err) {
+        throw new AuthzStoreUnavailableError('tenancy', err);
+    }
+}
+
+/**
  * The §5 gate itself.
  *
  * Returns a refusal to short-circuit on, `undefined` to proceed — the shape
@@ -298,14 +322,7 @@ export async function refuseUngrantedActivationWrite(
     // identity step and `./keys.ts` already resolve this exact name with, so
     // all three read one deployment's posture through one scope: an outage
     // answered here is the service's, never this call site's omission.
-    let posture;
-    try {
-        posture = effectiveTenancyPosture(
-            await deps.resolveServiceOrLoud(context, 'tenancy', context.environmentId),
-        );
-    } catch (err) {
-        throw new AuthzStoreUnavailableError('tenancy', err);
-    }
+    const posture = await readEffectiveTenancyPosture(deps, context);
     if (!posture || !postureEnforcesWall(posture)) return undefined;
 
     // [ADR-0095 D2/D3 · #15981] The platform-operator test is the posture RUNG.
