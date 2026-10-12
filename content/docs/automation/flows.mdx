@@ -235,7 +235,7 @@ positions that hand a value to the client: an object form's `defaults` (each
 field's prefill), a field's `defaultValue`, and an object form's `recordId`,
 the list a `loop` (with a `body`) and a `map` iterate, their `collection`, and a
 `notify` node's computed values: its `recipients`, its `templateData` map and
-its `sourceId`. Each value
+its `sourceId`, and an `http` node's `body`, the payload it sends. Each value
 takes a CEL value envelope or a literal — a `collection`'s literal is an inline
 array, never a string, and a `recipients` list holds one entry per recipient,
 each a string or an envelope. Only a slot's top-level
@@ -380,7 +380,8 @@ does evaluate:
 ### Text slots read double-brace holes
 
 A flow's **text** slots — a `notify` node's `title`, `message` and `actionUrl`
-(the link, since [#19939](https://github.com/objectstack-ai/objectstack/issues/19939)), a `screen` node's `title` and `description`, and a
+(the link, since [#19939](https://github.com/objectstack-ai/objectstack/issues/19939)), an `http` node's `url` and each of its `headers` values
+(since the same card), a `screen` node's `title` and `description`, and a
 refusing `end` node's `message` — render through the formula template engine
 ([#22110], ADR-0032 §3): each
 `{{ }}` hole is a **variable path** with an optional **formatter**, and every
@@ -459,12 +460,26 @@ check.
   type: 'http',
   label: 'Post Order Event',
   config: {
-    url: 'https://api.example.com/v1/order-events',
-    method: 'POST',
-    body: { event: 'order.created', name: '{record.name}' },
+    url: 'https://api.example.com/v1/order-events/{{ record.id }}',   // a text slot: `{{ }}` holes
+    method: 'POST',                                                  // a literal, read as written
+    headers: { 'X-Request-Id': '{{ $runId }}' },                     // each value a text slot
+    // a value slot: one CEL value envelope builds the whole payload
+    body: { dialect: 'cel', source: "{'event': 'order.created', 'name': record.name}" },
   },
 }
 ```
+
+An `http` node reads each key by what it is. `url` and every `headers` value
+are **text** slots with `{{ }}` holes, like a notify title; a header that
+renders to no text is not sent. `body` is a **value** slot: a CEL value
+envelope evaluated per run to the payload — a CEL map literal builds an object,
+`'Done: ' + record.title` is text with a hole — or a literal sent as written,
+where an envelope nested inside the literal is data. `method`, `durable`,
+`timeoutMs` and `signingSecret` are literals, read as written. A single-brace
+`{…}` token is refused at every one of them, with its `{{ }}` or CEL spelling,
+or for a literal with the value itself; the request is rendered once, before
+the call, so a `durable` callout enqueues exactly the request the inline call
+would send.
 
 <Callout type="warn" title="Do not put a secret in an http node's url or headers">
 A flow definition, including an `http` node's `url` and `headers`, is served to every member who can read flows. A token, API key or signed webhook url written there is readable by all of them. Route an outbound credential by where it sits, and call the connector with a `connector_action` node instead — see [Connectors](/docs/automation/connectors#authentication). A credential in a header goes to a declarative connector with `bearer`, `basic` or `api-key` auth, whose `auth.credentialRef` names the secret. A key in the query string goes to `api-key` auth with `paramName`. No `credentialRef` variant carries a secret in the url path, so an incoming-webhook url (whose path is the secret) cannot be routed that way: call the service through a token-authenticated connector instead, such as the `slack` connector, whose bot token is supplied to the plugin by host code rather than written in the flow (it is registered by that plugin, not declared as a `connectors:` instance). Otherwise such a url is served with the definition. Only `signingSecret` and a start node's `secret` are kept out of a flow saved through the metadata API: the metadata save door stores each in a write-only, encrypted flow credential store, a read never returns it, and the engine reads it only to verify an inbound post or sign an outbound request. A packaged flow keeps its literal in its package source. The literal is withheld when the definition is served, and a credential store row for that flow, where one exists, wins when the engine verifies or signs. `url` and `headers` are stored and served as written.
@@ -2090,11 +2105,12 @@ failures so one broken flow does not abort startup.
 
 A flow computes with **one expression dialect, CEL**: every condition is bare
 CEL, and every computed value (a field value, an assignment value) is a CEL
-value envelope. **Text** slots — a `notify` title, message or link, a screen
-title or description, a refusing `end` node's message — are `{{ }}` templates
+value envelope. **Text** slots — a `notify` title, message or link, an `http`
+url and header values, a screen title or description, a refusing `end` node's
+message — are `{{ }}` templates
 (see [text slots](#text-slots-read-double-brace-holes)). Single braces remain
-only on the value-like positions that hand a resolved value over and that the
-retirement has not reached yet (an `http` body, a CRUD `filter` value, …).
+only on the value-like position that hands a resolved value over and that the
+retirement has not reached yet, a CRUD `filter` value.
 
 | Where | Dialect | Write it like | Bindings |
 |:---|:---|:---|:---|
@@ -2103,7 +2119,7 @@ retirement has not reached yet (an `http` body, a CRUD `filter` value, …).
 | Decision-node `conditions[].expression` | **CEL** (bare, no braces) | `order_amount > 10000` | flow variables by name, `vars.*` and `current_user` |
 | Field values and assignment values, as a **literal** | none — written as it is | `'open'`, `42`, `true`, `['a', 'b']` | — (a `{…}` template token is refused here since [#19939](https://github.com/objectstack-ai/objectstack/issues/19939), `{$User.*}` and the date macros `{NOW()}` / `{TODAY() ± N}` included: a date is `isoDate(today())` / `isoDatetime(now())` in an envelope) |
 | Field values and assignment values, as a **CEL value envelope** | **CEL** (in an envelope) | `{ dialect: 'cel', source: 'round(price * 100.0) / 100.0' }` | flow variables by name, `vars.*` and `current_user` — the whole CEL stdlib (`joinNonEmpty`, …) |
-| Text slots — `notify` `title` / `message` / `actionUrl`, `screen` `title` / `description`, `end` `message` | **template** (`{{ }}` holes) | `'Deal won: {{ record.name }} ({{ record.amount \| currency }})'` | flow variables by name (`$`-named ones too: `{{ $error.message }}`) — a path and an optional formatter, never logic |
+| Text slots — `notify` `title` / `message` / `actionUrl`, `http` `url` and `headers` values, `screen` `title` / `description`, `end` `message` | **template** (`{{ }}` holes) | `'Deal won: {{ record.name }} ({{ record.amount \| currency }})'` | flow variables by name (`$`-named ones too: `{{ $error.message }}`) — a path and an optional formatter, never logic |
 
 A value slot takes either form, chosen by shape: an object naming a `dialect`
 is a CEL envelope, everything else is a literal. The `{token}` template dialect
@@ -2135,7 +2151,7 @@ and is read as `vars["current_user"]` / `vars["vars"]`.
    braces.
 3. **A `{…}` template in a value slot** — `total: '{round(x * 100) / 100}'`,
    `owner: '{record.owner}'` — is refused with the CEL spelling to write
-   instead. In a single-brace position (an `http` body, a `notify` recipient), an
+   instead. In a single-brace position (a CRUD `filter` value), an
    unsupported function in braces — `'{ROUND(x, 2)}'`, `'{Math.round(x)}'`,
    `'{(x).toFixed(2)}'` — fails the node with a **named error** listing the
    supported set and, where one is close, the spelling you meant. Before #11060

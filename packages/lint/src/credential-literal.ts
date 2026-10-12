@@ -43,10 +43,14 @@
  *
  * A pair is credential-shaped when R1 or R2 holds AND the value is a
  * **literal**: a non-blank string carrying no `{…}` platform template. A
- * template (`Bearer {api_token}`) is resolved per run from flow variables — the
- * pattern is `http-nodes.ts`'s own interpolation token, `/\{([^{}]+)\}/g` in
- * `template.ts` — so it is not a credential sitting in the definition, and it
- * draws nothing. A non-string value draws nothing either: the positions this
+ * template is resolved per run from flow variables, so it is not a credential
+ * sitting in the definition, and it draws nothing. Since #19939 an `http`
+ * node's `url` and `headers` values are text slots whose holes are
+ * `{{ api_token }}` (`Bearer {{ api_token }}`); the pattern below matches the
+ * inside of such a hole, and it still matches a 17.x single-brace token
+ * (`Bearer {api_token}`), which those slots now refuse at `error` — so neither
+ * spelling is reported as a credential here, and the refusal is the text-slot
+ * judge's. A non-string value draws nothing either: the positions this
  * guards hold strings, and a `true` / `3600` under a credential-sounding name
  * is a setting, not a secret.
  *
@@ -95,7 +99,10 @@ const CREDENTIAL_NAME_PAIRS: readonly string[] = ['api-key', 'private-key', 'acc
 /** R2: an auth scheme followed by a credential. */
 const AUTH_SCHEME_VALUE = /^\s*(?:bearer|basic|token|digest|apikey)\s+\S/i;
 
-/** A `{…}` platform template — the `http` executor's own interpolation token. */
+/**
+ * A `{…}` platform template — a `{{ }}` hole (its inside matches) or a 17.x
+ * single-brace token, which the text slots refuse (#19939).
+ */
 const PLATFORM_TEMPLATE = /\{[^{}]+\}/;
 
 /** R1. */
@@ -127,7 +134,7 @@ function isCredentialName(name: string): boolean {
  * isCredentialShapedLiteral('Authorization', 'Bearer abc')   // true  (R1 + R2)
  * isCredentialShapedLiteral('x-api-key', 'abc')              // true  (R1)
  * isCredentialShapedLiteral('X-Custom', 'Bearer abc')        // true  (R2)
- * isCredentialShapedLiteral('Authorization', 'Bearer {tok}') // false (a template)
+ * isCredentialShapedLiteral('Authorization', 'Bearer {{ tok }}') // false (a template)
  * isCredentialShapedLiteral('X-Trace', 'abc')                // false
  */
 export function isCredentialShapedLiteral(name: string, value: unknown): boolean {

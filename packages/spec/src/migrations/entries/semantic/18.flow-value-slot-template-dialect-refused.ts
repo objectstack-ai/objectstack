@@ -22,6 +22,11 @@ import type { SemanticMigration } from '../../types.js';
 // notify node's sourceObject, actorId and payload values, which the template
 // resolved too but no flow computed, are literals now, read as written: a
 // token there is refused with the literal's remedy, and an envelope there too.
+// The surface widens to an http node's body, one value, the whole payload,
+// evaluated before the call (the inline call and the durable outbox send the
+// same one); its method, durable, timeoutMs and signingSecret, which the
+// template resolved too but no shipped flow computed, are literals read as
+// written, refused with the literal's remedy like the notify literals.
 export const entry: SemanticMigration = {
   id: 'flow-value-slot-template-dialect-refused',
   // No backticks in `surface` — build-upgrade-guide renders it inside a code
@@ -33,7 +38,8 @@ export const entry: SemanticMigration = {
     + 'script node (the inputs map), of a screen node (an object form\'s defaults map and its recordId, and '
     + 'each field\'s defaultValue), and of a notify node (recipients, the value or each entry of a list; the '
     + 'templateData map; sourceId; and the literals sourceObject, actorId and the payload map, where a CEL '
-    + 'value envelope is refused as well) — a string value, or a '
+    + 'value envelope is refused as well), and of an http node (the body; and the literals method, durable, '
+    + 'timeoutMs and signingSecret, where a CEL value envelope is refused as well) — a string value, or a '
     + 'string anywhere inside an array or object value, carrying a single-brace template token, the run-user '
     + 'paths beginning $User. and the date macros NOW() and TODAY() with an optional day offset included; and the '
     + 'collection of a loop node with a body and of a map node — any string value: a single-brace template token, '
@@ -80,7 +86,13 @@ export const entry: SemanticMigration = {
     + '(has(record.assignee) ? record.assignee : null). Its sourceId evaluates to a string, null leaving the key '
     + 'unset, and its templateData values are handed on as evaluated. Its sourceObject, actorId and payload '
     + 'values are literals, read as written and never evaluated: write the value itself (the object\'s name, the '
-    + 'user\'s id, the data), with no token and no envelope',
+    + 'user\'s id, the data), with no token and no envelope. An http node\'s body is one value, the whole payload: '
+    + 'an envelope evaluated per run, whose CEL map literal builds an object ({ dialect: "cel", source: "{\'id\': '
+    + 'record.id, \'text\': \'Done: \' + record.title}" }), or a literal sent as written; it is evaluated once, '
+    + 'before the call, so the durable outbox enqueues the payload the inline call would send. Its method, durable, '
+    + 'timeoutMs and signingSecret are literals, read as written: write the method, true or false, the number of '
+    + 'milliseconds and the secret itself (a flow saved through the metadata API keeps the secret in the write-only '
+    + 'flow credential store), with no token and no envelope',
   reason:
     'The interpolator and the CEL engine answer differently for every token spelling authored in flows, so no '
     + 'conversion is lossless (ADR-0087 D2) and none is applied. A path, an absent variable, key or list index '
@@ -115,8 +127,17 @@ export const entry: SemanticMigration = {
     + 'recipient under the template, where CEL fails the run unless the value is guarded. At a notify node\'s '
     + 'sourceObject, actorId and payload no authored flow carried a token — none in the shipped metadata, docs '
     + 'and fixtures, none in the one external app measured — so no expression is read there: they are literals, '
-    + 'and a token, which the template resolved, would now be sent with its braces, so it is refused. A '
-    + 'flow carrying '
+    + 'and a token, which the template resolved, would now be sent with its braces, so it is refused. In an '
+    + 'http node\'s body the template interpolated every string at any depth before the call, an absent value '
+    + 'writing null for a whole token and nothing inside text, and handed a CEL envelope there to the endpoint as '
+    + 'the object it spells; under CEL an absent value fails the run unless guarded, and an envelope evaluates. '
+    + 'At its method, durable, timeoutMs and signingSecret no shipped flow, doc or fixture in this repository '
+    + 'carried a token — only '
+    + 'the tests that pinned the interpolation itself, a whole token at timeoutMs or durable resolving to its '
+    + 'value\'s type and a signing secret read from a flow variable — so they are literals, and a token would '
+    + 'now be sent with its braces or refused by the key\'s type, so it is refused with the literal\'s remedy; '
+    + 'the build doors leave signingSecret to the run, whose credential store may hold the secret, and its parse '
+    + 'refuses it there. A flow carrying '
     + 'a refused value is refused at registration, by objectstack validate and by the executor; a stored flow '
     + 'carrying one is skipped at boot with a warn naming it.',
   acceptanceCriteria:
@@ -138,8 +159,12 @@ export const entry: SemanticMigration = {
     + 'absent and the node should iterate nothing, guard it to answer []. For a notify node\'s recipients, guard '
     + 'each recipient field that may be unset so an absent one is dropped, as the template dropped it, and check '
     + 'that an entry which held a list now reaches each of its recipients. For a notify node\'s sourceObject, '
-    + 'actorId or payload value carrying a token, write the value the token stood for. Re-run '
-    + 'the flow paths that write those fields, serve those screens, iterate those lists and send those '
-    + 'notifications, and compare the stored and served values, the iterations and the audiences with the ones '
-    + 'the template produced.',
+    + 'actorId or payload value carrying a token, write the value the token stood for. For an http node\'s body, '
+    + 'write one envelope building the whole payload, guarding each value that may be absent; for its method, '
+    + 'durable, timeoutMs or signingSecret carrying a token, write the value the token stood for (a secret read '
+    + 'from a flow variable is written as the secret itself, which a save through the metadata API keeps out of '
+    + 'the served definition). Re-run '
+    + 'the flow paths that write those fields, serve those screens, iterate those lists, send those '
+    + 'notifications and make those http calls, and compare the stored and served values, the iterations, the '
+    + 'audiences and the request payloads with the ones the template produced.',
 };

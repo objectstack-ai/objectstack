@@ -21,14 +21,13 @@
  * these are **live execute-time contracts**: each executor `parse()`s its
  * config against its schema before running (`service-automation`'s
  * `parse-config.ts`), so type and `required` violations refuse the node as a
- * guard (not routable via `fault` edges). `notify` parses the RAW stored
- * config — its text slots carry `{{ }}` holes and its value slots a CEL value
+ * guard (not routable via `fault` edges). Both parse the RAW stored config —
+ * their text slots carry `{{ }}` holes and their value slots a CEL value
  * envelope or a literal (#19939), so both pass, a `{token}` in either is
  * refused, and the post-evaluation guards still own "resolved to nothing".
- * `http` parses the
- * INTERPOLATED config, because that is the shape
- * its executor reads — a `{token}` in a typed slot (`timeoutMs`, `durable`)
- * resolves to its real type first.
+ * Until #19939 `http` parsed its INTERPOLATED config, so a `{token}` in a
+ * typed slot (`timeoutMs`, `durable`) resolved to its real type first; those
+ * keys are literals now, read as written, and a token there is refused.
  *
  * ## Unknown keys — closed here too, as of #4001 批 9
  *
@@ -64,8 +63,8 @@ import { strictObject } from '../shared/strict-object';
 // built with — never re-exported, so the notify sentences add no public surface.
 import { templateExpressionInput, type TypedExpressionRefusals } from '../shared/typed-expression-input';
 import { textSlotTemplateRefusal } from './flow-text-slot-template';
-// [#19939] The notify value slots take the one value-slot contract and its one
-// judge — composed here, never re-spelled.
+// [#19939] The notify value slots and the http `body` take the one value-slot
+// contract and its one judge — composed here, never re-spelled.
 import {
   AssignmentExpressionValueSchema,
   FlowValueSlotSchema,
@@ -73,8 +72,9 @@ import {
 } from './builtin-node-config.zod';
 import { isExpressionEnvelopeShaped } from './flow-node-expression-paths';
 import { valueSlotTemplateRefusals } from './flow-value-slot-template';
-// [#19939] The retired dialect's one token grammar, for the notify literals'
-// refusal — the internal module the two slot judges read, never re-spelled.
+// [#19939] The retired dialect's one token grammar, for the notify and http
+// literals' refusals — the internal module the two slot judges read, never
+// re-spelled.
 import { READ_AS_WRITTEN_PARAM, templateTokensOf } from './flow-template-token';
 
 /**
@@ -725,6 +725,131 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
 export type NotifyConfig = z.input<typeof NotifyConfigSchema>;
 export type NotifyConfigParsed = z.infer<typeof NotifyConfigSchema>;
 
+// ─── http slots and literals (#19939) ─────────────────────────────────
+//
+// Until #19939 the `http` executor handed its WHOLE config to the flow's
+// single-brace `interpolate()` and parsed the result, so every value could
+// carry a `{token}`. That dialect is retired (ADR-0032 Decisions 2 and 3, the C
+// half of #11182 ruling D), and the executor now parses the config AS AUTHORED
+// — after the write-only credential channel's `signingSecret`, unchanged — and
+// reads each key by what it is:
+//
+//  - `url` and every `headers` value are TEXT slots, rendered per run with
+//    `{{ }}` holes through the one text renderer (`FLOW_NODE_TEXT_SLOTS` in
+//    `flow-text-slot-template.ts`); a single-brace token there is refused by
+//    the one text-slot judge, with its hole spelling;
+//  - `body` is a VALUE slot ({@link FlowValueSlotSchema}): a CEL value
+//    envelope the executor evaluates per run to the payload, or a literal sent
+//    as written; a `{…}` token in any string of a literal is refused by the
+//    one value-slot judge, naming the envelope that builds the whole body;
+//  - `method`, `durable`, `timeoutMs` and `signingSecret` are LITERALS, read
+//    as written: no shipped flow computed one (the census on #19939's S5
+//    found no `{…}` token at any of them in the examples, the docs or the
+//    dogfood fixtures — only the tests that pinned the interpolation itself),
+//    so no slot is built there (the rule S4 applied to a notify node's
+//    `sourceObject`, `actorId` and `payload`). A `{…}` token in one is refused
+//    with the literal's remedy, and so is a CEL value envelope: nothing
+//    evaluates it.
+//
+// The literal refusals of `method`, `durable` and `timeoutMs` carry
+// `READ_AS_WRITTEN_PARAM`, so the build doors' value arm
+// (`flow-node-config-refusals.ts`) reports them as the run would. The
+// `signingSecret` refusal does not: the build doors leave that key to the run
+// (`RUN_RESOLVED_KEYS`), because the credential channel may hold the secret
+// the run signs with, and its refusal is the executor's parse.
+
+/** What each `http` literal is, for its refusals. */
+const HTTP_LITERALS = {
+  method: 'the request method (`GET`, `POST`, …)',
+  durable: 'whether the call goes through the durable outbox, `true` or `false`',
+  timeoutMs: 'the per-request timeout in milliseconds, a number',
+} as const;
+
+/** The sentence every refusal at an `http` literal leads with. */
+function httpLiteralLead(key: keyof typeof HTTP_LITERALS): string {
+  return `\`${key}\` is ${HTTP_LITERALS[key]}, a literal the executor reads as written:`;
+}
+
+/** What a `{…}` token at an `http` literal would do, read as written. */
+const HTTP_LITERAL_AS_WRITTEN: Readonly<Record<keyof typeof HTTP_LITERALS, string>> = {
+  method: 'would be sent as the request method with its braces',
+  durable: 'is text, and `durable` takes a boolean',
+  timeoutMs: 'is text, and `timeoutMs` takes a number',
+};
+
+/** The refusal of a `{…}` token at an `http` literal, or `undefined` when `text` carries none. */
+function httpLiteralTokenRefusal(key: keyof typeof HTTP_LITERALS, text: string): string | undefined {
+  if (templateTokensOf(text).length === 0) return undefined;
+  return (
+    `${httpLiteralLead(key)} a single-brace token is not resolved here; write the value. Read as written, `
+    + `\`${text}\` ${HTTP_LITERAL_AS_WRITTEN[key]}.`
+  );
+}
+
+/** The refusal of a CEL value envelope at an `http` literal. */
+function httpLiteralEnvelopeRefusal(key: keyof typeof HTTP_LITERALS): string {
+  return `${httpLiteralLead(key)} a CEL value envelope is not evaluated here; write the value.`;
+}
+
+/**
+ * The refusal of a `{…}` token in `signingSecret`. It never echoes the value:
+ * a secret is not repeated into a message, a log line or a run record.
+ */
+const HTTP_SIGNING_SECRET_TOKEN_REFUSAL =
+  '`signingSecret` is the HMAC-SHA256 secret that signs the request, read as written: a single-brace `{…}` token '
+  + 'is not resolved here, so the request would be signed with the braces. Write the secret itself (a flow saved '
+  + 'through the metadata API keeps it in the write-only flow credential store, never in the served definition), '
+  + 'or `\'\'` to send unsigned on purpose.';
+
+/** The refusal of a CEL value envelope at `signingSecret`. */
+const HTTP_SIGNING_SECRET_ENVELOPE_REFUSAL =
+  '`signingSecret` is the HMAC-SHA256 secret that signs the request, read as written: a CEL value envelope is not '
+  + 'evaluated here. Write the secret itself, or `\'\'` to send unsigned on purpose.';
+
+/** The error map of an `http` literal's type: an envelope is refused by name, anything else by type. */
+function httpLiteralTypeError(refusal: string) {
+  return (issue: { readonly input?: unknown }) => (isExpressionEnvelopeShaped(issue.input) ? refusal : undefined);
+}
+
+/**
+ * Every refusal the `http` contract states beyond its key types, on whatever
+ * the parse reached — run even when a key's own type refused it (`when`
+ * below), so a token at a typed literal (`timeoutMs: '{t}'`) gets the
+ * literal's remedy beside the type's refusal:
+ *
+ *  - a single-brace token (or a hole over a `$` root the engine does not bind)
+ *    in `url` or a `headers` value — the text-slot judge's refusal;
+ *  - a `{…}` token in `method`, `durable` or `timeoutMs` (marked
+ *    `READ_AS_WRITTEN_PARAM`) and in `signingSecret` (unmarked, see above).
+ */
+function httpConfigRefusals(cfg: unknown, ctx: z.RefinementCtx): void {
+  if (cfg === null || typeof cfg !== 'object' || Array.isArray(cfg)) return;
+  const config = cfg as Record<string, unknown>;
+  if (typeof config.url === 'string') {
+    const refusal = textSlotTemplateRefusal(config.url);
+    if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: ['url'], message: refusal });
+  }
+  const headers = config.headers;
+  if (headers !== null && typeof headers === 'object' && !Array.isArray(headers)) {
+    for (const [name, value] of Object.entries(headers as Record<string, unknown>)) {
+      if (typeof value !== 'string') continue;
+      const refusal = textSlotTemplateRefusal(value);
+      if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: ['headers', name], message: refusal });
+    }
+  }
+  for (const key of Object.keys(HTTP_LITERALS) as Array<keyof typeof HTTP_LITERALS>) {
+    const value = config[key];
+    if (typeof value !== 'string') continue;
+    const message = httpLiteralTokenRefusal(key, value);
+    if (message !== undefined) {
+      ctx.addIssue({ code: 'custom', path: [key], message, params: { [READ_AS_WRITTEN_PARAM]: true } });
+    }
+  }
+  if (typeof config.signingSecret === 'string' && templateTokensOf(config.signingSecret).length > 0) {
+    ctx.addIssue({ code: 'custom', path: ['signingSecret'], message: HTTP_SIGNING_SECRET_TOKEN_REFUSAL });
+  }
+}
+
 // ─── http ────────────────────────────────────────────────────────────
 
 /**
@@ -733,9 +858,17 @@ export type NotifyConfigParsed = z.infer<typeof NotifyConfigSchema>;
  * Executor semantics worth knowing beyond the key set:
  *
  *  - `url` is **required at execute time** (the step is refused without it) —
- *    the one key the descriptor's form also marks `required`.
- *  - The whole config is `interpolate()`d before reading, so every value may
- *    carry `{token}` templates.
+ *    the one key the descriptor's form also marks `required` — and a url that
+ *    renders to no text refuses the node too.
+ *  - Each key is read by what it is (#19939, "http slots and literals" above):
+ *    `url` and every `headers` value are text slots with `{{ }}` holes, `body`
+ *    is a value slot (a CEL value envelope or a literal), and `method`,
+ *    `durable`, `timeoutMs` and `signingSecret` are literals read as written.
+ *    Until #19939 the whole config was `interpolate()`d before the parse, so
+ *    every value could carry a `{token}`; a `{…}` token is refused now, at
+ *    every key. The executor parses the config as authored, then renders the
+ *    text slots and evaluates the body ONCE, before either mode: the durable
+ *    outbox enqueues the rendered request, and nothing renders at delivery.
  *  - `method` defaults per mode — GET inline, POST durable — which is why the
  *    schema declares no static `.default()`.
  *  - `durable: true` routes through the messaging HTTP outbox
@@ -751,10 +884,18 @@ export const HttpConfigSchema = lazySchema(() => strictObject({
   // `header` → `headers`), and inventing entries nothing refutes is how this
   // campaign shipped four confidently-wrong prescriptions in one batch.
 }, {
-  /** Target URL (execute-time required). */
-  url: z.string().describe('Target URL'),
   /**
-   * HTTP method — default GET inline, POST when durable.
+   * Target URL (execute-time required). A TEXT slot (#19939): rendered per run
+   * with `{{ }}` holes (`https://api.example.com/v1/orders/{{ record.id }}`);
+   * a single-brace `{token}` is refused by the `superRefine` below.
+   */
+  url: z.string().describe(
+    'Target URL, rendered per run with `{{ }}` holes (`https://api.example.com/v1/orders/{{ record.id }}`); a '
+      + 'single-brace `{token}` is refused',
+  ),
+  /**
+   * HTTP method — default GET inline, POST when durable. A literal, read as
+   * written (#19939, "http slots and literals" above).
    *
    * ⛔ **No `.default()`, and that is the measured answer, not an omission.**
    * The executor applies TWO values for an absent key, decided by `durable`:
@@ -770,9 +911,12 @@ export const HttpConfigSchema = lazySchema(() => strictObject({
    * Contrast `ScreenConfigSchema.mode` in `builtin-node-config.zod.ts`, where
    * one value IS applied and is therefore declared.
    */
-  method: z.string().optional().describe('HTTP method (default GET; POST when durable)'),
+  method: z.string({ error: httpLiteralTypeError(httpLiteralEnvelopeRefusal('method')) }).optional()
+    .describe('HTTP method (default GET; POST when durable) — a literal, read as written: a single-brace `{token}` is not resolved here and is refused'),
   /**
-   * Request headers.
+   * Request headers — each value a TEXT slot (#19939), rendered per run with
+   * `{{ }}` holes like `url`; a single-brace `{token}` is refused by the
+   * `superRefine` below. A header that renders to no text is not sent.
    *
    * An open map, so it is served as authored: a flow definition is readable by
    * every member who can read flows, and nothing here is withheld. An outbound
@@ -783,19 +927,48 @@ export const HttpConfigSchema = lazySchema(() => strictObject({
    * advisory names a literal that reads as one.
    */
   headers: z.record(z.string(), z.string()).optional().describe(
-    'Request headers. The flow definition, this map included, is served to every member who can read flows, so '
-      + 'never put a credential here: declare a connector whose `auth` is `bearer` or `api-key` (a header), with '
-      + '`auth.credentialRef` naming the secret, and call it from a `connector_action` node.',
+    'Request headers, each value rendered per run with `{{ }}` holes (`X-Request-Id: {{ $runId }}`); a single-brace '
+      + '`{token}` is refused, and a header that renders to no text is not sent. The flow definition, this map '
+      + 'included, is served to every member who can read flows, so never put a credential here: declare a '
+      + 'connector whose `auth` is `bearer` or `api-key` (a header), with `auth.credentialRef` naming the secret, and '
+      + 'call it from a `connector_action` node.',
   ),
-  /** Request body — JSON-serialised before sending. */
-  body: z.unknown().optional().describe('Request body (JSON-serialised)'),
-  /** Fire-and-forget via the durable outbox instead of inline request/response. */
-  durable: z.boolean().optional()
-    .describe('Fire-and-forget via the durable outbox (retry/dead-letter) instead of inline request/response'),
-  /** Per-request timeout in milliseconds (both modes). */
-  timeoutMs: z.number().optional().describe('Per-request timeout (ms)'),
-  /** HMAC-SHA256 signing secret → X-Objectstack-Signature. */
-  signingSecret: z.string().optional().describe('HMAC-SHA256 secret → X-Objectstack-Signature'),
+  /**
+   * Request body — JSON-serialised before sending. A `value` slot (#19939,
+   * {@link FlowValueSlotSchema}): a CEL value envelope the executor evaluates
+   * per run to the payload (a CEL map literal builds an object,
+   * `{'id': record.id, 'text': 'Done: ' + record.title}`), or a literal sent
+   * as written. Only the top-level value is an expression: an envelope nested
+   * inside a literal is data.
+   */
+  body: FlowValueSlotSchema.optional().describe(
+    'Request body (JSON-serialised) — a CEL value envelope `{ dialect: \'cel\', source }` evaluated per run to the '
+      + 'payload (a CEL map literal builds an object: `"{\'id\': record.id, \'text\': \'Done: \' + record.title}"`), '
+      + 'or a literal sent as written; a `{…}` template token in a string of a literal is refused',
+  ),
+  /**
+   * Fire-and-forget via the durable outbox instead of inline request/response.
+   * A literal, read as written (#19939).
+   */
+  durable: z.boolean({ error: httpLiteralTypeError(httpLiteralEnvelopeRefusal('durable')) }).optional()
+    .describe('Fire-and-forget via the durable outbox (retry/dead-letter) instead of inline request/response — a literal `true` or `false`, read as written'),
+  /** Per-request timeout in milliseconds (both modes). A literal, read as written (#19939). */
+  timeoutMs: z.number({ error: httpLiteralTypeError(httpLiteralEnvelopeRefusal('timeoutMs')) }).optional()
+    .describe('Per-request timeout (ms) — a literal number, read as written'),
+  /**
+   * HMAC-SHA256 signing secret → X-Objectstack-Signature. A literal, read as
+   * written (#19939) — after the write-only flow credential channel, which
+   * holds a secret saved through the metadata API and takes the literal's
+   * place at execution (`RUN_RESOLVED_KEYS`, `flow-node-config-refusals.ts`).
+   * `''` sends unsigned on purpose.
+   */
+  signingSecret: z.string({ error: httpLiteralTypeError(HTTP_SIGNING_SECRET_ENVELOPE_REFUSAL) }).optional()
+    .describe('HMAC-SHA256 secret → X-Objectstack-Signature — the secret itself, read as written (a single-brace `{token}` is not resolved here and is refused); `\'\'` sends unsigned on purpose'),
+}).superRefine(httpConfigRefusals, {
+  // [#19939] Run even when a key's own type refused the config: a token at a
+  // typed literal (`timeoutMs: '{t}'`) is refused by the type, and this adds
+  // the literal's remedy — the one issue the build doors report there.
+  when: () => true,
 }));
 
 export type HttpConfig = z.input<typeof HttpConfigSchema>;
