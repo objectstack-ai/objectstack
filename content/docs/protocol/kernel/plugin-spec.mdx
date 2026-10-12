@@ -878,9 +878,8 @@ const crm = stack.kernel.getService<CRMService>('crm');
 
 A pure helper with no engine behind it needs no harness: test it with plain
 vitest. Many test files can share one boot through `bootStackOnce(config)`,
-under vitest's `isolate: false`. A project scaffolded with
-`npx create-objectstack` ships one test written this way (`note.test.ts`), and
-the `@objectstack/verify` README documents every method and boot option.
+under vitest's `isolate: false`. The `@objectstack/verify` README documents
+every method and boot option.
 
 ## Plugin Development Workflow
 
