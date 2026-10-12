@@ -13,6 +13,4 @@ Clause-②: yes (widening: a new declared response key)
 - `member` is present on every entry of such a type and absent on every other type, so the lists are unchanged for every type whose identity is its name alone.
 - The value is the one the by-name doors take back as their `member` selector: `GET /api/v1/meta/email_template/acme.welcome?state=draft&member=zh-CN` reads the `zh-CN` draft a list entry names, and `?member=` on publish, history, revert and reset addresses it the same way. For a commit item, `member` is the language the stored revert plan records, the one a revert of that commit acts on.
 
-This supersedes the note in the bundle member selector entry (#22877) that the protocol's draft list does not include the member: the draft list and the commit timeline both serve it now.
-
 **For code that uses these packages directly** (`@objectstack/metadata-protocol`): `ObjectStackProtocolImplementation.listDrafts` entries and `listCommits` items have the optional `member` described above. The types `ListDraftsResponse` and `ListPackageCommitsResponse` (`@objectstack/spec/api`, which `@objectstack/client`'s `meta.listDrafts` and `packages.listCommits` return) gain the same optional field. Code that does not read it behaves as before.
