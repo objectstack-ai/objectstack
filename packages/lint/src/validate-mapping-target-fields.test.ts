@@ -317,6 +317,15 @@ describe('[#22161] one-line verdicts — mapping-target-field-unknown', () => {
 // because the verdict's "Did you mean" names the near miss, and what a target
 // may name is the explanation's.
 describe('[#22161] one-line fixes — mapping-target-field-unknown', () => {
+  it('names no parts on an object that declares no compound field', () => {
+    const findings = validateMappingTargetFields({
+      objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
+      mappings: [{ name: 'lead_import', targetObject: 'crm_lead', fieldMapping: [{ source: 'Name', target: 'nmae' }] }],
+    });
+    expect(findings.map((f) => f.hint)).toEqual(['Point the target at a field "crm_lead" declares or provisions']);
+    expect(findings[0].message).toContain('Did you mean "name"?');
+  });
+
   it('every `fix:` line the cases in this file fired is one line of at most 200 characters', () => {
     const converted = fired.filter((f) => f.rule === MAPPING_TARGET_FIELD_UNKNOWN);
     // Coverage control: the target arm with and without compound parts on the
