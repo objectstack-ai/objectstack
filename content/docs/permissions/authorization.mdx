@@ -245,7 +245,9 @@ one of two doors, each writing only what it owns:
   CRUD) is transparently redirected into an env-scope metadata save
   (`saveMetaItem`), and the data record is a **pure projection** the platform
   re-derives on every metadata mutation (awaited — no staleness window) and at
-  boot. Under a `group` or `isolated` tenancy posture that Setup write is the
+  boot. A package's published set gets such a row too, until stage 7 — the
+  transitional `managedBy:'admin'` row described in the Package-door bullet
+  above. Under a `group` or `isolated` tenancy posture that Setup write is the
   platform operator's: anyone else is refused `403 PERMISSION_DENIED` before the
   redirect (ADR-0131 D3). Deleting an artifact-backed set through this door **resets** it to its
   declared body rather than removing it; renaming through the data door is
