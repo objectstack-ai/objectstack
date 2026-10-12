@@ -1081,22 +1081,32 @@ jobs:
       #   OK            at or under 1.3x (WARN_MEASURED_OVER_PREDICTED)
       #   WARN          past 1.3x, at or under 1.5x: a `::warning::` annotation
       #                 naming the shard and its heaviest overshoot; green
-      #   DRIFT         past 1.5x (MAX_MEASURED_OVER_PREDICTED): red
+      #   DRIFT         past 1.5x (MAX_MEASURED_OVER_PREDICTED): a second
+      #                 `::warning::` annotation, the upper tier; green
       #   NOT MEASURED  no executed test task carried a dataset entry; green
       #
-      # ONE red rule and a warning under it, on the same ratio: triage ruled
-      # the in-tree 1.5x the red and the card's 1.3x a warning only, and took no
-      # second red on wall time against `timeout-minutes`. Both constants, their
-      # measured basis and a self-test battery each live in the script.
+      # Two thresholds on ONE ratio, and no second rule on wall time against
+      # `timeout-minutes`: triage ruled the in-tree 1.5x the upper tier and the
+      # card's 1.3x the lower. Both constants, their measured basis and a
+      # self-test battery each live in the script.
       #
-      # THE RED IS A `schedule` RED ALONE (C2, both timing steps, ruling
-      # https://github.com/objectstack-ai/objectstack/issues/22949#issuecomment-6119186511):
-      # the dataset's weights are measured on the hourly `schedule` runs, so
-      # only those exit 1 on DRIFT. On `merge_group`, `pull_request`, `push`
-      # and `workflow_dispatch` the step prints the same verdict, raises the
-      # DRIFT as a `::warning::` annotation and exits 0. The event reaches the
-      # script as `--event "$GITHUB_EVENT_NAME"`, which it requires; the rule
-      # and its self-test live there (TIMING_GRADED_EVENT, timingGateMode).
+      # NO EVENT GRADES (#22949 ruling E, item 1, both timing steps:
+      # https://github.com/objectstack-ai/objectstack/issues/22949#issuecomment-6125775640).
+      # A wall-clock reading on a shared runner measures the run's load as much
+      # as the code: the same package reads 82 s on a quiet hour and 209 s on a
+      # busy one, 2.56x, past this step's 1.5x bound and the ceilings' 2.0x of
+      # weight. The dataset's weights come from a window that was mostly
+      # quiet-density and every event, `schedule` included, meets both
+      # densities, so busy hours put the same shards past the bound whatever
+      # their code does: density, not code.
+      # So on `schedule`, `merge_group`, `pull_request`, `push` and
+      # `workflow_dispatch` alike the step prints the same verdict, raises DRIFT
+      # as a `::warning::` annotation and exits 0. The event reaches the script
+      # as `--event "$GITHUB_EVENT_NAME"`, which it requires: a missing one is a
+      # refusal, and so is a dataset or run summary that does not parse, and a
+      # refusal is still a red step on every event. The rule and its self-test
+      # live in the script (timingGateMode); regression detection moves to the
+      # dataset refresh's diff (E2, #23059).
       #
       # EXECUTED WINDOWS ONLY. Measurements come from samplesFromSummary() in
       # measure-test-shard-timings.mjs, which drops cache HITs and failed
@@ -1105,11 +1115,11 @@ jobs:
       # predicted and vouch for a rotted dataset, so a shard whose packages all
       # replayed is NOT MEASURED, never "fast".
       #
-      # NO `if:` and NO `continue-on-error` (the red is the point, and the
-      # `schedule`-only red is the script's `--event`, so neither is needed),
-      # and ABOVE the attestation pair for the #6082 reason documented on the
-      # upload above: a failed unguarded step skips that pair, so a drift red
-      # also withholds this shard's attestation, the fail-closed direction. A shard
+      # NO `if:` and NO `continue-on-error` (the only red left here is a
+      # refusal, and a refusal must stay red, so neither is wanted), and ABOVE
+      # the attestation pair for the #6082 reason documented on the upload
+      # above: a failed unguarded step skips that pair, so a refusal also
+      # withholds this shard's attestation, the fail-closed direction. A shard
       # with no packages runs no turbo and writes no summary; that is NOT
       # MEASURED here rather than a usage error from the script.
       #
@@ -1459,8 +1469,10 @@ jobs:
       # diagnostics fault here (an artifact-service 403 is the measured one,
       # #14469) must not evict a green run. The suite-duration ceiling check
       # at the end of this job reads the same captures and is the one step
-      # here that DOES red the job, on purpose: it is a gate, not a report, and
-      # a capture that never arrived reads NOT MEASURED there, never red.
+      # here that can still red the job, on purpose and only on a refusal (a
+      # malformed table or raise record, no `--event`): a package over its
+      # ceiling is a `::warning::` on every event, and a capture that never
+      # arrived reads NOT MEASURED there, never red.
       #
       # ⛔ Steps, deliberately, NOT a new `needs:` entry: this job's
       # `OS_AGGREGATOR_MEMBERS` / `OS_AGGREGATOR_NON_MEMBERS` block is asserted
@@ -1516,11 +1528,14 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-      # ── The per-package suite-duration ratchet (#16468) ──────────────────
+      # ── The per-package suite-duration ceilings (#16468) ─────────────────
       #
-      # A GATE, unlike the two reporting steps above: NO `continue-on-error`,
-      # so on a `schedule` run a package whose suite ran past its ceiling reds
-      # `Test Core`, naming the package and its slowest test files. The
+      # A READING, never a red (ruling E, below): a package whose suite ran
+      # past its ceiling is one `::warning::` annotation naming it and its
+      # slowest test files, and the step exits 0 on every event. Unlike the two
+      # reporting steps above it carries NO `continue-on-error`, because a
+      # REFUSAL (a malformed table or raise record, no `--event`) is not a
+      # timing reading and reds `Test Core` on every event. The
       # ceiling is the package's slowest executed run in the refresh window
       # x 1.25, generated into scripts/test-shard-timings.json (`ceilings`) by
       # the refresh lane and held by every later refresh; it rises only by a
@@ -1538,19 +1553,26 @@ jobs:
       # samplesFromSummary, and every vitest file line); a capture that did not
       # arrive leaves its packages ungraded and says so, never red.
       #
-      # EXIT-GRADED ON `schedule` ALONE (C2, both timing steps, ruling
-      # https://github.com/objectstack-ai/objectstack/issues/22949#issuecomment-6119186511):
-      # the ceilings come from the hourly `schedule` runs, so only those red
-      # this job on a package over its ceiling. On `merge_group`,
-      # `pull_request`, `push` and `workflow_dispatch` the step prints the same
-      # table, raises each package over its ceiling as a `::warning::`
-      # annotation and exits 0; a real slowdown merged to `main` reds the next
-      # hourly run. A package whose ceiling is under the absolute floor (20s,
-      # CEILING_FLOOR_SECONDS) prints "below floor" and is never red. The
-      # event reaches the script as `--event "$GITHUB_EVENT_NAME"`, which it
-      # requires; a refusal (a malformed table or raise record) is red on every
-      # event. The rule, the floor's reading and their self-tests live in the
-      # script.
+      # NO EVENT GRADES (#22949 ruling E, item 1, both timing steps:
+      # https://github.com/objectstack-ai/objectstack/issues/22949#issuecomment-6125775640).
+      # A per-package suite wall on a shared runner measures the run's load as
+      # much as the package: the same package reads 82 s on a quiet hour (most
+      # packages replayed) and 209 s on a busy one (the whole workspace
+      # executing), 2.56x, while the ceiling formula (window max x 1.25) allows
+      # 2.0x of weight. The window the ceilings come from was mostly
+      # quiet-density and every event, `schedule` included, meets both
+      # densities, so busy hours put the same near-ceiling packages over
+      # whatever their code does: density, not code. So on `schedule`,
+      # `merge_group`, `pull_request`, `push` and `workflow_dispatch` alike the
+      # step prints the same table, raises each package over its ceiling as a
+      # `::warning::` annotation and exits 0. A package whose ceiling is under
+      # the absolute floor (20s, CEILING_FLOOR_SECONDS) prints "below floor" and
+      # is never over. The event reaches the script as
+      # `--event "$GITHUB_EVENT_NAME"`, which it requires; a refusal (a
+      # malformed table or raise record, no event) is red on every event. The
+      # rule, the floor's reading and their self-tests live in the script;
+      # regression detection moves to the dataset refresh's diff (E2, #23059)
+      # and the per-file budget.
       #
       # NOT MEASURED, exit 0, while the dataset carries no `ceilings`: they are
       # generated only where the run-summary artifacts are downloadable (the
