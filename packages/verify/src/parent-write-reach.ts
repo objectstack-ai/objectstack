@@ -421,6 +421,11 @@ async function effectivePermissions(stack: VerifyStack, token: string): Promise<
     if (res.status !== 200 || !payload?.objects || typeof payload.objects !== 'object') {
       return { sets, reason: `GET /auth/me/permissions answered ${res.status}: no effective grants to read` };
     }
+    // The endpoint answers this same empty body when it could not compute the
+    // caller's grants, so "no set at all" is not read as "no grant anywhere".
+    if (sets.length === 0) {
+      return { sets, reason: 'GET /auth/me/permissions resolved no permission set for the persona, which is also its answer when it could not compute one: no effective grants to read' };
+    }
     return { objects: payload.objects as Record<string, any>, sets };
   } catch (e) {
     return { sets: [], reason: `GET /auth/me/permissions faulted: ${clip((e as Error)?.message ?? e)}` };
