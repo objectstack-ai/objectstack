@@ -7053,7 +7053,11 @@ jobs:
       # boundary (`check-cross-package-test-inputs.mjs --union-into`): their
       # typecheck programs compile those same test files, so the test radius
       # covers what tsc imports across the boundary too (lint's and cli's tests
-      # import examples/app-showcase, which no `^build` edge reaches).
+      # import examples/app-showcase, which no `^build` edge reaches). It is a
+      # SUPERSET for tsc — it also names files tests only read from disk, so
+      # the repo-wide scans of spec, core, types, objectql and runtime put those
+      # five on most package diffs — and that is the price of not keeping a
+      # second, tsc-only declaration that nothing would hold honest.
       #
       # ⛔ ROOT-LEVEL CHANGES MEAN EVERYTHING IS AFFECTED. `turbo ls --affected`
       # handles some root files and not others. Measured on turbo 2.11.5 at
@@ -7062,12 +7066,15 @@ jobs:
       # root `package.json`, `pnpm-workspace.yaml`, `.npmrc` and a change to
       # the ROOT importer's `typescript` version in `pnpm-lock.yaml` select
       # ZERO. So this step does not delegate the rule: a changed file at the
-      # repository root (a path with no `/`) type-checks the whole universe.
+      # repository root (a path with no `/`) type-checks the whole universe,
+      # Markdown excepted — no tsc program reads a root `*.md`, and AGENTS.md
+      # alone was 2 of the last 30 commits on main at edecd448.
       # So does a changed file under `scripts/` that some package's own
       # package.json scripts run (`scripts/check-test-typecheck.mts` is run by
-      # every package's `typecheck`), found by the `git grep` below rather than
-      # listed, because a file every package's typecheck executes is part of
-      # every package's typecheck definition, as `turbo.json` is.
+      # the `typecheck` of 72 of the universe's 76 packages at edecd448), found
+      # by the `git grep` below rather than listed, because a file the packages'
+      # typecheck executes is part of their typecheck definition, as
+      # `turbo.json` is.
       #
       # An EMPTY selection is an honest green — a docs, workflow or tooling
       # diff affects no package — and is said so in the log. ⛔ It must exit
@@ -7098,12 +7105,12 @@ jobs:
             rm -f "$RUNNER_TEMP/turbo-ls.json" "$RUNNER_TEMP/changed-files.txt"
             bash scripts/ci/select-shard-packages.sh
             if [ ! -s "$RUNNER_TEMP/changed-files.txt" ]; then
-              WHOLE='the selector produced no changed-file list, so the root-level rule cannot be judged'
+              WHOLE='the selector left no changed-file list (missing or empty), so the root-level rule cannot be judged'
             else
               { git grep -h -o -E '(\.\./)+scripts/[A-Za-z0-9._/-]+' -- \
                   'packages/*/package.json' 'packages/*/*/package.json' 'apps/*/package.json' || true; } \
                 | sed -E 's#^(\.\./)+##' | sort -u > "$RUNNER_TEMP/package-script-tools.txt"
-              ROOT_FILE=$(grep -m1 -v / "$RUNNER_TEMP/changed-files.txt" || true)
+              ROOT_FILE=$(grep -m1 -v -e / -e '\.md$' "$RUNNER_TEMP/changed-files.txt" || true)
               TOOL_FILE=$(grep -m1 -Fx -f "$RUNNER_TEMP/package-script-tools.txt" "$RUNNER_TEMP/changed-files.txt" || true)
               if [ -n "$ROOT_FILE" ]; then
                 WHOLE="root-level change: $ROOT_FILE"
