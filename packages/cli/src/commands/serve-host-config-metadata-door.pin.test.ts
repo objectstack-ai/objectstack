@@ -35,6 +35,9 @@
  *     none under `lazy`.
  *   • `rootDir` is `hostRoot`, the served app's root, never the operator's cwd.
  *   • It is `kernel.use`d after the HTTP server plugin, at the dev door's site.
+ *   • Under production it mounts no dev `GET /api/v1/dev/metadata-events`; the
+ *     integration boots run the source entry, whose `NODE_ENV=development`
+ *     cannot reach that posture, so this leg is held in-process here.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -98,6 +101,47 @@ describe('#22989 A — `os serve` of a HOST config composes an artifact-less Met
         expect(count('await kernel.use(hostConfigMetadataDoor);')).toBe(1);
         expect(source.indexOf('await kernel.use(serverPlugin);'))
             .toBeLessThan(source.indexOf('await kernel.use(hostConfigMetadataDoor);'));
+    });
+
+    it('behavioural: under production the door mounts no dev metadata-events route (CONTROL: development does)', async () => {
+        // The composition's options, on a context with an HTTP server whose raw
+        // app records every route mounted on it.
+        const mounted = async (nodeEnv: string) => {
+            const routes: string[] = [];
+            const app = {
+                get: (p: string) => { routes.push(`GET ${p}`); },
+                post: (p: string) => { routes.push(`POST ${p}`); },
+            };
+            const services = new Map<string, unknown>([['http.server', { getRawApp: () => app }]]);
+            const ctx: any = {
+                logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+                registerService: (name: string, svc: unknown) => services.set(name, svc),
+                getService: (name: string) => {
+                    if (!services.has(name)) throw new Error(`no ${name}`);
+                    return services.get(name);
+                },
+                hook: vi.fn(),
+                trigger: vi.fn(),
+            };
+            const root = fs.mkdtempSync(path.join(os.tmpdir(), 'os-22989-hmr-'));
+            const previous = process.env.NODE_ENV;
+            const plugin = new MetadataPlugin({ watch: false, config: { bootstrap: 'lazy' }, rootDir: root });
+            const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+            try {
+                process.env.NODE_ENV = nodeEnv;
+                await plugin.init(ctx);
+                await plugin.start(ctx);
+                return routes;
+            } finally {
+                if (previous === undefined) delete process.env.NODE_ENV;
+                else process.env.NODE_ENV = previous;
+                log.mockRestore();
+                await plugin.destroy();
+                fs.rmSync(root, { recursive: true, force: true });
+            }
+        };
+        expect(await mounted('production')).toEqual([]);
+        expect(await mounted('development')).toContain('GET /api/v1/dev/metadata-events');
     });
 
     it('behavioural: `bootstrap: \'lazy\'` is load-bearing — the same root primes an item under eager and none under lazy', async () => {

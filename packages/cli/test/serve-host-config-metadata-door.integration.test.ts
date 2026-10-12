@@ -21,22 +21,29 @@
  *
  * ## What each leg pins
  *
- * - **production** — `os serve objectstack.config.ts`, NODE_ENV unset, a host
- *   config with no `dist/`: the declared path answers `401 UNAUTHENTICATED`
- *   (the route matched; only auth stopped it), an undeclared path under the
- *   same namespace answers `404 ENDPOINT_NOT_FOUND`, and the dev-only
- *   `GET /api/v1/dev/metadata-events` stays unmounted. Its two security items
- *   (a position and a capability) are served exactly once each: the door
- *   registers none of the stack, so the AppPlugin wrap stays their single
- *   registrar.
- * - **artifact** (CONTROL) — the same project with its compiled twin on disk,
- *   `os serve --dev`: the dev artifact door composes, and the same path
- *   answers the same `401`.
+ * - **source** — `os serve objectstack.config.ts` of a host config with no
+ *   `dist/`, so no artifact door can compose: the declared path answers
+ *   `401 UNAUTHENTICATED` (the route matched; only auth stopped it), and an
+ *   undeclared path under the same namespace answers `404
+ *   ENDPOINT_NOT_FOUND`. Its two security items (a position and a capability)
+ *   are served exactly once each: the door registers none of the stack, so
+ *   the AppPlugin wrap stays their single registrar.
+ * - **artifact** (CONTROL) — the same project with its compiled twin on disk:
+ *   the dev artifact door composes, and the same path answers the same `401`.
  *
- * ## Spawn shape
+ * ## Spawn shape, and the production posture it does not reach
  *
- * `bin/run.js` with `NODE_ENV` unset — the shipped entry, resolving commands
- * from `dist/`, so the boots measure the built packages (`requireBuiltCli`).
+ * The tsx source entry (`bin/run-dev.js`), the harness the other boot-level
+ * files here use. That entry runs under `NODE_ENV=development`, so both legs
+ * boot the DEVELOPMENT posture. The host-config door is decided by the same
+ * three facts on both postures (no artifact door, a host config, no
+ * `MetadataPlugin` in the composition), and the source leg is the branch
+ * where no artifact door composes, exactly as on every production boot. What
+ * only production decides — the dev SSE route staying unmounted — is pinned
+ * in-process in `src/commands/serve-host-config-metadata-door.pin.test.ts`,
+ * and the production boot of `examples/app-showcase` was measured over HTTP
+ * on the card.
+ *
  * Every boot runs in `beforeAll`; every `it` reads what it recorded, and a
  * failed boot is recorded against its own leg.
  */
@@ -45,23 +52,18 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import {
+  CLI,
   childEnv,
   E2E_SECRET_KEY,
   portContentionError,
   portDriftError,
   probeThroughChild,
   randomPort,
-  requireBuiltCli,
-  RUN_JS_RESOLVES_FROM_DIST,
+  TSX,
 } from './helpers/serve-process.js';
 import { defineStackSourceFromLiteral, linkSpec } from './helpers/define-stack-fixture.js';
-
-const HERE = resolve(fileURLToPath(import.meta.url), '..');
-/** `bin/run.js` — the SHIPPED entrypoint. */
-const CLI = resolve(HERE, '../bin/run.js');
 
 /** The banner's tail — every row above it has printed. */
 const READY = /Press Ctrl\+C to stop/;
@@ -69,6 +71,9 @@ const BOOT_TIMEOUT_MS = 180_000;
 const ALL_BOOTS_TIMEOUT_MS = 2 * (BOOT_TIMEOUT_MS + 30_000);
 
 const HOST_MARKER = 'com.example.fxh.host-marker';
+/** The development dev-admin seed — the operator on every boot here. */
+const EMAIL = 'admin@objectos.ai';
+const PASSWORD = 'admin123';
 const FEED_PATH = '/api/v1/apps/fxh/tasks';
 
 /** The stack, as data: the compiled twin is exactly this JSON. */
@@ -103,7 +108,6 @@ interface Live {
 interface Reading {
   feed?: { status: number; code?: string };
   undeclared?: { status: number; code?: string };
-  devEvents?: number;
   positionCopies?: number;
   capabilityCopies?: number;
   error?: Error;
@@ -111,14 +115,14 @@ interface Reading {
 
 const groups: ChildProcess[] = [];
 let dir: string;
-const readings: Partial<Record<'production' | 'artifact', Reading>> = {};
+const readings: Partial<Record<'source' | 'artifact', Reading>> = {};
 
 function boot(argv: string[], port: string, env: Record<string, string | undefined>): Promise<Live> {
   return new Promise((resolveBoot, rejectBoot) => {
-    const child = spawn(process.execPath, [CLI, ...argv], {
+    const child = spawn(TSX, [CLI, ...argv, '-p', port], {
       cwd: dir,
-      // `childEnv`, never a bare `...process.env` — see its header. `NODE_ENV`
-      // unset, so the built entry resolves its commands from `dist/`.
+      // `childEnv`, never a bare `...process.env` — see its header. Neither
+      // artifact variable leaks in from the runner: each leg states its own.
       env: childEnv({
         NO_COLOR: '1',
         OS_CLOUD_URL: 'off',
@@ -128,7 +132,6 @@ function boot(argv: string[], port: string, env: Record<string, string | undefin
         OS_ARTIFACT_URL: undefined,
         OS_ARTIFACT_PATH: undefined,
         OS_MODE: undefined,
-        NODE_ENV: undefined,
         ...env,
       }),
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -206,30 +209,22 @@ function copies(body: any, name: string): number {
   return Array.isArray(items) ? items.filter((i: any) => i?.name === name).length : -1;
 }
 
-async function measure(leg: 'production' | 'artifact', argv: string[], env: Record<string, string | undefined>): Promise<void> {
-  const port = randomPort();
+/** One leg: read what it pins from a boot already started, then stop it. */
+async function measure(leg: 'source' | 'artifact', started: Promise<Live>): Promise<void> {
   let live: Live | undefined;
   try {
-    live = await boot([...argv, '-p', port], port, env);
+    live = await started;
     const feed = await http(live, 'GET', FEED_PATH);
     const undeclared = await http(live, 'GET', '/api/v1/apps/fxh/no-such-endpoint');
     const reading: Reading = {
       feed: { status: feed.status, code: feed.body?.error?.code },
       undeclared: { status: undeclared.status, code: undeclared.body?.error?.code },
     };
-    if (leg === 'production') {
-      // The dev SSE route answers a stream when mounted; read the status only.
-      const ctl = new AbortController();
-      const events = await fetch(`${live.base}/api/v1/dev/metadata-events`, { signal: ctl.signal });
-      reading.devEvents = events.status;
-      ctl.abort();
-      // The first sign-up on a fresh production database is the bootstrap admin.
-      const signUp = await http(live, 'POST', '/api/v1/auth/sign-up/email', '', {
-        email: 'fxh-admin@example.com', password: 'fxh-admin-password-22989', name: 'Fxh Admin',
-      });
-      const token = signUp.body?.token;
-      if (signUp.status !== 200 || typeof token !== 'string') {
-        throw new Error(`sign-up answered ${signUp.status}: ${JSON.stringify(signUp.body)}\n--- output ---\n${live.output().slice(-3000)}`);
+    if (leg === 'source') {
+      const signIn = await http(live, 'POST', '/api/v1/auth/sign-in/email', '', { email: EMAIL, password: PASSWORD });
+      const token = signIn.body?.token;
+      if (signIn.status !== 200 || typeof token !== 'string') {
+        throw new Error(`sign-in answered ${signIn.status}: ${JSON.stringify(signIn.body)}\n--- output ---\n${live.output().slice(-3000)}`);
       }
       reading.positionCopies = copies((await http(live, 'GET', '/api/v1/meta/position', token)).body, 'fxh_reviewer');
       reading.capabilityCopies = copies((await http(live, 'GET', '/api/v1/meta/capability', token)).body, 'fxh.export_data');
@@ -242,7 +237,7 @@ async function measure(leg: 'production' | 'artifact', argv: string[], env: Reco
   }
 }
 
-function reading(leg: 'production' | 'artifact'): Reading {
+function reading(leg: 'source' | 'artifact'): Reading {
   const r = readings[leg];
   if (!r) throw new Error(`no reading recorded for ${leg} — the beforeAll never reached it`);
   if (r.error) throw r.error;
@@ -250,7 +245,6 @@ function reading(leg: 'production' | 'artifact'): Reading {
 }
 
 beforeAll(async () => {
-  requireBuiltCli(RUN_JS_RESOLVES_FROM_DIST);
   dir = mkdtempSync(join(tmpdir(), 'os-22989-host-door-'));
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'fxh-host', private: true }), 'utf8');
   // A host config: a plugin INSTANCE in `plugins` (`isHostConfig`).
@@ -262,17 +256,14 @@ beforeAll(async () => {
   writeFileSync(join(dir, 'objectstack.config.ts'), defineStackSourceFromLiteral(literal));
   linkSpec(dir);
 
-  await measure('production', ['serve', 'objectstack.config.ts'], {
-    OS_DATABASE_URL: 'file:production.db',
-    OS_AUTH_SECRET: 'e2e-22989-production-leg-secret-not-for-real-use',
-  });
+  let port = randomPort();
+  await measure('source', boot(['serve', 'objectstack.config.ts'], port, { OS_DATABASE_URL: 'file:source.db' }));
 
   // The compiled twin, for the artifact door's control leg.
   mkdirSync(join(dir, 'dist'), { recursive: true });
   writeFileSync(join(dir, 'dist', 'objectstack.json'), JSON.stringify(STACK, null, 2), 'utf8');
-  await measure('artifact', ['serve', 'objectstack.config.ts', '--dev'], {
-    OS_DATABASE_URL: 'file:artifact.db',
-  });
+  port = randomPort();
+  await measure('artifact', boot(['serve', 'objectstack.config.ts'], port, { OS_DATABASE_URL: 'file:artifact.db' }));
 }, ALL_BOOTS_TIMEOUT_MS);
 
 afterAll(async () => {
@@ -281,20 +272,16 @@ afterAll(async () => {
 }, 60_000);
 
 describe('#22989 — `os serve` of a HOST config serves its declared apis endpoints', () => {
-  it('production: the declared path answers 401 UNAUTHENTICATED, not 404', () => {
-    expect(reading('production').feed).toEqual({ status: 401, code: 'UNAUTHENTICATED' });
+  it('with no artifact door, the declared path answers 401 UNAUTHENTICATED, not 404', () => {
+    expect(reading('source').feed).toEqual({ status: 401, code: 'UNAUTHENTICATED' });
   });
 
   it('CONTROL: an undeclared path under the same namespace still answers 404 ENDPOINT_NOT_FOUND', () => {
-    expect(reading('production').undeclared).toEqual({ status: 404, code: 'ENDPOINT_NOT_FOUND' });
+    expect(reading('source').undeclared).toEqual({ status: 404, code: 'ENDPOINT_NOT_FOUND' });
   });
 
-  it('production: the dev-only metadata-events route stays unmounted', () => {
-    expect(reading('production').devEvents).toBe(404);
-  });
-
-  it('production: each stack-declared security item is served exactly once', () => {
-    const r = reading('production');
+  it('each stack-declared security item is served exactly once', () => {
+    const r = reading('source');
     expect(r.positionCopies).toBe(1);
     expect(r.capabilityCopies).toBe(1);
   });
