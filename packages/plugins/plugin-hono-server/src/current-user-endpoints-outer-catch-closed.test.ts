@@ -226,7 +226,7 @@ describe('[#23047] controls — what the fix must not move', () => {
 
         expect(await res.text()).toBe(
             '{"authenticated":true,"userId":"usr_member","tenantId":"org_active",'
-            + '"positions":["member","everyone"],"permissionSets":[],"objects":{},"fields":{}}',
+            + '"positions":["org_member","everyone"],"permissionSets":[],"objects":{},"fields":{}}',
         );
         expect(failedCalls(warn)).toHaveLength(0);
     });
