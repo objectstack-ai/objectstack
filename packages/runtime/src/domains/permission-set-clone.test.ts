@@ -59,6 +59,8 @@ interface BootOptions {
     noProtocol?: boolean;
     saveError?: Error;
     catalogError?: Error;
+    /** The `tenancy` service's posture; absent ⇒ no `tenancy` service (the `single` shape). */
+    posture?: 'single' | 'isolated' | 'group';
 }
 
 function boot(opts: BootOptions = {}) {
@@ -83,6 +85,7 @@ function boot(opts: BootOptions = {}) {
     };
     const services: Record<string, unknown> = { objectql: engine, data: engine };
     if (!opts.noProtocol) services.protocol = protocol;
+    if (opts.posture) services.tenancy = { posture: opts.posture };
     const resolve = (name: string): unknown => services[name] ?? null;
     const kernel = {
         getService: resolve,
@@ -258,5 +261,46 @@ describe('the permission-set clone door — refusals', () => {
         const h = boot({ noProtocol: true });
         const res = await clone(h, HOLDER(), PACKAGED.name, { name: 'x_copy', label: 'X' });
         expect(statusOf(res)).toBe(501);
+    });
+});
+
+// [ADR-0131 D3] The walled catalog refusal: a clone creates an environment
+// permission set, so under a wall it is the platform operator's. Same predicate
+// and envelope as the dispatcher's `PUT /meta` (`meta-walled-catalog-refusal.test.ts`).
+describe('the permission-set clone door — the walled catalog refusal (ADR-0131 D3)', () => {
+    const TENANT_HOLDER = () => ctx({ userId: 'u_tenant', tenantId: 'org_a', positions: [], systemPermissions: ['manage_metadata'], posture: 'TENANT_ADMIN' });
+    const OPERATOR = () => ctx({ userId: 'u_operator', positions: [], systemPermissions: ['manage_metadata'], posture: 'PLATFORM_ADMIN' });
+
+    for (const posture of ['isolated', 'group'] as const) {
+        it(`${posture}: a tenant manage_metadata holder is refused 403 PERMISSION_DENIED, and nothing is saved`, async () => {
+            const h = boot({ posture });
+            const res = await clone(h, TENANT_HOLDER(), PACKAGED.name, { name: 'my_sales_rep', label: 'My Sales Rep' });
+            expect(statusOf(res)).toBe(403);
+            expect(codeOf(res)).toBe('PERMISSION_DENIED');
+            expect(String((res as any)?.response?.body?.error?.message)).toContain(`'${posture}' tenancy posture`);
+            expect(h.saves).toHaveLength(0);
+        });
+
+        it(`${posture}: CONTROL — the platform operator rung clones`, async () => {
+            const h = boot({ posture });
+            const res = await clone(h, OPERATOR(), PACKAGED.name, { name: 'my_sales_rep', label: 'My Sales Rep' });
+            expect(statusOf(res)).toBe(200);
+            expect(h.saves).toHaveLength(1);
+        });
+    }
+
+    it('single: CONTROL — the same tenant holder clones, unchanged', async () => {
+        const h = boot({ posture: 'single' });
+        const res = await clone(h, TENANT_HOLDER(), PACKAGED.name, { name: 'my_sales_rep', label: 'My Sales Rep' });
+        expect(statusOf(res)).toBe(200);
+        expect(h.saves).toHaveLength(1);
+    });
+
+    it('the capability gate still answers first under a wall', async () => {
+        const h = boot({ posture: 'isolated' });
+        const res = await clone(h, NON_HOLDER(), PACKAGED.name, { name: 'my_sales_rep', label: 'My Sales Rep' });
+        expect(statusOf(res)).toBe(403);
+        expect(String((res as any)?.response?.body?.error?.message)).toContain('`manage_metadata`');
+        expect(h.saves).toHaveLength(0);
     });
 });
