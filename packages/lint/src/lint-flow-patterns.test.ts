@@ -2686,7 +2686,7 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
       });
 
       it('reads a `$` root the engine binds as that variable (`$error.message`)', () => {
-        const [f] = bareDollar(valueFlow('update_record', { objectName: 'task', filter: { id: '{record.id}' }, fields: { note: '$error.message' } }));
+        const [f] = bareDollar(valueFlow('update_record', { objectName: 'task', filter: { id: CEL('source.id') }, fields: { note: '$error.message' } }));
         expect(f!.message).toContain('in the update_record field value');
         expect(f!.hint).toContain(judgeSpelling('{$error.message}'));
         expect(prescribedSources(f!.hint!)).toEqual(['vars["$error"].message']);
@@ -2696,7 +2696,9 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         ['$User.Id', 'create_record', (v: unknown) => ({ objectName: 'task', fields: { v } })],
         ['$source.id', 'create_record', (v: unknown) => ({ objectName: 'task', fields: { v } })],
         ['$User.Email', 'create_record', (v: unknown) => ({ objectName: 'task', fields: { v } })],
-        ['$error.message', 'update_record', (v: unknown) => ({ objectName: 'task', filter: { id: '{record.id}' }, fields: { v } })],
+        // [#19939, stage S6] The filter operand is an envelope over a bound
+        // variable: a `{record.id}` token there is refused since S6.
+        ['$error.message', 'update_record', (v: unknown) => ({ objectName: 'task', filter: { id: CEL('source.id') }, fields: { v } })],
         ['$User.Id', 'assignment', (v: unknown) => ({ assignments: { v } })],
         // [#19939] The maps a node hands to a callee joined the value slots:
         // the hint flips there by asking the judge, with no line of its own.
@@ -2794,14 +2796,23 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         expect(refusalsOf(valueFlow('create_record', { objectName: 'task', fields: { who: CEL(guard) } }))).toEqual(NONE);
       });
 
-      it('control: outside the value and text slots the single brace still resolves, and the hint still names it', () => {
-        // [#19939] A CRUD `filter` value — the position S6 has not reached; an
-        // `http` body is a value slot since S5.
+      // [#19939, stage S6] RE-JUDGED IN PLACE: the control's position was a
+      // CRUD `filter` value — "the position S6 has not reached". Each filter
+      // operand is a value slot since S6, so the hint there names the operand's
+      // envelope and the filter operand's remedy; the single-brace arm is kept
+      // for a position no slot judges (a plugin node's own config).
+      it('control: a filter operand names its envelope now; outside every slot the hint keeps its single-brace arm', () => {
         const filtered = (owner: string) => valueFlow('get_record', { objectName: 'task', filter: { owner } });
         const [f] = bareDollar(filtered('$source.id'));
-        expect(f!.hint).toContain('Wrap it and bind a variable: `{source.id}`');
-        expect(flowNodeValueTemplateRefusals('get_record', { objectName: 'task', filter: { owner: '{source.id}' } })).toEqual([]);
-        // …and the http body names its envelope now.
+        expect(f!.message).toContain('in the get_record filter operand');
+        expect(f!.hint).toContain('A value slot reads a CEL value envelope');
+        expect(f!.hint).toContain('an operand envelope is evaluated before the query');
+        expect(prescribedSources(f!.hint!)).toEqual(['source.id']);
+        expect(refusalsOf(valueFlow('get_record', { objectName: 'task', filter: { owner: CEL('source.id') } }))).toEqual(NONE);
+        expect(flowNodeValueTemplateRefusals('get_record', { objectName: 'task', filter: { owner: '{source.id}' } })).toHaveLength(1);
+        const [plugin] = bareDollar(valueFlow('acme_custom_step', { note: '$source.id' }));
+        expect(plugin!.hint).toContain('Wrap it and bind a variable: `{source.id}`');
+        // …and the http body names its envelope.
         const [body] = lintFlowPatterns(httpFlow({ ticket: '$source.id' })).filter((x) => x.rule === FLOW_BARE_DOLLAR_REF);
         expect(body!.hint).toContain('A value slot reads a CEL value envelope');
       });
@@ -2902,10 +2913,15 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         expect(refusalsOf(valueFlow('screen', configOf(CEL("'Re: ' + record.title"))))).toEqual(NONE);
       });
 
-      it('control: outside the value and text slots the single brace still resolves, and the double-brace hint still names it', () => {
-        // [#19939] A CRUD `filter` value — the position S6 has not reached.
+      // [#19939, stage S6] RE-JUDGED IN PLACE, as the bare-`$` control above:
+      // a CRUD `filter` operand is a value slot since S6.
+      it('control: a filter operand names its envelope now; outside every slot the double-brace hint keeps its single-brace arm', () => {
         const [f] = doubleBrace(valueFlow('get_record', { objectName: 'task', filter: { title: '{{ record.title }}' } }));
-        expect(f!.hint).toContain('Use `{var}` (e.g. `{record.title}`)');
+        expect(f!.message).toContain('the get_record filter operand reads a CEL value envelope, not a template');
+        expect(f!.hint).not.toContain('Use `{var}`');
+        expect(prescribedSources(f!.hint!)).toEqual(['record.title']);
+        const [plugin] = doubleBrace(valueFlow('acme_custom_step', { note: '{{ record.title }}' }));
+        expect(plugin!.hint).toContain('Use `{var}` (e.g. `{record.title}`)');
         // …and the http body, a value slot since S5, names its envelope.
         const [body] = lintFlowPatterns(httpFlow({ title: '{{ record.title }}' })).filter((x) => x.rule === FLOW_DOUBLE_BRACE_INTERP);
         expect(body!.hint).not.toContain('Use `{var}`');

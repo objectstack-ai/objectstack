@@ -3427,35 +3427,6 @@ const AI_SKILL_TOOL_UNRESOLVED_EXPLANATION: RuleExplanation = {
   ],
 };
 
-// ── Flow filter tokens (`validate-flow-filter-tokens.ts`) ──────────────────
-
-const FLOW_FILTER_TOKEN_UNKNOWN_EXPLANATION: RuleExplanation = {
-  rule: 'flow-filter-token-unknown',
-  covers: 'the two vocabularies a flow filter token resolves in',
-  paragraphs: [
-    // The function lists are held to `FLOW_TEMPLATE_DATE_FUNCTIONS` and
-    // `FLOW_TEMPLATE_VALUE_FUNCTIONS` by the rule's test.
-    'A flow node\'s filter value is resolved in two layers. The automation template evaluator reads ' +
-      'it first, in the flow template dialect: `{NOW()}` and `{TODAY()}` with an optional ± N day ' +
-      'offset, `{$User.Id}`, `{record.<field>}`, and the value functions round, floor, ceil, abs, ' +
-      'min and max. Only a token that evaluator does not resolve is handed on to ObjectQL ' +
-      '(`interpolateFilter`), whose filter placeholders (`{current_user_id}`, `{today}`, ' +
-      '`{30_days_ago}` and the rest) resolve it there.',
-    'A token in call position that is a function in neither vocabulary never reaches the query: ' +
-      '`resolveToken` throws `FlowExpressionFunctionError`, a guard refusal a `fault` edge may not ' +
-      'swallow, so the node cannot run at all. That is why this is an error. An unknown token in a ' +
-      'presentation filter fails differently, reaching the data engine as a literal so the surface ' +
-      'renders empty, and `filter-token-unknown` reports that one.',
-    'Judged: the string values inside the authored filters of `flows`, and only the call-position ' +
-      'arm, whose reference set is closed. Bare and dotted identifiers (`{recordId}`, ' +
-      '`{record.id}`) address the run\'s variable map, which is open, so they are never judged here, ' +
-      'and a junk shape is reported by the CRUD guard at run time. This is its own id rather than ' +
-      '`flows` added to `filter-token-unknown`\'s walk, because the two positions share neither the ' +
-      'vocabulary nor the consequence, and a machine consumer keyed on the id cannot see which ' +
-      'position fired.',
-  ],
-};
-
 // ── Managed-object API methods (`validate-managed-api-methods.ts`) ─────────
 
 const MANAGED_API_METHOD_UNAFFORDABLE_EXPLANATION: RuleExplanation = {
@@ -3989,7 +3960,6 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [FLOW_CREDENTIAL_LITERAL_EXPLANATION.rule]: FLOW_CREDENTIAL_LITERAL_EXPLANATION,
   [AI_SKILL_SURFACE_MISMATCH_EXPLANATION.rule]: AI_SKILL_SURFACE_MISMATCH_EXPLANATION,
   [AI_SKILL_TOOL_UNRESOLVED_EXPLANATION.rule]: AI_SKILL_TOOL_UNRESOLVED_EXPLANATION,
-  [FLOW_FILTER_TOKEN_UNKNOWN_EXPLANATION.rule]: FLOW_FILTER_TOKEN_UNKNOWN_EXPLANATION,
   [MANAGED_API_METHOD_UNAFFORDABLE_EXPLANATION.rule]: MANAGED_API_METHOD_UNAFFORDABLE_EXPLANATION,
   [ORG_AXIS_PERMISSION_INHERITANCE_EXPLANATION.rule]: ORG_AXIS_PERMISSION_INHERITANCE_EXPLANATION,
   [ORG_AXIS_CROSS_ORG_BU_GRANT_EXPLANATION.rule]: ORG_AXIS_CROSS_ORG_BU_GRANT_EXPLANATION,
