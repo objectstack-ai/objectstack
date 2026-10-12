@@ -2272,11 +2272,11 @@ function buildFixtureTree() {
   });
 
   // (6c) …and its control: the same file, in a package whose tsconfig excludes
-  // only the `**/*.test.ts` GLOB most packages here carry. A glob is not a
-  // payload directory, so this one is still reported.
+  // only the `**/*.test.ts` GLOB most packages here carry, and its `src/`-rooted
+  // twin. A glob is not a payload directory, so this one is still reported.
   fixture(root, 'packages/glob-excluded-tests', {
     'package.json': ARTIFACT_MANIFEST('@fx/glob-excluded-tests'),
-    'tsconfig.json': JSON.stringify({ exclude: ['node_modules', 'dist', '**/*.test.ts'] }),
+    'tsconfig.json': JSON.stringify({ exclude: ['node_modules', 'dist', '**/*.test.ts', 'src/**/*.test.ts'] }),
     'src/templates/blank/starter.test.ts': "import { alive } from '@fx/core';\nexport default alive;\n",
   });
 

@@ -839,8 +839,9 @@ function selfTest() {
       // Package `b` carries the same file with no exclusion, so a predicate
       // that stopped honouring the boundary selects a SECOND package rather
       // than nothing changing. Package `c` excludes `**/*.test.ts`, the glob
-      // most packages here put in their tsconfig: a glob is not a payload
-      // directory, so a predicate that read it as one would lose `c` too.
+      // most packages here put in their tsconfig, and its `src/`-rooted twin:
+      // a glob is not a payload directory, so a predicate that read either as
+      // one would lose `c` too.
       name: "a test under a dir the package's tsconfig excludes is payload and does not SELECT",
       packages: {
         a: {
@@ -858,7 +859,7 @@ function selfTest() {
         },
         c: {
           'package.json': TEST_MANIFEST,
-          'tsconfig.json': JSON.stringify({ exclude: ['node_modules', 'dist', '**/*.test.ts'] }),
+          'tsconfig.json': JSON.stringify({ exclude: ['node_modules', 'dist', '**/*.test.ts', 'src/**/*.test.ts'] }),
           'src/x.test.ts': BOOTS,
           'vitest.config.ts': `export default { test: { globals: true } };\n`,
         },
