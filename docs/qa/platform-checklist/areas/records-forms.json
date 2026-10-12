@@ -4354,7 +4354,7 @@
         "an extension that duplicates, replaces or removes a base value is a FAIL: extensions are additive only, and a duplicate is refused loudly rather than last-wins"
       ],
       "source": [
-        "#18164 design of record (comment 5715762696), items 1 to 6: the kind, the field reference, server resolution, the additive package extension, the translation face, and the verification sentence, all of which that remains is this item's: its per-organization half left with records-forms.picklist-org-append, retired by #22869 as ruled out",
+        "#18164 design of record (comment 5715762696), items 1 to 6: the kind, the field reference, server resolution, the additive package extension, the translation face, and the verification sentence, which is now this item's alone: its per-organization half left with records-forms.picklist-org-append, retired by #22869 as ruled out",
         "#19518, the spec layer (landed as addbbf02ab): packages/spec/src/data/picklist.zod.ts#PicklistSchema",
         "#19518, the extension shape: packages/spec/src/data/picklist.zod.ts#PicklistExtensionSchema",
         "#19519, the runtime layer this item waits on (load before `object`, additive merge, resolve at serve time, write validation against the resolved set); its acceptance sentence is this item's three clauses"
