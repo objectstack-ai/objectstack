@@ -294,6 +294,29 @@ export class AppPlugin implements Plugin {
     }
 
     /**
+     * [#23029] One COLLECTION of the boot's converted copy
+     * ({@link forwardConverted}), for the datasource readers that used to read
+     * it off the RAW {@link collections}: the code-defined registration and its
+     * owners, the reserved-name check and `connectDeclared`'s input. A turso
+     * `config.timeout` or a memory `config.persistence.autoSaveInterval`
+     * authored by 17.x tooling is renamed by the conversion; read raw, the
+     * driver found no `*Ms` key and fell back to its default with no notice.
+     * (Job scheduling takes the whole copy: see `start()`.)
+     *
+     * WHICH source the collection comes from is still decided on the raw
+     * inputs, as the security block decides it (#18034). The converted copy is
+     * `{ ...manifest, ...collections }`, so where the stack declares no such
+     * collection it would hand over the MANIFEST's key of that name — for
+     * `datasources` and `objects` the glob-pattern lists `ManifestSchema`
+     * declares, which these readers have never read. Where the stack declares
+     * it, the stack wins the spread, so the value is the stack's own, converted.
+     */
+    private convertedCollection(ctx: PluginContext, key: 'datasources' | 'objects'): any {
+        if ((this.collections as Record<string, unknown> | null | undefined)?.[key] === undefined) return undefined;
+        return this.forwardConverted(ctx).definition?.[key];
+    }
+
+    /**
      * The enforcer this artifact's consent records were registered on, or
      * `undefined` when the artifact declared no `grantedPermissions` key.
      *
@@ -786,11 +809,12 @@ export class AppPlugin implements Plugin {
      *
      *  - `packages` ABSENT: the artifact is its one package's body, so every
      *    datasource takes the manifest's id, the key `registerApp` installs the
-     *    package under. The list is `this.collections.datasources`, the one
-     *    this registration has always read (D7).
+     *    package under. The list is the stack's `datasources` (D7), read off
+     *    the boot's converted copy ({@link convertedCollection}, #23029).
      *  - `packages` PRESENT: each body's datasources take THAT body's id
      *    (`artifactPackageId`, the one spelling `registerApp` keys on), in the
-     *    order `resolveArtifactPackageOrder` gives. ⛔ Never the artifact's
+     *    order `resolveArtifactPackageOrder` gives, over the converted copy's
+     *    bodies (#23029: the conversion replays every body). ⛔ Never the artifact's
      *    top-level manifest id on every entry: on a composed artifact that id
      *    is one member's, and stamping it everywhere hands one package another
      *    package's datasources (#14599). ⛔ Never a name-to-package index over
@@ -825,7 +849,7 @@ export class AppPlugin implements Plugin {
             packageVersion: typeof body?.version === 'string' ? body.version : undefined,
         });
         const own = coordsOf(this.bundle.manifest || this.bundle);
-        const declared = listOf(this.collections.datasources);
+        const declared = listOf(this.convertedCollection(ctx, 'datasources'));
 
         if ((this.bundle as { packages?: unknown }).packages === undefined) {
             return declared.map((datasource) => ({ datasource, owner: own }));
@@ -833,7 +857,7 @@ export class AppPlugin implements Plugin {
 
         const owned: Array<{ datasource: any; owner: { packageId?: string; packageVersion?: string } }> = [];
         const claimed = new Set<unknown>();
-        for (const body of resolveArtifactPackageOrder(this.bundle)) {
+        for (const body of resolveArtifactPackageOrder(this.forwardConverted(ctx).definition)) {
             const owner = coordsOf(body);
             for (const datasource of listOf((body as { datasources?: unknown } | null)?.datasources)) {
                 claimed.add(datasource?.name);
@@ -1059,8 +1083,11 @@ export class AppPlugin implements Plugin {
         // divert every unbound object to a fresh connection. Contract-first:
         // reject at load, loudly (outside the lenient catch below), instead of
         // letting the collision produce undefined routing.
+        //
+        // [#23029] This check, the registration and `connectDeclared` below
+        // all read the boot's converted copy (`convertedCollection`).
         {
-            const dsDefs = this.collections.datasources;
+            const dsDefs = this.convertedCollection(ctx, 'datasources');
             const declared = Array.isArray(dsDefs)
                 ? dsDefs
                 : dsDefs && typeof dsDefs === 'object'
@@ -1078,7 +1105,7 @@ export class AppPlugin implements Plugin {
             }
         }
         try {
-            const dsDefs = this.collections.datasources;
+            const dsDefs = this.convertedCollection(ctx, 'datasources');
             const dsList = Array.isArray(dsDefs)
                 ? dsDefs
                 : dsDefs && typeof dsDefs === 'object'
@@ -1132,7 +1159,7 @@ export class AppPlugin implements Plugin {
         // so the kernel's init-all-then-start-all ordering guarantees the
         // connection service was already registered during init.
         try {
-            const dsDefs = this.collections.datasources;
+            const dsDefs = this.convertedCollection(ctx, 'datasources');
             const dsList: any[] = Array.isArray(dsDefs)
                 ? dsDefs
                 : dsDefs && typeof dsDefs === 'object'
@@ -1159,7 +1186,8 @@ export class AppPlugin implements Plugin {
                     connection = undefined;
                 }
                 if (typeof connection?.connectDeclared === 'function') {
-                    const objects = Array.isArray(this.collections.objects) ? this.collections.objects : [];
+                    const declaredObjects = this.convertedCollection(ctx, 'objects');
+                    const objects = Array.isArray(declaredObjects) ? declaredObjects : [];
                     const results = await connection.connectDeclared({
                         datasources: dsList,
                         objects,
@@ -1469,10 +1497,20 @@ export class AppPlugin implements Plugin {
         // `fnMap[job.handler]` only: a job's sandboxed `body` was skipped at
         // warn, and ignored when a `handler` stood beside it. The binder runs
         // the body, and the body wins. See `./app-artifact-handlers.ts`.
+        //
+        // [#23029] Handed the boot's converted copy (`forwardConverted`), the
+        // definition the `manifest` service registered, so a job authored with
+        // the retired `timeout` is scheduled with its `timeoutMs`. Read raw, the
+        // scheduler found no `timeoutMs` and the job ran under the adapter's
+        // default with no notice. `collectBundleJobs`' rule is unmoved on that
+        // copy: the stack's `jobs` win the spread, and the legacy
+        // `manifest.jobs` is read only when the stack declares none. A `handler`
+        // job's `ctx.bundle` is that copy too.
         try {
-            if (collectBundleJobs(this.bundle).length > 0) {
+            const jobsDefinition = this.forwardConverted(ctx).definition;
+            if (collectBundleJobs(jobsDefinition).length > 0) {
                 ctx.hook('kernel:ready', async () => {
-                    await scheduleAppArtifactJobs(ctx, this.bundle, { appId, ql, source: 'AppPlugin' });
+                    await scheduleAppArtifactJobs(ctx, jobsDefinition, { appId, ql, source: 'AppPlugin' });
                 });
             }
         } catch (err: any) {
