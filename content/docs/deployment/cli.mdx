@@ -1922,6 +1922,7 @@ only when the first passes.
 os verify                                      # Author-time rules, then CRUD round-trip fidelity
 os verify --app ./objectstack.config.ts --rls  # Also prove the cross-owner RLS invariant
 os verify --rls --multi-tenant --json          # Org-scoped boot, structured report
+os verify --reference-shapes                   # Also prove reference fields refuse non-id values
 ```
 
 1. **Author-time rules.** The rule registry `os validate` runs, over the stack
@@ -1943,7 +1944,14 @@ os verify --rls --multi-tenant --json          # Org-scoped boot, structured rep
    fidelity failure fails the run. With `--rls`, a second fresh boot proves the
    cross-owner invariant — a member must not write what it cannot read — for a
    probe persona and for one persona per declared position, and a hole fails
-   the run. `--multi-tenant` boots org-scoped so tenant-isolation RLS policies
+   the run. With `--reference-shapes`, another fresh boot proves that every
+   client-writable reference field (`lookup`, `master_detail`, `user`, `tree`)
+   refuses a value that is not a record id — a boolean, a number, an embedded
+   record object — on insert and update, through the REST door and the system
+   door; a field that admits one fails the run. It is opt-in because the engine
+   still admits wrong-shaped elements on a `multiple: true` `lookup` or `user`
+   field, so an app that declares one would fail until the engine refuses them.
+   `--multi-tenant` boots org-scoped so tenant-isolation RLS policies
    apply; a walled tenancy posture (`OS_TENANCY_POSTURE` set to `isolated` or
    `group`) asks for the same boot.
 
@@ -1970,8 +1978,8 @@ document carries depends on where the run ended:
   `path`, `message`, `hint`, plus `package` for a finding raised inside one
   package of the artifact), or the schema issues when the stack does not parse.
 - **Reached the runtime stage:** the report — `app`, `config`, `multiTenant`,
-  `crud`, `rls` (with `--rls`) and `hardFailures`, the count the exit status is
-  read from.
+  `crud`, `rls` (with `--rls`), `referenceShapes` (with `--reference-shapes`)
+  and `hardFailures`, the count the exit status is read from.
 - **Could not run:** `{ "error": "<sentence>" }`, plus `code` and `httpStatus`
   when the failure carries them.
 

@@ -7,7 +7,7 @@
  * (re-expressing the overlay path as a LayeredRepository):
  *
  *   1. **Whitelist enforcement** — only metadata types whose registry
- *      entry sets `allowOrgOverride: true` may be persisted as
+ *      entry sets `allowEnvironmentOverlay: true` may be persisted as
  *      per-organization overlays. Everything else (trigger, hook,
  *      datasource, function, service, …) MUST throw with
  *      `code='NOT_OVERRIDABLE'`, `status=403`. This is the
@@ -15,7 +15,7 @@
  *      §"Tenant-customizable type whitelist").
  *
  *      Note: object, field, flow, workflow, agent, permission, role,
- *      and profile all flipped to `allowOrgOverride: true` in commit
+ *      and profile all flipped to `allowEnvironmentOverlay: true` in commit
  *      ba252da0b (feat: add project mode, metadata forms, and org
  *      overlays). The invariant now pins the execution/wiring-layer
  *      types that MUST stay false. Several of that commit's flips have
@@ -130,7 +130,7 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
     afterEach(() => vi.clearAllMocks());
 
     // ── allowed types: pure render-time, safe per-org override ──
-    describe('allowed (allowOrgOverride: true) — must accept', () => {
+    describe('allowed (allowEnvironmentOverlay: true) — must accept', () => {
         // [ADR-0131 D6] These writes used to pass `organizationId: 'org_alpha'`;
         // every org-scoped write is now refused (403 NOT_OVERRIDABLE), so they
         // run environment-wide, as the runtime-creatable loop below already does.
@@ -152,7 +152,7 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
             expect(result.success).toBe(true);
         });
 
-        it('accepts report (flipped to allowOrgOverride:true on 2026-05-22)', async () => {
+        it('accepts report (flipped to allowEnvironmentOverlay:true on 2026-05-22)', async () => {
             // This test pins the user-requested change from 8494fe8e —
             // if someone flips report back to false, this fails loud.
             const result = await protocol.saveMetaItem({
@@ -237,10 +237,10 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
     });
 
     // ── runtime-creatable types: brand-new items succeed; overriding an
-    //    artifact-backed item still requires allowOrgOverride. The test
+    //    artifact-backed item still requires allowEnvironmentOverlay. The test
     //    registry has no artifacts, so saves all succeed here; provenance-
     //    aware rejection is exercised in `protocol-meta.test.ts`.
-    describe('runtime-creatable (allowOrgOverride:false, allowRuntimeCreate:true) — brand-new items succeed', () => {
+    describe('runtime-creatable (allowEnvironmentOverlay:false, allowRuntimeCreate:true) — brand-new items succeed', () => {
         const runtimeCreatable: Array<{ type: string; item: any }> = [
             // [#8421] `trigger` left this list on 2026-08-15, and it was DEBT
             // rather than a consequence of that card: ADR-0088 retired the kind
@@ -252,7 +252,7 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
             // registry has never heard of, which is the arm #8421 closed. It is
             // REPLACED rather than deleted, and replaced by a type that carries
             // the flags in this describe's title for real — `mapping` declares
-            // `allowOrgOverride: false, allowRuntimeCreate: true` (#2611: the
+            // `allowEnvironmentOverlay: false, allowRuntimeCreate: true` (#2611: the
             // import wizard saves one at runtime) — so the case still measures
             // the tier it is named for instead of the closed hole.
             {
@@ -271,7 +271,7 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
             // two-tier verdict, not that refusal.
             { type: 'hook', item: { name: 'before_save', object: 'case', events: ['beforeInsert'], body: { language: 'js', source: 'return;' } } },
             { type: 'hooks', item: { name: 'before_save', object: 'case', events: ['beforeInsert'], body: { language: 'js', source: 'return;' } } }, // plural
-            // object reverted to allowOrgOverride:false on 2026-05-29 —
+            // object reverted to allowEnvironmentOverlay:false on 2026-05-29 —
             // packaged items locked, brand-new tenant-authored items succeed.
             {
                 type: 'object',
@@ -340,10 +340,10 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
             //
             // The specimen used to be `agent`, which #5086 moved out from under
             // this bypass: a type declaring BOTH `allowRuntimeCreate: false` and
-            // `allowOrgOverride: false` is code-only and is refused on EVERY
+            // `allowEnvironmentOverlay: false` is code-only and is refused on EVERY
             // kernel (see `protocol.code-only-types.test.ts`). What ADR-0005's
             // sentence actually granted single kernels — the *overlay* whitelist
-            // staying off — is unchanged, so `hook` (allowOrgOverride:false,
+            // staying off — is unchanged, so `hook` (allowEnvironmentOverlay:false,
             // allowRuntimeCreate:true) is now the honest specimen for it.
             const { protocol: localProto } = makeProtocol({ environmentId: undefined });
             const result = await localProto.saveMetaItem({
@@ -369,14 +369,14 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
 
     // ── registry invariant: whitelist derives from spec, no parallel list ──
     describe('registry-as-source-of-truth (Prime Directive #8)', () => {
-        it('every type in OVERLAY_ALLOWED_TYPES has allowOrgOverride:true in the registry', () => {
+        it('every type in OVERLAY_ALLOWED_TYPES has allowEnvironmentOverlay:true in the registry', () => {
             // The protocol's whitelist is derived from
             // DEFAULT_METADATA_TYPE_REGISTRY. If anyone introduces a parallel
             // list, this test catches it: every accepted type must trace back
             // to a registry entry that opted in.
             const allowedFromRegistry = new Set<string>();
             for (const entry of DEFAULT_METADATA_TYPE_REGISTRY) {
-                if (entry.allowOrgOverride) allowedFromRegistry.add(entry.type);
+                if (entry.allowEnvironmentOverlay) allowedFromRegistry.add(entry.type);
             }
             // Render-time types must be in the set; if any of these drop out,
             // the shared-DB contract is broken.
@@ -384,11 +384,11 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
             expect(allowedFromRegistry.has('dashboard')).toBe(true);
             expect(allowedFromRegistry.has('report')).toBe(true);
             expect(allowedFromRegistry.has('email_template')).toBe(true);
-            // object/field reverted to allowOrgOverride:false on 2026-05-29
+            // object/field reverted to allowEnvironmentOverlay:false on 2026-05-29
             // (packaged-object lock; tenants create new ones via runtime-create).
             expect(allowedFromRegistry.has('object')).toBe(false);
             expect(allowedFromRegistry.has('field')).toBe(false);
-            // #6283 — `flow` rolled BACK to allowOrgOverride:false. The `true`
+            // #6283 — `flow` rolled BACK to allowEnvironmentOverlay:false. The `true`
             // this line used to assert came from commit ba252da0b (see the file
             // header) and never had an ADR behind it: ADR-0005's amendment
             // table (`docs/adr/0005-metadata-customization-overlay.md:57`) has
@@ -401,11 +401,11 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
             // ADR-0020: `workflow` retired as a metadata type.
             expect(allowedFromRegistry.has('workflow')).toBe(false);
             // ADR-0063 §2: tenant custom agents withdrawn — `agent` is now
-            // allowOrgOverride:false (no per-org agent fork). The kernel ships
+            // allowEnvironmentOverlay:false (no environment fork of a packaged agent). The kernel ships
             // exactly two platform agents; tenants extend via skills + tools.
             expect(allowedFromRegistry.has('agent')).toBe(false);
             // Commit ee58392e1 — `permission`/`position` rolled BACK to
-            // allowOrgOverride:false (with page/app/action/dataset/book/
+            // allowEnvironmentOverlay:false (with page/app/action/dataset/book/
             // tool/skill; the whole nine-type divergence family). ADR-0005's
             // security row has always said ❌: "Authorization correctness;
             // overlays would create silent privilege drift." Reintroduction

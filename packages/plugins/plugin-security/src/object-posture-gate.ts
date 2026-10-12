@@ -12,7 +12,7 @@
  *  - **R1 — env-tighten-only (ADR-0086 D1, ADR-0049).** An environment write
  *    over a PACKAGED object (artifact-backed — reachable only via the
  *    `OS_METADATA_WRITABLE=object` escape hatch, since `object` ships
- *    `allowOrgOverride:false`) may not set `sharingModel` /
+ *    `allowEnvironmentOverlay:false`) may not set `sharingModel` /
  *    `externalSharingModel` WIDER than the packaged declaration. Widening
  *    legitimately = author it in the package source and publish (ADR-0090
  *    D7), never an env overlay. No lint rule covers this comparison — it

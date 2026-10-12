@@ -42,7 +42,7 @@ The single source of truth for built-in types is the
   domain: 'ui',               // one of: data | ui | automation | system | security | ai
   filePatterns: ['**/*.my-widget.ts', '**/*.my-widget.yml'], // required: globs used to discover files of this type
   supportsOverlay: true,      // false = no 3-state diff in the editor
-  allowOrgOverride: true,     // false = compile-time only, true = runtime overlays accepted via the metadata API
+  allowEnvironmentOverlay: true, // false = packaged items locked; true = an environment may overlay a packaged item via the metadata API
   allowRuntimeCreate: true,   // allow admin to create new instances at runtime
 }
 ```
@@ -56,7 +56,7 @@ The single source of truth for built-in types is the
 > verbatim as the `:type` path param (`/api/v1/meta/my_widget`) — there is no
 > automatic pluralization.
 
-The `allowOrgOverride` flag is the **only** place that controls whether the
+The `allowEnvironmentOverlay` flag is the **only** place that controls whether the
 overlay store accepts writes for this type. The runtime env-var
 `OS_METADATA_WRITABLE=foo,bar`
 flips the flag on at runtime for the listed types — useful for opt-in writable
@@ -182,7 +182,7 @@ registry.registerEditPage('my_widget', (params) => (
 - Dirty tracking (`JSON.stringify` diff)
 - Save with destructive-change confirmation dialog
 - Reset overlay / Refresh / History buttons
-- Read-only fallback when `allowOrgOverride` is false
+- Read-only fallback when `allowEnvironmentOverlay` is false
 
 You only have to render the value-bound part.
 

@@ -417,7 +417,9 @@ it was copied from, so changes to the source never reach the copy.
 - **The copy is held by nobody** until you add it to a position or assign it.
 - **Who may call it** is who may save a permission set through the metadata
   API: a holder of `manage_metadata`. Anyone else is refused `403`
-  `PERMISSION_DENIED`.
+  `PERMISSION_DENIED`. Under a `group` or `isolated` tenancy posture the clone
+  is the platform operator's alone (ADR-0131 D3): a `manage_metadata` holder
+  inside one organization is refused `403` `PERMISSION_DENIED` too.
 
 ### Declared ≠ enforced — diagnosing a frozen package set
 

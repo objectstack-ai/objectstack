@@ -207,14 +207,14 @@ export const GetMetaTypesResponseSchema = lazySchema(() => z.object({
     label: z.string().describe('Human-readable label'),
     description: z.string().optional().describe('Brief description'),
     filePatterns: z.array(z.string()).describe('Glob patterns used to discover artifacts of this type'),
-    supportsOverlay: z.boolean().describe('Loader can merge per-org overlays on top of artifact'),
-    allowOrgOverride: z.boolean().describe('Per-org overlay writes accepted at runtime (may be env-elevated)'),
+    supportsOverlay: z.boolean().describe('Whether a stored overlay row of an item a managed package ships may be removed through the ordinary delete door without the type\'s environment-overlay permission: the removal removes no managed definition, and changes what is served for permission alone; it opens no save and it decides no read'),
+    allowEnvironmentOverlay: z.boolean().describe('True when the registry grants environment overlays of this type\'s packaged items, or when OS_METADATA_WRITABLE names the type (overrideSource env), which opens the type\'s writes of items no managed package ships and never a managed item (ADR-0131 D6)'),
     allowRuntimeCreate: z.boolean().describe('New artifacts of this type can be created via runtime API'),
     supportsVersioning: z.boolean().describe('History is tracked for this type'),
     executionPinned: z.boolean().describe('Runtime transactions pin a specific historical version_hash (ADR-0009)'),
     loadOrder: z.number().int().describe('Loading priority (lower = earlier)'),
     domain: z.enum(['data', 'ui', 'automation', 'system', 'security', 'ai']).describe('Protocol domain'),
-    overrideSource: z.enum(['registry', 'env']).describe('Whether allowOrgOverride is set in the static registry or via OS_METADATA_WRITABLE env var'),
+    overrideSource: z.enum(['registry', 'env']).describe('Whether allowEnvironmentOverlay comes from the static registry or is elevated by the OS_METADATA_WRITABLE environment variable'),
     createSeed: z.unknown().optional().describe('Authoritative minimal valid create seed for this type — Studio/CLI/API derive create defaults from it (single source of truth in @objectstack/spec). Absent for canvas-create types whose shape is built interactively.'),
   })).optional().describe('Enriched per-type registry entries (Phase 3a)'),
 }));
@@ -1603,7 +1603,7 @@ export const HistoryMetaItemRequestSchema = lazySchema(() => z.object({
  * carries no spelling regex.
  *
  * `{ events: [] }` is the honest answer for a genuinely empty change log AND
- * for a non-overlay metadata type (neither `allowOrgOverride` nor
+ * for a non-overlay metadata type (neither `allowEnvironmentOverlay` nor
  * `allowRuntimeCreate`): such types have no history by construction —
  * `saveMetaItem` refuses them outright (#5086) — and the implementation
  * answers `[]` rather than throwing so callers can treat "no history"

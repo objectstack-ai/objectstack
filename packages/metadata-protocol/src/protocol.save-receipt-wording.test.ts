@@ -17,7 +17,7 @@
  * the sentence on a `view` (`supportsOverlay: true`, so the receipt was true
  * there); the same sentence for `object` / `flow` simply was not.
  *
- * The discriminator is NOT `supportsOverlay` and NOT `allowOrgOverride` — the
+ * The discriminator is NOT `supportsOverlay` and NOT `allowEnvironmentOverlay` — the
  * spec's TSDoc keeps those two apart on purpose (loader merge *capability* vs
  * runtime write *permission*), and neither is the fact the sentence claims.
  * The fact the sentence claims is "something was overlaid", and the write path
@@ -175,7 +175,7 @@ describe('#5265 — a save receipt names what was actually written', () => {
         }
         // #6283 → commit ee58392e1 — the override-artifact case at the bottom of this
         // file needs a type that is BOTH overlay-less and per-org overridable.
-        // `flow` played that part until #6283 rolled its `allowOrgOverride`
+        // `flow` played that part until #6283 rolled its `allowEnvironmentOverlay`
         // back to `false` (ADR-0005:57); `action` inherited it until commit ee58392e1
         // rolled back the remaining nine unratified `true` flags — `action`'s
         // overlay-less-yet-overridable pairing was the #6190 phantom shape
@@ -184,7 +184,7 @@ describe('#5265 — a save receipt names what was actually written', () => {
         // new member re-opens the statically-reachable case below instead of
         // silently landing an untested pairing.
         const overlaylessYetOverridable = DEFAULT_METADATA_TYPE_REGISTRY
-            .filter((e) => e.supportsOverlay === false && e.allowOrgOverride)
+            .filter((e) => e.supportsOverlay === false && e.allowEnvironmentOverlay)
             .map((e) => e.type);
         expect(overlaylessYetOverridable).toEqual([]);
     });

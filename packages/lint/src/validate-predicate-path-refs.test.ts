@@ -667,7 +667,14 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // == true`, and removes none. Neither reaches the literal-comparison census
     // below: one is an `in`-list gate, and the other compares against the bare
     // `true`, which is not a quoted literal.
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(87);
+    // It is 88 today, an ADDITION of ONE: #22870 offered the field form's
+    // `mailAssociation` row, a PARSE gate like the deadline pair (`FieldSchema`
+    // refuses the key off `email`). Measured, not inferred: the shipped
+    // `*.form.ts` corpus differenced against the merge base `018b077fb` by
+    // `<form>::<field>::<source>`, 87 → 88, adds exactly
+    // `field :: mailAssociation :: data.type == 'email'` and removes none. It
+    // does reach the literal-comparison census below.
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(88);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);
@@ -774,7 +781,9 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // It is 64 today: #22727's `field :: currencyConfig` gate also opens for a
     // currency formula, `data.type == 'formula' && data.returnType == 'currency'`,
     // two more single-quoted literal comparisons.
-    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(64);
+    // It is 65 today: #22870's `field :: mailAssociation` row is gated on
+    // `data.type == 'email'`, a single-quoted literal comparison.
+    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(65);
 
     const rhsFindings = validatePredicatePathRefs(corrupted)
       .filter((f) => f.rule === PREDICATE_RHS_PATH_SHAPED);

@@ -158,7 +158,7 @@ export const KIND_COVERAGE: Record<MetadataType, KindCoverage> = {
     notes: 'Flat positions only (no hierarchy — ADR-0090 D3); everyone/guest are built-in anchors, never declared.',
   },
   // [#5961] `capability` graduated into the registry (schema + entry, code-only:
-  // allowRuntimeCreate/allowOrgOverride both false — ADR-0066 D1). The showcase
+  // allowRuntimeCreate/allowEnvironmentOverlay both false — ADR-0066 D1). The showcase
   // has declared capabilities since ADR-0066 landed; the registry entry only
   // made the kind's coverage ownable here.
   capability: {

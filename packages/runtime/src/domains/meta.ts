@@ -31,6 +31,10 @@ import {
     // too. No `/meta` branch here carries an organization into a metadata
     // write or read: the per-organization overlay axis is retired.
     metaWriteCapabilityVerdict,
+    // [ADR-0131 D3] …and, for the security catalog under a wall, the platform
+    // operator alone: the walled catalog refusal every catalog write door asks.
+    isSecurityCatalogType,
+    walledCatalogWriteVerdict,
 } from '@objectstack/metadata-core';
 // [#15238] The DECLARED protocol contracts this domain's request literals are
 // compiled against. Imported, never restated: a second hand-written
@@ -90,6 +94,7 @@ import {
     type MetaReadGatePolicy,
 } from '@objectstack/rest';
 import { buildApiError } from '../error-envelope.js';
+import { readEffectiveTenancyPosture } from './activation-gate.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 
@@ -943,7 +948,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     if (parts[0] === 'types') {
         // PRIORITY 1: Try protocol service — it returns BOTH legacy
         // `types: string[]` AND the richer `entries` array (with
-        // JSON Schemas, allowOrgOverride flags, domain, etc) needed by
+        // JSON Schemas, allowEnvironmentOverlay flags, domain, etc) needed by
         // the metadata admin UI. It internally also merges
         // MetadataService runtime types, so this path is strictly richer.
         const protocol = await resolveProtocol(deps, _context);
@@ -1299,6 +1304,27 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     handled: true,
                     response: deps.error(verdict.message, 403),
                 };
+            }
+
+            // [ADR-0131 D3] The walled catalog refusal, right after the
+            // capability gate and before anything is read or written: under
+            // `isolated` / `group` a position, permission set or capability is
+            // shared by every organization, so only the platform operator rung
+            // (or the engine itself) saves one. Inert under `single`. The
+            // posture is read only for a catalog type, so no other save pays
+            // for it. Same predicate as `RestServer`'s four write doors and the
+            // security plugin's data door.
+            if (isSecurityCatalogType(type)) {
+                const ec: any = _context.executionContext;
+                const walled = walledCatalogWriteVerdict({
+                    type,
+                    tenancyPosture: await readEffectiveTenancyPosture(deps, _context),
+                    isSystem: ec?.isSystem === true,
+                    callerPosture: ec?.posture,
+                });
+                if (!walled.allowed) {
+                    return { handled: true, response: deps.error(walled.message, 403) };
+                }
             }
 
             // [#22141] The ADR-0008 precondition and the ADR-0033 lifecycle,

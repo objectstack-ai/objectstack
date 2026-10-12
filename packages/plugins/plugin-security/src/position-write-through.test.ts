@@ -712,11 +712,17 @@ describe('[ADR-0131 D3] Q3 = A — a package cannot register a name a Setup posi
 });
 
 describe('[ADR-0131 D3] controls — what the write-through leaves exactly as it was', () => {
-  it('a walled posture: an organization administrator\'s create lands its organization row, and no definition', async () => {
+  // [ADR-0131 D3] Under a wall the catalog is the platform operator's: an
+  // organization administrator's Setup create is refused at the data door
+  // (`walled-catalog-data-door.ts`) before any row or definition exists. It
+  // used to land a row of the organization with no definition; the refusal
+  // and its assignment control are pinned in `walled-catalog-data-door.test.ts`.
+  it('a walled posture: an organization administrator\'s create is refused 403, with no row and no definition', async () => {
     const b = await boot({ posture: 'isolated' });
     const saves = vi.spyOn(b.protocol, 'saveMetaItem');
-    await create(b, { name: 'plant_lead', label: 'Plant lead' });
-    expect((await b.rows('plant_lead')).map((r) => r.organization_id)).toEqual([ORG]);
+    expect(envelope(await refusalOf(create(b, { name: 'plant_lead', label: 'Plant lead' }))))
+      .toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(await b.rows('plant_lead')).toEqual([]);
     expect(saves).not.toHaveBeenCalled();
     expect(await b.envRows('plant_lead')).toEqual([]);
   });
@@ -725,9 +731,15 @@ describe('[ADR-0131 D3] controls — what the write-through leaves exactly as it
   // under a wall an organization's Setup position is a row with no definition,
   // so it grants nothing; the metadata door takes an environment definition
   // under the same name, and that definition is what the catalog then serves.
+  //
+  // The row-only position is the population a wall's Setup created before the
+  // walled catalog refusal (#15196 Q3 = A), so it is seeded here as that
+  // existing row, a system write into the organization: a tenant can no longer
+  // create one.
   it('a walled posture: an organization\'s row-only position is promoted by an environment definition saved at the metadata door', async () => {
     const b = await boot({ posture: 'isolated' });
-    await create(b, { name: 'plant_auditor', label: 'Plant auditor' });
+    await b.engine.insert('sys_position', { name: 'plant_auditor', label: 'Plant auditor' },
+      { context: { isSystem: true, tenantId: ORG } } as any);
     expect(await b.catalogResolves('plant_auditor')).toBe(false);
     await (b.protocol as any).saveMetaItem({
       type: 'position', name: 'plant_auditor', item: { name: 'plant_auditor', label: 'Plant auditor', permissionSets: ['plant_tools'] },

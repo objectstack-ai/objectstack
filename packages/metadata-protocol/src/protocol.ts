@@ -7759,9 +7759,18 @@ export class ObjectStackProtocolImplementation implements
         // `types: string[]` field is preserved alongside the new `entries`.
         //
         // Phase 3a-env-writable: `OS_METADATA_WRITABLE` env var (comma
-        // separated singular type names) flips `allowOrgOverride` on listed
-        // types so admins can self-serve. The same env var is consulted by
-        // `isOverlayAllowed()` at write time — they must stay in sync.
+        // separated singular type names) elevates `allowEnvironmentOverlay` on
+        // listed types (`overrideSource: 'env'`). The same env var is consulted
+        // by `isOverlayAllowed()` at write time — they must stay in sync — and
+        // since ADR-0131 D6 it opens only items no managed package ships: a
+        // managed item stays sealed whatever the hatch names
+        // (`isSealedManagedItem`).
+        //
+        // ONE wire spelling, on BOTH arms below: the registry arm's `...base`
+        // spread already carries `allowEnvironmentOverlay` at the registry
+        // value, and the elevated value OVERWRITES that same key — never a
+        // second field — so no entry carries `allowEnvironmentOverlay`, the spelling
+        // retired in 18 (its tombstone is `MetadataTypeRegistryEntry`'s).
         const writableOverrides = ObjectStackProtocolImplementation.envWritableTypes();
         const registryByType = new Map(
             DEFAULT_METADATA_TYPE_REGISTRY.map((e) => [e.type, e] as const)
@@ -7803,8 +7812,8 @@ export class ObjectStackProtocolImplementation implements
                     ...base,
                     type: singular,
                     schemaId: singular, // API client expects schemaId field
-                    allowOrgOverride: base.allowOrgOverride || isEnvOverridden,
-                    overrideSource: isEnvOverridden && !base.allowOrgOverride
+                    allowEnvironmentOverlay: base.allowEnvironmentOverlay || isEnvOverridden,
+                    overrideSource: isEnvOverridden && !base.allowEnvironmentOverlay
                         ? 'env' as const
                         : 'registry' as const,
                     schema,
@@ -7873,7 +7882,7 @@ export class ObjectStackProtocolImplementation implements
                 description: undefined,
                 filePatterns: [],
                 supportsOverlay: false,
-                allowOrgOverride: writableOverrides.has(singular),
+                allowEnvironmentOverlay: writableOverrides.has(singular),
                 allowRuntimeCreate: mintableByContract,
                 supportsVersioning: false,
                 executionPinned: false,
@@ -11091,14 +11100,15 @@ export class ObjectStackProtocolImplementation implements
      *
      * - **Registry present, object absent → fail CLOSED** (404
      *   `OBJECT_NOT_FOUND`). The registry is authoritative for objects:
-     *   `object` is `allowOrgOverride: false` (ADR-0005), so no per-org
-     *   overlay can legitimately exist outside the process-wide registry, and
+     *   `object` is `allowEnvironmentOverlay: false` (ADR-0005) and every
+     *   metadata row is environment-wide (ADR-0131 D6), so no object
+     *   definition can legitimately exist outside the process-wide registry, and
      *   both boot hydration (`loadMetaFromDb`) and runtime authoring
      *   (`applyObjectRegistryMutation`) register the schema before its table
      *   is reachable.
      *
      *   [#6190] That justification rested on a premise the WRITE path did not
-     *   enforce until this note was written. `allowOrgOverride: false` closed
+     *   enforce until this note was written. `allowEnvironmentOverlay: false` closed
      *   the overlay tier only; `object` is also `allowRuntimeCreate: true`, and
      *   that tier stamped `organization_id` on the row like any other — so a
      *   Studio-authored `object` COULD legitimately exist as a per-org row,
@@ -15720,7 +15730,7 @@ export class ObjectStackProtocolImplementation implements
      * Metadata types that are customer-overridable via {@link saveMetaItem}/
      * {@link deleteMetaItem} in project-kernel mode. Derived from the canonical
      * registry in {@link DEFAULT_METADATA_TYPE_REGISTRY}: a type opts in by
-     * setting `allowOrgOverride: true` on its registry entry. The set is
+     * setting `allowEnvironmentOverlay: true` on its registry entry. The set is
      * augmented with the plural form of every singular so callers using REST
      * conventions (`/api/v1/meta/views/...`) get the same gate. See ADR-0005
      * §"Whitelist enforcement" for the rationale and the per-type rollout
@@ -15729,7 +15739,7 @@ export class ObjectStackProtocolImplementation implements
     private static readonly OVERLAY_ALLOWED_TYPES: ReadonlySet<string> = (() => {
         const out = new Set<string>();
         for (const entry of DEFAULT_METADATA_TYPE_REGISTRY) {
-            if (!entry.allowOrgOverride) continue;
+            if (!entry.allowEnvironmentOverlay) continue;
             out.add(entry.type);
             const plural = SINGULAR_TO_PLURAL[entry.type];
             if (plural) out.add(plural);
@@ -15740,7 +15750,7 @@ export class ObjectStackProtocolImplementation implements
     /**
      * Phase 3a-env-writable: parse `OS_METADATA_WRITABLE` once.
      * Comma-separated singular type names. When the env var is set, the
-     * listed types get treated as `allowOrgOverride: true` regardless of
+     * listed types get treated as `allowEnvironmentOverlay: true` regardless of
      * their static registry entry. This is the runtime escape hatch admins
      * use to enable Studio-side editing of types whose protocol-level flag
      * is still false (object, field, permission, …).
@@ -15768,7 +15778,7 @@ export class ObjectStackProtocolImplementation implements
     /**
      * Types that opt into runtime creation of brand-new items (ADR-0005
      * extension — two-tier model). A type may have
-     * `allowOrgOverride: false` (cannot overlay artifact-shipped items)
+     * `allowEnvironmentOverlay: false` (cannot overlay artifact-shipped items)
      * yet still set `allowRuntimeCreate: true` (users can author new
      * items in `sys_metadata`). The two flags are orthogonal; see
      * {@link isArtifactBacked} for how the protocol decides which gate
@@ -15810,19 +15820,26 @@ export class ObjectStackProtocolImplementation implements
     })();
 
     /**
-     * [#6960] Metadata types whose LOADER merges a per-org/env overlay row on
-     * top of the artifact at read time — `supportsOverlay: true` on the
-     * registry entry, read straight off the declaration.
+     * [#6960] Metadata types whose stored overlay row of an item a managed
+     * package ships may be REMOVED through the ordinary delete door without
+     * the type's environment-overlay permission — `supportsOverlay: true` on
+     * the registry entry, read straight off the declaration.
      *
      * This is a strictly different question from {@link OVERLAY_ALLOWED_TYPES}
-     * (`allowOrgOverride`), and the registry keeps the two flags apart on
-     * purpose: `supportsOverlay` is a CAPABILITY of the read path ("an overlay
-     * row under this name changes what is served"), `allowOrgOverride` is a
-     * PERMISSION on the write path ("a tenant may author one"). Commit
+     * (`allowEnvironmentOverlay`), and the registry keeps the two flags apart on
+     * purpose: `allowEnvironmentOverlay` decides whether an environment may
+     * overlay an item a managed package ships, on the save AND on the served
+     * read ({@link isSealedManagedItem}, {@link declinesStoredRow});
+     * `supportsOverlay` decides the removal carve-out alone — such a row may be
+     * removed without that permission: the removal removes no managed
+     * definition, and changes what is served for `permission` alone
+     * ({@link refusePackagedBaseRemoval}). It opens no save and it decides no
+     * read. Commit
      * ee58392e1 rolled the permission back for six types — `permission`,
      * `position`, `page`, `app`, `dataset`, `book` — and deliberately left
-     * the capability alone, which is exactly the state #6960 was filed about:
-     * a row authored BEFORE the rollback still merges overlay-wins today.
+     * this flag alone, which is exactly the state #6960 was filed about: rows
+     * authored BEFORE the rollback stay stored, and this carve-out is how an
+     * operator removes them.
      *
      * Registry-derived, never a hand-written list (Prime Directive #8), and
      * augmented with the plural spelling so `/api/v1/meta/pages/...` is judged
@@ -15841,8 +15858,12 @@ export class ObjectStackProtocolImplementation implements
     })();
 
     /**
-     * [#6960] Does this type's loader merge an overlay row at read time?
-     * Normalizes plural→singular, like every other predicate here.
+     * [#6960] Does this type's registry entry carry the removal carve-out
+     * (`supportsOverlay`)? The name predates ADR-0131 D6's seal and no read
+     * consults it: a stored overlay row of a managed item is served or
+     * withheld by {@link declinesStoredRow}, which keys on
+     * `allowEnvironmentOverlay`. Normalizes plural→singular, like every other
+     * predicate here.
      *
      * Read ONLY by `deleteMetaItem`'s two-tier authorization (and mirrored by
      * `SysMetadataRepository`'s delete gate); it never widens a create or an
@@ -15855,7 +15876,7 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * Does the type's REGISTRY entry open an overlay channel (`allowOrgOverride`)?
+     * Does the type's REGISTRY entry open an overlay channel (`allowEnvironmentOverlay`)?
      * The registry arm of {@link isOverlayAllowed}, without the hatch.
      * Normalizes plural→singular before consulting the allow-list.
      *
@@ -15988,7 +16009,7 @@ export class ObjectStackProtocolImplementation implements
 
     /**
      * #5086 — a brand-new item of a type the registry declares code-only
-     * (`allowRuntimeCreate: false` AND `allowOrgOverride: false`).
+     * (`allowRuntimeCreate: false` AND `allowEnvironmentOverlay: false`).
      *
      * Names the type, the flags that produced the verdict, the prescription
      * and the escape hatch — the same shape the retired-key refusals in this
@@ -15999,7 +16020,7 @@ export class ObjectStackProtocolImplementation implements
     private static codeOnlyCreateError(type: string): Error {
         const err = new Error(
             `Metadata type '${type}' is code-only: the metadata-type registry declares `
-            + `allowRuntimeCreate=false and allowOrgOverride=false, so it cannot be created through the `
+            + `allowRuntimeCreate=false and allowEnvironmentOverlay=false, so it cannot be created through the `
             + `runtime metadata API (PUT /api/v1/meta/${type}/:name) on any kernel.`
             + ObjectStackProtocolImplementation.codeOnlySourceHint(type)
             + ` An operator may set OS_METADATA_WRITABLE=${PLURAL_TO_SINGULAR[type] ?? type} to grant a runtime escape hatch. `
@@ -16024,7 +16045,7 @@ export class ObjectStackProtocolImplementation implements
     private static codeOnlyOverrideError(type: string, name: string): Error {
         const err = new Error(
             `Metadata item '${type}/${name}' is provided by a managed package and its type is `
-            + `code-only (allowRuntimeCreate=false, allowOrgOverride=false), so it is sealed against `
+            + `code-only (allowRuntimeCreate=false, allowEnvironmentOverlay=false), so it is sealed against `
             + `runtime edits on any kernel, and OS_METADATA_WRITABLE does not open a managed item.`
             + ObjectStackProtocolImplementation.codeOnlySourceHint(type)
             + ` See docs/adr/0131-total-organization-ownership-no-null-organization-id.md.`
@@ -16118,7 +16139,7 @@ export class ObjectStackProtocolImplementation implements
      * excluded here.
      *
      * Used by the two-tier authorization model to distinguish
-     * "overlaying a packaged item" (requires `allowOrgOverride`) from
+     * "overlaying a packaged item" (requires `allowEnvironmentOverlay`) from
      * "authoring a DB-only item" (requires only `allowRuntimeCreate`).
      *
      * [#7743] …and it must answer that question about the artifact as SHIPPED,
@@ -16191,7 +16212,7 @@ export class ObjectStackProtocolImplementation implements
      * `runtime-only`) and what arms `saveMetaItem`'s own `NOT_OVERRIDABLE`
      * gate. With the lookup empty, an override of a packaged field was
      * classified as a runtime-only CREATE, and `field` carries
-     * `allowRuntimeCreate: true` — so `allowOrgOverride: false` was never
+     * `allowRuntimeCreate: true` — so `allowEnvironmentOverlay: false` was never
      * consulted, and `PUT /api/v1/meta/field/showcase_task.title` answered
      * **200** on a write the registry forbids. Measured on the showcase before
      * this fix: 200 `state:'active'`, the row reading back with
@@ -16380,7 +16401,7 @@ export class ObjectStackProtocolImplementation implements
      * artifact-only lookup, which answers from the entries the artifact loader
      * registered under a package id — never from the body a caller sends) and
      * "does the type have an overlay channel?" — [ADR-0131 D6] asked together
-     * as {@link isSealedManagedItem}, the registry's `allowOrgOverride` alone,
+     * as {@link isSealedManagedItem}, the registry's `allowEnvironmentOverlay` alone,
      * never the `OS_METADATA_WRITABLE` hatch — keep exactly one spelling. The refusal — code, status and sentence — is registered to
      * this package in the ADR-0112 ledger, so the caller relays it verbatim
      * and stamps no code of its own.
@@ -16406,7 +16427,7 @@ export class ObjectStackProtocolImplementation implements
      *    lock's;
      *  - the ADR-0010 per-item `_lock` (L3), which `saveMetaItem` enforces
      *    separately and records to `sys_metadata_audit`: with the hatch shut,
-     *    an artifact-backed item of a type without `allowOrgOverride` is
+     *    an artifact-backed item of a type without `allowEnvironmentOverlay` is
      *    refused here before its `_lock` could matter;
      *  - a named base (`?package=`) on a door that carries none: the
      *    package-less refusal (`NOT_OVERRIDABLE`) is the whole answer there.
@@ -16999,7 +17020,7 @@ export class ObjectStackProtocolImplementation implements
             // hatch is not a limb at all.
             //   • Below the registry limb — this whole branch is guarded
             //     by {@link isSealedManagedItem}, whose type half is the
-            //     registry's `allowOrgOverride` alone, so a regime-O type
+            //     registry's `allowEnvironmentOverlay` alone, so a regime-O type
             //     never reaches the door. That is ADR-0005: an overlay of
             //     a code-shipped item ALWAYS names the read-only package
             //     it customizes, and a door one limb higher would close
@@ -17047,7 +17068,7 @@ export class ObjectStackProtocolImplementation implements
      * merges an overlay at read time, where removing the row is repair (the
      * #6960 ruling; the call site in {@link deleteMetaItem} carries the record
      * and the tier boundary, which is `supportsOverlay`, never
-     * `allowOrgOverride`). Throws the refusal; returns when the removal is not
+     * `allowEnvironmentOverlay`). Throws the refusal; returns when the removal is not
      * refused on that ground.
      *
      * [#20679] Lifted out of `deleteMetaItem` UNCHANGED, for the reason {@link
@@ -18086,7 +18107,7 @@ export class ObjectStackProtocolImplementation implements
      * with package provenance IS a code artifact as far as
      * `getArtifactItem` is concerned, so `isArtifactBacked` turns true and
      * `saveMetaItem`'s overlay gate refuses the NEXT write to it with
-     * `not_overridable` — `object` declares `allowOrgOverride: false`.
+     * `not_overridable` — `object` declares `allowEnvironmentOverlay: false`.
      * Moving the key without the stamp therefore re-creates cloud#970 (an
      * app the user just built becomes silently un-editable) on the write
      * path, one save later instead of one restart later. Measured, not
@@ -18995,8 +19016,9 @@ export class ObjectStackProtocolImplementation implements
         // assert exists to make a producer that stops folding FAIL LOUDLY
         // instead of silently — not to repair its key.
         if (request.type === 'object') {
-            // NOT org-gated, deliberately: an `object` is `allowOrgOverride:
-            // false` (ADR-0005) and its physical TABLE is env-wide, so the
+            // NOT org-gated, deliberately: no overlay of a packaged `object`
+            // exists at any scope (`allowEnvironmentOverlay: false`, ADR-0005),
+            // and its physical TABLE is env-wide, so the
             // registry entry backing it is env-wide too — `assertObjectRegistered`
             // fails CLOSED on a missing entry, and refusing to register here
             // would make a runtime-created object unreachable for data CRUD
@@ -19951,11 +19973,11 @@ export class ObjectStackProtocolImplementation implements
         // ADR-0005 (extended — two-tier model): project-kernel customization is
         // gated by per-item provenance, not just the type-level flag.
         //
-        //  • Item exists as a packaged artifact → require `allowOrgOverride`
+        //  • Item exists as a packaged artifact → require `allowEnvironmentOverlay`
         //    (writing here would overlay code-shipped behaviour; gated for
         //    security on executable types like hook/trigger/validation).
         //  • Item does NOT exist as an artifact → require `allowRuntimeCreate`
-        //    OR `allowOrgOverride`. This lets users author brand-new hooks /
+        //    OR `allowEnvironmentOverlay`. This lets users author brand-new hooks /
         //    validations / triggers without unlocking the artifact-shadowing
         //    capability. Returns `not_creatable` (vs `not_overridable`) so
         //    the UI can present a tailored message.
@@ -19964,7 +19986,7 @@ export class ObjectStackProtocolImplementation implements
 
         // #5086 — CODE-ONLY TYPES ARE REFUSED ON EVERY KERNEL, not only on
         // project-scoped ones. A type whose registry entry sets BOTH
-        // `allowRuntimeCreate: false` AND `allowOrgOverride: false` declares
+        // `allowRuntimeCreate: false` AND `allowEnvironmentOverlay: false` declares
         // that it has **no runtime write channel at all** — today `job`
         // (#4509: `handler` resolves only through the compiled bundle's
         // function table, so a runtime-created job could never be scheduled)
@@ -20004,10 +20026,10 @@ export class ObjectStackProtocolImplementation implements
         //
         // [#6960] THAT CARVE-OUT NOW NAMES BOTH TIERS, because as written it
         // covered only the CODE-ONLY one (`allowRuntimeCreate: false` AND
-        // `allowOrgOverride: false`, i.e. the `if` immediately below) while
+        // `allowEnvironmentOverlay: false`, i.e. the `if` immediately below) while
         // the identical argument had grown a second population: an
         // ARTIFACT-BACKED item of a type that kept `allowRuntimeCreate: true`
-        // and had its `allowOrgOverride` ROLLED BACK to `false` (commit
+        // and had its `allowEnvironmentOverlay` ROLLED BACK to `false` (commit
         // ee58392e1 — `permission` / `position` / `page` / `app` / `dataset` /
         // `book`). Its loader still merges the overlay at read time
         // (`supportsOverlay: true`, untouched by the rollback), so a row
@@ -20024,7 +20046,7 @@ export class ObjectStackProtocolImplementation implements
         // symmetry" in either direction — symmetrizing towards delete re-opens
         // the write door commit ee58392e1 closed, symmetrizing towards save re-traps the
         // repair. And the relaxation is keyed on `supportsOverlay`, not on
-        // `allowOrgOverride`, so it stops at the tier boundary: `object`
+        // `allowEnvironmentOverlay`, so it stops at the tier boundary: `object`
         // (`supportsOverlay: false`, its overlay a contributor LAYER per
         // ADR-0029 D9) keeps refusing both verbs, which is D9.6's declared
         // cost and is pinned. See {@link deleteMetaItem}.
@@ -20072,7 +20094,7 @@ export class ObjectStackProtocolImplementation implements
         // and none of them has to learn to defer to it.
         //
         // ⛔ NO ACCEPTANCE SET MOVES. This predicate is the repository's
-        // (the registry's `allowOrgOverride` — [ADR-0131 D6] never the
+        // (the registry's `allowEnvironmentOverlay` — [ADR-0131 D6] never the
         // `OS_METADATA_WRITABLE` hatch for an item a managed package ships —
         // and a named read-only base through the one `isWritablePackage`),
         // and `repo.put` refuses every write it refuses, on every topology —
@@ -20164,7 +20186,7 @@ export class ObjectStackProtocolImplementation implements
         //     while the same-shaped change on an `object` refused in the same
         //     harness.
         //  2. `field` is code-only (`allowRuntimeCreate: false` AND
-        //     `allowOrgOverride: false` in the `packages/spec` kernel
+        //     `allowEnvironmentOverlay: false` in the `packages/spec` kernel
         //     registry), so the #5086 refusal ABOVE this gate answers first —
         //     `NOT_CREATABLE` for a runtime-only parent, `NOT_OVERRIDABLE` for
         //     an artifact-backed one (#7743's `isNestedArtifactField` path) —
@@ -21126,7 +21148,7 @@ export class ObjectStackProtocolImplementation implements
      *   inert engine to hold the registry, and `POST /meta/_migrate-stored`
      *   resolves a live one from the services registry — so
      *   `content/docs/deployment/cli.mdx` carries it too.
-     * - **Types with no repository write path** (neither `allowOrgOverride` nor
+     * - **Types with no repository write path** (neither `allowEnvironmentOverlay` nor
      *   `allowRuntimeCreate`). This pass declines them, and since #5086 it
      *   would have no choice: `saveMetaItem` refuses a code-only type with
      *   `403 NOT_CREATABLE` / `NOT_OVERRIDABLE` before persistence. The skip
@@ -21425,7 +21447,7 @@ export class ObjectStackProtocolImplementation implements
                 record({
                     ...base,
                     outcome: 'skipped',
-                    reason: `type '${singular}' has no repository write path (allowOrgOverride and `
+                    reason: `type '${singular}' has no repository write path (allowEnvironmentOverlay and `
                         + 'allowRuntimeCreate are both false), so a rewrite would record no history',
                 });
                 continue;
@@ -21556,7 +21578,7 @@ export class ObjectStackProtocolImplementation implements
      * in event_seq order. Powers the Studio "History" tab and any
      * client-side audit timeline.
      *
-     * Returns `[]` for code-only types (neither `allowOrgOverride` nor
+     * Returns `[]` for code-only types (neither `allowEnvironmentOverlay` nor
      * `allowRuntimeCreate`) instead of throwing — callers can treat "no
      * history" uniformly. Those types have no history to yield by
      * construction: `saveMetaItem` refuses them outright (#5086), and the one
@@ -21579,7 +21601,7 @@ export class ObjectStackProtocolImplementation implements
         // here — it was a door AROUND the gate immediately below, measured on
         // `origin/main`:
         //
-        //   `translation` declares `allowOrgOverride: true`, so the singular
+        //   `translation` declares `allowEnvironmentOverlay: true`, so the singular
         //   passes `isOverlayAllowed` and reads real `sys_metadata_history`
         //   rows. `translations` is MANIFEST-ABSENT, so the old line left it
         //   plural; `isOverlayAllowed('translations')` is false, and
@@ -22889,7 +22911,7 @@ export class ObjectStackProtocolImplementation implements
         // state with no consumer.
         //
         // Why it MUST go rather than sit unreached: `api` is now code-only
-        // (`allowRuntimeCreate: false` + `allowOrgOverride: false`), and the
+        // (`allowRuntimeCreate: false` + `allowEnvironmentOverlay: false`), and the
         // #5086 inlet refuses the write BEFORE persistence and BEFORE the
         // draft/publish branch — it does not look at `mode`. So no `api` draft
         // row can be created any more, and this gate could never again see one.
@@ -25298,7 +25320,7 @@ export class ObjectStackProtocolImplementation implements
                     // limb used to carry, `SysMetadataRepository.delete` opened
                     // with `assertAllowed(ref.type, opts.intent)` — the same
                     // gate `put` uses — which refuses every type that is not
-                    // `allowOrgOverride`, `object` among them. So a commit that
+                    // `allowEnvironmentOverlay`, `object` among them. So a commit that
                     // CREATED an object could not be reverted at all: the
                     // first-build undo (publish a brand-new app, then undo it)
                     // left every created object behind, answered `success:
@@ -25428,7 +25450,7 @@ export class ObjectStackProtocolImplementation implements
                     // sibling caller {@link rollbackMetaItem} derives it. Left
                     // unstated, `SysMetadataRepository.restoreVersion` defaults to
                     // `'override-artifact'` and `put`'s `assertAllowed` refuses every
-                    // type that is not `allowOrgOverride` — `object` among them — so
+                    // type that is not `allowEnvironmentOverlay` — `object` among them — so
                     // each `object` item of a reverted commit came back in `failed[]`
                     // as `NOT_OVERRIDABLE` while the same edit reverted fine one
                     // artifact at a time through the version-history revert. The
@@ -26294,12 +26316,14 @@ export class ObjectStackProtocolImplementation implements
         const originGatedRefusal = this.originGatedRemovalRefusal(request.type, request.name);
         // Two-tier authorization for delete (mirrors saveMetaItem).
         //  • Artifact-backed item → delete becomes a tombstone overlay,
-        //    requires `allowOrgOverride`…
-        //  • …EXCEPT when the type's loader merges overlays at read time
-        //    (`supportsOverlay: true`) — then removing the row is repair and
-        //    is allowed without it. [#6960, delete-only; see below.]
+        //    requires `allowEnvironmentOverlay`…
+        //  • …EXCEPT when the type's entry carries `supportsOverlay: true` —
+        //    the removal carve-out: removing the row removes no managed
+        //    definition (and changes what is served for `permission` alone),
+        //    so it is repair and is allowed without it. The flag opens no save
+        //    and decides no read. [#6960, delete-only; see below.]
         //  • DB-only item → hard delete of a user-created row,
-        //    requires `allowRuntimeCreate` (or `allowOrgOverride`).
+        //    requires `allowRuntimeCreate` (or `allowEnvironmentOverlay`).
         if (this.environmentId !== undefined) {
             const overlayAllowed = ObjectStackProtocolImplementation.isOverlayAllowed(request.type);
             const runtimeCreateAllowed = ObjectStackProtocolImplementation.isRuntimeCreateAllowed(request.type);
@@ -26321,17 +26345,19 @@ export class ObjectStackProtocolImplementation implements
             //
             // THE TIER BOUNDARY, which is what makes this narrow enough to be
             // safe: {@link mergesOverlayAtRead} is `supportsOverlay`, NOT
-            // `allowOrgOverride`.
+            // `allowEnvironmentOverlay`.
             //
-            //  • `supportsOverlay: true` + `allowOrgOverride: false` — the
+            //  • `supportsOverlay: true` + `allowEnvironmentOverlay: false` — the
             //    ROLLED-BACK OVERLAYABLE tier (`permission` / `position` /
             //    `page` / `app` / `dataset` / `book`, and any type that lands
             //    in this shape later). Commit ee58392e1 closed the write door
-            //    and left the read path merging overlay-wins, so a row
-            //    authored before the rollback still shapes the effective body
-            //    and the ordinary "Reset to package default" flow answered 403
-            //    with the item still customized. That is the stuck operator
-            //    this branch releases.
+            //    and, until ADR-0131 D6's seal, left the read path merging
+            //    overlay-wins, so a row authored before the rollback shaped the
+            //    effective body and the ordinary "Reset to package default" flow
+            //    answered 403 with the item still customized. The seal now
+            //    withholds such a row from the served read (`permission`
+            //    excepted, {@link isUnservedSealedOverlay}); the row stays stored,
+            //    and this branch is how the operator removes it.
             //  • `supportsOverlay: false` — `object` above all, whose overlay
             //    is a CONTRIBUTOR LAYER (ADR-0029 D9) rather than a merge, and
             //    whose reset refusal is D9.6's declared and maintainer-approved
@@ -26644,7 +26670,7 @@ export class ObjectStackProtocolImplementation implements
 
         // ── Legacy raw-engine path: reachable in control-plane bootstrap
         // (`environmentId === undefined`) for a code-only type — one whose
-        // registry entry sets BOTH `allowOrgOverride: false` and
+        // registry entry sets BOTH `allowEnvironmentOverlay: false` and
         // `allowRuntimeCreate: false` (today `job` and `agent`). No history
         // row, no watch event — these types don't participate in the
         // change-log model, and `SysMetadataRepository.assertAllowed()` would

@@ -691,7 +691,7 @@ export const AdminScopeSchema = lazySchema(() => strictObject(
   /** May create/delete `sys_position_permission_set` bindings whose blast radius lies within the boundary. */
   manageBindings: z.boolean().default(false).describe('Manage position↔permission-set bindings within the subtree'),
   /** May author environment-owned permission sets (package-managed rows stay publish-only per ADR-0086). */
-  authorEnvironmentSets: z.boolean().default(false).describe('Author environment-owned permission sets'),
+  authorEnvironmentSets: z.boolean().default(false).describe('Author environment-owned permission sets (single posture only: under group or isolated the platform operator authors the catalog, ADR-0131 D3)'),
   /**
    * The anti-self-escalation core: permission-set NAMES the delegate may
    * assign/bind. Every set reached by a delegated write must be in this list;
