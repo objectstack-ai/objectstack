@@ -1811,7 +1811,7 @@ describe('[#22161] one-line fixes — the flow trigger ids this slice shortened'
     // names are held to `TimeRelativeTriggerSchema` here, one per mode.
     for (const descriptor of [
       { object: 'task', dateField: 'due_at', withinDays: 3 },
-      { object: 'task', dateField: 'due_at', offsetDays: -1 },
+      { object: 'task', dateField: 'due_at', offsetDays: [7] },
     ]) {
       expect(TimeRelativeTriggerSchema.safeParse(descriptor).success, JSON.stringify(descriptor)).toBe(true);
     }
