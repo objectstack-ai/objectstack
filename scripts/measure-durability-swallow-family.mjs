@@ -314,6 +314,7 @@ const WRITE_SHAPED_CALLEES = new Map([
   ['syncSchema', 'gate-vocabulary'],
   ['syncSchemasBatch', 'gate-vocabulary'],
   ['syncRegisteredSchemas', 'gate-vocabulary'],
+  ['syncObjectSchema', 'gate-vocabulary'],
   ['initObjects', 'gate-vocabulary'],
   ['rearmSuspendedWaitTimers', 'gate-vocabulary'],
   ['writeDeferredReference', 'gate-vocabulary'],

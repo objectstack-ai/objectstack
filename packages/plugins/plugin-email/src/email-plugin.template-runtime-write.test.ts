@@ -98,7 +98,6 @@ function template(over: AnyRecord = {}): AnyRecord {
   return {
     name: 'ops.digest',
     label: 'Digest',
-    category: 'notification',
     locale: 'en-US',
     subject: 'Digest for {{user.name}}',
     bodyHtml: '<p>Hi {{user.name}}</p>',

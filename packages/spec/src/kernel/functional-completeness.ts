@@ -298,7 +298,20 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   English sentence. So the loss is total rather than partial — every
  *   record, on every object — and the author is told at render time as well
  *   as here. Both reads hold at the pin this repo builds against
- *   (`.objectui-sha` = `9646e2ed2`, re-read there 2026-10-12:
+ *   (`.objectui-sha` = `7578323a5`, re-read there 2026-10-12:
+ * on the hop off `9646e2ed2` `ObjectCalendar.tsx` is byte-identical (`git diff
+ * --quiet`), so `getCalendarConfig` `:311`, the `if (!calendarConfig)` arm
+ * `:1354` and its `tt(…)` lines `:1361-1362` did not move; the `en` / `zh` /
+ * `de` packs changed (the same five commits each: objectui#12198,
+ * objectui#12190, objectui#12156, objectui#12187 and objectui `38bb37333`'s
+ * top-bar app identity) but not their `calendar.configRequired` strings, which
+ * moved `en.ts` `:949` -> `:953`, `zh.ts` `:725` -> `:726` and `de.ts` `:705`
+ * -> `:706`; and `ListView.tsx` changed (+34/-79, objectui#12217, objectui
+ * `f5b66bf97`: two import lines changed in place at `:10` / `:12` and one added
+ * at `:16`, a four-line docblock added and `useListViewTranslation` exported
+ * near `:1040`, and the grid's inline empty state replaced by `ListEmptyState`
+ * from `:5677` down), so its `case 'calendar'` MOVED `3813` -> `3818`,
+ * byte-identical. At `9646e2ed2`, re-read there 2026-10-12:
  * on the hop off `088e0f705` `ObjectCalendar.tsx` and the `en` / `zh` / `de`
  * packs are byte-identical (`git diff --quiet`), so `getCalendarConfig` `:311`,
  * the `if (!calendarConfig)` arm `:1354` with its `tt(…)` lines `:1361-1362`
@@ -448,7 +461,15 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   This repo already records the same deletion one door over: the #13817
  *   check in `../ui/view.zod.ts` names objectui#7029 as its runtime half.
  * - `gantt`    → NO fallback, and no silence [#19630]. Measured at the pin
- *   this repo builds against (`.objectui-sha` = `9646e2ed2`, re-read there 2026-10-12:
+ *   this repo builds against (`.objectui-sha` = `7578323a5`, re-read there 2026-10-12:
+ * on the hop off `9646e2ed2` `ObjectGantt.tsx` is byte-identical (`git diff
+ * --quiet`), so `getGanttConfig` `:612` and the `if (!ganttConfig)` arm `:2330`
+ * did not move, and `ListView.tsx` changed (+34/-79, objectui#12217, objectui
+ * `f5b66bf97`: two import lines changed in place at `:10` / `:12` and one added
+ * at `:16`, a four-line docblock added and `useListViewTranslation` exported
+ * near `:1040`, and the grid's inline empty state replaced by `ListEmptyState`
+ * from `:5677` down), so its `case 'gantt'` MOVED `3959` -> `3964`,
+ * byte-identical. At `9646e2ed2`, re-read there 2026-10-12:
  * on the hop off `088e0f705` `ObjectGantt.tsx` is byte-identical (`git diff
  * --quiet`), so `getGanttConfig` `:612` and the `if (!ganttConfig)` arm `:2330`
  * did not move, and `ListView.tsx` changed (+9/-9, objectui#12189, objectui
@@ -559,7 +580,17 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   requires. So the view does not draw a blank chart: it refuses, by name.
  * - `timeline` → date axis: NO fallback [#19630]; title: `titleField || 'name'`,
  *   which still stands. Measured at the same pin (`.objectui-sha` =
- * `9646e2ed2`, re-read there 2026-10-12:
+ * `7578323a5`, re-read there 2026-10-12:
+ * on the hop off `9646e2ed2` `ObjectTimeline.tsx` is byte-identical (`git diff
+ * --quiet`), so its start-date chain `:589-591` and its `if (!hasAuthoredItems
+ * && !startDateField)` refusal arm `:974` did not move, and `ListView.tsx`
+ * changed (+34/-79, objectui#12217, objectui `f5b66bf97`: two import lines
+ * changed in place at `:10` / `:12` and one added at `:16`, a four-line
+ * docblock added and `useListViewTranslation` exported near `:1040`, and the
+ * grid's inline empty state replaced by `ListEmptyState` from `:5677` down), so
+ * its `case 'timeline'` MOVED `3902` -> `3907` and `resolveTimelineDateBinding`
+ * `695` -> `696`, each byte-identical. At `9646e2ed2`, re-read there
+ * 2026-10-12:
  * on the hop off `088e0f705` `ObjectTimeline.tsx` is byte-identical (`git diff
  * --quiet`), so its start-date chain `:589-591` and its `if (!hasAuthoredItems
  * && !startDateField)` refusal arm `:974` did not move, and `ListView.tsx`
@@ -668,7 +699,16 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   block does render; the warning still fires there, because the block the
  *   view TYPE names is the one that is missing. Unchanged by this row.
  * - `map`      → NO fallback, and no silence [#19630]. Measured at the same
- *   pin (`.objectui-sha` = `9646e2ed2`, re-read there 2026-10-12:
+ *   pin (`.objectui-sha` = `7578323a5`, re-read there 2026-10-12:
+ * on the hop off `9646e2ed2` `ObjectMap.tsx` is byte-identical (`git diff
+ * --quiet`), so `getMapConfig` `:421`, `hasCoordinateBinding` `:527` and the
+ * refusal arm `:1337` did not move; and `ListView.tsx` changed (+34/-79,
+ * objectui#12217, objectui `f5b66bf97`: two import lines changed in place at
+ * `:10` / `:12` and one added at `:16`, a four-line docblock added and
+ * `useListViewTranslation` exported near `:1040`, and the grid's inline empty
+ * state replaced by `ListEmptyState` from `:5677` down), so its `case 'map'`
+ * MOVED `4079` -> `4084` and `resolveListMapConfig` `:209` -> `:210`, each
+ * byte-identical. At `9646e2ed2`, re-read there 2026-10-12:
  * on the hop off `088e0f705` `ObjectMap.tsx` is byte-identical (`git diff
  * --quiet`), so `getMapConfig` `:421`, `hasCoordinateBinding` `:527` and the
  * refusal arm `:1337` did not move; and `ListView.tsx` changed (+9/-9,

@@ -345,6 +345,10 @@ const DURABILITY_CRITICAL_CALLEES = new Map([
         'The schema-sync pass never completed — objects are registered and served against tables that were never created or altered.',
     ],
     [
+        'syncObjectSchema',
+        "One object's storage was never set up on demand — for a managed object its table/columns were not created or altered, for a federated object its binding to the remote table was not installed — yet the object stays registered and served. Its callers run AFTER the boot's own schema sync (a service provisioning its tables at kernel:ready, a datasource connected late, a publish), so the boot's sync never covers them and nothing reports the gap: the deployment keeps looking healthy while writes to that object fail or land nowhere and reads fail or answer from the wrong table.",
+    ],
+    [
         'initObjects',
         'Object storage was never initialized — writes go to a table that does not exist.',
     ],
@@ -575,6 +579,21 @@ const FAILURE_PROPAGATION_SITES = new Map([
                 + '`success` to false, populates `failedCount`, and returns the offending `{ type, name, error }` '
                 + 'to the caller. The copy reports, per item, that the write did not land (#5241, entered the '
                 + 'baseline in #4754).',
+        },
+    ],
+    [
+        'packages/cli/src/utils/schema-migration-plugins.ts::measureComposedCoverage',
+        {
+            callees: [['failures.set', 'effect']],
+            why:
+                "`failures` is this function's per-refusal outcome recorder: every entry becomes one note of the "
+                + 'RETURNED report (`The driver REFUSED schema registration for N object(s) (<refusal>); those '
+                + 'objects are NOT in the plan below.`), beside `coverage.reasons.failed`, and `os migrate plan` / '
+                + '`apply` print those notes and mark the plan PARTIAL. So the caller is told, per refusal, which '
+                + 'objects the plan did not examine. It is not a durability seam at all: this pass runs only on a '
+                + 'boot that DEFERRED its DDL, so the `syncObjectSchema` it guards registers metadata in memory and '
+                + 'writes nothing. Declared here because the vocabulary is a name and the name reaches this catch '
+                + "(#22985); `schema-migration-plugins.test.ts` pins the refusal note and the failed count.",
         },
     ],
 ]);
@@ -1876,6 +1895,158 @@ function calleeName(node) {
     if (ts.isIdentifier(expr)) return expr.text;
     if (ts.isPropertyAccessExpression(expr) && ts.isIdentifier(expr.name)) return expr.name.text;
     return undefined;
+}
+
+/**
+ * The GUARDED side's callee read (#22985): which declared durability-critical
+ * operation, if any, does this call INVOKE?
+ *
+ * `calleeName()` reads the property a call is spelled through, so
+ * `sync.call(engine, name)` reads as `call`. That is the right answer for
+ * every other use of it in this file (helper following, the read vocabulary),
+ * and the wrong one here: `.call(recv, …)` / `.apply(recv, args)` /
+ * `.bind(recv)(…)` are ADAPTERS, and what runs is the function they are
+ * applied to. `resolveLogCallee` has read them that way on the LOG side since
+ * #9657; this is the same reading on the guarded side, nothing more.
+ *
+ * The adapter is spelled because the operation is optional on its contract
+ * (`IDataEngine.syncObjectSchema?`): a caller probes it into a local
+ * (`const sync = engine.syncObjectSchema`) and calls the local with the
+ * engine as its receiver. So the function value is resolved through a
+ * `const` alias too, with the scope rules a reader would apply:
+ *
+ *   - the NEAREST enclosing declaration of the name wins, walking out from the
+ *     call; a parameter, a `catch` binding, a loop variable or a function
+ *     declaration of that name in between SHADOWS any outer alias and stops
+ *     the walk, unresolved;
+ *   - only `const` is an alias — a `let`/`var` binding can be reassigned
+ *     after it is read, and a destructured binding names no single value;
+ *   - a bare `.bind(recv)` invokes nothing, so it is not a guarded call (it
+ *     is a call of `bind`), while `fn.bind(recv)(…)` and a `const` holding
+ *     `fn.bind(recv)` are calls of `fn`.
+ *
+ * Reach is only ever ADDED: the plain `calleeName()` reading is still
+ * consulted, so a call this resolver reads differently can never drop a seam
+ * the gate already held. The vocabulary is unchanged by this function — it
+ * matches the same names, through more of the spellings that invoke them.
+ */
+function guardedCriticalCallee(node) {
+    if (!ts.isCallExpression(node)) return undefined;
+    for (const name of [invokedOperationName(node.expression, 0), calleeName(node)]) {
+        if (name && DURABILITY_CRITICAL_CALLEES.has(name)) return name;
+    }
+    return undefined;
+}
+
+/** `(…)`, `…!`, `… as T`, `<T>…`, `… satisfies T` — the value is unchanged. */
+function stripValueWrappers(expr) {
+    let e = expr;
+    while (
+        e &&
+        (ts.isParenthesizedExpression(e) ||
+            ts.isNonNullExpression(e) ||
+            ts.isAsExpression(e) ||
+            ts.isTypeAssertionExpression(e) ||
+            (typeof ts.isSatisfiesExpression === 'function' && ts.isSatisfiesExpression(e)))
+    ) {
+        e = e.expression;
+    }
+    return e;
+}
+
+/** The name of the operation a call whose callee is `calleeExpr` invokes. */
+function invokedOperationName(calleeExpr, depth) {
+    if (depth > MAX_CALLEE_RESOLUTION_DEPTH) return undefined;
+    const expr = stripValueWrappers(calleeExpr);
+    if (!expr) return undefined;
+    if (ts.isPropertyAccessExpression(expr) && ts.isIdentifier(expr.name)) {
+        const name = expr.name.text;
+        if (name === 'call' || name === 'apply') return functionValueName(expr.expression, depth + 1);
+        return name;
+    }
+    // `fn.bind(recv)(…)`: the callee is itself the `.bind(…)` call.
+    if (ts.isCallExpression(expr)) {
+        const target = boundTarget(expr);
+        return target ? functionValueName(target, depth + 1) : undefined;
+    }
+    if (ts.isIdentifier(expr)) return functionValueName(expr, depth + 1);
+    return undefined;
+}
+
+/** `fn.bind(recv)` → `fn`; anything else → undefined. */
+function boundTarget(call) {
+    const callee = stripValueWrappers(call.expression);
+    if (callee && ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.name) && callee.name.text === 'bind') {
+        return callee.expression;
+    }
+    return undefined;
+}
+
+/** The operation name a FUNCTION VALUE expression denotes. */
+function functionValueName(valueExpr, depth) {
+    if (depth > MAX_CALLEE_RESOLUTION_DEPTH) return undefined;
+    const expr = stripValueWrappers(valueExpr);
+    if (!expr) return undefined;
+    if (ts.isPropertyAccessExpression(expr) && ts.isIdentifier(expr.name)) return expr.name.text;
+    if (ts.isCallExpression(expr)) {
+        const target = boundTarget(expr);
+        return target ? functionValueName(target, depth + 1) : undefined;
+    }
+    if (ts.isIdentifier(expr)) {
+        const init = constAliasInitializer(expr);
+        if (init === null) return expr.text;
+        return functionValueName(init, depth + 1) ?? expr.text;
+    }
+    return undefined;
+}
+
+/** Does this binding name (identifier or pattern) bind `name`? */
+function bindingBinds(bindingName, name) {
+    if (!bindingName) return false;
+    if (ts.isIdentifier(bindingName)) return bindingName.text === name;
+    if (ts.isObjectBindingPattern(bindingName) || ts.isArrayBindingPattern(bindingName)) {
+        return bindingName.elements.some((el) => !ts.isOmittedExpression(el) && bindingBinds(el.name, name));
+    }
+    return false;
+}
+
+/**
+ * The initializer of the `const` the identifier `ident` reads, from the
+ * nearest enclosing scope that declares the name — or `null` when the nearest
+ * binding is not a plain `const <name> = <init>` (see `guardedCriticalCallee`).
+ */
+function constAliasInitializer(ident) {
+    const name = ident.text;
+    for (let scope = ident.parent; scope; scope = scope.parent) {
+        if (ts.isFunctionLike(scope) && scope.parameters?.some((p) => bindingBinds(p.name, name))) return null;
+        if (ts.isCatchClause(scope) && scope.variableDeclaration && bindingBinds(scope.variableDeclaration.name, name)) {
+            return null;
+        }
+        if (
+            (ts.isForStatement(scope) || ts.isForOfStatement(scope) || ts.isForInStatement(scope)) &&
+            scope.initializer &&
+            ts.isVariableDeclarationList(scope.initializer) &&
+            scope.initializer.declarations.some((d) => bindingBinds(d.name, name))
+        ) {
+            return null;
+        }
+        const statements =
+            ts.isBlock(scope) || ts.isSourceFile(scope) || ts.isModuleBlock(scope) || ts.isCaseClause(scope) ||
+            ts.isDefaultClause(scope)
+                ? scope.statements
+                : undefined;
+        if (!statements) continue;
+        for (const st of statements) {
+            if ((ts.isFunctionDeclaration(st) || ts.isClassDeclaration(st)) && st.name?.text === name) return null;
+            if (!ts.isVariableStatement(st)) continue;
+            const list = st.declarationList;
+            const decl = list.declarations.find((d) => bindingBinds(d.name, name));
+            if (!decl) continue;
+            if (!(list.flags & ts.NodeFlags.Const) || !ts.isIdentifier(decl.name) || !decl.initializer) return null;
+            return decl.initializer;
+        }
+    }
+    return null;
 }
 
 /**
@@ -3342,10 +3513,8 @@ function analyzeSourceFile(sf, relPath, findings, seams, options = {}) {
     const collectGuardedCalls = (tryBlock) => {
         const guarded = [];
         const inspect = (child) => {
-            const name = calleeName(child);
-            if (name && DURABILITY_CRITICAL_CALLEES.has(name)) {
-                guarded.push({ callee: name, line: lineOf(child) });
-            }
+            const name = guardedCriticalCallee(child);
+            if (name) guarded.push({ callee: name, line: lineOf(child) });
         };
         const walk = (n) => {
             n.forEachChild((child) => {
@@ -4383,6 +4552,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
         'summary limb: a counter-guarded if INSIDE the catch stays the catch rule\'s finding': 1,
         'summary limb: a counter-guarded branch that logs nothing is not a report': 1,
         'passes: a propagating catch is still counted as a seam (not made invisible)': 1,
+        'flags: #22985 — `sync.call(engine, name)` through a const alias is the critical call it invokes': 1,
+        'passes: #22985 — the same alias shape through a cast, logging error, is a seam and loud': 1,
+        'flags: #22985 — `.apply(recv, args)` and `.bind(recv)(…)` invoke their target too': 1,
+        'passes: #22985 — a bare `.bind(recv)` invokes nothing, so it guards nothing': 1,
+        'passes: #22985 — a shadowing parameter or a `let` binding is not resolved as an alias': 1,
     }),
     // Partition 2 — the read-seam invention rule's table, driven by
     // `selfTestReadSeams()`.
@@ -4454,7 +4628,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // added to the roster with no size pin at all: the lookup below reads
 // `undefined` and the comparison fails loudly.
 const SELF_TEST_BATTERY_FLOOR = Object.freeze({
-    selfTest: 63,
+    selfTest: 68,
     selfTestReadSeams: 57,
 });
 
@@ -4463,7 +4637,7 @@ const SELF_TEST_BATTERY_FLOOR = Object.freeze({
 // `selfTestReadSeams`'s partition being deleted from the roster wholesale — the
 // deleted partition's own size pin is not evaluated by anyone once its entry
 // stops reaching it. This is the one assertion that survives that deletion.
-const SELF_TEST_BATTERY_TOTAL_FLOOR = 120;
+const SELF_TEST_BATTERY_TOTAL_FLOOR = 125;
 
 /**
  * The floor for ONE partition of the roster, run from that partition's own
@@ -5474,6 +5648,88 @@ function selfTest() {
                 } }`,
             expectViolation: false,
             expectSeams: 1,
+        },
+        // ── #22985: the guarded side reads what `.call` / `.apply` / `.bind` INVOKE ──
+        //
+        // The live shape, verbatim in structure: an optional operation probed
+        // into a local `const` and called with the engine as its receiver. The
+        // plain reading saw `call`, so neither catch below was a seam at all.
+        {
+            name: 'flags: #22985 — `sync.call(engine, name)` through a const alias is the critical call it invokes',
+            code: `
+                class P { async f(ctx: any, engine: any, objects: any[]) {
+                    const sync = engine.syncObjectSchema;
+                    if (typeof sync !== 'function') return;
+                    for (const obj of objects) {
+                        try { await sync.call(engine, obj.name); }
+                        catch (err) { ctx.logger.warn('could not provision ' + obj.name); }
+                    }
+                } }`,
+            expectViolation: true,
+            expectKinds: ['quiet-log'],
+            expectSeams: 1,
+        },
+        {
+            // The same seam DISCOVERED and judged loud — the green direction is a
+            // seam count, not an absence, so it cannot pass by matching nothing.
+            name: 'passes: #22985 — the same alias shape through a cast, logging error, is a seam and loud',
+            code: `
+                class P { async f(ctx: any, engine: any, obj: any) {
+                    const sync = (engine as unknown as { syncObjectSchema?: (n: string) => Promise<void> }).syncObjectSchema;
+                    if (typeof sync !== 'function') return;
+                    try { await sync.call(engine, obj.name); }
+                    catch (err) { ctx.logger.error('storage NOT created; the boot looks healthy; fix: os migrate apply'); }
+                } }`,
+            expectViolation: false,
+            expectSeams: 1,
+        },
+        {
+            name: 'flags: #22985 — `.apply(recv, args)` and `.bind(recv)(…)` invoke their target too',
+            code: `
+                class P { async f(ctx: any, engine: any, obj: any) {
+                    try { await engine.syncObjectSchema.apply(engine, [obj.name]); }
+                    catch (err) { ctx.logger.warn('apply'); }
+                    const bound = engine.syncObjectSchema.bind(engine);
+                    try { await bound(obj.name); }
+                    catch (err) { ctx.logger.warn('bound alias'); }
+                    try { await engine.syncObjectSchema.bind(engine)(obj.name); }
+                    catch (err) { ctx.logger.warn('bound inline'); }
+                } }`,
+            expectViolation: true,
+            expectCount: 3,
+            expectSeams: 3,
+        },
+        {
+            // MUST NOT LIGHT: binding a function runs nothing.
+            name: 'passes: #22985 — a bare `.bind(recv)` invokes nothing, so it guards nothing',
+            code: `
+                class P { f(ctx: any, engine: any) {
+                    try { this.sync = engine.syncObjectSchema.bind(engine); }
+                    catch (err) { ctx.logger.warn('bind failed'); }
+                } }`,
+            expectViolation: false,
+            expectSeams: 0,
+        },
+        {
+            // MUST NOT LIGHT: the nearest binding of the name is a PARAMETER,
+            // which shadows the outer alias; and a let-binding is not an alias,
+            // because it can be reassigned after it is read.
+            name: 'passes: #22985 — a shadowing parameter or a `let` binding is not resolved as an alias',
+            code: `
+                const sync = engine.syncObjectSchema;
+                class P {
+                    async f(ctx: any, sync: any) {
+                        try { await sync.call(null, 't'); }
+                        catch (err) { ctx.logger.warn('parameter'); }
+                    }
+                    async g(ctx: any, engine: any) {
+                        let run = engine.syncObjectSchema;
+                        try { await run.call(engine, 't'); }
+                        catch (err) { ctx.logger.warn('let'); }
+                    }
+                }`,
+            expectViolation: false,
+            expectSeams: 0,
         },
     ];
 

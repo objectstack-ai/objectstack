@@ -19387,7 +19387,10 @@ export class ObjectStackProtocolImplementation implements
      * this, inserting into a freshly-published object fails with "no such
      * table" (surfaced as `object_not_found`) until the next restart.
      * Best-effort + non-fatal: drivers without DDL (or read-only datasources)
-     * simply no-op, and a sync failure must not abort the publish.
+     * simply no-op, and a sync failure must not abort the publish. Non-fatal is
+     * not quiet: a refused sync is reported at `error` with its consequence
+     * and fix (#22985), because the publish it follows has already answered
+     * success.
      */
     private async ensureObjectStorage(type: string, name: string): Promise<void> {
         // [#8862] The `&& type !== 'objects'` limb is GONE. Both call sites
@@ -19403,7 +19406,22 @@ export class ObjectStackProtocolImplementation implements
         try {
             await this.engine.syncObjectSchema(name);
         } catch (err: any) {
-            console.warn(`[Protocol] table sync failed for object '${name}': ${err?.message ?? err}`);
+            // [#22985] `error`, not `warn`, by the one question AGENTS.md
+            // "Degradation log levels" turns this on: the publish still
+            // answers success and the object is registered and served, while
+            // the storage it was published for does not exist. Said once per
+            // publish of the object, never per write; the publish is
+            // deliberately NOT failed (see the docblock). The driver's refusal
+            // is a separate argument, so a multi-line driver error cannot split
+            // the line that carries the level.
+            console.error(
+                `[Protocol] object '${name}' was published but its storage was NOT created or altered — its schema `
+                + 'sync was refused. The publish answered success and the object is registered and served, so it '
+                + 'looks usable while its writes fail (or drop the columns this publish added) until the sync runs. '
+                + "Fix: resolve the driver's refusal (logged after this line), then publish the object again, which "
+                + 're-runs this sync, or restart, since the boot syncs every registered object\'s storage.',
+                err?.message ?? err,
+            );
         }
     }
 

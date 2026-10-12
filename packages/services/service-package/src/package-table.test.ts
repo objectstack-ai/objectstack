@@ -157,8 +157,10 @@ function pluginContext(engine: unknown) {
       error: (msg: string, err?: unknown) => logs.push({ level: 'error', msg, err }),
     },
     getService: (n: string) => (n === 'objectql' ? engine : undefined),
-    registerService: (_n: string, s: PackageService) => {
-      registered = s;
+    // [#23022] `init()` registers `package.storage` too; this captures only
+    // the `package` service `start()` registers.
+    registerService: (n: string, s: PackageService) => {
+      if (n === 'package') registered = s;
     },
   };
   return { ctx, logs, registered: () => registered };
