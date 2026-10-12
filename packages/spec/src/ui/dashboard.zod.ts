@@ -12,6 +12,7 @@ import { DATE_MACRO_WRAPPED_RE, isDateMacroToken } from '../data/date-macros.zod
 import { DATE_RANGE_PRESETS } from '../data/date-range-presets';
 import { ChartTypeSchema, ChartConfigSchema, type ChartType } from './chart.zod';
 import { ActionType } from './action.zod';
+import { navigationTargetRefusal } from './navigation-target';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 // `AriaPropsSchema` is no longer imported here: `widgets[].aria` was retired
 // (#5010). The shape itself is NOT removed — it stays live on `page.aria` /
@@ -80,6 +81,35 @@ const DASHBOARD_HISTORY =
   + 'without whatever the key was meant to configure.';
 
 /**
+ * The scheme set of a url header action's `actionUrl` — the grammar is
+ * `navigation-target.ts`'s, the one the console's action runner applies at the
+ * click (ruling A+ on objectstack-ai/objectui#12191); this only scopes it to
+ * the url route. ⛔ No second URL grammar here.
+ *
+ * The url route is `actionType: 'url'` OR an omitted `actionType`. The contract
+ * states no default for the key, and its two readers that assign one both
+ * assign `'url'`: objectui's `DashboardRenderer` builds the header action's
+ * `ActionDef` with `type: actionType || 'url'`, and `@objectstack/lint`'s
+ * `validateDashboardActionRefs` applies the same default. So an omitted type is
+ * judged, not waved through: a refused target never works on either reading.
+ * On every other type `actionUrl` names a script, flow, page, endpoint or form
+ * and is untouched. The refusal names both spellings of the url route, so an
+ * author who meant a flow or a script learns that declaring `actionType` is the
+ * way out.
+ */
+const HEADER_ACTION_URL_SUBJECT =
+  "A dashboard header action's `actionUrl`, a url target when `actionType` is `'url'` or omitted,";
+
+function refuseUnopenableHeaderActionUrl(
+  data: { actionUrl: string; actionType?: string },
+  ctx: z.core.$RefinementCtx,
+): void {
+  if (data.actionType !== undefined && data.actionType !== 'url') return;
+  const refusal = navigationTargetRefusal(data.actionUrl, HEADER_ACTION_URL_SUBJECT);
+  if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: ['actionUrl'], message: refusal });
+}
+
+/**
  * Dashboard Header Action Schema
  * An action button displayed in the dashboard header area.
  *
@@ -105,15 +135,27 @@ export const DashboardHeaderActionSchema = lazySchema(() => strictObject({
   /** Action label */
   label: I18nLabelSchema.describe('Action button label').meta({ title: 'Label' }),
 
-  /** Action URL or target */
-  actionUrl: z.string().describe('URL or target for the action').meta({ title: 'Action URL' }),
+  /**
+   * Action URL or target.
+   *
+   * **The url scheme set** (`actionType: 'url'`, or `actionType` omitted):
+   * `actionUrl` is an `http://` or `https://` URL, a `mailto:` address, an
+   * in-app path that starts with `/` or `./`, or a template that opens with
+   * `${` (judged after interpolation, at the click). Every other scheme, a
+   * protocol-relative `//host`, a `/` followed by a backslash, a tab / line
+   * feed / carriage return anywhere, and a bare relative target are refused at
+   * parse — the same set the console's action runner opens
+   * (`navigation-target.ts`). On every other `actionType` it names the script,
+   * flow, page, endpoint or form, and is untouched.
+   */
+  actionUrl: z.string().describe("URL or target for the action. When actionType is 'url' or omitted: an http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ — every other scheme and a protocol-relative //host are refused.").meta({ title: 'Action URL' }),
 
   /** Action type */
   actionType: WidgetActionTypeSchema.optional().describe('Type of action').meta({ title: 'Action Type' }),
 
   /** Icon identifier */
   icon: z.string().optional().describe('Icon identifier for the action button').meta({ title: 'Icon' }),
-}).describe('Dashboard header action'));
+}).superRefine(refuseUnopenableHeaderActionUrl).describe('Dashboard header action'));
 
 /**
  * Dashboard Header Schema
