@@ -29,9 +29,9 @@ under the same rules.
   before it.
 - **One stage, one changeset, one migration.** ADR-0131 lands in stages, in the
   order the ADR records, and each stage that breaks something says so in its
-  own changeset: what is no longer accepted, the old and new spelling, and the
-  fix. Those changesets become each package's `CHANGELOG.md` inside the
-  `18.0.0-next.N` tarball, so read the CHANGELOG of every prerelease you move
+  own changeset: what breaks, and how to move from the old shape to the new
+  one. Those changesets become the `CHANGELOG.md` entries shipped inside each
+  `18.0.0-next.N` package, so read the CHANGELOG of every prerelease you move
   to — moving from one `18.0.0-next.N` to the next can break you.
 - **Protocol 18 comes with it.** `PROTOCOL_VERSION` is `18.0.0` on `main`, so a
   v18 prerelease's handshake admits `engines.protocol: '^18'` and refuses
