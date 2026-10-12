@@ -36,3 +36,8 @@ await stack.stop();
 ```
 
 **`@objectstack/cli` — `os verify --parent-write-reach`.** Opt-in, like `--delete-behaviors` and `--unique-scopes`, on a fresh boot of its own with the verifier personas' sets registered. A write whose answer disagrees, a door that faulted, or a persona that could not be provisioned counts in `hardFailures` and fails the run. The `--json` document carries the report as `parentWriteReach` when the flag is given; without the flag the run and its document are unchanged.
+
+**The unique-scope family — one change and one correction.** `runUniqueScopeProofs` is new in this same release, and two sentences of its own entry in these notes no longer hold:
+
+- **Attribution changed.** A unique refusal that names no field is now `unattributed` where a unique `indexes[]` entry covers the probed column. That entry refuses the same second holder, naming no field either, and admits the twin, so there the refusal may be the entry's rather than the field's own declaration. This is a change to the family's attribution rule: a field-less refusal is attributed to the field only when its twin with only the probed value changed is admitted AND no unique `indexes[]` entry covers the field.
+- **How the second organization is provisioned, corrected.** The family provisions it by `signUp`, then `POST /auth/organization/create`, not by a sign-up that creates its own organization as that entry's parenthetical says.
