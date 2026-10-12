@@ -1,8 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { ObjectSchema, ObjectExtensionSchema } from './object.zod';
+import { ObjectSchema, ObjectExtensionSchema, materializeTreeSelfReferences } from './object.zod';
 import { FieldSchema } from './field.zod';
+import { referenceTargetOf } from './field-value.zod';
+import { defineStack } from '../stack.zod';
 import { classifyDottedFilterHead } from './filter-dotted-head';
 
 // ---------------------------------------------------------------------------
@@ -55,7 +57,9 @@ describe('a `tree` field\'s `reference` must name the declaring object', () => {
     const parsed = ObjectSchema.safeParse(zoo());
     expect(parsed.success, parsed.success ? '' : JSON.stringify(parsed.error.issues)).toBe(true);
     if (!parsed.success) return;
-    expect(parsed.data.fields.f_tree.reference).toBeUndefined();
+    // [#23065] Omitted is accepted, and the parse writes the self-reference the
+    // omission means (the block below pins that reading in full).
+    expect(parsed.data.fields.f_tree.reference).toBe('showcase_field_zoo');
     // The fifth reading (folded from #13928): a reference-less `tree` is
     // classified `relation` and still materialises `deleteBehavior` beside
     // `lookup` — coherent under this rule, because the hierarchy it declares
@@ -142,5 +146,104 @@ describe('a `tree` field\'s `reference` must name the declaring object', () => {
     expect(foreign.error.issues.map((i) => i.path)).toEqual([['fields', 'parent_contact', 'reference']]);
     expect(firstSentence(foreign.error.issues[0].message)).toContain('`contact`');
     expect(firstSentence(foreign.error.issues[0].message)).toContain('`company`');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#23065] A `tree` field that names no `reference` references the object that
+// declares it, and the doors that know that object WRITE it down. The contract
+// already read the omission as a self-reference (the refusal above tells
+// authors to drop the key, and `FieldSchema` materializes `set_null` on the
+// field), but nothing could read the target off a field alone, so every reader
+// answered "no target": the delete walk never reached the field, and a parent
+// delete left its children holding the deleted id. The engine's registry runs
+// the same helper for the doors this parse does not cover (its own pins).
+// ---------------------------------------------------------------------------
+
+describe('a referenceless `tree` is written as a self-reference by the doors that know the object', () => {
+  it('the object parse writes the own name, byte-identical to a field that wrote it, and a re-parse is a no-op', () => {
+    const omitted = ObjectSchema.parse(zoo());
+    const written = ObjectSchema.parse(zoo('showcase_field_zoo'));
+    expect(omitted.fields.f_tree.reference).toBe('showcase_field_zoo');
+    // The same bytes, key order included: the key lands at its shape position.
+    expect(JSON.stringify(omitted)).toBe(JSON.stringify(written));
+    expect(JSON.stringify(ObjectSchema.parse(omitted))).toBe(JSON.stringify(omitted));
+    // The reader of one field now answers the target, as for any self-reference.
+    expect(referenceTargetOf(omitted.fields.f_tree)).toBe('showcase_field_zoo');
+  });
+
+  it('the authoring door (create()) and the stack door (defineStack) write it too', () => {
+    const created = ObjectSchema.create({
+      name: 'category',
+      fields: { name: { type: 'text', label: 'Name' }, parent: { type: 'tree', label: 'Parent' } },
+    });
+    expect(created.fields.parent.reference).toBe('category');
+
+    const stack = defineStack({
+      manifest: { id: 'com.example.tree', namespace: 'tre', version: '0.0.1', type: 'app', name: 'Tree' },
+      objects: [{ name: 'tre_node', fields: { name: { type: 'text' }, parent: { type: 'tree', deleteBehavior: 'cascade' } } }],
+    });
+    const parent = (stack.objects?.[0]?.fields as Record<string, { reference?: string; deleteBehavior?: string }>).parent;
+    expect(parent).toMatchObject({ reference: 'tre_node', deleteBehavior: 'cascade' });
+  });
+
+  it('the extension door writes the object it extends', () => {
+    const ext = ObjectExtensionSchema.parse({
+      extend: 'contact',
+      fields: { parent_contact: { type: 'tree', label: 'Parent' } },
+    });
+    expect(ext.fields?.parent_contact.reference).toBe('contact');
+  });
+
+  it('the refusal\'s own remedy now holds: dropping a foreign `reference` yields the self-reference', () => {
+    const refused = ObjectSchema.safeParse(zoo('showcase_category'));
+    expect(refused.success).toBe(false);
+    if (refused.success) return;
+    expect(refused.error.issues[0].message).toContain('Drop `reference`');
+    expect(ObjectSchema.parse(zoo()).fields.f_tree.reference).toBe('showcase_field_zoo');
+  });
+
+  it('CONTROL: a written self-reference, a lookup and a master_detail parse exactly as before', () => {
+    // Each field, parsed inside the object, is exactly what `FieldSchema` alone
+    // makes of it: the object door wrote nothing onto any of them.
+    const fields = {
+      f_tree: { type: 'tree', label: 'Tree', reference: 'showcase_field_zoo' },
+      f_lookup: { type: 'lookup', label: 'Account', reference: 'showcase_account' },
+      f_master_detail: { type: 'master_detail', label: 'Project', reference: 'showcase_project' },
+      f_text: { type: 'text', label: 'Text' },
+    } as const;
+    const parsed = ObjectSchema.parse({ name: 'showcase_field_zoo', fields });
+    for (const [name, def] of Object.entries(fields)) {
+      expect(JSON.stringify(parsed.fields[name]), name).toBe(JSON.stringify(FieldSchema.parse(def)));
+    }
+    expect(parsed.fields.f_text).not.toHaveProperty('reference');
+  });
+
+  it('the helper: absence is the carrier reader\'s absence, a present value is untouched, nothing to write allocates nothing', () => {
+    const untouched = { name: { type: 'text' }, parent: { type: 'tree', reference: 'node' } };
+    expect(materializeTreeSelfReferences('node', untouched)).toBe(untouched);
+
+    const absent = {
+      a: { type: 'tree' },
+      b: { type: 'tree', reference: null },
+      c: { type: 'tree', reference: '' },
+      d: { type: 'tree', reference: { object: 'node' } },
+      e: { type: 'lookup' },
+    };
+    const out = materializeTreeSelfReferences('node', absent) as Record<string, { reference?: unknown }>;
+    expect(out).not.toBe(absent);
+    expect([out.a.reference, out.b.reference, out.c.reference]).toEqual(['node', 'node', 'node']);
+    // A non-string carrier is the carrier reader's to refuse, loudly — never
+    // overwritten here, where it would read as a valid self-reference.
+    expect(out.d.reference).toEqual({ object: 'node' });
+    expect(out.e).toBe(absent.e);
+    // The input is not mutated.
+    expect(absent.a).toEqual({ type: 'tree' });
+
+    // No name, or no field map, is nothing to write against.
+    expect(materializeTreeSelfReferences(undefined, absent)).toBe(absent);
+    expect(materializeTreeSelfReferences('', absent)).toBe(absent);
+    const list = [{ name: 'parent', type: 'tree' }];
+    expect(materializeTreeSelfReferences('node', list)).toBe(list);
   });
 });
