@@ -386,14 +386,20 @@ function requireReadCapability(deps: DomainHandlerDeps, context: HttpProtocolCon
  * (ADR-0070 D2). Revert asks it only after the protocol's stored-row answer, so
  * a `sys_metadata` row bound to the package keeps its own answer.
  *
- * [#14451] The remedy it names is ADR-0005 org overlay, and it used to name
- * `POST /packages/:id/duplicate` instead. That sentence sent a caller holding a
- * read-only package at a route which — for exactly the packages this refusal
- * fires on — cannot help: duplicate clones a base's `sys_metadata` rows, a code
- * package owns none, and until {@link requireDuplicableSource} the trip ended
- * in a 200 reporting `copiedCount: 0` (the #14451 measurement). A refusal that
- * prescribes a dead end is worse than one that prescribes nothing, so the two
- * doors now agree: overlay is how a code package is customised.
+ * [#14451] It used to name `POST /packages/:id/duplicate` as the remedy. That
+ * sentence sent a caller holding a read-only package at a route which — for
+ * exactly the packages this refusal fires on — cannot help: duplicate clones a
+ * base's `sys_metadata` rows, a code package owns none, and until {@link
+ * requireDuplicableSource} the trip ended in a 200 reporting `copiedCount: 0`
+ * (the #14451 measurement). A refusal that prescribes a dead end is worse than
+ * one that prescribes nothing.
+ *
+ * [ADR-0131 D6] For the same reason it no longer names the ADR-0005
+ * organization overlay, its remedy after that: the per-organization overlay
+ * axis is retired, and a write naming an organization answers `403
+ * NOT_OVERRIDABLE`. What a managed package provides is customised BESIDE it,
+ * as environment-level state, and the two doors name that remedy in one
+ * clause ({@link CUSTOMISE_BESIDE_REMEDY}).
  *
  * ⛔ Deliberately NOT caller-sensitive — there is no `isSystem` bypass, unlike
  * {@link requireManageMetadata}. Read-only is a property of the PACKAGE. Engine
@@ -521,6 +527,24 @@ function commitItemTypes(items: unknown): unknown[] {
     return Array.isArray(list) ? list.map((item) => (item as { type?: unknown } | null)?.type) : [];
 }
 
+/**
+ * [ADR-0131 D6] The customisation remedy both read-only refusals below name
+ * ({@link requireWritablePackage}, {@link requireDuplicableSource}), in one
+ * spelling. A managed package's items are sealed, and what a customer changes
+ * lives beside them as environment-level state: a save under an item's own
+ * name is an environment overlay on a type whose registry entry takes one
+ * (`allowEnvironmentOverlay`) unless the package's lock refuses it — that save
+ * is refused `ITEM_LOCKED`, naming the lock and its reason (ADR-0010 §3.3) —
+ * and on every other type the save door's own refusal names the route that
+ * type has: a flow's clone and switch, an action's switch, a permission set's
+ * clone, else the source. The sentence names that door rather than a list of
+ * types, so it cannot drift from the regime table the door reads.
+ */
+const CUSTOMISE_BESIDE_REMEDY =
+    'customise what this package provides beside it, as environment-level state (ADR-0131 D6): save an item '
+    + 'under its own name — that overlays it where the item\'s type takes an environment overlay and the package\'s '
+    + 'lock does not refuse it, and is otherwise refused naming the route that type has, or the lock.';
+
 function requireWritablePackage(
     deps: DomainHandlerDeps,
     engine: unknown,
@@ -534,8 +558,8 @@ function requireWritablePackage(
         response: deps.error(
             `[writable_package_required] Cannot ${action} package '${id}': it is read-only `
             + `(provided by code or an installed app). Packages the deployment ships are managed by `
-            + `the deployment, not over this API — ${action} a package you own, or customise what `
-            + `this one provides in place, with an ADR-0005 org overlay.`,
+            + `the deployment, not over this API — ${action} a package you own, or `
+            + CUSTOMISE_BESIDE_REMEDY,
             422,
             {
                 code: 'WRITABLE_PACKAGE_REQUIRED',
@@ -591,9 +615,13 @@ function requireWritablePackage(
  * Making it clone a code package's items would extend D4 from bases to code
  * packages — a NEW decision, and one the ADR itself still lists as open
  * ("should customising a code item also fork it into a writable base?
- * *Leaning: keep overlay for surgical tweaks*"). ADR-0005 overlay is the built,
- * shipped answer for customising what a code package provides, so the honest
- * behaviour of an unbuilt gesture is to say so.
+ * *Leaning: keep overlay for surgical tweaks*"). Two built answers exist
+ * instead (ADR-0131 D6): customising BESIDE the package, as environment-level
+ * state ({@link CUSTOMISE_BESIDE_REMEDY}), and, for an editable copy of the
+ * whole package, its `unmanaged` install, which the install door judges (the
+ * package must permit it, and the copy cannot sit beside a managed install of
+ * the same package). So the honest behaviour of an unbuilt gesture is to say
+ * so and name both.
  *
  * ## Shape
  *
@@ -603,7 +631,8 @@ function requireWritablePackage(
  * a lie by implicature here: nothing is being written to the source, and its
  * remedy ("use a writable package") reads as *make the source writable*, which
  * is neither possible nor the point. `DUPLICATE_SOURCE_NOT_A_BASE` names the
- * one thing the caller can act on — pick a base, or overlay instead.
+ * one thing the caller can act on — pick a base, customise beside the package,
+ * or install it unmanaged where it permits that.
  *
  * ⛔ Deliberately NOT a check on emptiness. A WRITABLE base holding no active
  * rows still duplicates to `copiedCount: 0`, and that answer stays exactly as
@@ -637,8 +666,9 @@ function requireDuplicableSource(
             + `(provided by code or an installed app), and duplicate clones a writable base's `
             + `stored metadata rows. A code package's metadata is delivered as code, so there are `
             + `no rows to clone and the copy would be empty (ADR-0070 D4 duplicates a BASE). `
-            + `Duplicate a base you own, or customise what this package provides in place, with an `
-            + `ADR-0005 org overlay.`,
+            + `Duplicate a base you own, or ${CUSTOMISE_BESIDE_REMEDY} `
+            + `For an editable copy of the whole package, install it unmanaged instead `
+            + `(installMode 'unmanaged'), where its manifest's installModes permits that.`,
             422,
             {
                 code: 'DUPLICATE_SOURCE_NOT_A_BASE',
