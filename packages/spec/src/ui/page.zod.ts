@@ -16,6 +16,7 @@ import {
   ViewFilterRuleSchema,
   AddRecordConfigSchema,
   ListColumnSchema,
+  EmptyStateSchema,
 } from './view.zod';
 
 import { lazySchema } from '../shared/lazy-schema';
@@ -888,6 +889,26 @@ export const InterfacePageConfigSchema = lazySchema(() => strictObject({
 
   /** Record count */
   showRecordCount: z.boolean().optional().describe('Show record count at page bottom'),
+
+  /**
+   * [#23005] What the list page draws in place of rows when it has none to
+   * show — the list view's own {@link EmptyStateSchema}, BY REFERENCE (triage's
+   * direction: ⛔ no second empty-state shape), so the page's empty state
+   * carries the same `title`, `message`, `icon` and one `link` a list view's
+   * does, judged by the same rules. A list page defines its own data surface
+   * (ADR-0047 revised), and until this key it had nowhere to say what belongs
+   * in an empty list: the "packages you publish appear here" line of an empty
+   * My Packages page, for one.
+   *
+   * Planned, not yet rendered: measured at objectui `7af0ab3`,
+   * `InterfaceListPage` hands `ListView` the resolved SOURCE view's
+   * `emptyState` (`InterfaceListPage.tsx:503`, `emptyState: view.emptyState`)
+   * and reads no `interfaceConfig.emptyState`. The renderer half — the page's
+   * own empty state preferred over a source view's, on every visualization —
+   * is objectstack-ai/objectui#12270.
+   */
+  emptyState: EmptyStateSchema.optional()
+    .describe('[PLANNED — not yet rendered] What the page draws in place of rows when its list has none to show: `{ title, message, icon, link }`, the list view\'s own empty-state shape. The console\'s list page is its planned reader; until it ships, the page draws a source view\'s empty state, if any.'),
 
   /** Advanced */
   allowPrinting: z.boolean().optional().describe('Allow users to print the page'),
