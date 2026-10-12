@@ -1832,14 +1832,18 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         const types = Array.isArray(body?.types)
             ? body.types.filter((t: unknown): t is string => typeof t === 'string' && t.length > 0)
             : undefined;
+        // Attributed to the caller, not to the route: this writes history
+        // rows, and "who ran the migration" is the question they exist to
+        // answer. [#23068] By the caller's user id alone, or by nobody (an
+        // `isSystem` caller): it lands in `recorded_by` / `updated_by`,
+        // `lookup('sys_user')` columns, so ⛔ never the route's name — the
+        // pass records its origin on `source: 'migrate-stored'`.
+        const actor = typeof ec?.userId === 'string' && ec.userId ? ec.userId : undefined;
         try {
             const report = await protocol.migrateStoredMetadata({
                 apply: body?.apply === true,
                 ...(types && types.length > 0 ? { types } : {}),
-                // Attributed to the caller, not to the route: this writes
-                // history + audit rows, and "who ran the migration" is the
-                // question those rows exist to answer.
-                actor: ec?.userId ? `${ec.userId} (POST /metadata/_migrate-stored)` : 'POST /metadata/_migrate-stored',
+                ...(actor ? { actor } : {}),
             });
             return { handled: true, response: deps.success(report) };
         } catch (e: any) {

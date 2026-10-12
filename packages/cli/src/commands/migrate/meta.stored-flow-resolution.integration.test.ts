@@ -110,11 +110,11 @@ describe('os migrate meta --stored — the protocol resolves the engine itself (
 
       const protocol: any = stack.kernel.getService('protocol');
 
-      // The command's exact call since #4498 — no `canonicalizeFlow`.
+      // The command's exact call since #4498 — no `canonicalizeFlow` — and,
+      // since #23068, no `actor` either (the command has no user to name).
       const report = await protocol.migrateStoredMetadata({
         apply: true,
         types: ['flow'],
-        actor: 'os migrate meta --stored',
       });
 
       // Before the resolver this row came back `skipped` with "no automation
@@ -195,7 +195,8 @@ describe('os migrate meta --stored — the protocol resolves the engine itself (
         name: 'sfs_purge',
         item: { ...item, label: 'Purge Stale Leads (edited)' },
         parentVersion: null,
-        actor: 'studio-roundtrip-probe',
+        // A user id, as a Studio save passes one — never a label (#23068).
+        actor: 'usr_studio_probe',
       });
 
       const [row] = await ql.find('sys_metadata', {

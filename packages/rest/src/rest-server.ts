@@ -2849,7 +2849,8 @@ export class RestServer {
     /**
      * [#7749] The acting identity recorded on a metadata WRITE — the single
      * producer for every `/meta` route that stamps an `actor` (save, delete,
-     * publish, rollback, compound save).
+     * publish, rollback, compound save, and — since #23068, which retired the
+     * route-name label it stamped inline — `POST /_migrate-stored`).
      *
      * ## What was wrong
      *
@@ -6002,15 +6003,19 @@ export class RestServer {
                         // Preview by default — `apply` must be explicitly true,
                         // the same posture the CLI takes. A caller who sends an
                         // empty body gets a report and no writes.
+                        // Attributed to the caller: this writes history rows,
+                        // and "who ran the migration" is the question they
+                        // exist to answer. [#23068] By user id alone — the
+                        // identity this request was authorized as, read by the
+                        // producer every `/meta` write door shares — or by
+                        // nobody. It lands in `recorded_by` / `updated_by`,
+                        // `lookup('sys_user')` columns, so ⛔ never the route's
+                        // name: the pass records its origin on `source`.
+                        const actor = await this.resolveMetaWriteActor(environmentId, req);
                         const report = await (p as any).migrateStoredMetadata({
                             apply: (req.body as any)?.apply === true,
                             ...(types.length > 0 ? { types } : {}),
-                            // Attributed to the caller: this writes history +
-                            // audit rows, and "who ran the migration" is the
-                            // question those rows exist to answer.
-                            actor: ctx?.userId
-                                ? `${ctx.userId} (POST ${metadata.prefix}/_migrate-stored)`
-                                : `POST ${metadata.prefix}/_migrate-stored`,
+                            ...(actor ? { actor } : {}),
                         });
                         res.json(report);
                     } catch (error: any) {
