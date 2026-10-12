@@ -650,7 +650,11 @@ export const ERROR_CODE_LEDGER = {
     // so nothing is written. Each gives a consumer a branch no existing code
     // gives: the package installs MANAGED instead, and neither the
     // `OS_METADATA_WRITABLE` hatch (`NOT_CREATABLE`'s remedy) nor a retry
-    // helps. No HTTP door on this tree yet; the thrown value is the boundary.
+    // helps. Doored: `POST /api/v1/marketplace/install-local` with
+    // `installMode: 'unmanaged'` (`@objectstack/cloud-connection`) answers
+    // both with their own code and status; the install door also raises the
+    // WALLED_POSTURE refusal itself, through the same function, before it
+    // judges anything else about the package.
     //  - UNCOPYABLE, 422: the body carries what the copy cannot write as
     //    environment rows — a runtime-uncreatable type, code, an extension of
     //    another package's items, or an artifact envelope.
@@ -1076,6 +1080,12 @@ export const ERROR_CODE_LEDGER = {
     // admits the (code, shadows) pair, and this row extends its emitter list,
     // never endorses the spelling for new code.
     'FORBIDDEN',
+    // [ADR-0131 D6] install-local refused a requested `installMode` the
+    // package's `installModes` does not permit (absent meaning `['managed']`),
+    // 422, before any write; `details.permitted` names the modes it does.
+    // Its own code because the consumer's branch is its own: retrying with a
+    // permitted mode helps, and no edit of the package is needed.
+    'INSTALL_MODE_NOT_PERMITTED',
     'INVALID_REQUEST',
     'MANIFEST_CONFLICT',             // manifest_id already defined by local code
     'MARKETPLACE_PROXY_FAILED',
@@ -1474,6 +1484,13 @@ export const ERROR_CODE_LEDGER = {
     'STACK_SCHEMA_INVALID',                      // `ObjectStackDefinitionSchema.safeParse` failed; `issues` carries the zod issues structurally
     'STACK_SINGLE_APP_VIOLATION',                // an `app` package declares more than one app (ADR-0019 D3)
     'STACK_TRIGGER_CAPABILITY_REQUIRED',         // an auto-launched flow while `requires` omits `triggers` or `automation` (the pair installs its trigger)
+    // [ADR-0131 D6] The eighth `defineStack` refusal, same family and same
+    // reading (`door: 'none'`, `status: 422`): the package permits the
+    // `unmanaged` install mode while it carries what an unmanaged install
+    // cannot copy — an item of a runtime-uncreatable type, code, an extension
+    // of another package's items. Its install-time counterpart is
+    // `UNMANAGED_INSTALL_UNCOPYABLE` under `@objectstack/metadata-protocol`.
+    'STACK_UNMANAGED_INSTALL_UNCOPYABLE',
     // [#16348] The COMPOSITION half of the same family, and `door: 'none'` on
     // the same reading: the six `composeStacks` refusals, one code per raise
     // site, every one `status: 422` (`StackRefusalError`, `stack.zod.ts`), the

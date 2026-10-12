@@ -94,8 +94,11 @@ import { SEED_SETTLEMENT_SERVICE } from '@objectstack/spec/contracts';
  *    (`metadataForms.*` for object/field/agent/flow/view configuration
  *    forms). Replaces the historical detour of piggy-backing on
  *    `plugin-auth` — translations belong with the package that defines
- *    them. Loaded on `kernel:ready` so the i18n service plugin (which may
- *    register later than ordinary services) is guaranteed to be present.
+ *    them. Loaded UNDER what is already loaded, so a host's bundle for a
+ *    platform key wins in either boot order: in `start()` when an i18n
+ *    service exists by then, else on `kernel:ready` (an `AppPlugin` on a
+ *    lean kernel registers its in-memory fallback during its own `start()`).
+ *    See `contributeTranslations`.
  *
  * Gracefully degrades on lean kernels: without a manifest service the
  * ledger is simply absent — every flag reader answers "not verified", the
@@ -197,6 +200,12 @@ export class PlatformObjectsPlugin {
       // activation ledger stays unregistered (every enable/disable door
       // refuses loudly with 503 rather than keeping a bit that reverts).
     }
+
+    // The translation backstop for a kernel with no i18n service yet at this
+    // plugin's `start()`. Registered here, not in `start()`, so it runs ahead of
+    // the authored-translation sync hooks of the plugins ordered after this one
+    // (see `contributeTranslations`). A no-op when `start()` already loaded.
+    ctx?.hook?.('kernel:ready', () => this.contributeTranslations(ctx));
   }
 
   async start(ctx: any): Promise<void> {
@@ -297,44 +306,138 @@ export class PlatformObjectsPlugin {
     ctx?.hook?.('app:seeded', () => attest('app:seeded'));
     ctx?.hook?.('kernel:ready', () => attest('kernel:ready'));
 
-    ctx?.hook?.('kernel:ready', async () => {
-      let i18n: II18nService | undefined;
-      try {
-        i18n = ctx.getService?.('i18n');
-      } catch {
-        return;
-      }
-      if (!i18n || typeof i18n.loadTranslations !== 'function') return;
+    // Platform translation bundles: here, as soon as an i18n service exists.
+    // `init()` registered the `kernel:ready` backstop for a kernel whose i18n
+    // service only appears later in Phase 2.
+    this.contributeTranslations(ctx);
+  }
 
-      const bundles: Array<[string, Record<string, unknown>]> = [
-        ['Setup', SetupAppTranslations as unknown as Record<string, unknown>],
-        ['MetadataForms', MetadataFormsTranslations as unknown as Record<string, unknown>],
-      ];
+  /**
+   * The i18n service instance the platform bundles were loaded into, so the
+   * `kernel:ready` backstop loads them once per instance, never twice.
+   */
+  private translationsLoadedInto: II18nService | undefined;
 
-      let loaded = 0;
-      for (const [bundleName, bundle] of bundles) {
-        for (const [locale, data] of Object.entries(bundle)) {
-          if (!data || typeof data !== 'object') continue;
-          try {
-            i18n.loadTranslations(locale, data as Record<string, unknown>);
-            loaded++;
-          } catch (err: any) {
-            ctx?.logger?.warn?.(
-              `[platform-objects] failed to load ${bundleName} translations for '${locale}': ${
-                err?.message ?? err
-              }`,
-            );
-          }
+  /**
+   * Load the platform translation bundles UNDER whatever is already loaded
+   * for each locale, so a host's bundle for a platform key wins in either
+   * boot order — the precedence `content/docs/ui/translations.mdx` publishes
+   * ("yours would override the platform's"). A bundle loaded later wins by
+   * the service's own deep merge (last writer); one loaded earlier wins
+   * because {@link layUnder} hands it back on top of the platform's.
+   *
+   * ## Why `start()` first, with `kernel:ready` only as a backstop
+   *
+   * The read that makes "under" possible is `II18nService.getTranslations`,
+   * and both real providers answer it with the runtime-AUTHORED overlay
+   * (Studio `translation` items) merged over the bundles. That overlay is
+   * synced at `kernel:ready`, by a hook `AppPlugin` registers in `init()` —
+   * ahead of every hook registered in `start()`. Read after it, the overlay's
+   * values would be written into the bundle layer, and a deleted Studio
+   * override of a platform key would keep serving the deleted text until the
+   * next restart. Read in `start()`, no sync has run yet. The backstop hook is
+   * registered in `init()` for the same reason: it then runs ahead of the
+   * sync hooks of every plugin ordered after this one.
+   */
+  private contributeTranslations(ctx: any): void {
+    let i18n: II18nService | undefined;
+    try {
+      i18n = ctx.getService?.('i18n');
+    } catch {
+      return;
+    }
+    if (!i18n || typeof i18n.loadTranslations !== 'function') return;
+    if (this.translationsLoadedInto === i18n) return;
+    this.translationsLoadedInto = i18n;
+
+    // `getTranslations` is on the contract. A provider without it still gets
+    // the platform bundles, loaded the old way: over whatever is there.
+    const canLayUnder = typeof i18n.getTranslations === 'function';
+    if (!canLayUnder) {
+      ctx?.logger?.warn?.(
+        '[platform-objects] the i18n service has no getTranslations(locale), so the platform ' +
+          'translation bundles were loaded OVER any bundle already registered: a host bundle ' +
+          'loaded before this point does not override the platform text it repeats. Implement ' +
+          'getTranslations (II18nService) on the provider to restore that precedence.',
+      );
+    }
+
+    const bundles: Array<[string, Record<string, unknown>]> = [
+      ['Setup', SetupAppTranslations as unknown as Record<string, unknown>],
+      ['MetadataForms', MetadataFormsTranslations as unknown as Record<string, unknown>],
+    ];
+
+    let loaded = 0;
+    for (const [bundleName, bundle] of bundles) {
+      for (const [locale, data] of Object.entries(bundle)) {
+        if (!data || typeof data !== 'object') continue;
+        try {
+          const platform = data as Record<string, unknown>;
+          i18n.loadTranslations(
+            locale,
+            canLayUnder ? layUnder(platform, readLoaded(i18n, locale)) : platform,
+          );
+          loaded++;
+        } catch (err: any) {
+          ctx?.logger?.warn?.(
+            `[platform-objects] failed to load ${bundleName} translations for '${locale}': ${
+              err?.message ?? err
+            }`,
+          );
         }
       }
+    }
 
-      if (loaded > 0) {
-        ctx?.logger?.info?.(
-          `[platform-objects] contributed platform translations (${loaded} locale entries)`,
-        );
-      }
-    });
+    if (loaded > 0) {
+      ctx?.logger?.info?.(
+        `[platform-objects] contributed platform translations (${loaded} locale entries)`,
+      );
+    }
   }
+}
+
+/** What the i18n service holds for `locale` now; empty when it cannot say. */
+function readLoaded(i18n: II18nService, locale: string): Record<string, unknown> {
+  try {
+    const loaded = i18n.getTranslations(locale);
+    return isPlainRecord(loaded) ? loaded : {};
+  } catch {
+    // Unreadable reads as nothing loaded: the platform bundle still lands.
+    return {};
+  }
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * The platform bundle with every leaf the service already holds laid back on
+ * top — what to hand `loadTranslations` so the platform text goes UNDER it.
+ *
+ * Walks the platform bundle's own keys only: a key outside it is untouched by
+ * the service's deep merge anyway, so nothing is copied that the load would
+ * not reach. Where both sides hold an object it recurses, so a host label
+ * deep inside `objects.<name>.fields` wins and its platform siblings still
+ * land; anywhere else the loaded value is handed back as it is — a string
+ * over a platform subtree, or a subtree over a platform string — so the load
+ * never replaces or deletes a key the host shipped. Arrays are values, as in
+ * the providers' own merge. Neither input is mutated.
+ */
+function layUnder(
+  platform: Record<string, unknown>,
+  loaded: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, platformValue] of Object.entries(platform)) {
+    const loadedValue = loaded[key];
+    if (isPlainRecord(platformValue) && isPlainRecord(loadedValue)) {
+      out[key] = layUnder(platformValue, loadedValue);
+    } else {
+      out[key] = loadedValue === undefined ? platformValue : loadedValue;
+    }
+  }
+  return out;
 }
 
 /**

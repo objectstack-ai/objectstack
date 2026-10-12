@@ -410,33 +410,45 @@ function requireReadCapability(deps: DomainHandlerDeps, context: HttpProtocolCon
  * 422 (and so this gate never becomes an existence oracle of its own).
  */
 /**
- * [#15204 W2] ADR-0131 D3 at `DELETE /packages/:id`: under a wall the security
- * catalog is the platform operator's, so deleting a package that carries a
- * position or a permission set is too.
+ * [#15204 W2 · W3] ADR-0131 D3 at the `/packages` write doors: under a wall the
+ * security catalog is the platform operator's, so a package write that
+ * creates, changes, restores or removes a position or a permission set is the
+ * operator's too.
  *
- * Measured before this refusal, under `isolated` and `group`: the operator
- * created a writable runtime package and saved a permission set into it
- * (`PUT /meta/permission/:name?package=`); another organization's member held
- * that set; an organization's `manage_metadata` holder (rung `TENANT_ADMIN`)
- * deleted the package, `200`, and the set left the catalog and the member's
- * grants. The capability gate above checks no rung.
+ * Measured before these refusals, under `isolated` and `group`. An
+ * organization's `manage_metadata` holder (rung `TENANT_ADMIN`) acted on a
+ * writable runtime package the operator had saved a permission set into, and
+ * another organization's member held that set:
+ *  - `DELETE /packages/:id` answered `200`; the set left the catalog and the
+ *    member's grants (W2);
+ *  - `publish-drafts` published the operator's pending draft adding
+ *    `manage_users`, and the member gained it;
+ *  - `rollback` and `commits/:commitId/revert` undid the operator's published
+ *    change, and the member lost it;
+ *  - `duplicate` copied the set, under the same name, into the holder's own
+ *    package, and `GET /meta` then served that copy;
+ *  - `revert` discarded the operator's pending catalog draft;
+ *  - `adopt-orphans` moved environment catalog rows, the operator's included,
+ *    into the holder's own package.
+ * The capability gate before each of them checks no rung.
  *
- * The items are read where the delete reads them: `deletePackage` removes the
- * `sys_metadata` rows bound to the package, and those rows are not held under
- * the package in the running registry, so the stored rows are what is asked.
- * The decision is {@link walledCatalogWriteVerdict}'s, never restated. It is
- * asked FIRST, for the first catalog type: its answer does not vary across
- * catalog types, so when it admits this caller (under `single`, with no
- * `tenancy` service, for `isSystem` or for the `PLATFORM_ADMIN` rung) nothing
- * is read and the delete behaves exactly as before. Only a refused caller's
- * package is read, and a package without catalog rows is admitted. The answer
- * is this domain's `403` (`PERMISSION_DENIED`).
+ * Each door passes `readTypes`: the metadata types of the items its verb acts
+ * on, read where the verb reads them (stored `sys_metadata` rows, or a
+ * commit's items; the running registry holds neither under the package). The
+ * decision is {@link walledCatalogWriteVerdict}'s, never restated. It is asked
+ * FIRST, for the first catalog type: its answer does not vary across catalog
+ * types, so when it admits this caller (under `single`, with no `tenancy`
+ * service, for `isSystem` or for the `PLATFORM_ADMIN` rung) `readTypes` is
+ * never called and the door behaves exactly as before. A write that touches no
+ * catalog item is admitted. The answer is this domain's `403`
+ * (`PERMISSION_DENIED`).
  */
-async function refuseWalledCatalogPackageDelete(
+async function refuseWalledCatalogPackageWrite(
     deps: DomainHandlerDeps,
     context: HttpProtocolContext,
-    qlService: Pick<IObjectQLEngine, 'find'> | null | undefined,
-    packageId: string,
+    /** The refused write, as the message names it, e.g. `Deleting package "x"`. */
+    action: string,
+    readTypes: () => Promise<Iterable<unknown>>,
 ): Promise<HttpDispatcherResult | null> {
     const ec: any = context?.executionContext;
     const tenancyPosture = await readEffectiveTenancyPosture(deps, context);
@@ -447,33 +459,66 @@ async function refuseWalledCatalogPackageDelete(
         callerPosture: ec?.posture,
     });
     if (verdictFor(SECURITY_CATALOG_TYPES[0]!).allowed) return null;
-    if (typeof qlService?.find !== 'function') return null;
-    let rows: unknown;
+    let types: Iterable<unknown>;
     try {
-        rows = await qlService.find('sys_metadata', { where: { package_id: packageId }, context: { isSystem: true } });
+        types = await readTypes();
     } catch (e) {
         return { handled: true, response: deps.errorFromThrown(e, 500) };
     }
-    const storedTypes = new Set<string>();
-    for (const row of Array.isArray(rows) ? rows : []) {
-        const type = (row as { type?: unknown } | null)?.type;
-        if (typeof type === 'string' && isSecurityCatalogType(type)) storedTypes.add(type);
-    }
-    if (storedTypes.size === 0) return null;
-    for (const type of SECURITY_CATALOG_TYPES) {
-        if (!storedTypes.has(type)) continue;
+    for (const type of types) {
+        if (typeof type !== 'string' || !isSecurityCatalogType(type)) continue;
         const verdict = verdictFor(type);
         if (!verdict.allowed) {
             return {
                 handled: true,
-                response: deps.error(
-                    `Deleting package "${packageId}" is refused: the package carries security catalog items. ${verdict.message}`,
-                    403,
-                ),
+                response: deps.error(`${action} is refused: it touches security catalog items. ${verdict.message}`, 403),
             };
         }
     }
     return null;
+}
+
+/**
+ * [#15204 W3] The metadata types of the `sys_metadata` rows `where` selects,
+ * read with the system context the package verbs read them with. Empty when
+ * no data engine is reachable: the verb then has nothing to act on either.
+ */
+function storedRowTypes(
+    qlService: Pick<IObjectQLEngine, 'find'> | null | undefined,
+    where: Record<string, unknown>,
+    keep: (row: Record<string, unknown>) => boolean = () => true,
+): () => Promise<unknown[]> {
+    return async () => {
+        if (typeof qlService?.find !== 'function') return [];
+        const rows = await qlService.find('sys_metadata', { where, context: { isSystem: true } });
+        return (Array.isArray(rows) ? rows : [])
+            .filter((row) => row && typeof row === 'object' && keep(row as Record<string, unknown>))
+            .map((row) => (row as { type?: unknown }).type);
+    };
+}
+
+/**
+ * [#15204 W3] The `sys_metadata_commit` row `commitId` names, or `undefined`.
+ * Read directly because `revertCommit` and `rollbackToPackageCommit` take the
+ * commit id alone: the URL's package segment is not what they act on.
+ */
+async function readCommitRow(
+    qlService: Pick<IObjectQLEngine, 'find'> | null | undefined,
+    commitId: string,
+): Promise<Record<string, unknown> | undefined> {
+    if (typeof qlService?.find !== 'function') return undefined;
+    const rows = await qlService.find('sys_metadata_commit', { where: { id: commitId }, context: { isSystem: true } });
+    const row = Array.isArray(rows) ? rows[0] : undefined;
+    return row && typeof row === 'object' ? (row as Record<string, unknown>) : undefined;
+}
+
+/** [#15204 W3] The metadata types a commit's `items` name (stored as JSON text, or already parsed). */
+function commitItemTypes(items: unknown): unknown[] {
+    let list: unknown = items;
+    if (typeof list === 'string') {
+        try { list = JSON.parse(list); } catch { return []; }
+    }
+    return Array.isArray(list) ? list.map((item) => (item as { type?: unknown } | null)?.type) : [];
 }
 
 function requireWritablePackage(
@@ -1496,6 +1541,13 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         if (parts.length === 2 && parts[1] === 'publish-drafts' && m === 'POST') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
+            // [#15204 W3] ADR-0131 D3: publishing a catalog draft is the
+            // operator's under a wall. The drafts this verb promotes.
+            const walled = await refuseWalledCatalogPackageWrite(
+                deps, _context, `Publishing the drafts of package "${id}"`,
+                storedRowTypes(qlService, { package_id: id, state: 'draft' }),
+            );
+            if (walled) return walled;
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.publishPackageDrafts === 'function') {
                 try {
@@ -1814,6 +1866,13 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         if (parts.length === 2 && parts[1] === 'discard-drafts' && m === 'POST') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
+            // [#15204 W3] ADR-0131 D3: discarding a catalog draft is the
+            // operator's under a wall. The drafts this verb discards.
+            const walled = await refuseWalledCatalogPackageWrite(
+                deps, _context, `Discarding the drafts of package "${id}"`,
+                storedRowTypes(qlService, { package_id: id, state: 'draft' }),
+            );
+            if (walled) return walled;
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.discardPackageDrafts === 'function') {
                 try {
@@ -1855,6 +1914,17 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         if (parts.length === 4 && parts[1] === 'commits' && parts[3] === 'revert' && m === 'POST') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const commitId = decodeURIComponent(parts[2]);
+            // [#15204 W3] ADR-0131 D3: reverting a commit that touched a
+            // catalog item is the operator's under a wall. Judged by the
+            // commit's own items: `revertCommit` takes the commit id alone, so
+            // the URL's package segment names nothing it acts on. A commit
+            // that does not exist reads as touching nothing; the verb answers
+            // its own 404.
+            const walled = await refuseWalledCatalogPackageWrite(
+                deps, _context, `Reverting commit "${commitId}"`,
+                async () => commitItemTypes((await readCommitRow(qlService, commitId))?.items),
+            );
+            if (walled) return walled;
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.revertCommit === 'function') {
                 try {
@@ -1879,6 +1949,30 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 if (!body?.commitId) {
                     return { handled: true, response: deps.error('Body { commitId } is required', 400) };
                 }
+                // [#15204 W3] ADR-0131 D3: a rollback reverts every `apply`
+                // commit of the target's package newer than the target, so it
+                // is the operator's under a wall when any of them touched a
+                // catalog item. Read as `rollbackToPackageCommit` reads them:
+                // the target row, then that package's commits. Every `apply`
+                // commit at or after the target's instant other than the
+                // target itself is read, a superset of the reverted ones.
+                const targetCommitId = String(body.commitId);
+                const walled = await refuseWalledCatalogPackageWrite(
+                    deps, _context, `Rolling back to commit "${targetCommitId}"`,
+                    async () => {
+                        const target = await readCommitRow(qlService, targetCommitId);
+                        if (!target || typeof protocol.listCommits !== 'function') return [];
+                        const commits: any[] = await protocol.listCommits({ packageId: target.package_id });
+                        const at = Date.parse(String(
+                            commits.find((c) => c?.id === targetCommitId)?.createdAt ?? target.created_at,
+                        ));
+                        return commits
+                            .filter((c) => c?.id !== targetCommitId && c?.operation === 'apply'
+                                && !(Date.parse(String(c?.createdAt)) < at))
+                            .flatMap((c) => commitItemTypes(c?.items));
+                    },
+                );
+                if (walled) return walled;
                 try {
                     const result = await protocol.rollbackToPackageCommit({
                         commitId: String(body.commitId),
@@ -1896,6 +1990,13 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         if (parts.length === 2 && parts[1] === 'revert' && m === 'POST') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
+            // [#15204 W3] ADR-0131 D3: discarding a catalog draft is the
+            // operator's under a wall. The drafts this verb discards.
+            const walled = await refuseWalledCatalogPackageWrite(
+                deps, _context, `Reverting package "${id}"`,
+                storedRowTypes(qlService, { package_id: id, state: 'draft' }),
+            );
+            if (walled) return walled;
             // [#22090] A package's members live in one of two places, and each
             // is reverted by the service that holds it. A Studio-authored
             // package is `sys_metadata` rows bound by `package_id` — the rows
@@ -1952,6 +2053,16 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         if (parts.length === 2 && parts[1] === 'adopt-orphans' && m === 'POST') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
+            // [#15204 W3] ADR-0131 D3: rebinding environment catalog rows into
+            // a package is the operator's under a wall. The orphans exactly as
+            // `reassignOrphanedMetadata` selects them: organization-less rows
+            // with no package (null, empty, or the `sys_metadata` sentinel).
+            const walled = await refuseWalledCatalogPackageWrite(
+                deps, _context, `Adopting orphaned metadata into package "${id}"`,
+                storedRowTypes(qlService, { organization_id: null },
+                    (row) => row.package_id == null || row.package_id === '' || row.package_id === 'sys_metadata'),
+            );
+            if (walled) return walled;
             const protocol = await resolveProtocol(deps, _context);
             if (!protocol || typeof protocol.reassignOrphanedMetadata !== 'function') {
                 return { handled: true, response: deps.error('Orphan adoption not supported', 501) };
@@ -1994,6 +2105,15 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // the target package record (`installPackage`) ahead of its copy
             // loop, so a refusal any later still leaves the empty shell behind.
             const notABase = requireDuplicableSource(deps, qlService, id); if (notABase) return notABase;
+            // [#15204 W3] ADR-0131 D3: a duplicate copies the source's items
+            // into a new package, and a copied catalog item is a catalog
+            // creation (its name is not re-namespaced), the operator's under
+            // a wall. The rows `duplicatePackage` copies: active, environment-wide.
+            const walled = await refuseWalledCatalogPackageWrite(
+                deps, _context, `Duplicating package "${id}"`,
+                storedRowTypes(qlService, { package_id: id, state: 'active', organization_id: null }),
+            );
+            if (walled) return walled;
             try {
                 const result = await protocol.duplicatePackage({
                     sourcePackageId: id,
@@ -2110,7 +2230,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // organization's holder passes it. [#15204 W2] What makes the delete
             // the operator's under a wall is the catalog refusal below (ADR-0131
             // D3), for a package that carries a position or a permission set.
-            const walled = await refuseWalledCatalogPackageDelete(deps, _context, qlService, id);
+            const walled = await refuseWalledCatalogPackageWrite(
+                deps, _context, `Deleting package "${id}"`,
+                storedRowTypes(qlService, { package_id: id }),
+            );
             if (walled) return walled;
             const protocol = await resolveProtocol(deps, _context);
             const persists = Boolean(protocol && typeof protocol.deletePackage === 'function');

@@ -3258,20 +3258,24 @@ export default class Serve extends Command {
           // as before this decision existed.
           //
           // The trade this makes, stated rather than discovered later: on that
-          // boot the dev HMR SSE endpoint is not mounted either, because the
-          // plugin that mounts it is the one not composed. That is the right
-          // way round. The alternative — compose the door anyway and only
-          // withhold the registrar — keeps a dev convenience by re-creating the
-          // TWO-WRITER divergence this block exists to remove: the watcher
-          // picks the artifact up if it later appears, and then registers a
-          // second copy behind a wrap that already registered its own. The
-          // endpoint is missing only where `os dev` was pointed at an artifact
-          // that is not there (`--artifact` skips auto-compile), and the
-          // warning above says so by name.
+          // boot nothing reloads the named artifact if it later appears,
+          // because the plugin that would watch it is the one not composed.
+          // That is the right way round. The alternative — compose the door
+          // anyway and only withhold the registrar — keeps a dev convenience by
+          // re-creating the TWO-WRITER divergence this block exists to remove:
+          // the watcher picks the artifact up if it later appears, and then
+          // registers a second copy behind a wrap that already registered its
+          // own. That boot still gets a `MetadataPlugin` — the host-config door
+          // below (#22989), which names no artifact, so it watches and
+          // registers none, and which mounts the dev HMR SSE endpoint under
+          // `NODE_ENV=development` in this door's place. The reload is missing
+          // only where `os dev` was pointed at an artifact that is not there
+          // (`--artifact` skips auto-compile), and the warning below says so by
+          // name.
           if (hmrArtifactPath && !/^https?:\/\//i.test(hmrArtifactPath)) {
             if (!fs.existsSync(hmrArtifactPath)) {
               console.warn(chalk.yellow(
-                `  ⚠ Dev metadata-HMR endpoint not enabled: no compiled artifact at ${hmrArtifactPath}`
+                `  ⚠ Dev artifact reload not enabled: no compiled artifact at ${hmrArtifactPath}`
                 + '\n    Stack-declared security metadata stays with the app wrap, its registrar on every'
                 + '\n    boot without a door.',
               ));
@@ -3294,6 +3298,53 @@ export default class Serve extends Command {
           console.warn(chalk.yellow(`  ⚠ Dev metadata-HMR endpoint not enabled: ${e?.message}`));
         }
       }
+
+      // ── The metadata door of a HOST config with no artifact door (#22989) ──
+      // A host config never reaches `createStandaloneStack`, the composition
+      // that gives every other config boot `@objectstack/metadata`'s
+      // `MetadataPlugin`. So unless the dev artifact door above composed, its
+      // `metadata` slot fell to the kernel's in-memory core fallback, which has
+      // no `matchEndpoint`: every `apis` endpoint the stack declares answered
+      // `404 ENDPOINT_NOT_FOUND` on `os serve` (and on `os start`, whose
+      // `serve` child takes this branch), while `os dev` over the compiled twin
+      // matched it. Maintainer ruling (#22989, option A): such a composition
+      // gets a `MetadataPlugin` with NO `artifactSource`, so the slot is a
+      // `MetadataManager` on both doors and the AppPlugin wrap's registration
+      // fills its endpoint index.
+      //
+      // What this door does and does not do, measured on `examples/app-showcase`:
+      //   • `bootstrap: 'lazy'` skips the filesystem priming pass the default
+      //     `eager` mode runs when no artifact is named. The artifact door this
+      //     mirrors loads its artifact and never runs that pass; with no
+      //     artifact the pass would scan `rootDir/<type>/` and register a
+      //     second, differently stamped copy of whatever it found beside the
+      //     wrap's (it finds 0 items under the showcase).
+      //   • `rootDir` is the served app's root (`hostRoot`), the root
+      //     `createStandaloneStack` hands its own door as `projectRoot`, so the
+      //     repository it attaches sits under the app, never under whatever
+      //     directory the operator stood in. Attaching writes nothing at boot.
+      //   • It registers NONE of the stack's metadata: with no artifact it
+      //     reads nothing of it. The wrap below therefore stays the single
+      //     registrar of `positions` / `permissions` / `capabilities` /
+      //     `sharingRules`, and its `securityMetadataRegistrar` stays the
+      //     default `'app-plugin'`. ⛔ Never `'artifact-door'` for this door:
+      //     that would leave the four collections with no registrar at all.
+      //   • A composition that already holds a `MetadataPlugin` (its own, or
+      //     the dev door above) is left alone. A config that is not a host
+      //     config got one from the standalone stack already.
+      let hostConfigMetadataDoor: any;
+      if (
+        !devArtifactDoor
+        && isHostConfig(config)
+        && !plugins.some((p: any) => p?.name === 'com.objectstack.metadata' || p?.constructor?.name === 'MetadataPlugin')
+      ) {
+        const { MetadataPlugin } = await import('@objectstack/metadata');
+        hostConfigMetadataDoor = new MetadataPlugin({
+          watch: false,
+          config: { bootstrap: 'lazy' },
+          rootDir: hostRoot,
+        });
+      }
       // ORDERING (#4085 → #4131/ADR-0116): the wrap is APPENDED to `plugins`
       // rather than registered here — but the append is no longer what makes
       // the boot correct. AppPlugin now DECLARES its ordering contract
@@ -3310,8 +3361,10 @@ export default class Serve extends Command {
             const { AppPlugin } = await import('@objectstack/runtime');
             // The registrar is DECLARED by this composition, never inferred by
             // AppPlugin — see the `devArtifactDoor` block above. Default
-            // (`'app-plugin'`) whenever no door composes, which is every
-            // non-dev boot of a host config.
+            // (`'app-plugin'`) whenever no artifact door composes, which is
+            // every non-dev boot of a host config — including every boot that
+            // composes `hostConfigMetadataDoor`, which reads no artifact and
+            // so registers none of the stack.
             plugins = [...plugins, new AppPlugin(
               config,
               undefined,
@@ -3503,12 +3556,14 @@ export default class Serve extends Command {
       // ── Dev-only: metadata HMR SSE endpoint for host/aggregator configs ──
       //
       // Host configs (their `plugins[]` holds instantiated Plugin objects) skip
-      // the standalone stack — see `shouldBootWithLibrary()`. That stack is the
-      // only place `@objectstack/metadata`'s MetadataPlugin gets composed, and
-      // MetadataPlugin is what registers `GET /api/v1/dev/metadata-events` in
-      // its start(). So when serving a host config the Console's dev
-      // metadata-HMR reloader hits a 404 and the page never auto-reloads after
-      // a recompile.
+      // the standalone stack — see `shouldBootWithLibrary()`. That stack is
+      // where every other config gets `@objectstack/metadata`'s MetadataPlugin,
+      // and MetadataPlugin is what registers `GET /api/v1/dev/metadata-events`
+      // in its start(). So when serving a host config with no door the
+      // Console's dev metadata-HMR reloader hit a 404 and the page never
+      // auto-reloaded after a recompile. (A host config with no artifact door
+      // now gets the artifact-less `hostConfigMetadataDoor` instead, #22989,
+      // which mounts the same endpoint under development and reloads nothing.)
       //
       // Compose a lightweight, artifact-sourced MetadataPlugin here so the
       // endpoint exists regardless of boot shape. Guards:
@@ -3542,6 +3597,15 @@ export default class Serve extends Command {
         } catch (e: any) {
           console.warn(chalk.yellow(`  ⚠ Dev metadata-HMR endpoint not enabled: ${e?.message}`));
         }
+      }
+      // [#22989] The host-config door with no artifact, at the same site and
+      // for the same ordering reason; it exists only when `devArtifactDoor`
+      // does not, so a boot composes at most one of the two. No catch: this
+      // door is the `metadata` slot's occupant, and a boot that cannot compose
+      // it must fail, not fall back to the matcher-less core fallback quietly.
+      if (hostConfigMetadataDoor) {
+        await kernel.use(hostConfigMetadataDoor);
+        trackPlugin('Metadata');
       }
 
       // Serve /runtime/assets/* unconditionally — branding logos, favicons,

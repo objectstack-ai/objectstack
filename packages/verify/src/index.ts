@@ -3,10 +3,12 @@
 // @objectstack/verify — public API.
 //
 // Boot any ObjectStack app in-process and verify it through the real HTTP
-// stack. Three proof families, all app-agnostic (derived from your metadata):
+// stack. Five proof families, all app-agnostic (derived from your metadata):
 //   - data fidelity   : runCrudVerification     — author → write → read → assert
 //   - authorization   : runRlsProofs            — "you can't write what you can't read"
 //   - value shape     : runReferenceShapeProofs — "a reference refuses a value that is not a record id"
+//   - delete behaviour: runDeleteBehaviorProofs — "a declared deleteBehavior is what a delete does"
+//   - unique scope    : runUniqueScopeProofs    — "a declared unique collides where its scope says"
 
 export { bootStack, bootStackOnce } from './harness.js';
 export type { VerifyStack, BootOptions } from './harness.js';
@@ -79,6 +81,49 @@ export type {
   ReferenceShapeReport,
   ReferenceShapeProofOptions,
 } from './reference-shape.js';
+
+// The delete-behaviour family: every `deleteBehavior` a reference field
+// declares is what a by-id delete of the referenced record does, asked of the
+// engine through the REST door and the system door.
+export {
+  deriveDeleteBehaviorCases,
+  runDeleteBehaviorProofs,
+  formatDeleteBehaviorReport,
+} from './delete-behavior.js';
+export type {
+  DeclaredDeleteBehavior,
+  DeleteBehaviorCase,
+  DeleteBehaviorDoor,
+  DeleteBehaviorAnswer,
+  DeleteBehaviorProbeResult,
+  DeleteBehaviorFieldStatus,
+  DeleteBehaviorFieldResult,
+  DeleteBehaviorReport,
+  DeleteBehaviorProofOptions,
+} from './delete-behavior.js';
+
+// ADR-0120 D1 — the unique-scope family: every field a stack declares `unique`
+// collides as its declared scope says (within one organization; across two
+// only for `'global'` or an object with no organization column), asked of the
+// engine through the REST door and the system door.
+export {
+  deriveUniqueScopeCases,
+  runUniqueScopeProofs,
+  formatUniqueScopeReport,
+} from './unique-scope.js';
+export type {
+  DeclaredUniqueScope,
+  UniqueScopeCase,
+  UniqueScopeDoor,
+  UniqueScopeLeg,
+  UniqueScopeOperation,
+  UniqueScopeAnswer,
+  UniqueScopeProbeResult,
+  UniqueScopeFieldStatus,
+  UniqueScopeFieldResult,
+  UniqueScopeReport,
+  UniqueScopeProofOptions,
+} from './unique-scope.js';
 
 // ADR-0060 — reusable conformance-ledger helper (static complement to the
 // runtime harness): classify every declarable property, fail closed on drift.

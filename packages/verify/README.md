@@ -1,7 +1,7 @@
 # @objectstack/verify
 
 Boot any ObjectStack app **in-process** and verify it through the **real HTTP
-stack** — no mocks, no ports, no sockets. Three app-agnostic proof families, all
+stack** — no mocks, no ports, no sockets. Five app-agnostic proof families, all
 derived from your own metadata:
 
 - **Data fidelity** — author one record per object covering every field type,
@@ -14,6 +14,21 @@ derived from your own metadata:
   embedded record object is written into each `lookup` / `master_detail` /
   `user` / `tree` field, on insert and update, through the REST door and the
   system door, and the engine must refuse it naming the field.
+- **Declared delete behaviour** (opt-in) — *every `deleteBehavior` a reference
+  field declares is what a delete of the referenced record does*: per field, a
+  fresh target record and a holder referencing it, then the target is deleted
+  by id through the REST door and the system door. `cascade` must remove the
+  holder, `set_null` must keep it with the link cleared, and `restrict` must
+  refuse the delete (`DELETE_RESTRICTED` naming the holder's object); a second
+  holder of another target record must be left alone either way.
+- **Declared unique scope** (opt-in) — *every field declared `unique` collides
+  as its scope says* (ADR-0120): per field, a first record holds a value and a
+  second one is offered it, by insert and by update, through the REST door and
+  the system door. Within one organization the second holder must be refused
+  (`UNIQUE_VIOLATION` / `DUPLICATE_RECORD`, attributed to the field). On an
+  org-scoped boot a second organization is provisioned too, and there a
+  `true` / `'organization'` value must be admitted while a `'global'` one, or
+  one on an object with no organization column, must be refused.
 
 And, on the same booted stack, an **in-process handle** so an app's own tests
 can run a hook, a validation rule, a flow, an action, a seed or a read against
@@ -52,6 +67,12 @@ objectstack verify --app ./objectstack.config.ts --rls --multi-tenant
 
 # also prove every reference field refuses a value that is not a record id
 objectstack verify --reference-shapes
+
+# also prove every declared deleteBehavior is what a delete does
+objectstack verify --delete-behaviors
+
+# also prove every declared unique collides where its scope says (both legs)
+objectstack verify --unique-scopes --multi-tenant
 ```
 
 `--reference-shapes` is opt-in, on a fresh boot of its own: the engine still
@@ -59,9 +80,33 @@ admits wrong-shaped ELEMENTS on a `multiple: true` `lookup` / `user` field, so
 on an app that declares one the family reports holes and fails the run until
 the engine refuses them.
 
+`--delete-behaviors` is opt-in, on a fresh boot of its own. The declaration is
+read as the spec's parse of the field states it, which is what a built
+artifact carries: a `lookup` or `tree` that authors nothing states `set_null`.
+A `tree` field's delete is not honoured today (deleting the parent leaves the
+child's reference in place), so on an app that declares one the family reports
+a contradiction and fails the run.
+
+`--unique-scopes` is opt-in, on a fresh boot of its own (it writes duplicates on
+purpose). The scope is read as the spec's parse of the field states it: an
+`autonumber` that authors no `unique` states `'organization'`. A field the
+caller cannot set (`readonly`, `system`, a runtime-issued `autonumber`) is
+probed through the system door only, which keeps an explicit value. Without
+`--multi-tenant` the boot has one organization and no wall, so the
+cross-organization leg is reported **not run**, with the reason, on the
+report's `boot` — run it org-scoped to prove that `true` / `'organization'`
+lets two organizations hold one value (the walled boot needs a declared
+membership policy, `OS_AUTH_MEMBERSHIP_POLICY`). A refusal proves the
+collision only when it is the platform's unique refusal and it is this field's:
+it names the field, or it names none (a per-organization constraint is an
+expression index, which the driver reports by index name) and the same record
+with only the probed value changed is admitted.
+
 Exit code is **non-zero** on real failures (`create-failed`, `read-failed`,
-`fidelity-gaps`, `rls-hole`, and with `--reference-shapes` a field with
-`holes` or `failed`) so it drops straight into a CI gate. Inconclusive
+`fidelity-gaps`, `rls-hole`, with `--reference-shapes` a field with `holes` or
+`failed`, and with `--delete-behaviors` or `--unique-scopes` a field
+`contradicted` or `failed`) so
+it drops straight into a CI gate. Inconclusive
 verdicts (`needs-fixture`, `skipped`, `member-visible`) are warnings and exit 0.
 
 ## Programmatic (embed in your own test runner)
@@ -70,6 +115,8 @@ verdicts (`needs-fixture`, `skipped`, `member-visible`) are warnings and exit 0.
 import {
   bootStack, runCrudVerification, runRlsProofs, formatReport,
   runReferenceShapeProofs, formatReferenceShapeReport,
+  runDeleteBehaviorProofs, formatDeleteBehaviorReport,
+  runUniqueScopeProofs, formatUniqueScopeReport,
 } from '@objectstack/verify';
 import myApp from './objectstack.config.js';
 
@@ -94,6 +141,21 @@ const shapes = await runReferenceShapeProofs(shapeStack, await shapeStack.signIn
 console.log(formatReferenceShapeReport(shapes));
 expect(shapes.summary.hardFailures).toBe(0);
 await shapeStack.stop();
+
+// Declared delete behaviour, on a fresh stack: every `restrict` probe leaves rows behind
+const deleteStack = await bootStack(myApp);
+const deletes = await runDeleteBehaviorProofs(deleteStack, await deleteStack.signIn(), myApp);
+console.log(formatDeleteBehaviorReport(deletes));
+expect(deletes.summary.hardFailures).toBe(0);
+await deleteStack.stop();
+
+// Declared unique scope, on a fresh stack: it writes duplicates on purpose.
+// Boot it with `{ multiTenant: true }` to run the cross-organization leg too.
+const uniqueStack = await bootStack(myApp);
+const uniques = await runUniqueScopeProofs(uniqueStack, await uniqueStack.signIn(), myApp);
+console.log(formatUniqueScopeReport(uniques)); // `uniques.boot` says which legs ran
+expect(uniques.summary.hardFailures).toBe(0);
+await uniqueStack.stop();
 ```
 
 ## The in-process handle (drive the real engine from a test)
@@ -288,6 +350,32 @@ await expect(shipped.hooks.run('crm_lead', 'insert', { last_name: 'Ada' }, { sys
 | `inconclusive` | a refusal named something else, or a probe could not be written (the reason is reported) |
 | `excluded` | the field is `readonly` or `system`; the caller does not write it |
 
+**Declared delete behaviour** (`runDeleteBehaviorProofs`), per reference field
+and per door (by-id deletes only: a predicate or multi-row delete is not asked):
+
+| status | meaning |
+| --- | --- |
+| `proven` | the delete did what the declared `cascade` / `set_null` / `restrict` says, through every door |
+| `contradicted` | a delete did something else — the holder survived a `cascade`, was deleted or still references the record after a `set_null`, a `restrict` was not refused, or a holder of another record changed **(failure)** |
+| `failed` | a door faulted **(failure)** |
+| `inconclusive` | the delete was refused for another reason (a hook, a rule, a permission), or a fixture could not be created (the reason is reported) |
+| `excluded` | the declaration states no outcome of its own: a `set_null` on a required reference (it cannot be cleared, so an engine rule decides), or a field the spec's parse gives no `deleteBehavior` (a bare `master_detail`, a `user`) |
+| `not-derivable` | no fixture can be built from the app's metadata: the target is not an object the app declares (`sys_user`), the field is `readonly` / `system`, or the CRUD derivation cannot synthesize the holder or the target |
+
+**Declared unique scope** (`runUniqueScopeProofs`), per field declared `unique`
+(the field-level declaration; a unique `indexes[]` entry is a different surface
+and is not in the population). Probes: `within` × door × insert and update, and
+on a walled boot `across` × door × insert:
+
+| status | meaning |
+| --- | --- |
+| `proven` | every second holder met what the declared scope says: refused within one organization; across, admitted for `true` / `'organization'`, refused for `'global'` or with no organization column |
+| `contradicted` | a second holder was admitted where the scope refuses it, or refused where it admits it (the constraint is installation-wide, and its refusal tells one organization another holds the value) **(failure)** |
+| `failed` | a door faulted **(failure)** |
+| `inconclusive` | a refusal was not this field's unique constraint (an app's own dedupe, a rule, a permission, a constraint on another field), or a fixture could not be written (the reason is reported) |
+| `excluded` | a derived value (`formula`, `summary`) is not stored, or the declaration does not parse |
+| `not-derivable` | no fresh value can be built: a closed or tiny value space (`boolean`, `select`, …), a multi-valued reference, a target the app does not declare, or an object the CRUD derivation cannot synthesize |
+
 `member-visible` everywhere usually means the app is single-tenant; pass
 `--multi-tenant` (or `{ multiTenant: true }`) to register org-scoping so tenant
 isolation policies actually apply.
@@ -326,6 +414,13 @@ run" must never read like "nothing to find".
 - `runRlsProofs(stack, adminToken, memberToken, config)` → `RlsReport`; `formatRlsReport(report)`.
 - `deriveReferenceShapeCases(config)` → one case per reference field; `runReferenceShapeProofs(stack, token, config, { doors? })`
   → `ReferenceShapeReport` (`summary.hardFailures` is what a gate reads); `formatReferenceShapeReport(report)`.
+- `deriveDeleteBehaviorCases(config)` → one case per reference field, with its declared behaviour or the reason it is
+  not compared; `runDeleteBehaviorProofs(stack, token, config, { doors? })` → `DeleteBehaviorReport`
+  (`summary.hardFailures` is what a gate reads); `formatDeleteBehaviorReport(report)`.
+- `deriveUniqueScopeCases(config)` → one case per field declared `unique`, with its parsed scope, its doors and what a
+  second organization meets, or the reason it is not compared; `runUniqueScopeProofs(stack, token, config, { doors? })`
+  → `UniqueScopeReport` (`boot` names the legs this boot ran; `summary.hardFailures` is what a gate reads);
+  `formatUniqueScopeReport(report)`.
 
 `bootStack` options: `admin`, `authSecret`, `security` (a custom `SecurityPlugin`
 for owner-scoped fixtures), `multiTenant` (also what decides the posture

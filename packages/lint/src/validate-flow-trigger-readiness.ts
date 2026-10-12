@@ -452,10 +452,12 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
           message:
             `targets object '${objectName}', which this stack does not define — if the name is wrong, ` +
             `the flow will never fire (and the runtime stays silent about it).`,
+          // [#22161] One remedy line; that names match exactly, and why a
+          // name another package declares is not refused, are
+          // `os explain flow-trigger-unknown-object`.
           hint:
-            `Object names match exactly. Check config.objectName against the object's registered name ` +
-            `(e.g. 'app_candidate', not 'candidate'). If the object comes from another installed package, ` +
-            `this warning can be ignored.`,
+            `Set config.objectName to the object's exact registered name (e.g. 'app_candidate', not ` +
+            `'candidate'), or ignore this if another installed package declares it`,
         });
       }
     }
@@ -503,8 +505,8 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
             `sweeps object '${objectName}', which this stack does not define — if the name is wrong, ` +
             `the sweep will match nothing (and the runtime stays quiet about it).`,
           hint:
-            `Object names match exactly. Check config.timeRelative.object against the object's registered name. ` +
-            `If the object comes from another installed package, this warning can be ignored.`,
+            `Set config.timeRelative.object to the object's exact registered name, or ignore this if another ` +
+            `installed package declares it`,
         });
       }
 
@@ -574,9 +576,9 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
         message:
           `triggerType '${triggerType}' is not a recognized record trigger, so the flow binds to the ` +
           `record-change trigger and ${NEVER_FIRES}`,
-        hint:
-          `Use record-{before,after}-{create,update,delete,write}. 'write' fires on create OR update in one ` +
-          `flow; create/insert are synonyms. There is no "any change" token — pick the specific event(s).`,
+        // [#22161] One remedy line; the insert synonym and that there is no
+        // "any change" token are the explanation's.
+        hint: `Use record-{before,after}-{create,update,delete,write}; 'write' fires on create OR update in one flow`,
       });
     }
 
@@ -601,10 +603,9 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
         message:
           `triggerType is an array (${JSON.stringify(config.triggerType)}), but a start node takes one ` +
           `trigger event, so the flow binds to nothing and ${NEVER_FIRES}`,
-        hint:
-          `Use one triggerType string. For "created or updated" use record-after-write (one flow, both events). ` +
-          `For any other combination, author one flow per event — multi-event arrays are deferred until ` +
-          `two independent projects need a combination other than created-or-updated.`,
+        // [#22161] One remedy line; why multi-event arrays are deferred is
+        // the explanation's.
+        hint: `Use one triggerType string: record-after-write for "created or updated", else one flow per event`,
       });
     }
 
@@ -675,13 +676,12 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
         message:
           `has config.timeRelative = ${renderNonObject(config.timeRelative)}, not a descriptor object, so ` +
           `the sweep is never installed and ${consequence}`,
+        // [#22161] One remedy line; the optional keys, the schedule's default
+        // and where the descriptor is documented are
+        // `os explain flow-time-relative-descriptor-unroutable`.
         hint:
-          `config.timeRelative describes WHICH records to sweep — an object: ` +
-          `{ object, dateField, and exactly one of withinDays | offsetDays } (plus optional filter / ` +
-          `maxRecords). A cadence like 'daily' is not a descriptor: HOW OFTEN the sweep runs is the ` +
-          `sibling key config.schedule on the same start node (it defaults to daily, so it is usually ` +
-          `omitted). See TimeRelativeTriggerSchema and ` +
-          `content/docs/references/automation/time-relative-trigger.mdx.`,
+          `Make config.timeRelative a TimeRelativeTriggerSchema object { object, dateField, withinDays | ` +
+          `offsetDays }; a cadence like 'daily' goes in the sibling config.schedule`,
       });
     }
 
@@ -784,11 +784,11 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
               `routes to no trigger`
             : `its start node has no triggerType at all, so the engine routes it to no trigger`) +
           `, so the flow is demoted to a manual one and ${NEVER_FIRES}`,
+        // [#22161] One remedy line; the token grammar and why those two types
+        // have no trigger to miss are `os explain flow-trigger-unroutable`.
         hint:
-          `Use record-{before,after}-{create,update,delete,write} ('write' is create OR update in one flow; ` +
-          `create/insert are synonyms). If the flow really is launched by hand or from a screen, ` +
-          `declare type: 'autolaunched' or 'screen' instead of 'record_change' — those types have no trigger ` +
-          `to be missing.`,
+          `Set triggerType to record-{before,after}-{create,update,delete,write}, or declare type: ` +
+          `'autolaunched' or 'screen' if the flow is launched by hand or from a screen`,
       });
     }
 
@@ -932,12 +932,11 @@ export function validateFlowApiTriggerSecret(
       message:
         `binds the inbound api trigger (${binds.join(' and ')}) but ${secretProblem}, so the engine ` +
         `refuses to register the flow`,
+      // [#22161] One remedy line; the signature format and the 300-second
+      // window are `os explain flow-api-trigger-secret-missing`.
       hint:
-        `Set a non-blank string config.secret on the start node, and sign each post with it: the ` +
-        `x-objectstack-signature header carries t=<unix seconds>,v1=<hex>, the hex being the HMAC-SHA256 of ` +
-        `'<t>.<raw body>' under the secret, and a t more than 300 seconds from the server clock is refused. ` +
-        `A flow that is only ever started explicitly and never receives inbound posts is type: 'autolaunched', ` +
-        `with no triggerType: 'api' on its start node — that flow needs no secret.`,
+        `Set a non-blank string config.secret on the start node and sign each post with it, or make a flow ` +
+        `that never receives posts type: 'autolaunched' with no triggerType: 'api'`,
     });
   });
   return findings;

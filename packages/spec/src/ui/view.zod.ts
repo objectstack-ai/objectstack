@@ -2230,16 +2230,23 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * `objectql.zod.ts` and `ObjectMap.tsx` are byte-identical, so
  * `ObjectMapConfigSchema` (`2523`, still closed with `.strict()`),
  * `LIST_VIEW_LOCAL_OVERRIDES` (`1506`, still without `map`) and the two
- * `getMapConfig` lines did not move. Each anchor quotes the line it was read at,
+ * `getMapConfig` lines did not move. RE-READ again at pin `7578323a5` on
+ * 2026-10-12: `ListView.tsx` (+34/-79: objectui#12217, objectui `f5b66bf97`)
+ * gained one import line above both of its anchors, so `resolveListMapConfig`
+ * `209` -> `210` and `FLAT_MAP_CONFIG_SPELLING` `95` -> `96`, each
+ * byte-identical; `ObjectView.tsx`, `objectql.zod.ts` and `ObjectMap.tsx` are
+ * byte-identical (`git diff --quiet`), so `case 'map':` (`2479`),
+ * `ObjectMapConfigSchema` (`2523`) and the two `getMapConfig` lines did not
+ * move. Each anchor quotes the line it was read at,
  * so the next pin bump reds instead of rotting
  * (`check:objectui-pin-citations`):
  *
  * - **The block this face feeds is FLATTENED, not forwarded.** `ListView`
- *   (`packages/plugin-list/src/ListView.tsx:209` first line
+ *   (`packages/plugin-list/src/ListView.tsx:210` first line
  *   `function resolveListMapConfig(schema: { map?: unknown; options?: { map?: unknown } }): Record<string, unknown> {`)
  *   and `ObjectView` (`packages/plugin-view/src/ObjectView.tsx:2479` first line
  *   `case 'map':`) copy it through a HAND-LISTED whitelist
- *   (`packages/plugin-list/src/ListView.tsx:95` first line
+ *   (`packages/plugin-list/src/ListView.tsx:96` first line
  *   `export const FLAT_MAP_CONFIG_SPELLING = {`) — ⚠️ re-read at the new pin:
  *   the whitelist was a key LIST named `FLAT_MAP_CONFIG_KEYS` carrying this
  *   block's keys MINUS `style`, and objectui#9950 made it a total map from
@@ -3429,7 +3436,17 @@ const FormFieldBaseSchema = lazySchema(() => {
    * inside the `53ded82bf7...87af769e9` range, so the widest-tier-only
    * under-span this block used to record (#17328: one cell of two at
    * 720px) no longer reproduces at the pin this repo builds against
-   * (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+   * (`.objectui-sha` = `7578323a5`, re-read there 2026-10-12:
+   * `autoLayout.ts`, `fields`' `field-type-alias.ts` and `form.tsx` are
+   * byte-identical to `9646e2ed2` (`git diff --quiet`), so `resolveColSpan`
+   * `:154`, `WIDE_FIELD_TYPES` `:58-69`, the `repeater` -> `field:grid` mapping,
+   * `spanLadderFor` `:275-302` and its one call site `:3329` held unmoved, and it
+   * still emits the ladder. At `9646e2ed2`, re-read there 2026-10-12:
+   * `autoLayout.ts`, `fields`' `field-type-alias.ts` and `form.tsx` are
+   * byte-identical to `088e0f705` (`git diff --quiet`), so `resolveColSpan`
+   * `:154`, `WIDE_FIELD_TYPES` `:58-69`, the `repeater` -> `field:grid` mapping,
+   * `spanLadderFor` `:275-302` and its one call site `:3329` held unmoved, and it
+   * still emits the ladder. At `088e0f705`, re-read there 2026-10-12:
    * `autoLayout.ts` and `fields`' `field-type-alias.ts` are byte-identical to
    * `e5311165a` (`git diff --quiet`), so `resolveColSpan` `:154`,
    * `WIDE_FIELD_TYPES` `:58-69` and the `repeater` -> `field:grid` mapping held
@@ -3552,7 +3569,7 @@ const FormFieldBaseSchema = lazySchema(() => {
    * had changed only in its registration's input list, objectui#9910's
    * `children` slot; at `62597c588` it was byte-identical to `87af769e9`).
    */
-  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `088e0f705520`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
+  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `7578323a544e`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
 
   /** Custom widget override — only needed when auto-inference is insufficient */
   widget: z.string().optional().describe('Custom widget/component name (overrides type-based inference)'),

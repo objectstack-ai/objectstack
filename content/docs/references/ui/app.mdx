@@ -94,7 +94,7 @@ const result = ActionNavItemSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **primaryColor** | `string` | optional | Primary theme color hex code |
 | **accentColor** | `string` | optional | Accent color hex code (highlights, active states). Declared to match the objectui ConsoleLayout read of branding.accentColor (inverse-drift fix, liveness audit /). |
-| **logo** | `string` | optional | Custom logo URL for this app |
+| **logo** | `string` | optional | Custom logo URL for this app: a 1:1 square app icon, SVG preferred, at least 64 px. It is the app's one logo asset — each surface scales it to the size it needs, and there is no second size or wordmark slot. |
 | **favicon** | `string` | optional | Custom favicon URL for this app |
 
 ### Nested Shape: `App.navigation[number][type='object']`
@@ -311,7 +311,7 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | :--- | :--- | :--- | :--- |
 | **primaryColor** | `string` | optional | Primary theme color hex code |
 | **accentColor** | `string` | optional | Accent color hex code (highlights, active states). Declared to match the objectui ConsoleLayout read of branding.accentColor (inverse-drift fix, liveness audit /). |
-| **logo** | `string` | optional | Custom logo URL for this app |
+| **logo** | `string` | optional | Custom logo URL for this app: a 1:1 square app icon, SVG preferred, at least 64 px. It is the app's one logo asset — each surface scales it to the size it needs, and there is no second size or wordmark slot. |
 | **favicon** | `string` | optional | Custom favicon URL for this app |
 
 

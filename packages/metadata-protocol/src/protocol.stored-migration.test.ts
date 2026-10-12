@@ -330,6 +330,41 @@ describe('migrateStoredMetadata — apply (#4327)', () => {
     });
 });
 
+/**
+ * [#23068] Who a rewritten row records. The pass's `actor` becomes
+ * `PutOptions.actor`, which lands in `sys_metadata_history.recorded_by` and in
+ * the row's own `updated_by` — both `lookup('sys_user')` columns. So it is the
+ * acting user's id, or nothing (`null`, #4556's "system-initiated"). The pass
+ * names ITSELF on `source: 'migrate-stored'`, the column that exists for an
+ * origin label, and never in the actor: a label there is a reference to no
+ * user, and no engine check stops it (`put` writes under `isSystem`).
+ */
+describe('migrateStoredMetadata — a rewrite records the user who ran it, or nobody (#23068)', () => {
+    it('a pass run by a user records that user id in recorded_by and in the row\'s updated_by', async () => {
+        const { engine, tables } = makeStubEngine([legacyObjectRow]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const report = await protocol.migrateStoredMetadata({ apply: true, actor: 'usr_operator' });
+
+        expect(report.rewritten).toBe(1);
+        expect(historyRows(tables).map((h) => h.recorded_by)).toEqual(['usr_operator']);
+        expect(metaRows(tables).map((r) => r.updated_by)).toEqual(['usr_operator']);
+    });
+
+    it('a pass with no user records null in both columns — no label reaches either one', async () => {
+        const { engine, tables } = makeStubEngine([legacyObjectRow, legacyActionRow]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const report = await protocol.migrateStoredMetadata({ apply: true });
+
+        expect(report.rewritten).toBe(2);
+        expect(historyRows(tables).map((h) => h.recorded_by)).toEqual([null, null]);
+        expect(metaRows(tables).map((r) => r.updated_by)).toEqual([null, null]);
+        // The pass's own name is still on every history row, where it belongs.
+        expect(historyRows(tables).map((h) => h.source)).toEqual(['migrate-stored', 'migrate-stored']);
+    });
+});
+
 describe('migrateStoredMetadata — flow rows via the canonicalizeFlow hook (#4454)', () => {
     // A body the write path's schema gate accepts — the hook canonicalizes the
     // shape, it does not exempt the row from validation.

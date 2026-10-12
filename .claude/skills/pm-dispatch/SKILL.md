@@ -89,8 +89,8 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 
 - 状态只经 GitHub 标签、assignee、正文行与 `pm:seat` 座位贴读写;循环须能从全新会话恢复。
 - 用户账号仅三用:assignee、授权批准、维护者亲手;批准账号永不跑席位或作其关联用户。
-- 内容写只走 REST 代理,⛔ 无 MCP 写;`user.login` 记令牌不记席位,归属 = 文本里的 session ID。
-- 写侧恒为 `objectstack-fleet[bot]`(AGENTS.md);节奏 ≥3 秒/笔、每账号每小时 ≤40 笔,429 即停写。
+- 内容写只走 REST 代理,⛔ 无 MCP 写,唯一例外 `rerun_failed_jobs`(限 CI 红单次重跑,先核 head)。
+- 写侧恒为 `objectstack-fleet[bot]`;`user.login` 记令牌不记席位,归属 = 文本里的 session ID。
 - GitHub 上一切新内容用英文;中文只留四通道(维护者速读、轮报、裁决引文、四维分析)。
 - 裁决引文照抄不译;四维中文只管新记录,存量英文块 ⛔ 不迁移;存量中文 ⛔ 不追溯改写。
 - 一 PM 恰管一车道,一车道由一组座位管,一席一贴;PM Y 管什么恰一个答案。

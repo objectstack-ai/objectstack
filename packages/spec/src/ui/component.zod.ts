@@ -840,7 +840,13 @@ export const PageTabsProps = strictObject({
      * false candidate a component over).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+     * (`.objectui-sha` = `7578323a5`, re-read there 2026-10-12:
+     * every objectui file this record cites is byte-identical across the hop from
+     * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+     * `9646e2ed2`, re-read there 2026-10-12:
+     * every objectui file this record cites is byte-identical across the hop from
+     * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+     * `088e0f705`, re-read there 2026-10-12:
      * every objectui file this record cites is byte-identical across the hop from
      * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
      * `e5311165a`, re-read there 2026-10-12:
@@ -1089,7 +1095,13 @@ export const PageCardProps = strictObject({
  * declarations identical.
  *
  * Each clause is read off the objectui pin this repo builds against
- * (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+ * (`.objectui-sha` = `7578323a5`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+ * `9646e2ed2`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+ * `088e0f705`, re-read there 2026-10-12:
  * every objectui file this record cites is byte-identical across the hop from
  * `e5311165a8d6` (`git diff --quiet`), so every anchor held unmoved. At
  * `e5311165a8d6`, re-read there 2026-10-12:
@@ -1239,6 +1251,134 @@ const RECORD_BLOCK_REQUIRED_PERMISSIONS_DESCRIPTION =
   + 'When the client has resolved the user\'s capabilities and any of these is missing, this block does not render its content; wherever it would otherwise render, an insufficient-permissions notice takes its place. '
   + 'Presentation only: it authorises nothing, and the data API still serves the same data to the same user. '
   + 'A client that cannot resolve the user\'s capabilities (no permission provider, or one that does not report `systemPermissions`) renders this block as if they were held — it fails open.';
+
+/**
+ * [#23013] The ONE hole a `record:details` section heading binds: `{{ count }}`
+ * — the number of values the field named by the section's `count.field` holds
+ * on the current record. Inner whitespace is free (`{{count}}` is the same
+ * hole), exactly as i18next and the formula template engine both trim a hole's
+ * content.
+ *
+ * Non-global on purpose: a `g` RegExp carries `lastIndex` between calls, so a
+ * shared one is a footgun. A renderer filling the hole builds its own global
+ * copy from `.source`. Exported so the renderer that fills the hole and the
+ * judge below that refuses a heading without one read ONE grammar — two
+ * readings of a hole is how a heading parses clean and still renders the hole
+ * as literal text.
+ */
+export const SECTION_HEADING_COUNT_HOLE = /\{\{\s*count\s*\}\}/;
+
+/** Every double-brace hole, whatever it names — a heading binds only `count`. */
+const SECTION_HEADING_ANY_HOLE = /\{\{([^{}]*)\}\}/g;
+
+/**
+ * The single-brace spelling of the same hole (`{count}`, `${count}`), read
+ * AFTER the double-brace holes are stripped so `{{ count }}` itself never
+ * matches. That dialect is being retired from the platform's text slots and a
+ * heading never interpolated it, so it would render as literal text.
+ */
+const SECTION_HEADING_SINGLE_BRACE_COUNT = /\{\s*count\s*\}/;
+
+/** `count.field` — one field of the bound object, as its machine name. */
+const SECTION_COUNT_FIELD_PATTERN = /^[a-z_][a-z0-9_]*$/;
+
+const SECTION_COUNT_EXAMPLE =
+  "`count: { field: 'tags' }` with `label: '{{ count }} tags'`";
+
+/**
+ * [#23013] The parse half of the section heading's count: a section that
+ * declares `count` must SHOW it. The field reference itself — does `count.field`
+ * name a field the bound object declares, and is that field multi-valued? — is
+ * a cross-schema question this shape cannot see, so it is answered where every
+ * page-to-object field reference is: `@objectstack/lint`'s page field-binding
+ * pass (`page-field-unknown`, `page-section-count-not-multi-value`), the
+ * `sections[].group` precedent one key over.
+ *
+ * Judged only when `count` is present. A `{{ count }}` hole in a section that
+ * declares no `count` is NOT refused here: `label` accepted any text before
+ * this key existed, and refusing one of its values is a narrowing this
+ * widening does not carry.
+ */
+function sectionHeadingCountRefinement(
+  section: { count?: unknown; group?: unknown; label?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  if (section.count === undefined) return;
+
+  if (typeof section.group === 'string' && section.group.length > 0) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['count'],
+      message:
+        '`count` cannot be combined with `group` on this `record:details` section. A group-referencing '
+        + "section's heading is the group's own `label` from the object's `fieldGroups` entry, shared by "
+        + 'every surface that group renders on, and those surfaces bind no `{{ count }}` hole. Drop `group`, '
+        + 'enumerate `fields`, and write the heading on this section: ' + SECTION_COUNT_EXAMPLE + '.',
+    });
+    return;
+  }
+
+  const label = section.label;
+  if (label === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['label'],
+      message:
+        'This `record:details` section declares `count` but no `label`, so the count is never shown: '
+        + 'the number appears only where the heading writes the `{{ count }}` hole. Add the heading, '
+        + 'e.g. ' + SECTION_COUNT_EXAMPLE + ', or drop `count`.',
+    });
+    return;
+  }
+
+  const variants: Array<[path: Array<string>, text: unknown]> =
+    typeof label === 'string'
+      ? [[[], label]]
+      : label && typeof label === 'object'
+        ? Object.entries(label as Record<string, unknown>).map(([locale, text]) => [[locale], text])
+        : [];
+
+  for (const [path, text] of variants) {
+    if (typeof text !== 'string') continue; // the label's own schema reports a non-string
+    const where = path.length > 0 ? `the \`${path[0]}\` text of \`label\`` : '`label`';
+    const foreign = [...text.matchAll(SECTION_HEADING_ANY_HOLE)]
+      .map((m) => m[1].trim())
+      .filter((name) => name !== 'count');
+    if (foreign.length > 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['label', ...path],
+        message:
+          `${where} writes ${foreign.map((n) => '`{{ ' + n + ' }}`').join(', ')}, a hole this section `
+          + 'heading does not bind. The one value a heading binds is `{{ count }}`, written bare, without '
+          + 'a formatter; any other hole renders as literal text. Read other record values in the '
+          + 'section body through `fields`.',
+      });
+      continue;
+    }
+    const stripped = text.replace(SECTION_HEADING_ANY_HOLE, '');
+    if (SECTION_HEADING_SINGLE_BRACE_COUNT.test(stripped)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['label', ...path],
+        message:
+          `${where} writes the count as a single-brace \`{count}\`, which a section heading never `
+          + 'interpolates, so it would render as literal text. Write the double-brace hole `{{ count }}`.',
+      });
+      continue;
+    }
+    if (!SECTION_HEADING_COUNT_HOLE.test(text)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['label', ...path],
+        message:
+          `This \`record:details\` section declares \`count\`, but ${where} has no \`{{ count }}\` hole, `
+          + 'so the count is never shown. Write the hole where the number belongs, e.g. '
+          + SECTION_COUNT_EXAMPLE + '. Every locale of an inline label map writes it.',
+      });
+    }
+  }
+}
 
 export const RecordDetailsProps = strictObject({
   surface: 'this `record:details`',
@@ -1430,6 +1570,71 @@ export const RecordDetailsProps = strictObject({
      * renderer's own fallback.
      */
     headerColor: z.enum(['muted', 'muted/50', 'accent', 'primary/10', 'secondary/10', 'destructive/10']).optional().describe('Section-header background tint, from the closed six-token vocabulary rendered by objectui\'s `record:details` header (`muted` | `muted/50` | `accent` | `primary/10` | `secondary/10` | `destructive/10`). A value outside the enum is refused at authoring time rather than silently not painting. Omit for an untinted header.'),
+    /**
+     * [#23013] How many values a multi-value field holds on the current
+     * record, shown in this section's heading — the spec half of
+     * objectui#12192 (the heading 「N 项功能需要更高套餐 · 查看」 accepted on
+     * cloud#2772 item 3). Generic by construction: any multi-value field, on
+     * any object, never a product-specific widget.
+     *
+     * THE SHAPE, and why it is two halves. The field reference is a declared
+     * key (`count.field`), and the heading carries only the fixed hole
+     * `{{ count }}` ({@link SECTION_HEADING_COUNT_HOLE}). The alternative —
+     * a field path inside the label (`{{ tags | count }}`) — was measured and
+     * rejected: the formula template engine's formatter whitelist has no
+     * count, every section label would become a template, and the field name
+     * would live in translated text, where a translator can change it and no
+     * reference check reads it. Here the reference is one checkable key and a
+     * translation carries only a closed variable name.
+     *
+     * THE HOLE is the platform's kept delimiter: ADR-0032 §3's `{{ }}`, the
+     * form the flow text slots render, and the form i18next interpolates
+     * natively (objectui's label resolver passes bundle text through `t()`,
+     * which keeps a `{{ … }}` hole it was given no value for — measured on
+     * i18next 26.4.0, `skipOnVariables: true` by default). So a translated
+     * `objects.<object>._sections.<name>.label` carries the same `{{ count }}`
+     * the authored label does, and `os i18n extract` seeds the skeleton with
+     * the authored label verbatim. The single-brace `{var}` dialect is NOT
+     * used (it is being retired from the flow value slots, and a heading never
+     * read it).
+     *
+     * STRICTNESS, split along the line the `group` key above already draws:
+     * the shape and the label rule are judged here at parse
+     * ({@link sectionHeadingCountRefinement}); whether `count.field` names a
+     * field the bound object declares, and whether that field is multi-valued
+     * (`isMultiValueField`, the one answer to that question), is a cross-schema
+     * reference judged by `@objectstack/lint`'s page field-binding pass at
+     * ERROR severity — unlike a section's `fields[]`, where a miss is skipped,
+     * a count over a missing or single-valued field renders a confident wrong
+     * number.
+     *
+     * DECLARED AHEAD OF ITS READER. At this landing no renderer reads the key,
+     * so the describe carries the `[EXPERIMENTAL — not enforced]` marker, the
+     * liveness ledger's own spelling, recorded here because page components
+     * sit in the undrilled `page/regions` container and no ledger row exists
+     * for any `ComponentPropsMap` key (the `editable`-navigation precedent in
+     * this file). Drop the marker in the change that lands the renderer at the
+     * `.objectui-sha` pin.
+     */
+    count: strictObject({
+      surface: 'this `record:details` section `count`',
+      history: PROPS_HISTORY,
+    }, {
+      field: z.string().regex(SECTION_COUNT_FIELD_PATTERN, {
+        message:
+          '`count.field` names one field of the bound object by its machine name (snake_case, no dotted '
+          + "path): a related record's field cannot be counted from this heading.",
+      }).describe('Machine name of the multi-value field whose values on the current record are counted.'),
+    }).optional().describe(
+      '[EXPERIMENTAL — not enforced] Show how many values a multi-value field holds on the current record '
+      + "in this section's heading: `{ field: 'tags' }`, with `label` writing the `{{ count }}` hole where the "
+      + "number goes (`'{{ count }} tags'`). The field must be a multi-value field the bound object declares — "
+      + '`multiselect`, `checkboxes`, `tags`, or a `select` / `lookup` / `user` / `file` / `image` field with '
+      + '`multiple: true` — and an absent or empty value counts 0. Every locale of an inline label map, and a '
+      + 'translated `objects.<object>._sections.<name>.label`, writes the same `{{ count }}` hole. Not allowed '
+      + 'beside `group`. Declared ahead of its renderer: until the record detail renderer reads it, the hole '
+      + 'renders as literal text.',
+    ),
   }).superRefine(sectionGroupReferenceRefinement({
     surface: 'this `record:details` section',
     // Exactly the keys `deriveFieldGroupLayout` fills from the group. `name` is
@@ -1442,7 +1647,7 @@ export const RecordDetailsProps = strictObject({
     // `headerColor`. Those are how THIS page lays the section out and the group
     // declares nothing about them, so there is no second source to create.
     derivedKeys: ['name', 'label', 'icon', 'description', 'collapsible', 'defaultCollapsed'],
-  }))).optional().describe('Field groups rendered as the detail body, in order. Object form: `{ name?, label?, columns?, fields, hideEmpty?, collapsible?, showBorder?, defaultCollapsed?, icon?, description?, headerColor? }` — or the group-reference form `{ group, columns?, hideEmpty?, showBorder?, headerColor? }`, which inherits members and presentation from the object\'s `fieldGroups` entry (ADR-0085 §5).'),
+  })).superRefine(sectionHeadingCountRefinement)).optional().describe('Field groups rendered as the detail body, in order. Object form: `{ name?, label?, columns?, fields, hideEmpty?, collapsible?, showBorder?, defaultCollapsed?, icon?, description?, headerColor?, count? }` — or the group-reference form `{ group, columns?, hideEmpty?, showBorder?, headerColor? }`, which inherits members and presentation from the object\'s `fieldGroups` entry (ADR-0085 §5). `count: { field }` shows how many values a multi-value field holds in the heading, through its `{{ count }}` hole.'),
   fields: z.array(z.string()).optional().describe('Explicit field list to display (optional, overrides highlightFields)'),
   /**
    * Field names to omit from the body, applied to both `fields` and every
@@ -2496,7 +2701,13 @@ export const PageAccordionProps = strictObject({
      * re-derive the same false candidate).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+     * (`.objectui-sha` = `7578323a5`, re-read there 2026-10-12:
+     * every objectui file this record cites is byte-identical across the hop from
+     * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+     * `9646e2ed2`, re-read there 2026-10-12:
+     * every objectui file this record cites is byte-identical across the hop from
+     * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+     * `088e0f705`, re-read there 2026-10-12:
      * every objectui file this record cites is byte-identical across the hop from
      * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
      * `e5311165a`, re-read there 2026-10-12:
@@ -2936,7 +3147,13 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * the button.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+   * (`.objectui-sha` = `7578323a5`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+   * `9646e2ed2`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+   * `088e0f705`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
    * `e5311165a`, re-read there 2026-10-12:
@@ -3417,7 +3634,13 @@ export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
  * had no row for — `action:button`, `action:group`, `action:menu`,
  * `action:icon`, `element:definition-list`, `element:repeater`
  * (`core/src/registry/public-blocks.ts:117-122` at the pin this repo builds
- * against, `.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+ * against, `.objectui-sha` = `7578323a5`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+ * `9646e2ed2`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+ * `088e0f705`, re-read there 2026-10-12:
  * `public-blocks.ts`, `auto-trigger.ts`, `static-params.ts`, `ui/button.tsx`,
  * the four `action-*.tsx` renderers, `basic/data-list.tsx` and
  * `previews/block-config.ts` are byte-identical across the hop from
@@ -4007,7 +4230,13 @@ export type ActionIconPropsParsed = z.infer<typeof ActionIconPropsSchema>;
  * inventory. A member's `params` is its `ActionParam[]` input list: both
  * containers forward an array as `actionParams` (group `:346-348`, menu
  * `:270-272`, re-read at the pin this repo builds against, `.objectui-sha` =
- * `088e0f705`, 2026-10-12: `action-group.tsx`, `action-menu.tsx` and
+ * `7578323a5`, 2026-10-12: `action-group.tsx`, `action-menu.tsx` and
+ * `static-params.ts` are byte-identical across the hop from `9646e2ed2` (`git
+ * diff --quiet`), so both held unmoved; at `9646e2ed2`, 2026-10-12:
+ * `action-group.tsx`, `action-menu.tsx` and
+ * `static-params.ts` are byte-identical across the hop from `088e0f705` (`git
+ * diff --quiet`), so both held unmoved; at `088e0f705`, 2026-10-12:
+ * `action-group.tsx`, `action-menu.tsx` and
  * `static-params.ts` are byte-identical across the hop from `e5311165a` (`git
  * diff --quiet`), so both held unmoved; at `e5311165a`, 2026-10-12:
  * `action-group.tsx`, `action-menu.tsx` and
@@ -4707,7 +4936,13 @@ const GridOperationsSchema = lazySchema(() => strictObject({
  * control `schema.editable` in `ObjectGrid.tsx`. It was declared ahead of its
  * reader on purpose (the BUILD objectui#11068 chose), and its describe carried
  * the `[EXPERIMENTAL — not enforced]` marker that said so. Re-measured at the
- * pin this repo builds against (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+ * pin this repo builds against (`.objectui-sha` = `7578323a5`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+ * `9646e2ed2`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+ * `088e0f705`, re-read there 2026-10-12:
  * every objectui file this record cites is byte-identical across the hop from
  * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
  * `e5311165a`, re-read there 2026-10-12:
@@ -4842,7 +5077,13 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * same members, and objectui's grid follows this declaration.
    *
    * ⚠️ That gap is closed at the pin this repo builds against (`.objectui-sha`
-   * = `088e0f705`, re-read there 2026-10-12:
+   * = `7578323a5`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+   * `9646e2ed2`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+   * `088e0f705`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
    * `e5311165a`, re-read there 2026-10-12:
@@ -5253,7 +5494,13 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * `ComponentPropsMap` key. This record said to drop the marker in the change
    * that lands the BUILD at the pin, and it is dropped here.
    *
-   * Read at the pin this repo builds against (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+   * Read at the pin this repo builds against (`.objectui-sha` = `7578323a5`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+   * `9646e2ed2`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+   * `088e0f705`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
    * `e5311165a`, re-read there 2026-10-12:
@@ -5709,7 +5956,13 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * same record for the metric tile.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+   * (`.objectui-sha` = `7578323a5`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+   * `9646e2ed2`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+   * `088e0f705`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
    * `e5311165a`, re-read there 2026-10-12:
@@ -5975,7 +6228,13 @@ const ObjectKanbanLaneSchema = lazySchema(() => strictObject({
  * DESIGNER's spelling with
  * zero read points (#7973 class) — aliased to the `groupBy` the board reads.
  * `limit` (#16503) was measured later, at the pin this repo builds against
- * (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+ * (`.objectui-sha` = `7578323a5`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+ * `9646e2ed2`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+ * `088e0f705`, re-read there 2026-10-12:
  * every objectui file this record cites is byte-identical across the hop from
  * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
  * `e5311165a`, re-read there 2026-10-12:
@@ -6102,7 +6361,19 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * Row cap (#16503 — the spec half of objectui#8172; decision batch #68,
    * 2026-09-07, option A: the contract declares the capability that already
    * ships, is documented and is in use). Measured at the objectui pin this
-   * repo builds against (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+   * repo builds against (`.objectui-sha` = `7578323a5`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved;
+   * `ListView.tsx` and `ObjectView.tsx`, named below only as an earlier
+   * re-read's record and no longer anchors here, are not among them
+   * (`ListView.tsx` and app-shell's `ObjectView.tsx` changed on this hop). At
+   * `9646e2ed2`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved;
+   * `ListView.tsx` and `ObjectView.tsx`, named below only as an earlier
+   * re-read's record and no longer anchors here, are not among them
+   * (`ListView.tsx` changed on this hop). At `088e0f705`, re-read there
+   * 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
    * `e5311165a`, re-read there 2026-10-12:
@@ -6401,7 +6672,13 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * quick-add control and no block a document can name offers one either).
    *
    * Measured at the objectui pin this repo builds against
-   * (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+   * (`.objectui-sha` = `7578323a5`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+   * `9646e2ed2`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+   * `088e0f705`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
    * `e5311165a`, re-read there 2026-10-12:
@@ -6629,6 +6906,12 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * element schemas).
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
+   * `7578323a5`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+   * `9646e2ed2`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
    * `088e0f705`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
@@ -6864,6 +7147,12 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
    * `object-kanban`'s above.
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
+   * `7578323a5`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+   * `9646e2ed2`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
    * `088e0f705`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
@@ -8096,7 +8385,13 @@ const OBJECT_MAP_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * `object-map` (objectui `plugin-map/src/ObjectMap.tsx` plus the registry shell
  * `plugin-map/src/index.tsx`, read at the pin this repo builds against —
- * `.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+ * `.objectui-sha` = `7578323a5`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+ * `9646e2ed2`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+ * `088e0f705`, re-read there 2026-10-12:
  * every objectui file this record cites is byte-identical across the hop from
  * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
  * `e5311165a`, re-read there 2026-10-12:
@@ -8303,7 +8598,13 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
    * Base query filter — the `ViewFilterRule` ARRAY form, the one filter
    * orthography every `filter` door in this map shares (ui#6206-B reaching the
    * `object-*` family: #15449, decision batch #55, option A). Measured at the
-   * pin this repo builds against (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+   * pin this repo builds against (`.objectui-sha` = `7578323a5`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+   * `9646e2ed2`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+   * `088e0f705`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
    * `e5311165a`, re-read there 2026-10-12:
@@ -8389,7 +8690,13 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
    * Marker order — the `SortItem` ARRAY form, the one sort orthography every
    * DECLARED `sort` door on this platform carries (objectui#8221, decision batch
    * #77, option B). Measured at the pin this repo builds against
-   * (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+   * (`.objectui-sha` = `7578323a5`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+   * `9646e2ed2`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+   * `088e0f705`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
    * `e5311165a`, re-read there 2026-10-12:
@@ -8597,7 +8904,23 @@ function objectGanttMarker() {
 /**
  * `object-gantt` (objectui `plugin-gantt/src/ObjectGantt.tsx` plus the registry
  * shell `plugin-gantt/src/index.tsx`, read at the pin this repo builds against
- * — `.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+ * — `.objectui-sha` = `7578323a5`, re-read there 2026-10-12:
+ * `ObjectGantt.tsx`, `record-source.ts` and `plugin-gantt/src/index.tsx` are
+ * byte-identical across the hop from `9646e2ed2` (`git diff --quiet`), so every
+ * anchor in them held unmoved; `ListView.tsx` changed (+34/-79, objectui#12217,
+ * objectui `f5b66bf97`: two import lines changed in place and one added at the
+ * top, a docblock added and `useListViewTranslation` exported near `:1040`, the
+ * grid's inline empty state replaced from `:5677` down), and its `case 'gantt'`
+ * MOVED `3959` -> `3964`, byte-identical, and still writes the toolbar Search
+ * term onto the node as `search` / `searchableFields`. At `9646e2ed2`, re-read
+ * there 2026-10-12:
+ * `ObjectGantt.tsx`, `record-source.ts` and `plugin-gantt/src/index.tsx` are
+ * byte-identical across the hop from `088e0f705` (`git diff --quiet`), so every
+ * anchor in them held unmoved; `ListView.tsx` changed (+9/-9, objectui#12189,
+ * objectui `26b0bd2d1`: the FilterBuilder group type's rename, nine lines
+ * replaced in place, the last at `:1558`), and its `case 'gantt'` held at
+ * `3959` and still writes the toolbar Search term onto the node as `search` /
+ * `searchableFields`. At `088e0f705`, re-read there 2026-10-12:
  * every objectui file this record cites is byte-identical across the hop from
  * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
  * `e5311165a`, re-read there 2026-10-12:
@@ -8874,10 +9197,26 @@ export type ObjectGanttPropsParsed = z.infer<typeof ObjectGanttPropsSchema>;
 /**
  * The flat `TreeConfig` spellings `getTreeConfig` reads ahead of the `tree`
  * block (`ObjectTree.tsx:289-302`) and that `ObjectView` / `ListView` EMIT when
- * they flatten `options.tree` (`ListView.tsx:4120-4144`, `case 'tree'`: the
+ * they flatten `options.tree` (`ListView.tsx:4125-4149`, `case 'tree'`: the
  * product carries these keys, the EFFECTIVE `filter` objectui#10250 added, and
  * NO `tree` key). Both halves re-READ at the
- * pin this repo builds against (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+ * pin this repo builds against (`.objectui-sha` = `7578323a5`, re-read there 2026-10-12:
+ * `ObjectTree.tsx` and `plugin-tree/src/index.tsx` are byte-identical to
+ * `9646e2ed2` (`git diff --quiet`), so `289-302` and `240-261` did not move;
+ * and `ListView.tsx` changed (+34/-79, objectui#12217, objectui `f5b66bf97`:
+ * two import lines changed in place and one added at the top, a docblock added
+ * and `useListViewTranslation` exported near `:1040`, the grid's inline empty
+ * state replaced from `:5677` down), so its `case 'tree'` arm MOVED `4120-4144`
+ * -> `4125-4149`, byte-identical, with `labelField: treeCfg.labelField ||
+ * 'name'` at `:4145`, and the flat key set it emits did not move. At
+ * `9646e2ed2`, re-read there 2026-10-12:
+ * `ObjectTree.tsx` and `plugin-tree/src/index.tsx` are byte-identical to
+ * `088e0f705` (`git diff --quiet`), so `289-302` and `240-261` did not move;
+ * and `ListView.tsx` changed (+9/-9, objectui#12189, objectui `26b0bd2d1`: the
+ * FilterBuilder group type's rename, nine lines replaced in place, the last at
+ * `:1558`), so its `case 'tree'` arm held at `4120-4144` with `labelField:
+ * treeCfg.labelField || 'name'` at `:4140`, and the flat key set it emits did
+ * not move. At `088e0f705`, re-read there 2026-10-12:
  * every objectui file this record cites is byte-identical across the hop from
  * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
  * `e5311165a`, re-read there 2026-10-12:
@@ -9031,7 +9370,13 @@ const OBJECT_TREE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * `object-tree` (objectui `plugin-tree/src/ObjectTree.tsx` plus the registry
  * shell `plugin-tree/src/index.tsx`, read at the pin this repo builds against
- * — `.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+ * — `.objectui-sha` = `7578323a5`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+ * `9646e2ed2`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+ * `088e0f705`, re-read there 2026-10-12:
  * every objectui file this record cites is byte-identical across the hop from
  * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
  * `e5311165a`, re-read there 2026-10-12:
@@ -9236,7 +9581,13 @@ export const ObjectTreePropsSchema = lazySchema(() => strictObject({
    * holds for them because each registers through `ElementDataSourceGate`,
    * which lowers the spec binding onto `objectName` before the renderer sees
    * the node. `plugin-tree/src/index.tsx` does NOT: at the pin this repo
-   * builds against (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+   * builds against (`.objectui-sha` = `7578323a5`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+   * `9646e2ed2`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+   * `088e0f705`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
    * `e5311165a`, re-read there 2026-10-12:
@@ -9654,7 +10005,13 @@ function objectTimelineItemsFitVariant() {
  * `object-timeline` (objectui `plugin-timeline/src/ObjectTimeline.tsx`, the
  * presentational `plugin-timeline/src/renderer.tsx` it composes into, and the
  * registry shell `plugin-timeline/src/index.tsx` — all read at the pin this
- * repo builds against (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+ * repo builds against (`.objectui-sha` = `7578323a5`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+ * `9646e2ed2`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+ * `088e0f705`, re-read there 2026-10-12:
  * every objectui file this record cites is byte-identical across the hop from
  * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
  * `e5311165a`, re-read there 2026-10-12:
@@ -9920,6 +10277,12 @@ export const ObjectTimelinePropsSchema = lazySchema(() => strictObject({
    * first publishes a refusal for a key the renderer honours.
    *
    * Read points at the pin this repo builds against (`.objectui-sha` =
+   * `7578323a5`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+   * `9646e2ed2`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
    * `088e0f705`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
@@ -10292,6 +10655,12 @@ export const ComponentPropsMap = {
   // set from this map's keys), on the three-part evidence that vocabulary's
   // string-arm ledger asks of a type admitted without an enum member — all
   // measured at the pin this repo builds against (`.objectui-sha` =
+  // `7578323a5`, re-read there 2026-10-12:
+  // every objectui file this record cites is byte-identical across the hop from
+  // `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+  // `9646e2ed2`, re-read there 2026-10-12:
+  // every objectui file this record cites is byte-identical across the hop from
+  // `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
   // `088e0f705`, re-read there 2026-10-12:
   // every objectui file this record cites is byte-identical across the hop from
   // `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
@@ -10407,6 +10776,12 @@ export const ComponentPropsMap = {
   // authority for map and gantt while tree's rung-1 `data` read stayed
   // undeclared on every face. Key sets measured from the renderers' read
   // points at the pin this repo builds against (`.objectui-sha` =
+  // `7578323a5`, re-read there 2026-10-12:
+  // every objectui file this record cites is byte-identical across the hop from
+  // `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+  // `9646e2ed2`, re-read there 2026-10-12:
+  // every objectui file this record cites is byte-identical across the hop from
+  // `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
   // `088e0f705`, re-read there 2026-10-12:
   // every objectui file this record cites is byte-identical across the hop from
   // `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
@@ -10503,6 +10878,12 @@ export const ComponentPropsMap = {
   // it — so `object-timeline` was unjudged in both directions, a real key and
   // a typo riding through alike. Key set measured from the renderer's read
   // points at the pin this repo builds against (`.objectui-sha` =
+  // `7578323a5`, re-read there 2026-10-12:
+  // every objectui file this record cites is byte-identical across the hop from
+  // `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+  // `9646e2ed2`, re-read there 2026-10-12:
+  // every objectui file this record cites is byte-identical across the hop from
+  // `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
   // `088e0f705`, re-read there 2026-10-12:
   // every objectui file this record cites is byte-identical across the hop from
   // `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At

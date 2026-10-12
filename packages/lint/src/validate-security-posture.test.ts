@@ -50,9 +50,22 @@ const SHORTENED_RULE_IDS: readonly string[] = [
   SECURITY_DELEGATION_MISSING_REASON,
 ];
 const firedShortened: Array<{ rule: string; message: string }> = [];
+// [#22161] Slice 13: the rule ids whose `fix:` line this file shortened. The
+// last block in this file holds every one it fired to one line.
+const ONE_LINE_FIX_IDS: readonly string[] = [
+  SECURITY_CBP_AMBIGUOUS_RELATION,
+  SECURITY_MASTER_DETAIL_UNGRANTED,
+  SECURITY_CBP_NO_RELATION,
+  SECURITY_FLS_UNKNOWN_FIELD,
+  SECURITY_WILDCARD_VAMA,
+];
+const firedFix: Array<{ rule: string; message: string; hint: string }> = [];
 const validateSecurityPosture: typeof validateSecurityPostureUnrecorded = (...args) => {
   const findings = validateSecurityPostureUnrecorded(...args);
-  for (const f of findings) if (SHORTENED_RULE_IDS.includes(f.rule)) firedShortened.push(f);
+  for (const f of findings) {
+    if (SHORTENED_RULE_IDS.includes(f.rule)) firedShortened.push(f);
+    if (ONE_LINE_FIX_IDS.includes(f.rule)) firedFix.push(f);
+  }
   return findings;
 };
 
@@ -1884,5 +1897,83 @@ describe('[#22161] one-line verdicts — the rule ids this file shortened', () =
     expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
     const text = explanation!.paragraphs.join('\n');
     for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
+});
+
+// [#22161] Slice 13: the `fix:` line. Each of these ids names its remedy in one
+// line; the tier precedence, the sys_* / isSystem alternative, what each
+// baseline means, what a field rename did to the mask and where an app-level
+// admin set belongs are the ids' explanations. The FLS line names the nearest
+// column instead of listing the object's fields.
+describe('[#22161] one-line fixes — the rule ids this file shortened', () => {
+  it('every `fix:` line the cases above fired for those ids is one line of at most 200 characters', () => {
+    // Coverage control: each id fired, and the FLS id with and without a
+    // nearest column.
+    expect([...new Set(firedFix.map((f) => f.rule))].sort()).toEqual([...ONE_LINE_FIX_IDS].sort());
+    const fls = firedFix.filter((f) => f.rule === SECURITY_FLS_UNKNOWN_FIELD);
+    expect(fls.some((f) => f.hint.includes('is the nearest'))).toBe(true);
+    expect(fls.some((f) => !f.hint.includes('is the nearest'))).toBe(true);
+    for (const f of firedFix) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('the FLS line names the nearest declared or injected column', () => {
+    const hintFor = (key: string, perm: Record<string, unknown> = { readable: false }) =>
+      validateSecurityPosture({
+        objects: [
+          {
+            name: 'crm_account',
+            label: 'Account',
+            sharingModel: 'public_read',
+            fields: { name: { type: 'text' }, description: { type: 'textarea' } },
+          },
+        ],
+        permissions: [
+          { name: 'sales_rep', label: 'Sales Rep', objects: { crm_account: { allowRead: true } }, fields: { [key]: perm } },
+        ],
+      }).find((f) => f.rule === SECURITY_FLS_UNKNOWN_FIELD)!.hint;
+    expect(hintFor('crm_account.descriptio')).toBe(
+      "Point the key at a field \"crm_account\" declares ('crm_account.description' is the nearest), or delete " +
+        'the entry if the field is gone',
+    );
+    // A registry-injected column resolves too, so it is a candidate as well.
+    expect(hintFor('crm_account.created_att', { readable: true })).toContain("'crm_account.created_at' is the nearest");
+    // Nothing close: the line names no column rather than a wrong one.
+    expect(hintFor('crm_account.zzzzzzzz')).toBe(
+      'Point the key at a field "crm_account" declares, or delete the entry if the field is gone',
+    );
+  });
+
+  const MOVED_FROM_FIX: Record<string, readonly string[]> = {
+    [SECURITY_CBP_AMBIGUOUS_RELATION]: [
+      'a required master_detail, then any master_detail, then a required lookup',
+      "A tie in a lower tier is masked by a higher tier's single winner",
+    ],
+    [SECURITY_MASTER_DETAIL_UNGRANTED]: ['named `sys_*` or set `isSystem: true`'],
+    [SECURITY_CBP_NO_RELATION]: ["'private' (the owner plus explicit shares)", 'An object with no master decides its own baseline'],
+    [SECURITY_FLS_UNKNOWN_FIELD]: [
+      'an entry that cannot match is not protection',
+      'renaming the key is the fix',
+      'the mask has been off since that rename',
+    ],
+    [SECURITY_WILDCARD_VAMA]: [
+      "Only the platform's own admin set may combine the two",
+      'ADR-0066',
+      'ADR-0090 D9',
+      'binds to a position of their own choosing',
+    ],
+  };
+
+  it('covers exactly the ids whose `fix:` line was shortened', () => {
+    expect(Object.keys(MOVED_FROM_FIX).sort()).toEqual([...ONE_LINE_FIX_IDS].sort());
+  });
+
+  it.each([...ONE_LINE_FIX_IDS])('`os explain %s` carries what its `fix:` line no longer says', (rule) => {
+    const explanation = explainRule(rule);
+    expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
+    const text = explanation!.paragraphs.join('\n');
+    for (const fact of MOVED_FROM_FIX[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
   });
 });

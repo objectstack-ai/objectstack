@@ -173,6 +173,11 @@ function makeStubEngine() {
         async transaction<T>(cb: (ctx: undefined, info: { owned: boolean }) => Promise<T>): Promise<T> {
             return cb(undefined, { owned: true });
         },
+        // [#22985] `HostEngine` declares it, and a publish of an object calls
+        // it. Without it the publish's storage sync threw a TypeError that the
+        // protocol now reports at `error` — which the "logs nothing" control
+        // below would read as a commit-store report.
+        async syncObjectSchema() {},
         registry: {
             registerItem: () => {},
             registerObject: () => {},

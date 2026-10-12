@@ -120,7 +120,7 @@
 
 import { referenceCarrierOf } from '@objectstack/spec/data';
 import { describeAnchorForbiddenBits, type AnchorBindingContext } from '@objectstack/spec/security';
-import { indexObjectGraph, recordsOf, type ObjectGraph } from './object-graph.js';
+import { indexObjectGraph, nearestName, recordsOf, type ObjectGraph } from './object-graph.js';
 
 export const SECURITY_OWD_UNSET = 'security-owd-unset';
 export const SECURITY_OWD_ALIAS = 'security-owd-alias';
@@ -553,11 +553,12 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
         message:
           `declares sharingModel 'controlled_by_parent' but has no master relation to derive access ` +
           `from, so every read is denied and every write refused (422 INVALID_METADATA)`,
+        // [#22161] One remedy line; that an object with no master decides its
+        // own baseline, and what each value means, is this id's `os explain`
+        // entry.
         hint:
-          `Add the master relation this object is derived from, e.g. fields.parent: ` +
-          `{ type: 'master_detail', reference: '<master_object>', required: true }. If the object has no ` +
-          `master, its baseline is its own decision — use sharingModel: 'private' (owner + shares), ` +
-          `'public_read', or 'public_read_write'.`,
+          `Add the master relation, e.g. fields.parent: { type: 'master_detail', reference: '<master_object>', ` +
+          `required: true }, or set its own sharingModel: 'private', 'public_read' or 'public_read_write'`,
       });
     }
 
@@ -598,13 +599,11 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
         message:
           `the controlled_by_parent master is decided by field order: ${cbpTier.candidates.length} fields ` +
           `tie in the ${cbpTier.tier} tier (${roster}) and "${winner.field}" wins today`,
+        // [#22161] One remedy line; the tier precedence, and why only a tie in
+        // the winning tier is ambiguous, are this id's `os explain` entry.
         hint:
-          `Leave exactly ONE candidate in the winning tier, so the master is authored rather than positional. ` +
-          `Either promote the intended master into a higher tier — make it the object's only required ` +
-          `master_detail ({ type: 'master_detail', reference: '<master_object>', required: true }) — or demote ` +
-          `the others in this tier (drop required, or change the relation type). Precedence is required ` +
-          `master_detail, then any master_detail, then a required lookup; only a tie inside the tier that ` +
-          `WINS is ambiguous.`,
+          `Leave ONE candidate in the ${cbpTier.tier} tier: make the intended master the only required ` +
+          `master_detail, or drop required (or change the relation type) on the others`,
       });
     }
 
@@ -766,8 +765,12 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
       // key naming an object this stack does not define.
       const emptyField = flsField.length === 0;
 
-      const declared = [...surface.names].sort();
-      const roster = declared.length <= 12 ? declared.join(', ') : `${declared.slice(0, 12).join(', ')}, …`;
+      // [#22161] The `fix:` line names the nearest column the key could have
+      // meant (a declared field or a registry-injected one, the two sets the
+      // resolution above accepts), not the object's field list: a list of up
+      // to twelve names does not fit one line, and the nearest name is what a
+      // renamed or mistyped key needs.
+      const nearest = emptyField ? undefined : nearestName(flsField, [...surface.names, ...surface.injected.keys()]);
       const wrote = emptyField
         ? `field-permission key '${flsKey}' names NO field — everything after the '${flsObject}.' prefix is empty`
         : `field-permission key '${flsKey}' is object-qualified but "${flsObject}" declares no field '${flsField}'`;
@@ -779,10 +782,13 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
         // [#22161] One verdict sentence; how the runtime resolves an FLS key,
         // and why this shape survives review, are this id's `os explain` entry.
         message: `${wrote}, so the key matches nothing and the masking it declares never enforces`,
+        // [#22161] One remedy line; that an entry which cannot match is no
+        // protection, and what a field rename did to the mask, are this id's
+        // `os explain` entry.
         hint:
-          `Point the key at a field "${flsObject}" really declares (${roster}), or delete the entry if the ` +
-          `field is gone — an entry that cannot match is not protection. If the masking is still wanted, ` +
-          `renaming the key is the fix; if the field was renamed, the mask has been off since that rename.`,
+          `Point the key at a field "${flsObject}" declares` +
+          (nearest ? ` ('${flsObject}.${nearest}' is the nearest)` : '') +
+          `, or delete the entry if the field is gone`,
       });
     }
 
@@ -796,10 +802,9 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
         message:
           `'*' wildcard carrying View All / Modify All Data — a package-authored superuser. ` +
           `Only the platform's own admin set may combine the wildcard with VAMA (ADR-0066).`,
-        hint:
-          `Enumerate the objects this set really needs, or drop viewAllRecords/modifyAllRecords ` +
-          `from the wildcard entry. App-level admins belong in an ordinary set the customer binds ` +
-          `to a position of their choosing (ADR-0090 D9).`,
+        // [#22161] One remedy line; where an app-level admin set belongs
+        // (ADR-0090 D9) is this id's `os explain` entry.
+        hint: `Enumerate the objects this set really needs, or drop viewAllRecords/modifyAllRecords from the '*' entry`,
       });
     }
 
@@ -972,11 +977,11 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
           message:
             `detail object "${objName}" (${md.type} "${md.name}"${parentText}) has no object-level ` +
             `CRUD grant in any permission set, so non-admin users are denied it (403)`,
+          // [#22161] One remedy line; the sys_* / isSystem alternative for a
+          // table no role touches is this id's `os explain` entry.
           hint:
-            `Grant "${objName}" in at least one permission set that already grants its master` +
-            `${md.parent ? ` "${md.parent}"` : ''} — e.g. permissions[i].objects.${objName} = ` +
-            `{ allowRead: true, allowCreate: true, allowEdit: true }. If no role should ever touch ` +
-            `it (a pure system/internal table), name it sys_* or set isSystem: true.`,
+            `Grant it where its master${md.parent ? ` "${md.parent}"` : ''} is granted: ` +
+            `permissions[i].objects.${objName} = { allowRead: true, allowCreate: true, allowEdit: true }`,
         });
       }
     }

@@ -22,6 +22,7 @@ import {
   UpdateRecordConfigSchema,
   DeleteRecordConfigSchema,
 } from './builtin-node-config.zod';
+import { HttpConfigSchema } from './io-node-config.zod';
 // #5500 — the `loop` container contract (ADR-0031). A `loop` with no
 // `config.body` is the LEGACY flat-graph shape: `loop-node.ts` reads
 // `config.collection` as a bare VARIABLE NAME, binds `$loopItems`/`$loopIndex`
@@ -488,9 +489,12 @@ describe('FlowSchema', () => {
             config: {
               url: '/api/approvals',
               method: 'POST',
+              // #19939 — the body is a value slot: one CEL value envelope builds the
+              // payload (a `{…}` token there is refused), and `dyn(…)` lets the map
+              // hold a text variable beside a field read.
               body: {
-                recordId: '{opportunityId}',
-                approver: '{opportunity.owner.manager}',
+                dialect: 'cel',
+                source: "{'recordId': dyn(opportunityId), 'approver': dyn(opportunity.owner.manager)}",
               },
             },
             position: { x: 250, y: 350 },
@@ -541,6 +545,7 @@ describe('FlowSchema', () => {
       const configOf = (id: string) => approvalFlow.nodes.find(n => n.id === id)?.config;
       expect(GetRecordConfigSchema.safeParse(configOf('get_opportunity')).success).toBe(true);
       expect(UpdateRecordConfigSchema.safeParse(configOf('auto_approve')).success).toBe(true);
+      expect(HttpConfigSchema.safeParse(configOf('send_approval_request')).success).toBe(true);
 
       // The decision declares no config at all: its branching lives on the
       // out-edges — exactly one guarded branch and exactly one `isDefault`
@@ -781,11 +786,14 @@ describe('FlowSchema', () => {
             config: {
               url: 'https://api.external.com/v1/data',
               method: 'POST',
+              // [#19939] Each header value is a text slot (`{{ }}` holes) and
+              // the body a value slot (a CEL envelope); a credential never goes
+              // in a header — a connector's `auth.credentialRef` carries it.
               headers: {
                 'Content-Type': 'application/json',
-                Authorization: 'Bearer {$Credential.token}',
+                'X-Request-Id': '{{ $runId }}',
               },
-              body: '{payload}',
+              body: { dialect: 'cel', source: 'payload' },
             },
           },
           {

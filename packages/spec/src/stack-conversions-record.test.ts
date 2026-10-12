@@ -469,6 +469,11 @@ describe('every refusal site in defineStack carries the record — census, both 
       code: 'STACK_TRIGGER_CAPABILITY_REQUIRED',
       config: { manifest, objects: [task], pages, requires: ['automation'], flows: [recordFlow] },
     },
+    {
+      site: 'unmanaged install mode',
+      code: 'STACK_UNMANAGED_INSTALL_UNCOPYABLE',
+      config: { manifest: { ...manifest, installModes: ['unmanaged'] }, objects: [task], pages, functions: { probe_noop: () => undefined } },
+    },
     { site: 'bound-action merge, strict: false — objects not an array', code: 'STACK_SCHEMA_INVALID', config: { manifest, objects: 'nope', pages }, strict: false },
     { site: 'bound-action merge, strict: false — an objects entry not an object', code: 'STACK_SCHEMA_INVALID', config: { manifest, objects: [null], pages }, strict: false },
     { site: 'bound-action merge, strict: false — actions not an array', code: 'STACK_SCHEMA_INVALID', config: { manifest, objects: [task], actions: 7, pages }, strict: false },
@@ -484,8 +489,8 @@ describe('every refusal site in defineStack carries the record — census, both 
     });
   }
 
-  it('the census reaches every code defineStack refuses with: seven distinct codes', () => {
-    expect(new Set(rows.map((r) => r.code)).size).toBe(7);
+  it('the census reaches every code defineStack refuses with: eight distinct codes', () => {
+    expect(new Set(rows.map((r) => r.code)).size).toBe(8);
   });
 });
 

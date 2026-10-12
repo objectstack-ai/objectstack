@@ -67,7 +67,6 @@ ${footerHtml}
 export const AUTH_PASSWORD_RESET_TEMPLATE: EmailTemplate = {
   name: 'auth.password_reset',
   label: 'Password Reset',
-  category: 'auth',
   locale: 'en-US',
   subject: 'Reset your {{appName}} password',
   bodyHtml: wrap('Reset your password', `
@@ -94,7 +93,6 @@ If you didn't request this, ignore this email.`,
     { name: 'appName', type: 'string', required: false, description: 'Product/app name (brand override)' },
   ],
   active: true,
-  isSystem: true,
   description: 'Sent when a user requests a password reset via better-auth.',
 };
 
@@ -181,7 +179,6 @@ export const AUTH_PASSWORD_RESET_TEMPLATES: EmailTemplate[] = [
 export const AUTH_VERIFY_EMAIL_TEMPLATE: EmailTemplate = {
   name: 'auth.verify_email',
   label: 'Verify Email Address',
-  category: 'auth',
   locale: 'en-US',
   subject: 'Verify your {{appName}} email address',
   bodyHtml: wrap('Verify your email', `
@@ -201,7 +198,6 @@ Please verify your email ({{user.email}}) by opening this link:
     { name: 'appName', type: 'string', required: false },
   ],
   active: true,
-  isSystem: true,
   description: 'Sent when better-auth needs to verify a newly-registered email address.',
 };
 
@@ -270,7 +266,6 @@ export const AUTH_VERIFY_EMAIL_TEMPLATES: EmailTemplate[] = [
 export const AUTH_MAGIC_LINK_TEMPLATE: EmailTemplate = {
   name: 'auth.magic_link',
   label: 'Magic Link Sign-In',
-  category: 'auth',
   locale: 'en-US',
   subject: 'Your {{appName}} sign-in link',
   bodyHtml: wrap('Sign in to {{appName}}', `
@@ -286,7 +281,6 @@ export const AUTH_MAGIC_LINK_TEMPLATE: EmailTemplate = {
     { name: 'appName', type: 'string', required: false },
   ],
   active: true,
-  isSystem: true,
   description: 'Passwordless sign-in link sent by the magic-link plugin.',
 };
 
@@ -346,7 +340,6 @@ export const AUTH_MAGIC_LINK_TEMPLATES: EmailTemplate[] = [
 export const AUTH_INVITATION_TEMPLATE: EmailTemplate = {
   name: 'auth.invitation',
   label: 'Organization Invitation',
-  category: 'auth',
   locale: 'en-US',
   subject: '{{inviter.name}} invited you to {{organization.name}}',
   bodyHtml: wrap('You have been invited', `
@@ -366,7 +359,6 @@ Accept: {{acceptUrl}}`,
     { name: 'appName', type: 'string', required: false },
   ],
   active: true,
-  isSystem: true,
   description: 'Sent by better-auth organization plugin when a user is invited to an org.',
 };
 
@@ -429,7 +421,6 @@ export const AUTH_INVITATION_TEMPLATES: EmailTemplate[] = [
 export const AUTH_TWO_FACTOR_OTP_TEMPLATE: EmailTemplate = {
   name: 'auth.two_factor_otp',
   label: 'Two-Factor Verification Code',
-  category: 'auth',
   locale: 'en-US',
   subject: 'Your {{appName}} verification code',
   bodyHtml: wrap('Your verification code', `
@@ -445,7 +436,6 @@ export const AUTH_TWO_FACTOR_OTP_TEMPLATE: EmailTemplate = {
     { name: 'appName', type: 'string', required: false },
   ],
   active: true,
-  isSystem: true,
   description: 'Time-based OTP delivered for two-factor / email-OTP login.',
 };
 
@@ -545,7 +535,6 @@ const EMAIL_CHANGE_NOTICE_VARIABLES: EmailTemplate['variables'] = [
 export const AUTH_EMAIL_CHANGE_NOTICE_TEMPLATE: EmailTemplate = {
   name: 'auth.email_change_notice',
   label: 'Email Change Notice (previous address)',
-  category: 'auth',
   locale: 'en-US',
   subject: 'Security notice: the email address on your {{appName}} account is being changed',
   bodyHtml: wrap(
@@ -571,7 +560,6 @@ If you did not request this, your account may be compromised. Contact your
 to end other sessions.`,
   variables: EMAIL_CHANGE_NOTICE_VARIABLES,
   active: true,
-  isSystem: true,
   description: 'Sent to the PREVIOUS address when a change-email request is accepted, so a hijacked session cannot move the account identity unannounced. Notification only — never gates the change.',
 };
 

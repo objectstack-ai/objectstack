@@ -7,8 +7,9 @@ import type { HttpConfigParsed } from '@objectstack/spec/automation';
 import { randomUUID } from 'node:crypto';
 import type { AutomationEngine } from '../engine.js';
 import { refuseNode } from '../guard-refusal.js';
-import { interpolate } from './template.js';
+import { renderTextSlot, type VariableMap } from './template.js';
 import { parseNodeConfig } from './parse-config.js';
+import { resolveValueSlot } from './value-slot-map.js';
 import { FLOW_CREDENTIAL_CLEARED, HTTP_SIGNING_SECRET_KEY } from '../flow-credential-projection.js';
 
 /**
@@ -39,10 +40,48 @@ import { FLOW_CREDENTIAL_CLEARED, HTTP_SIGNING_SECRET_KEY } from '../flow-creden
  * (`@objectstack/core`'s `signHttpBody`): the outbox signs the body it will
  * POST, and the inline call — including the durable arm's no-outbox fallback —
  * signs the exact bytes it hands `fetch`, the empty string when there is no
- * body. An authored `''` sends unsigned on purpose, on every arm; a non-empty
- * value that renders to nothing at run time refuses the node rather than let
- * the call leave unsigned.
+ * body. An authored `''` sends unsigned on purpose, on every arm.
+ *
+ * ## What each key is (#19939)
+ *
+ * The config is parsed AS AUTHORED — after the credential channel's
+ * `signingSecret` — and each key is read by what it is (`HttpConfigSchema`):
+ *
+ *  - `url` and every `headers` value are TEXT slots, rendered through
+ *    {@link renderTextSlot} — `{{ }}` holes over the flow's variables. A url
+ *    that renders to no text refuses the node; a header that renders to no
+ *    text is not sent.
+ *  - `body` is a VALUE slot, resolved through the shared
+ *    {@link resolveValueSlot}: a CEL value envelope is evaluated in the run's
+ *    scope to the payload, and a literal is sent as written.
+ *  - `method`, `durable`, `timeoutMs` and `signingSecret` are literals, read
+ *    as written.
+ *
+ * All three are rendered and evaluated ONCE, before either mode, so the
+ * durable outbox enqueues exactly the request the inline call would send and
+ * nothing renders at delivery. Until #19939 the whole config went through the
+ * single-brace `interpolate()` first; a `{…}` token is refused now, by the
+ * contract parse below and, before a run starts, by `registerFlow` and
+ * `objectstack validate`.
  */
+
+/**
+ * Render each `headers` value — a text slot — for this run. A header that
+ * renders to no text is not sent (absent in, absent out, like every text
+ * slot), where the 17.x interpolation sent it empty.
+ */
+function renderHeaders(
+    headers: Readonly<Record<string, string>> | undefined,
+    variables: VariableMap,
+): Record<string, string> | undefined {
+    if (headers === undefined) return undefined;
+    const out: Record<string, string> = {};
+    for (const [name, value] of Object.entries(headers)) {
+        const text = renderTextSlot(value, variables);
+        if (text !== undefined) out[name] = text;
+    }
+    return out;
+}
 
 /** Structural view of `service-messaging`'s HTTP outbox surface (ADR-0018 M3). */
 interface MessagingHttpSurface {
@@ -117,29 +156,43 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                     url: {
                         type: 'string',
                         description:
-                            'Target URL. Stored in the flow definition, which is served to every member who can read '
+                            'Target URL, rendered per run with `{{ }}` holes (`https://api.example.com/v1/orders/{{ record.id }}`); '
+                            + 'a single-brace `{token}` is refused. '
+                            + 'Stored in the flow definition, which is served to every member who can read '
                             + 'flows, so never a secret-bearing URL. A key in the query string: call the upstream with a '
                             + '`connector_action` on a declarative `rest` connector with `api-key` auth, whose '
                             + '`paramName` names the parameter and `auth.credentialRef` names the secret. A webhook whose '
                             + 'path is the secret: call the service through a token-authenticated connector instead, such '
                             + 'as the `slack` connector with its bot token.',
                     },
-                    method: { type: 'string', description: 'HTTP method (default GET; POST when durable)' },
+                    method: {
+                        type: 'string',
+                        description: 'HTTP method (default GET; POST when durable) — a literal, read as written',
+                    },
                     headers: {
                         type: 'object',
                         description:
-                            'Request headers. Stored in the flow definition, which is served to every member who can '
+                            'Request headers, each value rendered per run with `{{ }}` holes; a single-brace `{token}` '
+                            + 'is refused, and a header that renders to no text is not sent. '
+                            + 'Stored in the flow definition, which is served to every member who can '
                             + 'read flows, so never put a credential here (an `Authorization` value, an API key): call an '
                             + 'authenticated upstream through a `connector_action` on a declarative connector whose '
                             + '`auth.credentialRef` names the secret.',
                     },
-                    body: { description: 'Request body (JSON-serialised)' },
+                    body: {
+                        description:
+                            'Request body (JSON-serialised) — a CEL value envelope `{ dialect: \'cel\', source }` '
+                            + 'evaluated per run to the payload, or a literal sent as written',
+                    },
                     durable: {
                         type: 'boolean',
                         description: 'Fire-and-forget via the durable outbox (retry/dead-letter) instead of inline request/response',
                     },
                     timeoutMs: { type: 'number', description: 'Per-request timeout (ms)' },
-                    signingSecret: { type: 'string', description: 'HMAC-SHA256 secret → X-Objectstack-Signature' },
+                    signingSecret: {
+                        type: 'string',
+                        description: 'HMAC-SHA256 secret → X-Objectstack-Signature — the secret itself, read as written',
+                    },
                 },
             },
         }),
@@ -148,10 +201,9 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
             // [#20790] A signing secret the write-only credential channel holds
             // is not in the definition: it is read now, at execution, and takes
             // the place the literal would have had — so everything below (the
-            // template interpolation, the contract parse, the refusal of a value
-            // that renders to nothing) treats it exactly as an authored one. The
-            // channel's row wins where one exists (a packaged flow's literal is
-            // the fallback). A cleared `''` is the author's "unsigned": the
+            // contract parse, the signing) treats it exactly as an authored one.
+            // The channel's row wins where one exists (a packaged flow's literal
+            // is the fallback). A cleared `''` is the author's "unsigned": the
             // channel is not asked. A held secret that does not come back
             // refuses the node — it is never sent unsigned.
             let raw = authored;
@@ -173,39 +225,28 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                 }
                 if (held !== undefined) raw = { ...authored, signingSecret: held };
             }
-            // Parsed AFTER interpolation — unique among the contract-carrying
-            // builtins, because this executor reads the interpolated config
-            // wholesale, so that is the shape its contract describes: a `{token}`
-            // in a typed slot (`timeoutMs`, `durable`) resolves to the value's
-            // real type before the contract sees it (whole-token interpolation
-            // preserves types).
-            const parsed = parseNodeConfig<HttpConfigParsed>('http', node.id, HttpConfigSchema, interpolate(raw, variables, context));
+            // [#19939] Parsed AS AUTHORED, like every other contract-carrying
+            // builtin: a `{…}` token is refused here at any key (the text
+            // slots', the body's and the literals' own refusals), and the
+            // evaluation below sees only what the contract accepted. Until
+            // #19939 this executor interpolated the whole config first and
+            // parsed the result.
+            const parsed = parseNodeConfig<HttpConfigParsed>('http', node.id, HttpConfigSchema, raw);
             if (!parsed.ok) return parsed.refusal;
             const cfg = parsed.config;
 
-            const url = cfg.url;
+            // The request, rendered and evaluated ONCE, before either mode: the
+            // durable outbox enqueues what the inline call would send.
+            const url = renderTextSlot(cfg.url, variables);
             if (!url) return refuseNode('http: url is required');
+            const headers = renderHeaders(cfg.headers, variables);
+            const body = cfg.body === undefined ? undefined : resolveValueSlot(engine, cfg.body, variables, 'body', context);
 
             const durable = cfg.durable === true;
-            const headers = cfg.headers;
-            const body = cfg.body;
             const timeoutMs = cfg.timeoutMs;
+            // Read as written (or as the credential channel holds it): no
+            // template resolves here, so what was authored is what signs.
             const signingSecret = cfg.signingSecret;
-
-            // A secret the author SET that rendered to nothing — a `{token}`
-            // with no value in this run — cannot sign, and sending anyway is
-            // the one outcome the key exists to prevent: the receiver gets a
-            // request it cannot authenticate while the run reports success.
-            // Only an authored `''` means "unsigned on purpose" (the outbox
-            // reads it the same way). A non-string result never reaches here:
-            // the contract parse above already refused it, naming the key.
-            if (typeof raw.signingSecret === 'string' && raw.signingSecret !== '' && !signingSecret) {
-                return refuseNode(
-                    `http '${node.id}': config.signingSecret is set but resolved to no value in this run, so the ` +
-                        `request cannot carry ${HTTP_SIGNATURE_HEADER} and was not sent. Give the value its template ` +
-                        `reads to the run, or author signingSecret: '' to send unsigned on purpose.`,
-                );
-            }
 
             // ── Durable mode: enqueue onto the messaging HTTP outbox ──────────
             if (durable) {

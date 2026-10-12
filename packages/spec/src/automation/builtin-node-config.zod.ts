@@ -263,9 +263,10 @@ const CRUD_BULK_INTENT_GUIDANCE = {
  * expression ledger declares (`assignment.assignments.*`,
  * `create_record.fields.*`, `update_record.fields.*`, and since #19939
  * `subflow.input.*`, `map.input.*`, `script.inputs.*`, a `screen`'s
- * `defaults.*`, `fields[].defaultValue` and `recordId`, and a `loop`'s and a
- * `map`'s `collection`), so an author (or an agent reading the issue) learns
- * the rule before the detail.
+ * `defaults.*`, `fields[].defaultValue` and `recordId`, a `loop`'s and a
+ * `map`'s `collection`, a `notify` node's `recipients`, `templateData.*`
+ * and `sourceId`, and an `http` node's `body`), so an author (or an agent
+ * reading the issue) learns the rule before the detail.
  *
  * Slot-neutral on purpose (#19938): the refusal's LOCATION names the slot
  * (`config.fields.<field>`, `config.assignments.<variable>`). A sentence that
@@ -422,7 +423,11 @@ function celValueSlotSchema(description: string) {
  * `input`; `SubflowConfigSchema`'s `input` and `ScriptConfigSchema`'s
  * `inputs` in `schemaless-node-config.zod.ts`), and so do a `screen`'s
  * `defaults` map and each field's `defaultValue` (`ScreenConfigSchema`; its
- * `recordId` takes the same rule with a string literal), and it is
+ * `recordId` takes the same rule with a string literal), and so does a
+ * `notify` node's `templateData` map (`NotifyConfigSchema`; its `recipients`
+ * and `sourceId` take the same rule with a string literal, a list of them for
+ * `recipients`), and so does an `http` node's `body` (`HttpConfigSchema`, one
+ * value: the whole payload), and it is
  * what a consumer judging ANY value-role slot applies (`AutomationEngine`'s
  * `valueEnvelopeRefusals`, the lint's `checkDeclaredValue`). The `assignment`
  * map's {@link AssignmentValueSchema} is the same rule under a

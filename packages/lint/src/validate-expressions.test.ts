@@ -16,6 +16,7 @@ import {
   ASSIGNMENT_VALUE_ENVELOPE_REFUSAL,
   PREDICATE_SLOT_STRING_REFUSAL,
   STRUCTURAL_CONDITION_SHAPE_REFUSAL,
+  TEXT_SLOT_TEMPLATE_REFUSAL,
   VALUE_SLOT_TEMPLATE_REFUSAL,
   flowNodeConfigRefusals,
   predicateSlotRefusal,
@@ -5061,6 +5062,96 @@ describe('the loop and map collection is a value slot (#19939)', () => {
   it('a body-less loop — the legacy flat-graph form — is judged nowhere: a bare name is its spelling', () => {
     expect(errorsOf(stackWith({ type: 'loop', config: { collection: 'rows' } }))).toEqual([]);
     expect(errorsOf(stackWith({ type: 'loop', config: { collection: '{rows}' } }))).toEqual([]);
+  });
+});
+
+/**
+ * [#19939, stage S4] A notify node's `sourceObject`, `actorId` and `payload`
+ * are literals the executor reads as written: no flow computed one, so no
+ * value slot is built there. `objectstack validate` refuses a `{…}` token in
+ * one, and an envelope, in the contract's words (the literal's remedy, write
+ * the value) — the same refusal `FlowSchema.parse`, `registerFlow` and the
+ * executor's parse give, since the contract marks it read as written.
+ */
+describe('the notify literals are refused with the literal remedy (#19939)', () => {
+  const stackWith = (config: Record<string, unknown>) => ({
+    flows: [{ name: 'f', nodes: [{ id: 'start', type: 'start' }, { id: 'n', type: 'notify', config: { recipients: 'u1', title: 'T', ...config } }], edges: [] }],
+  });
+  const errorsOf = (stack: unknown) =>
+    validateStackExpressions(stack as never).filter((i) => (i.severity ?? 'error') === 'error');
+  const LITERALS = [
+    ['sourceObject', (v: unknown) => ({ sourceObject: v }), 'sourceObject'],
+    ['actorId', (v: unknown) => ({ actorId: v }), 'actorId'],
+    ['payload', (v: unknown) => ({ payload: { who: v } }), 'payload.who'],
+  ] as const;
+
+  it.each(LITERALS)('%s: a `{…}` token is refused at the key, with the literal remedy', (_label, configOf, at) => {
+    const found = errorsOf(stackWith(configOf('{record.owner}')));
+    expect(found.map((i) => i.where)).toEqual([`flow 'f' · node 'n' (notify) config.${at}`]);
+    expect(found[0]!.message).toContain(`refused at \`${at}\` by the notify contract:`);
+    expect(found[0]!.message).toContain('a literal the executor reads as written: a single-brace token is not resolved here; write the value.');
+    expect(found[0]!.message).not.toContain(VALUE_SLOT_TEMPLATE_REFUSAL);
+  });
+
+  it.each(LITERALS)('%s: an envelope is refused — nothing evaluates it there; a literal is clean', (_label, configOf, at) => {
+    const found = errorsOf(stackWith(configOf({ dialect: 'cel', source: "'u' + '1'" })));
+    expect(found.map((i) => i.where)).toEqual([`flow 'f' · node 'n' (notify) config.${at}`]);
+    expect(found[0]!.message).toContain('a CEL value envelope is not evaluated here; write the value.');
+    expect(errorsOf(stackWith(configOf('crm_case')))).toEqual([]);
+  });
+});
+
+/**
+ * [#19939, stage S5] An `http` node reads each key by what it is: `url` and
+ * each `headers` value are text slots, `body` a value slot, and `method`,
+ * `durable`, `timeoutMs` and `signingSecret` literals read as written.
+ * `objectstack validate` refuses a `{…}` token at each with the spelling that
+ * replaces it — except `signingSecret`, whose credential store may hold the
+ * secret the run signs with, so its refusal is the executor's parse.
+ */
+describe('the http text slots, body and literals are refused with their remedies (#19939)', () => {
+  const stackWith = (config: Record<string, unknown>) => ({
+    flows: [{ name: 'f', nodes: [{ id: 'start', type: 'start' }, { id: 'n', type: 'http', config: { url: 'https://x.test/hook', ...config } }], edges: [] }],
+  });
+  const errorsOf = (stack: unknown) =>
+    validateStackExpressions(stack as never).filter((i) => (i.severity ?? 'error') === 'error');
+
+  it.each([
+    ['url', { url: 'https://x.test/{id}' }, 'http url at config.url', '`https://x.test/{{ id }}`'],
+    ['a headers value', { headers: { 'X-Ref': 'r-{id}' } }, 'http header at config.headers.X-Ref', '`r-{{ id }}`'],
+  ] as const)('%s: a single-brace token is refused at `error` with its hole spelling', (_label, config, where, spelling) => {
+    const found = errorsOf(stackWith(config));
+    expect(found).toHaveLength(1);
+    expect(found[0]!.where).toContain(where);
+    expect(found[0]!.message.startsWith(TEXT_SLOT_TEMPLATE_REFUSAL)).toBe(true);
+    expect(found[0]!.message).toContain(spelling);
+  });
+
+  it('body: a token is refused at `error`, located inside the literal, naming the whole-value envelope', () => {
+    const found = errorsOf(stackWith({ body: { id: '{id}' } }));
+    expect(found).toHaveLength(1);
+    expect(found[0]!.where).toContain('http body at config.body.id');
+    expect(found[0]!.message.startsWith(VALUE_SLOT_TEMPLATE_REFUSAL)).toBe(true);
+    // CONTROL: the envelope that builds the whole body is clean.
+    expect(errorsOf(stackWith({ body: { dialect: 'cel', source: "{'id': 'x' + '1'}" } }))).toEqual([]);
+  });
+
+  it.each([
+    ['method', { method: '{verb}' }],
+    ['durable', { durable: '{flag}' }],
+    ['timeoutMs', { timeoutMs: '{t}' }],
+    ['headers', { headers: '{all}' }],
+  ] as const)('%s (read as written): a `{…}` token is refused at the key in the contract\'s words', (key, config) => {
+    const found = errorsOf(stackWith(config));
+    expect(found.map((i) => i.where)).toEqual([`flow 'f' · node 'n' (http) config.${key}`]);
+    expect(found[0]!.message).toContain(`refused at \`${key}\` by the http contract:`);
+    expect(found[0]!.message).toMatch(/ as written[:,]/);
+    expect(found[0]!.message).not.toContain(VALUE_SLOT_TEMPLATE_REFUSAL);
+  });
+
+  it('signingSecret is left to the run; the literals as written are clean', () => {
+    expect(errorsOf(stackWith({ signingSecret: '{k}' }))).toEqual([]);
+    expect(errorsOf(stackWith({ method: 'POST', durable: true, timeoutMs: 5000, signingSecret: 's', headers: { 'X-Kind': 'probe' } }))).toEqual([]);
   });
 });
 

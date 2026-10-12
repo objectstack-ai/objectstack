@@ -2480,8 +2480,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
             severity: 'error',
           });
         }
-        // [#22110] The TEXT slots (a notify `title` / `message`, a screen
-        // `title` / `description`, an `end` `message`) render ADR-0032 §3's
+        // [#22110] The TEXT slots (a notify `title` / `message` and, since
+        // #19939, its `actionUrl` and an http `url` and each `headers` value, a
+        // screen `title` / `description`, an `end` `message`) render ADR-0032 §3's
         // `{{ }}` holes. The same two checks `registerFlow` runs on the same
         // config, in the same order: a single-brace token left from the 17.x
         // dialect is refused with its hole spelling (the spec's one judge),

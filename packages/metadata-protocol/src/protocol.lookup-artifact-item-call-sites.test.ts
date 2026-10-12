@@ -68,7 +68,7 @@ type Disposition = 'definition' | 'served-package envelope' | 'no';
  * envelope never reaches an answer whose body came from another package.
  */
 const SITES: ReadonlyArray<Site & { readonly noPackage: boolean; readonly disposition: Disposition; readonly why: string }> = [
-    { member: 'lookupArtifactItem', args: 'type: string, name: string, currentPackageId?: string', noPackage: false, disposition: 'definition',
+    { member: 'lookupArtifactItem', args: 'type: string, name: string, currentPackageId?: string, member?: string', noPackage: false, disposition: 'definition',
         why: 'the definition itself' },
     { member: 'getMetaItem', args: 'request.type, request.name, envelopePackageId(request.packageId, item)', noPackage: true, disposition: 'served-package envelope',
         why: 'the by-name read\'s envelope: naming no package, the package of the item it serves (the list\'s rule)' },
@@ -76,6 +76,8 @@ const SITES: ReadonlyArray<Site & { readonly noPackage: boolean; readonly dispos
         why: 'the list\'s envelope: each item\'s own package, the rule the by-name read shares' },
     { member: 'getMetaItem', args: 'request.type, request.name, request.packageId', noPackage: true, disposition: 'no',
         why: 'the shipped-flow arm: the served body IS this artifact, and the envelope is looked up at its own package' },
+    { member: 'getMetaItem', args: 'request.type, request.name, request.packageId, wantedMember', noPackage: true, disposition: 'no',
+        why: '[#22877] a bundled type\'s addressed member (the selector\'s, else the canonical one) when no stored row of it exists: the served body IS this artifact, and the envelope is looked up at its own package' },
     { member: 'getMetaItemLayered', args: 'request.type, request.name, request.packageId', noPackage: true, disposition: 'no',
         why: 'the layered read\'s code LAYER: body and envelope are one artifact, and its provenance fields are read off that layer' },
     { member: 'packagedArtifactBase', args: 'type, name', noPackage: true, disposition: 'no',

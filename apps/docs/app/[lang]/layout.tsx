@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { RootProvider } from 'fumadocs-ui/provider/next';
+import { RootProvider } from '@/components/root-provider';
 import { notFound } from 'next/navigation';
 import { i18n, isSupportedLanguage } from '@/lib/i18n';
 
