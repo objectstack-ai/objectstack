@@ -204,7 +204,9 @@ describe('#4556 — recorded_by holds a user id or NULL, never a sentinel', () =
 describe('#23033 — the sys_metadata row records who created it and who last changed it', () => {
   let engine: ReturnType<typeof makeFakeEngine>;
   let repo: SysMetadataRepository;
-  const ref = { org: 'org_alpha', type: 'view' as const, name: 'case_grid' };
+  // Environment-wide, the topology the protocol's own overlay repository has
+  // (ADR-0131 D6) and the scope `listDrafts` reads.
+  const ref = { org: 'system', type: 'view' as const, name: 'case_grid' };
   const onlyRow = () => {
     expect(engine.rows.size).toBe(1);
     return Array.from(engine.rows.values())[0]!;
@@ -212,7 +214,7 @@ describe('#23033 — the sys_metadata row records who created it and who last ch
 
   beforeEach(() => {
     engine = makeFakeEngine();
-    repo = new SysMetadataRepository({ engine, organizationId: 'org_alpha', orgLabel: 'org_alpha' });
+    repo = new SysMetadataRepository({ engine });
   });
 
   it('a first write with actor A stamps created_by A and updated_by A', async () => {
