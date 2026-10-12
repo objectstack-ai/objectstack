@@ -307,6 +307,63 @@ describe('runUniqueScopeProofs — NEGATIVE CONTROL, within: a declaration its d
   });
 });
 
+describe('runUniqueScopeProofs — ATTRIBUTION CONTROL, a unique indexes[] entry over the probed column', () => {
+  // The field's own index cannot be created (the table already holds a
+  // duplicate when the declaration arrives, ADR-0120 D4), while a declared
+  // unique composite over the same column can: its other column takes one
+  // default on every fixture, so the composite refuses every second holder,
+  // naming no field, and admits the twin. A field-less refusal there is
+  // possibly that entry's, never proof of the field's own declaration.
+  const controlApp = (declared: boolean) => ({
+    manifest: { id: 'com.example.unique-scope-composite', namespace: 'uqc', version: '0.0.1', type: 'app', name: 'Composite Control' },
+    objects: [
+      {
+        name: 'uqc_item',
+        label: 'Item',
+        fields: {
+          name: { type: 'text', label: 'Name', ...(declared ? { unique: true } : {}) },
+          kind: { type: 'text', label: 'Kind', ...(declared ? { defaultValue: 'standard' } : {}) },
+        },
+        ...(declared ? { indexes: [{ fields: ['name', 'kind'], unique: 'organization' }] } : {}),
+      },
+    ],
+  });
+  let dir: string;
+  let stack: VerifyStack;
+  let report: UniqueScopeReport;
+
+  beforeAll(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'verify-unique-scope-composite-'));
+    const databaseFile = join(dir, 'db.sqlite');
+    const before = await bootStack(defineStack(controlApp(false) as never) as never, { databaseFile });
+    await before.seed('uqc_item', [{ name: 'held twice', kind: 'a' }, { name: 'held twice', kind: 'b' }]);
+    await before.stop();
+    const app = defineStack(controlApp(true) as never) as never;
+    stack = await bootStack(app, { databaseFile });
+    report = await runUniqueScopeProofs(stack, await stack.signIn(), app);
+  }, 2 * BOOT_TIMEOUT + RUN_TIMEOUT);
+
+  afterAll(async () => {
+    await stack?.stop();
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('never credits a field-less refusal to the field when a unique indexes[] entry covers its column', () => {
+    const r = resultFor(report, 'uqc_item', 'name');
+    expect(r.status, JSON.stringify(r.probes)).toBe('inconclusive');
+    expect(shape(report, 'uqc_item', 'name')).toEqual([
+      'within rest insert refused unattributed', 'within rest update refused unattributed',
+      'within system insert refused unattributed', 'within system update refused unattributed',
+    ]);
+    for (const p of r.probes) {
+      expect(p.answer).toMatchObject({ kind: 'refused' });
+      expect(p.answer!.field).toBeUndefined();
+      expect(p.detail).toMatch(/^the unique refusal names no field, and a unique indexes\[\] entry \(name, kind\) covers name/);
+    }
+    expect(report.summary).toMatchObject({ proven: 0, inconclusive: 1, unattributed: 4, hardFailures: 0 });
+  });
+});
+
 describe('runUniqueScopeProofs — NEGATIVE CONTROL, across: a per-organization field a global index overrides', () => {
   const controlApp = {
     manifest: { id: 'com.example.unique-scope-across', namespace: 'uqx', version: '0.0.1', type: 'app', name: 'Across Control' },

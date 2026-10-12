@@ -101,7 +101,10 @@ membership policy: the `auth.membership_policy` setting or
 collision only when it is the platform's unique refusal and it is this field's:
 it names the field, or it names none (a per-organization constraint is an
 expression index, which the driver reports by index name) and the same record
-with only the probed value changed is admitted.
+with only the probed value changed is admitted. Where a unique `indexes[]`
+entry covers the field, a refusal that names none is `unattributed`: that
+entry refuses the same write, naming no field either, so it may be the
+entry's rather than the field's own declaration.
 
 Exit code is **non-zero** on real failures (`create-failed`, `read-failed`,
 `fidelity-gaps`, `rls-hole`, with `--reference-shapes` a field with `holes` or
@@ -373,7 +376,7 @@ on a walled boot `across` × door × insert:
 | `proven` | every second holder met what the declared scope says: refused within one organization; across, admitted for `true` / `'organization'`, refused for `'global'` or with no organization column |
 | `contradicted` | a second holder was admitted where the scope refuses it, or refused where it admits it (the constraint is installation-wide, and its refusal tells one organization another holds the value) **(failure)** |
 | `failed` | a door faulted **(failure)** |
-| `inconclusive` | a refusal was not this field's unique constraint (an app's own dedupe, a rule, a permission, a constraint on another field), or a fixture could not be written (the reason is reported) |
+| `inconclusive` | a refusal was not this field's unique constraint (an app's own dedupe, a rule, a permission, a constraint on another field, or one that names no field where a unique `indexes[]` entry covers the field), or a fixture could not be written (the reason is reported) |
 | `excluded` | a derived value (`formula`, `summary`) is not stored, or the declaration does not parse |
 | `not-derivable` | no fresh value can be built: a closed or tiny value space (`boolean`, `select`, …), a multi-valued reference, a target the app does not declare, or an object the CRUD derivation cannot synthesize |
 
