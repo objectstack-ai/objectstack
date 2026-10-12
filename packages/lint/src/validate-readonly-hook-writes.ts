@@ -485,14 +485,14 @@ export function validateReadonlyHookWrites(
           message:
             `body's ${call} writes readonlyWhen field '${w.field}', silently stripped ${READONLY_WHEN_STRIP_SCOPE}` +
             loc.messageSuffix,
+          // [#22161] One remedy line: the two routes, and the refusal of
+          // elevation. Why a derived value lands on a locked record, why no
+          // system context waives the lock, why sudo() is a TypeError from a
+          // body, and the drop-the-field alternative are
+          // `os explain hook-api-update-readonly-when-field`.
           hint:
-            `Either confirm this call only targets records whose readonlyWhen predicate is FALSE, or ` +
-            `derive '${w.field}' in a beforeUpdate hook on '${objectName}' - a hook-derived value is not ` +
-            `caller-supplied and does land, even on a locked record. Elevation is not a workaround here: ` +
-            `a system context does not waive the conditional lock (unlike the static readonly strip), so ` +
-            `neither runAs: 'system' nor ctx.api.sudo() helps - and sudo() is not marshalled into the ` +
-            `sandbox in any case (calling it from a body is a TypeError at run time). Otherwise ` +
-            `drop '${w.field}' from this payload. This warning never blocks a build.`,
+            `Derive '${w.field}' in a beforeUpdate hook on '${objectName}', or target only records whose ` +
+            `readonlyWhen predicate is FALSE; runAs: 'system' and sudo() do not waive this lock`,
         });
       }
     }
