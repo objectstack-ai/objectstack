@@ -484,7 +484,10 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // the ledger is append-only and written under system context.
       sys_audit_log: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
     },
-    systemPermissions: ['manage_org_users', 'setup.access', 'setup.write'],
+    // `manage_mailboxes` (ruling 6116489638, Q4 → A): an organization
+    // administrator reads its organization's mailboxes and their unassociated
+    // pool; the organization wall bounds it to its own organization's rows.
+    systemPermissions: ['manage_org_users', 'setup.access', 'setup.write', 'manage_mailboxes'],
     // [#21237] Keeps the identity object's `Admin` group for an org admin, who
     // resolves `member_default` too; the derived no-bypass variant carries it
     // over. See `identityAdminFieldSecurity`.
