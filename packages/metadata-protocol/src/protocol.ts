@@ -963,13 +963,19 @@ const PROTECTION_BLOCK_KEY = 'protection';
  * question). On any other type the schema's own verdict stands: an
  * unrecognized key, refused by the parse.
  *
- * Every writer through this door is judged, as for
- * {@link runtimeHookWithoutBodyRefusal}: the REST and dispatcher saves, in
- * draft and in publish mode, and the two server-stated re-savers
- * (`migrateStoredMetadata`, `duplicatePackage`), which record this refusal as
- * the row's failure. The unmanaged import strips a block it can parse before
- * the body reaches this door (`stripUnmanagedImportLock`). A row stored before
- * this rule keeps its bytes.
+ * Every AUTHORING write is refused: the REST and dispatcher saves, in draft
+ * and in publish mode, the domain doors that save through this one, and the
+ * unmanaged import, which strips a block it can parse before the body reaches
+ * this door (`stripUnmanagedImportLock`) and hands a malformed one on to be
+ * refused here. The server-stated rewrites of rows the store already holds —
+ * a `source`-stating re-save (`migrateStoredMetadata`, the flow credential
+ * move) and `duplicatePackage` — strip the block instead, through
+ * {@link withoutProtectionBlock}, exactly as they strip the derived provenance
+ * stamps (`tenantAuthoredWriteRefusal` draws the same line): a row stored
+ * before this rule may carry one, the block never bound, so removing it
+ * changes no verdict, and failing the rewrite would fail a stored migration or
+ * a credential move over a key that does nothing. A row nothing rewrites keeps
+ * its bytes.
  *
  * `VALIDATION_ERROR` / 400, the envelope of the door's other content refusals
  * (`savedItemNameRefusal`, the hook refusal above). No code is minted. It is
@@ -1008,6 +1014,24 @@ function protectionBlockRefusal(
         code: 'custom',
     }];
     return err;
+}
+
+/**
+ * [ADR-0010 §3.5] The server-stated rewrites' half of
+ * {@link protectionBlockRefusal}: the same body without its `protection` block,
+ * on a type whose schema declares one. On any other type the body passes as
+ * it is, for the parse to judge.
+ *
+ * Returns the SAME reference when there is nothing to strip, and a copy
+ * otherwise, so a caller's own body is never mutated.
+ */
+function withoutProtectionBlock(type: string, item: unknown): unknown {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+    if (!Object.prototype.hasOwnProperty.call(item, PROTECTION_BLOCK_KEY)) return item;
+    if (overlaySchemaDeclaredKey(type, PROTECTION_BLOCK_KEY) === undefined) return item;
+    const rest = { ...(item as Record<string, unknown>) };
+    delete rest[PROTECTION_BLOCK_KEY];
+    return rest;
 }
 
 /**
@@ -20625,10 +20649,14 @@ export class ObjectStackProtocolImplementation implements
         // after the authorization refusals above (a locked item still answers
         // `ITEM_LOCKED`, a sealed one `NOT_OVERRIDABLE`) and before every gate
         // that reads or reshapes the body, so the block is judged as authored
-        // and a refused save costs no read. See {@link protectionBlockRefusal}.
-        {
+        // and a refused save costs no read. The server-stated rewrites — the
+        // same two the flow authoring rule above exempts — strip it instead.
+        // See {@link protectionBlockRefusal}.
+        if (request.source === undefined && request.writeFace !== 'package-duplicate') {
             const protectionRefusal = protectionBlockRefusal(singularType, request.item, request.name);
             if (protectionRefusal) throw protectionRefusal;
+        } else {
+            request.item = withoutProtectionBlock(singularType, request.item);
         }
 
         // Phase 3a-destructive: for `object` writes, diff against the

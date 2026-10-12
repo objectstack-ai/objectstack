@@ -15,9 +15,13 @@
  *
  *  - the `app` and `dashboard` probes are refused with a located
  *    `400 VALIDATION_ERROR`, and no row is stored;
- *  - draft mode, a malformed block and a server-stated re-saver meet the same
- *    refusal;
+ *  - draft mode, a malformed block and the unmanaged import's face meet the
+ *    same refusal;
  *  - an overlay of a packaged item that declares no lock meets it too;
+ *  - the server-stated rewrites of stored rows (`source: 'migrate-stored'`,
+ *    `writeFace: 'package-duplicate'`) strip the block instead, so the row they
+ *    write carries none and the rewrite is not failed over a key that never
+ *    bound;
  *  - CONTROL: a body without `protection` saves as before, its row carries no
  *    `protection`, and the item stays editable and deletable;
  *  - CONTROL: the packaged item's `protection` still binds — the artifact the
@@ -229,10 +233,11 @@ describe('the save door refuses a `protection` block — every way it arrives', 
         expect(metadataWrites()).toEqual([]);
     });
 
-    it('on a server-stated re-save (`migrate-stored`), which records it as the row\'s failure', async () => {
+    it('on the unmanaged import\'s face, which hands a block it cannot parse to this door to be refused', async () => {
         const { protocol, metadataWrites } = makeProtocol();
         const err = await refusalOf(() => protocol.saveMetaItem({
-            type: app.type, name: app.name, item: app.body({ protection: LOCK }), source: 'migrate-stored', force: true,
+            type: app.type, name: app.name, item: app.body({ protection: { lock: 'sealed', reason: 'r' } }),
+            writeFace: 'package-unmanaged-import',
         }));
         expectProtectionRefusal(err);
         expect(metadataWrites()).toEqual([]);
@@ -251,6 +256,29 @@ describe('the save door refuses a `protection` block — every way it arrives', 
         });
         expect(ok.success).toBe(true);
     });
+});
+
+describe('the server-stated rewrites strip the block instead — a row stored before the refusal may carry one', () => {
+    const app = PROBES[0];
+    const rewrites = [
+        { face: '`source: \'migrate-stored\'` (the stored migration, the flow credential move)', extra: { source: 'migrate-stored', force: true } },
+        { face: '`writeFace: \'package-duplicate\'`', extra: { writeFace: 'package-duplicate' } },
+    ] as const;
+
+    for (const rewrite of rewrites) {
+        it(`${rewrite.face}: the rewrite lands, and the row carries no \`protection\``, async () => {
+            const { protocol, stored } = makeProtocol();
+            const item = app.body({ protection: LOCK });
+            const result = await protocol.saveMetaItem({ type: app.type, name: app.name, item, ...rewrite.extra });
+            expect(result.success).toBe(true);
+            const [row] = stored(app.type, app.name).filter((r) => r.state === 'active');
+            const body = JSON.parse(row!.metadata);
+            expect(body).not.toHaveProperty('protection');
+            expect(body.label).toBe(app.body().label);
+            // The caller's own body is never mutated.
+            expect(item.protection).toEqual(LOCK);
+        });
+    }
 });
 
 describe('CONTROLS — what the refusal leaves as it was', () => {
