@@ -154,6 +154,49 @@
 # and its output — pass or fail, verbatim — goes into the PR body. The PR is
 # opened either way, because a refusal to open it would lose the measurement,
 # which is the exact silent-rot failure this workflow exists to end.
+#
+# REGRESSION DETECTION LIVES HERE, AND WHO FILES WHAT (#22949 ruling E)
+# ---------------------------------------------------------------------
+# The suite-duration ceilings only REPORT (ruling E item 1): a package's wall on
+# a shared runner reads the run's load as much as the package. So this lane is
+# the regression detector, and every refresh PR's body opens with what
+# `measure-test-shard-timings.mjs --diff` reads (items 2 and 3):
+#
+#   - RISES: every package whose weight is up 1.25x or more against the
+#     previous dataset -- the one on `main` before this refresh, read with
+#     `git show HEAD:` -- with both numbers, its share of its runs' executed
+#     total before and after, its slowest file in the window, and a verdict.
+#     Only `finding` is a card.
+#   - DENSITY: each run's count of EXECUTED packages (cache replays excluded),
+#     which the generator records in the dataset's `density` from the first
+#     refresh after the ruling on. A rise is judged only against a window of
+#     COMPARABLE density -- mean executed packages per run within 1.25x of
+#     each other, a number its self-test pins -- and a rise whose share of its
+#     runs' executed total moved by less than 1.25x is density alone, not a
+#     finding. The first refresh after this landed meets a previous dataset
+#     with no `density`, and its body says the diff is a BASELINE.
+#   - DOWNS, in one line.
+#   - FILES OVER BUDGET: every test file over 10 s of wall in the window, with
+#     its package and its slowest run (#22998). The dataset holds no per-file
+#     reading; the window's runs do, in the per-shard `test-core-timings-N-of-6`
+#     captures, which a step before the body downloads: the same runs, retained
+#     exactly as long as their run summaries.
+#
+# ⛔ THE BOT FILES NOTHING, AND NONE OF THIS IS EVER A RED BUILD. The seat that
+# lands the refresh PR files, after it lands:
+#
+#   - one card per package the diff marks `finding`, for the owning lane (its
+#     `domain:*`, by the package's path in the pm-dispatch domain lane table),
+#     with a `Protects:` line naming the package and the numbers -- the body
+#     prints each line ready to paste;
+#   - for the files over budget, one card per owning package naming its files
+#     (#22998: a test file over 10 s of wall is a card for the owning lane);
+#   - nothing for a rise marked density only, provisional, no prior share or
+#     baseline, and no second card where an open one already names the package
+#     or the file: the new numbers go there as a comment.
+#
+# The body's own "What the seat landing this PR does" section says the same
+# with this run's list in it, so the duty is read where the work is.
 
 name: Shard Timings Refresh
 
@@ -590,6 +633,57 @@ jobs:
           echo "BEFORE: $(cat "$RUNNER_TEMP/bins-before.txt")"
           echo "AFTER:  $(cat "$RUNNER_TEMP/bins-after.txt")"
 
+      # The per-file half of the regression readings (#22949 ruling E, item 3).
+      # The dataset holds no per-file durations; the window's runs do, in the
+      # per-shard captures `report-test-timings.mjs --capture` uploads as
+      # `test-core-timings-N-of-6`, retained 1 day like the run summaries the
+      # generator read. The selector listed their ids beside the summaries'
+      # (`timing_artifact_ids`), so this is a read of the SAME runs, never a new
+      # measurement, and it feeds the PR body alone.
+      #
+      # ⛔ It cannot fail the job: a capture that did not arrive is a warning
+      # here and a named run in the PR body, never a lost refresh -- the capture
+      # step in ci.yml is report-only, so a run can be a complete measurement
+      # without one. Every fallible command is an `if` condition, which `bash -e`
+      # does not abort on.
+      - name: Download the window's per-file timing captures for the pull request body
+        if: steps.compare.outputs.changed == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUNS: ${{ steps.generate.outputs.runs }}
+        run: |
+          FILES="$RUNNER_TEMP/refresh-files"
+          mkdir -p "$FILES"
+          for R in $RUNS; do
+            mkdir -p "$FILES/$R"
+            # One "SHARD ARTIFACT_ID" line per retained capture of run R.
+            if ! node -e '
+              const rs = JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP + "/candidates.json", "utf8"));
+              const r = rs.find((x) => String(x.run_id) === process.argv[1]);
+              for (const [n, id] of Object.entries((r && r.timing_artifact_ids) || {})) console.log(n + " " + id);
+            ' "$R" > "$FILES/$R.ids"; then
+              echo "::warning::Could not read run $R's per-file capture ids; its files are not in the over-budget list."
+              continue
+            fi
+            if [ ! -s "$FILES/$R.ids" ]; then
+              echo "::warning::Run $R retained no per-file timing capture; its files are not in the over-budget list."
+              continue
+            fi
+            while read -r N ART; do
+              if curl -sSL --fail -H "Authorization: Bearer $GITHUB_TOKEN" \
+                   -H "Accept: application/vnd.github+json" \
+                   "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/$ART/zip" \
+                   -o "$FILES/$R/$N.zip" \
+                 && unzip -qo "$FILES/$R/$N.zip" -d "$FILES/$R/$N"; then
+                rm -f "$FILES/$R/$N.zip"
+              else
+                echo "::warning::Could not download per-file capture $ART (shard $N) of run $R; its files are not in the over-budget list."
+              fi
+            done < "$FILES/$R.ids"
+          done
+          echo "Per-file captures read for the PR body:"
+          find "$FILES" -name '*.json' -type f | sort
+
       # Composition is separated from the WRITE on purpose: a `pull_request` run
       # of this lane must exercise the body-building — the shard durations, the
       # bins, the conditional blocks — without pushing anything. The write step
@@ -691,6 +785,38 @@ jobs:
             console.log(lines.join("\n\n"));
           ')
 
+          # The regression readings (#22949 ruling E): this window diffed against
+          # the previous dataset -- read from git, like the ceiling line above,
+          # because the bins step has already copied the refreshed file over the
+          # working copy -- plus the per-file budget from the captures the step
+          # above downloaded. A refusal here (a malformed generated field) must
+          # not cost the measurement, so its text goes into the body in place of
+          # the section and the PR still opens. A less-than character is spelled
+          # out first: GitHub's body sanitizer can eat everything after one.
+          git show HEAD:scripts/test-shard-timings.json > "$RUNNER_TEMP/refresh/previous.json"
+          DIFF_EXIT=0
+          node scripts/measure-test-shard-timings.mjs --diff \
+            --prior "$RUNNER_TEMP/refresh/previous.json" \
+            --refreshed "$RUNNER_TEMP/refresh/refreshed.json" \
+            --captures "$RUNNER_TEMP/refresh-files" \
+            --out "$RUNNER_TEMP/refresh/diff.md" 2> "$RUNNER_TEMP/refresh/diff-stderr.txt" || DIFF_EXIT=$?
+          cat "$RUNNER_TEMP/refresh/diff-stderr.txt"
+          if [ "$DIFF_EXIT" -ne 0 ]; then
+            echo "::warning::The refresh diff refused (exit $DIFF_EXIT); the PR body carries its text in place of the regression readings."
+            {
+              echo "## Regression readings: NOT MEASURED -- the diff refused (exit $DIFF_EXIT)"
+              echo
+              echo '```'
+              sed 's/</\&lt;/g' "$RUNNER_TEMP/refresh/diff-stderr.txt"
+              echo '```'
+              echo
+              echo "## What the seat landing this PR does"
+              echo
+              echo "File nothing from this refresh's readings: no rise and no file was judged. The refusal above"
+              echo "is a defect in this lane, and that is the one card to file."
+            } > "$RUNNER_TEMP/refresh/diff.md"
+          fi
+
           SHARDS=$(node -e '
             const rs = JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP + "/candidates.json", "utf8"));
             const r = rs.find((x) => String(x.run_id) === process.env.RUN_ID);
@@ -703,6 +829,8 @@ jobs:
             echo "shard split. Opened automatically by \`.github/workflows/shard-timings-refresh.yml\`."
             echo "Every byte came out of \`scripts/measure-test-shard-timings.mjs\`; nothing here was"
             echo "hand-edited, and no bound, timeout or matrix entry was touched."
+            echo
+            cat "$RUNNER_TEMP/refresh/diff.md"
             echo
             echo "## Source"
             echo

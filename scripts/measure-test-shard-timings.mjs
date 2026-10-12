@@ -1460,7 +1460,7 @@ export function renderRefreshDiff({ diff, files = null, filesNotMeasured = null,
   } else {
     const pkgs = [...new Set(files.over.map((e) => e.pkg))];
     out.push(
-      `2. **Files over ${budget} s:** objectstack#22998 makes a test file over ${budget} s of wall a card for the owning ` +
+      `2. **Files over ${budget} s:** #22998 makes a test file over ${budget} s of wall a card for the owning ` +
         `lane -- one card per package in the file list above (${pkgs.length} this time), naming each of its files and ` +
         'its slowest run.'
     );

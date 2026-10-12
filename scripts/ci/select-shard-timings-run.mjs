@@ -550,8 +550,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // count executed runs rather than runs, and keep a short refresh as
   // PROVISIONAL rather than refusing it.
   'shard-timings-refresh accumulation depth': 11,
+  // #22949 ruling E. The per-file capture download step, driven like the
+  // battery above, and the real `--diff` reading what it laid out.
+  'shard-timings-refresh per-file captures (#22949 E)': 5,
 });
-const SELF_TEST_BATTERY_FLOOR = 5;
+const SELF_TEST_BATTERY_FLOOR = 6;
 const UNATTRIBUTED_BATTERY = '(no battery open)';
 
 // Returned by `selfTest()` only after its verdict is printed, so a `return` that
@@ -1492,6 +1495,152 @@ async function selfTest() {
   await check(() => {
     if (lost.status !== 1 || !lost.log.includes('::error::') || lost.runCount !== null) {
       throw new Error(`coverage control: a lost package did not refuse the refresh (exit ${lost.status}, runs ${lost.runCount}):\n${lost.log}`);
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  battery('shard-timings-refresh per-file captures (#22949 E)');
+  // -------------------------------------------------------------------------
+  // The per-file budget list in the refresh PR body reads the window's
+  // per-shard captures, which the download step fetches by the ids this
+  // script now carries (`timing_artifact_ids`). Driven like the depth battery:
+  // the step's own `run:` block under `bash -e`, `curl` and `unzip` stubbed to
+  // serve fixture captures, then the REAL `measure-test-shard-timings.mjs
+  // --diff` reading what landed. The step must never fail the job -- a capture
+  // that did not arrive is a warning and a named run, never a lost refresh.
+  const CAPTURES_STEP = "Download the window's per-file timing captures for the pull request body";
+  const capturesScript = extractStepScript(REFRESH_YAML, CAPTURES_STEP);
+  const drivenCaptures = (() => {
+    const dir = mkdtempSync(join(tmpdir(), 'os-timings-captures-'));
+    try {
+      const runnerTemp = join(dir, 'runner-temp');
+      const bin = join(dir, 'bin');
+      const fixtures = join(dir, 'fixtures');
+      for (const d of [runnerTemp, bin, fixtures]) mkdirSync(d, { recursive: true });
+      const capture = (files) => ({ schema: 'test-timing-capture/1', shard: '1/6', files, packages: [], cached: [], problems: [] });
+      // Run 701: two retained captures, the second of which fails to download.
+      // Run 702: no capture retained at all.
+      writeFileSync(join(fixtures, '7011.json'), JSON.stringify(capture([
+        { pkg: '@objectstack/a', file: 'test/slow.test.ts', project: null, tests: 1, ms: 12_000, state: 'pass', replayed: false },
+      ])));
+      writeFileSync(
+        join(runnerTemp, 'candidates.json'),
+        JSON.stringify([
+          { run_id: 701, head_sha: 'a'.repeat(40), timing_artifact_ids: { 1: 7011, 2: 7012 } },
+          { run_id: 702, head_sha: 'b'.repeat(40), timing_artifact_ids: {} },
+        ])
+      );
+      writeFileSync(
+        join(bin, 'curl'),
+        [
+          '#!/usr/bin/env bash',
+          "out=''; id=''",
+          'while [ $# -gt 0 ]; do',
+          '  case "$1" in',
+          '    -o) out="$2"; shift 2; continue ;;',
+          '    */actions/artifacts/*/zip) id="${1%/zip}"; id="${id##*/}" ;;',
+          '  esac',
+          '  shift',
+          'done',
+          `[ -f ${JSON.stringify(fixtures)}/"$id".json ] || exit 22`,
+          'printf %s "$id" > "$out"',
+        ].join('\n')
+      );
+      writeFileSync(
+        join(bin, 'unzip'),
+        [
+          '#!/usr/bin/env bash',
+          "zip=''; dest=''",
+          'while [ $# -gt 0 ]; do',
+          '  case "$1" in',
+          '    -d) dest="$2"; shift 2; continue ;;',
+          '    -*) ;;',
+          '    *) zip="$1" ;;',
+          '  esac',
+          '  shift',
+          'done',
+          'mkdir -p "$dest"',
+          `cp ${JSON.stringify(fixtures)}/"$(cat "$zip")".json "$dest/shard-1.json"`,
+        ].join('\n')
+      );
+      chmodSync(join(bin, 'curl'), 0o755);
+      chmodSync(join(bin, 'unzip'), 0o755);
+      const run = spawnSync('bash', ['-e', '-c', capturesScript], {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: `${bin}:${process.env.PATH}`,
+          RUNNER_TEMP: runnerTemp,
+          RUNS: '701 702',
+          GITHUB_TOKEN: 'stub-token',
+          GITHUB_REPOSITORY: 'o/r',
+        },
+      });
+      const filesDir = join(runnerTemp, 'refresh-files');
+      // The REAL diff over what landed, against a two-run window naming both runs.
+      const dataset = (extra) => ({
+        packages: { '@objectstack/a': 20 },
+        carriedOver: [],
+        provisional: [],
+        provenance: { runs: ['701', '702'] },
+        ...extra,
+      });
+      writeFileSync(join(dir, 'prior.json'), JSON.stringify(dataset({})));
+      writeFileSync(join(dir, 'refreshed.json'), JSON.stringify(dataset({ density: { runs: [{ run: '701', executed: 1 }], shares: { '@objectstack/a': 1 } } })));
+      const diff = spawnSync(
+        process.execPath,
+        [toolPath('../measure-test-shard-timings.mjs'), '--diff', '--prior', join(dir, 'prior.json'), '--refreshed', join(dir, 'refreshed.json'), '--captures', filesDir, '--out', join(dir, 'diff.md')],
+        { encoding: 'utf8' }
+      );
+      return {
+        status: run.status,
+        log: `${run.stdout ?? ''}${run.stderr ?? ''}`,
+        landed: existsSync(join(filesDir, '701', '1', 'shard-1.json')),
+        strayZip: existsSync(join(filesDir, '701', '1.zip')),
+        diffStatus: diff.status,
+        diffLog: `${diff.stdout ?? ''}${diff.stderr ?? ''}`,
+        body: existsSync(join(dir, 'diff.md')) ? readFileSync(join(dir, 'diff.md'), 'utf8') : '',
+      };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  })();
+  await check(() => {
+    if (drivenCaptures.status !== 0) throw new Error(`captures step: a missing capture failed the step (exit ${drivenCaptures.status}):\n${drivenCaptures.log}`);
+  });
+  await check(() => {
+    if (!drivenCaptures.landed || drivenCaptures.strayZip) {
+      throw new Error(`captures step: the retained capture did not land as refresh-files/RUN/SHARD/*.json:\n${drivenCaptures.log}`);
+    }
+  });
+  await check(() => {
+    if (!drivenCaptures.log.includes('::warning::Could not download per-file capture 7012 (shard 2) of run 701')) {
+      throw new Error(`captures step: the failed download was not named:\n${drivenCaptures.log}`);
+    }
+    if (!drivenCaptures.log.includes('::warning::Run 702 retained no per-file timing capture')) {
+      throw new Error(`captures step: the run without a capture was not named:\n${drivenCaptures.log}`);
+    }
+  });
+  await check(() => {
+    // The consumer: the over-budget file is listed with its run, and the run
+    // that left no capture is named in the body rather than silently absent.
+    if (drivenCaptures.diffStatus !== 0) throw new Error(`captures step: --diff refused what the step laid out:\n${drivenCaptures.diffLog}`);
+    if (!drivenCaptures.body.includes('| `test/slow.test.ts` | `@objectstack/a` | `701` | 12.00 | 1 / 1 |')) {
+      throw new Error(`captures step: the file over budget is not in the body:\n${drivenCaptures.body}`);
+    }
+    if (!drivenCaptures.body.includes('No capture arrived for `702`')) {
+      throw new Error(`captures step: the run without a capture is not named in the body:\n${drivenCaptures.body}`);
+    }
+  });
+  await check(() => {
+    // The YAML half: the step is gated like every step after `compare`, and the
+    // compose step feeds the diff the directory this step writes.
+    const at = REFRESH_YAML.indexOf(`      - name: ${CAPTURES_STEP}`);
+    if (!REFRESH_YAML.slice(at, at + 400).includes("if: steps.compare.outputs.changed == 'true'")) {
+      throw new Error('captures step: it is not gated on a changed dataset');
+    }
+    if (!extractStepScript(REFRESH_YAML, 'Compose the pull request body').includes('--captures "$RUNNER_TEMP/refresh-files"')) {
+      throw new Error('captures step: the compose step does not read the directory this step writes');
     }
   });
 
