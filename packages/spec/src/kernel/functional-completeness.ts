@@ -298,7 +298,10 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   English sentence. So the loss is total rather than partial — every
  *   record, on every object — and the author is told at render time as well
  *   as here. Both reads hold at the pin this repo builds against
- *   (`.objectui-sha` = `499799502`, re-read there 2026-10-11:
+ *   (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `499799502` (`git diff --quiet`), so every anchor held unmoved. At
+ * `499799502`, re-read there 2026-10-11:
  * on the hop off `0df67f237` `ObjectCalendar.tsx` and `ListView.tsx` are
  * byte-identical (`git diff --quiet`), so `getCalendarConfig` `:311`, the
  * `if (!calendarConfig)` arm `:1354` with its `tt(…)` lines `:1361-1362` and
@@ -425,7 +428,10 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   This repo already records the same deletion one door over: the #13817
  *   check in `../ui/view.zod.ts` names objectui#7029 as its runtime half.
  * - `gantt`    → NO fallback, and no silence [#19630]. Measured at the pin
- *   this repo builds against (`.objectui-sha` = `499799502`, re-read there 2026-10-11:
+ *   this repo builds against (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `499799502` (`git diff --quiet`), so every anchor held unmoved. At
+ * `499799502`, re-read there 2026-10-11:
  * on the hop off `0df67f237` `ObjectGantt.tsx` changed (+27/-4,
  * objectui#12082, objectui `752504520`: the chart's in-chart writes read the
  * affordance-to-grant map), none of it in `getGanttConfig` or the refusal arm,
@@ -524,6 +530,9 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   requires. So the view does not draw a blank chart: it refuses, by name.
  * - `timeline` → date axis: NO fallback [#19630]; title: `titleField || 'name'`,
  *   which still stands. Measured at the same pin (`.objectui-sha` =
+ * `088e0f705`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `499799502` (`git diff --quiet`), so every anchor held unmoved. At
  * `499799502`, re-read there 2026-10-11:
  * every objectui file this record cites is byte-identical across the hop from
  * `0df67f237` (`git diff --quiet`), so every anchor held unmoved. At
@@ -620,7 +629,10 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   block does render; the warning still fires there, because the block the
  *   view TYPE names is the one that is missing. Unchanged by this row.
  * - `map`      → NO fallback, and no silence [#19630]. Measured at the same
- *   pin (`.objectui-sha` = `499799502`, re-read there 2026-10-11:
+ *   pin (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `499799502` (`git diff --quiet`), so every anchor held unmoved. At
+ * `499799502`, re-read there 2026-10-11:
  * every objectui file this record cites is byte-identical across the hop from
  * `0df67f237` (`git diff --quiet`), so every anchor held unmoved. At
  * `0df67f237`, re-read there 2026-10-11:
