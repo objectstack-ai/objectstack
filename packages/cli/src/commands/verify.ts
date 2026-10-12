@@ -15,8 +15,11 @@ import {
   provisionRlsPositionPersona,
   declaredPositionNames,
   rlsProbeSecurity,
+  runReferenceShapeProofs,
+  formatReferenceShapeReport,
   type VerifyReport,
   type RlsReport,
+  type ReferenceShapeReport,
   type RlsProbeDescriptor,
   type RlsPositionPersonaInput,
 } from '@objectstack/verify';
@@ -79,17 +82,21 @@ export function resolveVerifyMultiTenant(flags: { 'multi-tenant'?: boolean }): b
  *      asserting runtime behavior the static gates can't see:
  *        - data fidelity: author → write → read → assert, per object/field type
  *        - authorization (--rls): "you can't write what you can't read" (#1994 class)
+ *        - reference-value shape (--reference-shapes, ADR-0104 D1): every
+ *          client-writable reference field refuses a value that is not a
+ *          record id, through the REST door and the system door
  *
  * Exits non-zero on either stage's failures so it drops straight into CI.
  */
 export default class Verify extends Command {
   static override description =
-    'Run the author-time rules os validate runs, then boot the app in-process and verify it through the real HTTP stack (CRUD round-trip fidelity + the cross-owner RLS invariant)';
+    'Run the author-time rules os validate runs, then boot the app in-process and verify it through the real HTTP stack (CRUD round-trip fidelity, plus the cross-owner RLS invariant and the reference-value shape proofs on request)';
 
   static override examples = [
     '<%= config.bin %> verify',
     '<%= config.bin %> verify --app ./objectstack.config.ts --rls',
     '<%= config.bin %> verify --rls --multi-tenant --json',
+    '<%= config.bin %> verify --reference-shapes',
   ];
 
   static override flags = {
@@ -99,6 +106,10 @@ export default class Verify extends Command {
     }),
     rls: Flags.boolean({
       description: 'Also run the cross-owner RLS invariant (a fresh member must not write what it cannot read)',
+      default: false,
+    }),
+    'reference-shapes': Flags.boolean({
+      description: 'Also prove every client-writable reference field refuses a value that is not a record id (a boolean, a number, an embedded record), through the REST door and the system door (ADR-0104 value shapes)',
       default: false,
     }),
     'multi-tenant': Flags.boolean({
@@ -178,6 +189,7 @@ export default class Verify extends Command {
   private async runVerification(flags: {
     app?: string;
     rls: boolean;
+    'reference-shapes': boolean;
     'multi-tenant': boolean;
     json: boolean;
   }): Promise<void> {
@@ -278,6 +290,21 @@ export default class Verify extends Command {
       }
     }
 
+    // The reference-value shape proofs run on a fresh stack of their own, for
+    // the reason the RLS proofs do: a door that admits a probe lands a row,
+    // and the base records the family creates would collide with the other
+    // phases' on a unique field.
+    let referenceShapes: ReferenceShapeReport | undefined;
+    if (flags['reference-shapes']) {
+      const shapeStack = await bootStack(config, { multiTenant, hostRoot });
+      try {
+        const adminToken = await shapeStack.signIn();
+        referenceShapes = await runReferenceShapeProofs(shapeStack, adminToken, config);
+      } finally {
+        await shapeStack.stop();
+      }
+    }
+
     // Failure contract: a "real" runtime break the app's author must see.
     // A degraded RLS probe counts: the run reported verdicts it could not have
     // established, which is worse than no verifier at all.
@@ -293,16 +320,22 @@ export default class Verify extends Command {
       crud.summary.fidelityGaps +
       (rls?.totals.holes ?? 0) +
       (rls?.probe.degraded ? 1 : 0) +
-      (rls?.positionCoverage.notRun.length ?? 0);
+      (rls?.positionCoverage.notRun.length ?? 0) +
+      // A reference field that ADMITTED a wrong-shaped value, or a door that
+      // faulted on one. Inconclusive fields (the probe could not be attributed
+      // or written) are reported, not counted, exactly as CRUD's
+      // `needs-fixture` is.
+      (referenceShapes?.summary.hardFailures ?? 0);
 
     if (flags.json) {
       // `emitJson`, not `this.log`: stdout is reserved (see `run()`), so the
       // report has to leave through the real stream — and awaiting the write
       // drains a report larger than one pipe buffer before `this.exit` below.
-      await emitJson({ app: crud.app, config: absolutePath, multiTenant, crud, rls, hardFailures });
+      await emitJson({ app: crud.app, config: absolutePath, multiTenant, crud, rls, referenceShapes, hardFailures });
     } else {
       this.log(formatReport(crud));
       if (rls) this.log(formatRlsReport(rls));
+      if (referenceShapes) this.log(formatReferenceShapeReport(referenceShapes));
       this.log('');
       this.log(
         hardFailures > 0

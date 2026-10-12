@@ -233,6 +233,25 @@ export class HookConditionError extends Error {
 }
 
 /**
+ * The condition the gate in {@link wrapDeclarativeHook} evaluates, or
+ * `undefined` when there is no gate: no `condition`, or an envelope with no
+ * non-blank `source` (the CEL engine evaluates `source` alone).
+ *
+ * The write door reads this too (#22856, `opensAfterAbortUnit`): a hook with a
+ * gate can abort its write whatever its `onError` and `async` say, because the
+ * gate throws {@link HookConditionError} outside both. One reading, so the door
+ * cannot count a gate the wrapper never installs, or miss one it does.
+ */
+export function declaredHookCondition(meta: Pick<Hook, 'condition'>): (Expression & { source: string }) | undefined {
+  if (!meta.condition) return undefined;
+  // Accept either string shorthand or full Expression envelope.
+  const expr: Expression = typeof meta.condition === 'string'
+    ? { dialect: 'cel', source: meta.condition }
+    : (meta.condition as Expression);
+  return expr.source && expr.source.trim() ? (expr as Expression & { source: string }) : undefined;
+}
+
+/**
  * Wrap a hook handler so it honours the declarative fields defined on
  * `HookSchema`. The wrapping order, from outermost to innermost, is:
  *
@@ -288,53 +307,48 @@ export function wrapDeclarativeHook(
 
   // Pre-compile condition once so each invocation is cheap.
   let conditionFn: ((ctx: HookContext) => boolean) | undefined;
-  if (meta.condition) {
-    // Accept either string shorthand or full Expression envelope.
-    const expr: Expression = typeof meta.condition === 'string'
-      ? { dialect: 'cel', source: meta.condition }
-      : (meta.condition as Expression);
-    if (expr.source && expr.source.trim()) {
-      const source = expr.source;
-      const check = ExpressionEngine.compile(expr);
-      if (check.ok) {
-        conditionFn = (ctx: HookContext) => {
-          // `previous` is passed through as-is: `undefined` means the binding
-          // is OMITTED from the CEL scope (see `buildScope` in
-          // @objectstack/formula), which is exactly what the validation side
-          // does when no prior record is in hand. Binding it to an empty
-          // object instead would answer `previous.x == null` with a
-          // fabricated "yes" for a record whose prior state is unknown.
-          const record = pickRecordPayload(ctx);
-          const previous = pickPreviousPayload(ctx);
-          const r = ExpressionEngine.evaluate<boolean>(expr, { record: record ?? {}, previous });
-          if (!r.ok) {
-            // [#4775] Fail LOUD. Not `false` — see `HookConditionError`.
-            throw unevaluableConditionError(meta, ctx, source, r.error);
-          }
-          return Boolean(r.value);
-        };
-      } else {
-        // [#4775] A condition that never compiled is the same defect one step
-        // earlier, and its old treatment ("condition ignored") was the WORSE
-        // half of the swallow: the gate disappeared entirely, so the hook fired
-        // on every write as though no condition had been declared. Reported at
-        // invocation rather than at bind time — a throw here would wedge boot
-        // for an app whose object nobody is even writing, and #4775's remit is
-        // to abort THE OPERATION that runs a broken hook.
-        const fault = check.error;
-        conditionFn = (ctx: HookContext) => {
-          throw uncompilableConditionError(meta, ctx, source, fault);
-        };
-        // Contract arg order (#5637): `error(message, error?: Error, meta?)`.
-        // The fault in hand is a `CelFault` (`{ kind, message }`), not an
-        // `Error`, so the Error slot is genuinely empty and the diagnostic
-        // travels as meta — where every implementation of the contract reads it.
-        logger.error('[hook] condition formula failed to compile; every operation on this hook\'s object will be rejected until it is fixed', undefined, {
-          hook: meta.name,
-          condition: source,
-          error: check.error.message,
-        });
-      }
+  const expr = declaredHookCondition(meta);
+  if (expr) {
+    const source = expr.source;
+    const check = ExpressionEngine.compile(expr);
+    if (check.ok) {
+      conditionFn = (ctx: HookContext) => {
+        // `previous` is passed through as-is: `undefined` means the binding
+        // is OMITTED from the CEL scope (see `buildScope` in
+        // @objectstack/formula), which is exactly what the validation side
+        // does when no prior record is in hand. Binding it to an empty
+        // object instead would answer `previous.x == null` with a
+        // fabricated "yes" for a record whose prior state is unknown.
+        const record = pickRecordPayload(ctx);
+        const previous = pickPreviousPayload(ctx);
+        const r = ExpressionEngine.evaluate<boolean>(expr, { record: record ?? {}, previous });
+        if (!r.ok) {
+          // [#4775] Fail LOUD. Not `false` — see `HookConditionError`.
+          throw unevaluableConditionError(meta, ctx, source, r.error);
+        }
+        return Boolean(r.value);
+      };
+    } else {
+      // [#4775] A condition that never compiled is the same defect one step
+      // earlier, and its old treatment ("condition ignored") was the WORSE
+      // half of the swallow: the gate disappeared entirely, so the hook fired
+      // on every write as though no condition had been declared. Reported at
+      // invocation rather than at bind time — a throw here would wedge boot
+      // for an app whose object nobody is even writing, and #4775's remit is
+      // to abort THE OPERATION that runs a broken hook.
+      const fault = check.error;
+      conditionFn = (ctx: HookContext) => {
+        throw uncompilableConditionError(meta, ctx, source, fault);
+      };
+      // Contract arg order (#5637): `error(message, error?: Error, meta?)`.
+      // The fault in hand is a `CelFault` (`{ kind, message }`), not an
+      // `Error`, so the Error slot is genuinely empty and the diagnostic
+      // travels as meta — where every implementation of the contract reads it.
+      logger.error('[hook] condition formula failed to compile; every operation on this hook\'s object will be rejected until it is fixed', undefined, {
+        hook: meta.name,
+        condition: source,
+        error: check.error.message,
+      });
     }
   }
 

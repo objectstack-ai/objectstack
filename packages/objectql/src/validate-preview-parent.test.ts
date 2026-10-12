@@ -20,11 +20,11 @@
 // gate. For a repointing update it also binds the stored row's own header as
 // `previousParent`, as the write does for the ADR-0113 pre-check.
 //
-// ⛔ Read under the caller's access. The write reads the header elevated; the
-// preview asks the READ DOOR first, under the caller's own context. A header
-// the caller cannot read gets the verdict a missing header gets, and a header
-// column is kept only where the read door served the caller that very value,
-// so a hidden or masked column is judged as empty.
+// ⛔ Read under the caller's access. The preview asks the READ DOOR first,
+// under the caller's own context, as the write does since #22519. A header
+// the caller cannot read gets the verdict a missing header gets, and (the
+// preview's own rule) a header column is kept only where the read door served
+// the caller that very value, so a hidden or masked column is judged as empty.
 //
 // ## Pins
 //
