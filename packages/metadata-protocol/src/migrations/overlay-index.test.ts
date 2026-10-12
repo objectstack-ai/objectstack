@@ -712,8 +712,8 @@ describe('sys_metadata overlay key — the bundle member part (#22877)', () => {
         expect(overlayMemberValue('email_template', 'en-US')).toBeNull();
         expect(overlayMemberValue('email_template', '  ')).toBeNull();
         expect(overlayMemberValue('email_template', ' zh-CN ')).toBe('zh-CN');
-        // The plural spelling folds — the registry key, not the URL segment.
-        expect(overlayMemberValue('email_templates', 'zh-CN')).toBe('zh-CN');
+        // The type's other spelling folds to the registry key.
+        expect(overlayMemberValue('emailTemplates', 'zh-CN')).toBe('zh-CN');
 
         expect(overlayMemberOfBody('email_template', { locale: 'zh-CN' })).toBe('zh-CN');
         expect(overlayMemberOfBody('email_template', { locale: 'en-US' })).toBeNull();
@@ -741,9 +741,10 @@ describe('sys_metadata overlay key — the bundle member part (#22877)', () => {
         const result = await backfillOverlayBundleMembers(engine);
 
         expect(result).toEqual({ status: 'done', backfilled: 2, unparseable: 1 });
-        expect(engine.updates).toEqual([
-            { id: 't_zh', bundle_member: 'zh-CN' },
+        // Exactly the two non-canonical bodies are written, each by id.
+        expect([...engine.updates].sort((a, b) => String(a.id).localeCompare(String(b.id)))).toEqual([
             { id: 't_draft', bundle_member: 'ja-JP' },
+            { id: 't_zh', bundle_member: 'zh-CN' },
         ]);
         const members = Object.fromEntries(allRows("type = 'email_template'").map((r) => [r.id, r.bundle_member]));
         expect(members).toEqual({ t_zh: 'zh-CN', t_en: null, t_bare: null, t_draft: 'ja-JP' });

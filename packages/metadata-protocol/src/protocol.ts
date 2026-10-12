@@ -111,9 +111,6 @@ import {
     // the anonymous form doors read it — the runtime authoring gate's input for
     // its public-form intake advisory (see `tenancyPostureInForce()`).
     anonymousFormIntakePosture,
-    // [#22877] A bundled type's member as its body declares it — the value the
-    // save door addresses the write's stored head by.
-    itemDiscriminator,
 } from '@objectstack/metadata-core';
 // [#5532] One vocabulary of "which driver read errors are benign", shared with
 // `sys-metadata-repository.ts` in this package and with `DatabaseLoader` in
@@ -26102,7 +26099,7 @@ export class ObjectStackProtocolImplementation implements
             // [#22877] The canonical member's lineage only — a by-name diff of a
             // bundled type compares the member a by-name read serves, never a
             // second locale's snapshot as its "earlier version".
-            const rows = historyRowsOfMember(singularType, await engineAny.find('sys_metadata_history', {
+            const rows: any[] = historyRowsOfMember<any>(singularType, await engineAny.find('sys_metadata_history', {
                 where: {
                     organization_id: orgId,
                     type: singularType,
