@@ -86,8 +86,6 @@
     "system/EmailAndPasswordConfig:enabled = true",
     "system/EmailServiceConfig:provider = \"log\"",
     "system/EmailTemplateDefinition:active = true",
-    "system/EmailTemplateDefinition:category = \"custom\"",
-    "system/EmailTemplateDefinition:isSystem = false",
     "system/EmailTemplateDefinition:locale = \"en-US\"",
     "system/EmailTemplateDefinition:variables = []",
     "system/EmailTemplateDefinitionVariable:required = false",

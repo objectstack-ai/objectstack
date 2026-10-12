@@ -1593,6 +1593,39 @@ function declaredMultiValued(field: { type?: unknown; multiple?: unknown } | nul
 }
 
 /**
+ * [#22957] The reference types whose `deleteBehavior` states DELETE SEMANTICS:
+ * the relational family the referential delete walk follows.
+ *
+ * `tree` is a member because the spec says so. `FieldSchema`'s `.overwrite`
+ * (`packages/spec/src/data/field.zod.ts`) materializes `deleteBehavior:
+ * 'set_null'` on a `tree` beside `lookup`, because the type "is in the
+ * relational family, where the key states delete semantics". Its reference is
+ * self-referential by contract (`refuseForeignTreeReference`, `object.zod.ts`),
+ * so its `cascade` is a subtree delete. The walk used to admit only
+ * `master_detail` and `lookup`, so every behaviour a `tree` declared, the
+ * materialized default included, was inert: a parent delete left its children
+ * holding the deleted id.
+ *
+ * ⛔ `user` stays out. It stores like a `lookup`, but the spec's parse puts it
+ * on the other side of the line and materializes no `deleteBehavior` on it, so
+ * no `user` field declares a delete outcome by default. Moving it is a change
+ * to the declaration, made in the spec, never here.
+ */
+const DELETE_SEMANTICS_REFERENCE_TYPES: ReadonlySet<string> = new Set(['master_detail', 'lookup', 'tree']);
+
+/**
+ * [#22957] Does `fdef` belong to {@link DELETE_SEMANTICS_REFERENCE_TYPES}? This
+ * is the ONE family test every reader of the referential delete walk asks:
+ * {@link ObjectQL.cascadeRelationBehavior}, through it the collection walk and
+ * the dependents walk, and {@link ObjectQL.planCascadeAtomicity}. So the walk
+ * that runs and the verdict on whether it runs as one unit of work cannot
+ * disagree about which relations take part. ⛔ Never a type literal at a site.
+ */
+function statesDeleteSemantics(fdef: { type?: unknown } | null | undefined): boolean {
+  return typeof fdef?.type === 'string' && DELETE_SEMANTICS_REFERENCE_TYPES.has(fdef.type);
+}
+
+/**
  * Plan the formula pass of a read: which formula fields to evaluate, and —
  * when the caller named a projection — the projection the DRIVER is asked for.
  *
@@ -17179,8 +17212,9 @@ export class ObjectQL implements IObjectQLEngine {
    * Three verdicts, because "wrap it in a transaction" is only unconditionally
    * right in one of them:
    *
-   * - **`'none'`** — no registered object declares a `master_detail`/`lookup`
-   *   pointing at `object`, so `cascadeDeleteRelations` cannot write anything
+   * - **`'none'`** — no registered object declares a relation of the delete
+   *   family ({@link statesDeleteSemantics}: `master_detail` / `lookup` /
+   *   `tree`) pointing at `object`, so `cascadeDeleteRelations` cannot write anything
    *   and there is no multi-write unit to make atomic. The delete runs exactly
    *   as it did before this card: one `driver.delete`, no transaction opened,
    *   no degrade warning. A plain non-cascade delete is the CONTROL for this
@@ -17230,10 +17264,17 @@ export class ObjectQL implements IObjectQLEngine {
     const objects: ServiceObject[] = this._registry.getAllObjects();
 
     // Which objects reference `name` via a relation the cascade would follow.
-    // The `master_detail`/`lookup` + `reference` test is `cascadeDeleteRelations`'s
-    // own, so the two cannot disagree about who participates. `restrict` fields
-    // are INCLUDED deliberately: a restrict refusal is the card's core repro,
-    // and it must roll back the siblings already cascaded before it.
+    // The family test ({@link statesDeleteSemantics}) + `reference` test is
+    // `cascadeDeleteRelations`'s own, so the two cannot disagree about who
+    // participates. `restrict` fields are INCLUDED deliberately: a restrict
+    // refusal is the card's core repro, and it must roll back the siblings
+    // already cascaded before it.
+    //
+    // [#22957] A `tree` takes part since it joined the family. Its reference
+    // names the object that declares it, so an object whose only relation is
+    // its own hierarchy now plans `'atomic'` rather than `'none'`: a subtree
+    // cascade is several deletes, and a refusal from a node deep in it must
+    // roll back the nodes deleted before it.
     const referencing = (name: string): string[] => {
       const out: string[] = [];
       for (const child of objects) {
@@ -17241,7 +17282,7 @@ export class ObjectQL implements IObjectQLEngine {
         const fields = (child as any)?.fields as Record<string, any> | undefined;
         if (!childName || !fields) continue;
         for (const [fieldName, fdef] of Object.entries(fields)) {
-          if (!fdef || (fdef.type !== 'master_detail' && fdef.type !== 'lookup')) continue;
+          if (!statesDeleteSemantics(fdef)) continue;
           // [#18550] The carrier is read through the ONE arbiter, so a
           // `reference` no reader can read REFUSES here instead of reading as
           // "this child does not reference `name`". The two answers stay
@@ -17662,8 +17703,9 @@ export class ObjectQL implements IObjectQLEngine {
 
   /**
    * Apply referential delete behavior for relations pointing AT this record,
-   * before it is removed. For every registered object with a `master_detail`
-   * or `lookup` field referencing `object`, honor the field's `deleteBehavior`:
+   * before it is removed. For every registered object with a `master_detail`,
+   * `lookup` or `tree` field ({@link statesDeleteSemantics}) referencing
+   * `object`, honor the field's `deleteBehavior`:
    *   - `cascade`  → delete the dependent rows (recursively, so grandchildren
    *                  are handled by each child's own delete),
    *   - `set_null` → clear the foreign key. On a MULTI-VALUED field
@@ -17676,7 +17718,7 @@ export class ObjectQL implements IObjectQLEngine {
    *                  doc block, #9447 maintainer ruling 2026-08-18),
    *   - `restrict` → refuse the delete when dependents exist.
    * `master_detail` defaults to `cascade` (the parent owns the child
-   * lifecycle); `lookup` defaults to `set_null` — except a `set_null` default
+   * lifecycle); `lookup` and `tree` default to `set_null` — except a `set_null` default
    * on a REQUIRED lookup escalates to `restrict` (you can't null a NOT NULL
    * FK; restricting with a clear dependent-count message beats a misleading
    * "<field> is required" 400 from the child) — and on a `multiple: true`
@@ -17835,7 +17877,9 @@ export class ObjectQL implements IObjectQLEngine {
     fieldName: string,
     fdef: any,
   ): string | undefined {
-    if (!fdef || (fdef.type !== 'master_detail' && fdef.type !== 'lookup')) return undefined;
+    // [#22957] The family test is the shared predicate, so this reader, the
+    // two walks that read it and `planCascadeAtomicity` admit one family.
+    if (!statesDeleteSemantics(fdef)) return undefined;
     // [#18550] Same arbiter, same absence-vs-unreadability split as
     // {@link ObjectQL.planCascadeAtomicity} states above — and this is the
     // seam where the silence was measurable end to end: an unreadable
@@ -17879,6 +17923,12 @@ export class ObjectQL implements IObjectQLEngine {
     // child FK is typically required, so set_null would be invalid). Only
     // an explicit `restrict` deviates. A plain lookup honors its
     // configured deleteBehavior (default set_null).
+    //
+    // [#22957] A `tree` reads like a `lookup`: the spec materializes the same
+    // `set_null` default on it, and an authored `cascade` / `restrict` is
+    // honoured as written. Its `cascade` is a subtree delete, and a cycle in
+    // the data (a corrupt row pointing at its own descendant) terminates on
+    // the cascade set, the same membership test any self-reference has.
     //
     // [#9625] "Only an explicit `restrict` deviates" is the whole of it:
     // every other value a master_detail can declare — including an

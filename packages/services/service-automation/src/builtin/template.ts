@@ -38,10 +38,11 @@
  * each with its CEL spelling — the run user is the CEL scope's
  * `current_user`, and a date macro is its CEL string form, `isoDate(today())`
  * / `isoDatetime(now())` (the stdlib writes the bytes the date branch below
- * writes). The `{$User.*}` and date branches below still answer the positions
- * that keep this dialect (a `filter`, a `notify` `recipients` entry). Nor do
- * the TEXT slots — a notify `title` / `message`, a screen `title` /
- * `description`, a refusing `end` node's `message` (#22110, ADR-0032 D3):
+ * writes). The `{$User.*}` and date branches below still answer the position
+ * that keeps this dialect, a `filter`. Nor do the TEXT slots — a notify
+ * `title` / `message` / `actionUrl`, an http `url` and `headers` values, a
+ * screen `title` / `description`, a refusing `end` node's `message` (#22110,
+ * ADR-0032 D3; #19939):
  * they render ADR-0032 §3's `{{ }}` holes through the formula template engine,
  * via {@link renderTextSlot} below, and a `{…}` token there is refused
  * (`flow-text-slot-template.ts`).
@@ -520,9 +521,10 @@ export function interpolate<T = unknown>(
  * when both could match, and a token belonging to neither dialect is left to
  * the caller's collapse guard to report.
  *
- * Only filter blocks use this. Every other single-brace position (`url`,
- * `recipients`, …) keeps plain {@link interpolate}, where a bare
- * `{current_year_start}` is a nonsense reference rather than a query bound.
+ * Only filter blocks use this. No other position reads the single-brace
+ * dialect any more (#19939: an `http` `url` and its headers are text slots,
+ * its `body` a value slot), so a bare `{current_year_start}` anywhere else is
+ * refused before a run starts rather than read as a query bound.
  */
 export function interpolateFilter<T = unknown>(
     value: T,

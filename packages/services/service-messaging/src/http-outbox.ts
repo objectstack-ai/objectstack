@@ -72,7 +72,8 @@ export interface HttpDelivery {
     /**
      * Custom headers — the ordinary place a credential (`Authorization:
      * Bearer …`) goes, whichever producer authored them (a `WebhookSchema`
-     * `headers` map, or a flow `http` node's per-run interpolated values).
+     * `headers` map, or a flow `http` node's values, rendered per run before
+     * the enqueue).
      *
      * [#8118] On engine-backed storage the row column (`headers_json`) is
      * declared `internal: true`, so the generic data path never returns it.

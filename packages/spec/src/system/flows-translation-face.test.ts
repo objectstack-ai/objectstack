@@ -165,7 +165,12 @@ const OTHER_NODE_SLOTS: Readonly<Record<string, Disposition>> = {
       "the notify node's localizable path is `template` (see `notify.title`); the inline body is declared not "
       + 'localizable',
   },
+  // [#19939] A rendered text slot that is not copy: the link a person follows.
+  'notify.actionUrl': noReader('the link the notification points at — an app path with `{{ }}` holes, not copy'),
   'http.body': noReader('the request body sent to the endpoint'),
+  // [#19939] Rendered text slots that are not copy: the request an endpoint receives.
+  'http.url': noReader('the endpoint the request is sent to — a url with `{{ }}` holes, not copy'),
+  'http.headers': noReader('the request headers sent to the endpoint — values with `{{ }}` holes, not copy'),
   [`${APPROVAL_NODE_TYPE}.decisionOutputs[].label`]: {
     owed:
       "the approver reads it as an input label in the approval decision dialog. No translation face addresses an "
@@ -334,7 +339,10 @@ describe('the flows translation face covers every user-read flow slot (#22507)',
     const other = otherNodeLeaves();
     const covers = (row: string, leaves: string[]) => leaves.some((leaf) => leaf === row || rowFor({ [row]: noReader('') }, leaf) === row);
     expect(Object.keys(RUNNER_SLOTS).filter((row) => !covers(row, runner))).toEqual([]);
-    expect(Object.keys(OTHER_NODE_SLOTS).filter((row) => !covers(row, other))).toEqual([]);
+    // A tier-2 row classifies a copy-named slot, or a rendered text slot whose
+    // name is not a copy word (`notify.actionUrl`, a link).
+    const textSlots = FLOW_NODE_TEXT_SLOTS.map((slot) => `${slot.nodeType}.${slot.key}`);
+    expect(Object.keys(OTHER_NODE_SLOTS).filter((row) => !covers(row, [...other, ...textSlots]))).toEqual([]);
   });
 
   it('every `keyed` row names one slot exactly, and its key exists in the face — parsed and kept', () => {

@@ -13,10 +13,11 @@
  *  - a config that violates its contract REFUSES the node as a **guard** —
  *    the failure is not routable via `fault` edges (a config is metadata;
  *    re-running changes nothing), and the message names every violated path;
- *  - `{token}` templates stay legal everywhere they were: string slots parse
- *    raw templates, and `http` — which reads its config interpolated — parses
- *    the POST-interpolation shape, where a whole-token template has already
- *    resolved to its value's real type;
+ *  - every executor parses its RAW stored config: since #19939 the slots read
+ *    `{{ }}` holes or a CEL value envelope and a `{token}` is refused, and
+ *    `http` — which until then parsed its config POST-interpolation, so a
+ *    whole-token template in a typed slot resolved to its value's real type —
+ *    reads its typed keys as written, where such a token is refused;
  *  - the deliberate exemption: a legacy flat-graph `loop` (no `config.body`)
  *    predates the ADR-0031 construct and is not parsed.
  *
@@ -168,10 +169,13 @@ describe('execute-time config parse (#4277)', () => {
     expect(result.error).toContain('config.title');
   });
 
-  it('string slots parse RAW templates — a `{token}` recipient and a `{{ }}` title pass', async () => {
+  it('slots parse RAW — a CEL value envelope recipient and a `{{ }}` title pass', async () => {
+    // [#19939] `recipients` is a value slot: a `{token}` there is refused now,
+    // and its envelope is what the parse accepts, raw, for the executor to
+    // evaluate.
     const engine = engineWith();
     engine.registerFlow('f', flowWith('notify', {
-      recipients: '{who}', title: 'Hi {{ who }}',
+      recipients: { dialect: 'cel', source: 'who' }, title: 'Hi {{ who }}',
     }, { variables: [{ name: 'who', type: 'text', isInput: true }] }));
 
     // No messaging service wired → the node degrades to a skipped success;
@@ -180,20 +184,29 @@ describe('execute-time config parse (#4277)', () => {
     expect(result.success).toBe(true);
   });
 
-  it('http parses the INTERPOLATED config — a whole-token template in a typed slot resolves first', async () => {
+  it('http parses the RAW config — a whole-token template in a typed slot is refused, at the door and at the run', async () => {
+    // [#19939] Until then the executor interpolated its whole config first and
+    // `timeoutMs: '{t}'` resolved to the number. `timeoutMs` is a literal now,
+    // read as written: the token is refused with the literal's remedy.
+    expect(doorRefusal('http', { url: 'https://example.test/hook', durable: true, timeoutMs: '{t}' }))
+      .toContain('`timeoutMs` is the per-request timeout in milliseconds, a number, a literal the executor reads as written');
     const enqueued: any[] = [];
     const engine = engineWith({
       isHttpDeliveryReady: () => true,
       async enqueueHttp(input) { enqueued.push(input); return 'dlv_1'; },
     });
-    engine.registerFlow('f', flowWith('http', {
-      url: 'https://example.test/hook', durable: true, timeoutMs: '{t}',
-    }, { variables: [{ name: 't', type: 'number', isInput: true }] }));
-
-    const result = await engine.execute('f', { params: { t: 1500 } } as any);
-    expect(result.success).toBe(true);
-    // Whole-token interpolation preserved the number, so the contract's
-    // `timeoutMs: z.number()` saw 1500, not a string.
+    const result = await runPatched(engine, 'http', { url: 'https://example.test/hook', durable: true, timeoutMs: 1500 }, { timeoutMs: '{t}' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('config.timeoutMs');
+    expect(result.error).toContain('a single-brace token is not resolved here; write the value');
+    expect(enqueued).toHaveLength(0);
+    // CONTROL: the literal as written is enqueued as written.
+    const ok = engineWith({
+      isHttpDeliveryReady: () => true,
+      async enqueueHttp(input) { enqueued.push(input); return 'dlv_1'; },
+    });
+    ok.registerFlow('f', flowWith('http', { url: 'https://example.test/hook', durable: true, timeoutMs: 1500 }));
+    expect((await ok.execute('f')).success).toBe(true);
     expect(enqueued[0]?.timeoutMs).toBe(1500);
   });
 

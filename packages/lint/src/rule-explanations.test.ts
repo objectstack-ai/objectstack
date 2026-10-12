@@ -10,6 +10,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
+import { UNCONSUMED_WIDGET_OPTION } from '@objectstack/sdui-parser';
 import { FUNCTIONAL_COMPLETENESS_RULES } from '@objectstack/spec/kernel';
 
 import * as indexBarrel from './index.js';
@@ -22,9 +23,11 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * Every rule id constant the root barrel exports, by value, plus the ids of the
  * functional-completeness predicate: those rules live in `@objectstack/spec/kernel`
  * and `validate-functional-completeness.ts` forwards their findings unchanged.
+ * The same holds for `@objectstack/sdui-parser`'s widget-option check, whose
+ * code `validate-dashboard-widget-options.ts` forwards unchanged.
  */
 function exportedRuleIds(): Set<string> {
-  const ids = new Set<string>(FUNCTIONAL_COMPLETENESS_RULES);
+  const ids = new Set<string>([...FUNCTIONAL_COMPLETENESS_RULES, UNCONSUMED_WIDGET_OPTION]);
   for (const [name, value] of Object.entries(indexBarrel)) {
     if (/^[A-Z][A-Z0-9_]*$/.test(name) && typeof value === 'string') ids.add(value);
   }

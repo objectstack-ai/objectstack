@@ -709,6 +709,83 @@ export const GLOBAL_SEARCH_PARAMS: readonly string[] = [
 ];
 
 /**
+ * [#22877] The bundle member selector's query parameter on the by-name `/meta`
+ * doors (ruling 6116165299, Q2 i): GET, DELETE, `/history`, `/publish` and
+ * `/rollback` on `/meta/:type/:name` each carry it in their closed set below.
+ * Named after the discriminator's concept (`sys_metadata.bundle_member`) and
+ * type-neutral — ⛔ never `locale`, which on `/meta` already names the
+ * response translation locale (`extractLocale`).
+ */
+export const META_ITEM_MEMBER_PARAM = 'member';
+
+/**
+ * [#22877] The closed query-parameter set of `GET {metaPath}/:type/:name`,
+ * which declared none before the selector joined it.
+ *
+ * **Measured** from the handler's read points and the helpers it calls:
+ * `layers` (the deprecated layered spelling, `wantsMetaItemLayers`), `state`
+ * and `preview` (the two admitted draft switches), `package` (the cache bypass,
+ * `metaItemPackageBinding`, and the layered read's `serveMetaItemLayered`),
+ * and `locale` — read a frame down, by `extractLocale` behind the cached arm's
+ * validator and every `translateMetaEnvelope` / `createMetaItemAnswer`
+ * translation, never in the handler body; omitting it would 400 every
+ * `?locale=zh-CN` read that works today. Plus {@link META_ITEM_MEMBER_PARAM}.
+ */
+export const META_ITEM_READ_PARAMS: readonly string[] = [
+    'layers', 'state', 'preview', 'package', 'locale', META_ITEM_MEMBER_PARAM,
+];
+
+/**
+ * [#22877] The closed set of `DELETE {metaPath}/:type/:name` (the reset).
+ * **Measured**: `state` (the draft discard) and `dropStorage` (the opt-in
+ * table teardown); the OCC pin and the actor ride headers and the session.
+ * Plus {@link META_ITEM_MEMBER_PARAM}.
+ */
+export const META_ITEM_RESET_PARAMS: readonly string[] = ['state', 'dropStorage', META_ITEM_MEMBER_PARAM];
+
+/**
+ * [#22877] The closed set of `GET {metaPath}/:type/:name/history`.
+ * **Measured**: the paging pair `sinceSeq` and `limit`, each read through its
+ * declaration (`readDeclaredQueryNumber`); the authoring-door and per-caller
+ * refusals read the session, not the query. Plus {@link META_ITEM_MEMBER_PARAM}.
+ */
+export const META_ITEM_HISTORY_PARAMS: readonly string[] = ['sinceSeq', 'limit', META_ITEM_MEMBER_PARAM];
+
+/**
+ * [#22877] The closed set of `POST {metaPath}/:type/:name/publish`.
+ * **Measured**: `package` (the draft's package binding,
+ * `metaItemPackageBinding`); the message rides the body, the actor the
+ * session. Plus {@link META_ITEM_MEMBER_PARAM}.
+ */
+export const META_ITEM_PUBLISH_PARAMS: readonly string[] = ['package', META_ITEM_MEMBER_PARAM];
+
+/**
+ * [#22877] The closed set of `POST {metaPath}/:type/:name/rollback`.
+ * **Measured**: `toVersion`, the query fallback after the body's `toVersion` /
+ * `version`; the message rides the body, the actor the session. Plus
+ * {@link META_ITEM_MEMBER_PARAM}.
+ */
+export const META_ITEM_ROLLBACK_PARAMS: readonly string[] = ['toVersion', META_ITEM_MEMBER_PARAM];
+
+/**
+ * [#22877] THE reading of the bundle member selector on every by-name `/meta`
+ * door, as the spread each door's protocol request takes: `{ member }` when
+ * the caller named one, `{}` when not, which the protocol reads as the
+ * canonical member. The VALUE is the protocol's to judge, once, for every
+ * transport (`resolveBundleMemberSelector` in `@objectstack/metadata-protocol`):
+ * a selector on a type with no members, a blank one or an overlong one is
+ * answered there with the located 400. A value that is not a string (an
+ * adapter's nested-object parse) is handed over as received, so that one
+ * reading refuses it — ⛔ never dropped here, which would answer the canonical
+ * member to a request that named something. Recognition of the NAME is each
+ * route's closed set above; repetition, `refuseRepeatedQueryParams`.
+ */
+function metaMemberSelector(query: unknown): { member?: string } {
+    const raw = (query as Record<string, unknown> | null | undefined)?.[META_ITEM_MEMBER_PARAM];
+    return raw === undefined ? {} : { member: raw as string };
+}
+
+/**
  * [#20062 / #20139] The reading of a numeric query parameter on a door whose
  * request has no declared schema: a whole number, and nothing about range.
  * Every such parameter in this file counts or addresses whole things — rows
@@ -2772,7 +2849,8 @@ export class RestServer {
     /**
      * [#7749] The acting identity recorded on a metadata WRITE — the single
      * producer for every `/meta` route that stamps an `actor` (save, delete,
-     * publish, rollback, compound save).
+     * publish, rollback, compound save, and — since #23068, which retired the
+     * route-name label it stamped inline — `POST /_migrate-stored`).
      *
      * ## What was wrong
      *
@@ -5925,15 +6003,19 @@ export class RestServer {
                         // Preview by default — `apply` must be explicitly true,
                         // the same posture the CLI takes. A caller who sends an
                         // empty body gets a report and no writes.
+                        // Attributed to the caller: this writes history rows,
+                        // and "who ran the migration" is the question they
+                        // exist to answer. [#23068] By user id alone — the
+                        // identity this request was authorized as, read by the
+                        // producer every `/meta` write door shares — or by
+                        // nobody. It lands in `recorded_by` / `updated_by`,
+                        // `lookup('sys_user')` columns, so ⛔ never the route's
+                        // name: the pass records its origin on `source`.
+                        const actor = await this.resolveMetaWriteActor(environmentId, req);
                         const report = await (p as any).migrateStoredMetadata({
                             apply: (req.body as any)?.apply === true,
                             ...(types.length > 0 ? { types } : {}),
-                            // Attributed to the caller: this writes history +
-                            // audit rows, and "who ran the migration" is the
-                            // question those rows exist to answer.
-                            actor: ctx?.userId
-                                ? `${ctx.userId} (POST ${metadata.prefix}/_migrate-stored)`
-                                : `POST ${metadata.prefix}/_migrate-stored`,
+                            ...(actor ? { actor } : {}),
                         });
                         res.json(report);
                     } catch (error: any) {
@@ -6298,7 +6380,12 @@ export class RestServer {
                         // lines apart (`?layers=`, `?state=`, `?preview=`,
                         // `?package=`), and a per-branch gate is one a new branch
                         // inherits by accident rather than by construction.
-                        if (refuseRepeatedQueryParams(req, res, ['layers', 'state', 'preview', 'package'])) return;
+                        // [#22877] …and RECOGNITION first, over the route's
+                        // measured closed set (AGENTS.md route rule 5), which
+                        // the bundle member selector joined.
+                        if (refuseUnknownQueryParams(req, res, META_ITEM_READ_PARAMS)) return;
+                        if (refuseRepeatedQueryParams(req, res, ['layers', 'state', 'preview', 'package', META_ITEM_MEMBER_PARAM])) return;
+                        const memberSelector = metaMemberSelector(req.query);
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
                         const p = await this.resolveProtocol(environmentId, req);
 
@@ -6396,6 +6483,16 @@ export class RestServer {
                         // helper prescribes for a transport that cannot say where
                         // it serves the item.
                         const wantLayered = metaReadGate.wantsMetaItemLayers(req.query);
+                        // [#22877] The layered view reads no member, so a member
+                        // named on it is refused rather than answered with the
+                        // canonical member's layers.
+                        if (wantLayered && memberSelector.member !== undefined) {
+                            throw Object.assign(new Error(
+                                `The "${META_ITEM_MEMBER_PARAM}" selector is not served by the layered view `
+                                + `(\`?layers=\`), which shows the canonical member's layers. Read one member with `
+                                + `\`?${META_ITEM_MEMBER_PARAM}=\` alone.`,
+                            ), { code: 'VALIDATION_ERROR', status: 400 });
+                        }
                         if (wantLayered && typeof (p as any).getMetaItemLayered === 'function') {
                             const requestPath: unknown = req.path;
                             const deprecation = metaReadGate.metaItemLayersDeprecationHeaders(
@@ -6513,7 +6610,12 @@ export class RestServer {
                         // ADR-0046 §6.7 — the two audience-gated types, excluded
                         // from the cache so {@link metaItemReadGate} judges them.
                         const isAudienceGatedType = metaType === 'book' || metaType === 'doc';
-                        if (metadata.enableCache && p.getMetaItemCached && !isAppType && !isDashboardType && !isDraftRead && !previewDrafts && !packageScoped && !isAudienceGatedType) {
+                        // [#22877] A member-addressed read bypasses the cache
+                        // too: the cached read takes no member and keys its
+                        // validator on type and name, so it can only answer the
+                        // canonical member.
+                        const memberScoped = memberSelector.member !== undefined;
+                        if (metadata.enableCache && p.getMetaItemCached && !isAppType && !isDashboardType && !isDraftRead && !previewDrafts && !packageScoped && !memberScoped && !isAudienceGatedType) {
                             // [ADR-0106 D3] When a projection applies, the
                             // protocol is NOT allowed to judge the conditional
                             // request: `getMetaItemCached` hashes the UNFILTERED
@@ -6761,6 +6863,8 @@ export class RestServer {
                                 // never `req.query` re-read here.
                                 ...(isDraftRead ? { state: 'draft' as const } : {}),
                                 ...(previewDrafts ? { previewDrafts: true } : {}),
+                                // [#22877] The member, read once above.
+                                ...memberSelector,
                             };
                             const envelope = await p.getMetaItem(itemRequest) as Record<string, any>;
 
@@ -7238,7 +7342,9 @@ export class RestServer {
                     // matching), but "the wrong answer happens to be the
                     // conservative one" is not a rule a caller can rely on and
                     // is not what the request asked for.
-                    if (refuseRepeatedQueryParams(req, res, ['state', 'dropStorage'])) return;
+                    // [#22877] Recognition first, over the measured closed set.
+                    if (refuseUnknownQueryParams(req, res, META_ITEM_RESET_PARAMS)) return;
+                    if (refuseRepeatedQueryParams(req, res, ['state', 'dropStorage', META_ITEM_MEMBER_PARAM])) return;
                     const stateParam = typeof req.query?.state === 'string'
                         && req.query.state.toLowerCase() === 'draft'
                         ? 'draft' as const
@@ -7276,6 +7382,8 @@ export class RestServer {
                         ...(actor ? { actor } : {}),
                         ...(stateParam ? { state: stateParam } : {}),
                         ...(dropStorage ? { dropStorage: true } : {}),
+                        // [#22877] Resets ONE member of a bundled type.
+                        ...metaMemberSelector(req.query),
                     };
                     const result = await p.deleteMetaItem(deleteRequest);
                     res.json(result);
@@ -7350,7 +7458,9 @@ export class RestServer {
                     // `Number.isFinite` spreads below drop — so a repeated
                     // `?limit=` silently returned the UNLIMITED history instead
                     // of the page the caller asked for.
-                    if (refuseRepeatedQueryParams(req, res, ['sinceSeq', 'limit'])) return;
+                    // [#22877] Recognition first, over the measured closed set.
+                    if (refuseUnknownQueryParams(req, res, META_ITEM_HISTORY_PARAMS)) return;
+                    if (refuseRepeatedQueryParams(req, res, ['sinceSeq', 'limit', META_ITEM_MEMBER_PARAM])) return;
                     // [#20139] `sinceSeq` is parsed through its DECLARATION
                     // (`HistoryMetaItemRequestSchema.sinceSeq`, `z.number().optional()`),
                     // the way `limit` is just below: `?sinceSeq=abc` used to be `NaN`,
@@ -7409,6 +7519,8 @@ export class RestServer {
                         // refuse anything else, so no `Number.isFinite` drop is left here.
                         ...(sinceSeq !== undefined ? { sinceSeq } : {}),
                         ...(limit !== undefined ? { limit } : {}),
+                        // [#22877] ONE member's events of the bundle's lineage.
+                        ...metaMemberSelector(req.query),
                     };
                     const result = await p.historyMetaItem(historyRequest);
                     res.json(result);
@@ -7713,7 +7825,9 @@ export class RestServer {
                     // path — narrowing that never fires while looking like it
                     // does. Widening `MetadataItem` is a `packages/spec` contract
                     // change and stays filed rather than taken here.
-                    if (refuseRepeatedQueryParams(req, res, ['package'])) return;
+                    // [#22877] Recognition first, over the measured closed set.
+                    if (refuseUnknownQueryParams(req, res, META_ITEM_PUBLISH_PARAMS)) return;
+                    if (refuseRepeatedQueryParams(req, res, ['package', META_ITEM_MEMBER_PARAM])) return;
                     const packageId = metaItemPackageBinding(req.query?.package);
 
                     // [ADR-0131 D6] No organization, as on the `PUT` twin: a
@@ -7757,6 +7871,8 @@ export class RestServer {
                         ...(actor ? { actor } : {}),
                         ...(message ? { message } : {}),
                         ...(packageId ? { packageId } : {}),
+                        // [#22877] Publishes ONE member's draft of a bundled type.
+                        ...metaMemberSelector(req.query),
                     };
                     const result = await p.publishMetaItem(publishRequest);
                     res.json(result);
@@ -7850,7 +7966,9 @@ export class RestServer {
                     // is required", which tells a caller who supplied two valid
                     // integers that they supplied none. Refusing the multiplicity
                     // by name says what actually happened.
-                    if (refuseRepeatedQueryParams(req, res, ['toVersion'])) return;
+                    // [#22877] Recognition first, over the measured closed set.
+                    if (refuseUnknownQueryParams(req, res, META_ITEM_ROLLBACK_PARAMS)) return;
+                    if (refuseRepeatedQueryParams(req, res, ['toVersion', META_ITEM_MEMBER_PARAM])) return;
                     const body = (req.body && typeof req.body === 'object') ? req.body : {};
                     const toVersionRaw = body.toVersion ?? body.version ?? req.query?.toVersion;
                     const toVersion = Number(toVersionRaw);
@@ -7875,6 +7993,8 @@ export class RestServer {
                         ...(environmentId ? { environmentId } : {}),
                         ...(actor ? { actor } : {}),
                         ...(message ? { message } : {}),
+                        // [#22877] Reverts ONE member of a bundled type.
+                        ...metaMemberSelector(req.query),
                     });
                     res.json(result);
                 } catch (error: any) {

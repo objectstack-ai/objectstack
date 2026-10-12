@@ -1783,6 +1783,17 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'takes that level\'s style. The `body` default for an absent `variant` is unchanged.',
   },
   {
+    id: 'email-template-category-is-system-retired',
+    order: 94,
+    text:
+      'It removes `category` and `isSystem` from the email template (ADR-0049 enforce-or-remove): '
+      + 'nothing read either key once templates stopped being copied into `sys_email_template` rows — '
+      + 'the Studio listing never offered the category facet, and no door refused deleting a template '
+      + 'that set `isSystem`. The D2 conversion `email-template-category-is-system-removed` strips both '
+      + 'keys from every template, which matters because both carried a default, so every template a '
+      + '17.x parse emitted carries them.',
+  },
+  {
     id: 'field-inline-and-related-list-columns-closed',
     order: 9,
     text:
@@ -1899,10 +1910,10 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'contract before it acts, so a `create_record` `outputVariable: 42` or a screen field `min: \'1\'` '
       + 'used to pass `objectstack validate` and `objectstack compile`, register, and fail every run that '
       + 'reached the node. The arm judges only what the build can know the run will parse: never a value '
-      + 'carrying a `{token}`, whatever its slot\'s type (held back by ruling, not admitted: outside `http` '
-      + 'such a token in a number or boolean slot still fails at its first run, so those slots take a '
-      + 'literal); on `http`, which parses after interpolating, only '
-      + 'token-free values and never the credential-held `signingSecret`; on a `loop`, only one with a '
+      + 'carrying a `{token}`, whatever its slot\'s type (held back by ruling, not admitted: such a token in '
+      + 'a number or boolean slot still fails at its first run, so those slots take a literal), save at a '
+      + 'key its executor reads as written — a `notify` or `http` literal — whose contract refuses the token '
+      + 'itself; on `http`, never the credential-held `signingSecret`; on a `loop`, only one with a '
       + '`body`; on the region containers, never the region slots. Key membership is untouched. No key '
       + 'is removed, so there is no tombstone, and no D2 conversion exists: the platform cannot know the '
       + 'value the author meant. Its D3 record is the semantic entry '
@@ -1975,15 +1986,18 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'flow-text-slot-single-brace-refused',
     order: 89,
     text:
-      'It executes ADR-0032 Decision 3 in the flow TEXT slots — a `notify` node\'s `title` and `message`, '
-      + 'a `screen` node\'s `title` and `description`, a refusing `end` node\'s `message`: they render '
+      'It executes ADR-0032 Decision 3 in the flow TEXT slots — a `notify` node\'s `title`, `message` and '
+      + 'link (`actionUrl`), a `screen` node\'s `title` and `description`, a refusing `end` node\'s `message`, '
+      + 'an `http` node\'s `url` and each of its `headers` values: they render '
       + 'through the formula template engine, so their placeholders are `{{ }}` holes, a variable path with '
       + 'an optional formatter (the engine\'s hole grammar now admits a `$`-named variable, so '
       + '`{{ $error.message }}` is a hole). A single-brace `{…}` token there is refused — by the node contract, '
       + '`registerFlow` and `objectstack validate` alike — with the hole spelling of each path token, or, for '
       + 'arithmetic, a function, a date macro or a run-user path, the `assignment` that computes it into a '
       + 'variable. No D2 conversion exists: the 17.x interpolator and the engine render a `Date` differently '
-      + '(JSON-quoted against ISO text), and a whole-slot object differently in a screen or `end` text, so '
+      + '(JSON-quoted against ISO text), and a whole-slot object differently in a screen or `end` text or a '
+      + 'notify link, and an `http` url or header that was one token holding anything but a string was refused '
+      + 'after the interpolation where the engine renders it as text, so '
       + 'the rewrite is the author\'s to check. Every other flow string keeps the single-brace dialect. Its '
       + 'D3 record is the semantic entry `flow-text-slot-single-brace-refused`.',
   },

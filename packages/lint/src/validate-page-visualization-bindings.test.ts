@@ -52,7 +52,7 @@ import { explainRule } from './rule-explanations.js';
 // recorded verdict to one line of at most 200 characters — every firing
 // variant this suite exercises, the shipped showcase pages included, not a
 // chosen few. Run the whole file: those cases read what the cases above fired.
-const fired: Array<{ rule: string; message: string; severity: string }> = [];
+const fired: Array<{ rule: string; message: string; severity: string; hint: string }> = [];
 const validatePageVisualizationBindings: typeof validatePageVisualizationBindingsUnrecorded = (...args) => {
   const findings = validatePageVisualizationBindingsUnrecorded(...args);
   fired.push(...findings);
@@ -590,5 +590,53 @@ describe('[#22161] one-line verdicts — page/visualization-without-binding', ()
       expect(f.message, f.rule).not.toContain('\n');
       expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
     }
+  });
+});
+
+// [#22161] Slice 13: the `fix:` line names the three routes in one line: a
+// `sourceView` with the visualization's block, a field of the type the
+// derivation finds first, or dropping the visualization. Why `sourceView` is
+// the one channel, and the name fallback the derivation also tries, are the
+// explanation's.
+describe('[#22161] one-line fixes — page/visualization-without-binding', () => {
+  it('every `fix:` line the cases in this file fired is one line of at most 200 characters', () => {
+    // Every visualization with a deriver, on the dateless object, recorded
+    // like every case above.
+    const VIZ = OBJECTUI_DERIVATION_PREDICATES.map((p) => p.visualization);
+    validatePageVisualizationBindings({
+      objects: [DATELESS],
+      pages: [listPage('note_every_fix', { source: 'crm_note', appearance: { allowedVisualizations: ['grid', ...VIZ] } })],
+    });
+    const converted = fired.filter((f) => f.rule === PAGE_VISUALIZATION_WITHOUT_BINDING);
+    // Coverage control: each visualization's type half reached a `fix:` line.
+    for (const row of OBJECTUI_DERIVATION_PREDICATES) {
+      expect(
+        converted.some((f) => f.hint.includes(`'${row.visualization}'`) && f.hint.includes(row.types.join(' / '))),
+        row.visualization,
+      ).toBe(true);
+    }
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('names the three routes in one line', () => {
+    const [f] = validatePageVisualizationBindings({
+      objects: [DATELESS],
+      pages: [listPage('note_calendar_fix', { source: 'crm_note', appearance: { allowedVisualizations: ['calendar'] } })],
+    });
+    expect(f.hint).toBe(
+      'Point `sourceView` at a list view with a `calendar:` block, give "crm_note" a field typed date / datetime / ' +
+        "time, or drop 'calendar' from the whitelist",
+    );
+  });
+
+  it('`os explain` carries what the `fix:` line no longer says', () => {
+    const text = explainRule(PAGE_VISUALIZATION_WITHOUT_BINDING)!.paragraphs.join('\n');
+    expect(text).toContain('`sourceView` is the one schema-legal channel');
+    expect(text).toContain("`sourceView: 'VIEW_KEY'`");
+    expect(text).toContain('the name fallback above also binds');
+    expect(text).toContain('`appearance.allowedVisualizations`');
   });
 });

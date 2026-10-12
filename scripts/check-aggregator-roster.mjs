@@ -10,10 +10,11 @@
  *
  * ## The gap this closes
  *
- * Three of this repo's required contexts are aggregator jobs standing in for a
+ * Four of this repo's required contexts are aggregator jobs standing in for a
  * set of real jobs, each deciding its verdict from what it lists in `needs:`:
  * `test-gate` / `Test Core` and `dogfood-gate` / `Dogfood Regression Gate` in
- * ci.yml, and `typecheck` / `TypeScript Type Check` in lint.yml.
+ * ci.yml, and `typecheck` / `TypeScript Type Check` and, since #22991,
+ * `lint` / `Lint & Repo Gates` in lint.yml.
  *
  * Nothing held those rosters to anything. The failure mode is one forgotten
  * line:
@@ -67,7 +68,7 @@
  *
  * Discovery is by declaration, so a NEW aggregator that adds the two keys is
  * covered without editing this file. `REQUIRED_AGGREGATORS` is the floor
- * underneath that: the three jobs that carry a branch-protection-required
+ * underneath that: the four jobs that carry a branch-protection-required
  * context must each be found AND declared, so deleting the declaration to make
  * a red go away is itself red.
  *
@@ -107,6 +108,8 @@ export const REQUIRED_AGGREGATORS = [
   { workflow: 'ci.yml', job: 'test-gate', context: 'Test Core' },
   { workflow: 'ci.yml', job: 'dogfood-gate', context: 'Dogfood Regression Gate' },
   { workflow: 'lint.yml', job: 'typecheck', context: 'TypeScript Type Check' },
+  // #22991: the single 193-step job became an aggregate over eight lanes.
+  { workflow: 'lint.yml', job: 'lint', context: 'Lint & Repo Gates' },
 ];
 
 /** A legal GitHub Actions job id. A comma or a stray quote fails here. */
@@ -495,6 +498,7 @@ async function selfTest() {
   battery('(2) POSITIVE CONTROL A, per aggregator');
   const dropped = [
     { label: 'typecheck loses a lane from needs:', file: 'lint.yml', member: 'typecheck-consumers', from: '      - typecheck-consumers\n', to: '' },
+    { label: 'lint loses a lane from needs:', file: 'lint.yml', member: 'lint-pm-dispatch-gates', from: '      - lint-pm-dispatch-gates\n', to: '' },
     { label: 'test-gate loses its matrix from needs:', file: 'ci.yml', member: 'test', from: '    needs: [test, filter]\n', to: '    needs: [filter]\n' },
     {
       label: 'dogfood-gate loses the CLI pass from needs:',
@@ -523,6 +527,7 @@ async function selfTest() {
   battery('(3) POSITIVE CONTROL B, per aggregator');
   const phantom = [
     { label: 'typecheck needs a job that was deleted', file: 'lint.yml', from: '      - typecheck-consumers\n', to: '      - typecheck-consumers\n      - typecheck-ghost\n', ghost: 'typecheck-ghost' },
+    { label: 'lint needs a job that was deleted', file: 'lint.yml', from: '      - lint-pm-dispatch-gates\n', to: '      - lint-pm-dispatch-gates\n      - lint-ghost\n', ghost: 'lint-ghost' },
     { label: 'test-gate needs a job that was deleted', file: 'ci.yml', from: '    needs: [test, filter]\n', to: '    needs: [test, filter, test-ghost]\n', ghost: 'test-ghost' },
     {
       label: 'dogfood-gate needs a job that was deleted',
@@ -561,12 +566,24 @@ async function selfTest() {
 
   // 5a. The declaration is unfindable: the whole env block is gone.
   battery('(5) REFUSALS -- the most important assertions in this file');
+  // Anchored on the roster's FIRST MEMBER, not on the key alone: since #22991 lint.yml declares
+  // two rosters, and an unanchored pattern deletes whichever comes first in the file -- which
+  // silently retargeted this fixture at `lint` the day that job became an aggregate.
   const noDeclaration = fixture('typecheck loses its roster declaration', 'lint.yml', (s) =>
-    s.replace(new RegExp(`\\n    env:\\n      ${MEMBERS_KEY}: [^\\n]*\\n`), '\n'),
+    s.replace(new RegExp(`\\n    env:\\n      ${MEMBERS_KEY}: typecheck-source-gates[^\\n]*\\n`), '\n'),
   );
   assert(
     noDeclaration.problems.some((p) => p.includes("job 'typecheck'") && p.includes('declares no') && p.includes('refusing to report a pass')),
     `deleting an aggregator's declaration ⇒ REFUSAL naming the job -- got ${JSON.stringify(noDeclaration.problems)}`,
+  );
+  const noLintDeclaration = fixture('lint loses its roster declaration', 'lint.yml', (s) =>
+    s.replace(new RegExp(`\\n    env:\\n      ${MEMBERS_KEY}: lint-eslint[^\\n]*\\n`), '\n'),
+  );
+  assert(
+    noLintDeclaration.problems.some(
+      (p) => p.includes("job 'lint'") && p.includes("'Lint & Repo Gates'") && p.includes('declares no') && p.includes('refusing to report a pass'),
+    ),
+    `deleting the lint aggregate's declaration ⇒ REFUSAL naming the job and its required context -- got ${JSON.stringify(noLintDeclaration.problems)}`,
   );
 
   // 5b. The aggregator job itself is gone from the workflow.
@@ -578,7 +595,7 @@ async function selfTest() {
 
   // 5c. The declaration resolves to ZERO members.
   const emptyRoster = fixture('typecheck declares an empty roster', 'lint.yml', (s) =>
-    s.replace(new RegExp(`${MEMBERS_KEY}: [^\\n]*`), `${MEMBERS_KEY}: ''`),
+    s.replace(new RegExp(`${MEMBERS_KEY}: typecheck-source-gates[^\\n]*`), `${MEMBERS_KEY}: ''`),
   );
   assert(
     emptyRoster.problems.some((p) => p.includes('EMPTY') && p.includes('refusing to report a pass')),
@@ -703,7 +720,7 @@ async function selfTest() {
   console.log(
     `✓ check-aggregator-roster --self-test: ${checked} assertions ` +
       `(baseline + a dropped member and a phantom needs: entry for each of the ${REQUIRED_AGGREGATORS.length} required aggregators + ` +
-      `six refusals + the --leg cross-check + the malformed-roster and laundered-non-member pins + the CI wiring).`,
+      `seven refusals + the --leg cross-check + the malformed-roster and laundered-non-member pins + the CI wiring).`,
   );
 
   return SELF_TEST_VERDICT;

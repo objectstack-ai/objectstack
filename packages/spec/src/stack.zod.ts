@@ -2,7 +2,14 @@
 
 import { z } from 'zod';
 
-import { ManifestSchema } from './kernel/manifest.zod';
+import { ManifestSchema, resolveInstallModes } from './kernel/manifest.zod';
+import { DEFAULT_METADATA_TYPE_REGISTRY } from './kernel/metadata-plugin.zod';
+import {
+  UNMANAGED_INSTALL_KEY_DISPOSITIONS,
+  UNMANAGED_INSTALL_REFUSING_DISPOSITIONS,
+  unmanagedInstallValueCarries,
+} from './kernel/unmanaged-install';
+import { PLURAL_TO_SINGULAR } from './meta-spelling/manifest-collection-spelling';
 import { validateObjectNamespacePrefix } from './kernel/namespace-prefix';
 import { PLATFORM_CAPABILITY_TOKENS, RETIRED_PLATFORM_CAPABILITY_GUIDANCE } from './kernel/platform-capabilities';
 import { DatasourceSchema } from './data/datasource.zod';
@@ -33,7 +40,8 @@ import { SeedSchema } from './data/seed.zod';
 
 // UI Protocol
 import { AppSchema } from './ui/app.zod';
-import { ViewSchema } from './ui/view.zod';
+import { ViewSchema, isAggregatedViewContainer } from './ui/view.zod';
+import { deriveViewContainerObject } from './ui/view-container-object';
 import { PageSchema } from './ui/page.zod';
 import { DashboardSchema } from './ui/dashboard.zod';
 import { ReportSchema } from './ui/report.zod';
@@ -1938,6 +1946,79 @@ function validateSingleApp(config: ObjectStackDefinition): string[] {
 }
 
 /**
+ * [ADR-0131 D6] The types the metadata-type registry declares
+ * runtime-uncreatable (`allowRuntimeCreate: false`) — the flag the save door
+ * reads, so an unmanaged install's one write path cannot create an item of
+ * any of them. Derived, never listed.
+ */
+const RUNTIME_UNCREATABLE_TYPES: ReadonlySet<string> = new Set(
+  DEFAULT_METADATA_TYPE_REGISTRY.filter((entry) => !entry.allowRuntimeCreate).map((entry) => entry.type),
+);
+
+/**
+ * [ADR-0131 D6] A package that PERMITS the `unmanaged` install mode must be
+ * copyable — the authoring half of "a declared mode is enforced" (the stage-0
+ * ACCEPT's Q5 on the D6 execution card).
+ *
+ * An unmanaged install copies every metadata item into the environment ledger
+ * through the one save door, or copies nothing. So a package that declares
+ * `installModes` with `'unmanaged'` while it carries what that door cannot
+ * write is refused HERE, naming each key, instead of passing `os validate` and
+ * being refused at the install door:
+ *
+ *  - a non-empty collection whose metadata type the registry declares
+ *    runtime-uncreatable ({@link RUNTIME_UNCREATABLE_TYPES});
+ *  - a key the shared classification refuses
+ *    (`UNMANAGED_INSTALL_KEY_DISPOSITIONS`: code, an extension of another
+ *    package's items, an artifact envelope), on the stack or on its manifest.
+ *
+ * The classification is the one the install door's import planner reads
+ * (`kernel/unmanaged-install.ts`), so the two refusals cannot disagree. ⛔ No
+ * partial copy and no `OS_METADATA_WRITABLE` hatch: the remedy is to stop
+ * permitting `unmanaged`, or to move what cannot be copied out of the package.
+ *
+ * Mirrors {@link validateSingleApp}: one finding per key; `defineStack`
+ * aggregates and throws.
+ */
+function validateUnmanagedInstallMode(config: ObjectStackDefinition): string[] {
+  if (!resolveInstallModes(config.manifest).includes('unmanaged')) return [];
+  const findings: string[] = [];
+  const judge = (value: unknown, key: string, where: string): void => {
+    if (!unmanagedInstallValueCarries(value)) return;
+    const type = PLURAL_TO_SINGULAR[key];
+    if (type !== undefined) {
+      if (RUNTIME_UNCREATABLE_TYPES.has(type)) {
+        const count = Array.isArray(value) ? value.length : Object.keys(value as object).length;
+        findings.push(
+          `\`${where}\` carries ${count} '${type}' item(s), and the metadata-type registry declares '${type}' `
+          + 'runtime-uncreatable, so an unmanaged install cannot copy them into the environment.',
+        );
+      }
+      return;
+    }
+    const disposition = UNMANAGED_INSTALL_KEY_DISPOSITIONS[key];
+    if (disposition === undefined || !UNMANAGED_INSTALL_REFUSING_DISPOSITIONS.has(disposition)) return;
+    findings.push(
+      disposition === 'code'
+        ? `\`${where}\` is code, which has no metadata form an unmanaged install can copy into the environment.`
+        : disposition === 'uncopyable'
+          ? `\`${where}\` extends items another package owns, and an unmanaged install has no environment row for that.`
+          : `\`${where}\` describes an artifact of several packages, and an unmanaged install copies one package.`,
+    );
+  };
+  for (const [key, value] of Object.entries(config)) {
+    // `manifest` is the package's own manifest here, judged key by key below —
+    // never the nested-manifest envelope the classification names for a body.
+    if (key === 'manifest') continue;
+    judge(value, key, key);
+  }
+  for (const [key, value] of Object.entries(config.manifest ?? {})) {
+    judge(value, key, `manifest.${key}`);
+  }
+  return findings;
+}
+
+/**
  * Platform-provided object names (`sys_` / `cloud_` / `ai_` prefixes — the
  * same classification the seed loader applies). These objects are contributed
  * by the runtime, never by the stack, so cross-reference checks must not
@@ -2230,6 +2311,268 @@ function collectDuplicateActionKeyErrors(config: ObjectStackDefinition): string[
 }
 
 /**
+ * Same-stack duplicate `functions` names in the ARRAY form (#22902) — one
+ * refusal line per colliding name, naming the name and every index.
+ *
+ * Functions live in one flat namespace resolved by name: a hook's `handler`,
+ * an action's `target` and a flow `script` node's `config.function` all look a
+ * function up by its name, and the engine registers each under that name
+ * (`registerFunction` is a plain `Map.set`). The map form cannot author one
+ * name twice — an object key is unique — so it is never visited. The array
+ * form can, and nothing refused it, so the two entries diverged silently and
+ * differently on each path. Measured on main `7dbb89dc5` with
+ * `[{ name: 'kc_a', handler: first }, { name: 'kc_a', handler: second }]`:
+ *
+ * - `objectstack build` exited 0 and shipped
+ *   `[{ name: 'kc_a' }, { name: 'kc_a__2' }]`: `lowerCallables` mints refs in
+ *   one namespace, so the second entry took a suffixed internal ref the author
+ *   never wrote and nothing references — `kc_a` ran `first`;
+ * - a source boot (no build) registered `kc_a` as `second` and dropped
+ *   `first`, with no notice (`collectBundleFunctionEntries` keys by name, last
+ *   wins).
+ *
+ * So the same stack ran different code under `kc_a` depending on whether it
+ * was built. {@link composeStacks} already refuses the cross-stack case
+ * (`composeFunctions`, `STACK_COMPOSE_FUNCTION_CONFLICT`); this is its
+ * one-stack sibling, in the aggregate beside the action-key check. Every entry
+ * counts, byte-identical twins included: two entries are two registrations
+ * under one name whatever they hold, and only one can own it.
+ */
+function collectDuplicateFunctionNameErrors(config: ObjectStackDefinition): string[] {
+  const functions = config.functions;
+  if (!Array.isArray(functions)) return [];
+
+  const indicesByName = new Map<string, number[]>();
+  for (const [i, entry] of functions.entries()) {
+    const list = indicesByName.get(entry.name) ?? [];
+    list.push(i);
+    indicesByName.set(entry.name, list);
+  }
+
+  const errors: string[] = [];
+  for (const [name, indices] of indicesByName) {
+    if (indices.length < 2) continue;
+    errors.push(
+      `Function '${name}' is declared ${indices.length === 2 ? 'twice' : `${indices.length} times`} ` +
+        `in the \`functions\` array: ${joinDeclarationOrigins(indices.map((i) => `stack.functions[${i}]`))}. ` +
+        `Functions are registered and resolved by name, so only one of these entries can own ` +
+        `'${name}' and the others would be silently renamed or dropped. Rename one of them, or ` +
+        `merge them into a single entry.`,
+    );
+  }
+  return errors;
+}
+
+/**
+ * Same-stack duplicate entries in the named collections (#22934) — one refusal
+ * line per (collection, identity) collision, naming the collection, the
+ * identity and every index. The sibling of the action-key and `functions`
+ * checks above, for the 27 collections whose entries the runtime registers
+ * under one identity each.
+ *
+ * Measured on main `246edf5b3` with every collection below carrying two entries
+ * under one identity, on a source boot (`os serve`, no build) and through
+ * `os build` → an artifact-backed boot: `defineStack` and `os validate`
+ * accepted every pair (exit 0, `valid: true`, no finding naming it), and the
+ * boot then kept one entry silently or diverged —
+ *
+ * - 23 collections, and `objectExtensions`, kept only the LAST entry on both
+ *   paths, the earlier entries' content gone with no notice at the default log
+ *   level;
+ * - `datasources`: the metadata described the last entry while the driver
+ *   connected with the first one's configuration;
+ * - `hooks`: the metadata listed one hook while both handlers were bound and
+ *   ran;
+ * - `docs`: `os validate` and `os build` refused the pair (`docs/duplicate-name`)
+ *   while a source boot kept the last.
+ *
+ * The identity is the string the registrars key an entry by: `name` for 24
+ * collections, the `(name, locale)` pair for `emailTemplates` (an i18n bundle
+ * is one name across several locales), the extended object (`extend`) for
+ * `objectExtensions`, and for `views` the slot every registrar files the entry
+ * under — an aggregated container under the object it binds to
+ * ({@link deriveViewContainerObject}), any other entry under its own `name`,
+ * falling back to the same derivation.
+ * An entry with no readable identity claims no slot and is not counted.
+ *
+ * Deliberately NOT in the table, each for a reason that is not "nobody looked":
+ * `plugins` (last-one-wins with one warn is the kernel's declared contract, and
+ * plugins are host assembly, not artifact metadata); `agents` (withdrawn for
+ * app packages, ADR-0063 §2 — the runtime never loads one); `picklistExtensions`
+ * (the registry merges a package's contributions by option value and refuses a
+ * duplicate value); `actions` and `functions` (their own checks above).
+ *
+ * Every entry counts, byte-identical twins included: two entries are two
+ * registrations under one identity whatever they hold. The map form of a
+ * map-supported collection reaches this check already normalized (key → `name`,
+ * an explicit `name` winning), so two map keys whose entries spell one `name`
+ * collide here too. Cross-package reuse of a name is untouched (ADR-0048 §3.4):
+ * a multi-package project (`composeStacks(…, { manifest: 'preserve' })`)
+ * carries each package's collections in its own `packages[i]` body, which this
+ * check does not read. The same-package case is the one §3.4 leaves to
+ * authoring-time hygiene (`os lint`'s duplicate-name advisory); it is refused
+ * here at the contract, as the action-key check already does for actions.
+ */
+interface SameStackEntryIdentity {
+  /** The identity the registrars key this collection's entries by, or `undefined` when an entry has none. */
+  readonly identity: (entry: unknown) => string | undefined;
+  /** The finding's subject for one identity: `Datasource 'x'`. */
+  readonly subject: (identity: string) => string;
+  /** What the runtime does with the pair, measured — one sentence. */
+  readonly consequence: (identity: string) => string;
+  /** The fix, one sentence. */
+  readonly remedy: (identity: string) => string;
+}
+
+function readEntryName(entry: unknown): string | undefined {
+  if (!entry || typeof entry !== 'object') return undefined;
+  const name = (entry as { name?: unknown }).name;
+  return typeof name === 'string' && name ? name : undefined;
+}
+
+const RENAME_OR_MERGE = (): string => 'Rename one of them, or merge them into a single entry.';
+
+/** The 23 collections whose boot keeps the last entry under a name, on both paths. */
+function lastWinsByName(noun: string, plural: string): SameStackEntryIdentity {
+  return {
+    identity: readEntryName,
+    subject: (name) => `${noun} '${name}'`,
+    consequence: () =>
+      `The runtime registers ${plural} by name, so only the last of these entries is kept and the ` +
+      `others are silently dropped.`,
+    remedy: RENAME_OR_MERGE,
+  };
+}
+
+const SAME_STACK_ENTRY_IDENTITY = Object.freeze({
+  objects: lastWinsByName('Object', 'objects'),
+  datasources: {
+    identity: readEntryName,
+    subject: (name) => `Datasource '${name}'`,
+    consequence: () =>
+      'The runtime registers datasources by name, and its two halves disagree on which entry won: ' +
+      'the metadata describes the last of these entries while the driver connects with the first ' +
+      "one's configuration.",
+    remedy: RENAME_OR_MERGE,
+  },
+  pages: lastWinsByName('Page', 'pages'),
+  dashboards: lastWinsByName('Dashboard', 'dashboards'),
+  reports: lastWinsByName('Report', 'reports'),
+  datasets: lastWinsByName('Dataset', 'datasets'),
+  flows: lastWinsByName('Flow', 'flows'),
+  jobs: lastWinsByName('Job', 'jobs'),
+  // An i18n bundle is one `name` across several `locale` tags, so the identity
+  // is the pair — the registry's `ITEM_KEY_DISCRIMINATORS` entry, keyed as
+  // `name@locale` with an untagged entry keyed as the floor tag (the schema's
+  // own default). Two entries collide only on one name AND one locale.
+  emailTemplates: {
+    identity: (entry) => {
+      const name = readEntryName(entry);
+      if (name === undefined) return undefined;
+      const locale = (entry as { locale?: unknown }).locale;
+      const tag = typeof locale === 'string' && locale.trim() ? locale.trim() : EMAIL_TEMPLATE_FLOOR_LOCALE;
+      return `${name}@${tag}`;
+    },
+    subject: (key) => {
+      const at = key.lastIndexOf('@');
+      return `Email template '${key.slice(0, at)}' for locale '${key.slice(at + 1)}'`;
+    },
+    consequence: () =>
+      'The runtime keys email templates by name and locale, so only the last of these entries is kept ' +
+      'for that locale and the others are silently dropped.',
+    remedy: () =>
+      'Rename one of them, give each its own `locale` (one entry per locale is an i18n bundle), or merge ' +
+      'them into a single entry.',
+  },
+  books: lastWinsByName('Book', 'books'),
+  positions: lastWinsByName('Position', 'positions'),
+  permissions: lastWinsByName('Permission set', 'permission sets'),
+  capabilities: lastWinsByName('Capability', 'capabilities'),
+  sharingRules: lastWinsByName('Sharing rule', 'sharing rules'),
+  webhooks: lastWinsByName('Webhook', 'webhooks'),
+  hooks: {
+    identity: readEntryName,
+    subject: (name) => `Hook '${name}'`,
+    consequence: () =>
+      'The metadata keeps only the last of these entries under that name, yet every entry\'s handler ' +
+      'is still bound and runs, so what the metadata lists is not what executes.',
+    remedy: RENAME_OR_MERGE,
+  },
+  mappings: lastWinsByName('Mapping', 'mappings'),
+  analyticsCubes: lastWinsByName('Analytics cube', 'analytics cubes'),
+  connectors: lastWinsByName('Connector', 'connectors'),
+  picklists: lastWinsByName('Picklist', 'picklists'),
+  docs: lastWinsByName('Doc', 'docs'),
+  tools: lastWinsByName('Tool', 'tools'),
+  skills: lastWinsByName('Skill', 'skills'),
+  views: {
+    identity: (entry) =>
+      isAggregatedViewContainer(entry)
+        ? deriveViewContainerObject(entry)
+        : readEntryName(entry) ?? deriveViewContainerObject(entry),
+    subject: (object) => `View container '${object}'`,
+    consequence: () =>
+      'The runtime files a `views` container under the object it binds to (`object`, else ' +
+      '`list.data.object`, else `form.data.object`, else its `name`), so these entries occupy one ' +
+      'registry slot and only the last of them is kept in it.',
+    remedy: () =>
+      'Keep one container per object: merge their `list`, `form`, `listViews` and `formViews` into a ' +
+      'single entry.',
+  },
+  apis: {
+    identity: readEntryName,
+    subject: (name) => `API endpoint '${name}'`,
+    consequence: () =>
+      "The runtime indexes endpoints by name, so only the last of these entries is routed and the " +
+      "others' paths answer 404.",
+    remedy: () => 'Give each endpoint its own name.',
+  },
+  apps: lastWinsByName('App', 'apps'),
+  objectExtensions: {
+    identity: (entry) => {
+      if (!entry || typeof entry !== 'object') return undefined;
+      const extend = (entry as { extend?: unknown }).extend;
+      return typeof extend === 'string' && extend ? extend : undefined;
+    },
+    subject: (object) => `Object extension of '${object}'`,
+    consequence: () =>
+      'The runtime applies one extension of a target object per package, so only the last of these ' +
+      "entries' fields register and the others' are silently dropped.",
+    remedy: (object) => `Merge them into a single \`objectExtensions\` entry for '${object}'.`,
+  },
+} satisfies Partial<Record<keyof ObjectStackDefinition, SameStackEntryIdentity>>);
+
+function collectDuplicateEntryErrors(config: ObjectStackDefinition): string[] {
+  const errors: string[] = [];
+  for (const [key, rule] of Object.entries(SAME_STACK_ENTRY_IDENTITY) as [
+    keyof typeof SAME_STACK_ENTRY_IDENTITY,
+    SameStackEntryIdentity,
+  ][]) {
+    const entries: unknown = config[key];
+    if (!Array.isArray(entries)) continue;
+
+    const indicesByIdentity = new Map<string, number[]>();
+    for (const [i, entry] of entries.entries()) {
+      const identity = rule.identity(entry);
+      if (identity === undefined) continue;
+      const list = indicesByIdentity.get(identity) ?? [];
+      list.push(i);
+      indicesByIdentity.set(identity, list);
+    }
+
+    for (const [identity, indices] of indicesByIdentity) {
+      if (indices.length < 2) continue;
+      errors.push(
+        `${rule.subject(identity)} is declared ${indices.length === 2 ? 'twice' : `${indices.length} times`} ` +
+          `in \`${key}\`: ${joinDeclarationOrigins(indices.map((i) => `stack.${key}[${i}]`))}. ` +
+          `${rule.consequence(identity)} ${rule.remedy(identity)}`,
+      );
+    }
+  }
+  return errors;
+}
+
+/**
  * [ADR-0112 · #15963] The envelope every refusal `defineStack` raises shares:
  * `status: 422` — an unprocessable authored entity, not a server fault, the
  * reading {@link StackCrossReferenceError} took from its two precedents — ONE
@@ -2303,8 +2646,8 @@ abstract class StackRefusalError<TIssue = string> extends Error {
  * machine-readable in {@link StackCrossReferenceError.issues}, one entry per
  * finding, which is the structured form of what was previously only
  * newline-joined prose. The family is also WIDER than "undefined object": the
- * same aggregate carries the duplicate-action-key, global-`update`-action and
- * mapping `javascript`-transform findings, so a
+ * same aggregate carries the duplicate-action-key, duplicate-function-name,
+ * global-`update`-action and mapping `javascript`-transform findings, so a
  * `…_UNDEFINED_OBJECT` spelling would be false for those.
  *
  * ⭐ There are TWO raise sites since #18202, one per PASS, and they share this
@@ -2475,6 +2818,23 @@ class StackTriggerCapabilityRequiredError extends StackRefusalError {
 
   constructor(message: string, issues: readonly string[]) {
     super('StackTriggerCapabilityRequiredError', message, issues);
+  }
+}
+
+/**
+ * [ADR-0131 D6 · ADR-0112] A package permits the `unmanaged` install mode
+ * while it carries what an unmanaged install cannot copy —
+ * {@link validateUnmanagedInstallMode}. Spelled in this family's `STACK_*`
+ * vocabulary, one code per raise site; its install-time counterpart is
+ * `UNMANAGED_INSTALL_UNCOPYABLE` (`importUnmanagedPackage`,
+ * `@objectstack/metadata-protocol`), which judges the same body with the same
+ * key classification (`kernel/unmanaged-install.ts`).
+ */
+class StackUnmanagedInstallUncopyableError extends StackRefusalError {
+  readonly code = 'STACK_UNMANAGED_INSTALL_UNCOPYABLE';
+
+  constructor(message: string, issues: readonly string[]) {
+    super('StackUnmanagedInstallUncopyableError', message, issues);
   }
 }
 
@@ -2945,6 +3305,12 @@ function validateCrossReferences(
   // stack that declares two globals under one name collides on exactly the
   // same runtime key, and this check needs no object to resolve against.
   errors.push(...collectDuplicateActionKeyErrors(config));
+  // Same placement, same reason: two `functions` array entries under one name
+  // collide in the one function namespace whether or not there are objects.
+  errors.push(...collectDuplicateFunctionNameErrors(config));
+  // Same placement, same reason: two entries of one named collection under one
+  // identity occupy one registry slot whether or not there are objects.
+  errors.push(...collectDuplicateEntryErrors(config));
   // Same placement, same reason: a global `operation: 'update'` action is
   // wrong whether or not the stack declares any objects.
   errors.push(...collectGlobalUpdateActionErrors(config));
@@ -4094,6 +4460,16 @@ function buildDefinedStack(
     const header = `defineStack trigger capability validation failed (${triggerErrors.length} issue${triggerErrors.length === 1 ? '' : 's'}):`;
     const lines = triggerErrors.map((e) => `  ✗ ${e}`);
     throw new StackTriggerCapabilityRequiredError(`${header}\n\n${lines.join('\n')}`, triggerErrors);
+  }
+
+  const unmanagedErrors = validateUnmanagedInstallMode(data);
+  if (unmanagedErrors.length > 0) {
+    const header = `defineStack unmanaged install-mode validation failed (${unmanagedErrors.length} issue${unmanagedErrors.length === 1 ? '' : 's'}):`;
+    const lines = unmanagedErrors.map((e) => `  ✗ ${e}`);
+    const hint = '\n\n`manifest.installModes` permits \'unmanaged\', which copies every item of this package into the '
+      + 'environment ledger or copies nothing (ADR-0131 D6). Remove \'unmanaged\' from `manifest.installModes`, or move '
+      + 'what cannot be copied out of this package.';
+    throw new StackUnmanagedInstallUncopyableError(`${header}\n\n${lines.join('\n')}${hint}`, unmanagedErrors);
   }
 
   // Post-parse and advisory only: this call has no effect on what is

@@ -1912,6 +1912,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.bundle-member.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.bundle-member.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.bundle-member.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/sys-metadata-repository.contract.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3112,11 +3127,6 @@
       "pinned": 1
     },
     {
-      "file": "packages/plugins/plugin-security/src/bootstrap-seed-round-trips.test.ts",
-      "verb": "update",
-      "pinned": 1
-    },
-    {
       "file": "packages/plugins/plugin-security/src/check-only-write-scope.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3169,16 +3179,6 @@
     {
       "file": "packages/plugins/plugin-security/src/controlled-by-parent-write-member.test.ts",
       "verb": "findOne",
-      "pinned": 1
-    },
-    {
-      "file": "packages/plugins/plugin-security/src/declared-permission-reload-projection.test.ts",
-      "verb": "findOne",
-      "pinned": 1
-    },
-    {
-      "file": "packages/plugins/plugin-security/src/declared-permission-reload-projection.test.ts",
-      "verb": "update",
       "pinned": 1
     },
     {
@@ -3292,11 +3292,6 @@
       "pinned": 1
     },
     {
-      "file": "packages/plugins/plugin-security/src/per-organization-catalog.test.ts",
-      "verb": "update",
-      "pinned": 1
-    },
-    {
       "file": "packages/plugins/plugin-security/src/permission-denied-user-copy.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3317,22 +3312,12 @@
       "pinned": 1
     },
     {
-      "file": "packages/plugins/plugin-security/src/permission-set-drift.test.ts",
-      "verb": "update",
-      "pinned": 1
-    },
-    {
       "file": "packages/plugins/plugin-security/src/permission-set-duplicate-name-refusal.test.ts",
       "verb": "findOne",
       "pinned": 1
     },
     {
       "file": "packages/plugins/plugin-security/src/permission-set-duplicate-name-refusal.test.ts",
-      "verb": "update",
-      "pinned": 1
-    },
-    {
-      "file": "packages/plugins/plugin-security/src/permission-set-name-collision.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3468,11 +3453,6 @@
     },
     {
       "file": "packages/plugins/plugin-security/src/vama-write-path-convergence.test.ts",
-      "verb": "update",
-      "pinned": 1
-    },
-    {
-      "file": "packages/plugins/plugin-security/src/walled-platform-bucket-diagnostic.test.ts",
       "verb": "update",
       "pinned": 1
     },

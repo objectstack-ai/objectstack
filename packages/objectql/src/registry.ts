@@ -2024,6 +2024,22 @@ function collectBundle(
 }
 
 /**
+ * [#22877] `entries` narrowed to ONE member of their bundle, order kept. An
+ * entry's member is its discriminator value, or the canonical member for an
+ * item that declares none — the value {@link SchemaRegistry.registerItem} keys
+ * it by. `member` is a discriminator value as a caller names it (`'zh-CN'`); a
+ * blank one names the canonical member, as `itemDiscriminator` reads a body.
+ */
+function entriesOfMember(
+  entries: readonly BundleEntry[],
+  disc: { field: string; canonical: string },
+  member: string,
+): BundleEntry[] {
+  const wanted = member.trim() || disc.canonical;
+  return entries.filter((e) => (discriminatorValue(e.item, disc.field) || disc.canonical) === wanted);
+}
+
+/**
  * `schema` without the field `name` — `schema` itself, by reference, when it
  * does not carry one. Never mutates its input.
  */
@@ -4594,8 +4610,13 @@ export class SchemaRegistry {
    *   1. bare-key runtime/DB overlay (ADR-0005 sanctioned override) — unchanged
    *   2. the `currentPackageId` composite entry (prefer-local)
    *   3. first composite match (legacy first-registered-wins fallback)
+   *
+   * @param member - [#22877] For a type whose identity is a pair
+   *   ({@link ITEM_KEY_DISCRIMINATORS}), the bundle member to answer, as its
+   *   discriminator value (`'zh-CN'`); omitted, the canonical member. Ignored
+   *   for every other type, which has no members.
    */
-  getItem<T>(type: string, name: string, currentPackageId?: string): T | undefined {
+  getItem<T>(type: string, name: string, currentPackageId?: string, member?: string): T | undefined {
     // Special handling for 'object' and 'objects' types - use objectContributors
     if (type === 'object' || type === 'objects') {
       return this.getObject(name) as unknown as T | undefined;
@@ -4606,15 +4627,22 @@ export class SchemaRegistry {
 
     // [#7730] A discriminated type's name addresses a BUNDLE, so every tier
     // below is a group rather than a single key. The tiers themselves are
-    // unchanged (overlay → prefer-local → first composite); within a tier the
-    // canonical member wins, which is the locale `sendTemplate` falls back to.
-    // A caller that needs a specific member reads the bundle from
-    // `listItems(type)` and picks on the discriminator — this API takes a name
-    // and can only answer about the name.
+    // unchanged (overlay → prefer-local → first composite).
+    //
+    // [#22877] A bare-name read answers the CANONICAL member — the one the
+    // `/meta` by-name doors address when no member is named — wherever it
+    // sits in that tier order. It used to take the first tier that held ANY
+    // member and pick canonical-first only inside it, so an overlay of a
+    // second locale alone (a template customized in `zh-CN` only) answered a
+    // read that named no member. Only a bundle with no canonical member at
+    // all still answers its first member, as it always did. A named `member`
+    // answers that member, in the same tier order, or nothing.
     const disc = ITEM_KEY_DISCRIMINATORS[type];
     if (disc) {
       const { bare, local, other } = collectBundle(collection, name, disc, currentPackageId);
-      return ([...bare, ...local, ...other][0]?.item as T) ?? undefined;
+      const tiers = [...bare, ...local, ...other];
+      if (member !== undefined) return (entriesOfMember(tiers, disc, member)[0]?.item as T) ?? undefined;
+      return ((entriesOfMember(tiers, disc, disc.canonical)[0] ?? tiers[0])?.item as T) ?? undefined;
     }
 
     // A bare-key entry (a runtime/DB overlay rehydrated by restoreMetadataFromDb)
@@ -4655,8 +4683,12 @@ export class SchemaRegistry {
    * overlay row hydrated into the plain key must never be able to mask
    * it (that masking is exactly the "registry pollution" bug where a
    * locked app's `_lock` read back as undefined after a PUT+GET).
+   *
+   * @param member - [#22877] As on {@link getItem}: one bundle member's
+   *   artifact, for a type whose identity is a pair. Omitted, the bundle's
+   *   artifact canonical-first, as before.
    */
-  getArtifactItem<T>(type: string, name: string, currentPackageId?: string): T | undefined {
+  getArtifactItem<T>(type: string, name: string, currentPackageId?: string, member?: string): T | undefined {
     if (type === 'object' || type === 'objects') {
       // [ADR-0029 D9.6] Artifact identity is read from the OWNER contributor's
       // layer, NEVER from the merged body. The merged body deliberately keeps
@@ -4687,10 +4719,11 @@ export class SchemaRegistry {
     const disc = ITEM_KEY_DISCRIMINATORS[type];
     if (disc) {
       const { bare, local, other } = collectBundle(collection, name, disc, currentPackageId);
-      for (const { item } of [...local, ...other]) {
+      const narrow = (entries: BundleEntry[]) => (member === undefined ? entries : entriesOfMember(entries, disc, member));
+      for (const { item } of narrow([...local, ...other])) {
         if (isCodeArtifactBody(item)) return item as T;
       }
-      for (const { item } of bare) {
+      for (const { item } of narrow(bare)) {
         if (isCodeArtifactBody(item) && (!currentPackageId || item._packageId === currentPackageId)) return item as T;
       }
       return undefined;
@@ -4743,24 +4776,49 @@ export class SchemaRegistry {
    * onto the shadow (ADR-0010 §3.3), so a stamped `_packageId` does not
    * mean the plain entry IS the artifact registration; artifact loaders
    * always register under a composite key.
+   *
+   * @param member - [#22877] For a type whose identity is a pair, the ONE
+   *   bundle member whose shadow to lift, as its discriminator value. Named,
+   *   only that member's shadow goes, and only when the package ships that
+   *   member [#23074]: a packaged artifact of the MEMBER remains, so the
+   *   member stays resolvable. Omitted, the bundle's whole shadow group, when
+   *   any member's artifact remains, as before.
    */
-  removeRuntimeShadow(type: string, name: string): boolean {
+  removeRuntimeShadow(type: string, name: string, member?: string): boolean {
     const collection = this.metadata.get(type);
     if (!collection) return false;
 
     // [#7730] For a discriminated type the shadow sits at `name@<discriminator>`
     // — nothing is ever stored under the plain name — so the plain-key test
-    // would silently answer "no shadow" for every email template. The overlay
-    // layer is keyed by name alone (`sys_metadata` is unique on type+name+org),
-    // so the shadow group is swept as one, exactly as the delete event
-    // addresses it.
+    // would silently answer "no shadow" for every email template.
+    //
+    // [#22877] The overlay store now keys a row by its member
+    // (`sys_metadata.bundle_member`), so a by-name reset removes ONE member's
+    // row and the heal that follows it names that member: resetting `zh-CN`
+    // must leave the `en-US` overlay registered, because its row is still
+    // stored and still served. Sweeping the group, as this did while the
+    // store kept one row per name, dropped every other member's overlay until
+    // the next boot. A caller naming no member keeps the group sweep, the
+    // shape `unregisterItem` takes for a withdrawal by name.
     const disc = ITEM_KEY_DISCRIMINATORS[type];
     if (disc) {
       const { bare, local, other } = collectBundle(collection, name, disc);
-      if (bare.length === 0) return false;
-      const artifact = [...local, ...other].find(({ item }) => item?._packageId && item._packageId !== 'sys_metadata');
+      const shadows = member === undefined ? bare : entriesOfMember(bare, disc, member);
+      if (shadows.length === 0) return false;
+      // [#23074] A named member's OWN artifact, the test this tier has always
+      // made for a name: a shadow is lifted only where a packaged artifact
+      // takes its place. An overlay of a member the package does NOT ship has
+      // none, so this tier declines, and the heal's last tier retires the
+      // entry (`removeOverlayEntry`): the protocol grafts the artifact
+      // envelope onto the shipped member alone, so that overlay is registered
+      // as the tenant row it is and the retirement takes it. (#22877 stage 2
+      // lifted it here on ANY member's artifact, because the bundle's envelope
+      // grafted onto it made the retirement refuse it as code.) The group
+      // sweep, naming no member, keeps the bundle's artifact, any member's.
+      const artifacts = member === undefined ? [...local, ...other] : entriesOfMember([...local, ...other], disc, member);
+      const artifact = artifacts.find(({ item }) => item?._packageId && item._packageId !== 'sys_metadata');
       if (!artifact) return false;
-      for (const { key } of bare) {
+      for (const { key } of shadows) {
         collection.delete(key);
         this.log(`[Registry] Removed runtime shadow ${type}: ${key} (artifact ${artifact.item._packageId} restored)`);
       }
@@ -4816,9 +4874,11 @@ export class SchemaRegistry {
    * package-stamped item can land here; unregistering shipped code that the
    * overlay delete never touched would be a worse bug than the one this fixes.
    *
+   * @param member - [#22877] As on {@link removeRuntimeShadow}: the ONE bundle
+   *   member whose entry to retire; omitted, the whole overlay group.
    * @returns whether an entry was removed.
    */
-  removeOverlayEntry(type: string, name: string): boolean {
+  removeOverlayEntry(type: string, name: string, member?: string): boolean {
     const collection = this.metadata.get(type);
     if (!collection) return false;
 
@@ -4827,11 +4887,12 @@ export class SchemaRegistry {
     // finds nothing and the deleted overlay would keep being served for the
     // life of the process — the very residue #5079 removed. The refusal is
     // still per entry: a bundle member that IS a packaged artifact stays.
+    // [#22877] …and a named member retires that member's entry only.
     const disc = ITEM_KEY_DISCRIMINATORS[type];
     if (disc) {
       const { bare } = collectBundle(collection, name, disc);
       let removed = false;
-      for (const { key, item } of bare) {
+      for (const { key, item } of member === undefined ? bare : entriesOfMember(bare, disc, member)) {
         if (isCodeArtifactBody(item)) continue;
         collection.delete(key);
         this.log(`[Registry] Removed overlay entry ${type}: ${key} (no layer serves it any more)`);

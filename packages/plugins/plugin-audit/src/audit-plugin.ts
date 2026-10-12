@@ -181,6 +181,32 @@ function provisionFailureLine(objectName: string): string {
 }
 
 /**
+ * [#22984] Whether the engine's `ObjectQLPlugin` resolved `skipSchemaSync` (the
+ * option, else `OS_SKIP_SCHEMA_SYNC=1`). `ObjectQLPlugin.init()` publishes that
+ * value on the engine instance as an undeclared property, read here with the same
+ * optional-probe posture `provisionSystemTables` uses for `getDriverForObject`:
+ * an engine nothing published it on (a test double, a foreign engine) reads as
+ * not set. ⛔ Never a second read of the environment: the option and the env var
+ * must not disagree between the engine's boot and this plugin's.
+ */
+function bootSchemaSyncSkipped(engine: IDataEngine): boolean {
+  return (engine as unknown as { skipSchemaSync?: unknown }).skipSchemaSync === true;
+}
+
+/**
+ * [#22984] The ONE line `provisionSystemTables` prints when that flag is set —
+ * at `info`, see "Why the flag skips this provisioning" on that method.
+ */
+function provisionSkippedLine(objectNames: readonly string[]): string {
+  return (
+    `AuditPlugin: ${objectNames.join(', ')} NOT provisioned at boot — the boot's schema sync is skipped ` +
+    "(`skipSchemaSync` / OS_SKIP_SCHEMA_SYNC=1), declaring this deployment's DDL managed out-of-band, so this " +
+    'plugin issues none either. `os migrate apply` creates any that are missing (`os migrate plan` lists them ' +
+    'as `create_table`).'
+  );
+}
+
+/**
  * AuditPlugin
  *
  * Registers the sys_audit_log / sys_activity / sys_comment / sys_comment_reaction
@@ -537,10 +563,30 @@ export class AuditPlugin implements Plugin {
    * "Degradation log levels" sends to `error`, with the consequence and the
    * fix in the first line. Both remedies the line names were measured to
    * create a missing table once the driver fault is gone: a restart (this
-   * method runs on every boot) and `os migrate apply` (`os migrate plan` lists
-   * it as `create_table`). `OS_SKIP_SCHEMA_SYNC` is NOT named: this method
-   * issues its DDL whether or not that flag is set, so the flag cannot make
-   * this failure deliberate.
+   * method runs on every boot that runs DDL) and `os migrate apply` (`os migrate
+   * plan` lists it as `create_table`). The line is only ever printed on a boot
+   * that runs DDL: under `OS_SKIP_SCHEMA_SYNC` this method issues none (see "Why
+   * the flag skips this provisioning" below). The flag is still not named as a
+   * fix here: it creates nothing, it only stops the attempt. Where the driver
+   * also refused the engine's own boot sync of the same table, that sync's
+   * `Schema sync FAILED for object` line, which this one points at, already
+   * names the flag for a deployment that meant to manage DDL out-of-band.
+   *
+   * ## Why the flag skips this provisioning (#22984)
+   *
+   * `skipSchemaSync` / `OS_SKIP_SCHEMA_SYNC=1` declares a deployment's DDL
+   * managed out-of-band ("Use after running migrations manually"), and the
+   * engine's boot honours it. This method is boot-time DDL too, so it honours
+   * the same declaration: it reads the value `ObjectQLPlugin` resolved, from
+   * the engine (`bootSchemaSyncSkipped`), and when it is set it returns
+   * before any DDL. It issues no existence probe either, because the flag
+   * protects a cold-start budget. It says so once, at `info`, naming what it did
+   * not provision and why. Not `warn`: nothing is degraded, because the operator
+   * declared this. If a table is in fact missing, the audit writers report the
+   * missing-table failure at `error` on the first write that needs it, and
+   * `os migrate apply`, the documented path, was measured to create all four
+   * tables. `syncObjectSchema` itself stays ungated, because it is also how a
+   * runtime publish gives a new object its table.
    *
    * ## Why this method reports where each table landed (#4887)
    *
@@ -566,6 +612,13 @@ export class AuditPlugin implements Plugin {
    * different problems, and the log now distinguishes them.
    */
   private async provisionSystemTables(engine: IDataEngine, ctx: PluginContext): Promise<void> {
+    const objects = [SysAuditLog, SysActivity, SysComment, SysCommentReaction];
+    // [#22984] FIRST: a deployment that declared its DDL managed out-of-band
+    // gets none from here either. See "Why the flag skips this provisioning".
+    if (bootSchemaSyncSkipped(engine)) {
+      ctx.logger.info(provisionSkippedLine(objects.map((obj) => obj.name)));
+      return;
+    }
     // `syncObjectSchema` lives on the concrete ObjectQL engine, not the
     // IDataEngine contract; engines/drivers without on-demand DDL (e.g. an
     // in-memory test double) simply skip provisioning.
@@ -594,7 +647,7 @@ export class AuditPlugin implements Plugin {
 
     const placements: string[] = [];
     const offDefault: string[] = [];
-    for (const obj of [SysAuditLog, SysActivity, SysComment, SysCommentReaction]) {
+    for (const obj of objects) {
       try {
         await sync.call(engine, obj.name);
       } catch (err) {

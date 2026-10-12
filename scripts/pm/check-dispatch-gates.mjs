@@ -64,18 +64,29 @@
  * only decides which tier a run gets:
  *
  *   a dev box, no flag          `--self-test --fast`     the fast tier, what a delivery runs
- *   `--slow` on argv            `--self-test`            both tiers, on demand
- *   `GITHUB_ACTIONS` is `true`  `--self-test`            both tiers, what CI runs
+ *   `--slow` on argv            `--self-test`            both tiers, on demand (CI included)
+ *   CI, a PR or a queue build   `--self-test --fast`     the fast tier (#22991)
+ *   CI, any other event         `--self-test`            both tiers: `schedule`, `push` to main, a dispatch
  *
- * The CI read is the one environment read this file makes, and its failure
- * direction is the SAFE one: an unset variable where it should be set buys a
- * shorter run that still prints which tier it was, never a quiet one; a set
- * variable on a dev box buys the full battery, loud. `lint.yml` runs this gate
- * with no argument, so the slow tier stays wired in CI without a workflow edit
- * and without a second family for the derivation to name. The tier chosen and
- * the reason are printed before the spawn, and the wall clock after it names
- * the tier it measured. The fast tier fits a quiet box's foreground cap with
- * room to spare; the detached form above stays the form for both tiers.
+ * "CI" is `GITHUB_ACTIONS` set to `true`; the event is `GITHUB_EVENT_NAME`.
+ * The fast tier on CI is a CLOSED list of two events, `pull_request` and
+ * `merge_group` — the path every change waits on — under the #22991 ruling:
+ * that path runs the fast tier, the slow tier runs on the hourly `schedule`
+ * and on every `push` to main, so every case still runs at least daily
+ * (#22076's constraint) and a slow-tier red is a main red. Every other CI
+ * event keeps both tiers, `workflow_dispatch` included: the ruling moved the
+ * slow tier off those two events and no others, and a new trigger nobody
+ * thought about lands on the full battery rather than on the shorter one.
+ *
+ * Those two reads are the only environment reads this file makes, and their
+ * failure direction is the SAFE one: an unset variable where it should be set
+ * buys a shorter run on a dev box, or the full battery on CI, and either one
+ * prints which tier it was and why — never a quiet run. `lint.yml` runs this
+ * gate with no argument, so the tier follows the event without a workflow
+ * edit and without a second family for the derivation to name. The tier chosen
+ * and the reason are printed before the spawn, and the wall clock after it
+ * names the tier it measured. The fast tier fits a quiet box's foreground cap
+ * with room to spare; the detached form above stays the form for both tiers.
  *
  * ## The exit contract, and why the kill branch does not keep its old code
  *
@@ -321,18 +332,45 @@ const SELF_TEST_CHILD_FLAG = '--self-test-child';
 /** The flag that runs this file's own battery instead of the tool's. */
 const SELF_TEST_FLAG = '--self-test';
 
-/** The flag that asks for both tiers off CI; without it a dev box runs the fast tier. */
+/**
+ * The flag that asks for both tiers wherever the event would pick the fast one — a dev box,
+ * or a CI run on one of FAST_TIER_EVENTS below; it is the manual override in both places.
+ */
 const SLOW_TIER_FLAG = '--slow';
 
 /**
- * Which tier this run gets, and why — one read of argv and one of the
+ * The CI events that run the FAST tier (#22991): the PR and merge-queue path every change
+ * waits on. A closed list on purpose, so the failure direction stays the safe one — an event
+ * that is not on it (`schedule`, `push` to main, `workflow_dispatch`, a trigger added later)
+ * runs both tiers. The header's tier table argues the ruling this encodes.
+ */
+const FAST_TIER_EVENTS = Object.freeze(['pull_request', 'merge_group']);
+
+/**
+ * Which tier this run gets, and why — one read of argv and two of the
  * environment, decided here so the spawn below and its announcement cannot
  * disagree. Not exported: this file is a CLI, and the self-test drives the
  * decision through spawned children that echo the argv they were given.
  */
 function tierOfThisRun({ argv = process.argv.slice(2), env = process.env } = {}) {
   if (argv.includes(SLOW_TIER_FLAG)) return { args: [], word: 'both tiers', why: `${SLOW_TIER_FLAG} on argv` };
-  if (env.GITHUB_ACTIONS === 'true') return { args: [], word: 'both tiers', why: 'GITHUB_ACTIONS is true — the CI run owes the slow tier' };
+  if (env.GITHUB_ACTIONS === 'true') {
+    const event = env.GITHUB_EVENT_NAME ?? '';
+    if (FAST_TIER_EVENTS.includes(event)) {
+      return {
+        args: ['--fast'],
+        word: 'the fast tier',
+        why:
+          `GITHUB_EVENT_NAME is ${event} — the PR and merge-queue path runs the fast tier; ` +
+          `the slow tier runs on schedule and on push to main (#22991); ${SLOW_TIER_FLAG} runs both`,
+      };
+    }
+    return {
+      args: [],
+      word: 'both tiers',
+      why: `GITHUB_EVENT_NAME is ${event === '' ? '(unset)' : event} — a CI run off the PR and merge-queue path owes the slow tier`,
+    };
+  }
   return { args: ['--fast'], word: 'the fast tier', why: `the default off CI; ${SLOW_TIER_FLAG} runs both` };
 }
 
@@ -478,10 +516,13 @@ async function selfTest() {
     const redChild = stub('red.mjs', 'process.exit(1);\n');
     const greenChild = stub('green.mjs', 'process.exit(0);\n');
 
+    // Both CI variables are blanked unless a case sets them: this battery itself runs on CI,
+    // where the runner's own `GITHUB_EVENT_NAME` would otherwise leak into every case and decide
+    // the tier the cases below claim to be driving.
     const drive = (childPath, { extra = [], env = {} } = {}) =>
       spawnSync(process.execPath, [SELF, SELF_TEST_CHILD_FLAG, childPath, ...extra], {
         encoding: 'utf8',
-        env: { ...process.env, GITHUB_ACTIONS: '', ...env },
+        env: { ...process.env, GITHUB_ACTIONS: '', GITHUB_EVENT_NAME: '', ...env },
       });
 
     const killed = drive(killedChild);
@@ -491,20 +532,42 @@ async function selfTest() {
     // The tier decision, driven against a child that echoes the argv it was given.
     const echoChild = stub('echo.mjs', "console.log(process.argv.slice(2).join(' '));\nprocess.exit(0);\n");
     const offCi = drive(echoChild);
-    const onCi = drive(echoChild, { env: { GITHUB_ACTIONS: 'true' } });
     const slowAsked = drive(echoChild, { extra: [SLOW_TIER_FLAG] });
+    const onCi = (event, extra = []) =>
+      drive(echoChild, { extra, env: { GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: event } });
+    const ranFast = (r) =>
+      r.status === 0 && (r.stdout ?? '').trim() === '--self-test --fast' && r.stderr.includes('running the fast tier');
+    const ranBoth = (r) =>
+      r.status === 0 && (r.stdout ?? '').trim() === '--self-test' && r.stderr.includes('running both tiers');
+    t('off CI with no flag the child runs the FAST tier — the argv it received says so', ranFast(offCi));
+    // The #22991 event switch, one case per event lint.yml is triggered by, plus the two that
+    // decide its failure direction: an event nobody listed, and no event at all. ⛔ The fast
+    // events are spelled HERE, never read from FAST_TIER_EVENTS: a loop over the constant under
+    // test registers no case at all when the constant is emptied, and goes green over exactly
+    // the regression it exists to catch (measured: that ablation exited 0 before this line).
+    for (const event of ['pull_request', 'merge_group']) {
+      const r = onCi(event);
+      t(
+        `⭐ on CI a ${event} run gets the FAST tier, and says which event decided it`,
+        ranFast(r) && r.stderr.includes(`GITHUB_EVENT_NAME is ${event}`),
+      );
+    }
+    for (const event of ['schedule', 'push']) {
+      const r = onCi(event);
+      t(
+        `⭐ on CI a ${event} run gets BOTH tiers — the slow tier's daily home under the #22991 ruling`,
+        ranBoth(r) && r.stderr.includes(`GITHUB_EVENT_NAME is ${event}`),
+      );
+    }
     t(
-      'off CI with no flag the child runs the FAST tier — the argv it received says so',
-      offCi.status === 0 && (offCi.stdout ?? '').trim() === '--self-test --fast' && offCi.stderr.includes('running the fast tier'),
+      '…and so does workflow_dispatch: the ruling moved the slow tier off the PR and queue path, and nothing else',
+      ranBoth(onCi('workflow_dispatch')),
     );
-    t(
-      `⭐ under GITHUB_ACTIONS=true the child runs BOTH tiers — the slow tier stays wired in CI without a workflow edit`,
-      onCi.status === 0 && (onCi.stdout ?? '').trim() === '--self-test' && onCi.stderr.includes('running both tiers'),
-    );
-    t(
-      `…and ${SLOW_TIER_FLAG} asks for both tiers off CI, on demand`,
-      slowAsked.status === 0 && (slowAsked.stdout ?? '').trim() === '--self-test' && slowAsked.stderr.includes('running both tiers'),
-    );
+    t('…and an event the list never named runs BOTH tiers — the safe direction, loud', ranBoth(onCi('a_trigger_added_later')));
+    const noEvent = onCi('');
+    t('…and a CI run with no event at all runs BOTH tiers and says the event was unset', ranBoth(noEvent) && noEvent.stderr.includes('(unset)'));
+    t(`${SLOW_TIER_FLAG} on a pull_request run still asks for both tiers — the manual override reaches CI too`, ranBoth(onCi('pull_request', [SLOW_TIER_FLAG])));
+    t(`…and ${SLOW_TIER_FLAG} asks for both tiers off CI, on demand`, ranBoth(slowAsked));
 
     t(
       'CONTROL: the killed stub really died by SIGNAL, so the branch under test is the one that ran',
@@ -560,7 +623,7 @@ async function selfTest() {
 
   console.log(
     failures === 0
-      ? '✓ check:pm-dispatch-gates --self-test: the exit contract holds in all three directions, and the tier decision in both.'
+      ? '✓ check:pm-dispatch-gates --self-test: the exit contract holds in all three directions, and the tier decision off CI and per CI event.'
       : `✗ check:pm-dispatch-gates --self-test: ${failures} case(s) failed.`,
   );
   process.exit(failures === 0 ? 0 : 1);

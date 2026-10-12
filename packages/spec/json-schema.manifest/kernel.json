@@ -45,6 +45,7 @@
     "kernel/GetPackageRequest",
     "kernel/GetPackageResponse",
     "kernel/HotReloadConfig",
+    "kernel/InstallMode",
     "kernel/InstallPackageRequest",
     "kernel/InstallPackageResponse",
     "kernel/InstalledPackage",

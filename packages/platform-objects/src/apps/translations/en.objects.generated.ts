@@ -2948,6 +2948,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           user: "user"
         }
       },
+      bundle_member: {
+        label: "Bundle Member",
+        help: "Bundle member (e.g. the locale of an email template) this overlay row customizes. Null = the canonical member."
+      },
       metadata: {
         label: "Metadata",
         help: "JSON-serialized metadata payload"

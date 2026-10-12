@@ -252,16 +252,21 @@ describe('configSchema ↔ expression-ledger reconciliation (#4027)', () => {
   /**
    * [#20316] The cross-check the census rests on: every slot a declaring
    * channel REQUIRES but the ledger's `required` flag leaves alone (the
-   * non-predicate ones — today `loop.collection` and `map.collection`) is
-   * refused ABSENT by the node-config judge, on a config that is otherwise
-   * whole. Before #20316 all three doors admitted both, and each run refused.
+   * non-predicate ones — today `loop.collection` and `map.collection`, and
+   * since #19939's stage S4 `notify.recipients`, which the notify contract
+   * always required) is refused ABSENT by the node-config judge, on a config
+   * that is otherwise whole. Before #20316 all three doors admitted the first
+   * two, and each run refused.
    */
   it('every channel-required slot outside the predicate role is refused absent by flowNodeConfigRefusals (#20316)', () => {
     const requiredElsewhere = declaredEverywhere().filter((d) => d.required && d.role !== 'predicate');
-    expect(requiredElsewhere.map(key).sort()).toEqual(['loop.collection (value)', 'map.collection (value)']);
+    expect(requiredElsewhere.map(key).sort()).toEqual([
+      'loop.collection (value)', 'map.collection (value)', 'notify.recipients (value)',
+    ]);
     const WHOLE: Record<string, Record<string, unknown>> = {
       loop: { body: { nodes: [{ id: 'b', type: 'assignment', label: 'B' }], edges: [] } },
       map: { flowName: 'child_flow' },
+      notify: { title: 'T' },
     };
     for (const slot of requiredElsewhere) {
       const refusals = flowNodeConfigRefusals(slot.nodeType, WHOLE[slot.nodeType]);
@@ -361,6 +366,38 @@ describe('configSchema ↔ expression-ledger reconciliation (#4027)', () => {
       'screen.fields[].defaultValue (value)',
       'screen.recordId (value)',
     ]);
+  });
+
+  /**
+   * [#19939, stage S4] A `notify` node's computed values — `recipients`,
+   * `templateData.*`, `sourceId` — are `value` slots declared on the spec Zod
+   * channel (`NotifyConfigSchema`, carried by
+   * `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`): the descriptor offers them with no
+   * marker (the Studio form keeps its recipients picker and text inputs), so
+   * neither channel declares one slot twice. Its `actionUrl` is a text slot,
+   * which the ledger does not carry, and its `sourceObject`, `actorId` and
+   * `payload` are literals, which no channel declares.
+   */
+  it('notify declares its three value slots on the spec Zod channel alone, and none on its descriptor', () => {
+    expect(declaredFromDescriptors().filter((d) => d.nodeType === 'notify')).toEqual([]);
+    expect(declaredFromSchemalessConfigs().filter((d) => d.nodeType === 'notify').map(key).sort()).toEqual([
+      'notify.recipients (value)',
+      'notify.sourceId (value)',
+      'notify.templateData.* (value)',
+    ]);
+  });
+
+  /**
+   * [#19939, stage S5] An `http` node's `body` is a `value` slot declared on
+   * the spec Zod channel (`HttpConfigSchema`, carried by
+   * `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`): the descriptor offers `body` as an
+   * untyped input with no marker. Its `url` and `headers` values are text
+   * slots, which the ledger does not carry, and its `method`, `durable`,
+   * `timeoutMs` and `signingSecret` are literals, which no channel declares.
+   */
+  it('http declares its one value slot on the spec Zod channel alone, and none on its descriptor', () => {
+    expect(declaredFromDescriptors().filter((d) => d.nodeType === 'http')).toEqual([]);
+    expect(declaredFromSchemalessConfigs().filter((d) => d.nodeType === 'http').map(key)).toEqual(['http.body (value)']);
   });
 
   it('map keeps `collection` on its descriptor channel beside the new `input.*` — one slot, one channel', () => {

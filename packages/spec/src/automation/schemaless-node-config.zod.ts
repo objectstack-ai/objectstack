@@ -122,6 +122,7 @@ import {
   ScreenConfigSchema,
   UpdateRecordConfigSchema,
 } from './builtin-node-config.zod';
+import { HttpConfigSchema, NotifyConfigSchema } from './io-node-config.zod';
 
 /**
  * What a rejected key on these contracts silently did before #4001 批 9 — and
@@ -650,7 +651,8 @@ export type SchemalessNodeType = keyof typeof SCHEMALESS_NODE_CONFIG_SCHEMAS;
 /**
  * Node types that DO publish a descriptor `configSchema` and still declare an
  * expression slot through a spec Zod, because the descriptor cannot carry the
- * marker (#14149; the CRUD pair since #19938; `map` and `screen` since #19939).
+ * marker (#14149; the CRUD pair since #19938; `map`, `screen`, `notify` and
+ * `http` since #19939).
  *
  * Each of these descriptors declares its map as `additionalProperties: true`
  * — `assignment`'s `assignments`, `create_record` / `update_record`'s
@@ -665,6 +667,12 @@ export type SchemalessNodeType = keyof typeof SCHEMALESS_NODE_CONFIG_SCHEMAS;
  * other two value slots, a field's `defaultValue` and `recordId`, are single
  * values its descriptor offers as unmarked inputs (the Studio form renders
  * them as it always did), so their markers ride `ScreenConfigSchema` too.
+ * `notify`'s value slots — `recipients`, `templateData.*`, `sourceId` — are
+ * offered by its descriptor with no marker (the Studio form keeps its
+ * recipients picker and text inputs), so their markers ride
+ * `NotifyConfigSchema`. `http`'s one value slot, `body`, is offered by its
+ * descriptor as an untyped input with no marker, so its marker rides
+ * `HttpConfigSchema`.
  * `map`'s other expression slot, `collection`, keeps arriving through its
  * descriptor (`xExpression: 'value'` since #19939 made it a value slot; it
  * was `'template'`), and so does `screen`'s
@@ -672,8 +680,8 @@ export type SchemalessNodeType = keyof typeof SCHEMALESS_NODE_CONFIG_SCHEMAS;
  * marker there, so the two channels never declare one slot twice. Kept apart
  * from {@link SCHEMALESS_NODE_CONFIG_SCHEMAS} on purpose: that map means
  * "publishes no descriptor", its other readers (`metadata-protocol`'s
- * reference-site attribution) walk it for that reason, and none of these five
- * is a member of that class.
+ * reference-site attribution) walk it for that reason, and none of these
+ * seven is a member of that class.
  */
 export const LEDGER_DECLARED_NODE_CONFIG_SCHEMAS = {
   assignment: AssignmentConfigSchema,
@@ -681,6 +689,8 @@ export const LEDGER_DECLARED_NODE_CONFIG_SCHEMAS = {
   update_record: UpdateRecordConfigSchema,
   map: MapConfigSchema,
   screen: ScreenConfigSchema,
+  notify: NotifyConfigSchema,
+  http: HttpConfigSchema,
 } as const satisfies Record<string, z.ZodType>;
 
 /** Node types whose expression slots reach the ledger through {@link LEDGER_DECLARED_NODE_CONFIG_SCHEMAS}. */

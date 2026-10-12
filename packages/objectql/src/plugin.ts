@@ -209,6 +209,12 @@ export interface ObjectQLPluginOptions {
    * Falls back to `process.env.OS_SKIP_SCHEMA_SYNC === '1'` when the
    * option is unset, so containers can flip it via their env without a
    * code change.
+   *
+   * The resolved value also governs the other boot-time DDL in the kernel:
+   * plugins that provision their own system tables at `kernel:ready`
+   * (`plugin-audit`, `service-messaging`) read it from the engine and skip
+   * that provisioning too. A runtime publish's `syncObjectSchema` is not
+   * gated: the flag's scope is the boot.
    */
   skipSchemaSync?: boolean;
   /**
@@ -261,6 +267,31 @@ export interface ObjectQLPluginOptions {
     referenceAudit?: Omit<DanglingReferenceAuditOptions, 'signal'> & { enabled?: boolean };
   };
 }
+
+/**
+ * [#22984] The engine-instance property under which {@link ObjectQLPlugin}
+ * publishes the `skipSchemaSync` value it resolved (the option, else
+ * `OS_SKIP_SCHEMA_SYNC === '1'`).
+ *
+ * This plugin's boot sync is not the only boot-time DDL in a composed kernel:
+ * `plugin-audit` and `service-messaging` provision their system tables from a
+ * `kernel:ready` hook through `syncObjectSchema`. They read this value so a
+ * deployment that declared its DDL managed out-of-band gets no table created
+ * behind its back, and they read the value resolved HERE rather than the
+ * environment a second time, so the option and the env var cannot disagree
+ * between the engine's boot and theirs.
+ *
+ * `syncObjectSchema` itself does not consult it: that method is also how a
+ * runtime publish gives a new object its table, and the flag's declared scope
+ * is the boot.
+ *
+ * Deliberately an undeclared own property of the engine instance, not a member
+ * of `ObjectQL` or of the `IDataEngine` contract, so it adds no name to any
+ * declared surface. Readers probe it (`=== true`); an engine nothing published
+ * it on reads as "not set". Both readers pin it against this producer by
+ * booting the real plugin in their own plugin tests.
+ */
+const SKIP_SCHEMA_SYNC_ENGINE_KEY = 'skipSchemaSync';
 
 export class ObjectQLPlugin implements Plugin {
   name = 'com.objectstack.engine.objectql';
@@ -564,7 +595,11 @@ export class ObjectQLPlugin implements Plugin {
         const hostCtx = { ...this.hostContext, logger: ctx.logger };
         this.ql = new ObjectQL(hostCtx);
     }
-    
+
+    // [#22984] Publish the resolved opt-out where boot-time provisioning
+    // plugins read it — see SKIP_SCHEMA_SYNC_ENGINE_KEY.
+    (this.ql as unknown as Record<string, unknown>)[SKIP_SCHEMA_SYNC_ENGINE_KEY] = this.skipSchemaSync;
+
     // Register as provider for Core Kernel Services
     ctx.registerService('objectql', this.ql);
 
