@@ -1433,12 +1433,17 @@ export const FieldSchema = lazySchema(() => {
    * judge it — a field does not know which object declares it — so the
    * refusal of any other target lives on `ObjectSchema` / `ObjectExtensionSchema`
    * (`object.zod.ts`, `refuseForeignTreeReference`), where the own name is known.
+   * Absent, it is written there too (#23065, `materializeTreeSelfReferences`):
+   * the object's parse gives the field its own object's name, and so does the
+   * engine's object registry for a definition that reaches it unparsed, so every
+   * reader of the target — the delete walk that honours `deleteBehavior`,
+   * `$expand`, the write-time reference check — sees an ordinary self-reference.
    */
   reference: z.string().optional().describe(
     'Target object name (snake_case) for lookup/master_detail fields. '
     + 'Required for relationship types. Used by $expand to resolve foreign key IDs into full objects. '
     + 'On a `tree` field it is optional and, if given, must be the declaring object\'s own name — '
-    + 'the object schema refuses any other target.'
+    + 'the object schema refuses any other target, and writes the own name when it is left out.'
   ),
   /**
    * Polymorphic pointer declaration (ADR-0052 §5 — the ActivityPointer model).
@@ -1529,9 +1534,12 @@ export const FieldSchema = lazySchema(() => {
    * #9784 — the `.overwrite` materializes the default ONLY on the reference
    * types where the key has meaning (`lookup` / `tree`; `master_detail` omits
    * it per the #9689 idempotent-materialization ruling). On every other type
-   * the key was inert by construction — the engine reads it exclusively
-   * behind a `master_detail`/`lookup` + `reference` guard — yet the
-   * materialized value shipped in every built artifact as an apparent
+   * the key was inert by construction — the engine's referential delete walk
+   * reads it only on a `master_detail`, `lookup` or `tree` field that carries a
+   * `reference` (the family predicate `statesDeleteSemantics` in
+   * `packages/objectql/src/engine.ts`; a `tree`'s `reference` is its own
+   * object, written by the object's parse when the author leaves it out) — yet
+   * the materialized value shipped in every built artifact as an apparent
    * explicit declaration (the #4447 shadowing mechanism). A bare `text` /
    * `datetime` / `number` field now parses to output WITHOUT the key; an
    * authored value on any type is preserved verbatim (accept-set unchanged).
@@ -2799,9 +2807,12 @@ export const FieldSchema = lazySchema(() => {
     //
     // #9784 — materialize the default ONLY on reference types. `deleteBehavior`
     // has no meaning on a non-reference field: the engine's
-    // `cascadeDeleteRelations` reaches the key exclusively on
-    // `master_detail`/`lookup` fields carrying a `reference`
-    // (`packages/objectql/src/engine.ts`, the type + `fdef.reference` guards),
+    // `cascadeDeleteRelations` reaches the key only on `master_detail`,
+    // `lookup` and `tree` fields carrying a `reference`
+    // (`packages/objectql/src/engine.ts`: the family predicate
+    // `statesDeleteSemantics` + the carrier guard; a `tree` with no
+    // `reference` carries its own object's name once the object's parse or the
+    // engine's object registry has written it, #23065),
     // so on a `text`/`datetime`/`number` field the materialized value was
     // inert by construction — yet it shipped in every built app artifact,
     // where a default materialized at parse becomes an EXPLICIT declaration
@@ -2813,10 +2824,10 @@ export const FieldSchema = lazySchema(() => {
     // `=== undefined` guard), so stored artifacts from the materializing era
     // stay legal. `tree` (hierarchical reference) keeps materializing with
     // `lookup`: it is in the relational family, where the key states delete
-    // semantics — the conservative byte-identity side of the line. `user` is
-    // stored identically to `lookup` but sits outside today's cascade guard
-    // exactly like `text` does, so it takes the non-reference side; an
-    // authored value there still round-trips.
+    // semantics, and the delete walk reads it there (#22957). `user` is
+    // stored identically to `lookup` but sits outside the delete walk's family
+    // (`master_detail`, `lookup`, `tree`) exactly like `text` does, so it takes
+    // the non-reference side; an authored value there still round-trips.
     if (field.deleteBehavior === undefined && (field.type === 'lookup' || field.type === 'tree')) {
       patch.deleteBehavior = 'set_null';
     }
