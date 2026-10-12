@@ -174,7 +174,7 @@ const result = DiscardPackageDraftsResponseSchema.parse(data);
 | **aiModel** | `string` | optional | AI model that authored the change, when recorded. |
 | **parentCommitId** | `string` | optional | The commit this one chains from, when recorded. |
 | **itemCount** | `number` | ✅ | How many items the commit touched. |
-| **items** | `{ type: string; name: string; existedBefore: boolean; prevVersion: number \| null }[]` | ✅ | The items the commit touched. |
+| **items** | `{ type: string; name: string; member?: string; existedBefore: boolean; … }[]` | ✅ | The items the commit touched. |
 | **createdAt** | `string` | optional | When the commit was made (ISO-8601 string), when recorded. |
 
 

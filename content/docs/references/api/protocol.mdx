@@ -2108,7 +2108,7 @@ Install package response
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **drafts** | `{ type: string; name: string; label: string \| Record<string, string> \| null; packageId: string \| null; … }[]` | ✅ | Every pending draft visible to the caller, one row per item. |
+| **drafts** | `{ type: string; name: string; member?: string; label: string \| Record<string, string> \| null; … }[]` | ✅ | Every pending draft visible to the caller, one row per item. |
 
 ### Nested Shape: `ListDraftsResponse.drafts[number]`
 
@@ -2116,6 +2116,7 @@ Install package response
 | :--- | :--- | :--- | :--- |
 | **type** | `string` | ✅ | Metadata type name (canonical singular). |
 | **name** | `string` | ✅ | Item name. |
+| **member** | `string` | optional | The bundle member this draft is, for a metadata type whose identity is a pair (today only `email_template`, identified by `(name, locale)`): its discriminator value (`zh-CN`), and the canonical member spelled out (`en-US`). Present on every draft of such a type, so two members of one name are two entries; absent for a type whose identity is its name alone. Pass it back as the by-name doors' `member` selector (`?member=`) to read, publish or discard this draft. |
 | **label** | `string \| Record<string, string> \| null` | ✅ | The draft body's own top-level `label`, as authored: a plain string or an inline locale map (`I18nLabel`), resolved by the reader. `null` when the body declares none, or none this shape admits — never the item name standing in for it. |
 | **packageId** | `string \| null` | ✅ | Package the draft is bound to, `null` for a package-less draft. |
 | **updatedAt** | `string \| null` | ✅ | Last-touch timestamp of the draft row (ISO-8601 string), `null` when the row recorded none. |
