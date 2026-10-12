@@ -7050,14 +7050,17 @@ jobs:
       # request, the group's `base_sha` in the queue, the full list (with a
       # `::warning::`) whenever either cannot be resolved. It also unions in
       # the packages whose tests read the changed files across a package
-      # boundary (`check-cross-package-test-inputs.mjs --union-into`): their
-      # typecheck programs compile those same test files, so the test radius
-      # covers what tsc imports across the boundary too (lint's and cli's tests
-      # import examples/app-showcase, which no `^build` edge reaches). It is a
-      # SUPERSET for tsc — it also names files tests only read from disk, so
-      # the repo-wide scans of spec, core, types, objectql and runtime put those
-      # five on most package diffs — and that is the price of not keeping a
-      # second, tsc-only declaration that nothing would hold honest.
+      # boundary (`check-cross-package-test-inputs.mjs --union-into`, whose
+      # gate holds every such test declared): their typecheck programs compile
+      # those same test files, so a diff that reaches a package only through
+      # such an import (lint's and cli's tests import examples/app-showcase,
+      # which no `^build` edge reaches) still schedules that package, as the
+      # full run did. It is a SUPERSET for tsc — it also names files tests only
+      # read from disk, so the repo-wide scans of spec, core, types, objectql
+      # and runtime put those five on most package diffs (each replays in
+      # seconds when its own hash is in the restored seed) — and that is the
+      # price of not keeping a second, tsc-only declaration that nothing would
+      # hold honest.
       #
       # ⛔ ROOT-LEVEL CHANGES MEAN EVERYTHING IS AFFECTED. `turbo ls --affected`
       # handles some root files and not others. Measured on turbo 2.11.5 at
@@ -7082,11 +7085,13 @@ jobs:
       # examples included. Every other doubt (no changed-file list, a failed
       # union) falls back to the whole universe, never to a narrower set.
       #
-      # What this does not see, the turbo cache never saw either: a typecheck
-      # verdict that depends on a file outside the package that is neither a
-      # dependency edge, a declared cross-package test input, nor a root file.
-      # `typecheck`'s turbo inputs are package-local, so the same diff replays
-      # a cached green on every event, `schedule` included.
+      # What this does not change, and the cache never promised: `typecheck`'s
+      # turbo inputs are package-local. A package scheduled through the union
+      # or the root rule still replays a cached green when its own hash is in
+      # the restored seed, on every event, `schedule` included — the full run
+      # before this step selected anything behaved the same way. Selection
+      # decides which packages run; the cache still decides which of those
+      # execute.
       - name: Type check workspace packages
         env:
           OS_SHARD_EVENT_NAME: ${{ github.event_name }}
