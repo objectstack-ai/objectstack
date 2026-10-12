@@ -1,5 +1,8 @@
 ---
 '@objectstack/spec': minor
+'@objectstack/driver-sql': patch
+'@objectstack/metadata-core': patch
+'@objectstack/platform-objects': patch
 ---
 
 An `email` field can declare that it identifies a correspondent for inbound mail: `mailAssociation`
@@ -11,3 +14,6 @@ Clause-②: yes (widening)
 - **The door that judges it.** `FieldSchema` refuses the key on any type other than `email`, naming the field's type and the fix (change the type to `email`, or drop the key). Every metadata that parsed before parses unchanged.
 - **Who reads it.** Nothing yet: the mailbox service's ingest is the reader, and it ships separately. Until then `objectstack validate` and `objectstack lint` warn an author who sets it (`liveness-planned-property`) that no mailbox service reads it yet.
 - **Where to author it.** The field designer offers it on email fields as "Match Inbound Mail".
+- **`@objectstack/driver-sql`.** `FIELD_KEY_STORAGE_CLASS` classifies `mailAssociation` as `presentation`: the mailbox service reads it, never `createColumn`, so a declaration on a builtin column name is not reported as discarded storage. No behaviour changes.
+- **`@objectstack/metadata-core`.** `FIELD_REFERENCE_POSITIONS` classifies `mailAssociation` as `keep`: the FLS scrub of a served object definition passes the flag through unchanged, because it names no field.
+- **`@objectstack/platform-objects`.** The field designer's new row carries its label and help text in the metadata-form translation bundles for en, zh-CN, ja-JP and es-ES.
