@@ -294,6 +294,22 @@
 //     such a call never enters that measurement and is still not reported;
 //     widening the population is a different card.
 //
+// ── Payload: a dir the package's own tsconfig excludes holds no test ROOT ───
+//
+// A test file under a directory the package's own `tsconfig.json` excludes is
+// PAYLOAD, not a test of that package, and does not seed the walk. The boundary
+// is the one `check-undeclared-dep-imports.mjs` already reads, imported from
+// there (`tsconfigExcludedDirs`: a literal `exclude` entry inside `src/`, never
+// a glob, so the `**/*.test.ts` most packages exclude is NOT payload). It is
+// how `packages/create-objectstack/src/templates/**` is judged: those files are
+// copied verbatim into a scaffolded project, and the blank template's starter
+// test imports `@objectstack/verify`, a dependency of THAT project, which
+// `create-objectstack`'s own vitest excludes and never runs. An alias for it in
+// this package's config would resolve nothing any run loads.
+//
+// Only the walk's ROOTS move. A real test that imports a payload file still
+// walks into it, because then vitest really loads it.
+//
 // ── The registry, and why it is shaped like this ────────────────────────────
 //
 // `KNOWN_UNALIASED_TEST_IMPORTS` is the measured state of the repo on the day
@@ -339,6 +355,7 @@ import {
   selfTest as workspaceEnumeratorSelfTest,
   workspaceEnumeratorFloorFailures,
 } from './workspace-enumerator.mjs';
+import { tsconfigExcludedDirs } from './check-undeclared-dep-imports.mjs';
 import { tmpdir } from 'node:os';
 import process from 'node:process';
 
@@ -1279,7 +1296,14 @@ function resolveModulePath(baseDir, spec) {
  */
 function testReachableWorkspaceImports(pkg, workspaceNames, crossInto) {
   const files = walkFiles(pkg.dir);
-  const tests = files.filter((f) => TEST_FILE.test(f));
+  // Payload (see the header): a test under a dir the package's own tsconfig
+  // excludes is not one of its tests, so it is not a ROOT of the walk.
+  const payload = tsconfigExcludedDirs(pkg.dir);
+  const inPayload = (f) => {
+    const relFromPkg = relative(pkg.dir, f).split('\\').join('/');
+    return payload.some((p) => relFromPkg === p || relFromPkg.startsWith(`${p}/`));
+  };
+  const tests = files.filter((f) => TEST_FILE.test(f) && !inPayload(f));
   if (tests.length === 0) return null;
 
   const seen = new Set();
@@ -2238,6 +2262,24 @@ function buildFixtureTree() {
     'src/thing.test.ts': "export default 1;\n",
   });
 
+  // (6b) PAYLOAD: the create-objectstack shape. The package's own tsconfig
+  // excludes `src/templates`, so the starter test under it is not one of its
+  // tests and seeds no walk, although it imports an artifact with no alias.
+  fixture(root, 'packages/template-payload', {
+    'package.json': ARTIFACT_MANIFEST('@fx/template-payload'),
+    'tsconfig.json': JSON.stringify({ include: ['src'], exclude: ['src/templates'] }),
+    'src/templates/blank/starter.test.ts': "import { alive } from '@fx/core';\nexport default alive;\n",
+  });
+
+  // (6c) …and its control: the same file, in a package whose tsconfig excludes
+  // only the `**/*.test.ts` GLOB most packages here carry. A glob is not a
+  // payload directory, so this one is still reported.
+  fixture(root, 'packages/glob-excluded-tests', {
+    'package.json': ARTIFACT_MANIFEST('@fx/glob-excluded-tests'),
+    'tsconfig.json': JSON.stringify({ exclude: ['node_modules', 'dist', '**/*.test.ts'] }),
+    'src/templates/blank/starter.test.ts': "import { alive } from '@fx/core';\nexport default alive;\n",
+  });
+
   // ── (7) THE CANARY ────────────────────────────────────────────────────────
   //
   // A byte-for-byte copy of the shape `plugin-audit` and `service-knowledge`
@@ -2723,11 +2765,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the import clause is bounded to ONE statement (#12555)': 11,
   'the declared population must stay READABLE by the dispatch deriver': 11,
   'the declaration must still BE the workspace (#11510)': 22,
+  "the payload boundary: a dir the package's own tsconfig excludes holds no test": 2,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 9;
+const SELF_TEST_BATTERY_FLOOR = 10;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2766,6 +2809,20 @@ function selfTest() {
     expect(!has(bare.failures, 'packages/unreachable'), 'an import no test can reach was treated as a hazard');
     expect(has(bare.failures, 'ENOTDIR'), 'the prefix/ENOTDIR alias trap was not detected');
     expect(has(bare.failures, 'cannot be read statically'), 'a config with spread aliases was read as aliasing nothing');
+
+    // ── the payload boundary ─────────────────────────────────────────────
+    // A test under a dir the package's own tsconfig excludes is payload (the
+    // create-objectstack template), and the control beside it carries the same
+    // file under a GLOB exclusion, which is not payload.
+    battery("the payload boundary: a dir the package's own tsconfig excludes holds no test");
+    expect(
+      !has(bare.failures, 'packages/template-payload'),
+      'a starter test under a tsconfig-excluded dir was walked as a test of the package that ships it',
+    );
+    expect(
+      has(bare.failures, 'packages/glob-excluded-tests'),
+      'a `**/*.test.ts` glob exclusion was read as a payload dir, which would drop the tests of most packages',
+    );
 
     // ── the remediation hint is MEASURED, not a template (#8256) ──────────
     //

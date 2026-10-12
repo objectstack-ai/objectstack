@@ -58,6 +58,19 @@
 // fixtures boot stacks too — `packages/qa/dogfood/test/shared-showcase.ts` is
 // the memoized boot the whole shared-showcase project runs on).
 //
+// ⭐ A directory the package's OWN `tsconfig.json` excludes is PAYLOAD, not a
+// source of that package, and is not read at all. The payload boundary is the
+// one `check-undeclared-dep-imports.mjs` already reads, imported from there
+// (`tsconfigExcludedDirs`: a literal `exclude` entry inside `src/`, never a
+// glob — so the `**/*.test.ts` most packages exclude is NOT payload). It is
+// how `packages/create-objectstack/src/templates/**` is judged: those files are
+// copied verbatim into a scaffolded project, and the blank template's starter
+// test boots THAT project's stack through `@objectstack/verify`, a dependency
+// of the scaffolded project. `create-objectstack`'s own vitest excludes the
+// directory too and never runs it, so a declaration demanded of this package
+// would quiet nothing. The honoured payload directories are printed on the
+// green line.
+//
 // ⭐ COMMENT MASKING IS WHAT MAKES THE PREDICATE HONEST, and it is not a
 // precaution: measured on this tree, `packages/cli` names `@objectstack/verify`
 // and its `bootStack` in EIGHT places, every one of them a comment or docblock
@@ -130,6 +143,7 @@ import { fileURLToPath } from 'node:url';
 import { maskComments, maskCommentsAndLiterals } from './js-comment-mask.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 import { workspacePackageDirs } from './check-console-intercept-disarm.mjs';
+import { tsconfigExcludedDirs } from './check-undeclared-dep-imports.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
@@ -243,10 +257,19 @@ function sourceFiles(dir, out = []) {
 /**
  * Which of S1/S2/S3 this package's own sources satisfy.
  *
+ * A file under a directory the package's own `tsconfig.json` excludes is
+ * payload (see the header) and is not one of its sources.
+ *
+ * @param {string[]} [payload] package-relative payload dirs; read from the
+ *   package's tsconfig when omitted
  * @returns {string[]} the reasons, empty when the package is out of population.
  */
-export function bootSignals(dir) {
-  const files = sourceFiles(dir);
+export function bootSignals(dir, payload = tsconfigExcludedDirs(dir)) {
+  const inPayload = (f) => {
+    const relFromPkg = f.slice(dir.length + 1).split(sep).join('/');
+    return payload.some((p) => relFromPkg === p || relFromPkg.startsWith(`${p}/`));
+  };
+  const files = sourceFiles(dir).filter((f) => !inPayload(f));
   const reasons = [];
   const isTest = (f) => {
     const rest = f.slice(dir.length).split(sep).join('/');
@@ -370,10 +393,14 @@ function describe(verdict, where, levels) {
   );
 }
 
-/** @returns {{findings: string[], vitestPackages: number, selected: Array<[string,string[]]>}} */
+/**
+ * @returns {{findings: string[], vitestPackages: number, selected: Array<[string,string[]]>,
+ *   payload: string[]}} `payload` is every honoured payload dir, repo-relative
+ */
 export function scan(root, levels = readRegistryLogLevels(root)) {
   const findings = [];
   const selected = [];
+  const payloadDirs = [];
   let vitestPackages = 0;
   for (const dir of workspacePackageDirs(root)) {
     let manifest;
@@ -387,7 +414,9 @@ export function scan(root, levels = readRegistryLogLevels(root)) {
     if (!scripts.some((s) => typeof s === 'string' && VITEST_SCRIPT_RE.test(s))) continue;
     vitestPackages += 1;
 
-    const reasons = bootSignals(dir);
+    const payload = tsconfigExcludedDirs(dir);
+    for (const p of payload) payloadDirs.push(`${rel(root, dir)}/${p}`);
+    const reasons = bootSignals(dir, payload);
     if (reasons.length === 0) continue;
     const name = rel(root, dir);
     selected.push([name, reasons]);
@@ -444,7 +473,7 @@ export function scan(root, levels = readRegistryLogLevels(root)) {
       );
     }
   }
-  return { findings, vitestPackages, selected };
+  return { findings, vitestPackages, selected, payload: payloadDirs };
 }
 
 function rel(root, path) {
@@ -461,7 +490,7 @@ function main() {
     console.error(`check-registry-log-declared: MEASUREMENT FAILED — ${error.message}`);
     process.exit(2);
   }
-  const { findings, vitestPackages, selected } = result;
+  const { findings, vitestPackages, selected, payload } = result;
   if (vitestPackages === 0) {
     console.error(
       'check-registry-log-declared: MEASUREMENT FAILED — the scan found ZERO vitest-running '
@@ -492,6 +521,10 @@ function main() {
       + `(${levels.join('/')}).`,
   );
   for (const [name, reasons] of selected) console.log(`    ${name} — ${reasons.join('; ')}`);
+  console.log(
+    `  payload, not read (a dir the package's own tsconfig.json excludes): `
+      + `${payload.length > 0 ? payload.join(', ') : 'none'}`,
+  );
 }
 
 // ── self-test ───────────────────────────────────────────────────────────────
@@ -566,13 +599,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'projects config with only a ROOT env is RED (root is inert for projects)': 1,
   'projects config declaring in every project passes': 1,
   'a template-literal spelling of the key does not count': 1,
+  "a test under a dir the package's tsconfig excludes is payload and does not SELECT": 1,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too. This pin is also half of
 // the duplicate-label refusal: two rows sharing a label collapse to ONE key in
 // the literal above, so the roster falls below this number.
-const SELF_TEST_BATTERY_FLOOR = 16;
+const SELF_TEST_BATTERY_FLOOR = 17;
 
 // The key an assertion is filed under when a row carries no label. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -799,6 +833,42 @@ function selfTest() {
       expectSelected: 1,
       expectText: 'declares no OS_REGISTRY_LOG',
     },
+    {
+      // The create-objectstack shape: a template's starter test is payload.
+      // Package `a` excludes the directory that holds it, so it is SILENT.
+      // Package `b` carries the same file with no exclusion, so a predicate
+      // that stopped honouring the boundary selects a SECOND package rather
+      // than nothing changing. Package `c` excludes `**/*.test.ts`, the glob
+      // most packages here put in their tsconfig: a glob is not a payload
+      // directory, so a predicate that read it as one would lose `c` too.
+      name: "a test under a dir the package's tsconfig excludes is payload and does not SELECT",
+      packages: {
+        a: {
+          'package.json': TEST_MANIFEST,
+          'tsconfig.json': JSON.stringify({ exclude: ['src/templates'] }),
+          'src/templates/blank/starter.test.ts':
+            `import { bootStack } from '@objectstack/verify';\nexport const s = bootStack;\n`,
+          'vitest.config.ts': `export default { test: { globals: true } };\n`,
+        },
+        b: {
+          'package.json': TEST_MANIFEST,
+          'src/templates/blank/starter.test.ts':
+            `import { bootStack } from '@objectstack/verify';\nexport const s = bootStack;\n`,
+          'vitest.config.ts': `export default { test: { globals: true } };\n`,
+        },
+        c: {
+          'package.json': TEST_MANIFEST,
+          'tsconfig.json': JSON.stringify({ exclude: ['node_modules', 'dist', '**/*.test.ts'] }),
+          'src/x.test.ts': BOOTS,
+          'vitest.config.ts': `export default { test: { globals: true } };\n`,
+        },
+      },
+      expectFindings: 2,
+      expectSelected: 2,
+      expectText: 'packages/b/vitest.config.ts declares no OS_REGISTRY_LOG',
+      expectSelectedNames: ['packages/b', 'packages/c'],
+      expectPayload: ['packages/a/src/templates'],
+    },
   ];
 
   // The ledger this self-test's floor is evaluated against (#13489).
@@ -814,7 +884,7 @@ function selfTest() {
     const caseDir = mkdtempSync(join(tmpdir(), 'ci-reglog-'));
     try {
       buildWorkspace(caseDir, testCase.packages);
-      const { findings, vitestPackages, selected } = scan(caseDir, LEVELS);
+      const { findings, vitestPackages, selected, payload } = scan(caseDir, LEVELS);
       const problems = [];
       if (findings.length !== testCase.expectFindings) {
         problems.push(`expected ${testCase.expectFindings} finding(s), got ${findings.length}`);
@@ -824,6 +894,15 @@ function selfTest() {
       }
       if (testCase.expectText && !findings.some((f) => f.includes(testCase.expectText))) {
         problems.push(`no finding contains '${testCase.expectText}'`);
+      }
+      if (testCase.expectSelectedNames !== undefined) {
+        const names = selected.map(([n]) => n).sort().join(', ');
+        if (names !== testCase.expectSelectedNames.join(', ')) {
+          problems.push(`expected selected [${testCase.expectSelectedNames.join(', ')}], got [${names}]`);
+        }
+      }
+      if (testCase.expectPayload !== undefined && payload.join(', ') !== testCase.expectPayload.join(', ')) {
+        problems.push(`expected payload [${testCase.expectPayload.join(', ')}], got [${payload.join(', ')}]`);
       }
       if (
         testCase.expectVitestPackages !== undefined
