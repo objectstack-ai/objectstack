@@ -541,8 +541,11 @@ async function selfTest() {
       r.status === 0 && (r.stdout ?? '').trim() === '--self-test' && r.stderr.includes('running both tiers');
     t('off CI with no flag the child runs the FAST tier — the argv it received says so', ranFast(offCi));
     // The #22991 event switch, one case per event lint.yml is triggered by, plus the two that
-    // decide its failure direction: an event nobody listed, and no event at all.
-    for (const event of FAST_TIER_EVENTS) {
+    // decide its failure direction: an event nobody listed, and no event at all. ⛔ The fast
+    // events are spelled HERE, never read from FAST_TIER_EVENTS: a loop over the constant under
+    // test registers no case at all when the constant is emptied, and goes green over exactly
+    // the regression it exists to catch (measured: that ablation exited 0 before this line).
+    for (const event of ['pull_request', 'merge_group']) {
       const r = onCi(event);
       t(
         `⭐ on CI a ${event} run gets the FAST tier, and says which event decided it`,
