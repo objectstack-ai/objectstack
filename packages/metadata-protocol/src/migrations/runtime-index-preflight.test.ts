@@ -9,7 +9,7 @@ import {
     runtimeIndexProbes,
     type RuntimeIndexPreflight,
 } from './runtime-index-preflight.js';
-import { buildOverlayDuplicateProbeSql } from './overlay-index.js';
+import { buildOverlayDuplicateProbeSql, buildOverlayDuplicateProbeSqlWithoutMember } from './overlay-index.js';
 import {
     buildSysSettingDuplicateProbeSql,
     buildSysSettingDuplicateProbeSqlMysql,
@@ -81,7 +81,7 @@ describe('kernel:ready index pre-flight (#8725)', () => {
         // ── sys_metadata: two ACTIVE package-less overlays for one key ─────
         db.exec(`CREATE TABLE sys_metadata (
             id TEXT PRIMARY KEY, type TEXT, name TEXT, organization_id TEXT,
-            package_id TEXT, state TEXT
+            package_id TEXT, state TEXT, bundle_member TEXT
         );`);
         const meta = db.prepare(
             'INSERT INTO sys_metadata (id, type, name, organization_id, package_id, state) VALUES (?,?,?,?,?,?)',
@@ -132,6 +132,8 @@ describe('kernel:ready index pre-flight (#8725)', () => {
                     name: 'crm_case.board',
                     organization_id: null,
                     package_id_key: '',
+                    // [#22877] A row of a name-only type is the canonical member.
+                    bundle_member_key: '',
                 },
                 rowCount: 2,
             },
@@ -160,13 +162,13 @@ describe('kernel:ready index pre-flight (#8725)', () => {
             migration: 'ensureMetadataOverlayIndexes',
             table: 'sys_metadata',
             rowScope: "state = 'active'",
-            keyParts: ['type', 'name', 'organization_id', "COALESCE(package_id, '')"],
+            keyParts: ['type', 'name', 'organization_id', "COALESCE(package_id, '')", "COALESCE(bundle_member, '')"],
         });
         expect(by('idx_sys_metadata_overlay_draft', results)).toMatchObject({
             migration: 'ensureMetadataOverlayIndexes',
             table: 'sys_metadata',
             rowScope: "state = 'draft'",
-            keyParts: ['type', 'name', 'organization_id', "COALESCE(package_id, '')"],
+            keyParts: ['type', 'name', 'organization_id', "COALESCE(package_id, '')", "COALESCE(bundle_member, '')"],
         });
         // `sys_setting` has no lifecycle column: the declaration means every row.
         expect(by('uniq_sys_setting_organization_id_namespace_key_scope_user_id', results).rowScope).toBeNull();
@@ -255,5 +257,57 @@ describe('kernel:ready index pre-flight (#8725)', () => {
         });
         // …and one unreadable index never aborts the rest of the inventory.
         expect(by('idx_sys_metadata_overlay_active', results).status).toBe('blocked');
+    });
+
+    it('a store this version has not booted yet (no member column) is still listed — every row the empty member', async () => {
+        // [#22877] The member part is added by the next SERVING boot's schema
+        // sync, and this command boots read-only. Against the table as an
+        // earlier version left it, the full listing cannot run; the member-less
+        // one does, reading every row as the empty member the column will hold,
+        // so the duplicate that will block the rebuild is still reported — and
+        // the entry carries the statement that ran.
+        db.exec('DROP TABLE sys_metadata');
+        db.exec(`CREATE TABLE sys_metadata (
+            id TEXT PRIMARY KEY, type TEXT, name TEXT, organization_id TEXT,
+            package_id TEXT, state TEXT
+        );`);
+        const meta = db.prepare(
+            'INSERT INTO sys_metadata (id, type, name, organization_id, package_id, state) VALUES (?,?,?,?,?,?)',
+        );
+        meta.run('m1', 'view', 'crm_case.board', null, null, 'active');
+        meta.run('m2', 'view', 'crm_case.board', null, null, 'active');
+        meta.run('m4', 'view', 'crm_case.retired', null, null, 'archived');
+        meta.run('m5', 'view', 'crm_case.retired', null, null, 'archived');
+        // Control: the full listing really cannot run on this table.
+        expect(() => db.prepare(buildOverlayDuplicateProbeSql('active')).all()).toThrow(/bundle_member/);
+
+        const results = await collectRuntimeIndexPreflight(exec);
+
+        const active = by('idx_sys_metadata_overlay_active', results);
+        expect(active).toMatchObject({
+            status: 'blocked',
+            duplicateSql: buildOverlayDuplicateProbeSqlWithoutMember('active'),
+            groups: [
+                {
+                    key: {
+                        type: 'view',
+                        name: 'crm_case.board',
+                        organization_id: null,
+                        package_id_key: '',
+                        bundle_member_key: '',
+                    },
+                    rowCount: 2,
+                },
+            ],
+        });
+        const draft = by('idx_sys_metadata_overlay_draft', results);
+        expect(draft).toMatchObject({
+            status: 'clear',
+            groups: [],
+            duplicateSql: buildOverlayDuplicateProbeSqlWithoutMember('draft'),
+        });
+        expect(JSON.stringify(results)).not.toContain('crm_case.retired');
+        // The descriptor fields other than the statement are the migration's own.
+        expect(active.keyParts).toEqual(runtimeIndexProbes()[0]!.keyParts);
     });
 });
