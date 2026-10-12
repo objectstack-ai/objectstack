@@ -54,7 +54,6 @@ import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import { isExitSignal } from './format.js';
 import { bootSchemaStack } from './schema-migrate.js';
 import { buildDataMigrationPlugins } from './data-migration-plugins.js';
-import MetaResync from '../commands/meta/resync.js';
 import MigrateAccountIssuer from '../commands/migrate/account-issuer.js';
 import MigrateApply from '../commands/migrate/apply.js';
 import MigrateAuditMetadataBodies from '../commands/migrate/audit-metadata-bodies.js';
@@ -146,11 +145,6 @@ const invoke = (command: { run: (argv: string[], opts: { root: string }) => Prom
  * modes it has. The first case below holds this table equal to the source.
  */
 const CALLERS: Record<string, Caller> = {
-  'commands/meta/resync.ts': {
-    run: invoke(MetaResync),
-    noWrite: [{ label: 'meta resync (no --yes)', argv: ['--database-url', '@DB@', '--json'] }],
-    write: [{ label: 'meta resync --yes', argv: ['--yes', '--database-url', '@DB@', '--json'] }],
-  },
   'commands/migrate/account-issuer.ts': {
     run: invoke(MigrateAccountIssuer),
     noWrite: [{ label: 'migrate account-issuer', argv: ['--database-url', '@DB@', '--json'] }],
@@ -309,7 +303,7 @@ interface RunResult {
  * process-global and `emitJson` sets it, so it is saved and restored. The
  * stdout spy is installed before the boot, because a `--json` boot reserves
  * stdout and keeps whatever `process.stdout.write` is at that moment.
- * `os meta resync` ends in `process.exit()`, so that is trapped too.
+ * A command that ends in `process.exit()` is trapped too.
  */
 async function runJson(command: Invoke, argv: string[]): Promise<RunResult> {
   const savedExit = process.exitCode;

@@ -41,6 +41,7 @@ import { applyConversionsToFlow } from '../conversions/apply';
 import {
   AssignmentValueSchema,
   CreateRecordConfigSchema,
+  FlowCollectionSlotSchema,
   FlowValueSlotSchema,
   UpdateRecordConfigSchema,
 } from './builtin-node-config.zod';
@@ -69,6 +70,16 @@ function configAtEntry(path: string, value: unknown): Record<string, unknown> {
   if (rest.length === 0) return { [head!]: value };
   if (head!.endsWith('[]')) return { [head!.slice(0, -2)]: [{ name: 'k', ...configAtEntry(rest.join('.'), value) }] };
   return { [head!]: rest[0] === '*' ? { k: value } : configAtEntry(rest.join('.'), value) };
+}
+
+/**
+ * {@link configAtEntry}, on a config the entry's slot is READ on: an entry with
+ * `onlyWithKey` (`loop.collection`, read only with a `body` — #19939) gets that
+ * key too.
+ */
+function configForEntry(entry: { readonly path: string; readonly onlyWithKey?: string }, value: unknown): Record<string, unknown> {
+  const config = configAtEntry(entry.path, value);
+  return entry.onlyWithKey === undefined ? config : { ...config, [entry.onlyWithKey]: { nodes: [], edges: [] } };
 }
 
 /** The one refusal a string draws, or a failure naming what came back. */
@@ -548,10 +559,12 @@ describe('`flowNodeValueTemplateRefusals` — every value position of a node, lo
       ['input.ownerId', 'subflow input value', '{record.project.owner}'],
       ['input.note', 'subflow input value', 'Task "{record.title}" is done.'],
     ]);
-    // `map.collection` keeps the dialect until its own stage; `map.input` does not.
+    // [#19939] RE-JUDGED IN PLACE: `map.collection` kept the dialect until its
+    // own stage, S3; it is refused beside `map.input` now, in ledger order.
     expect(flowNodeValueTemplateRefusals('map', {
       flowName: 'child', collection: '{rows}', input: { row: '{item}', tags: ['{item.tag}'] },
     }).map((r) => [r.path, r.label])).toEqual([
+      ['collection', 'map collection'],
       ['input.row', 'map item input value'],
       ['input.tags[0]', 'map item input value'],
     ]);
@@ -560,6 +573,81 @@ describe('`flowNodeValueTemplateRefusals` — every value position of a node, lo
     // Each names the envelope the executor now evaluates, at the key itself.
     const [refusal] = flowNodeValueTemplateRefusals('subflow', { flowName: 'child', input: { list: '{rows}' } });
     expect(refusal!.message).toContain("{ dialect: 'cel', source: 'rows' }");
+  });
+});
+
+/**
+ * [#19939, stage S3] A `loop`'s (with a `body`) or a `map`'s `collection` is the
+ * list the node iterates. Only the value itself is judged — an inline array's
+ * strings are data, never interpolated — and the remedy is the collection's
+ * own: the list it must evaluate to, and a guard answering `[]` where the
+ * template's absent token failed the node.
+ */
+describe('a loop\'s or a map\'s collection: the refusal names the list it must evaluate to', () => {
+  const BODY = { nodes: [{ id: 'b', type: 'noop', label: 'B' }], edges: [] };
+  const COLLECTIONS = [
+    ['loop', { body: BODY }, 'loop collection'],
+    ['map', { flowName: 'child' }, 'map collection'],
+  ] as const;
+  const one = (nodeType: string, base: Record<string, unknown>, collection: unknown) => {
+    const refusals = flowNodeValueTemplateRefusals(nodeType, { ...base, collection });
+    expect(refusals, JSON.stringify(collection)).toHaveLength(1);
+    return refusals[0]!;
+  };
+
+  it.each(COLLECTIONS)('%s: a whole path is that path in an envelope, guarded to iterate nothing', (nodeType, base, label) => {
+    const refusal = one(nodeType, base, '{rows}');
+    expect([refusal.path, refusal.label, refusal.source]).toEqual(['collection', label, '{rows}']);
+    expect(refusal.message.startsWith(VALUE_SLOT_TEMPLATE_REFUSAL)).toBe(true);
+    expect(refusal.message).toContain("Write `{rows}` as { dialect: 'cel', source: 'rows' }.");
+    expect(refusal.message).toContain('`collection` must evaluate to a list, and anything else fails the node');
+    expect(refusal.message).toContain('a guard answering `[]` iterates nothing instead: `has(vars.rows) ? vars.rows : []`.');
+    // It reads clean: the value slots' `null` guard would fail the node here too, so it is never offered.
+    expect(refusal.message).not.toContain('? vars.rows : null');
+    expect(refusal.message).not.toContain('the guarded form writes `null`');
+  });
+
+  it('a dotted path is guarded a step at a time; a path with an index or a `$` head gets no guard', () => {
+    expect(one('map', { flowName: 'child' }, '{record.items}').message)
+      .toContain('`has(vars.record) && has(vars.record.items) ? vars.record.items : []`');
+    const indexed = one('map', { flowName: 'child' }, '{lists.0}').message;
+    expect(indexed).toContain("{ dialect: 'cel', source: 'lists[0]' }");
+    expect(indexed).not.toContain('a guard answering');
+    expect(one('map', { flowName: 'child' }, '{$loopItems}').message).toContain('source: \'vars["$loopItems"]\'');
+  });
+
+  it.each([['text with holes', '{a}{b}'], ['an expression', '{x + 1}'], ['a date macro', '{TODAY()}'], ['the run user', '{$User.Id}']])(
+    'any other token (%s) never computed a list — the refusal says so instead of spelling one', (_kind, value) => {
+      const message = one('map', { flowName: 'child' }, value).message;
+      expect(message).toContain(`\`${value}\` never computed a list`);
+      expect(message).toContain('so every run failed at this node');
+      expect(message).not.toContain('isoDate');
+      expect(message).not.toContain('current_user');
+    },
+  );
+
+  it('an inline array is data — its strings are not judged; a bare name and an envelope are not this judge\'s', () => {
+    for (const collection of [['{x}', 'y'], [{ dialect: 'cel', source: 'x' }], 'rows', { dialect: 'cel', source: 'rows' }]) {
+      expect(flowNodeValueTemplateRefusals('map', { flowName: 'child', collection }), JSON.stringify(collection)).toEqual([]);
+    }
+  });
+
+  it('a body-less `loop` — the legacy flat-graph form — is not judged at all', () => {
+    expect(flowNodeValueTemplateRefusals('loop', { collection: '{rows}' })).toEqual([]);
+    expect(flowNodeValueTemplateRefusals('loop', { collection: '{rows}', body: null })).toEqual([]);
+  });
+
+  it('the contract refuses the same token with the same words, and a bare name naming its envelope', () => {
+    const judged = one('map', { flowName: 'child' }, '{rows}').message;
+    const parsed = FlowCollectionSlotSchema.safeParse('{rows}');
+    expect(parsed.success).toBe(false);
+    expect(parsed.error!.issues.map((i) => i.message)).toEqual([judged]);
+    const bare = FlowCollectionSlotSchema.safeParse('rows');
+    expect(bare.success).toBe(false);
+    expect(bare.error!.issues[0]!.message).toContain("A variable's bare name, `rows`, is not one");
+    expect(bare.error!.issues[0]!.message).toContain("`{ dialect: 'cel', source: 'rows' }`");
+    expect(FlowCollectionSlotSchema.safeParse('$loopItems').error!.issues[0]!.message)
+      .toContain('`{ dialect: \'cel\', source: \'vars["$loopItems"]\' }`');
   });
 });
 
@@ -589,7 +677,7 @@ describe('a callee\'s input map: the refusal says what the guarded form hands th
   });
 
   it('map: the same sentence, for each item\'s child flow', () => {
-    const message = at('map', 'input', 'row', '{item}', { flowName: 'child', collection: '{rows}' });
+    const message = at('map', 'input', 'row', '{item}', { flowName: 'child', collection: { dialect: 'cel', source: 'rows' } });
     expect(message).toContain('`input.row` is each item\'s child flow\'s input variable `row`.');
     expect(message).toContain('wins over that default');
   });
@@ -629,7 +717,7 @@ describe('a callee\'s input map: the refusal says what the guarded form hands th
     const valueEntries = FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.role === 'value');
     expect(valueEntries.filter((e) => CALLEE.has(`${e.nodeType} ${e.path}`))).toHaveLength(3);
     for (const entry of valueEntries) {
-      const refusals = flowNodeValueTemplateRefusals(entry.nodeType, configAtEntry(entry.path, '{x}'));
+      const refusals = flowNodeValueTemplateRefusals(entry.nodeType, configForEntry(entry, '{x}'));
       expect(refusals, `${entry.nodeType} ${entry.path}`).toHaveLength(1);
       const carries = /is (the child flow|each item's child flow|the function)'s/.test(refusals[0]!.message);
       expect(carries, `${entry.nodeType} ${entry.path}`).toBe(CALLEE.has(`${entry.nodeType} ${entry.path}`));
@@ -734,7 +822,7 @@ describe('a screen\'s value slots: the refusal says what the client is served in
     const valueEntries = FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.role === 'value');
     expect(valueEntries.filter((e) => SCREEN.has(`${e.nodeType} ${e.path}`))).toHaveLength(3);
     for (const entry of valueEntries) {
-      const [refusal] = flowNodeValueTemplateRefusals(entry.nodeType, configAtEntry(entry.path, '{x}'));
+      const [refusal] = flowNodeValueTemplateRefusals(entry.nodeType, configForEntry(entry, '{x}'));
       const carries = /prefills (the object form|this screen field)|names the record an `edit` form opens/.test(refusal!.message);
       expect(carries, `${entry.nodeType} ${entry.path}`).toBe(SCREEN.has(`${entry.nodeType} ${entry.path}`));
     }

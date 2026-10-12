@@ -4131,6 +4131,16 @@ export class ObjectQL implements IObjectQLEngine {
   }>();
 
   /**
+   * [#22855] The units {@link runOpenedUnit} published, keyed by their handle.
+   * The value is the very entry {@link txStore} holds, so the one write that
+   * closes a unit answers both of its readers: the ambient one finds the entry
+   * empty, and {@link buildDriverOptions} looks an explicitly threaded handle up
+   * here ({@link isClosedUnitHandle}). Weak, so a finished unit's handle stays
+   * collectable.
+   */
+  private readonly openedUnits = new WeakMap<object, { transaction: unknown }>();
+
+  /**
    * [#22305] The {@link CascadeDeleteSet} of the by-id cascade delete in
    * progress, ambient for the same reason as {@link txStore}: the cascade
    * recurses through the public `delete()`, and each level must judge its
@@ -4692,14 +4702,16 @@ export class ObjectQL implements IObjectQLEngine {
    * untouched (#7413); only the boundary around them moves.
    *
    * No unit — the pre-#22782 path — when one is open (ambient or threaded: the
-   * caller's unit decides), when `object` is off the default driver
+   * caller's unit decides; a threaded handle whose unit has closed is not open,
+   * #22855 `isClosedUnitHandle`), when `object` is off the default driver
    * (`transaction()` covers that one alone and would refuse the write), or when
    * that driver has no transactions (ADR-0119 D1; asking would only warn).
    * `SummaryRecomputeError` means "the records WERE written": it is rethrown
    * after the commit, never through the rollback.
    */
   private opensAfterAbortUnit(event: 'afterInsert' | 'afterUpdate' | 'afterDelete', object: string, context: ExecutionContext | undefined): boolean {
-    if (context?.transaction !== undefined || this.txStore.getStore()?.transaction !== undefined) return false;
+    const threaded = context?.transaction;
+    if ((threaded !== undefined && !this.isClosedUnitHandle(threaded)) || this.txStore.getStore()?.transaction !== undefined) return false;
     if ((context as { skipAutomations?: unknown } | undefined)?.skipAutomations) return false;
     const aborting = (this.hooks.get(event) ?? []).some((entry) =>
       entry.meta && !entry.meta.async && (entry.meta.onError ?? 'abort') === 'abort' && hookMatchesObject(entry, object));
@@ -6106,9 +6118,12 @@ export class ObjectQL implements IObjectQLEngine {
   private buildDriverOptions(object: string, execCtx?: ExecutionContext, base?: any): any {
     // The open transaction may arrive explicitly via the context, or ambiently
     // via txStore when an internal query runs during a transactional write
-    // (ADR-0034). Explicit wins; ambient is the safety net.
-    const tx = execCtx?.transaction !== undefined
-      ? execCtx.transaction
+    // (ADR-0034). Explicit wins; ambient is the safety net. [#22855] A handle
+    // whose unit has closed is no handle: work the unit started and did not
+    // await runs unenrolled (`runOpenedUnit`).
+    const explicit = execCtx?.transaction;
+    const tx = explicit !== undefined && !this.isClosedUnitHandle(explicit)
+      ? explicit
       : this.txStore.getStore()?.transaction;
     // [#5351] SAME-ORIGIN GATE. A transaction handle is a property of ONE
     // driver's connection; handing it to a different driver does not put that
@@ -19517,16 +19532,11 @@ export class ObjectQL implements IObjectQLEngine {
     }
     const trx = await drv.beginTransaction();
     const trxCtx = { ...(baseContext ?? {}), transaction: trx };
-    const ambientEntry: { transaction: unknown; scope?: TransactionScope } =
-      { transaction: trx, scope: this.newTransactionScope(driver!) };
     try {
       // Run the callback inside the ambient transaction store so internal
-      // queries during writes reuse this transaction's connection (ADR-0034).
-      // [#22782] CLOSED once the callback settles, before the commit: work it
-      // started and did not await (an `async: true` hook) inherits this store,
-      // ran on the finished handle and lost its write. Now it runs unenrolled.
-      const result = await this.txStore.run(ambientEntry, () => callback(trxCtx, { owned: true }))
-        .finally(() => { ambientEntry.transaction = undefined; ambientEntry.scope = undefined; });
+      // queries during writes reuse this transaction's connection (ADR-0034),
+      // CLOSED once the callback settles, before the commit (#22782, #22855).
+      const result = await this.runOpenedUnit(trx, driver!, () => callback(trxCtx, { owned: true }));
       if (drv.commit) await drv.commit(trx);
       else if (drv.commitTransaction) await drv.commitTransaction(trx);
       return result;
@@ -19543,6 +19553,45 @@ export class ObjectQL implements IObjectQLEngine {
       // comes back as the same reference.
       throw redactPropagatedDriverFault(err);
     }
+  }
+
+  /**
+   * [#22782, #22855] Run `body`, the callback of a unit just opened on `owner`
+   * with handle `trx`. This is the ONE place both transaction surfaces
+   * ({@link transaction} and `ScopedContext.transaction`) publish a unit and
+   * close it again.
+   *
+   * Published: the entry goes into {@link txStore} (ADR-0034) for the body's
+   * lifetime, carrying its owner (#4619). Internal queries during writes reuse
+   * this connection, and a nested `transaction()` on either surface joins it.
+   *
+   * Closed once `body` settles, BEFORE the caller commits or rolls back. Work
+   * the body started and did not await (an `async: true` hook) holds the
+   * handle two ways: ambiently, through this entry, and explicitly, threaded
+   * into the callback's context and from there into the hook's `ctx.api`. That
+   * work used to run on the finished handle and lose its write ("Transaction
+   * query already complete"). Emptying the entry ends the ambient way;
+   * {@link openedUnits} ends the explicit one, because
+   * {@link buildDriverOptions} treats a closed unit's handle as absent. The
+   * work then runs unenrolled, on its own connection, as outside any unit:
+   * `opensAfterAbortUnit` reads the handle the same way, so such a write opens
+   * the door's own unit when its hooks call for one.
+   *
+   * A primitive handle cannot key {@link openedUnits}, so it keeps only the
+   * ambient half.
+   */
+  private runOpenedUnit<T>(trx: unknown, owner: IDataDriver, body: () => Promise<T>): Promise<T> {
+    const entry: { transaction: unknown; scope?: TransactionScope } =
+      { transaction: trx, scope: this.newTransactionScope(owner) };
+    if (trx !== null && (typeof trx === 'object' || typeof trx === 'function')) this.openedUnits.set(trx, entry);
+    return this.txStore.run(entry, body).finally(() => { entry.transaction = undefined; entry.scope = undefined; });
+  }
+
+  /** [#22855] Is `handle` a unit {@link runOpenedUnit} published whose callback has since settled? */
+  private isClosedUnitHandle(handle: unknown): boolean {
+    if (handle === null || (typeof handle !== 'object' && typeof handle !== 'function')) return false;
+    const entry = this.openedUnits.get(handle);
+    return entry !== undefined && entry.transaction === undefined;
   }
 
   /**
@@ -20389,14 +20438,10 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
   ): Promise<any> {
     const engine = this.engine as any;
     // The engine's ambient transaction store (ADR-0034), reached the `as any`
-    // way this whole class reaches engine internals. One accessor serves both
-    // readers below: the D2 join, and the `run` that publishes a transaction
-    // this call opens.
+    // way this whole class reaches engine internals, for the D2 join below. A
+    // transaction this call opens is published by the engine's own helper.
     const txStore = engine?.txStore as
-      | {
-          getStore(): { transaction: unknown } | undefined;
-          run<R>(s: { transaction: unknown; scope?: unknown }, fn: () => R): R;
-        }
+      | { getStore(): { transaction: unknown } | undefined }
       | undefined;
 
     // ADR-0067 D2 — JOIN an already-open ambient transaction instead of opening
@@ -20454,11 +20499,14 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
     // queries during writes reuse its connection (ADR-0034) — and so a nested
     // `transaction()` on either surface can JOIN it. The store entry also
     // carries WHICH driver owns the transaction (#4619) so the write path can
-    // report a write routed off it; `newTransactionScope` is the engine's,
-    // reached the same `as any` way as `txStore` itself.
-    const scope = engine.newTransactionScope?.(driver);
+    // report a write routed off it. [#22855] Through the engine's ONE unit
+    // helper, `runOpenedUnit`, the one `ObjectQL.transaction` runs its callback
+    // in, reached the same `as any` way as `txStore` itself. It closes the unit
+    // when the callback settles, so work the callback started and did not await
+    // (an `async: true` hook) no longer keeps the finished handle, neither the
+    // ambient one nor the `trxCtx` one threaded above.
     const runIn = <R>(fn: () => Promise<R>): Promise<R> =>
-      txStore ? txStore.run({ transaction: trx, scope }, fn) : fn();
+      typeof engine.runOpenedUnit === 'function' ? engine.runOpenedUnit(trx, driver, fn) : fn();
 
     try {
       // Reached only with no ambient transaction to join, so this call really

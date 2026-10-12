@@ -33,9 +33,8 @@ export {
   DEFAULT_TEMPLATE_LOCALE,
 } from './email-service.js';
 export {
-  createSysEmailTemplateLoader,
-  type TemplateLoaderEngine,
-  type CreateTemplateLoaderOptions,
+  createRegistryEmailTemplateLoader,
+  type EmailTemplateRegistrySources,
 } from './template-loader.js';
 export type {
   EmailServiceOptions,
@@ -107,14 +106,6 @@ export {
   type EmailTransportProvider,
   type ApiKeyEmailProvider,
 } from './transports/index.js';
-export {
-  bootstrapDeclaredEmailTemplates,
-  upsertDeclaredEmailTemplate,
-  deactivateDeclaredEmailTemplate,
-  mapTemplateToRow,
-  EMAIL_TEMPLATE_OBJECT,
-  type BootstrapDeclaredEmailTemplatesResult,
-} from './bootstrap-declared-email-templates.js';
 export {
   sweepStrandedOutbox,
   OUTBOX_OBJECT,

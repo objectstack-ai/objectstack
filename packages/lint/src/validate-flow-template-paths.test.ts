@@ -550,7 +550,7 @@ describe('validateFlowTemplatePaths', () => {
                 type: 'loop',
                 label: 'Each',
                 config: {
-                  collection: '{items}',
+                  collection: { dialect: 'cel', source: 'items' },
                   body: {
                     nodes: [
                       {
@@ -794,7 +794,7 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
           type: 'loop',
           label: 'Each stale case',
           config: {
-            collection: '{staleCases}',
+            collection: { dialect: 'cel', source: 'staleCases' },
             iteratorVariable: 'currentCase',
             body: {
               nodes: [{ id: 'ping', type: 'notify', config: { body: 'Ping {currentCase.owner_id.manager}' } }],
@@ -811,7 +811,33 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
     expect(findings[0].message).toContain('{currentCase.owner_id.manager}');
   });
 
-  it('accepts the bare-name collection spelling loop-node.ts falls back to', () => {
+  // [#19939] RE-JUDGED IN PLACE: this pinned the bare name as "the spelling
+  // loop-node.ts falls back to" — the structured loop never read one (the
+  // interpolator handed the name back and the node failed). Every door refuses
+  // both pre-#19939 spellings now; the rule still reads them, so a flow
+  // carrying one keeps its template-path findings beside that refusal.
+  it.each([['a lone token', '{staleCases}'], ['a bare name', 'staleCases']])(
+    'still resolves a pre-#19939 collection spelling, %s', (_label, collection) => {
+      const findings = validateFlowTemplatePaths(
+        scheduleFlow([
+          FETCH_MANY,
+          {
+            id: 'each',
+            type: 'loop',
+            config: {
+              collection,
+              iteratorVariable: 'currentCase',
+              body: { nodes: [{ id: 'ping', type: 'notify', config: { body: '{currentCase.subjcet}' } }], edges: [] },
+            },
+          },
+        ]),
+      );
+      expect(findings).toHaveLength(1);
+      expect(findings[0].rule).toBe(FLOW_TEMPLATE_UNKNOWN_FIELD);
+    },
+  );
+
+  it('is silent on a collection envelope whose source is not a bare variable name (#19939)', () => {
     const findings = validateFlowTemplatePaths(
       scheduleFlow([
         FETCH_MANY,
@@ -819,15 +845,14 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
           id: 'each',
           type: 'loop',
           config: {
-            collection: 'staleCases',
+            collection: { dialect: 'cel', source: 'staleCases.filter(c, c.priority == 1)' },
             iteratorVariable: 'currentCase',
             body: { nodes: [{ id: 'ping', type: 'notify', config: { body: '{currentCase.subjcet}' } }], edges: [] },
           },
         },
       ]),
     );
-    expect(findings).toHaveLength(1);
-    expect(findings[0].rule).toBe(FLOW_TEMPLATE_UNKNOWN_FIELD);
+    expect(findings).toEqual([]);
   });
 
   // ── shape 3: the trigger root, unchanged ──────────────────────────────────
@@ -946,7 +971,7 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
       scheduleFlow(
         [
           FETCH_MANY,
-          { id: 'loop_cases', type: 'loop', config: { collection: '{staleCases}', iteratorVariable: 'currentCase' } },
+          { id: 'loop_cases', type: 'loop', config: { collection: { dialect: 'cel', source: 'staleCases' }, iteratorVariable: 'currentCase' } },
           { id: 'note', type: 'notify', config: { title: '{currentCase.subject}', body: '{currentCase.subjcet}' } },
         ],
         { variables: [{ name: 'staleCases', type: 'record_collection', isInput: false, isOutput: false }] },
@@ -1047,7 +1072,7 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
             id: 'each',
             type: 'loop',
             config: {
-              collection: '{somethingElse}',
+              collection: { dialect: 'cel', source: 'somethingElse' },
               iteratorVariable: 'currentCase',
               body: { nodes: [{ id: 'ping', type: 'notify', config: { body: '{currentCase.subjcet}' } }], edges: [] },
             },

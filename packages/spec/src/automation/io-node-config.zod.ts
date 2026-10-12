@@ -198,7 +198,7 @@ function notifyTemplateSourceRequired(key: 'title' | 'message'): string {
  *    `configSchema` literal — so requiredness lives here and in the
  *    execute-time guard, not in the form.
  *  - **Localization contract (#9205, ruled 「走 emailTemplates 路线」):**
- *    `template` names a `sys_email_template` bundle
+ *    `template` names an `email_template` bundle
  *    (`EmailTemplateDefinitionSchema`, `system/email-template.zod.ts`), and the
  *    delivery path resolves `(name, locale)` at delivery time via
  *    `IEmailService.sendTemplate({ template, locale })`.
@@ -284,10 +284,10 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
   message: templateExpressionInput(ExpressionSchema, notifyTemplateRefusals('message')).optional()
     .describe('Notification body — the same template input as `title` (a bare string or a `{ dialect: \'template\', source }` envelope), rendered per run with `{{ }}` holes like `title`; not localizable. Only valid with inline `title`, never with `template`.'),
   /**
-   * The localizable content path (#9205): name of a `sys_email_template`
+   * The localizable content path (#9205): name of an `email_template`
    * bundle. Resolved by `(name, locale)` AT DELIVERY TIME —
-   * `IEmailService.sendTemplate({ template, locale })` picks that locale's row
-   * with the documented en-US fallback ladder.
+   * `IEmailService.sendTemplate({ template, locale })` picks that locale's
+   * member with the documented en-US fallback ladder.
    *
    * The `locale` is resolved PER RECIPIENT, after fan-out (maintainer ruling
    * 2026-09-01, #13881): the recipient's own `sys_user.locale` when set, else
@@ -305,7 +305,7 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
    * in this comment only (#22093).
    */
   template: z.string().optional()
-    .describe('Email template name (`sys_email_template.name`, e.g. `crm.large_deal_won`) — the localizable content path: the delivery path resolves `(name, locale)` against sys_email_template at delivery time and renders subject/body from that row. The locale is resolved per recipient, after fan-out: the recipient\'s own `sys_user.locale` when set, else the deployment default locale — so recipients whose personal languages differ receive different rows of the same bundle. The node\'s `payload.locale` is not consulted. Mutually exclusive with inline `title`/`message`, which are the non-localizable path. Read raw — no `{token}` interpolation.'),
+    .describe('Email template name (an `email_template` item\'s `name`, e.g. `crm.large_deal_won`) — the localizable content path: the delivery path resolves `(name, locale)` among the email templates — built-in, declared by an app, or authored in Studio — at delivery time and renders subject/body from that member. The locale is resolved per recipient, after fan-out: the recipient\'s own `sys_user.locale` when set, else the deployment default locale — so recipients whose personal languages differ receive different members of the same bundle. The node\'s `payload.locale` is not consulted. Mutually exclusive with inline `title`/`message`, which are the non-localizable path. Read raw — no `{token}` interpolation.'),
   /**
    * Render context for the referenced template's `{{var}}` holes. Values are
    * interpolated per run (`{record.x}` resolves), so flow state can feed the
@@ -368,10 +368,10 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
       path: ['template'],
       message:
         '`template` cannot be combined with inline `title`/`message` — pick ONE content path: '
-        + '`template` (localizable: resolves `(name, locale)` from sys_email_template at delivery, the locale being '
+        + '`template` (localizable: resolves `(name, locale)` among the email templates at delivery, the locale being '
         + 'each recipient\'s own `sys_user.locale` or the deployment default — resolved per recipient, after fan-out) '
         + 'or inline `title` + `message` (one text for every recipient, not localizable). To localize, keep `template`, move '
-        + 'the text into the template bundle\'s rows, and delete `title`/`message`; runtime precedence would '
+        + 'the text into the template bundle\'s locale members, and delete `title`/`message`; runtime precedence would '
         + 'silently ignore one of them.',
     });
   }
@@ -390,7 +390,7 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
       path: ['title'],
       message:
         'A notify node needs one content source: inline `title` (+ optional `message`), or a `template` '
-        + 'reference resolving a sys_email_template bundle at delivery in each recipient\'s locale '
+        + 'reference resolving an email template bundle at delivery in each recipient\'s locale '
         + '(the recipient\'s own `sys_user.locale` or the deployment default — resolved per recipient, after fan-out). '
         + 'Neither was given, so there is nothing to deliver.',
     });

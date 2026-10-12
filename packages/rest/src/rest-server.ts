@@ -12043,11 +12043,26 @@ export class RestServer {
          *
          * The full wrapper still reaches the operator: every caller logs the
          * whole error object immediately above its `respondError`.
+         *
+         * [#22885] …and the sandbox read is the doors' own now. The runner's
+         * OWN fault (a denied capability, a missing `ctx.api` method, a
+         * budget) carries no `innerMessage`, so the read above let it through
+         * and these arms relayed the runner's diagnostic text. The sentence is
+         * {@link sandboxFaultAnswer}'s, the answer the other hand-built
+         * families give every sandbox fault, so a crash, a declared 5xx and an
+         * own fault read one withheld sentence here as there. ⛔ Only the
+         * SENTENCE: this family's own `500` and `SHARE_*_FAILED` code stay the
+         * recorded exception the write-route ledger names (#22764's
+         * `OWN_FAULT_TERMINAL`), a decision this does not take. The
+         * `innerMessage` read stays for any sandbox origin that answer declines.
          */
-        const sharingFaultMessage = (error: any): string =>
-            typeof error?.innerMessage === 'string' && error.innerMessage
+        const sharingFaultMessage = (error: any): string => {
+            const fault = sandboxFaultAnswer(error);
+            if (fault !== undefined) return nestedRefusalEnvelope(fault).message;
+            return typeof error?.innerMessage === 'string' && error.innerMessage
                 ? INTERNAL_ERROR_MESSAGE
                 : String(error?.message ?? error).slice(0, 500);
+        };
 
         // GET — list shares on a record. [ADR-0111 D5] Management-gated in the
         // service: invisible record → 404, visible-but-not-manager → 403.

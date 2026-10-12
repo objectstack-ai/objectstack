@@ -114,9 +114,9 @@ async function serveInboundHook<R>(
  *  - [#22774] registers the `trigger-api` service, whose
  *    `handleInboundHook(request, hook)` serves the same door from a
  *    web-standard `Request`, for a kernel with no raw app;
- *  - validates hookId + HMAC signature (`x-objectstack-signature`,
- *    GitHub/Stripe style, constant-time) against the flow's start-node
- *    config;
+ *  - validates hookId + HMAC signature (`x-objectstack-signature`, the
+ *    timestamped `t=…,v1=…` form only, constant-time) against the flow's
+ *    start-node config;
  *  - **enqueues** the payload (`queue` service) and ACKs 202 — flow
  *    execution happens on the queue consumer, never in-band with the
  *    inbound request (ADR-0041 §5: boundary triggers must not let a slow

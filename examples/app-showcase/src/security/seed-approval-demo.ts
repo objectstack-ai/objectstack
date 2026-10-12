@@ -18,9 +18,9 @@
  *  - `sys_approval_request` is engine-owned (ADR-0103: get/list only), so a
  *    request can't be inserted through the generic data API either.
  *
- * So we play the admin's part imperatively, exactly like `bind-position-sets.ts`:
- * on `kernel:bootstrapped` (after the security bootstrap has created the
- * position/permission rows and the automation engine is wired) we
+ * So we play the admin's part imperatively: on `kernel:bootstrapped` (after
+ * every `kernel:ready` handler has settled and the automation engine is
+ * wired) we
  *   1. assign the dev-seeded admin to `manager` / `finance` / `legal` so they
  *      are a resolvable approver on every demo request (and can act in the
  *      inbox);

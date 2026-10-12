@@ -1069,7 +1069,8 @@ export default class Compile extends Command {
           try {
             runtimeBundle = await buildRuntimeBundle({
               sourceConfigPath: absolutePath,
-              refs: Object.keys(lowering.functions),
+              callables: lowering.functions,
+              loadedConfig: config,
               outputDir: artifactDir,
             });
             finalBundle.runtimeModule = `./${runtimeBundle.outputFileName}`;

@@ -49,8 +49,8 @@ export const NotificationChannelSchema = lazySchema(() => z.enum([
 // it (this vocabulary is where the confusion kept starting):
 //   - email  — the `email_template` metadata kind, whose ONE canonical schema
 //     is `EmailTemplateDefinitionSchema` (`system/email-template.zod.ts`,
-//     registered in `BUILTIN_METADATA_TYPE_SCHEMAS`), materialized into
-//     `sys_email_template` rows by `plugin-email`. The `EmailTemplateSchema`
+//     registered in `BUILTIN_METADATA_TYPE_SCHEMAS`), read from the registry
+//     by `plugin-email` at every send (no row). The `EmailTemplateSchema`
 //     removed here was the *legacy* shape spec 7.1.0 explicitly demoted when
 //     it resolved that Prime Directive #8 double-declaration, keeping it
 //     "only as an inline sub-shape inside `Notification`" — the holder #4610

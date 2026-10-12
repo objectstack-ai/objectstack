@@ -119,7 +119,7 @@ describe('#15230 — `iteration` is the loop\'s, `branch` is the parallel branch
                 {
                     id: 'each', type: 'loop', label: 'For each row',
                     config: {
-                        collection: '{rows}', iteratorVariable: 'row', indexVariable: 'idx',
+                        collection: { dialect: 'cel', source: 'rows' }, iteratorVariable: 'row', indexVariable: 'idx',
                         body: {
                             nodes: [{
                                 id: 'fan', type: 'parallel', label: 'Fan out',
@@ -190,7 +190,7 @@ describe('#15230 — `iteration` is the loop\'s, `branch` is the parallel branch
                 {
                     id: 'each', type: 'loop', label: 'For each row',
                     config: {
-                        collection: '{rows}', iteratorVariable: 'row',
+                        collection: { dialect: 'cel', source: 'rows' }, iteratorVariable: 'row',
                         body: {
                             nodes: [{
                                 id: 'guard', type: 'try_catch', label: 'Guard',

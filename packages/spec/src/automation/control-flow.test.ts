@@ -33,7 +33,7 @@ describe('canonical construct type ids', () => {
 describe('LoopConfigSchema', () => {
   it('accepts a structured loop container with a body region', () => {
     const parsed = LoopConfigSchema.parse({
-      collection: '{items}',
+      collection: { dialect: 'cel', source: 'items' },
       iteratorVariable: 'item',
       indexVariable: 'i',
       body: {
@@ -46,35 +46,35 @@ describe('LoopConfigSchema', () => {
   });
 
   it('defaults iteratorVariable to "item"', () => {
-    const parsed = LoopConfigSchema.parse({ collection: '{items}' });
+    const parsed = LoopConfigSchema.parse({ collection: { dialect: 'cel', source: 'items' } });
     expect(parsed.iteratorVariable).toBe('item');
   });
 
   it('accepts a legacy flat-graph loop (no body)', () => {
-    const parsed = LoopConfigSchema.parse({ collection: '{tasks}', iteratorVariable: 'currentTask' });
+    const parsed = LoopConfigSchema.parse({ collection: { dialect: 'cel', source: 'tasks' }, iteratorVariable: 'currentTask' });
     expect(parsed.body).toBeUndefined();
   });
 
   it('rejects maxIterations above the engine ceiling', () => {
     expect(() =>
-      LoopConfigSchema.parse({ collection: '{x}', maxIterations: LOOP_MAX_ITERATIONS_CEILING + 1 }),
+      LoopConfigSchema.parse({ collection: { dialect: 'cel', source: 'x' }, maxIterations: LOOP_MAX_ITERATIONS_CEILING + 1 }),
     ).toThrow();
   });
 
-  it('emits the xExpression:"template" marker on `collection` through z.toJSONSchema, so the flow designer renders it as a template', () => {
-    // The marker rides the same `.meta()` → JSON-Schema channel as
-    // `xRef` / `xEnumDeprecated`, telling the flow designer `collection` is an
-    // `interpolate()` `{var}` template (not bare CEL).
+  // [#19939] RE-JUDGED IN PLACE: this pinned the single-brace `'template'`
+  // marker riding the contract to the designer. Stage S3 made `collection` a
+  // value slot: the contract (`FlowCollectionSlotSchema`) publishes the list
+  // or the envelope and carries no marker — the `loop` descriptor declares
+  // `xExpression: 'value'`, one slot on one channel.
+  it('publishes `collection` through z.toJSONSchema as a list or a CEL envelope, with no single-brace marker (#19939)', () => {
     const schema = z.toJSONSchema(LoopConfigSchema, {
       target: 'draft-2020-12',
       io: 'input',
       unrepresentable: 'any',
-    }) as { properties?: { collection?: { xExpression?: unknown; description?: unknown } } };
-    expect(schema.properties?.collection?.xExpression).toBe('template');
-    // description survives alongside the marker (they share one .meta()).
-    expect(schema.properties?.collection?.description).toBe(
-      'Template/variable resolving to the array to iterate (an inline array is accepted)',
-    );
+    }) as { properties?: { collection?: { xExpression?: unknown; description?: unknown; anyOf?: Array<{ type?: unknown }> } } };
+    expect(schema.properties?.collection?.xExpression).toBeUndefined();
+    expect(schema.properties?.collection?.anyOf?.map((arm) => arm.type)).toEqual(['array', 'object']);
+    expect(String(schema.properties?.collection?.description)).toContain('The list the node iterates');
   });
 
   it('accepts an inline array collection — the union map.collection declares', () => {
@@ -217,7 +217,7 @@ describe('validateControlFlow', () => {
           { ...node('start', 'start') },
           {
             ...node('loop1', LOOP_NODE_TYPE),
-            config: { collection: '{items}', iteratorVariable: 'item', body: { nodes: [node('w', 'noop')], edges: [] } },
+            config: { collection: { dialect: 'cel', source: 'items' }, iteratorVariable: 'item', body: { nodes: [node('w', 'noop')], edges: [] } },
           },
         ] as never,
       }),
@@ -231,7 +231,7 @@ describe('validateControlFlow', () => {
           {
             ...node('loop1', LOOP_NODE_TYPE),
             config: {
-              collection: '{items}',
+              collection: { dialect: 'cel', source: 'items' },
               body: { nodes: [node('a'), node('b')], edges: [] }, // two entries, two exits
             },
           },
@@ -243,7 +243,7 @@ describe('validateControlFlow', () => {
   it('ignores legacy flat-graph loops (no body)', () => {
     expect(() =>
       validateControlFlow({
-        nodes: [{ ...node('loop1', LOOP_NODE_TYPE), config: { collection: '{items}', iteratorVariable: 'x' } }] as never,
+        nodes: [{ ...node('loop1', LOOP_NODE_TYPE), config: { collection: { dialect: 'cel', source: 'items' }, iteratorVariable: 'x' } }] as never,
       }),
     ).not.toThrow();
   });
@@ -299,14 +299,14 @@ describe('control-flow strictness — an unknown key is refused, per shape', () 
     const bare = findClosestMatches('itemVariable', LOOP_KEYS, Math.max(2, Math.floor('itemVariable'.length / 3)), 1);
     expect(bare, 'the raw suggester still gets this wrong — that is why the alias exists').toEqual(['indexVariable']);
 
-    const result = LoopConfigSchema.safeParse({ collection: '{tasks}', itemVariable: 'task' });
+    const result = LoopConfigSchema.safeParse({ collection: { dialect: 'cel', source: 'tasks' }, itemVariable: 'task' });
     expect(result.success).toBe(false);
     expect(result.error!.issues[0]!.message).toContain('`itemVariable` → `iteratorVariable`');
     expect(result.error!.issues[0]!.message).not.toContain('indexVariable');
   });
 
   it('Loop: `flowName` is pointed at the `map` node, which is where it is real', () => {
-    const result = LoopConfigSchema.safeParse({ collection: '{tasks}', flowName: 'per_item' });
+    const result = LoopConfigSchema.safeParse({ collection: { dialect: 'cel', source: 'tasks' }, flowName: 'per_item' });
     expect(result.success).toBe(false);
     const message = result.error!.issues[0]!.message;
     expect(message).toContain('`map` node');
@@ -314,7 +314,7 @@ describe('control-flow strictness — an unknown key is refused, per shape', () 
   });
 
   it('Loop: a plain typo still rides the edit-distance fallback', () => {
-    const result = LoopConfigSchema.safeParse({ collection: '{x}', maxIteration: 5 });
+    const result = LoopConfigSchema.safeParse({ collection: { dialect: 'cel', source: 'x' }, maxIteration: 5 });
     expect(result.success).toBe(false);
     expect(result.error!.issues[0]!.message).toContain('`maxIteration` → `maxIterations`');
   });
@@ -364,7 +364,7 @@ describe('control-flow strictness — an unknown key is refused, per shape', () 
     // declared spellings would make every assertion above pass for the wrong
     // reason. These are the showcase/app-todo shapes, verbatim in structure.
     expect(() => LoopConfigSchema.parse({
-      collection: '{tasksToRemind}', iteratorVariable: 'task', indexVariable: 'i',
+      collection: { dialect: 'cel', source: 'tasksToRemind' }, iteratorVariable: 'task', indexVariable: 'i',
       maxIterations: 500, body: { nodes: [node('w', 'noop')], edges: [] },
     })).not.toThrow();
     expect(() => ParallelConfigSchema.parse({
@@ -499,7 +499,7 @@ describe('validateControlFlow and the unknown-key gate meet at the region-slot s
     // Two entries / two exits — a key gate cannot see this, and the message
     // must stay the analysis\'s, not the schema\'s.
     expect(() => validateControlFlow(flowWith({
-      collection: '{items}', body: { nodes: [node('a'), node('b')], edges: [] },
+      collection: { dialect: 'cel', source: 'items' }, body: { nodes: [node('a'), node('b')], edges: [] },
     }))).toThrow(/single-entry/);
   });
 
@@ -507,7 +507,7 @@ describe('validateControlFlow and the unknown-key gate meet at the region-slot s
     let message = '';
     try {
       validateControlFlow(flowWith({
-        collection: '{items}', body: { nodes: [node('a')], edges: [], name: 'inner' },
+        collection: { dialect: 'cel', source: 'items' }, body: { nodes: [node('a')], edges: [], name: 'inner' },
       }));
     } catch (e) { message = (e as Error).message; }
 
@@ -537,14 +537,14 @@ describe('validateControlFlow and the unknown-key gate meet at the region-slot s
   });
 
   it('the guard still ignores legacy flat-graph loops (no region to key-check)', () => {
-    expect(() => validateControlFlow(flowWith({ collection: '{items}', iteratorVariable: 'x' }))).not.toThrow();
+    expect(() => validateControlFlow(flowWith({ collection: { dialect: 'cel', source: 'items' }, iteratorVariable: 'x' }))).not.toThrow();
   });
 
   it('nested regions are key-checked at depth, like the structural check', () => {
     let message = '';
     try {
       validateControlFlow(flowWith({
-        collection: '{outer}',
+        collection: { dialect: 'cel', source: 'outer' },
         body: {
           nodes: [{
             ...node('inner', TRY_CATCH_NODE_TYPE),

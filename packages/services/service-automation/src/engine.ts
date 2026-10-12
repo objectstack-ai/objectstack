@@ -10668,11 +10668,11 @@ export class AutomationEngine implements IAutomationService {
      * unvalidated again.
      *
      * Recording the dialect is what makes (2) safe rather than a regression:
-     * `{…}` is the #1491 brace-trap in a bare-CEL slot and the *correct* spelling
-     * in a single-brace `{var}` flow-interpolation slot (`loop.collection`). A
-     * dialect-blind pass would reject every valid `collection` while still
-     * passing every wrong `visibleWhen`, so the `flow-template` slots are
-     * recorded and skipped — no validator implements their dialect.
+     * `{…}` is the #1491 brace-trap in a bare-CEL slot, and a `value` slot's
+     * expression is an envelope rather than a string. Until #19939 a third
+     * role recorded the single-brace `{var}` slots (`loop` / `map`
+     * `collection`), skipped because no validator implements that dialect; both
+     * are value slots now, and the role is gone.
      *
      * #1928 — when an object-schema resolver is wired ({@link setObjectSchemaResolver}),
      * a second, schema-aware pass surfaces the checks `objectstack build` runs
@@ -10864,12 +10864,10 @@ export class AutomationEngine implements IAutomationService {
                 // key like `screen.fields[].visibleWhen` is checked as the bare CEL it
                 // is — the traversal gap that let #3528 ship a `{var}` predicate.
                 //
-                // Only `predicate` slots are checked: `flow-template` slots take the
-                // single-brace `{var}` dialect `interpolate()` implements, and no
-                // validator implements it (validateExpression's `template` role is the
-                // ADR-0032 §3 double-brace text template and would reject every
-                // correct `loop.collection`). They are declared in the ledger so the
-                // reconciliation ratchet still covers the marker.
+                // A `predicate` slot is checked as bare CEL, and a `value` slot's
+                // envelope as a CEL value (#15137) — the two roles the ledger has
+                // since #19939 retired the single-brace one with the `loop` / `map`
+                // `collection` it recorded.
                 for (const found of resolveFlowNodeExpressions(node.type, node.config)) {
                     const slotWhere =
                         `${at}node '${node.id}' (${node.type}) ${found.entry.label} at config.${found.path}`;
@@ -10934,7 +10932,7 @@ export class AutomationEngine implements IAutomationService {
                 `Flow '${flowName}' has ${failures.length} invalid expression${failures.length > 1 ? 's' : ''} (ADR-0032 §1a). ` +
                 `Predicates — conditions and declared bare-CEL slots such as a screen field's \`visibleWhen\` — ` +
                 `must not wrap references in \`{…}\` template braces, and neither may a value slot (a computed ` +
-                `value is a CEL envelope); template slots (e.g. \`loop.collection\`) require them:\n` +
+                `value is a CEL envelope, the list a \`loop\` or \`map\` iterates included):\n` +
                 `${failures.join('\n')}`,
             );
         }
@@ -12267,9 +12265,15 @@ export class AutomationEngine implements IAutomationService {
      * message carries the source, per §1d.
      *
      * Only slots the ledger declares reach this: `assignment`'s canonical
-     * `assignments` map, and — since #19938 (#11182 ruling D) — the
-     * `create_record` / `update_record` `fields` map (`crud-nodes.ts`'s
-     * `resolveFieldValues`, top-level field values only). The two legacy
+     * `assignments` map; since #19938 (#11182 ruling D) the `create_record` /
+     * `update_record` `fields` map (top-level field values only); and since
+     * #19939 the maps a node hands to a callee (`subflow` and `map` `input`,
+     * `script` `inputs`), a `screen`'s `defaults`, field `defaultValue` and
+     * `recordId`, and the list a `loop` (with a `body`) and a `map` iterate,
+     * their `collection` — every one but `assignments` through
+     * `builtin/value-slot-map.ts`, the one per-slot resolver
+     * (`resolveValueSlotMap`, `resolveValueSlot`, `resolveCollectionSlot`).
+     * The two legacy
      * `assignment` shapes the executor still normalizes (the
      * `assignments: [{ variable, value }]` array and the bare
      * `{ <variable>: <value> }` config) are deliberately NOT declared, so an

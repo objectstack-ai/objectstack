@@ -4,39 +4,28 @@
  * [#10772] `await kernel.shutdown()` must actually reach `EmailServicePlugin`'s
  * teardown.
  *
- * THE DEFECT. The plugin arms a live `email_template` bridge at
- * `kernel:ready`: a metadata subscription, a protocol mutation listener, a
- * provenance hook bound to the data engine, and (when SMTP is configured) an
- * open transport. The teardown that released all of them was spelled
- * `dispose()`. `Plugin` (`@objectstack/core`'s `types.ts`) declares `init()`,
+ * THE DEFECT. The plugin armed a live `email_template` bridge at
+ * `kernel:ready` — a metadata subscription, a protocol mutation listener, a
+ * provenance hook bound to the data engine — and (when SMTP is configured) an
+ * open transport. The teardown that released them was spelled `dispose()`.
+ * `Plugin` (`@objectstack/core`'s `types.ts`) declares `init()`,
  * `start?(ctx)` and `destroy?()` — and NO `dispose()` — and
  * `ObjectKernel.performShutdown()` / `LiteKernel.destroy()` walk the plugins
- * in reverse calling `plugin.destroy()`. Measured on the same revision:
- * `dispose()` had exactly ONE caller in the whole repo, a test in this
- * package. The kernel was never one of them, so after `await
- * kernel.shutdown()` had RESOLVED the bridge was still armed and still
- * writing.
+ * in reverse calling `plugin.destroy()`, so after `await kernel.shutdown()`
+ * had RESOLVED the bridge was still armed and still writing.
  *
- * THE SPELLING. This member and `WebhookOutboxPlugin` are the `dispose()`
- * half of the family — the "seventh spelling" the #10619 gate's roster was
- * widened for BEFORE any instance of it was known, already present when the
- * roster was measured. A census that looked only for `stop()` misses them
- * entirely, which is the other half of why #10371's enumeration came out
- * short.
+ * WHAT IS LEFT TO RELEASE. Templates now resolve from the registry at every
+ * send (ADR-0131 D6/D10), so there is no bridge: no subscription, no listener,
+ * no projector. What `kernel:ready` still binds to the data engine is the
+ * closed `sys_email_template` organization door, and that binding is what
+ * these pins drive through a real `LiteKernel` bootstrap and shutdown.
  *
- * WHY THE ASSERTIONS ARE BEHAVIOURAL. `expect(plugin.destroy).toBeDefined()`
- * would pass on a plugin the kernel still never reaches. These drive a real
- * `LiteKernel` through a real bootstrap and a real shutdown and then perform a
- * real runtime write, reading the rows that did or did not land.
+ * EVERY PRE-SHUTDOWN LEG IS A POSITIVE CONTROL: without it a door that never
+ * bound would satisfy the post-shutdown assertion vacuously.
  *
- * EVERY PRE-SHUTDOWN LEG IS A POSITIVE CONTROL: without it a bridge that never
- * armed would satisfy the post-shutdown assertion vacuously.
- *
- * THE `dispose()` LEG IS THE OTHER DIRECTION. The repair keeps `dispose()` as
- * a delegating alias because it is public API of an exported class and an
- * embedder — here, a test in this very package — calls it directly. Pinning
- * only the shutdown direction would go green on an implementation that simply
- * deletes `dispose()`.
+ * THE `dispose()` LEG IS THE OTHER DIRECTION. `dispose()` stays a delegating
+ * alias because it is public API of an exported class; pinning only the
+ * shutdown direction would go green on an implementation that deletes it.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -44,89 +33,44 @@ import { assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { LiteKernel } from '@objectstack/core';
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { EmailServicePlugin } from './email-plugin.js';
+import { EMAIL_TEMPLATE_DOOR_PACKAGE } from './email-template-door.js';
 
-const TABLE = 'sys_email_template';
 type AnyRecord = Record<string, any>;
+type Hook = { event: string; handler: (ctx: AnyRecord) => unknown; packageId?: string };
 
 /**
- * The slice of ObjectQL the template bridge and the organization door touch —
- * the same double `email-plugin.template-runtime-write.test.ts` uses, so this
- * file cannot accept a dispatch shape the real engine would refuse.
+ * The slice of ObjectQL the organization door binds to: its hook table, plus
+ * an `update` that routes through `assertEngineUpdateDispatch` so this double
+ * cannot accept a dispatch shape the real engine would refuse.
  */
 function fakeEngine() {
-    const rows: AnyRecord[] = [];
-    const matches = (row: AnyRecord, cond?: AnyRecord) =>
-        !cond ||
-        Object.entries(cond).every(([k, v]) => {
-            if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
-            return row[k] === v;
-        });
+    const hooks: Hook[] = [];
     return {
-        rows,
-        _registry: { listItems: () => [] },
-        async find(object: string, q?: AnyRecord) {
-            if (object !== TABLE) return [];
-            const out = rows.filter((r) => matches(r, q?.where ?? q?.filter));
-            return typeof q?.limit === 'number' ? out.slice(0, q.limit) : out;
-        },
-        async insert(_object: string, row: AnyRecord) {
-            rows.push({ ...row });
-            return { id: row.id };
-        },
+        hooks,
+        registry: { listItems: () => [] },
+        async find() { return []; },
         async update(_object: string, data: AnyRecord, options?: AnyRecord) {
-            const dispatch = assertEngineUpdateDispatch(data, options);
-            if (dispatch.kind !== 'by-id') throw new Error(`unexpected update dispatch: ${dispatch.kind}`);
-            const target = rows.find((r) => r.id === dispatch.id);
-            if (target) Object.assign(target, data);
-            return { affected: target ? 1 : 0 };
+            assertEngineUpdateDispatch(data, options);
+            return { affected: 0 };
         },
-        registerHook() { /* organization door */ },
-        unregisterHooksByPackage() { return 0; },
-    };
-}
-
-/** Mirrors `ObjectStackProtocolImplementation`'s two registration seams. */
-function fakeProtocol() {
-    const projectors = new Map<string, (evt: AnyRecord) => Promise<void>>();
-    const listeners: Array<(evt: AnyRecord) => void> = [];
-    const p: AnyRecord = {
-        projectorFailures: [] as string[],
-        registerMutationProjector: (type: string, fn: (evt: AnyRecord) => Promise<void>) => {
-            projectors.set(type, fn);
+        registerHook(event: string, handler: Hook['handler'], options?: AnyRecord) {
+            hooks.push({ event, handler, packageId: options?.packageId });
         },
-        onMetadataMutation: (fn: (evt: AnyRecord) => void) => {
-            listeners.push(fn);
-            return () => {
-                const i = listeners.indexOf(fn);
-                if (i >= 0) listeners.splice(i, 1);
-            };
+        unregisterHooksByPackage(packageId: string) {
+            const before = hooks.length;
+            for (let i = hooks.length - 1; i >= 0; i--) if (hooks[i].packageId === packageId) hooks.splice(i, 1);
+            return before - hooks.length;
         },
-        async announce(evt: AnyRecord) {
-            const projector = projectors.get(evt.type);
-            if (projector) {
-                // Mirrors `runMutationProjector`: a throw is caught and
-                // reported on the write's response, never propagated.
-                try { await projector(evt); }
-                catch (e: any) { p.projectorFailures.push(String(e?.message ?? e)); }
+        /** The door's own hooks — the plugin binds others (the outbox drain) that are not under test here. */
+        doorHooks() { return hooks.filter((h) => h.packageId === EMAIL_TEMPLATE_DOOR_PACKAGE); },
+        /** An organization's create, as the engine runs it: every `beforeInsert` hook first. */
+        async organizationCreate() {
+            for (const h of hooks.filter((x) => x.event === 'beforeInsert')) {
+                await h.handler({ session: { userId: 'u1', organizationId: 'org_1' } });
             }
-            for (const l of [...listeners]) l(evt);
-            await new Promise((r) => setTimeout(r, 0));
         },
-        /** A `PUT /api/v1/meta/email_template/:name` that landed. */
-        save: (name: string, body: unknown) =>
-            p.announce({ type: 'email_template', name, state: 'active', body }),
     };
-    return p;
 }
-
-const template = () => ({
-    name: 'auth.password_reset',
-    label: 'Password Reset',
-    category: 'auth',
-    locale: 'en-US',
-    subject: 'Reset your password, {{user.name}}',
-    bodyHtml: '<p>Click <a href="{{url}}">here</a></p>',
-});
 
 /** Registers the collaborators the email plugin resolves. Nothing under test. */
 class FixturePlugin implements Plugin {
@@ -135,16 +79,11 @@ class FixturePlugin implements Plugin {
     version = '1.0.0';
     providesServices = ['objectql', 'manifest', 'metadata', 'protocol'];
     readonly engine = fakeEngine();
-    readonly protocol = fakeProtocol();
     init(ctx: PluginContext): void {
         ctx.registerService('objectql', this.engine);
         ctx.registerService('manifest', { register: () => {}, list: () => [] });
-        ctx.registerService('metadata', {
-            list: () => [],
-            get: async () => undefined,
-            subscribe: () => () => {},
-        });
-        ctx.registerService('protocol', this.protocol);
+        ctx.registerService('metadata', { list: () => [], get: async () => undefined, subscribe: () => () => {} });
+        ctx.registerService('protocol', { getMetaItemsForExecution: async () => ({ items: [] }) });
     }
 }
 
@@ -152,34 +91,26 @@ async function boot() {
     const kernel = new LiteKernel({ logger: { level: 'error' } });
     const fixture = new FixturePlugin();
     kernel.use(fixture);
-    const plugin = new EmailServicePlugin({ seedTemplates: false });
+    const plugin = new EmailServicePlugin();
     kernel.use(plugin);
     await kernel.bootstrap();
     return { kernel, plugin, fixture };
 }
 
-const rowsOf = (engine: AnyRecord) =>
-    engine.rows.filter((r: AnyRecord) => r.name === 'auth.password_reset');
-
-describe('#10772 EmailServicePlugin detaches its template bridge on kernel shutdown', () => {
-    it('stops materializing runtime writes once shutdown() has resolved', async () => {
+describe('#10772 EmailServicePlugin releases what it binds on kernel shutdown', () => {
+    it('unbinds the sys_email_template organization door once shutdown() has resolved', async () => {
         const { kernel, fixture } = await boot();
 
-        // POSITIVE CONTROL — the live bridge really is armed, so the assertion
-        // below measures a detachment and not a bridge that never worked.
-        await fixture.protocol.save('auth.password_reset', template());
-        expect(fixture.protocol.projectorFailures).toEqual([]);
-        expect(rowsOf(fixture.engine)).toHaveLength(1);
-        fixture.engine.rows.length = 0;
+        // POSITIVE CONTROL — the door really is bound, so the assertion below
+        // measures a release and not a door that never closed.
+        expect(fixture.engine.doorHooks()).toHaveLength(2);
+        await expect(fixture.engine.organizationCreate()).rejects.toThrow(/^PERMISSION_DENIED/);
 
         await kernel.shutdown();
 
-        await fixture.protocol.save('auth.password_reset', template());
-
-        // THE PIN. Before the fix this wrote another row: the kernel had no
-        // `destroy()` to call, and `dispose()`'s only caller in the entire
-        // repo was a test.
-        expect(rowsOf(fixture.engine)).toHaveLength(0);
+        // THE PIN. Before #10772 the kernel had no `destroy()` to call.
+        expect(fixture.engine.doorHooks()).toEqual([]);
+        await expect(fixture.engine.organizationCreate()).resolves.toBeUndefined();
     });
 
     it('the kernel reaches destroy() during shutdown', async () => {
@@ -199,21 +130,17 @@ describe('#10772 EmailServicePlugin detaches its template bridge on kernel shutd
     it('the retained dispose() alias still tears down for an embedder that calls it directly', async () => {
         const { plugin, fixture } = await boot();
 
-        await fixture.protocol.save('auth.password_reset', template());
-        expect(rowsOf(fixture.engine)).toHaveLength(1);
-        fixture.engine.rows.length = 0;
+        expect(fixture.engine.doorHooks()).toHaveLength(2);
 
         await plugin.dispose();
 
-        await fixture.protocol.save('auth.password_reset', template());
-
-        expect(rowsOf(fixture.engine)).toHaveLength(0);
+        expect(fixture.engine.doorHooks()).toEqual([]);
     });
 
     it('a teardown on a plugin the kernel never started is a no-op rather than a throw', async () => {
         // Idempotence matters because `destroy()` clears the handles it
         // released; the kernel calls it on every plugin it walks.
-        const plugin = new EmailServicePlugin({ seedTemplates: false });
+        const plugin = new EmailServicePlugin();
         await expect(plugin.destroy()).resolves.toBeUndefined();
         await expect(plugin.destroy()).resolves.toBeUndefined();
         await expect(plugin.dispose()).resolves.toBeUndefined();

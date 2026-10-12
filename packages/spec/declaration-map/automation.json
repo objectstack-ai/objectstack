@@ -65,6 +65,8 @@
     "ExecutionStepSkipReason": "automation/ExecutionStepSkipReason",
     "ExecutionStepSkipReasonSchema": "automation/ExecutionStepSkipReason",
     "Flow": "automation/Flow",
+    "FlowCollectionSlot": "automation/FlowCollectionSlot",
+    "FlowCollectionSlotSchema": "automation/FlowCollectionSlot",
     "FlowEdge": "automation/FlowEdge",
     "FlowEdgeSchema": "automation/FlowEdge",
     "FlowFunctionDeclarationSchema": "automation/FlowFunctionLoweredDeclaration",
