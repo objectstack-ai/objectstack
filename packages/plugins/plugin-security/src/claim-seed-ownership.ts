@@ -561,7 +561,7 @@ export async function claimSeedOwnership(
         // nor any later object. The rows stay unowned and the next run claims
         // them, because the predicate is still true of them. That run is the
         // next `app:seeded` (this boot or a later one) or the next promotion —
-        // ⚠️ NOT `os meta resync` and NOT a bootstrap replay: on an install that
+        // ⚠️ NOT a bootstrap replay: on an install that
         // already has an admin both short-circuit on `already_have_admin` and
         // never reach this function.
         logger?.warn?.(

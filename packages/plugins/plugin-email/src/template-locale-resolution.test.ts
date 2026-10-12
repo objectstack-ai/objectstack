@@ -7,14 +7,14 @@
 // boots — because the loader's no-locale query was an unordered `limit: 1` and
 // the service's en-US fallback only ran when a locale HAD been named. Both
 // seams are covered here, and the determinism assertions run the same bundle
-// through drivers that disagree about row order — including one that honours
-// no ordering at all — because "returns en-US on this machine today" is the
-// property the old code also had.
+// in both declaration orders, because "returns en-US on this machine today" is
+// the property the old code also had. The loader now reads `email_template`
+// metadata from the registry (ADR-0131 D6/D10) instead of `sys_email_template`
+// rows; its rule is the one these pinned against the row loader, unchanged.
 
 import { describe, it, expect } from 'vitest';
-import { EmailService, DEFAULT_TEMPLATE_LOCALE, type EmailTemplateRow, type TemplateLoader } from './email-service.js';
-import { createSysEmailTemplateLoader, type TemplateLoaderEngine } from './template-loader.js';
-import { EMAIL_TEMPLATE_OBJECT } from './bootstrap-declared-email-templates.js';
+import { EmailService, type EmailTemplateRow, type TemplateLoader } from './email-service.js';
+import { createRegistryEmailTemplateLoader } from './template-loader.js';
 import { EmailServicePlugin } from './email-plugin.js';
 import type { IEmailTransport, NormalizedEmailMessage, TransportSendResult } from '@objectstack/spec/contracts';
 
@@ -44,41 +44,22 @@ function row(locale: string, id = `row-${locale}`): Row {
 
 const EN = row('en-US');
 const ZH = row('zh-CN');
-const FR = row('fr-FR');
 
-interface FakeEngineOptions {
-  /** Emulate a driver that ignores `orderBy` and answers in storage order. */
-  ignoreOrderBy?: boolean;
+/** One `email_template` member of the `welcome` bundle, as the registry lists it. */
+function item(locale: string, over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    name: 'welcome',
+    label: 'Welcome',
+    locale,
+    subject: `[${locale}] Hello {{name}}`,
+    bodyHtml: `<p>[${locale}] Hi {{name}}</p>`,
+    ...over,
+  };
 }
 
-/**
- * A driver-ish engine: filters by `where`, applies `orderBy` when it honours
- * it, then `limit`. Rows are answered in the order they were handed in, so a
- * test can make "storage order" whatever it likes.
- */
-function fakeEngine(rows: Row[], options: FakeEngineOptions = {}) {
-  const queries: Array<Record<string, any>> = [];
-  const engine: TemplateLoaderEngine & { queries: typeof queries } = {
-    queries,
-    async find(object: string, query: Record<string, any>) {
-      expect(object).toBe(EMAIL_TEMPLATE_OBJECT);
-      queries.push(query);
-      const where = (query.where ?? {}) as Record<string, unknown>;
-      let out = rows.filter((r) => Object.entries(where).every(([k, v]) => (r as any)[k] === v));
-      if (!options.ignoreOrderBy && Array.isArray(query.orderBy)) {
-        out = [...out].sort((a, b) => {
-          for (const { field, order } of query.orderBy as Array<{ field: string; order: string }>) {
-            const av = String((a as any)[field] ?? '');
-            const bv = String((b as any)[field] ?? '');
-            if (av !== bv) return (av < bv ? -1 : 1) * (order === 'desc' ? -1 : 1);
-          }
-          return 0;
-        });
-      }
-      return typeof query.limit === 'number' ? out.slice(0, query.limit) : out;
-    },
-  };
-  return engine;
+/** The registry loader over a list answered in exactly the order it was handed in. */
+function registryLoader(items: Array<Record<string, unknown>>) {
+  return createRegistryEmailTemplateLoader({ registry: { listItems: () => items.map((i) => ({ ...i })) } });
 }
 
 /** A loader that ONLY does exact matches — no fallback of its own. */
@@ -102,68 +83,53 @@ function serviceWith(loader: TemplateLoader) {
   return { svc, transport };
 }
 
-// ── the loader seam (email-plugin.ts ~:548) ────────────────────────────────
+// ── the loader seam ────────────────────────────────────────────────────────
 
-describe('createSysEmailTemplateLoader — no locale means en-US, not "first row"', () => {
-  // The regression, both ways round: which row the store happens to hold
+describe('the registry loader — no locale means en-US, not "first member"', () => {
+  // The regression, both ways round: which member the list happens to carry
   // first is exactly the input the old code was reading.
   it.each([
-    ['en-US stored first', [EN, ZH]],
-    ['zh-CN stored first', [ZH, EN]],
-  ])('resolves the en-US row when no locale is passed (%s)', async (_label, rows) => {
-    const loader = createSysEmailTemplateLoader(fakeEngine(rows as Row[]));
-    const found = await loader.load('welcome', undefined);
+    ['en-US declared first', [item('en-US'), item('zh-CN')]],
+    ['zh-CN declared first', [item('zh-CN'), item('en-US')]],
+  ])('resolves the en-US member when no locale is passed (%s)', async (_label, items) => {
+    const found = await registryLoader(items).load('welcome', undefined);
     expect(found?.locale).toBe('en-US');
   });
 
-  it('pins en-US in the WHERE clause, so a driver that ignores orderBy still answers en-US', async () => {
-    const engine = fakeEngine([ZH, EN], { ignoreOrderBy: true });
-    const loader = createSysEmailTemplateLoader(engine);
-
-    expect((await loader.load('welcome', undefined))?.locale).toBe('en-US');
-    expect(engine.queries[0].where).toEqual({ name: 'welcome', locale: DEFAULT_TEMPLATE_LOCALE });
-    // …and it never asks an unordered question.
-    for (const q of engine.queries) expect(q.orderBy).toBeTruthy();
-  });
-
-  it('never sends the wire spelling `sort` — find() rejects it, so the tie-break must be orderBy', async () => {
-    const engine = fakeEngine([EN, ZH]);
-    await createSysEmailTemplateLoader(engine).load('welcome', undefined);
-    for (const q of engine.queries) expect(q.sort).toBeUndefined();
-  });
-
   it('an explicit locale is an EXACT match — no fallback of the loader\'s own', async () => {
-    const loader = createSysEmailTemplateLoader(fakeEngine([EN, ZH]));
+    const loader = registryLoader([item('en-US'), item('zh-CN')]);
     expect((await loader.load('welcome', 'zh-CN'))?.locale).toBe('zh-CN');
-    // fr-FR has no row: the loader answers null and leaves the en-US fallback
-    // to sendTemplate's ladder, where it is documented.
+    // fr-FR has no member: the loader answers null and leaves the en-US
+    // fallback to sendTemplate's ladder, where it is documented.
     expect(await loader.load('welcome', 'fr-FR')).toBeNull();
   });
 
-  it('resolves the same row on repeat calls, with duplicate rows for one locale', async () => {
-    const dupes = [
-      { ...row('en-US', 'row-b'), subject: 'B' },
-      { ...row('en-US', 'row-a'), subject: 'A' },
-    ];
-    const loader = createSysEmailTemplateLoader(fakeEngine(dupes));
+  it('does no language-subtag folding: `en` is not `en-US`, in either direction', async () => {
+    expect(await registryLoader([item('en-US')]).load('welcome', 'en')).toBeNull();
+    expect(await registryLoader([item('en')]).load('welcome', 'en-US')).toBeNull();
+  });
+
+  it('resolves the same member on repeat calls when two packages declare one slot', async () => {
+    const loader = registryLoader([
+      item('en-US', { subject: 'A', _packageId: 'com.example.a' }),
+      item('en-US', { subject: 'B', _packageId: 'com.example.b' }),
+    ]);
     const first = await loader.load('welcome', undefined);
     const second = await loader.load('welcome', 'en-US');
     expect(first?.subject).toBe('A');
     expect(second?.subject).toBe('A');
   });
 
-  describe('a bundle with no en-US row at all', () => {
+  describe('a bundle with no en-US member at all', () => {
     it.each([
-      ['fr-FR stored first', [FR, ZH]],
-      ['zh-CN stored first', [ZH, FR]],
-    ])('falls back to the lowest locale tag, identically in both storage orders (%s)', async (_l, rows) => {
-      const loader = createSysEmailTemplateLoader(fakeEngine(rows as Row[]));
-      expect((await loader.load('welcome', undefined))?.locale).toBe('fr-FR');
+      ['fr-FR declared first', [item('fr-FR'), item('zh-CN')]],
+      ['zh-CN declared first', [item('zh-CN'), item('fr-FR')]],
+    ])('falls back to the lowest locale tag, identically in both orders (%s)', async (_l, items) => {
+      expect((await registryLoader(items).load('welcome', undefined))?.locale).toBe('fr-FR');
     });
 
-    it('keeps a single-locale tenant working rather than resolving to nothing', async () => {
-      const loader = createSysEmailTemplateLoader(fakeEngine([ZH]));
-      expect((await loader.load('welcome', undefined))?.locale).toBe('zh-CN');
+    it('keeps a single-locale bundle working rather than resolving to nothing', async () => {
+      expect((await registryLoader([item('zh-CN')]).load('welcome', undefined))?.locale).toBe('zh-CN');
     });
   });
 });
@@ -226,14 +192,14 @@ describe('EmailService.sendTemplate — locale ladder', () => {
 
 describe('sendTemplate over the real loader (the #7731 reproduction)', () => {
   it.each([
-    ['en-US inserted first', [EN, ZH]],
-    ['zh-CN inserted first', [ZH, EN]],
-  ])('renders en-US for a no-locale send on a fresh boot (%s)', async (_l, rows) => {
+    ['en-US declared first', [item('en-US'), item('zh-CN')]],
+    ['zh-CN declared first', [item('zh-CN'), item('en-US')]],
+  ])('renders en-US for a no-locale send on a fresh boot (%s)', async (_l, items) => {
     const transport = new CaptureTransport();
     const svc = new EmailService({
       transport,
       defaultFrom: { address: 'no-reply@x.test' },
-      templateLoader: createSysEmailTemplateLoader(fakeEngine(rows as Row[])),
+      templateLoader: registryLoader(items),
     });
 
     await svc.sendTemplate({ template: 'welcome', to: 'a@x.test', data: { name: 'Ada' } });
@@ -247,7 +213,7 @@ describe('sendTemplate over the real loader (the #7731 reproduction)', () => {
     const svc = new EmailService({
       transport,
       defaultFrom: { address: 'no-reply@x.test' },
-      templateLoader: createSysEmailTemplateLoader(fakeEngine([EN, ZH])),
+      templateLoader: registryLoader([item('en-US'), item('zh-CN')]),
     });
 
     await svc.sendTemplate({ template: 'welcome', to: 'a@x.test', locale: 'zh-CN', data: { name: 'Ada' } });
@@ -332,9 +298,12 @@ describe('sendTemplate — format filters follow the RESOLVED ROW\'s locale (#78
     const svc = new EmailService({
       transport,
       defaultFrom: { address: 'no-reply@x.test' },
-      // zh-CN-only bundle: no en-US row exists, so the ladder falls through to
-      // the loader's own no-locale answer and lands on zh-CN.
-      templateLoader: createSysEmailTemplateLoader(fakeEngine([fmtRow('zh-CN')])),
+      // zh-CN-only bundle: no en-US member exists, so the ladder falls through
+      // to the loader's own no-locale answer and lands on zh-CN.
+      templateLoader: registryLoader([{
+        name: 'receipt', label: 'Receipt', locale: 'zh-CN',
+        subject: fmtRow('zh-CN').subject, bodyHtml: fmtRow('zh-CN').body_html,
+      }]),
     });
 
     await svc.sendTemplate({ template: 'receipt', to: 'a@x.test', timezone: 'UTC', data: FMT_DATA });
@@ -390,14 +359,8 @@ describe('sendTemplate — format filters follow the RESOLVED ROW\'s locale (#78
 // ── the wiring: the plugin must install THIS loader ────────────────────────
 
 describe('EmailServicePlugin wiring', () => {
-  it('installs the deterministic loader on kernel:ready', async () => {
-    const rows = [ZH, EN];
-    const engine = fakeEngine(rows);
+  async function bootWith(services: Record<string, unknown>) {
     const hooks: Record<string, Array<() => Promise<void> | void>> = {};
-    const services: Record<string, unknown> = {
-      manifest: { register: () => {} },
-      objectql: engine,
-    };
     const ctx = {
       logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
       getService: <T,>(name: string): T => {
@@ -407,16 +370,34 @@ describe('EmailServicePlugin wiring', () => {
       registerService: (name: string, svc: unknown) => { services[name] = svc; },
       hook: (name: string, fn: () => Promise<void> | void) => { (hooks[name] ??= []).push(fn); },
     };
-
-    const plugin = new EmailServicePlugin({ seedTemplates: false, persist: false });
+    const plugin = new EmailServicePlugin({ persist: false });
     await plugin.init(ctx as never);
     await plugin.start(ctx as never);
     for (const fn of hooks['kernel:ready'] ?? []) await fn();
+    return (services.email as EmailService).options.templateLoader!;
+  }
 
-    const service = services.email as EmailService;
-    const loader = service.options.templateLoader;
-    expect(loader).toBeTruthy();
-    expect((await loader!.load('welcome', undefined))?.locale).toBe('en-US');
-    expect(engine.queries[engine.queries.length - 1]?.where).toEqual({ name: 'welcome', locale: 'en-US' });
+  it('installs the registry loader on kernel:ready, reading the ObjectQL registry on a host with no metadata door', async () => {
+    const listed: string[] = [];
+    const loader = await bootWith({
+      manifest: { register: () => {} },
+      objectql: { registry: { listItems: (type: string) => { listed.push(type); return [item('zh-CN'), item('en-US')]; } } },
+    });
+
+    expect((await loader.load('welcome', undefined))?.locale).toBe('en-US');
+    expect(listed).toEqual(['email_template']);
+  });
+
+  it('reads the protocol\'s layered list when a metadata door is mounted — even one registered after kernel:ready', async () => {
+    const services: Record<string, unknown> = {
+      manifest: { register: () => {} },
+      objectql: { registry: { listItems: () => [item('en-US', { subject: 'package wording' })] } },
+    };
+    const loader = await bootWith(services);
+    services.protocol = {
+      getMetaItemsForExecution: async () => ({ items: [item('en-US', { subject: 'environment wording' })] }),
+    };
+
+    expect((await loader.load('welcome', 'en-US'))?.subject).toBe('environment wording');
   });
 });

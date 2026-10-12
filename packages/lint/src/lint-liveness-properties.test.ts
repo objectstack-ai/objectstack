@@ -397,21 +397,31 @@ describe('lintLivenessProperties', () => {
 
   // email_template used to carry a per-artifact warn on `name`: the WHOLE
   // authoring surface was disconnected from sendTemplate (the webhook shape).
-  // #4509 built the materializer bridge, so authoring is no longer a no-op and
-  // a well-formed template must warn about NOTHING. The type stays in
+  // #4509 built the materializer bridge, so authoring stopped being a no-op and
+  // a well-formed template warned about NOTHING. The type stayed in
   // TYPE_COLLECTIONS — a listed type with zero warns is the resolved state
-  // (webhook sits there the same way), and keeping it means a future
-  // regression that re-deadens a prop starts warning again on its own.
-  it('does not warn on a well-formed email_template — the bridge closed it (#4509)', () => {
-    const findings = lintLivenessProperties({
-      emailTemplates: [{
-        name: 'crm.welcome',
-        label: 'Welcome',
-        subject: 'Hi {{user.name}}',
-        bodyHtml: '<p>Welcome</p>',
-      }],
-    });
-    expect(findings).toEqual([]);
+  // (webhook sits there the same way) — so that a future regression that
+  // re-deadens a prop starts warning again on its own.
+  //
+  // That is what happened, by design: ADR-0131 D6/D10 retired the
+  // `sys_email_template` row projection, the only reader of `category` and
+  // `isSystem`, and the ledger grades both `dead`. A template that sets neither
+  // still warns about nothing; each one it sets draws one dead-property
+  // advisory (a boolean only when truthy). #22876 retires both keys in the next
+  // enforce-or-remove batch, which removes these advisories with them.
+  it('warns on an email_template only for the keys the ledger grades dead — `category`, and `isSystem` when truthy (#22876)', () => {
+    const base = { name: 'crm.welcome', label: 'Welcome', subject: 'Hi {{user.name}}', bodyHtml: '<p>Welcome</p>' };
+
+    expect(lintLivenessProperties({ emailTemplates: [base] })).toEqual([]);
+    expect(lintLivenessProperties({ emailTemplates: [{ ...base, isSystem: false }] })).toEqual([]);
+
+    const withCategory = lintLivenessProperties({ emailTemplates: [{ ...base, category: 'auth' }] });
+    expect(withCategory).toHaveLength(1);
+    expect(ruleOf(withCategory, 'category')).toBe(LIVENESS_DEAD_PROPERTY);
+
+    const withSystem = lintLivenessProperties({ emailTemplates: [{ ...base, isSystem: true }] });
+    expect(withSystem).toHaveLength(1);
+    expect(ruleOf(withSystem, 'isSystem')).toBe(LIVENESS_DEAD_PROPERTY);
   });
 
   // The advisory lint's job is the keys the PARSE still accepts. #4667 retired

@@ -101,8 +101,9 @@
 //
 // Deliberately NOT resolved, each silent rather than guessed: an
 // `outputVariable` on any node type other than `get_record` (the value's shape
-// is that executor's, not a declared object); a `loop` whose `collection` is
-// not a bare variable name holding a multi-record `get_record` output; and
+// is that executor's, not a declared object); a `loop` whose `collection` does
+// not name, by itself, a variable holding a multi-record `get_record` output;
+// and
 // case 3 above, which stays a TRIGGER-root question — `config.expand` and the
 // registry-injected columns are both read off the START node and neither has a
 // counterpart on a variable root.
@@ -362,7 +363,7 @@ const NO_NAMES: ReadonlySet<string> = new Set<string>();
 /** Roots the run owns outright, so no node declaration may claim the name. */
 const RESERVED_ROOTS: ReadonlySet<string> = new Set(['record', 'previous']);
 
-/** A bare variable name — the only `loop.collection` spelling resolved here. */
+/** A bare variable name — the only list a `loop.collection` is resolved to here. */
 const BARE_NAME_RE = /^[A-Za-z_$][\w$]*$/;
 
 /** Everything the token checks need about ONE resolvable template root. */
@@ -380,10 +381,26 @@ interface TemplateRoot {
 }
 
 /**
+ * The text a `loop`'s `config.collection` names its list by: since #19939 a CEL
+ * value envelope's `source` (`{ dialect: 'cel', source: 'staleCases' }`, the
+ * spelling the structured `loop` evaluates), and in a source written before
+ * that, the body of a lone `{…}` token or a bare name ({@link loneTokenBody};
+ * every door refuses both now, so reading them only keeps this rule's
+ * findings on such a flow). The caller resolves it only when it is a bare
+ * variable name.
+ */
+function collectionListText(raw: unknown): string | undefined {
+  if (raw !== null && typeof raw === 'object' && !Array.isArray(raw)) {
+    const envelope = raw as AnyRec;
+    return envelope.dialect === 'cel' && typeof envelope.source === 'string' ? envelope.source.trim() : undefined;
+  }
+  return loneTokenBody(raw);
+}
+
+/**
  * The body of a string that is EXACTLY one `{…}` token, or the string itself
- * when it carries no braces — the two spellings `loop-node.ts` accepts for
- * `config.collection` (it interpolates the template, then falls back to a bare
- * variable lookup).
+ * when it carries no braces — the two spellings a `loop`'s `config.collection`
+ * took before #19939 made it a CEL value envelope.
  */
 function loneTokenBody(raw: unknown): string | undefined {
   if (typeof raw !== 'string') return undefined;
@@ -502,7 +519,7 @@ function resolveVariableRoots(
   }
 
   for (const { collection, iterator } of loops) {
-    const body = loneTokenBody(collection);
+    const body = collectionListText(collection);
     const source = body && BARE_NAME_RE.test(body) ? lists.get(body) : undefined;
     if (source) bind(single, iterator, source);
     else poison(iterator);

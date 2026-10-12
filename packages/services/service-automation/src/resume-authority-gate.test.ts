@@ -384,7 +384,7 @@ describe('resume authorization gate (#3801)', () => {
           { id: 'bs', type: 'start', label: 'Start' },
           {
             id: 'signoffs', type: 'map', label: 'Sign off each',
-            config: { collection: '{items}', iteratorVariable: 'task', flowName: 'one_item', outputVariable: 'results' },
+            config: { collection: { dialect: 'cel', source: 'items' }, iteratorVariable: 'task', flowName: 'one_item', outputVariable: 'results' },
           },
           { id: 'be', type: 'end', label: 'End' },
         ],

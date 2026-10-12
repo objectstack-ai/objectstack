@@ -31,8 +31,10 @@
  * reads) is written out here — `rule-explanations.test.ts` holds each key to a
  * rule id constant some rule file exports (or to an id in the completeness
  * predicate's `FUNCTIONAL_COMPLETENESS_RULES`, whose rules live in
- * `@objectstack/spec`) and each such list to the rule's own constant, so
- * neither can drift from the rule it explains.
+ * `@objectstack/spec`, or to its exact list of the ids `@objectstack/cli`
+ * produces, which the CLI's own test fires from their producers because the
+ * CLI depends on this package) and each such list to the rule's own constant,
+ * so neither can drift from the rule it explains.
  *
  * Adding an entry: key it by the rule's id, write `covers` so that it
  * completes the sentence "`os explain <id>` for …", and move the long text out
@@ -3400,6 +3402,186 @@ const SEMANTIC_ROLE_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// ── Rule ids `@objectstack/cli` produces ────────────────────────────────────
+// The CLI's own checks, which `os explain` reads from this one table. The CLI
+// depends on this package, so their id constants cannot be imported here:
+// `rule-explanations.test.ts` lists these ids, and the CLI's
+// `test/explain-rule-id.test.ts` fires each one from its producer.
+
+// `packages/cli/src/lint/hook-body-lowering.ts` (`os lint`).
+
+const HOOK_BODY_NOT_LOWERABLE_EXPLANATION: RuleExplanation = {
+  rule: 'hook-body/not-lowerable',
+  covers: 'what lowering needs and how to bundle on purpose',
+  paragraphs: [
+    'A hook handler or an action `target` written as an inline function is lowered by `os build` ' +
+      'into a metadata-only `body`, which the runtime evaluates in a sandbox with no module scope. When ' +
+      'the function names something that sandbox does not have, the extractor refuses it and the build ' +
+      'ships the function through the bundled runtime module instead, and still exits 0.',
+    'The handler keeps working, so behaviour does not change; the deployment shape does: the app is ' +
+      'no longer shippable as pure metadata. This rule is the `error` that says so, so a gate that runs ' +
+      '`os lint` can fail on it, while `os build` keeps accepting the bundle.',
+    'The remedy depends on the name, and the `fix:` line names the one that applies. A module-scope ' +
+      'const, helper or import can be inlined into the handler or reached through `ctx`. A global the ' +
+      'Node host provides and the sandbox does not, such as `Intl`, cannot be inlined at all: keep the ' +
+      'check in a string handler ref, or move it to a validation rule.',
+    'If a bundled closure is what you want, say so and this rule stays silent: give the hook an ' +
+      'explicit `body`, or move the function into the top-level `functions:` map and reference it by ' +
+      'name (`handler: \'fn_name\'`). Neither is lowered to a metadata body.',
+    'The rule calls the extractor `os build` calls, on the same input, so it reports exactly the ' +
+      'handlers the build bundles; `os build --strict-body` makes each one a build failure.',
+  ],
+};
+
+const HOOK_BODY_BUNDLED_FALLBACK_EXPLANATION: RuleExplanation = {
+  rule: 'hook-body/bundled-fallback',
+  covers: 'what the sandbox cannot run',
+  paragraphs: [
+    'Some constructs can never run in the sandbox a metadata-only body is evaluated in: network, ' +
+      'module and process access, dynamic code, a member only the in-process host provides (such as ' +
+      '`sudo()`, a repository\'s `create()` or `ctx.submitted`), or a hook parameter list the build ' +
+      'cannot rebind to `ctx`. A handler that uses one is refused by the ' +
+      'extractor and shipped through the bundled runtime module, where it runs in-process.',
+    'That is the designed fallback, so this rule is a `warning`, never an error: writing such a ' +
+      'construct is choosing a bundled closure. The app is not pure metadata while the handler is ' +
+      'bundled.',
+    'The verdict quotes the first clause of the extractor\'s refusal. `os build` prints the whole ' +
+      'refusal line for every bundled handler, with the remedy it names, and `os build --strict-body` ' +
+      'prints the full diagnostic and makes a missing body fatal.',
+    'To ship the handler as metadata instead, remove the construct the refusal names; a network call ' +
+      'becomes a Connector recipe. To keep the bundle, nothing is required.',
+  ],
+};
+
+const HOOK_BODY_UNPARSEABLE_EXPLANATION: RuleExplanation = {
+  rule: 'hook-body/unparseable',
+  covers: 'what an unparseable handler means',
+  paragraphs: [
+    'The extractor found no function body it could judge: the handler\'s source text is not a single ' +
+      'arrow function or named function expression it can parse. This is a limit of the instrument, ' +
+      'not a verdict about the handler: it does not mean a bundled closure was chosen, and whether the ' +
+      'body could ship as pure metadata is undetermined.',
+    '`os build` still ships the handler through the bundled runtime module, so it keeps working. ' +
+      'Rewriting it as a single arrow function or named function expression lets the extractor judge it.',
+    'It is reported under its own rule, never as `hook-body/bundled-fallback`, whose verdict asserts ' +
+      'that the body uses something the sandbox cannot provide.',
+  ],
+};
+
+const HOOK_BODY_EXTRACTION_FAILED_EXPLANATION: RuleExplanation = {
+  rule: 'hook-body/extraction-failed',
+  covers: 'what an extractor failure means',
+  paragraphs: [
+    'The extraction instrument itself threw while reading the handler, with an error that is not one ' +
+      'of its refusals. Like `hook-body/unparseable`, this is not a verdict about the handler: nothing ' +
+      'is known about whether its body could ship as pure metadata.',
+    '`os build` still ships the handler through the bundled runtime module. The verdict quotes the ' +
+      'first line of the thrown error, and `os build --strict-body` prints it whole; an extractor that ' +
+      'throws on an ordinary handler is a defect in the instrument.',
+    'It is kept apart from `hook-body/unparseable` on purpose: a broken instrument and a limited ' +
+      'instrument are different events.',
+  ],
+};
+
+// `packages/cli/src/utils/collect-docs.ts` (`os build`, `os validate`, `os lint`).
+
+const DOCS_UNCOLLECTED_DIRECTORY_EXPLANATION: RuleExplanation = {
+  rule: 'docs/uncollected-directory',
+  covers: 'where package docs are read from',
+  paragraphs: [
+    'Package docs are collected from `src/docs/*.md` (ADR-0046 §3.2) and, in an artifact that declares ' +
+      '`packages[]`, from the `docs/` directory inside whichever directory under `src/` a package ' +
+      'answers to, at no fixed depth (ADR-0130 D4). Markdown files in a `docs/` directory that neither ' +
+      'reads are not ' +
+      'collected: they are absent from the artifact\'s `docs[]` and from every book that includes ' +
+      'them, while the build still succeeds. This warning names them, because a build that keeps none ' +
+      'of an author\'s docs and says nothing is the defect.',
+    'A directory answers to a package when its name is the package\'s `id` or the last dot-separated ' +
+      'segment of that `id`. Neither the package\'s display `name` nor its `namespace` resolves one: ' +
+      'packages of one artifact may share a namespace (ADR-0130 D1).',
+    'The collector never guesses. A directory that names no package, one that names more than one, ' +
+      'and a package that answers to more than one docs directory are each reported and collected from ' +
+      'nowhere.',
+    'To fix it, keep one docs directory per package and name it after the package (two packages need ' +
+      'distinct ids, and their last segments must differ too); or move the files into `src/docs/` — doc ' +
+      'names carry the package namespace prefix, so packages do not collide there; or declare the docs ' +
+      'inline as `defineStack({ docs })` on the package that owns them; or delete them if they are not ' +
+      'package docs. A stack with no `packages[]` reads `src/docs/` only.',
+  ],
+};
+
+const DOCS_DUPLICATE_NAME_EXPLANATION: RuleExplanation = {
+  rule: 'docs/duplicate-name',
+  covers: 'why a doc name may appear once',
+  paragraphs: [
+    'Within one package, inline `defineStack({ docs })` entries and `src/docs/*.md` files share one ' +
+      'set of doc names, and a name may appear in it once.',
+    'Across the packages of one artifact the same name is refused too, as authoring hygiene: doc names ' +
+      'carry the package namespace prefix, but packages of one artifact may share a namespace ' +
+      '(ADR-0130 D1), so the prefix does not keep two packages\' docs apart. The runtime keys a packaged ' +
+      'doc by package and name (ADR-0048), so this is a refusal of the authored artifact, not of a ' +
+      'registration collision.',
+    'To fix it, rename one of the two docs, and its `src/docs/*.md` file with it.',
+  ],
+};
+
+const DOCS_NAV_TARGET_EXPLANATION: RuleExplanation = {
+  rule: 'docs/nav-target',
+  covers: 'what a doc navigation item can open',
+  paragraphs: [
+    'A navigation item of `type: \'doc\'` opens a book (`book`) or a single page (`doc`) of this ' +
+      'package, and one whose target names nothing the package has is refused. It is judged in app ' +
+      '`navigation`, `areas[].navigation` and `manifest.navigationContributions`, during the docs ' +
+      'step, because that is where the docs read from `src/docs/*.md` join the artifact.',
+    '`book` resolves against the books declared in `books`, on the stack and on each package body, ' +
+      'and against a package id, which opens that package\'s implicit book. `doc` resolves against the ' +
+      'docs the package carries: the filename stem of a `src/docs/*.md` file, or an entry declared in ' +
+      '`docs`. The item and app are named by the finding\'s path.',
+    'The verdict names the nearest existing name when one is close. To fix it, correct the name, or ' +
+      'open the other kind of target: remove `doc` and open the whole book with `book`, or remove ' +
+      '`book` and open a single page with `doc`.',
+  ],
+};
+
+const DOCS_FRONTMATTER_TAGS_EXPLANATION: RuleExplanation = {
+  rule: 'docs/frontmatter-tags',
+  covers: 'how doc tags are read',
+  paragraphs: [
+    'A doc\'s frontmatter `tags:` is what a book group\'s `include: { tag }` matches. The reader ' +
+      'understands two YAML spellings and no others: an inline list (`tags: [tutorial, beginner]`) or a ' +
+      'block of `- item` lines under `tags:`. Anything else under the key, such as a bare scalar, an ' +
+      'unterminated inline list, a key with nothing under it, nested or mapping items, a block scalar or ' +
+      'a quoted item containing a comma, is reported instead of half-read, and the doc is collected ' +
+      'without tags.',
+    'Tags belong to the doc, not to one translation, so they are read from the base file only: a ' +
+      'locale variant (`NAME.LOCALE.md`) that declares `tags:` is reported and its tags are not ' +
+      'collected. Move them to the base file.',
+    'Reported, never dropped: a tag that silently fails to parse leaves a book group rendering empty ' +
+      'with nothing saying why.',
+  ],
+};
+
+// `packages/cli/src/utils/picklist-references.ts` (`os build`, `os validate`).
+
+const PICKLIST_REFERENCE_UNVERIFIED_EXPLANATION: RuleExplanation = {
+  rule: 'picklist-reference-unverified',
+  covers: 'why a picklist reference is not judged',
+  paragraphs: [
+    'A field\'s `picklist` and a picklist extension\'s `extend` name a shared option list. `os ' +
+      'validate` and `os build` resolve the name against every picklist the stack declares (every ' +
+      '`packages[]` body\'s `picklists`, or the top-level `picklists`) and refuse one that resolves ' +
+      'nowhere, as `picklist-reference-unknown`.',
+    'When the package that declares the reference depends on a package this stack does not carry, the ' +
+      'list could live there, and this command cannot read it: `manifest.dependencies` maps package ids ' +
+      'to version ranges the installer resolves, and nothing maps such an id to a file the CLI could ' +
+      'open. So the reference gets this notice instead of a refusal: it is not judged, and the notice ' +
+      'never gates a run, not even under `--strict`.',
+    'If one of the named dependencies declares the list, nothing is wrong. Otherwise declare the list ' +
+      'in this stack, or correct the name. A reference saved at runtime through Studio or the REST ' +
+      'metadata API is not judged here.',
+  ],
+};
+
 /**
  * Every rule explanation this package ships, keyed by rule id. `os explain
  * <rule-id>` reads this table and nothing else.
@@ -3536,6 +3718,15 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SEED_INSERT_MODE_DUPLICATES_ON_REPLAY_EXPLANATION.rule]: SEED_INSERT_MODE_DUPLICATES_ON_REPLAY_EXPLANATION,
   [SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION.rule]: SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION,
   [SEMANTIC_ROLE_FIELD_UNPROVISIONED_EXPLANATION.rule]: SEMANTIC_ROLE_FIELD_UNPROVISIONED_EXPLANATION,
+  [HOOK_BODY_NOT_LOWERABLE_EXPLANATION.rule]: HOOK_BODY_NOT_LOWERABLE_EXPLANATION,
+  [HOOK_BODY_BUNDLED_FALLBACK_EXPLANATION.rule]: HOOK_BODY_BUNDLED_FALLBACK_EXPLANATION,
+  [HOOK_BODY_UNPARSEABLE_EXPLANATION.rule]: HOOK_BODY_UNPARSEABLE_EXPLANATION,
+  [HOOK_BODY_EXTRACTION_FAILED_EXPLANATION.rule]: HOOK_BODY_EXTRACTION_FAILED_EXPLANATION,
+  [DOCS_UNCOLLECTED_DIRECTORY_EXPLANATION.rule]: DOCS_UNCOLLECTED_DIRECTORY_EXPLANATION,
+  [DOCS_DUPLICATE_NAME_EXPLANATION.rule]: DOCS_DUPLICATE_NAME_EXPLANATION,
+  [DOCS_NAV_TARGET_EXPLANATION.rule]: DOCS_NAV_TARGET_EXPLANATION,
+  [DOCS_FRONTMATTER_TAGS_EXPLANATION.rule]: DOCS_FRONTMATTER_TAGS_EXPLANATION,
+  [PICKLIST_REFERENCE_UNVERIFIED_EXPLANATION.rule]: PICKLIST_REFERENCE_UNVERIFIED_EXPLANATION,
 });
 
 /** The explanation for `rule`, or `undefined` when the rule has none. Exact id match. */

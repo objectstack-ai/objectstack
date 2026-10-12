@@ -31,7 +31,7 @@ describe('conversions reach nodes inside structured regions', () => {
         name: 'sweep',
         nodes: [
           webhookNode('top'),
-          { id: 'loop', type: 'loop', label: 'Loop', config: { collection: '{rows}', body: region(webhookNode('inner')) } },
+          { id: 'loop', type: 'loop', label: 'Loop', config: { collection: { dialect: 'cel', source: 'rows' }, body: region(webhookNode('inner')) } },
         ],
       }],
     });
@@ -91,13 +91,13 @@ describe('conversions reach nodes inside structured regions', () => {
         nodes: [{
           id: 'l1', type: 'loop', label: 'Outer',
           config: {
-            collection: '{a}',
+            collection: { dialect: 'cel', source: 'a' },
             body: region({
               id: 'tc', type: 'try_catch', label: 'Guard',
               config: {
                 try: region({
                   id: 'l2', type: 'loop', label: 'Inner',
-                  config: { collection: '{b}', body: region(webhookNode('deep')) },
+                  config: { collection: { dialect: 'cel', source: 'b' }, body: region(webhookNode('deep')) },
                 }),
               },
             }),
@@ -127,7 +127,7 @@ describe('conversions reach nodes inside structured regions', () => {
         nodes: [{
           id: 'loop', type: 'loop', label: 'Loop',
           config: {
-            collection: '{rows}',
+            collection: { dialect: 'cel', source: 'rows' },
             body: region({
               id: 'del', type: 'delete_record', label: 'Del',
               config: { object: 'lead', filters: { status: 'stale' } },
@@ -144,7 +144,7 @@ describe('conversions reach nodes inside structured regions', () => {
   it('reaches a region through `applyConversionsToFlow` — the runtime rehydration seam', () => {
     const flow = {
       name: 'sweep',
-      nodes: [{ id: 'loop', type: 'loop', label: 'Loop', config: { collection: '{rows}', body: region(webhookNode('inner')) } }],
+      nodes: [{ id: 'loop', type: 'loop', label: 'Loop', config: { collection: { dialect: 'cel', source: 'rows' }, body: region(webhookNode('inner')) } }],
     };
     const converted = applyConversionsToFlow(flow, { includeRetired: true });
     expect((converted as any).nodes[0].config.body.nodes[0]).toEqual(httpNode('inner'));
@@ -156,7 +156,7 @@ describe('the region walk stays copy-on-write and shape-gated', () => {
     const clean = {
       flows: [{
         name: 'clean',
-        nodes: [{ id: 'loop', type: 'loop', label: 'Loop', config: { collection: '{rows}', body: region(httpNode('inner')) } }],
+        nodes: [{ id: 'loop', type: 'loop', label: 'Loop', config: { collection: { dialect: 'cel', source: 'rows' }, body: region(httpNode('inner')) } }],
       }],
     };
     expect(applyConversions(clean)).toBe(clean);
@@ -187,7 +187,7 @@ describe('the region walk stays copy-on-write and shape-gated', () => {
         name: 'post',
         nodes: [
           { id: 'h', type: 'http', label: 'Post', config: { url: 'https://x', body: { nodes: 'not-an-array' } } },
-          { id: 'l', type: 'loop', label: 'Loop', config: { collection: '{r}', body: 'PT1M' } },
+          { id: 'l', type: 'loop', label: 'Loop', config: { collection: { dialect: 'cel', source: 'r' }, body: 'PT1M' } },
         ],
       }],
     };
@@ -198,7 +198,7 @@ describe('the region walk stays copy-on-write and shape-gated', () => {
     // A stack handed to `defineStack` is hand-built objects, not parsed JSON,
     // so a cycle is reachable on the load path.
     const selfRegion: { nodes: unknown[]; edges: unknown[] } = { nodes: [], edges: [] };
-    selfRegion.nodes.push({ id: 'l', type: 'loop', label: 'L', config: { collection: '{r}', body: selfRegion } });
+    selfRegion.nodes.push({ id: 'l', type: 'loop', label: 'L', config: { collection: { dialect: 'cel', source: 'r' }, body: selfRegion } });
     expect(() => applyConversions({ flows: [{ name: 'cyclic', nodes: selfRegion.nodes }] })).not.toThrow();
   });
 

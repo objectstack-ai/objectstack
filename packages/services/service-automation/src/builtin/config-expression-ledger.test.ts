@@ -57,11 +57,11 @@ interface SchemaNode {
 /**
  * `xExpression` marker → the dialect the ledger records for that slot.
  *
- * `'template'` maps to `flow-template` (single-brace `{var}`, resolved by
- * `interpolate()`), NOT to `validateExpression`'s `'template'` role — that role
- * enforces the ADR-0032 §3 double-brace text template, a different dialect that
- * rejects a single `{x}`. Conflating the two would fail every valid
- * `loop.collection`.
+ * `'template'` is NOT here (#19939): it marked the single-brace `{var}` slots
+ * (`loop` / `map` `collection`, the ledger's retired `flow-template` role),
+ * and both are value slots since stage S3. A descriptor that marks a slot
+ * `'template'` again fails `roleOf` as an unknown marker, so the single-brace
+ * dialect cannot be declared back into a flow node.
  *
  * `'value'` (#14149) maps to the ledger's `value` role: a slot whose authored
  * value may be a `{ dialect: 'cel', source }` envelope evaluated by the
@@ -72,7 +72,6 @@ interface SchemaNode {
  */
 const ROLE_BY_MARKER: Record<string, FlowNodeExpressionRole> = {
   expression: 'predicate',
-  template: 'flow-template',
   value: 'value',
 };
 
@@ -231,7 +230,7 @@ describe('configSchema ↔ expression-ledger reconciliation (#4027)', () => {
    *
    * Reconciled over the `predicate` role, the one role the flag acts on: the
    * resolver emits an absent value only for a required PREDICATE slot. The
-   * channels require two `flow-template` slots too (`loop.collection`,
+   * channels require two `value` slots too (`loop.collection`,
    * `map.collection`), so the flag stays off there, and the second assertion
    * pins that it is never set on another role. Their absence is refused at the
    * three doors all the same since #20316 — by `flowNodeConfigRefusals`, the
@@ -259,7 +258,7 @@ describe('configSchema ↔ expression-ledger reconciliation (#4027)', () => {
    */
   it('every channel-required slot outside the predicate role is refused absent by flowNodeConfigRefusals (#20316)', () => {
     const requiredElsewhere = declaredEverywhere().filter((d) => d.required && d.role !== 'predicate');
-    expect(requiredElsewhere.map(key).sort()).toEqual(['loop.collection (flow-template)', 'map.collection (flow-template)']);
+    expect(requiredElsewhere.map(key).sort()).toEqual(['loop.collection (value)', 'map.collection (value)']);
     const WHOLE: Record<string, Record<string, unknown>> = {
       loop: { body: { nodes: [{ id: 'b', type: 'assignment', label: 'B' }], edges: [] } },
       map: { flowName: 'child_flow' },
@@ -365,8 +364,32 @@ describe('configSchema ↔ expression-ledger reconciliation (#4027)', () => {
   });
 
   it('map keeps `collection` on its descriptor channel beside the new `input.*` — one slot, one channel', () => {
-    expect(declaredFromDescriptors().filter((d) => d.nodeType === 'map').map(key)).toEqual(['map.collection (flow-template)']);
+    expect(declaredFromDescriptors().filter((d) => d.nodeType === 'map').map(key)).toEqual(['map.collection (value)']);
     expect(declaredFromSchemalessConfigs().filter((d) => d.nodeType === 'map').map(key)).toEqual(['map.input.* (value)']);
+  });
+
+  /**
+   * [#19939, stage S3] The list a `loop` and a `map` iterate is a `value` slot,
+   * declared on the DESCRIPTOR channel (`xExpression: 'value'` on each
+   * `collection`); its contract, `FlowCollectionSlotSchema`, carries no
+   * marker, so `MapConfigSchema` — which the spec channel projects — does not
+   * declare it a second time.
+   */
+  it.each(['loop', 'map'])('%s.collection is a value slot declared on its descriptor — one slot, one channel', (nodeType) => {
+    const slot = FLOW_NODE_EXPRESSION_PATHS.find((e) => e.nodeType === nodeType && e.path === 'collection');
+    expect(slot!.role).toBe('value');
+    expect(declaredFromDescriptors().map(key)).toContain(key(slot!));
+    expect(declaredFromSchemalessConfigs().map(key)).not.toContain(key(slot!));
+  });
+
+  it('no descriptor or contract declares the retired single-brace marker `template` on any slot', () => {
+    const markers = [
+      ...engine.getActionDescriptors().flatMap((d) => collectExpressionProps(d.configSchema as SchemaNode)),
+      ...Object.values(getSchemalessNodeConfigJsonSchemas()).flatMap((json) => collectExpressionProps(json as SchemaNode)),
+    ].map((p) => p.marker);
+    expect(markers.length).toBeGreaterThan(0);
+    expect(markers).not.toContain('template');
+    expect(ROLE_BY_MARKER.template).toBeUndefined();
   });
 
   it('screen.fields[].visibleWhen is covered — the #3528 regression', () => {
@@ -396,13 +419,18 @@ describe('resolveFlowNodeExpressions — path resolution (#4027)', () => {
     expect(found.every((f) => f.entry.role === 'predicate')).toBe(true);
   });
 
-  it('resolves a top-level flow-template slot, marked as not-validated', () => {
-    const found = resolveFlowNodeExpressions('loop', { collection: '{tasks}' });
+  // [#19939] RE-JUDGED IN PLACE: this pinned `{tasks}` resolved for the
+  // `flow-template` role, skipped by every consumer. Stage S3 made the
+  // collection a value slot: its envelope is what resolves, on a `loop` with
+  // a `body`, and its `{tasks}` is the value-slot judge's to refuse.
+  it('resolves a top-level collection envelope as a value slot, on a loop with a body', () => {
+    const envelope = { dialect: 'cel', source: 'tasks' };
+    const found = resolveFlowNodeExpressions('loop', { collection: envelope, body: { nodes: [], edges: [] } });
     expect(found).toHaveLength(1);
     expect(found[0].path).toBe('collection');
-    // `flow-template`, not `predicate` — the consumers skip it, which is what
-    // keeps a correct single-brace `{tasks}` from being rejected as a CEL brace.
-    expect(found[0].entry.role).toBe('flow-template');
+    expect(found[0].entry.role).toBe('value');
+    expect(found[0].value).toBe(envelope);
+    expect(resolveFlowNodeExpressions('loop', { collection: '{tasks}', body: { nodes: [], edges: [] } })).toEqual([]);
   });
 
   it('skips absent values rather than inventing findings', () => {
@@ -418,8 +446,8 @@ describe('resolveFlowNodeExpressions — path resolution (#4027)', () => {
   // evaluator treated the blank the same way. That agreement was ruled no
   // defence: a blank predicate is an author's rule that was never written. So
   // the blank is EMITTED for a `predicate` slot, for `registerFlow` and
-  // `objectstack validate` to refuse, and still skipped for a `flow-template`
-  // one, which the ruling did not reach.
+  // `objectstack validate` to refuse, and skipped for a `value` slot's string,
+  // a literal (the `flow-template` role this pinned was retired in #19939).
   it('emits a blank string in a predicate slot for the consumer to refuse (#17493)', () => {
     expect(resolveFlowNodeExpressions('screen', { fields: [{ visibleWhen: '   ' }] })
       .map((f) => [f.path, f.value, f.entry.role]))

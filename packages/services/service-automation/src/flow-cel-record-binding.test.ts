@@ -230,7 +230,7 @@ describe('each entrance hands its record: `record` is that record, never the var
                 {
                     id: 'each', type: 'map', label: 'Each',
                     config: {
-                        flowName: 'child', collection: '{items}', iteratorVariable: 'item',
+                        flowName: 'child', collection: { dialect: 'cel', source: 'items' }, iteratorVariable: 'item',
                         input: { title: 'From a variable' }, outputVariable: 'mapped',
                     },
                 },

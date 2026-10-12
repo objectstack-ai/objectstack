@@ -713,7 +713,7 @@ describe('nested regions', () => {
 
   it('checks an approval nested in a loop body', () => {
     const findings = validateApprovalApprovers(
-      nestedApproval('loop', { collection: '{items}', body: { nodes: [badApproval], edges: [] } }),
+      nestedApproval('loop', { collection: { dialect: 'cel', source: 'items' }, body: { nodes: [badApproval], edges: [] } }),
     );
     expect(findings.some((f) => f.rule === APPROVAL_APPROVER_TYPE_UNKNOWN)).toBe(true);
     expect(findings.find((f) => f.rule === APPROVAL_APPROVER_TYPE_UNKNOWN)?.path).toBe(

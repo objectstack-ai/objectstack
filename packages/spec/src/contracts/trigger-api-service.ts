@@ -54,14 +54,19 @@ export interface ITriggerApiService {
    *    id gets this `503`, signed or not. It stays a `503` on purpose: it is
    *    the deployment's fault, a sender retries it, and it lasts only while
    *    the secret cannot be read.
-   *  - It verifies the `x-objectstack-signature` header (`sha256=` and the hex
-   *    HMAC-SHA256 of the raw body under that secret). A missing or wrong
-   *    signature gets the unverified-post refusal below.
+   *  - It verifies the `x-objectstack-signature` header in its timestamped
+   *    form, the only one it accepts: `t=<unix seconds>,v1=<hex>`, where the
+   *    hex is the HMAC-SHA256 of `<t>.<raw body>` under that secret, and a `t`
+   *    more than 300 seconds from the server's clock is refused. A missing or
+   *    wrong signature, one outside that window, and one in the body-only form
+   *    (`sha256=` and the hex HMAC-SHA256 of the raw body alone, which signs
+   *    no time; refused even when it is the secret's HMAC of the body) get the
+   *    unverified-post refusal below.
    *  - **One refusal for every post that does not verify** (#22806): an
    *    unknown flow, a wrong hook id, an absent signature and a bad one all
    *    answer `401 INVALID_SIGNATURE`, with one body. So the answer does not
    *    tell an armed flow name from an unarmed one, whichever hook id a flow
-   *    is armed with. The cause (which of those four) goes to the server log,
+   *    is armed with. The cause (which of those) goes to the server log,
    *    ⛔ never to the sender. FROM → TO: an unknown flow and a wrong hook id
    *    used to answer `404 RESOURCE_NOT_FOUND`; they now answer the same
    *    `401 INVALID_SIGNATURE` an absent or bad signature always has.
@@ -88,9 +93,9 @@ export interface ITriggerApiService {
    * again differs from them (key order, whitespace, escapes), so it would
    * fail verification for every real sender. ⛔ Nor does the caller check,
    * pre-filter or short-circuit the signature: there is one verifier, and it
-   * is behind this member. Anything a later signing scheme adds (a
-   * timestamp, for one) arrives in the same forwarded request, so this
-   * signature gains no field for it.
+   * is behind this member. Anything the signing scheme carries beyond the
+   * body (the accepted form's timestamp, for one) arrives in the same
+   * forwarded request, so this signature gains no field for it.
    *
    * **The signature is the only credential.** This member takes no
    * `ExecutionContext` and reads no session, cookie or `Authorization` header:

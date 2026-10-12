@@ -94,9 +94,9 @@ const CENSUS: Array<{ type: string; config: Config; key: string }> = [
   { type: 'screen', config: SCREEN, key: 'fields[0].options[0].label' },
   { type: 'script', config: { function: 'recalc_totals' }, key: 'function' },
   { type: 'subflow', config: { flowName: 'child_flow' }, key: 'flowName' },
-  { type: 'map', config: { collection: '{rows}', flowName: 'child_flow' }, key: 'collection' },
-  { type: 'map', config: { collection: '{rows}', flowName: 'child_flow' }, key: 'flowName' },
-  { type: 'loop', config: { collection: '{rows}', body: region('loop') }, key: 'collection' },
+  { type: 'map', config: { collection: { dialect: 'cel', source: 'rows' }, flowName: 'child_flow' }, key: 'collection' },
+  { type: 'map', config: { collection: { dialect: 'cel', source: 'rows' }, flowName: 'child_flow' }, key: 'flowName' },
+  { type: 'loop', config: { collection: { dialect: 'cel', source: 'rows' }, body: region('loop') }, key: 'collection' },
   { type: 'parallel', config: { branches: [region('p1'), region('p2')] }, key: 'branches' },
   { type: 'try_catch', config: { try: region('try'), catch: region('catch') }, key: 'try' },
 ];
@@ -148,7 +148,7 @@ describe('FlowSchema.parse refuses a key the node\'s executor contract requires,
 
   it('reaches a node inside an ADR-0031 region body, anchored at the inner node — never re-reported against the container', () => {
     const inner = { id: 'fetch', type: 'get_record', label: 'Fetch', config: { outputVariable: 'rows' } };
-    const issues = issuesOf(flowWith(node('loop', { collection: '{rows}', body: { nodes: [inner], edges: [] } })));
+    const issues = issuesOf(flowWith(node('loop', { collection: { dialect: 'cel', source: 'rows' }, body: { nodes: [inner], edges: [] } })));
     expect(issues.map((i) => [i.code, i.path])).toEqual([
       ['custom', ['nodes', 1, 'config', 'body', 'nodes', 0, 'config', 'objectName']],
     ]);
@@ -251,7 +251,7 @@ describe('FlowSchema.parse refuses a decision branch list the executor cannot re
 
   it('reaches a decision inside a region body, anchored where the author wrote it', () => {
     const issues = issuesOf(flowWith(node('loop', {
-      collection: '{rows}',
+      collection: { dialect: 'cel', source: 'rows' },
       body: { nodes: [{ id: 'inner', type: 'decision', label: 'Inner', config: { conditions: [{ expression: 'true' }] } }], edges: [] },
     })));
     expect(issues.map((i) => [i.code, i.path])).toEqual([

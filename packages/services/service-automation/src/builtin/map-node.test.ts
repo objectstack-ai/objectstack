@@ -84,7 +84,7 @@ function setup(childNodes: Array<{ id: string; type: string }>, captured: unknow
       { id: 'ps', type: 'start', label: 'Start' },
       {
         id: 'do_map', type: 'map', label: 'For each',
-        config: { flowName: 'child_flow', collection: '{items}', iteratorVariable: 'item', input: { val: { dialect: 'cel', source: 'item' } }, outputVariable: 'mapped' },
+        config: { flowName: 'child_flow', collection: { dialect: 'cel', source: 'items' }, iteratorVariable: 'item', input: { val: { dialect: 'cel', source: 'item' } }, outputVariable: 'mapped' },
       },
       { id: 'chk', type: 'mapcheck', label: 'Check' },
       { id: 'pe', type: 'end', label: 'End' },
@@ -192,9 +192,10 @@ describe('map descriptor configSchema (objectui #2670 Phase 3 / #3304)', () => {
       | { properties?: Record<string, { xExpression?: unknown; xRef?: { kind?: string } }>; required?: string[] }
       | undefined;
     expect(schema).toBeDefined();
-    // `collection` is an interpolate() `{items}` template (mono editor + `{var}`
-    // picker, no CEL brace-trap) — the same marker as loop.collection.
-    expect(schema?.properties?.collection?.xExpression).toBe('template');
+    // [#19939] `collection` is a value slot — a CEL value envelope or an inline
+    // array — the same marker as loop.collection (it was the single-brace
+    // `'template'` until stage S3).
+    expect(schema?.properties?.collection?.xExpression).toBe('value');
     // `flowName` / `itemObject` are typed references → pickers, not free text.
     expect(schema?.properties?.flowName?.xRef?.kind).toBe('flow');
     expect(schema?.properties?.itemObject?.xRef?.kind).toBe('object');
@@ -221,7 +222,7 @@ describe('map config `flow` alias (#4045)', () => {
         { id: 'ps', type: 'start', label: 'Start' },
         {
           id: 'do_map', type: 'map', label: 'For each',
-          config: { flow: 'child_flow', collection: '{items}', iteratorVariable: 'item', input: { val: { dialect: 'cel', source: 'item' } }, outputVariable: 'mapped' },
+          config: { flow: 'child_flow', collection: { dialect: 'cel', source: 'items' }, iteratorVariable: 'item', input: { val: { dialect: 'cel', source: 'item' } }, outputVariable: 'mapped' },
         },
         { id: 'chk', type: 'mapcheck', label: 'Check' },
         { id: 'pe', type: 'end', label: 'End' },

@@ -313,7 +313,7 @@ describe('validateReadonlyFlowWrites', () => {
           type: 'loop',
           label: 'Each',
           config: {
-            collection: '{items}',
+            collection: { dialect: 'cel', source: 'items' },
             body: {
               nodes: [
                 { id: 'u', type: 'update_record', label: 'U', config: { objectName: 'crm_opportunity', fields: { amount: 1 } } },
@@ -469,7 +469,7 @@ describe('validateReadonlyFlowWrites', () => {
             type: 'loop',
             label: 'Each',
             config: {
-              collection: '{items}',
+              collection: { dialect: 'cel', source: 'items' },
               body: {
                 nodes: [
                   { id: 'c', type: 'create_record', label: 'C', config: { objectName: 'crm_opportunity', fields: { approval_status: 'approved' } } },
@@ -653,7 +653,7 @@ describe('validateReadonlyFlowWrites', () => {
           type: 'loop',
           label: 'Each',
           config: {
-            collection: '{items}',
+            collection: { dialect: 'cel', source: 'items' },
             body: {
               nodes: [
                 { id: 'u', type: 'update_record', label: 'U', config: { objectName: 'crm_opportunity', fields: { amount: 1 } } },

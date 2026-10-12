@@ -20,12 +20,13 @@
  *
  * ## What passes
  *
- *  - **System-context writes** (`isSystem: true`): the built-in seed, the
- *    declared-template boot sweep, the live projector that writes a Studio save
- *    of an `email_template` into its sending row, and the v18 migration
- *    ceremony's promotion. Studio editing of a template is the METADATA door
- *    (`PUT /api/v1/meta/email_template/:name`), which stays open; its projection
- *    into this table is a system write.
+ *  - **System-context writes** (`isSystem: true`): the v18 migration
+ *    ceremony's promotion. The plugin itself no longer writes this table —
+ *    templates resolve from the registry (`template-loader.ts`), so the seed,
+ *    the boot sweep and the live projector that used to write here are gone.
+ *    Studio editing of a template is the METADATA door
+ *    (`PUT /api/v1/meta/email_template/:name`), which stays open and lands at
+ *    environment level.
  *  - **A write with no caller at all** — an engine call made with no execution
  *    context, whose hook session is `undefined` ("no caller", never "an
  *    anonymous caller"; see the engine's `buildSession`). It is not an
@@ -69,9 +70,9 @@ type DoorVerb = 'create' | 'edit';
 export function emailTemplateDoorRefusal(object: string, verb: DoorVerb): Error {
   const err: any = new Error(
     `PERMISSION_DENIED: ${object} is closed to organization writes — an organization cannot ${verb} an `
-    + 'email template row. Email templates are not overridden per organization: the rows are written by '
-    + 'the platform alone, from the built-in templates and the email_template metadata. To change what a '
-    + 'template sends, edit the email template in Studio.',
+    + 'email template row. Email templates are not overridden per organization, and no mail is sent from '
+    + 'these rows: every template is read from the built-in templates and the email_template metadata. '
+    + 'To change what a template sends, edit the email template in Studio.',
   );
   err.code = 'PERMISSION_DENIED';
   err.status = 403;

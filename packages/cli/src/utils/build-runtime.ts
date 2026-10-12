@@ -19,11 +19,23 @@ import { dirname, basename, resolve as resolvePath, relative, sep as PATH_SEP } 
  * even though the JSON artifact is pure metadata.
  */
 
+type AnyFn = (...args: unknown[]) => unknown;
+
 export interface BuildRuntimeOptions {
   /** Absolute path to the user's `objectstack.config.{ts,js,mjs}`. */
   sourceConfigPath: string;
-  /** Lowered handler refs (`name → handlerName`) — mirrors `LoweringResult.functions`. */
-  refs: string[];
+  /**
+   * `LoweringResult.functions`: ref → the callable it names. The module serves
+   * exactly these refs, each with exactly this callable.
+   */
+  callables: Readonly<Record<string, AnyFn>>;
+  /**
+   * The config `loadConfig` answered for `sourceConfigPath` (its `config`), the
+   * value `lowerCallables`' input was normalized from. Every callable is
+   * located in it by identity, so the module can pick the same function back
+   * up when it re-evaluates the config.
+   */
+  loadedConfig: unknown;
   /** Output directory (e.g. `<cwd>/dist`). Created if missing. */
   outputDir: string;
   /** Base file name without hash, e.g. `objectstack-runtime`. */
@@ -46,68 +58,142 @@ export interface BuildRuntimeResult {
 const DEFAULT_BASE = 'objectstack-runtime';
 
 /**
- * Generate the entry source that re-extracts callable handlers from the
- * compiled config. We bundle the user's config transitively (so every
- * `*.hook.ts` import is captured), then walk the same shape the lowering
- * pass walked and re-export the matching handlers under the same string
- * keys. The runtime side merges this map into `bundle.functions`.
+ * Where a callable lives in the loaded config: a property path from its top
+ * level (`['hooks', 0, 'handler']`, `['functions', 'score_lead']`).
  */
-function generateEntrySource(sourceConfigPath: string, refs: string[], entryDir: string): string {
+export type CallableLocator = readonly (string | number)[];
+
+/**
+ * Locate every ref's callable in `loadedConfig` by IDENTITY, breadth-first
+ * over its own enumerable properties, so each path is the shortest one.
+ *
+ * The ref → callable pairing is `lowerCallables`' (`callables`), and this
+ * function adds only WHERE each callable is, so the module never re-derives a
+ * name. The template used to: it walked `hooks`, then `functions`, keyed each
+ * callable by the hook's name or the entry's authored key, and kept those
+ * present in the ref list. It therefore disagreed with the lowering whenever
+ * one name or one function served two slots (a hook's ref resolved to a
+ * `functions` entry's code, an authored key shipped as a bare string), and it
+ * never reached an action's `target` or a `packages[i].manifest` body at all.
+ *
+ * Every callable `lowerCallables` registered was read off this same config
+ * (normalizing copies containers, never functions), so a callable it cannot
+ * find is an internal inconsistency. It throws, naming the refs, rather than
+ * writing a module that silently leaves them out.
+ */
+export function locateCallables(
+  callables: Readonly<Record<string, AnyFn>>,
+  loadedConfig: unknown,
+): Record<string, CallableLocator> {
+  const wanted = new Map<AnyFn, string[]>();
+  for (const [ref, fn] of Object.entries(callables)) {
+    const refs = wanted.get(fn);
+    if (refs === undefined) wanted.set(fn, [ref]);
+    else refs.push(ref);
+  }
+  const at = new Map<AnyFn, CallableLocator>();
+  const seen = new Set<object>();
+  let frontier: Array<[unknown, CallableLocator]> = [[loadedConfig, []]];
+  while (frontier.length > 0 && at.size < wanted.size) {
+    const next: Array<[unknown, CallableLocator]> = [];
+    for (const [value, path] of frontier) {
+      if (typeof value === 'function') {
+        const fn = value as AnyFn;
+        if (path.length > 0 && wanted.has(fn) && !at.has(fn)) at.set(fn, path);
+        continue;
+      }
+      if (value === null || typeof value !== 'object' || seen.has(value)) continue;
+      seen.add(value);
+      if (Array.isArray(value)) {
+        value.forEach((item, i) => next.push([item, [...path, i]]));
+        continue;
+      }
+      for (const key of Object.keys(value)) {
+        let item: unknown;
+        try {
+          item = (value as Record<string, unknown>)[key];
+        } catch {
+          continue; // a throwing getter holds no callable this pass could have read either
+        }
+        next.push([item, [...path, key]]);
+      }
+    }
+    frontier = next;
+  }
+  const locators: Record<string, CallableLocator> = {};
+  const missing: string[] = [];
+  for (const [ref, fn] of Object.entries(callables)) {
+    const path = at.get(fn);
+    if (path === undefined) missing.push(ref);
+    else locators[ref] = path;
+  }
+  if (missing.length > 0) {
+    throw new Error(
+      `[build-runtime] ${missing.length} lowered callable(s) are not reachable from the loaded config, ` +
+        `so the runtime module could not serve them: ${missing.map((r) => `'${r}'`).join(', ')}`,
+    );
+  }
+  return locators;
+}
+
+/**
+ * Generate the entry source of the runtime module. It bundles the user's
+ * config transitively (so every `*.hook.ts` import is captured) and exports
+ * `functions`: each ref of `locators`, bound to the callable found at its
+ * path. The runtime merges that map into `bundle.functions`.
+ *
+ * A path starts at the config `loadConfig` assembled: the default export's own
+ * keys, then the module's named exports for the keys it does not have (the
+ * named-export merge `loadConfig` performs, read back the same way).
+ */
+function generateEntrySource(
+  sourceConfigPath: string,
+  locators: Record<string, CallableLocator>,
+  entryDir: string,
+): string {
   // Use a POSIX-style relative path so esbuild's resolver bundles the
   // user's config + every transitively-imported `*.hook.ts` into the
   // emitted ESM. A `file://` URL would be treated as external.
   let importPath = relative(entryDir, sourceConfigPath).split(PATH_SEP).join('/');
   if (!importPath.startsWith('.')) importPath = './' + importPath;
-  const refLiteral = JSON.stringify(refs);
 
   return `// AUTO-GENERATED by @objectstack/cli — do not edit.
-import config from ${JSON.stringify(importPath)};
+import * as configModule from ${JSON.stringify(importPath)};
 
-const REFS = new Set(${refLiteral});
+// ref → where \`lowerCallables\` found its callable in the loaded config.
+const LOCATORS = ${JSON.stringify(locators)};
 
-function collect(cfg) {
+const base = configModule.default;
+function top(key) {
+  if (base && (typeof base === 'object' || typeof base === 'function') && Object.prototype.hasOwnProperty.call(base, key)) {
+    return base[key];
+  }
+  return key === 'default' ? undefined : configModule[key];
+}
+
+function collect() {
   const out = Object.create(null);
-  if (!cfg || typeof cfg !== 'object') return out;
-  // Hooks: { name, handler }
-  if (Array.isArray(cfg.hooks)) {
-    for (const h of cfg.hooks) {
-      if (h && typeof h === 'object' && typeof h.handler === 'function' && typeof h.name === 'string') {
-        if (REFS.has(h.name)) out[h.name] = h.handler;
-      }
-    }
-  }
-  // Top-level functions map — a value is the handler, or a declaration
-  // record stating its effect (\`{ handler, effect: 'writes' }\`).
-  if (cfg.functions && !Array.isArray(cfg.functions) && typeof cfg.functions === 'object') {
-    for (const [k, v] of Object.entries(cfg.functions)) {
-      if (!REFS.has(k)) continue;
-      if (typeof v === 'function') out[k] = v;
-      else if (v && typeof v === 'object' && typeof v.handler === 'function') out[k] = v.handler;
-    }
-  }
-  // Top-level functions array
-  if (Array.isArray(cfg.functions)) {
-    for (const entry of cfg.functions) {
-      if (entry && typeof entry === 'object' && typeof entry.handler === 'function' && typeof entry.name === 'string') {
-        if (REFS.has(entry.name)) out[entry.name] = entry.handler;
-      }
-    }
+  for (const ref of Object.keys(LOCATORS)) {
+    const path = LOCATORS[ref];
+    let value = top(path[0]);
+    for (let i = 1; i < path.length && value != null; i++) value = value[path[i]];
+    if (typeof value === 'function') out[ref] = value;
   }
   return out;
 }
 
-const cfg = config && typeof config === 'object' && 'default' in config ? config.default : config;
-export const functions = collect(cfg);
+export const functions = collect();
 export const meta = {
   builtAt: new Date().toISOString(),
-  refCount: ${refs.length},
+  refCount: ${Object.keys(locators).length},
 };
 `;
 }
 
 export async function buildRuntimeBundle(opts: BuildRuntimeOptions): Promise<BuildRuntimeResult> {
-  const { sourceConfigPath, refs, outputDir } = opts;
+  const { sourceConfigPath, callables, loadedConfig, outputDir } = opts;
   const baseName = opts.baseName ?? DEFAULT_BASE;
+  const locators = locateCallables(callables, loadedConfig);
 
   if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
 
@@ -116,7 +202,7 @@ export async function buildRuntimeBundle(opts: BuildRuntimeOptions): Promise<Bui
     entryDir,
     `.${baseName}.entry.${process.pid}.${Date.now()}.mjs`,
   );
-  writeFileSync(entryPath, generateEntrySource(sourceConfigPath, refs, entryDir));
+  writeFileSync(entryPath, generateEntrySource(sourceConfigPath, locators, entryDir));
 
   let esbuild: typeof import('esbuild');
   try {

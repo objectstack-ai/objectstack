@@ -69,21 +69,21 @@ describe('loop container executor (ADR-0031)', () => {
     ],
   });
 
-  it('publishes xExpression:"template" on the collection field of its configSchema (objectui #2670)', () => {
-    // The shipped descriptor tells the flow designer `collection` is an
-    // `interpolate()` `{var}` template — so it renders a `{var}` picker and does
-    // not false-positive the CEL brace-trap on `{tasks}`.
+  // [#19939] RE-JUDGED IN PLACE: the descriptor declared the single-brace
+  // `'template'` slot (objectui #2670) until stage S3 made `collection` a value
+  // slot — a CEL value envelope or an inline array.
+  it('publishes xExpression:"value" on the collection field of its configSchema (#19939)', () => {
     const descriptor = engine.getActionDescriptor('loop');
     const schema = descriptor?.configSchema as
       | { properties?: { collection?: { xExpression?: unknown } } }
       | undefined;
-    expect(schema?.properties?.collection?.xExpression).toBe('template');
+    expect(schema?.properties?.collection?.xExpression).toBe('value');
   });
 
   it('iterates the body region once per item, binding iterator + index', async () => {
     engine.registerFlow('loop_flow', loopFlow(
       {
-        collection: '{items}',
+        collection: { dialect: 'cel', source: 'items' },
         iteratorVariable: 'item',
         indexVariable: 'i',
         body: { nodes: [{ id: 'b', type: 'collect', label: 'Body', config: { itemVar: 'item', idxVar: 'i' } }], edges: [] },
@@ -106,7 +106,7 @@ describe('loop container executor (ADR-0031)', () => {
   it('surfaces each iteration\'s body steps in the run log, tagged with parentNodeId + index (#1479)', async () => {
     engine.registerFlow('loop_flow', loopFlow(
       {
-        collection: '{items}',
+        collection: { dialect: 'cel', source: 'items' },
         iteratorVariable: 'item',
         indexVariable: 'i',
         body: { nodes: [{ id: 'b', type: 'collect', label: 'Body', config: { itemVar: 'item', idxVar: 'i' } }], edges: [] },
@@ -134,7 +134,7 @@ describe('loop container executor (ADR-0031)', () => {
   it('runs a multi-node body region in order each iteration', async () => {
     engine.registerFlow('loop_flow', loopFlow(
       {
-        collection: '{items}',
+        collection: { dialect: 'cel', source: 'items' },
         iteratorVariable: 'item',
         body: {
           nodes: [
@@ -156,7 +156,7 @@ describe('loop container executor (ADR-0031)', () => {
   it('handles an empty collection (zero iterations) and still continues', async () => {
     engine.registerFlow('loop_flow', loopFlow(
       {
-        collection: '{items}',
+        collection: { dialect: 'cel', source: 'items' },
         iteratorVariable: 'item',
         body: { nodes: [{ id: 'b', type: 'collect', label: 'Body', config: { itemVar: 'item' } }], edges: [] },
       },
@@ -171,7 +171,7 @@ describe('loop container executor (ADR-0031)', () => {
   it('fails when the collection does not resolve to an array', async () => {
     engine.registerFlow('loop_flow', loopFlow(
       {
-        collection: '{notAList}',
+        collection: { dialect: 'cel', source: 'notAList' },
         body: { nodes: [{ id: 'b', type: 'collect', label: 'Body' }], edges: [] },
       },
       { notAList: 'hello' },
@@ -179,13 +179,13 @@ describe('loop container executor (ADR-0031)', () => {
 
     const result = await engine.execute('loop_flow');
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(/did not resolve to an array/);
+    expect(result.error).toContain("collection evaluated to a string, not a list — source: `notAList`");
   });
 
   it('enforces the max-iteration guard', async () => {
     engine.registerFlow('loop_flow', loopFlow(
       {
-        collection: '{items}',
+        collection: { dialect: 'cel', source: 'items' },
         iteratorVariable: 'item',
         maxIterations: 2,
         body: { nodes: [{ id: 'b', type: 'collect', label: 'Body', config: { itemVar: 'item' } }], edges: [] },
@@ -201,7 +201,7 @@ describe('loop container executor (ADR-0031)', () => {
   it('propagates a body failure as a flow failure', async () => {
     engine.registerFlow('loop_flow', loopFlow(
       {
-        collection: '{items}',
+        collection: { dialect: 'cel', source: 'items' },
         iteratorVariable: 'item',
         body: { nodes: [{ id: 'b', type: 'boom', label: 'Body' }], edges: [] },
       },
@@ -217,7 +217,7 @@ describe('loop container executor (ADR-0031)', () => {
     expect(() =>
       engine.registerFlow('bad_loop', loopFlow(
         {
-          collection: '{items}',
+          collection: { dialect: 'cel', source: 'items' },
           // two entry/exit nodes, no edges → not single-entry/single-exit
           body: { nodes: [{ id: 'a', type: 'collect', label: 'A' }, { id: 'b', type: 'collect', label: 'B' }], edges: [] },
         },

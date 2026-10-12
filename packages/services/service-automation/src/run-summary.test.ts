@@ -179,7 +179,7 @@ function sweepFlow(name: string) {
             {
                 id: 'each', type: 'loop', label: 'Each',
                 config: {
-                    collection: '{rows}', iteratorVariable: 'row',
+                    collection: { dialect: 'cel', source: 'rows' }, iteratorVariable: 'row',
                     body: {
                         nodes: [
                             { id: 'gate', type: 'decision', label: 'Gate' },
@@ -378,7 +378,7 @@ function idempotentSweepFlow(name: string, shape: 'healthy' | 'dead_gate') {
                 id: 'query', type: 'get_record', label: 'Query',
                 config: { objectName: 'deal', filter: { stalled: true }, limit: 10, outputVariable: 'rows' },
             },
-            { id: 'each', type: 'loop', label: 'Each', config: { collection: '{rows}', iteratorVariable: 'row', body } },
+            { id: 'each', type: 'loop', label: 'Each', config: { collection: { dialect: 'cel', source: 'rows' }, iteratorVariable: 'row', body } },
             { id: 'end', type: 'end', label: 'End' },
         ],
         edges: [

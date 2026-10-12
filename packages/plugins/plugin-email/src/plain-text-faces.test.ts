@@ -13,8 +13,8 @@
  * `/` instead of the accept page.
  *
  * The switch lives in the engine (`renderPlainTextTemplate`), not in the
- * templates, so these pins run the REAL `EmailService` over the REAL seeded
- * built-in rows AND over an authored row nobody hand-braced — a per-template
+ * templates, so these pins run the REAL `EmailService` over the REAL
+ * built-in templates AND over an authored row nobody hand-braced — a per-template
  * `{{{…}}}` patch would pass the first half and fail the second.
  *
  * ⚠️ Every expectation is an independent literal: nothing is derived from the
@@ -46,7 +46,7 @@ class CaptureTransport implements IEmailTransport {
   }
 }
 
-/** Exactly what `EmailServicePlugin` seeds, matched on `(name, locale)` with no fallback of its own. */
+/** Exactly what `EmailServicePlugin` registers, matched on `(name, locale)` with no fallback of its own. */
 function seededRow(name: string, locale: string): EmailTemplateRow | null {
   const hit = BUILTIN_AUTH_TEMPLATES.find((t) => t.name === name && t.locale === locale);
   if (!hit) return null;

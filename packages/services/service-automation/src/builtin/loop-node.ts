@@ -5,8 +5,8 @@ import { defineActionDescriptor, LOOP_MAX_ITERATIONS_CEILING, LoopConfigSchema }
 import type { LoopConfigParsed } from '@objectstack/spec/automation';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { AutomationEngine, StepLogEntry } from '../engine.js';
-import { interpolate } from './template.js';
 import { parseNodeConfig } from './parse-config.js';
+import { collectionNotAList, resolveCollectionSlot } from './value-slot-map.js';
 import { attachPartialSteps } from '../partial-steps.js';
 import { runInLoopIteration } from './loop-frame.js';
 
@@ -43,12 +43,14 @@ export function registerLoopNode(engine: AutomationEngine, ctx: PluginContext): 
       configSchema: {
         type: 'object',
         properties: {
-          // `xExpression: 'template'` tells the designer this string is an
-          // `interpolate()` single-brace `{var}` template (e.g. `{tasks}`), not
-          // bare CEL — so the flow-designer renders the mono expression editor
-          // with a `{var}` data-picker and does NOT run the CEL brace-trap on it
-          // (objectui #2670 Phase 3; the contract mirrors `xRef`/`xEnumDeprecated`).
-          collection: { type: 'string', description: 'Template/variable resolving to the array to iterate', xExpression: 'template' },
+          // [#19939] A `value` slot whose literal is a list: the
+          // `xExpression: 'value'` marker declares it to the expression ledger
+          // (it was `'template'`, the single-brace `{var}` slot), and its
+          // contract (`LoopConfigSchema.collection`, `FlowCollectionSlotSchema`)
+          // carries none, so one channel declares it. Untyped, like a screen
+          // field's `defaultValue`: the value is an envelope object or a list,
+          // and a string is refused.
+          collection: { description: 'The list to iterate: a CEL value envelope evaluated to a list in the run\'s scope (e.g. { dialect: \'cel\', source: \'tasks\' }), or an inline array of the items.', xExpression: 'value' },
           iteratorVariable: { type: 'string', description: 'Loop variable holding the current item' },
           indexVariable: { type: 'string', description: 'Optional loop variable holding the current index' },
           maxIterations: { type: 'integer', minimum: 1, maximum: LOOP_MAX_ITERATIONS_CEILING },
@@ -89,24 +91,15 @@ export function registerLoopNode(engine: AutomationEngine, ctx: PluginContext): 
       const iteratorVariable = cfg.iteratorVariable;
       const indexVariable = cfg.indexVariable || undefined;
 
-      // Resolve the collection: a `{token}` template, a bare variable name, or
-      // an inline array (the contract is the union, same as `map`).
-      const rawCollection = cfg.collection;
-      let collection: unknown;
-      if (Array.isArray(rawCollection)) {
-        collection = rawCollection;
-      } else {
-        collection = interpolate(rawCollection, variables, context ?? ({} as AutomationContext));
-        if ((collection == null) && variables.has(rawCollection)) {
-          collection = variables.get(rawCollection);
-        }
-      }
-
+      // [#19939] The collection is a `value` slot whose literal is a list (the
+      // contract `map` shares): a CEL value envelope evaluated in the run's
+      // scope, or an inline array, iterated as written. The parse above has
+      // refused a string — a `{token}` of the retired dialect, and a bare
+      // variable name, which this branch never read: the interpolator handed
+      // the name back unchanged and every run failed here.
+      const collection = resolveCollectionSlot(engine, cfg.collection, variables, context ?? ({} as AutomationContext));
       if (!Array.isArray(collection)) {
-        return {
-          success: false,
-          error: `loop '${node.id}': collection '${String(rawCollection)}' did not resolve to an array`,
-        };
+        return { success: false, error: `loop '${node.id}': ${collectionNotAList(cfg.collection, collection)}` };
       }
 
       // Hard iteration guard.

@@ -108,12 +108,6 @@ export const NON_ELEVATION_READS = [
     why: 'same object-definition lint, sharing-rule side',
   },
   {
-    file: 'packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts',
-    receiver: 'tpl',
-    field: 'EmailTemplate.isSystem',
-    why: 'copies the built-in-template marker onto the stored row',
-  },
-  {
     file: 'packages/plugins/plugin-security/src/explain-engine.ts',
     receiver: 'schema',
     field: 'Object.isSystem',

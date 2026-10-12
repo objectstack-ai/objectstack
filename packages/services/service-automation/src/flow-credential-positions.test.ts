@@ -155,7 +155,7 @@ function placements(nodeType: string, configKey: string): Array<{ where: string;
         { where: 'top level', flow: shell(inner()) },
         {
             where: 'a loop body',
-            flow: shell({ id: 'box', type: 'loop', label: 'Loop', config: { collection: '{items}', body: { nodes: [inner()], edges: [] } } }),
+            flow: shell({ id: 'box', type: 'loop', label: 'Loop', config: { collection: { dialect: 'cel', source: 'items' }, body: { nodes: [inner()], edges: [] } } }),
         },
         {
             where: 'a parallel branch',
@@ -221,7 +221,7 @@ describe('#20590 — what the projection answers, position by position', () => {
                 {
                     id: 'each', type: 'loop', label: 'Each',
                     config: {
-                        collection: '{rows}',
+                        collection: { dialect: 'cel', source: 'rows' },
                         body: { nodes: [{ id: 'call', type: 'http', label: 'Call', config: { url: 'https://x', signingSecret: 'sign-1' } }], edges: [] },
                     },
                 },
