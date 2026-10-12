@@ -399,7 +399,16 @@ describe('runParentWriteReachProofs — NEGATIVE and ATTRIBUTION controls', () =
 describe('runParentWriteReachProofs — a stack booted without parentWriteReachSecurity', () => {
   let stack: VerifyStack;
   let report: ParentWriteReachReport;
-  const app = defineStack({ ...source, objects: source.objects.filter((o) => o.name !== 'pwr_quote_line') } as never) as unknown as typeof source;
+  // The single-level objects only, so every probe this stack answers is one the engine agrees with.
+  const singleLevel = {
+    ...source,
+    objects: source.objects.filter((o) => o.name !== 'pwr_quote_line'),
+    permissions: source.permissions.map((set) => ({
+      ...set,
+      objects: Object.fromEntries(Object.entries(set.objects).filter(([name]) => name !== 'pwr_quote_line')),
+    })),
+  };
+  const app = defineStack(singleLevel as never) as unknown as typeof source;
 
   beforeAll(async () => {
     stack = await bootStack(app as never);
