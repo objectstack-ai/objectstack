@@ -188,8 +188,8 @@ localStorage / auth gotchas.
    **Never** set `namespace` (deprecated) or `tableName` (always equals `name`). For module prefixes, embed in the name
    (`sys_user`, `ai_conversations`).
 7. **One Zod source per metadata type.** Each type (`view`, `flow`, `agent`, …) has exactly one schema in
-   `packages/spec/src/{domain}/`. Org overlay opt-in lives only in `allowOrgOverride` on
-   `DEFAULT_METADATA_TYPE_REGISTRY` — no parallel whitelists. See ADR-0005.
+   `packages/spec/src/{domain}/`. Environment-overlay opt-in lives only in `allowEnvironmentOverlay` on
+   `DEFAULT_METADATA_TYPE_REGISTRY` — no parallel whitelists. See ADR-0005, amended by ADR-0131 C5.
 8. **North Star alignment.** Read `content/docs/concepts/north-star.mdx` before structural changes. If a change doesn't
    advance §7 Built, shrink Drift, or unlock Missing — it probably shouldn't ship.
 9. **`OS_` env-var prefix + structure.** All ObjectStack-owned env vars MUST start with `OS_`, then follow
