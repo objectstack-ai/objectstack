@@ -788,6 +788,12 @@ function claimConfiguration(config: unknown): ConfigurationClaim {
 /**
  * Boot an app config in-process and return a live verification stack.
  *
+ * `config` is `defineStack` output, which is what an app's configuration
+ * module exports and what `objectstack verify` loads: a raw object literal is
+ * not parsed here, so it registers its fields as authored, without the spec's
+ * parse defaults (an `autonumber` that authors no `unique` gets no unique
+ * scope and no index).
+ *
  * `NODE_ENV` is forced to `development` so the auth plugin's dev-admin
  * bootstrap provisions a known, loginable admin (mirrors `objectstack dev`).
  *

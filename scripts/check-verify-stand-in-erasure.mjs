@@ -230,6 +230,9 @@ const NOT_A_STAND_IN = {
   runUniqueScopeProofs: 'same `VerifyStack` handle as runCrudVerification.',
   formatUniqueScopeReport:
     'formats a `UniqueScopeReport` this package produced; presentation, not conformance.',
+  runParentWriteReachProofs: 'same `VerifyStack` handle as runCrudVerification.',
+  formatParentWriteReachReport:
+    'formats a `ParentWriteReachReport` this package produced; presentation, not conformance.',
   fillRelationalRefs:
     'takes one `CrudCase` derived by `deriveCrudCases` — a data record this package built, with no ' +
     'external implementer.',
