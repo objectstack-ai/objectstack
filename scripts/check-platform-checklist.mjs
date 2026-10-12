@@ -1100,7 +1100,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   //
   // 42 → 54: R1–R12, the `retired` rule. Before it a retired item fell through
   // to the active rule, so a planned item retired before it was implemented had
-  // no legal shape. Dropping the branch reds R1 and R3–R9.
+  // no legal shape. Measured at `ce66b832d` (this repo): making the branch dead
+  // (`if (false && …)`) reds R1 and R3–R11 — ten rows; R2 and R12 stay green
+  // because the active rule accepts both. The G-rows stay green too: a dead
+  // branch is one of the semantic severings G12 discloses, so these fixture
+  // rows, not the text pin, are what hold the branch.
   [BATTERY_PLANNED_STATUS]: 54,
 });
 const SELF_TEST_BATTERY_FLOOR = 7;
