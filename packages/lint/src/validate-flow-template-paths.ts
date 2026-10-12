@@ -3,8 +3,9 @@
 // Build-time guardrail for `{record.<path>}` template references in a
 // record-change flow's node config (#3426).
 //
-// A `notify` / `update_record` / `http` / ... node interpolates
-// `{record.<field>}` tokens against the triggering record. Two authoring
+// A `notify` / `update_record` / `http` / ... node resolves `{record.<field>}`
+// references against the triggering record — a `{{ }}` hole in a text slot, a
+// single-brace token where that dialect still reads. Two authoring
 // mistakes render a SILENT empty string at runtime, with no design-time
 // signal — exactly the failure #3426 reported:
 //
