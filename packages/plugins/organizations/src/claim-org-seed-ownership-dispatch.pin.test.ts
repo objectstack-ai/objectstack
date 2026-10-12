@@ -8,8 +8,10 @@
  *
  * `claimOrgSeedOwnership` re-owns an organization's seeded rows to its owner.
  * That is attribution, the step that completes the seed, not a user event, so
- * its write runs under `{ isSystem: true, skipAutomations: true }`. This file
- * pins what that context reaches on the engine, because a flag that is
+ * its write runs under `{ isSystem: true, skipAutomations: true }`. Since
+ * [#23054] that write is a PREDICATE write (`multi: true`), paged only when the
+ * engine refuses it for its per-row hook budget. This file pins what that
+ * context reaches on the engine along that path, because a flag that is
  * silently dropped on the way would read as green in every double:
  *
  *  1. **the metadata-hook filter** — a hook bound through the real binder
@@ -24,20 +26,24 @@
  *     `RecordChangeTrigger`'s handler reads before it dispatches a flow
  *     (`skipAutomations` implies it, `engine.ts` `buildSession`).
  *
- * And it measures the read the flag deliberately stays off: the claim's
- * per-object read is a plain system read, so the same metadata hook, bound on
- * `beforeFind`/`afterFind` too, sees it. That is also the in-run positive
- * control: the metadata hook is live on this engine DURING the claim, so its
- * silence on the write events is the filter, not a hook that was never bound.
+ * Each case carries a positive control on the SAME engine: the claim's own
+ * write shape with a plain `{ isSystem: true }` context fires the metadata
+ * hook per row and phase. Without it, "the hook fired 0 times" could be a hook
+ * that was never bound.
  *
- * Each case carries a second positive control on the SAME engine: the claim's
- * own write shape with a plain `{ isSystem: true }` context fires the metadata
- * hook per row and phase.
+ * [#23054] And it pins the claim's reach past the per-row hook ceiling: 10 500
+ * owner-less rows of one object in one organization are ALL owned after one
+ * pass. The flag does not exempt the write from that ceiling (code-registered
+ * hooks still cover the object), so the whole-set write is refused and the
+ * claim pages; the page read is a plain system read, so the metadata hook,
+ * bound on `beforeFind`/`afterFind` too, sees it — the in-run positive control
+ * of that case.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL, bindHooksToEngine } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
+import { BULK_PER_ROW_HOOK_LIMIT_ERROR_CODE, MAX_BULK_PER_ROW_HOOK_ROWS } from '@objectstack/spec/data';
 
 import { claimOrgSeedOwnership } from './claim-org-seed-ownership.js';
 
@@ -174,15 +180,10 @@ describe('[#23008] the organization seed-ownership claim dispatches no metadata-
     expect(owners.get('owned')).toBe(SOMEONE);
     expect(owners.get('foreign')).toBeNull();
 
-    // ⭐ 1 — the metadata-hook filter: not one write dispatch, before or after.
-    expect(writeEvents(metadataSeen), 'a metadata-bound hook fired for the claim write').toEqual([]);
-    // In-run positive control, and the read's measurement: the claim's one read
-    // of this object is a plain system read, so the same metadata hook saw it.
-    expect(metadataSeen.map((s) => s.event)).toEqual(['beforeFind', 'afterFind']);
-    for (const s of metadataSeen) {
-      expect(s.isSystem).toBe(true);
-      expect(s.skipAutomations).toBeUndefined();
-    }
+    // ⭐ 1 — the metadata-hook filter: not one dispatch, before or after. Under
+    // the ceiling the claim is one predicate write and reads nothing, so the
+    // hook (bound on the read events too) sees nothing at all.
+    expect(metadataSeen, 'a metadata-bound hook fired for the claim').toEqual([]);
 
     // ⭐ 2 — the per-row path still runs code-registered hooks: one dispatch per
     // claimed row and phase, so audit and sharing keep their per-row input.
@@ -198,13 +199,15 @@ describe('[#23008] the organization seed-ownership claim dispatches no metadata-
     }
 
     // Positive control, same engine, same rows: the claim's own write shape
-    // (a by-id `update`) under a plain system context fires the metadata hook
-    // per row and phase, and carries no skip flag.
+    // (a predicate write over this organization) under a plain system context
+    // fires the metadata hook per row and phase, and carries no skip flag.
     metadataHook.length = 0;
     codeHook.length = 0;
-    for (const id of claimed) {
-      await (engine as any).update(OBJECT, { id, stage: 'touched' }, SYS);
-    }
+    await (engine as any).update(OBJECT, { stage: 'touched' }, {
+      where: { organization_id: ORG, owner_id: OWNER },
+      multi: true,
+      ...SYS,
+    });
     expect(writeEvents(metadataHook)).toHaveLength(2 * N);
     expect(codeHook).toHaveLength(2 * N);
     for (const s of codeHook) {
@@ -224,5 +227,69 @@ describe('[#23008] the organization seed-ownership claim dispatches no metadata-
     expect(await claimOrgSeedOwnership(engine, ORG, OWNER)).toEqual([]);
     expect(writeEvents(metadataHook)).toEqual([]);
     expect(codeHook).toEqual([]);
+  }, 120_000);
+
+  it('[#23054] 10 500 owner-less rows are all owned after one pass: refused whole under the flag, then paged to every row', async () => {
+    const { engine, metadataHook, codeHook } = await boot();
+    const N = 10_500;
+    expect(N, 'the fixture must be past the per-row hook ceiling').toBeGreaterThan(MAX_BULK_PER_ROW_HOOK_ROWS);
+    const claimed = Array.from({ length: N }, (_, i) => `d${String(i).padStart(5, '0')}`);
+    await seed(engine, [
+      ...claimed.map((id, i) => ({ id, name: `Deal ${i}`, stage: 'open', organization_id: ORG, owner_id: null })),
+      { id: 'owned', name: 'Owned', stage: 'open', organization_id: ORG, owner_id: SOMEONE },
+      { id: 'foreign', name: 'Foreign', stage: 'open', organization_id: OTHER_ORG, owner_id: null },
+    ]);
+
+    // The measurement the paging rests on: with metadata hooks switched off,
+    // code-registered hooks still cover the object, so the ceiling still
+    // applies and refuses the whole-set write — nothing written, no hook run.
+    await expect(
+      (engine as any).update(OBJECT, { owner_id: OWNER }, {
+        where: { organization_id: ORG, owner_id: null },
+        multi: true,
+        context: { isSystem: true, skipAutomations: true },
+      }),
+    ).rejects.toMatchObject({ code: BULK_PER_ROW_HOOK_LIMIT_ERROR_CODE, limit: MAX_BULK_PER_ROW_HOOK_ROWS });
+    expect([...(await ownersOf(engine)).values()].filter((o) => o === OWNER)).toEqual([]);
+    expect(codeHook).toEqual([]);
+    metadataHook.length = 0;
+
+    const result = await claimOrgSeedOwnership(engine, ORG, OWNER);
+    const metadataSeen = [...metadataHook];
+    const codeSeen = [...codeHook];
+
+    expect(result).toEqual([{ object: OBJECT, count: N }]);
+    const owners = await ownersOf(engine);
+    expect(owners.size, 'the read-back saw every row').toBe(N + 2);
+    expect(claimed.filter((id) => owners.get(id) !== OWNER), 'rows the pass left owner-less').toEqual([]);
+    expect(owners.get('owned')).toBe(SOMEONE);
+    expect(owners.get('foreign')).toBeNull();
+
+    // ⭐ 1 on every landed write, page or whole set; the page read is the
+    // in-run positive control: a plain system read the metadata hook sees.
+    expect(writeEvents(metadataSeen), 'a metadata-bound hook fired on a claim write').toEqual([]);
+    expect(metadataSeen.map((s) => s.event)).toEqual(['beforeFind', 'afterFind']);
+    for (const s of metadataSeen) {
+      expect(s.isSystem).toBe(true);
+      expect(s.skipAutomations).toBeUndefined();
+    }
+    // ⭐ 2 and 3: one dispatch per claimed row and phase, every one flagged.
+    for (const event of ['beforeUpdate', 'afterUpdate']) {
+      expect(codeSeen.filter((s) => s.event === event), `${event} per claimed row`).toHaveLength(N);
+    }
+    expect(new Set(codeSeen.filter((s) => s.event === 'afterUpdate').map((s) => s.id)).size).toBe(N);
+    for (const s of codeSeen) {
+      expect(s.skipAutomations).toBe(true);
+      expect(s.skipTriggers).toBe(true);
+    }
+
+    // Positive control on this engine too, kept under the ceiling.
+    metadataHook.length = 0;
+    await (engine as any).update(OBJECT, { stage: 'touched' }, {
+      where: { id: { $in: claimed.slice(0, 3) } },
+      multi: true,
+      ...SYS,
+    });
+    expect(writeEvents(metadataHook)).toHaveLength(6);
   }, 120_000);
 });
