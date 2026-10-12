@@ -217,13 +217,19 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
   /**
    * Resolve one reference through the ladder and record a finding if it fails.
    * `subject` describes the reference for the message ("record-picker target").
+   * `remedy`, when a site has one sharper than the generic line (a view
+   * container's namespace-prefixed spelling), is the whole `fix:` line.
+   *
+   * [#22161] What a miss costs at each site used to close every hint; it is
+   * the ids' `os explain` entries now (one paragraph, every site), so a hint is
+   * one remedy line.
    */
   const check = (
     target: string | undefined,
     where: string,
     path: string,
     subject: string,
-    fix: string,
+    remedy = '',
   ) => {
     const name = strName(target);
     if (!name) return;
@@ -246,10 +252,9 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
           `this stack does not define it, so it likely resolves to nothing.` +
           suggestName(name, PLATFORM_NAMES),
         hint:
-          `Check the spelling against the object the providing package actually registers ` +
-          `(e.g. "sys_approval_request", not "sys_approval_process" — the process object ` +
-          `was removed when approval became a flow node, ADR-0019). If a third-party ` +
-          `package genuinely provides it, this warning is expected. ${fix}`,
+          remedy ||
+          'Check the spelling against the object the providing package registers ("sys_approval_request", ' +
+            'not the removed "sys_approval_process"), or ignore this if a third-party package provides it',
       });
       return;
     }
@@ -265,10 +270,13 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
         `${subject} "${name}" resolves to no object defined in this stack. ` +
         `The reference is inert at runtime — nothing reports the miss.` +
         suggestName(name, resolvable),
+      // [#22161] One remedy line. The verdict's "Did you mean" names the
+      // nearest object this stack or its artifact provides, so the whole list
+      // is not echoed.
       hint:
-        `Point it at one of this stack's objects, or at a platform object by its full ` +
-        `name (the platform user object is "sys_user", not "user"). ${fix}` +
-        (resolvable.size > 0 ? ` Defined objects: ${[...resolvable].sort().join(', ')}.` : ''),
+        remedy ||
+        'Point it at one of this stack\'s objects, or at a platform object by its full name (the platform ' +
+          'user object is "sys_user", not "user")',
     });
   };
 
@@ -328,8 +336,6 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
         `object "${objName}" · field "${fieldName}"`,
         `objects[${oi}].fields.${fieldName}.reference`,
         `${type} target`,
-        'The record picker has no object to query, `$expand` has nothing to resolve, and the ' +
-          'form renders a relationship control that can never resolve a value.',
       );
     }
   }
@@ -374,7 +380,7 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
     const prefixed = namespace ? `${namespace}_${bound}` : undefined;
     const namespaceHint =
       prefixed && !bound.startsWith(`${namespace}_`) && resolvable.has(prefixed)
-        ? ` Object names carry the package namespace prefix (manifest.namespace "${namespace}"): ` +
+        ? `Object names carry the package namespace prefix (manifest.namespace "${namespace}"): ` +
           `write "${prefixed}", not "${bound}".`
         : '';
     check(
@@ -382,10 +388,7 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
       `view ${strName(view.name) ? `"${strName(view.name)}"` : `#${vi}`}`,
       `views[${vi}].object`,
       'view container object',
-      'The runtime indexes a container\'s views by this key (`getViewsByObject()` / ' +
-        '`GET /meta/view?object=`), so a container bound to an object nothing registers is ' +
-        'never found: none of its views appears for any object.' +
-        namespaceHint,
+      namespaceHint,
     );
   }
 
@@ -422,14 +425,12 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
         where,
         `${actionPath}.params[${pi}].reference`,
         'record-picker target',
-        'Without a resolvable target the picker degrades to a raw record-id text input.',
       );
       check(
         strName(param.objectOverride),
         where,
         `${actionPath}.params[${pi}].objectOverride`,
         'field-backed param object',
-        'The param inherits type/options from a field on this object, so an unknown object leaves it untyped.',
       );
     }
   };
@@ -474,7 +475,6 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
         `dashboard "${dashName}" · filter "${strName(filter.name) ?? `#${fi}`}"`,
         `dashboards[${di}].globalFilters[${fi}].optionsFrom.object`,
         'filter options source',
-        'The dropdown fetches its options from this object; an unknown one renders an always-empty filter.',
       );
     }
   }
@@ -499,8 +499,6 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
       `dataset "${strName(ds.name) ?? `#${dsi}`}"`,
       `datasets[${dsi}].object`,
       'dataset base object',
-      'A dataset is the FROM of every report and dashboard widget bound to it (ADR-0021), so ' +
-        'an unknown base object leaves every one of those surfaces querying nothing.',
     );
   }
 
@@ -525,8 +523,6 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
           where,
           `${navPath}.requiresObject`,
           'capability gate object',
-          'The entry is hidden unless this object is registered, so a typo hides it permanently — ' +
-            'and it suppresses the nav cross-reference check that would have caught the target.',
         );
 
         // A nav target exempted from the `defineStack` throw by `requiresObject`
@@ -537,7 +533,6 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
             where,
             `${navPath}.objectName`,
             'navigation target',
-            'Declaring `requiresObject` exempts this target from the build-time check, so it is only verified here.',
           );
         }
 

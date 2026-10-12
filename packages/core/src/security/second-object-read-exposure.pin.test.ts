@@ -221,6 +221,14 @@ const CALLERS: Record<string, Classification> = {
     kind: 'not-a-served-read',
     reason: 'validation-rule analysis and evaluation on the write path; the verdict is pass/fail and no target field is served',
   },
+  'packages/verify/src/reference-shape.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "the verification harness's reference-value shape family: the target only picks, from the ids of records the " +
+      'family itself created through the REST door, the id its embedded-record probe carries. It writes probe values ' +
+      "to the SOURCE object (the REST data routes, which judge that object's exposure, and the engine's system write) " +
+      'and reads no record of the target',
+  },
 };
 
 const SCAN_TIMEOUT_MS = 60_000;
