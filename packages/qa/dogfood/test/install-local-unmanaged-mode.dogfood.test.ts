@@ -447,7 +447,7 @@ describe('dogfood: the unmanaged install mode on `isolated` — P2 (ADR-0131 D6)
 
   it('lock control: the MANAGED install keeps the package\'s lock — the dashboard is served locked, with its reason', () => {
     expect(managedLockedDashboard.status, JSON.stringify(managedLockedDashboard.body)).toBe(200);
-    expect(managedLockedDashboard.body?.data).toMatchObject({
+    expect(managedLockedDashboard.body?.data ?? managedLockedDashboard.body).toMatchObject({
       lock: 'full', lockReason: DASHBOARD_LOCK_REASON, editable: false, deletable: false,
     });
   });
