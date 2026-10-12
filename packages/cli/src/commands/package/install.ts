@@ -256,7 +256,7 @@ export default class PackageInstall extends Command {
       // "re-registers on every boot") is true of it, and none is printed.
       if (data.installMode === 'unmanaged') {
         console.log('');
-        printSuccess('Package copied into the environment (unmanaged) — every item is editable, and follows no upgrade');
+        printSuccess('Package copied into the environment (unmanaged) — its items are this environment\'s own metadata, and it follows no upgrade');
         printKV('  Package',   String(data.manifestId ?? label));
         printKV('  Version',   String(data.version ?? flags.version));
         printKV('  Runtime',   runtime);

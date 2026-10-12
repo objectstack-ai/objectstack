@@ -2300,8 +2300,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                         },
                     }
                     : {}),
-                note: `The package's metadata is now this environment's own, in the base '${result.targetPackageId}': `
-                    + 'every item is editable and follows no upgrade. Refresh the console to see it.',
+                note: `The package's metadata is now this environment's own, in the base '${result.targetPackageId}', `
+                    + 'and it follows no upgrade. Refresh the console to see it.',
             },
         }, 200);
     };
