@@ -50,6 +50,7 @@ import { ObjectQL } from './engine.js';
 
 const PKG = 'com.acme.mail';
 const NAME = 'acme.welcome';
+const DIGEST = 'acme.digest';
 
 const template = (locale: string, subject: string): Record<string, unknown> => ({
     name: NAME,
@@ -64,7 +65,17 @@ function mailManifest(): Record<string, unknown> {
     return {
         id: PKG,
         name: 'acme_mail',
-        emailTemplates: [template('en-US', 'PKG en'), template('zh-CN', 'PKG zh')],
+        // A versioned package, as a real install is: its items carry the
+        // package's protection envelope (`_packageId`, `_provenance`), which a
+        // hydrated overlay of them is grafted with.
+        version: '1.0.0',
+        emailTemplates: [
+            template('en-US', 'PKG en'), template('zh-CN', 'PKG zh'),
+            // [#22877 stage 2] A second template the package ships in `en-US`
+            // only, as the showcase ships its templates: a `zh-CN` overlay of
+            // it customizes a member no artifact ships.
+            { ...template('en-US', 'PKG digest en'), name: DIGEST },
+        ],
     };
 }
 
@@ -371,6 +382,27 @@ describe('the by-name doors address ONE member by the selector (#22877, stage 2)
         const after = await boot(stores);
         expect(await servedSubjects(after.protocol)).toEqual({ 'en-US': 'ADMIN en', 'zh-CN': 'PKG zh' });
         expect(registrySubject(after.engine, 'en-US')).toBe('ADMIN en');
+    });
+
+    it('DELETE by member of a member NO artifact ships: its overlay leaves the registry, and the canonical overlay stays', async () => {
+        // The package ships `acme.digest` in `en-US` only (the showcase's
+        // shape). The hydrated `zh-CN` overlay wears the bundle's artifact
+        // envelope, so the heal must lift it as that member's shadow; leaving
+        // it kept serving the reset wording until the next boot.
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const first = await boot(stores);
+        await first.protocol.saveMetaItem({ type: T, name: DIGEST, item: { ...template('en-US', 'ADMIN digest en'), name: DIGEST } });
+        await first.protocol.saveMetaItem({ type: T, name: DIGEST, item: { ...template('zh-CN', 'ADMIN digest zh'), name: DIGEST } });
+        const { engine, protocol } = await boot(stores);
+        const digestEntry = (member: string) => engine.registry.getItem<any>(T, DIGEST, undefined, member)?.subject;
+        expect(digestEntry('zh-CN')).toBe('ADMIN digest zh');
+
+        expect(await protocol.deleteMetaItem({ type: T, name: DIGEST, member: 'zh-CN' })).toMatchObject({ success: true, reset: true });
+        expect(digestEntry('zh-CN')).toBeUndefined();
+        expect(digestEntry('en-US')).toBe('ADMIN digest en');
+        const listed: any = await protocol.getMetaItemsForExecution({ type: T });
+        const digest = (listed?.items ?? []).filter((it: any) => it?.name === DIGEST).map((it: any) => `${it.locale}:${it.subject}`);
+        expect(digest).toEqual(['en-US:ADMIN digest en']);
     });
 
     it('DELETE with no member (the reverse): the canonical member is reset and the zh-CN overlay stays registered', async () => {

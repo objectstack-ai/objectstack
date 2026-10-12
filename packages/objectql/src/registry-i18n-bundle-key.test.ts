@@ -272,13 +272,21 @@ describe('SchemaRegistry — i18n bundle keys (#7730)', () => {
       expect(registry.getItem<any>('email_template', 'auth.welcome', undefined, 'zh-CN')?.subject).toBe('packaged zh');
       expect(registry.getItem<any>('email_template', 'auth.welcome', undefined, 'en-US')?.subject).toBe('overlay en');
 
-      // A runtime-only member (no artifact of it): the shadow heal declines,
-      // and the overlay-entry retirement takes that member's entry only.
+      // A member the package does NOT ship: its shadow is lifted all the same
+      // (a packaged artifact of the name remains), and nothing else moves.
       registry.registerItem('email_template', tpl('auth.welcome', 'ja-JP', { subject: 'overlay ja' }), 'name');
-      expect(registry.removeRuntimeShadow('email_template', 'auth.welcome', 'ja-JP')).toBe(false);
-      expect(registry.removeOverlayEntry('email_template', 'auth.welcome', 'ja-JP')).toBe(true);
+      expect(registry.removeRuntimeShadow('email_template', 'auth.welcome', 'ja-JP')).toBe(true);
       expect(registry.getItem<any>('email_template', 'auth.welcome', undefined, 'ja-JP')).toBeUndefined();
       expect(registry.getItem<any>('email_template', 'auth.welcome', undefined, 'en-US')?.subject).toBe('overlay en');
+
+      // A bundle no package ships: the shadow heal declines, and the
+      // overlay-entry retirement takes the named member's entry only.
+      registry.registerItem('email_template', tpl('crm.digest', 'en-US', { subject: 'digest en' }), 'name');
+      registry.registerItem('email_template', tpl('crm.digest', 'zh-CN', { subject: 'digest zh' }), 'name');
+      expect(registry.removeRuntimeShadow('email_template', 'crm.digest', 'zh-CN')).toBe(false);
+      expect(registry.removeOverlayEntry('email_template', 'crm.digest', 'zh-CN')).toBe(true);
+      expect(registry.getItem<any>('email_template', 'crm.digest', undefined, 'zh-CN')).toBeUndefined();
+      expect(registry.getItem<any>('email_template', 'crm.digest', undefined, 'en-US')?.subject).toBe('digest en');
 
       // No member named: the whole overlay group, as before.
       registry.registerItem('email_template', tpl('auth.welcome', 'zh-CN', { subject: 'overlay zh' }), 'name');

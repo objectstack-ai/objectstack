@@ -4779,8 +4779,10 @@ export class SchemaRegistry {
    *
    * @param member - [#22877] For a type whose identity is a pair, the ONE
    *   bundle member whose shadow to lift, as its discriminator value. Named,
-   *   only that member's shadow goes, and only while the artifact still ships
-   *   that member. Omitted, the bundle's whole shadow group, as before.
+   *   only that member's shadow goes — whether or not the package ships that
+   *   member, because the test is the one it always was: a packaged artifact
+   *   of the NAME remains, so the name stays resolvable. Omitted, the bundle's
+   *   whole shadow group, as before.
    */
   removeRuntimeShadow(type: string, name: string, member?: string): boolean {
     const collection = this.metadata.get(type);
@@ -4801,10 +4803,13 @@ export class SchemaRegistry {
     const disc = ITEM_KEY_DISCRIMINATORS[type];
     if (disc) {
       const { bare, local, other } = collectBundle(collection, name, disc);
-      const narrow = (entries: BundleEntry[]) => (member === undefined ? entries : entriesOfMember(entries, disc, member));
-      const shadows = narrow(bare);
+      const shadows = member === undefined ? bare : entriesOfMember(bare, disc, member);
       if (shadows.length === 0) return false;
-      const artifact = narrow([...local, ...other]).find(({ item }) => item?._packageId && item._packageId !== 'sys_metadata');
+      // The bundle's artifact, any member's: a hydrated overlay of a member
+      // the package does NOT ship still wears the bundle's artifact envelope
+      // (`_packageId`, `_provenance`), so the overlay-entry retirement that
+      // would otherwise take it refuses it as code — this tier must lift it.
+      const artifact = [...local, ...other].find(({ item }) => item?._packageId && item._packageId !== 'sys_metadata');
       if (!artifact) return false;
       for (const { key } of shadows) {
         collection.delete(key);
