@@ -17,9 +17,12 @@ import {
   rlsProbeSecurity,
   runReferenceShapeProofs,
   formatReferenceShapeReport,
+  runDeleteBehaviorProofs,
+  formatDeleteBehaviorReport,
   type VerifyReport,
   type RlsReport,
   type ReferenceShapeReport,
+  type DeleteBehaviorReport,
   type RlsProbeDescriptor,
   type RlsPositionPersonaInput,
 } from '@objectstack/verify';
@@ -85,18 +88,22 @@ export function resolveVerifyMultiTenant(flags: { 'multi-tenant'?: boolean }): b
  *        - reference-value shape (--reference-shapes, ADR-0104 D1): every
  *          client-writable reference field refuses a value that is not a
  *          record id, through the REST door and the system door
+ *        - delete behaviour (--delete-behaviors): every `deleteBehavior` a
+ *          reference field declares is what a by-id delete of the referenced
+ *          record does, through the REST door and the system door
  *
  * Exits non-zero on either stage's failures so it drops straight into CI.
  */
 export default class Verify extends Command {
   static override description =
-    'Run the author-time rules os validate runs, then boot the app in-process and verify it through the real HTTP stack (CRUD round-trip fidelity, plus the cross-owner RLS invariant and the reference-value shape proofs on request)';
+    'Run the author-time rules os validate runs, then boot the app in-process and verify it through the real HTTP stack (CRUD round-trip fidelity, plus the cross-owner RLS invariant, the reference-value shape proofs and the declared delete-behaviour proofs on request)';
 
   static override examples = [
     '<%= config.bin %> verify',
     '<%= config.bin %> verify --app ./objectstack.config.ts --rls',
     '<%= config.bin %> verify --rls --multi-tenant --json',
     '<%= config.bin %> verify --reference-shapes',
+    '<%= config.bin %> verify --delete-behaviors',
   ];
 
   static override flags = {
@@ -110,6 +117,10 @@ export default class Verify extends Command {
     }),
     'reference-shapes': Flags.boolean({
       description: 'Also prove every client-writable reference field refuses a value that is not a record id (a boolean, a number, an embedded record), through the REST door and the system door (ADR-0104 value shapes)',
+      default: false,
+    }),
+    'delete-behaviors': Flags.boolean({
+      description: 'Also prove every deleteBehavior a reference field declares (cascade, set_null, restrict) is what a delete of the referenced record does, through the REST door and the system door',
       default: false,
     }),
     'multi-tenant': Flags.boolean({
@@ -190,6 +201,7 @@ export default class Verify extends Command {
     app?: string;
     rls: boolean;
     'reference-shapes': boolean;
+    'delete-behaviors': boolean;
     'multi-tenant': boolean;
     json: boolean;
   }): Promise<void> {
@@ -305,6 +317,20 @@ export default class Verify extends Command {
       }
     }
 
+    // The delete-behaviour proofs run on a fresh stack of their own too: every
+    // `restrict` probe leaves its target and holder behind, and the fixtures
+    // the family creates would collide with the other phases' on a unique field.
+    let deleteBehaviors: DeleteBehaviorReport | undefined;
+    if (flags['delete-behaviors']) {
+      const deleteStack = await bootStack(config, { multiTenant, hostRoot });
+      try {
+        const adminToken = await deleteStack.signIn();
+        deleteBehaviors = await runDeleteBehaviorProofs(deleteStack, adminToken, config);
+      } finally {
+        await deleteStack.stop();
+      }
+    }
+
     // Failure contract: a "real" runtime break the app's author must see.
     // A degraded RLS probe counts: the run reported verdicts it could not have
     // established, which is worse than no verifier at all.
@@ -325,17 +351,22 @@ export default class Verify extends Command {
       // faulted on one. Inconclusive fields (the probe could not be attributed
       // or written) are reported, not counted, exactly as CRUD's
       // `needs-fixture` is.
-      (referenceShapes?.summary.hardFailures ?? 0);
+      (referenceShapes?.summary.hardFailures ?? 0) +
+      // A declared deleteBehavior a delete contradicted, or a door that
+      // faulted on one. Inconclusive, excluded and not-derivable fields are
+      // reported, not counted.
+      (deleteBehaviors?.summary.hardFailures ?? 0);
 
     if (flags.json) {
       // `emitJson`, not `this.log`: stdout is reserved (see `run()`), so the
       // report has to leave through the real stream — and awaiting the write
       // drains a report larger than one pipe buffer before `this.exit` below.
-      await emitJson({ app: crud.app, config: absolutePath, multiTenant, crud, rls, referenceShapes, hardFailures });
+      await emitJson({ app: crud.app, config: absolutePath, multiTenant, crud, rls, referenceShapes, deleteBehaviors, hardFailures });
     } else {
       this.log(formatReport(crud));
       if (rls) this.log(formatRlsReport(rls));
       if (referenceShapes) this.log(formatReferenceShapeReport(referenceShapes));
+      if (deleteBehaviors) this.log(formatDeleteBehaviorReport(deleteBehaviors));
       this.log('');
       this.log(
         hardFailures > 0

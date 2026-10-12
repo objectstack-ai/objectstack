@@ -5,7 +5,7 @@
 > **Protocol 18 update (2026-10-12, ADR-0131 C5, #22340):** The per-type overlay opt-in on `MetadataTypeRegistryEntry` is spelled `allowEnvironmentOverlay` from protocol 18 (`packages/spec/src/kernel/metadata-plugin.zod.ts#allowEnvironmentOverlay`). [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D6 retired the per-organization overlay axis, so the key now names the one scope it governs — whether an environment may overlay an item of this type that a managed package ships. The old key `allowOrgOverride` stays on the registry entry schema only as a tombstone that refuses at parse with the new name in its prescription: no second key, no alias, no conversion. The lines below that name `allowOrgOverride` describe the field as it was spelled when they were written and are preserved verbatim.
 
 
-**Status**: Accepted (2026-05-16) · **Amended** (2026-05-22, see "Amendment: post-ADR-0006 v4 scope") · **Amended** (2026-04-13, branch concept removed — see [ADR-0008 §0](./0008-metadata-repository-and-change-log.md#0-2026-04-13-amendment--drop-project-and-branch-from-metaref)) · **Amended** (2026-08-09, #6825 — the Phase-1 overlay-index migration is deleted; see "Amendment (2026-08-09, #6825): overlay-index delivery after the Phase-1 migration was deleted") · **Amended** (2026-09-04, [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D6 — the per-organization overlay axis is **retired for now**: `sys_metadata` carries no organization column, org-scoped writes of the five tier-A types are refused, and the environment layer is the whole ledger; the environment → code layered resolution and the "no overlay row = the registry" reading are unchanged) · **Amended** (2026-09-30, #20051 ruling 甲 — in "Addendum — 2026-05-16 (c)", which code cites as appendix (c), the persisted document is the **parsed body** once every round-trip key is declared, reversing the verbatim `request.item` save; a stored `view` row's round-trip keys are declared, and the storage switch itself, the ruling's last stage, is in force for `view` since PR #20868 (`9905e61ca2`) — see the amendment notes under that addendum's persisted-document bullet) · **Amended** (2026-09-30, #20051 ruling B — the parsed body a `view` stores is the parsed value of every key its request body carried, not the whole parse output: undeclared keys dropped, schema defaults not materialised, a moved key stored under its canonical spelling; every other type still stores its request body — see the second amendment note under that bullet)
+**Status**: Accepted (2026-05-16) · **Amended** (2026-05-22, see "Amendment: post-ADR-0006 v4 scope") · **Amended** (2026-04-13, branch concept removed — see [ADR-0008 §0](./0008-metadata-repository-and-change-log.md#0-2026-04-13-amendment--drop-project-and-branch-from-metaref)) · **Amended** (2026-08-09, #6825 — the Phase-1 overlay-index migration is deleted; see "Amendment (2026-08-09, #6825): overlay-index delivery after the Phase-1 migration was deleted") · **Amended** (2026-09-04, [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D6 — the per-organization overlay axis is **retired for now**: `sys_metadata` carries no organization column, org-scoped writes of the five tier-A types are refused, and the environment layer is the whole ledger; the environment → code layered resolution and the "no overlay row = the registry" reading are unchanged) · **Amended** (2026-09-30, #20051 ruling 甲 — in "Addendum — 2026-05-16 (c)", which code cites as appendix (c), the persisted document is the **parsed body** once every round-trip key is declared, reversing the verbatim `request.item` save; a stored `view` row's round-trip keys are declared, and the storage switch itself, the ruling's last stage, is in force for `view` since PR #20868 (`9905e61ca2`) — see the amendment notes under that addendum's persisted-document bullet) · **Amended** (2026-09-30, #20051 ruling B — the parsed body a `view` stores is the parsed value of every key its request body carried, not the whole parse output: undeclared keys dropped, schema defaults not materialised, a moved key stored under its canonical spelling; every other type still stores its request body — see the second amendment note under that bullet) · **Amended** (2026-10-12, #22877 ruling A — the overlay uniqueness key gains a fifth part, `bundle_member`: the member of a bundled type, such as an `email_template`'s locale, so two members of one item are two overlay rows; NULL is the canonical member, so every row of a type whose identity is `name` alone is unchanged. In force since `5677add93f` (PR #22954) — see "What delivers overlay uniqueness today")
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0003](./0003-package-as-first-class-citizen.md) (Package as first-class citizen), [ADR-0004](./0004-cloud-multi-kernel.md) (Cloud + per-project kernels)
 **Amended by**: [ADR-0006 v4](./0006-project-environment-split.v4.md) (drops `sys_project` entirely), [ADR-0008](./0008-metadata-repository-and-change-log.md) (re-expresses overlay as `LayeredRepository`; subsequently drops `project`/`branch` from `MetaRef`), [ADR-0029 D9](./0029-kernel-object-ownership-and-platform-objects-decomposition.md#amendment-2026-08-09-6853-a-tenant-overlay-of-an-object-is-its-own-contributor-layer-not-a-second-own) (for `object` only: the overlay is a registry contributor LAYER over the packaged owner, resolved as `base = overlay ?? own`, instead of a destructive in-place overwrite), [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) C5 / D6 (the per-organization overlay axis is retired and the per-type opt-in is spelled `allowEnvironmentOverlay` from protocol 18 — the note at the top of this record)
@@ -838,6 +838,10 @@ migration. The deleted producer could therefore only ever no-op (while reporting
 `status: 'created'`) or, in its one non-no-op window, install the retired key
 that nothing afterwards repaired.
 
+> **2026-10-12 note** — "the current key" above is the four-part key #6771 measured.
+> Since `5677add93f` (#22877 ruling A) the declared index and the runtime key carry a
+> fifth part, `bundle_member` — see the status line and the two owners below.
+
 ### Two staleness items in the same block that PREDATE #6771
 
 The YAML example there is stale for reasons of its own; attributing them to
@@ -864,22 +868,28 @@ The YAML example there is stale for reasons of its own; attributing them to
    (`packages/metadata-protocol/src/migrations/overlay-index.ts`, run at most once
    per protocol instance through its own `ensureOverlayIndex`) — the tier this ADR
    actually wants. Raw SQL, partial and NULL-safe:
-   `(type, name, organization_id, COALESCE(package_id, ''))` `WHERE state = 'active'`,
+   `(type, name, organization_id, COALESCE(package_id, ''), COALESCE(bundle_member, ''))` `WHERE state = 'active'`,
    with a sibling `idx_sys_metadata_overlay_draft` so an active row and a draft row
-   for one key can coexist. `COALESCE` is what constrains package-less (global)
-   overlays, which a plain UNIQUE leaves unconstrained because SQL treats NULLs as
-   distinct. On a dialect that cannot build the partial form it degrades to a
+   for one key can coexist. The fifth part (since `5677add93f`, #22877 ruling A) is a
+   bundled type's member — an `email_template`'s locale — so two members of one item
+   are two rows; it is NULL for the canonical member and for every row of a name-only
+   type. `COALESCE` is what constrains package-less (global) overlays and canonical
+   members, which a plain UNIQUE leaves unconstrained because SQL treats NULLs as
+   distinct; folded to `''`, those rows are constrained exactly as under the four-part
+   key. On a dialect that cannot build the partial form it degrades to a
    **non-unique** composite index — deliberately, since an unrestricted UNIQUE
    would reject the active/draft coexistence — and reports that uniqueness is not
    enforced instead of claiming success. It builds under a throwaway name first and
    only then replaces the real one, so a failure keeps the previous index; every
    failure is reported in the ADR-0120 D4 shape and none blocks the boot.
 2. **The declaration in `metadata-core`'s `sys-metadata.object.ts`** —
-   `{ name: 'idx_sys_metadata_overlay_active', fields: ['type', 'name', 'organization_id', 'package_id'], unique: true }`,
+   `{ name: 'idx_sys_metadata_overlay_active', fields: ['type', 'name', 'organization_id', 'package_id', 'bundle_member'], unique: 'global' }`
+   (`'global'` is protocol 18's spelling of the bare `true` it retired, ADR-0120 D2),
    materialized by `SqlDriver.syncDeclaredIndexes`. This is the coarse fallback a
-   stack assembled without the runtime migration gets: it still prevents duplicate
-   active overlays, at the cost of also colliding with archived and reset rows, and
-   it stays NULL-distinct on `package_id`. It cannot express either refinement —
+   stack assembled without the runtime migration gets: unrestricted, so it also
+   collides with archived and reset rows, and NULL-distinct on `package_id` and on
+   `bundle_member` — NULL for every canonical member, so it holds no canonical row
+   unique. It cannot express either refinement —
    knex's `table.unique()` has no `WHERE` and no `COALESCE` — which is why the
    runtime tier exists rather than a richer declaration.
 
