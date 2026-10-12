@@ -188,3 +188,75 @@ describe('#4556 — recorded_by holds a user id or NULL, never a sentinel', () =
     expect(headers[0]!.authoredBy).not.toBe('unknown');
   });
 });
+
+/**
+ * #23033 — the PARENT row records the actor too: `created_by` on the row's
+ * first write, `updated_by` on every write, from `PutOptions.actor` — the
+ * header's `actor → updated_by` mapping, which `put()` used to declare and not
+ * write. A missing actor stores NULL in both, never a placeholder user, for the
+ * same reason `recorded_by` does above.
+ *
+ * This fake stores exactly what it is handed, so these pins prove the
+ * repository HANDS the engine the pair. That the real engine KEEPS it — the
+ * `isSystem` write path, the readonly strip and the audit hooks — is pinned on
+ * the stored row in `packages/objectql/src/protocol-metadata-row-actor.test.ts`.
+ */
+describe('#23033 — the sys_metadata row records who created it and who last changed it', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let repo: SysMetadataRepository;
+  // Environment-wide, the topology the protocol's own overlay repository has
+  // (ADR-0131 D6) and the scope `listDrafts` reads.
+  const ref = { org: 'system', type: 'view' as const, name: 'case_grid' };
+  const onlyRow = () => {
+    expect(engine.rows.size).toBe(1);
+    return Array.from(engine.rows.values())[0]!;
+  };
+
+  beforeEach(() => {
+    engine = makeFakeEngine();
+    repo = new SysMetadataRepository({ engine });
+  });
+
+  it('a first write with actor A stamps created_by A and updated_by A', async () => {
+    await repo.put(ref, view('A'), { parentVersion: null, actor: 'usr_alice' });
+    const row = onlyRow();
+    expect(row.created_by).toBe('usr_alice');
+    expect(row.updated_by).toBe('usr_alice');
+  });
+
+  it('a second write with actor B keeps created_by A and moves updated_by to B', async () => {
+    const first = await repo.put(ref, view('A'), { parentVersion: null, actor: 'usr_alice' });
+    await repo.put(ref, view('B'), { parentVersion: first.version, actor: 'usr_bob' });
+    const row = onlyRow();
+    expect(row.created_by).toBe('usr_alice');
+    expect(row.updated_by).toBe('usr_bob');
+    // History is unchanged: each event names its own write's actor.
+    expect(engine.historyRows.map((h) => h.recorded_by)).toEqual(['usr_alice', 'usr_bob']);
+  });
+
+  it('a write with no actor stamps NULL in both — never a placeholder user', async () => {
+    await repo.put(ref, view('A'), { parentVersion: null, actor: null });
+    const row = onlyRow();
+    expect(row.created_by).toBeNull();
+    expect(row.updated_by).toBeNull();
+  });
+
+  it('an actor-less write after an authored one clears updated_by and keeps created_by', async () => {
+    // "Who last changed this?" — nobody named; the previous writer did not make this change.
+    const first = await repo.put(ref, view('A'), { parentVersion: null, actor: 'usr_alice' });
+    await repo.put(ref, view('B'), { parentVersion: first.version, actor: null });
+    const row = onlyRow();
+    expect(row.created_by).toBe('usr_alice');
+    expect(row.updated_by).toBeNull();
+  });
+
+  it('the read side follows the row: get().authoredBy and listDrafts().updatedBy name the last writer', async () => {
+    const first = await repo.put(ref, view('A'), { parentVersion: null, actor: 'usr_alice' });
+    await repo.put(ref, view('B'), { parentVersion: first.version, actor: 'usr_bob' });
+    expect((await repo.get(ref))!.authoredBy).toBe('usr_bob');
+
+    await repo.put(ref, view('draft'), { parentVersion: null, actor: 'usr_carol', state: 'draft' });
+    const drafts = await repo.listDrafts({ type: 'view' });
+    expect(drafts.map((d) => [d.name, d.updatedBy])).toEqual([['case_grid', 'usr_carol']]);
+  });
+});

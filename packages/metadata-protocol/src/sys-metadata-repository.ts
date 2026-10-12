@@ -46,7 +46,8 @@
  *   hash (sha256)         → checksum           (text(64))
  *   monotonic version int → version            (number)
  *   org isolation         → organization_id    (lookup)
- *   actor                 → updated_by         (lookup, optional)
+ *   actor                 → updated_by         (lookup, optional; every write)
+ *   first write's actor   → created_by         (lookup, optional; insert only)
  *
  * Composition: PR-10c will compose
  *   `LayeredRepository([FileSystemRepository, SysMetadataRepository])`
@@ -908,6 +909,14 @@ export class SysMetadataRepository implements MetadataRepository {
         state,
         version,
         updated_at: now,
+        // [#23033] The header's `actor → updated_by`, on every write. Written
+        // HERE because nothing below stamps it: the row goes in under
+        // `isSystem` with no user on the context, and the engine's audit hooks
+        // stamp the `*_by` pair only from `session.userId`. No actor → NULL,
+        // never a placeholder user — the `recorded_by` rule (#4556), since
+        // both are `lookup('sys_user')`. History's `recorded_by` below stays
+        // as it was: the same actor, on the event row.
+        updated_by: opts.actor ?? null,
       };
       // [#22877] Only for a type whose identity is a pair: every other type's
       // row payload stays byte-identical to what it was before the column.
@@ -935,6 +944,9 @@ export class SysMetadataRepository implements MetadataRepository {
         });
       } else {
         parentRowData.created_at = now;
+        // [#23033] Who created the row: the first write's actor, set on the
+        // insert only — an update never names `created_by`, so it keeps it.
+        parentRowData.created_by = opts.actor ?? null;
         await this.engine.insert('sys_metadata', parentRowData, { context: { ...ctx, isSystem: true } });
       }
 
