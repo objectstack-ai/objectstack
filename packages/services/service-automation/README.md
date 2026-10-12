@@ -208,7 +208,7 @@ Inside an object or list value, and in the legacy `assignment` shapes, an
 envelope is data: build the whole value as one envelope (a CEL map or list
 literal, its mixed values wrapped in `dyn(…)`), or move the assignment into the
 `assignments` map — an `http` `body` included: `{ dialect: 'cel', source:
-"{'id': record.id, 'text': 'Done: ' + record.title}" }`. A `filter` still reads
+"{'id': record.id, 'text': dyn('Done: ' + record.title)}" }`. A `filter` still reads
 the single-brace dialect (`{record.id}`).
 
 A `loop`'s or a `map`'s `collection` must evaluate to a list: anything else,

@@ -217,7 +217,7 @@ describe('2. rendered and evaluated in the run\'s scope; the literals read as wr
         url: `${URL_BASE}/orders/{{ id }}`,
         method: 'PUT',
         headers: { 'X-Ref': 'r-{{ id }}', 'X-Kind': 'probe' },
-        body: CEL("{'id': id, 'text': 'Done: ' + title}"),
+        body: CEL("{'id': id, 'text': dyn('Done: ' + title)}"),
         timeoutMs: 5000,
       },
       { id: 'o_7', title: 'Ship it' },

@@ -866,7 +866,7 @@ describe('HttpConfigSchema — the text slots, the body value slot and the liter
 
   it('body (a value slot): a CEL value envelope, a literal object, a literal string and a nested envelope (data) parse', () => {
     for (const body of [
-      CEL("{'id': record.id, 'text': 'Done: ' + record.title}"),
+      CEL("{'id': record.id, 'text': dyn('Done: ' + record.title)}"),
       { id: 'r1', lines: ['a', 'b'], n: 3 },
       'hello',
       { inner: CEL('x') },

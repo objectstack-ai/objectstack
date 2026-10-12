@@ -956,13 +956,16 @@ export const HttpConfigSchema = lazySchema(() => strictObject({
    * Request body — JSON-serialised before sending. A `value` slot (#19939,
    * {@link FlowValueSlotSchema}): a CEL value envelope the executor evaluates
    * per run to the payload (a CEL map literal builds an object,
-   * `{'id': record.id, 'text': 'Done: ' + record.title}`), or a literal sent
+   * `{'id': record.id, 'text': dyn('Done: ' + record.title)}` — CEL holds a
+   * map's values to one type, so a text or a literal beside a field read is
+   * wrapped in `dyn(…)`), or a literal sent
    * as written. Only the top-level value is an expression: an envelope nested
    * inside a literal is data.
    */
   body: FlowValueSlotSchema.optional().describe(
     'Request body (JSON-serialised) — a CEL value envelope `{ dialect: \'cel\', source }` evaluated per run to the '
-      + 'payload (a CEL map literal builds an object: `"{\'id\': record.id, \'text\': \'Done: \' + record.title}"`), '
+      + 'payload (a CEL map literal builds an object: `"{\'id\': record.id, \'text\': dyn(\'Done: \' + record.title)}"`, '
+      + 'a text or a literal beside a field read wrapped in `dyn(…)`, since a map\'s values share one type), '
       + 'or a literal sent as written; a `{…}` template token in a string of a literal is refused',
   ),
   /**

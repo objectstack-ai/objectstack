@@ -464,7 +464,7 @@ check.
     method: 'POST',                                                  // a literal, read as written
     headers: { 'X-Request-Id': '{{ $runId }}' },                     // each value a text slot
     // a value slot: one CEL value envelope builds the whole payload
-    body: { dialect: 'cel', source: "{'event': 'order.created', 'name': record.name}" },
+    body: { dialect: 'cel', source: "{'event': dyn('order.created'), 'name': record.name}" },
   },
 }
 ```
@@ -473,7 +473,9 @@ An `http` node reads each key by what it is. `url` and every `headers` value
 are **text** slots with `{{ }}` holes, like a notify title; a header that
 renders to no text is not sent. `body` is a **value** slot: a CEL value
 envelope evaluated per run to the payload — a CEL map literal builds an object,
-`'Done: ' + record.title` is text with a hole — or a literal sent as written,
+`'Done: ' + record.title` is text with a hole, and since CEL holds a map's
+values to one type, a literal or a text beside a field read is wrapped in
+`dyn(…)` (`dyn('order.created')`) — or a literal sent as written,
 where an envelope nested inside the literal is data. `method`, `durable`,
 `timeoutMs` and `signingSecret` are literals, read as written. A single-brace
 `{…}` token is refused at every one of them, with its `{{ }}` or CEL spelling,

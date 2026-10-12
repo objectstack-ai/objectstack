@@ -5145,7 +5145,7 @@ describe('the http text slots, body and literals are refused with their remedies
     const found = errorsOf(stackWith(config));
     expect(found.map((i) => i.where)).toEqual([`flow 'f' · node 'n' (http) config.${key}`]);
     expect(found[0]!.message).toContain(`refused at \`${key}\` by the http contract:`);
-    expect(found[0]!.message).toContain('read as written');
+    expect(found[0]!.message).toMatch(/ as written[:,]/);
     expect(found[0]!.message).not.toContain(VALUE_SLOT_TEMPLATE_REFUSAL);
   });
 

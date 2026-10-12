@@ -1239,7 +1239,9 @@ export const ResilientSyncFlow = defineFlow({
               config: {
                 url: 'https://api.example.com/v1/tasks',
                 method: 'POST',
-                body: { dialect: 'cel', source: "{'id': record.id, 'title': record.title, 'status': 'done'}" },
+                // CEL holds a map's values to one type: the literal beside the
+                // field reads is wrapped in `dyn(…)`.
+                body: { dialect: 'cel', source: "{'id': record.id, 'title': record.title, 'status': dyn('done')}" },
               },
             },
           ],
@@ -1444,7 +1446,7 @@ export const ProjectEscalationFlow = defineFlow({
         retry: { maxRetries: 2, backoffMs: 500, backoffMultiplier: 2 },
         errorVariable: '$error',
         try: {
-          nodes: [{ id: 'push', type: 'http', label: 'POST incident', config: { url: 'https://api.example.com/v1/incidents', method: 'POST', body: { dialect: 'cel', source: "{'project': record.id, 'severity': 'critical'}" } } }],
+          nodes: [{ id: 'push', type: 'http', label: 'POST incident', config: { url: 'https://api.example.com/v1/incidents', method: 'POST', body: { dialect: 'cel', source: "{'project': record.id, 'severity': dyn('critical')}" } } }],
           edges: [],
         },
         catch: {
