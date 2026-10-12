@@ -112,10 +112,12 @@ describe('`objectstack validate` — a flow text slot reads `{{ }}` holes (#2211
   it('passes holes, formatters and a `$`-named variable — and every value slot written as its envelope', () => {
     // [#19939] The notify value slots take a CEL envelope, and `actionUrl` is a
     // text slot with `{{ }}` holes.
+    // (This fixture flow binds no `record`, which the value-slot pass would
+    // refuse as an unbound root, so the envelopes compute from literals.)
     expect(validate('notify', {
-      recipients: [{ dialect: 'cel', source: 'record.owner' }],
+      recipients: ['team:ops', { dialect: 'cel', source: "'user_' + '1'" }],
       sourceObject: 'deal',
-      sourceId: { dialect: 'cel', source: 'record.id' },
+      sourceId: { dialect: 'cel', source: "'d_' + '1'" },
       actionUrl: '/deal/{{ record.id }}',
       title: 'Deal {{ record.name }} won: {{ record.amount | currency }}',
       message: 'Failed: {{ $error.message }}',

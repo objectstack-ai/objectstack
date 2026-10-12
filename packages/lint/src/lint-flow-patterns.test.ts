@@ -2441,7 +2441,7 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
      * the finding, so this pin can fail.
      */
     describe('a notify slot refusal prescribes only spellings this rule passes', () => {
-      function notifyFlow(key: 'title' | 'message' | 'actionUrl', value: unknown) {
+      function notifyFlow(key: 'title' | 'message' | 'actionUrl' | 'sourceId', value: unknown) {
         return {
           flows: [{
             name: 'deal_won_notice',
@@ -2464,7 +2464,7 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         return [bare, envelope === undefined ? undefined : { dialect: 'template', source: envelope }];
       }
 
-      function doubleBraceFindings(key: 'title' | 'message' | 'actionUrl', value: unknown) {
+      function doubleBraceFindings(key: 'title' | 'message' | 'actionUrl' | 'sourceId', value: unknown) {
         return lintFlowPatterns(notifyFlow(key, value)).filter((f) => f.rule === FLOW_DOUBLE_BRACE_INTERP);
       }
 
@@ -2487,12 +2487,16 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         }
       });
 
-      it('control: the same prescribed hole draws the finding on the node\'s single-brace `actionUrl`', () => {
+      // [#19939] The control moved from `actionUrl`, a text slot since stage
+      // S4 (a `{{ }}` hole is its spelling, so it draws no finding there now),
+      // to `sourceId`, a value slot, where a doubled brace is no hole.
+      it('control: the same prescribed hole draws the finding on the node\'s value slot `sourceId`, and none on its text slot `actionUrl`', () => {
         for (const sentence of [TYPED_EXPRESSION_SOURCE_REQUIRED.template, TYPED_EXPRESSION_DIALECT_ONLY.template]) {
           const prescribed = prescribedIn(sentence);
           expect(prescribed.every((p) => p !== undefined), sentence).toBe(true);
           const bare = prescribed[0] as string;
-          expect(doubleBraceFindings('actionUrl', `/deals/${bare}`), bare).toHaveLength(1);
+          expect(doubleBraceFindings('sourceId', bare), bare).toHaveLength(1);
+          expect(doubleBraceFindings('actionUrl', `/deals/${bare}`), bare).toEqual([]);
           expect(doubleBraceFindings('title', bare), bare).toEqual([]);
         }
       });
