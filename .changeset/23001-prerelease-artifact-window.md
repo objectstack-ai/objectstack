@@ -1,11 +1,11 @@
 ---
-'@objectstack/metadata-core': patch
+'@objectstack/metadata-core': minor
 '@objectstack/metadata': patch
 ---
 
 fix(metadata-core): an artifact declaring `engines.protocol: '^18'` that was built during the v18 prerelease boots on a later runtime that retired one of its shapes — the artifact door replays every retired conversion of protocol 18's step for a floor of `18.0.0`
 
-Clause-②: no
+Clause-②: yes
 
 **What an operator saw.** A compiled artifact (`os build` → `dist/objectstack.json`) that declares `engines.protocol: '^18'` and was built before a protocol-18 retirement landed carries the retired shape, for example a defaulted key that every earlier parse emitted. Booted on a runtime that enforces the retirement, the metadata plugin's startup refused it at the strict parse and the boot rolled back. The artifact door compared the floor `18.0.0` with each retirement's `retiredAfter` stamp, and every retirement that lands during the v18 prerelease is stamped with the last 17.x release, below that floor, so nothing was replayed.
 
