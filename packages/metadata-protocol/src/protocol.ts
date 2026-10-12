@@ -44,6 +44,8 @@ import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 import {
     backfillOverlayBundleMembers,
     ensureMetadataOverlayIndexes,
+    overlayMemberOfBody,
+    overlayMemberValue,
     overlayMemberWhere,
 } from './migrations/overlay-index.js';
 import { driverCanRunSql, resolveDriverExec } from './migrations/driver-exec.js';
@@ -1984,6 +1986,133 @@ function storedRowDiscriminator(type: string, record: unknown): string | undefin
         try { body = JSON.parse(raw); } catch { body = undefined; }
     }
     return itemDiscriminator(type, body);
+}
+
+/**
+ * [#22877] The by-name doors' bundle member selector: the request member, and
+ * the `?member=` query parameter in each REST route's closed set (ruling
+ * 6116165299, Q2 i). Named after what the stored column holds
+ * (`sys_metadata.bundle_member`) and type-neutral, never `locale`: on `/meta`,
+ * `?locale=` is the response translation locale.
+ */
+export const BUNDLE_MEMBER_SELECTOR = 'member';
+
+/**
+ * [#22877] The longest member a stored row can carry — the declared
+ * `maxLength` of `sys_metadata.bundle_member` (`@objectstack/metadata-core`
+ * `SysMetadataObject`, pinned equal in `protocol.bundle-member-selector.test.ts`).
+ * A longer selector names no member that could be stored, so it is refused as
+ * malformed rather than answered as an absent member.
+ */
+export const BUNDLE_MEMBER_MAX_LENGTH = 100;
+
+/**
+ * [#22877] THE one reading of the bundle member selector, shared by every
+ * by-name door (`getMetaItem`, `deleteMetaItem`, `publishMetaItem`,
+ * `historyMetaItem`, `rollbackMetaItem`).
+ *
+ * Returns the member as named, trimmed, or `undefined` when none was named,
+ * which every door reads as the CANONICAL member, as the registry's bare-name
+ * read does. Naming the canonical value (`en-US`) is the same request. A
+ * well-formed member with nothing stored or shipped is not refused here: each
+ * door answers it as it answers an absent item.
+ *
+ * Refuses, with a located 400 `VALIDATION_ERROR` (the code the REST door's
+ * recognition and arity refusals answer on the same routes, so one route
+ * keeps one dialect), a selector on a type whose identity is its name alone,
+ * and a value that cannot name a member: not a string, blank, or longer than
+ * {@link BUNDLE_MEMBER_MAX_LENGTH}. ⛔ A blank selector is never read as
+ * absent: `?member=` asked for something, and answering the canonical member
+ * for it would be a guess.
+ */
+export function resolveBundleMemberSelector(type: string, member: unknown): string | undefined {
+    if (member === undefined) return undefined;
+    const singular = PLURAL_TO_SINGULAR[type] ?? type;
+    const disc = ITEM_KEY_DISCRIMINATORS[singular];
+    const refuse = (sentence: string): never => {
+        const err = new Error(`The "${BUNDLE_MEMBER_SELECTOR}" selector ${sentence}`) as Error & {
+            code: 'VALIDATION_ERROR'; status: 400; param: string;
+        };
+        err.code = 'VALIDATION_ERROR';
+        err.status = 400;
+        err.param = BUNDLE_MEMBER_SELECTOR;
+        throw err;
+    };
+    if (!disc) {
+        return refuse(
+            `names a bundle member, and a '${singular}' item has none: its identity is its name alone. `
+            + `Remove the selector.`,
+        );
+    }
+    const example = `'${disc.canonical}'`;
+    if (typeof member !== 'string') {
+        return refuse(`must be one string: the ${disc.field} of one '${singular}' member, e.g. ${example}.`);
+    }
+    const value = member.trim();
+    if (value === '') {
+        return refuse(
+            `is blank. Name one '${singular}' member by its ${disc.field} (e.g. ${example}), or omit the `
+            + `selector to address the canonical member (${example}).`,
+        );
+    }
+    if (value.length > BUNDLE_MEMBER_MAX_LENGTH) {
+        return refuse(
+            `is ${value.length} characters long; a stored '${singular}' member holds at most `
+            + `${BUNDLE_MEMBER_MAX_LENGTH}, so it names no member. Name one by its ${disc.field} (e.g. ${example}).`,
+        );
+    }
+    return value;
+}
+
+/**
+ * [#22877] The discriminator value of the member a selector addresses, for a
+ * registry call or a body comparison: the selector itself, or the canonical
+ * member when none was named. `undefined` for a type with no members.
+ */
+function bundleMemberDiscriminator(type: string, member: string | undefined): string | undefined {
+    const disc = ITEM_KEY_DISCRIMINATORS[PLURAL_TO_SINGULAR[type] ?? type];
+    if (!disc) return undefined;
+    return member?.trim() || disc.canonical;
+}
+
+/**
+ * [#22877] `MetadataMutationEvent.member` for the member a write addressed,
+ * as a spread: empty for the canonical member and for a type with no members,
+ * so those events keep the shape they always had.
+ */
+function mutationEventMember(type: string, member: string | null | undefined): { member?: string } {
+    const value = overlayMemberValue(type, member);
+    return typeof value === 'string' ? { member: value } : {};
+}
+
+/**
+ * [#22877] One item of a package commit's revert plan (ADR-0067), as
+ * `sys_metadata_commit.items` stores it: `member` is the bundle member the
+ * item is, for a type whose identity is a pair, and is absent for the
+ * canonical member and every type with no members — so the plan of every
+ * other item is stored byte-identical to what it was. The commit timeline
+ * serves the declared four keys only ({@link ObjectStackProtocolImplementation.listCommits}).
+ */
+type CommitPlanItem = { type: string; name: string; existedBefore: boolean; prevVersion: number | null; member?: string };
+
+/** [#22877] The identity of a plan item or a draft within one batch: two members of one name are two. */
+function commitPlanKey(item: { type: string; name: string; member?: string }): string {
+    return `${item.type}/${item.name}\u0000${item.member ?? ''}`;
+}
+
+/**
+ * [#22877] A repository call's `member` option as a spread: present only when a
+ * member was named, so a call addressing the canonical member — and every call
+ * for a type with no members — passes exactly the options it always did.
+ */
+function memberOption(member: string | undefined): { member?: string } {
+    return member !== undefined ? { member } : {};
+}
+
+/** [#22877] {@link mutationEventMember} for the member a written BODY belongs to. */
+function mutationEventMemberOfBody(type: string, body: unknown): { member?: string } {
+    const value = overlayMemberOfBody(type, body);
+    return typeof value === 'string' ? { member: value } : {};
 }
 
 /**
@@ -5254,6 +5383,14 @@ export interface MetadataMutationEvent {
     /** Resulting lifecycle state of the row the mutation produced. */
     state: 'active' | 'draft' | 'deleted';
     organizationId?: string | null;
+    /**
+     * [#22877] The bundle member the mutated row belongs to, for a type whose
+     * identity is a pair (`'zh-CN'` of an `email_template`) — part of the
+     * row's ADDRESS, so a peer converging on this signal re-reads that
+     * member's row, not the canonical one. Absent for the canonical member and
+     * for every type with no members, as on every by-name door.
+     */
+    member?: string;
 }
 
 /**
@@ -7012,12 +7149,18 @@ export class ObjectStackProtocolImplementation implements
             name: evt.name,
             org: 'env',
         } as Parameters<typeof repo.get>[0];
-        const current = await repo.get(ref, { state: 'active' });
+        // [#22877] The member the event addresses: a peer's save of a second
+        // locale converges on THAT locale's row. Re-reading the canonical one,
+        // as this did, re-registered the canonical body and left the peer's
+        // registry without the member that changed (and a reset of it
+        // unhealed). A member the event names but this type does not have is
+        // read as the canonical one, as every repository read reads it.
+        const current = await repo.get(ref, { state: 'active', ...memberOption(evt.member) });
         if (current) {
             // The row's OWN package binding, read from this replica's DB the
             // way the recovery callers derive it (#4867 / #4636) — the wire
             // carries no binding, and must not.
-            const packageId = await this.resolveOverlayPackageBinding(type, evt.name, orgId);
+            const packageId = await this.resolveOverlayPackageBinding(type, evt.name, orgId, evt.member);
             this.applyRegistryWriteThrough({
                 type,
                 name: evt.name,
@@ -7026,7 +7169,7 @@ export class ObjectStackProtocolImplementation implements
                 organizationId: orgId,
             });
         } else {
-            await this.restoreArtifactRegistryView(type, evt.name, orgId);
+            await this.restoreArtifactRegistryView(type, evt.name, orgId, evt.member);
         }
         // [#13609] Retire this replica's overlay-row cache at the moment of
         // convergence — never a direct `@objectstack/objectql` import, see
@@ -9846,6 +9989,8 @@ export class ObjectStackProtocolImplementation implements
         name: string;
         state: 'active' | 'draft';
         packageId?: string;
+        /** [#22877] The bundle member a by-name door's selector named; omitted, the canonical one. */
+        member?: string;
     }): Promise<{ row: any } | undefined> {
         // [#21804] The order is {@link servedOverlayRowCandidates}, the one
         // the list's merge takes over the rows it read: the canonical
@@ -9859,10 +10004,10 @@ export class ObjectStackProtocolImplementation implements
             if (type === undefined) continue;
             const where: Record<string, unknown> = {
                 type, name: args.name, state: args.state, organization_id: candidate.organizationId,
-                // [#22877] A by-name read of a bundled type answers its
-                // CANONICAL member, as the registry's bare-name read does;
-                // nothing for every other type.
-                ...overlayMemberWhere(type),
+                // [#22877] A by-name read of a bundled type answers the member
+                // its selector named, else its CANONICAL member, as the
+                // registry's bare-name read does; nothing for every other type.
+                ...overlayMemberWhere(type, args.member),
             };
             if (candidate.packageId !== undefined) where.package_id = candidate.packageId;
             // [#21911, ADR-0096] The explicit system opt-in: a platform store
@@ -9914,9 +10059,21 @@ export class ObjectStackProtocolImplementation implements
         }, options);
     }
 
-    async getMetaItem(request: { type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean }) {
+    async getMetaItem(request: {
+        type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
+        /** [#22877] The bundle member to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
+        member?: string,
+    }) {
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
         request = canonicalizeMetaRequestType(request);
+        // [#22877] Ruling 6116165299 (Q2 i): ONE member of a bundled type is
+        // addressed by name, the selector's or else the canonical one. Every
+        // layer below answers that member or nothing — the stored row, the
+        // code layer's member and the registry's.
+        const member = resolveBundleMemberSelector(request.type, request.member);
+        const wantedMember = bundleMemberDiscriminator(request.type, member);
+        const isWantedMember = (candidate: unknown): boolean =>
+            wantedMember === undefined || itemDiscriminator(request.type, candidate) === wantedMember;
         let item: unknown;
         // [ADR-0131 D6] Environment → code: the environment's stored row,
         // else the code packages' definition. No organization's row is read —
@@ -9983,6 +10140,7 @@ export class ObjectStackProtocolImplementation implements
                     name: request.name,
                     state: 'draft',
                     ...(request.packageId ? { packageId: request.packageId } : {}),
+                    ...memberOption(member),
                 }))?.row;
                 if (draftRec) {
                     const draftItem = this.convertStoredItem(
@@ -10028,6 +10186,7 @@ export class ObjectStackProtocolImplementation implements
                 name: request.name,
                 state: readState,
                 ...(request.packageId ? { packageId: request.packageId } : {}),
+                ...memberOption(member),
             }))?.row;
             storedRowServed = record !== undefined && record !== null;
             // [#20946, #21922] The stored-row half — see `storedRowDeclined` above.
@@ -10074,7 +10233,9 @@ export class ObjectStackProtocolImplementation implements
                 item: decorateMetadataItem(request.type, this.governServedObject(request.type, item)),
                 // [#22114] The draft row's version token — the one a draft save
                 // (`?mode=draft`) at this address accepts as `If-Match`.
-                version: await this.readVersionToken(request, 'draft'),
+                // [#22877] The member's own row's, as a save of that member's
+                // body addresses it.
+                version: await this.readVersionToken({ ...request, member }, 'draft'),
             };
         }
 
@@ -10164,12 +10325,18 @@ export class ObjectStackProtocolImplementation implements
                     request.packageId,
                 );
                 if (fromService.data !== undefined && fromService.data !== null) {
+                    // [#22877] …when it is the member this read addresses. The
+                    // service keys a type's items by name alone, so for a
+                    // bundle it holds whichever member it registered last, and
+                    // that one answered every member's read.
                     // [#7556] A layer, not a resolved schema — see
                     // {@link foldObjectExtendersFromRegistry}. No-op for every
                     // type but `object`, and for an object nothing extends.
-                    item = this.foldObjectExtendersFromRegistry(
-                        request.type, request.name, fromService.data,
-                    );
+                    if (isWantedMember(fromService.data)) {
+                        item = this.foldObjectExtendersFromRegistry(
+                            request.type, request.name, fromService.data,
+                        );
+                    }
                 } else if (fromService.degraded) {
                     serviceDegraded = fromService;
                 }
@@ -10190,27 +10357,28 @@ export class ObjectStackProtocolImplementation implements
         //    necessary. Without this, project-kernel callers of
         //    `GET /api/v1/meta/object/<name>` 404 even though the object is
         //    registered and visible via the list endpoint.
-        // [#22877] A bundled type's bare name addresses its CANONICAL member
-        // (ruling A, Q2 i: no member named means the canonical one). Step 1
-        // read only the canonical member's stored row; when there is none, the
-        // canonical member is the code layer's. The registry's bare-name read
-        // below answers its overlay tier first, which would hand back a
-        // non-canonical member's hydrated overlay (a template customized in
-        // `zh-CN` only) for a read that named no member. It still answers a
-        // bundle that ships no canonical member at all.
-        if (item === undefined) {
-            const disc = ITEM_KEY_DISCRIMINATORS[request.type];
-            const artifact = disc ? this.lookupArtifactItem(request.type, request.name, request.packageId) : undefined;
-            if (disc && artifact !== undefined && itemDiscriminator(request.type, artifact) === disc.canonical) {
-                item = artifact;
-            }
+        // [#22877] A bundled type's name addresses ONE member (ruling A, Q2 i):
+        // the selector's, else the CANONICAL one. Step 1 read only that
+        // member's stored row; when there is none, the member is the code
+        // layer's — the artifact that ships it — and then the registry's, asked
+        // for that member. The registry's bare-name read answers the canonical
+        // member wherever it sits (its own [#22877] note), and still answers a
+        // bundle that ships no canonical member at all; a named member that no
+        // layer holds answers nothing, so the door answers it as absent.
+        if (item === undefined && wantedMember !== undefined) {
+            const artifact = this.lookupArtifactItem(request.type, request.name, request.packageId, wantedMember);
+            if (artifact !== undefined && isWantedMember(artifact)) item = artifact;
         }
         if (item === undefined) {
-            item = this.engine.registry.getItem(request.type, request.name, request.packageId);
+            item = this.engine.registry.getItem(request.type, request.name, request.packageId, member);
             if (item === undefined) {
                 const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
-                if (alt) item = this.engine.registry.getItem(alt, request.name, request.packageId);
+                if (alt) item = this.engine.registry.getItem(alt, request.name, request.packageId, member);
             }
+            // [#22877] A registry that does not narrow by member (a host
+            // double, an older registry) can answer another member of the
+            // bundle for a named one; that answer is not this member.
+            if (member !== undefined && item !== undefined && !isWantedMember(item)) item = undefined;
             // [#20946] The registry half — see `storedRowDeclined` above.
             // `getItem` answers the bare slot first, and for a shipped flow name
             // that slot holds the hydrated stored row, which is not one of the
@@ -10355,7 +10523,7 @@ export class ObjectStackProtocolImplementation implements
             // editor reads `state: 'draft'` or the plain read.
             ...(request.previewDrafts
                 ? {}
-                : { version: storedRowServed ? await this.readVersionToken(request, 'active') : null }),
+                : { version: storedRowServed ? await this.readVersionToken({ ...request, member }, 'active') : null }),
         };
     }
 
@@ -17216,7 +17384,18 @@ export class ObjectStackProtocolImplementation implements
      * type and its singular/plural twin. Returns `undefined` when the
      * registry is unavailable or the item is not artifact-backed.
      */
-    private lookupArtifactItem(type: string, name: string, currentPackageId?: string): unknown {
+    private lookupArtifactItem(
+        type: string,
+        name: string,
+        currentPackageId?: string,
+        /**
+         * [#22877] For a type whose identity is a pair, the ONE bundle member
+         * whose artifact to answer, as its discriminator value; omitted, the
+         * bundle's artifact canonical-first. A registry without the parameter
+         * ignores it, so a caller that needs the member checks the answer.
+         */
+        member?: string,
+    ): unknown {
         const registry = (this.engine as any)?.registry;
         if (!registry) return undefined;
         const singular = PLURAL_TO_SINGULAR[type] ?? type;
@@ -17228,8 +17407,8 @@ export class ObjectStackProtocolImplementation implements
         // as unlocked after PUT+GET until restart). `currentPackageId`
         // (ADR-0048) makes that scan package-scoped (prefer-local).
         if (typeof registry.getArtifactItem === 'function') {
-            return registry.getArtifactItem(singular, name, currentPackageId)
-                ?? registry.getArtifactItem(type, name, currentPackageId);
+            return registry.getArtifactItem(singular, name, currentPackageId, member)
+                ?? registry.getArtifactItem(type, name, currentPackageId, member);
         }
         // Partial registry mocks in tests — fall back to getItem and apply
         // the same package-provenance filter inline.
@@ -17981,7 +18160,8 @@ export class ObjectStackProtocolImplementation implements
      * (#11087) — the address the save resolves, not the key it was handed.
      */
     private async readVersionToken(
-        request: { type: string; name: string; packageId?: string },
+        /** [#22877] `member` — the bundle member the read addressed; omitted, the canonical one. */
+        request: { type: string; name: string; packageId?: string; member?: string },
         state: 'active' | 'draft',
     ): Promise<string | null> {
         const repo = this.getOverlayRepo();
@@ -17990,7 +18170,7 @@ export class ObjectStackProtocolImplementation implements
             name: request.name,
             org: 'env',
         } as Parameters<typeof repo.headAt>[0];
-        const stored = await this.storedHeadAt(repo, ref, state, request.packageId ?? null);
+        const stored = await this.storedHeadAt(repo, ref, state, request.packageId ?? null, request.member);
         return stored === null ? null : this.receiptVersion(stored);
     }
 
@@ -19215,6 +19395,15 @@ export class ObjectStackProtocolImplementation implements
         name: string,
         /** The DELETE's own scope — `null` for an env-wide row. [#6780] */
         organizationId: string | null,
+        /**
+         * [#22877] The bundle member whose row was removed, as the door's
+         * selector named it; omitted, the canonical member. For a type whose
+         * identity is a pair every tier below addresses that member alone:
+         * its shadow, its baseline and its overlay entry. The other members'
+         * rows are still stored and served, so their registry entries stay.
+         * No effect for a type with no members.
+         */
+        member?: string,
     ): Promise<void> {
         // [#6780] ADR-0005 — the plain-key entry belongs to the env-wide row,
         // so only an env-wide removal may heal (or retire) it.
@@ -19222,6 +19411,10 @@ export class ObjectStackProtocolImplementation implements
         try {
             const registry: any = this.engine.registry;
             const singular = PLURAL_TO_SINGULAR[type] ?? type;
+            // The member's discriminator value (the canonical one when none was
+            // named), or `undefined` for a type with no members — whose registry
+            // calls below are then exactly the calls they always were.
+            const memberKey = bundleMemberDiscriminator(singular, member);
 
             // ── [ADR-0029 D9.7] THE OBJECT HALF'S LAYER SUBTRACTION ──
             //
@@ -19248,15 +19441,20 @@ export class ObjectStackProtocolImplementation implements
 
             let healed = false;
             if (typeof registry.removeRuntimeShadow === 'function') {
-                healed = registry.removeRuntimeShadow(singular, name);
+                healed = registry.removeRuntimeShadow(singular, name, memberKey);
                 if (type !== singular) {
-                    healed = registry.removeRuntimeShadow(type, name) || healed;
+                    healed = registry.removeRuntimeShadow(type, name, memberKey) || healed;
                 }
             }
             if (healed) return;
 
             const baseline = await this.readItemFromMetadataService(type, name);
-            if (baseline.data !== undefined && baseline.data !== null) {
+            // [#22877] A baseline of ANOTHER member is no baseline of this one:
+            // the service keys a type's items by name alone, so it can hold a
+            // bundle's other member under the name.
+            const baselineServesMember = memberKey === undefined
+                || itemDiscriminator(singular, baseline.data) === memberKey;
+            if (baseline.data !== undefined && baseline.data !== null && baselineServesMember) {
                 if (this.environmentId === undefined) {
                     // [#22057] See tier 2 in the header. ⛔ View only.
                     const bound = canonicalMetaType(type) === 'view'
@@ -19275,8 +19473,8 @@ export class ObjectStackProtocolImplementation implements
 
             // [#5079] No artifact, no baseline: the row WAS the item.
             if (typeof registry.removeOverlayEntry === 'function') {
-                registry.removeOverlayEntry(singular, name);
-                if (type !== singular) registry.removeOverlayEntry(type, name);
+                registry.removeOverlayEntry(singular, name, memberKey);
+                if (type !== singular) registry.removeOverlayEntry(type, name, memberKey);
             }
             // [#6808] …and an `object` lives in a SECOND place, so tier 3 has a
             // second limb. `applyObjectRegistryMutation` writes both halves on
@@ -19432,6 +19630,11 @@ export class ObjectStackProtocolImplementation implements
         type: string,
         name: string,
         organizationId: string | null,
+        /**
+         * [#22877] The bundle member whose row's binding to read; omitted, the
+         * canonical member. Nothing for a type with no members.
+         */
+        member?: string,
     ): Promise<string | null> {
         // [#21911] The explicit system opt-in — see findServedOverlayRow.
         const row = await this.engine.findOne('sys_metadata', {
@@ -19440,6 +19643,7 @@ export class ObjectStackProtocolImplementation implements
                 name,
                 organization_id: organizationId,
                 state: 'active',
+                ...overlayMemberWhere(type, member),
             },
             context: { isSystem: true },
         });
@@ -21035,6 +21239,8 @@ export class ObjectStackProtocolImplementation implements
                 name: request.name,
                 state: mode === 'draft' ? 'draft' : 'active',
                 organizationId: null,
+                // [#22877] The saved body's member — the row this save wrote.
+                ...mutationEventMemberOfBody(singularTypeForRepo, request.item),
             });
             return {
                 success: true,
@@ -21652,6 +21858,8 @@ export class ObjectStackProtocolImplementation implements
         name: string;
         sinceSeq?: number;
         limit?: number;
+        /** [#22877] The bundle member whose lineage to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
+        member?: string;
     }): Promise<{ events: import('@objectstack/metadata-core').MetadataEvent[] }> {
         // [#9157] #4432 / #7894 — CANONICAL TYPE KEY. See {@link canonicalMetaType}
         // and the twin comment on {@link auditMetaItem}; #9180 step ① routes all
@@ -21685,6 +21893,12 @@ export class ObjectStackProtocolImplementation implements
         // (`viewes`) must be refused 400 naming `view` / `views`, not silently
         // absorbed by the early return.
         request = canonicalizeMetaRequestType(request);
+        // [#22877] Ruling 6116165299 (Q2 i) and the seat's answer 6118224899:
+        // the bundle shares ONE lineage counter per name, and this read serves
+        // one member's events of it — the selector's, else the canonical one.
+        // Checked before the gate below, so a selector on a type with no
+        // members is refused, never absorbed by the early empty answer.
+        const member = resolveBundleMemberSelector(request.type, request.member);
         // Canonical by construction from the fold above — NOT a second fold.
         const singularType = request.type;
         if (!ObjectStackProtocolImplementation.isOverlayAllowed(singularType)
@@ -21714,7 +21928,7 @@ export class ObjectStackProtocolImplementation implements
         } as Parameters<typeof repo.history>[0];
 
         const events: import('@objectstack/metadata-core').MetadataEvent[] = [];
-        const opts: { sinceSeq?: number; limit?: number } = {};
+        const opts: { sinceSeq?: number; limit?: number; member?: string } = { ...memberOption(member) };
         if (request.sinceSeq !== undefined) opts.sinceSeq = request.sinceSeq;
         if (request.limit !== undefined) opts.limit = request.limit;
         // [#21207] Each event's hash and parent hash are served in keyed form —
@@ -21789,6 +22003,8 @@ export class ObjectStackProtocolImplementation implements
          * multi-pass over the whole set), so it suppresses the per-item apply here.
          */
         _skipSeedApply?: boolean;
+        /** [#22877] The bundle member whose draft to publish — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
+        member?: string;
     }): Promise<{
         success: boolean;
         version: string;
@@ -21918,6 +22134,10 @@ export class ObjectStackProtocolImplementation implements
         // rewrites it on upgrade). Different input class, different map; see
         // {@link canonicalMetaType}'s header for why the two are not one fold.
         request = canonicalizeMetaRequestType(request);
+        // [#22877] Ruling 6116165299 (Q2 i): the promotion addresses ONE
+        // member's draft of a bundled type, the selector's, else the canonical
+        // one. Read once here and handed down trimmed.
+        const member = resolveBundleMemberSelector(request.type, request.member);
         // [commit 311433f6b] The item-name grammar verdict, same as `saveMetaItem`'s:
         // the promotion door writes an `active` row under this name, so an
         // off-grammar name is refused here too rather than promoted. With the
@@ -21930,7 +22150,7 @@ export class ObjectStackProtocolImplementation implements
         // site has no transaction of its own, so recording it in the `catch` is
         // where it always effectively landed; what changed is that the helper no
         // longer assumes that on behalf of the batch route too.
-        const { singularType, advisories, result } = await this.promoteDraftForPublish(request)
+        const { singularType, advisories, result } = await this.promoteDraftForPublish({ ...request, member })
             .catch(async (err: unknown) => {
                 await this.recordPendingDenialAudit(err);
                 throw err;
@@ -22076,6 +22296,12 @@ export class ObjectStackProtocolImplementation implements
          * "same-batch" closure would be the item itself and change nothing.
          */
         pending?: RuntimePendingDeclarations;
+        /**
+         * [#22877] The bundle member whose draft to promote; omitted, the
+         * canonical one. The draft read, the gate's read and the promotion
+         * all address it, so the body judged is the body that goes live.
+         */
+        member?: string;
     }): Promise<{
         singularType: string;
         /**
@@ -22141,9 +22367,10 @@ export class ObjectStackProtocolImplementation implements
                 draftRow = await this.engine.findOne('sys_metadata', {
                     where: {
                         type: singularType, name: request.name, organization_id: null, state: 'draft',
-                        // [#22877] The canonical member's draft — the one
-                        // `repo.get` / `repo.promoteDraft` below address.
-                        ...overlayMemberWhere(singularType),
+                        // [#22877] The addressed member's draft (the canonical
+                        // one when none was named) — the one `repo.get` /
+                        // `repo.promoteDraft` below address.
+                        ...overlayMemberWhere(singularType, request.member),
                     },
                     context: { isSystem: true },
                 });
@@ -22174,7 +22401,7 @@ export class ObjectStackProtocolImplementation implements
         }
         const draftForGate = await repo.get(
             { type: singularType, name: request.name, org: 'env' } as Parameters<typeof repo.get>[0],
-            { state: 'draft', ...(draftKey !== undefined ? { packageId: draftKey } : {}) },
+            { state: 'draft', ...(draftKey !== undefined ? { packageId: draftKey } : {}), ...memberOption(request.member) },
         );
         // [#21470] …and the divergent `name` refusal, on the same body and for
         // the same reason: a draft stored before `saveMetaItem` judged every
@@ -22291,6 +22518,8 @@ export class ObjectStackProtocolImplementation implements
                 // none), so a draft saved after the gate's read is refused as a
                 // conflict instead of being promoted unjudged.
                 expectedDraftHash: draftForGate ? draftForGate.hash : null,
+                // [#22877] …of the member that was judged.
+                ...memberOption(request.member),
             });
             return { singularType, advisories: runtimeAdvisories, result };
         } catch (err: any) {
@@ -22453,6 +22682,8 @@ export class ObjectStackProtocolImplementation implements
             name: args.name,
             state: 'active',
             organizationId: null,
+            // [#22877] The promoted body's member — the row the promotion wrote.
+            ...mutationEventMemberOfBody(args.singularType, args.body),
         });
         return out;
     }
@@ -22581,7 +22812,10 @@ export class ObjectStackProtocolImplementation implements
             ...(request?.type ? { type: PLURAL_TO_SINGULAR[request.type] ?? request.type } : {}),
             ...(request?.packageId ? { packageId: request.packageId } : {}),
         });
-        return { drafts };
+        // [#22877] The declared header (`ListDraftsResponseSchema`): the
+        // repository's `member` is the package-batch doors' reading, not part of
+        // this list's contract, and is not served on it.
+        return { drafts: drafts.map(({ member: _member, ...header }) => header) };
     }
 
     /**
@@ -22645,7 +22879,7 @@ export class ObjectStackProtocolImplementation implements
      * and the absence of the member it needs is stated rather than assumed.
      */
     private async collectBatchPendingDeclarations(
-        drafts: ReadonlyArray<{ type: string; name: string }>,
+        drafts: ReadonlyArray<{ type: string; name: string; member?: string }>,
     ): Promise<RuntimePendingDeclarations | undefined> {
         // [#13216] Typed as a mapped type over `RuntimePendingDeclarations`
         // with `-?`, not as a hand-listed literal. The literal it replaces was
@@ -22706,7 +22940,8 @@ export class ObjectStackProtocolImplementation implements
             const ref = {
                 type: singular, name: d.name, org: 'env',
             } as unknown as Parameters<typeof repo.get>[0];
-            const draft = await repo.get(ref, { state: 'draft' });
+            // [#22877] The draft's own bundle member, as listed.
+            const draft = await repo.get(ref, { state: 'draft', ...memberOption(d.member) });
             if (draft?.body === undefined || draft.body === null) continue;
             pending[key].push(draft.body);
             any = true;
@@ -23141,15 +23376,21 @@ export class ObjectStackProtocolImplementation implements
         // unprovisioned is truthful emptiness, everything else surfaces. See
         // the `catch` below for why the benign branch keeps exactly the push
         // that was wrong unconditionally.
-        const commitItems: Array<{ type: string; name: string; existedBefore: boolean; prevVersion: number | null }> = [];
+        const commitItems: CommitPlanItem[] = [];
         for (const d of ordered) {
             try {
                 // Read the pre-publish active row in the draft's scope, the
                 // environment's (ADR-0131 D6), so an env-wide edit is not
                 // mis-recorded as a create in the revert plan (#3115).
                 // [#21911] The explicit system opt-in — see findServedOverlayRow.
+                // [#22877] …and the draft's own bundle member: another
+                // member's active row is not this member's pre-publish state,
+                // and the revert plan records the member it describes.
                 const activeRow = (await this.engine.findOne('sys_metadata', {
-                    where: { organization_id: null, type: d.type, name: d.name, state: 'active' },
+                    where: {
+                        organization_id: null, type: d.type, name: d.name, state: 'active',
+                        ...overlayMemberWhere(d.type, d.member),
+                    },
                     context: { isSystem: true },
                 })) as { version?: number } | null;
                 commitItems.push({
@@ -23157,6 +23398,7 @@ export class ObjectStackProtocolImplementation implements
                     name: d.name,
                     existedBefore: !!activeRow,
                     prevVersion: activeRow && typeof activeRow.version === 'number' ? activeRow.version : null,
+                    ...(d.member !== undefined ? { member: d.member } : {}),
                 });
             } catch (error) {
                 // [#8896] Benign: `sys_metadata` has not been provisioned yet.
@@ -23180,7 +23422,10 @@ export class ObjectStackProtocolImplementation implements
                 // No new error code and no new response field: the caller
                 // receives the read's own failure, envelope intact.
                 if (!isMissingTableError(error, 'sys_metadata')) throw error;
-                commitItems.push({ type: d.type, name: d.name, existedBefore: false, prevVersion: null });
+                commitItems.push({
+                    type: d.type, name: d.name, existedBefore: false, prevVersion: null,
+                    ...(d.member !== undefined ? { member: d.member } : {}),
+                });
             }
         }
         const publishedSeqs: number[] = [];
@@ -23203,7 +23448,7 @@ export class ObjectStackProtocolImplementation implements
         // stubs) fall through to a plain sequential run with the same weaker
         // guarantee the repository's `withTxn` documents.
         type PromotedDraft = {
-            d: { type: string; name: string };
+            d: { type: string; name: string; member?: string };
             singularType: string;
             body: unknown;
             packageId: string | null;
@@ -23238,7 +23483,7 @@ export class ObjectStackProtocolImplementation implements
                             // deleted by the promote, and reading the draft is
                             // unambiguous).
                             const ref = { type: d.type, name: d.name, org: 'env' } as unknown as Parameters<typeof repo.get>[0];
-                            const draft = await repo.get(ref, { state: 'draft' });
+                            const draft = await repo.get(ref, { state: 'draft', ...memberOption(d.member) });
                             if (draft?.body) seedBodies.push(draft.body);
                         }
                         const { singularType, advisories, result } = await this.promoteDraftForPublish({
@@ -23276,6 +23521,13 @@ export class ObjectStackProtocolImplementation implements
                             // `d.packageId` is the row's own binding, so this
                             // is the listed key restated, never a new one.
                             packageId: d.packageId,
+                            // [#22877] …and as the bundle member `listDrafts`
+                            // surfaced it as: two members' drafts of one name
+                            // are two drafts, and promoting the canonical one
+                            // for each promoted it twice (`NO_DRAFT` the
+                            // second time, aborting the batch) and left the
+                            // other member's draft pending.
+                            ...memberOption(d.member),
                             // [#10377] The whole batch's own declarations, so
                             // this member is judged against the package it is
                             // being published AS PART OF and not against the
@@ -23307,14 +23559,16 @@ export class ObjectStackProtocolImplementation implements
                 // the published state land or roll back together, so a recorded
                 // commit can never describe a partial publish.
                 if (promoted.length > 0) {
-                    const promotedKeys = new Set(promoted.map((p) => `${p.d.type}/${p.d.name}`));
+                    // [#22877] Keyed by member too: two members of one name
+                    // are two plan items.
+                    const promotedKeys = new Set(promoted.map((p) => commitPlanKey(p.d)));
                     commit = await this.recordPackageCommit({
                         packageId: request.packageId,
                         operation: 'apply',
                         ...(request.message ? { message: request.message } : {}),
                         ...(request.actor ? { actor: request.actor } : {}),
                         ...(request.aiModel ? { aiModel: request.aiModel } : {}),
-                        items: commitItems.filter((it) => promotedKeys.has(`${it.type}/${it.name}`)),
+                        items: commitItems.filter((it) => promotedKeys.has(commitPlanKey(it))),
                         ...(publishedSeqs.length
                             ? { eventSeqStart: Math.min(...publishedSeqs), eventSeqEnd: Math.max(...publishedSeqs) }
                             : {}),
@@ -23327,7 +23581,7 @@ export class ObjectStackProtocolImplementation implements
             // BATCH_ABORTED so the caller sees the all-or-nothing semantics
             // instead of inferring them from publishedCount 0.
             const causal = e?.__batchItem as
-                { type: string; name: string; organizationId?: string | null } | undefined;
+                { type: string; name: string; organizationId?: string | null; member?: string } | undefined;
             // [#8333 · P6] `failed[].error` is RESPONSE DATA, not a message, so
             // no HTTP boundary's withhold reaches it. Measured on `origin/main`
             // by failing the `sys_metadata` write under the promote: the batch
@@ -23442,7 +23696,7 @@ export class ObjectStackProtocolImplementation implements
             // for a failure nobody can attribute would put a fictional item in
             // a compliance ledger. `console.warn` above stays the record there.
             const failedOut = ordered.map((d) =>
-                causal && d.type === causal.type && d.name === causal.name
+                causal && commitPlanKey(d) === commitPlanKey(causal)
                     ? {
                         type: d.type, name: d.name,
                         error: clientFacingFailureText(e, 'publish failed'),
@@ -23729,7 +23983,13 @@ export class ObjectStackProtocolImplementation implements
      * repository (ADR-0131 D6).
      */
     private async discardDraftInItsScope(
-        draft: { type: string; name: string },
+        /**
+         * [#22877] `member` — the draft's bundle member, as `listDrafts`
+         * surfaced it: the discard removes THAT member's draft. Without it the
+         * canonical member's was addressed for every draft of the name, so a
+         * second locale's draft answered "no pending draft" and stayed.
+         */
+        draft: { type: string; name: string; member?: string },
         actor: string | undefined,
     ): Promise<void> {
         await this.deleteMetaItem({
@@ -23737,6 +23997,7 @@ export class ObjectStackProtocolImplementation implements
             name: draft.name,
             state: 'draft',
             ...(actor ? { actor } : {}),
+            ...(draft.member !== undefined ? { member: draft.member } : {}),
         });
     }
 
@@ -24972,7 +25233,7 @@ export class ObjectStackProtocolImplementation implements
         actor?: string;
         aiModel?: string;
         parentCommitId?: string;
-        items: Array<{ type: string; name: string; existedBefore: boolean; prevVersion: number | null }>;
+        items: CommitPlanItem[];
         eventSeqStart?: number;
         eventSeqEnd?: number;
     }): Promise<{ commitId: string } | null> {
@@ -25053,8 +25314,8 @@ export class ObjectStackProtocolImplementation implements
 
     private parseCommitItems(
         raw: unknown,
-    ): Array<{ type: string; name: string; existedBefore: boolean; prevVersion: number | null }> {
-        if (Array.isArray(raw)) return raw as Array<{ type: string; name: string; existedBefore: boolean; prevVersion: number | null }>;
+    ): CommitPlanItem[] {
+        if (Array.isArray(raw)) return raw as CommitPlanItem[];
         if (typeof raw === 'string') {
             try {
                 const p = JSON.parse(raw);
@@ -25141,7 +25402,9 @@ export class ObjectStackProtocolImplementation implements
                 ...(r.ai_model ? { aiModel: r.ai_model } : {}),
                 ...(r.parent_commit_id ? { parentCommitId: r.parent_commit_id } : {}),
                 itemCount: typeof r.item_count === 'number' ? r.item_count : 0,
-                items: this.parseCommitItems(r.items),
+                // [#22877] The declared item (`ListPackageCommitsResponseSchema`):
+                // a plan item's stored `member` is `revertCommit`'s reading.
+                items: this.parseCommitItems(r.items).map(({ member: _member, ...item }) => item),
                 // [#14038] Canonicalise the ONE driver materialisation this
                 // column is measured to produce (a valid JS `Date`, on
                 // Postgres/MySQL); every other shape — including an
@@ -25243,6 +25506,9 @@ export class ObjectStackProtocolImplementation implements
         const actor = request.actor ?? null;
         const reverted: Array<{ type: string; name: string; action: 'removed' | 'restored' }> = [];
         const failed: Array<{ type: string; name: string; error: string; code?: string }> = [];
+        // [#22877] The members of what `reverted` reports, in its order, for
+        // the revert's own plan below; the response keeps its declared keys.
+        const revertedMembers: Array<string | undefined> = [];
 
         // Reverse apply order so artifacts that depend on others (e.g. a view on
         // a new object) are removed before the thing they reference.
@@ -25375,8 +25641,13 @@ export class ObjectStackProtocolImplementation implements
             const itemOrgId = null;
             const repo = this.getOverlayRepo();
             const ref = { type: it.type, name: it.name, org: itemOrgId ?? 'env' } as unknown as Parameters<typeof repo.get>[0];
+            // [#22877] The plan item's bundle member: every row read, write
+            // and heal below addresses it, so reverting a commit that changed
+            // one locale of a template leaves the other locale's row alone.
+            // Absent (the canonical member) on every other item, as before.
+            const member = it.member;
             try {
-                const current = await repo.get(ref, { state: 'active' });
+                const current = await repo.get(ref, { state: 'active', ...memberOption(member) });
                 if (!it.existedBefore) {
                     // Created by this commit → soft-remove (metadata only; table stays).
                     //
@@ -25419,6 +25690,7 @@ export class ObjectStackProtocolImplementation implements
                             source: 'protocol.revertCommit',
                             intent,
                             state: 'active',
+                            ...memberOption(member),
                         });
                     }
                     // [#6621] The registry must stop serving what the revert
@@ -25476,7 +25748,7 @@ export class ObjectStackProtocolImplementation implements
                     // #6602 gate this parameter carries asks "is this row
                     // env-wide?", and an env-wide row reverted by an org-scoped
                     // caller skipped the heal entirely while answering success.
-                    await this.restoreArtifactRegistryView(it.type, it.name, itemOrgId);
+                    await this.restoreArtifactRegistryView(it.type, it.name, itemOrgId, member);
                     // [#14179] …and announce it on the ONE choke point,
                     // {@link emitMetadataMutation}, exactly as the sibling
                     // delete caller {@link deleteMetaItem} does after its own
@@ -25508,9 +25780,11 @@ export class ObjectStackProtocolImplementation implements
                             name: it.name,
                             state: 'deleted',
                             organizationId: itemOrgId,
+                            ...mutationEventMember(it.type, member),
                         });
                     }
                     reverted.push({ type: it.type, name: it.name, action: 'removed' });
+                    revertedMembers.push(member);
                 } else if (restoreToVersion !== null) {
                     // Edited an existing artifact → restore the pre-commit body.
                     //
@@ -25555,7 +25829,7 @@ export class ObjectStackProtocolImplementation implements
                     // fallible query downstream of a write that already succeeded —
                     // the shape that ends in a `catch {}` swallowing a real outage
                     // (#4867). Per ITEM, because a batch mixes bindings.
-                    const restorePackageId = await this.resolveOverlayPackageBinding(it.type, it.name, itemOrgId);
+                    const restorePackageId = await this.resolveOverlayPackageBinding(it.type, it.name, itemOrgId, member);
                     const restored = await repo.restoreVersion(ref, restoreToVersion, {
                         actor,
                         source: 'protocol.revertCommit',
@@ -25567,6 +25841,7 @@ export class ObjectStackProtocolImplementation implements
                         // the SINGULAR type, the spelling the write-through
                         // registers under. See {@link restoredBodyWriter}.
                         deriveRestoredBody: this.restoredBodyWriter(PLURAL_TO_SINGULAR[it.type] ?? it.type, it.name),
+                        ...memberOption(member),
                     });
                     // [#6621] #4521 — a revert is a live write like any other: the
                     // restored body must be the one the runtime dispatches on
@@ -25626,8 +25901,10 @@ export class ObjectStackProtocolImplementation implements
                         name: it.name,
                         state: 'active',
                         organizationId: itemOrgId,
+                        ...mutationEventMember(it.type, member),
                     });
                     reverted.push({ type: it.type, name: it.name, action: 'restored' });
+                    revertedMembers.push(member);
                 }
             } catch (e: any) {
                 // [#8333 · P11] `failed[].error` is revert-response DATA.
@@ -25672,11 +25949,12 @@ export class ObjectStackProtocolImplementation implements
             message: `Revert: ${row.message ?? request.commitId}`,
             ...(request.actor ? { actor: request.actor } : {}),
             parentCommitId: request.commitId,
-            items: reverted.map((r) => ({
+            items: reverted.map((r, index) => ({
                 type: r.type,
                 name: r.name,
                 existedBefore: r.action === 'restored',
                 prevVersion: null,
+                ...(revertedMembers[index] !== undefined ? { member: revertedMembers[index] } : {}),
             })),
         });
 
@@ -25782,6 +26060,12 @@ export class ObjectStackProtocolImplementation implements
         toVersion: number;
         actor?: string;
         message?: string;
+        /**
+         * [#22877] The bundle member to revert — {@link resolveBundleMemberSelector};
+         * omitted, the canonical one. The bundle shares one lineage counter, so
+         * a version of ANOTHER member answers 404 `VERSION_NOT_FOUND`.
+         */
+        member?: string;
     }): Promise<{
         success: boolean;
         version: string;
@@ -25848,6 +26132,9 @@ export class ObjectStackProtocolImplementation implements
         // deleted because a reader arriving here still needs to know which of
         // these effects belong to THIS boundary and which moved to the producer.
         request = canonicalizeMetaRequestType(request);
+        // [#22877] Ruling 6116165299 (Q2 i): the revert addresses ONE member
+        // of a bundled type — the selector's, else the canonical one.
+        const member = resolveBundleMemberSelector(request.type, request.member);
         // Canonical by construction from the fold above. NOT a second fold: the
         // `PLURAL_TO_SINGULAR` lookup that used to stand here is exactly what
         // #7894 removed from this boundary. The binding survives under its own
@@ -25901,7 +26188,7 @@ export class ObjectStackProtocolImplementation implements
         // it afterwards would put a fallible query downstream of a write that
         // already succeeded — the shape that ends in a `catch {}` swallowing a
         // real outage (#4867).
-        const rollbackPackageId = await this.resolveOverlayPackageBinding(singularType, request.name, orgId);
+        const rollbackPackageId = await this.resolveOverlayPackageBinding(singularType, request.name, orgId, member);
         try {
             const result = await repo.restoreVersion(ref, request.toVersion, {
                 // #4556 — NULL, not 'system', for an actor-less rollback.
@@ -25914,6 +26201,8 @@ export class ObjectStackProtocolImplementation implements
                 // credential move keeps the write-only channel's current
                 // credential and stores none. See {@link restoredBodyWriter}.
                 deriveRestoredBody: this.restoredBodyWriter(singularType, request.name),
+                // [#22877] The member whose lineage `toVersion` is taken from.
+                ...memberOption(member),
             });
             // #4521 — a rollback is a live write like any other: the restored
             // body must be the one the runtime dispatches on immediately, not
@@ -25979,6 +26268,7 @@ export class ObjectStackProtocolImplementation implements
                 name: request.name,
                 state: 'active',
                 organizationId: orgId,
+                ...mutationEventMember(singularType, member),
             });
             return {
                 success: true,
@@ -26364,6 +26654,8 @@ export class ObjectStackProtocolImplementation implements
          * object" flow so a publish-to-preview leaves no orphan table.
          */
         dropStorage?: boolean;
+        /** [#22877] The bundle member to reset — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
+        member?: string;
     }): Promise<{
         success: boolean;
         message?: string;
@@ -26383,6 +26675,10 @@ export class ObjectStackProtocolImplementation implements
         // spelling while the repository deletes under the singular — so a
         // DELETE could remove the row and leave the shadow it was meant to lift.
         request = canonicalizeMetaRequestType(request);
+        // [#22877] Ruling 6116165299 (Q2 i): a reset by name removes ONE
+        // member's row of a bundled type — the selector's, else the canonical
+        // one — and heals the registry for that member alone.
+        const member = resolveBundleMemberSelector(request.type, request.member);
         // [#21899] The removal verdict on an ORIGIN-GATED code-defined item
         // (ADR-0126 §3: `datasource` — code-defined read-only, runtime-created
         // free), held back until the row probe below. See
@@ -26538,7 +26834,7 @@ export class ObjectStackProtocolImplementation implements
                 const targetState: 'active' | 'draft' = request.state === 'draft' ? 'draft' : 'active';
                 // Probe first — "no overlay exists" is a success/no-op, not
                 // a conflict. The repo would otherwise throw ConflictError.
-                const current = await repo.get(ref, { state: targetState });
+                const current = await repo.get(ref, { state: targetState, ...memberOption(member) });
                 // [#21899] An origin-gated code-defined item with NO stored row:
                 // the delete would remove nothing, and the item itself is not
                 // removable at runtime — refused with the package door's own
@@ -26561,7 +26857,7 @@ export class ObjectStackProtocolImplementation implements
                     // `sys_metadata`. A gate applied only to the delete-ful
                     // branch below would have left this door standing open.
                     if (targetState === 'active') {
-                        await this.restoreArtifactRegistryView(request.type, request.name, orgId);
+                        await this.restoreArtifactRegistryView(request.type, request.name, orgId, member);
                     }
                     return {
                         success: true,
@@ -26605,6 +26901,7 @@ export class ObjectStackProtocolImplementation implements
                         ? 'override-artifact'
                         : 'runtime-only',
                     state: targetState,
+                    ...memberOption(member),
                 });
 
                 // Heal the registry: drop the overlay's runtime shadow so the
@@ -26622,7 +26919,7 @@ export class ObjectStackProtocolImplementation implements
                 // ENV-WIDE row, i.e. one tenant's "reset to default" blanked
                 // the item for every other tenant and the control plane.
                 if (targetState === 'active') {
-                    await this.restoreArtifactRegistryView(request.type, request.name, orgId);
+                    await this.restoreArtifactRegistryView(request.type, request.name, orgId, member);
                 }
 
                 // Storage teardown (opt-in): drop the now-orphaned physical table
@@ -26658,6 +26955,7 @@ export class ObjectStackProtocolImplementation implements
                     name: request.name,
                     state: 'deleted',
                     organizationId: orgId,
+                    ...mutationEventMember(singularTypeForRepo, member),
                 });
                 return {
                     success: true,

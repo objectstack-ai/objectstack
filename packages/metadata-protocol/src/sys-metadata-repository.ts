@@ -280,6 +280,18 @@ export function historyRowsOfMember<T extends Record<string, unknown>>(
 }
 
 /**
+ * [#22877] A stored `sys_metadata` row's bundle member as a header spread:
+ * `{ member }` for a non-canonical member of a type whose identity is a pair,
+ * `{}` for the canonical member and for every type with no members — so a
+ * header of those rows keeps exactly the keys it always had.
+ */
+function storedRowMemberHeader(row: Record<string, unknown>): { member?: string } {
+  const stored = row[OVERLAY_MEMBER_COLUMN];
+  const value = overlayMemberValue(String(row.type), typeof stored === 'string' ? stored : null);
+  return typeof value === 'string' ? { member: value } : {};
+}
+
+/**
  * Overlay-row lifecycle state.
  *
  *  - `'active'`  → the published, live overlay. `getMetaItem` (the
@@ -1485,6 +1497,15 @@ export class SysMetadataRepository implements MetadataRepository {
       packageId: string | null;
       updatedAt: string | null;
       updatedBy: string | null;
+      /**
+       * [#22877] The bundle member the draft row belongs to, for a type whose
+       * identity is a pair (`'zh-CN'` of an `email_template`) — its stored
+       * `bundle_member`. Absent for the canonical member and for every type
+       * with no members. The package-batch doors read it so each draft is
+       * promoted or discarded as the member it is; it is a header of THIS
+       * repository, and the protocol's draft list does not serve it.
+       */
+      member?: string;
     }>
   > {
     this.assertOpen();
@@ -1494,6 +1515,7 @@ export class SysMetadataRepository implements MetadataRepository {
     return (rows as any[]).map((row) => ({
       type: row.type,
       name: row.name,
+      ...storedRowMemberHeader(row),
       // [#22200] Off the row this read already holds — no second query.
       label: draftBodyLabel(row),
       packageId: row.package_id ?? null,
