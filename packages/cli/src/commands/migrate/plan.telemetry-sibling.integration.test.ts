@@ -105,14 +105,29 @@ function childEnv(f: Fixture, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv 
   };
 }
 
-/** `os serve`'s own provision-and-exit: the full composition schema-synced into the fixture's database(s). */
-function serveBoot(f: Fixture, extra: NodeJS.ProcessEnv = {}): void {
+/** How much of each of the serving boot's streams an assertion message carries: its TAIL, where the boot diagnostics replay. */
+const BOOT_STREAM_TAIL = 8_000;
+
+/**
+ * `os serve`'s own provision-and-exit: the full composition schema-synced into the fixture's database(s).
+ *
+ * [#22913] Returns the child's own output, so every later assertion that reads what the boot provisioned can
+ * carry it: a boot that exits 0 with one table missing names its cause on its stderr (a refused DDL is logged
+ * there at `error`), and an assertion that failed without it left the CI log unable to confirm or refute one.
+ */
+function serveBoot(f: Fixture, extra: NodeJS.ProcessEnv = {}): string {
   const boot = spawnSync(TSX, [RUN_DEV, 'serve', '--no-server', '--no-ui', '--no-console', '--port', '0'], {
     cwd: f.dir, env: childEnv(f, { ...extra, OS_MIGRATE_AND_EXIT: '1' }), encoding: 'utf8', timeout: 240_000,
   });
-  expect(boot.status, `the serving boot did not provision the database:\n${`${boot.stdout}\n${boot.stderr}`.slice(-800)}`)
-    .toBe(0);
+  const output =
+    `--- the serving boot's stderr (exit ${boot.status}) ---\n${(boot.stderr ?? '').slice(-BOOT_STREAM_TAIL)}\n` +
+    `--- the serving boot's stdout ---\n${(boot.stdout ?? '').slice(-BOOT_STREAM_TAIL)}`;
+  expect(boot.status, `the serving boot did not provision the database:\n${output}`).toBe(0);
+  return output;
 }
+
+/** The message an assertion on what the boot provisioned carries, so its failure names the boot's own account. */
+const afterBoot = (bootOutput: string, what: string): string => `${what}\n${bootOutput}`;
 
 function command(f: Fixture, argv: string[], extra: NodeJS.ProcessEnv = {}): { exit: number | null; payload: any } {
   const run = spawnSync(TSX, [RUN_DEV, 'migrate', ...argv], { cwd: f.dir, env: childEnv(f, extra), encoding: 'utf8', timeout: 240_000 });
@@ -154,14 +169,14 @@ const pendingTables = (payload: any): string[] => (payload.pending ?? []).map((p
 describe('os migrate plan / apply plan each object against the database it lives in (#22579)', () => {
   it('after a development boot: the sibling is named and planned, nothing lifecycle-classed is planned for the primary, apply creates nothing', () => {
     const f = fixture();
-    serveBoot(f);
+    const booted = serveBoot(f);
 
     // The serving boot's layout — the thing the plan must describe.
-    expect(existsSync(f.sibling), 'the development boot provisioned no telemetry sibling: nothing to plan against').toBe(true);
+    expect(existsSync(f.sibling), afterBoot(booted, 'the development boot provisioned no telemetry sibling: nothing to plan against')).toBe(true);
     const primaryTables = tables(f.primary);
     const siblingTables = tables(f.sibling);
-    expect(siblingTables).toEqual(expect.arrayContaining(['sys_audit_log', 'sys_metadata_audit']));
-    expect(primaryTables.filter((t) => siblingTables.includes(t)), 'one table in both databases').toEqual([]);
+    expect(siblingTables, afterBoot(booted, 'the sibling the boot provisioned')).toEqual(expect.arrayContaining(['sys_audit_log', 'sys_metadata_audit']));
+    expect(primaryTables.filter((t) => siblingTables.includes(t)), afterBoot(booted, 'one table in both databases')).toEqual([]);
     // [#22580] What a retired lifecycle-classed object leaves behind: its table,
     // in the sibling, declared by nothing.
     const retired = 'sys_os22580_retired_event';
@@ -172,8 +187,8 @@ describe('os migrate plan / apply plan each object against the database it lives
     const plan = command(f, ['plan', '--json']);
     expect(plan.exit, JSON.stringify(plan.payload).slice(0, 800)).toBe(0);
     // Nothing to create anywhere — above all no lifecycle-classed object for the primary.
-    expect(pendingTables(plan.payload)).toEqual([]);
-    expect(plan.payload.changes).toEqual([]);
+    expect(pendingTables(plan.payload), afterBoot(booted, 'a table the serving boot did not provision')).toEqual([]);
+    expect(plan.payload.changes, afterBoot(booted, 'a change the serving boot did not make')).toEqual([]);
     expect(plan.payload.telemetryDatabase).toBe(f.sibling);
     expect(plan.payload.composition?.coverage?.unexaminedObjects).toBe(0);
     // Both databases' objects examined: their tables, less the raw-DDL one.
@@ -197,17 +212,17 @@ describe('os migrate plan / apply plan each object against the database it lives
 
   it('the control — a deployment with no sibling plans as it did; with the sibling on, an absent one is planned and not created', () => {
     const f = fixture();
-    serveBoot(f, { OS_TELEMETRY_DB: '0' });
+    const booted = serveBoot(f, { OS_TELEMETRY_DB: '0' });
     expect(existsSync(f.sibling)).toBe(false);
     const primaryTables = tables(f.primary);
-    expect(primaryTables).toEqual(expect.arrayContaining(['sys_audit_log', 'sys_metadata_audit']));
+    expect(primaryTables, afterBoot(booted, 'the primary the boot provisioned')).toEqual(expect.arrayContaining(['sys_audit_log', 'sys_metadata_audit']));
 
     // No sibling: no sibling named, nothing pending, every object on the primary.
     const control = command(f, ['plan', '--json'], { OS_TELEMETRY_DB: '0' });
     expect(control.exit, JSON.stringify(control.payload).slice(0, 800)).toBe(0);
     expect('telemetryDatabase' in control.payload).toBe(false);
-    expect(pendingTables(control.payload)).toEqual([]);
-    expect(control.payload.changes).toEqual([]);
+    expect(pendingTables(control.payload), afterBoot(booted, 'a table the serving boot did not provision')).toEqual([]);
+    expect(control.payload.changes, afterBoot(booted, 'a change the serving boot did not make')).toEqual([]);
     expect(control.payload.managedTables).toBe(primaryTables.length - NOT_AN_OBJECT.length);
 
     // The sibling on, over this deployment: the serving boot would now keep
