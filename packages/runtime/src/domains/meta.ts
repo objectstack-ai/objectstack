@@ -1397,6 +1397,20 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // reason: `item` is data, never a channel, so a caller
                     // cannot smuggle a `force` (or a `writeFace`) through it.
                     // Pinned both ways in `meta-save-destructive-remedy.test.ts`.
+                    //
+                    // [#23086] Attributed to the caller the gate above
+                    // admitted, as `RestServer`'s `PUT` twin attributes it
+                    // (`resolveMetaWriteActor`): the execution context's user
+                    // id, or nothing for a caller with none (`isSystem`), so
+                    // the protocol records `null`. It lands in
+                    // `sys_metadata.updated_by` / `created_by` and
+                    // `sys_metadata_history.recorded_by`, `lookup('sys_user')`
+                    // columns. Read off that identity alone, ⛔ never off `item`
+                    // or a header, so a caller cannot sign another person's
+                    // name. The `_migrate-stored` branch below reads it the
+                    // same way. Pinned in `meta-save-actor.test.ts`.
+                    const ec: any = _context.executionContext;
+                    const actor = typeof ec?.userId === 'string' && ec.userId ? ec.userId : undefined;
                     const result = await protocol.saveMetaItem({
                         type, name, item,
                         writeFace: 'meta-dispatch',
@@ -1405,6 +1419,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                         // only when the caller asked — read off the headers and
                         // the query above, never off `item`.
                         ...saveOptions.request,
+                        ...(actor ? { actor } : {}),
                     });
                     return { handled: true, response: deps.success(result) };
                 } catch (e: any) {
