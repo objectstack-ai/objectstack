@@ -440,8 +440,10 @@ update of the master was admitted:
 
 A master chain a persona cannot read is outside its reach and is counted, not
 probed (a write to a record the caller cannot read is the RLS family's
-subject). `summary.hardFailures` is `contradicted + failed` objects plus
-personas that could not be provisioned.
+subject). A persona whose `/auth/me/permissions` answer names no permission set
+is reported not run: that empty answer is also the endpoint's when it could not
+compute one, so it is not read as "no grant anywhere". `summary.hardFailures` is
+`contradicted + failed` objects plus personas that could not be provisioned.
 
 `member-visible` everywhere usually means the app is single-tenant; pass
 `--multi-tenant` (or `{ multiTenant: true }`) to register org-scoping so tenant
