@@ -938,14 +938,19 @@ export function registerCurrentUserEndpoints(
                     ql?.getSchema?.(name) as (ManagedSchemaLike & ApiExposureSchemaLike) | undefined,
                 logger: ctx.logger,
             });
-            return c.json(mePermissionsBody(identity, {
+            // Spread into a literal ON PURPOSE, here and in the `catch`: the
+            // route-envelope gate counts only object-literal bodies and reads a
+            // bare call as a RELAYED one, so `c.json(mePermissionsBody(…))`
+            // would hide two bodies this file builds from its ruled
+            // `unenveloped` count (scripts/check-route-envelope.mjs).
+            return c.json({ ...mePermissionsBody(identity, {
                 positions: execCtx.positions ?? [],
                 permissionSets: resolved.map((p: any) => p?.name).filter(Boolean),
                 objects,
                 fields,
                 systemPermissions: Array.from(systemPermissions),
                 tabPermissions,
-            }));
+            }) });
         } catch (err: any) {
             ctx.logger?.warn?.('[hono] /auth/me/permissions failed', { err: err?.message });
             // [#23047] The same event, for the caller, as the resolver throwing
@@ -953,7 +958,7 @@ export function registerCurrentUserEndpoints(
             // same CLOSED shape, `systemPermissions: []` included, and never the
             // degraded branch's open one (`systemPermissions` absent), which the
             // console reads as "capabilities unknown" and fails open on.
-            return c.json(mePermissionsBody(identity, closedMePermissionsGrants()));
+            return c.json({ ...mePermissionsBody(identity, closedMePermissionsGrants()) });
         }
     }));
 
