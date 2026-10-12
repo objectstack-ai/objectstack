@@ -952,10 +952,24 @@ export function coerceBooleanFields<T extends Record<string, unknown>>(
  * rather than re-derived one layer up: two readings of the same rejection
  * drifting by one clause is how one path prescribes the rename and the other
  * hands out `expected number, received undefined`.
+ *
+ * [#22908] On a multi-valued field the schema is `z.array(element)`, so the
+ * chosen issue's path starts with the offending element's index, and the
+ * detail names it (`at index 1: …`): a refusal of a three-element id list
+ * that does not say which element is wrong leaves its author to guess. Only a
+ * multi-valued field is prefixed. `repeater` and `vector` are arrays too, but
+ * their index is part of the type's own payload, and their detail is left as
+ * it was.
  */
-function valueShapeDetail(error: { issues: ReadonlyArray<{ code: string; message: string }> }): string {
+function valueShapeDetail(
+  def: FieldDef,
+  error: { issues: ReadonlyArray<{ code: string; message: string; path?: ReadonlyArray<PropertyKey> }> },
+): string {
   const { issues } = error;
-  return (issues.find((i) => i.code === 'unrecognized_keys') ?? issues[0])?.message ?? 'invalid value shape';
+  const issue = issues.find((i) => i.code === 'unrecognized_keys') ?? issues[0];
+  if (!issue) return 'invalid value shape';
+  const index = issue.path?.[0];
+  return isMultiValueField(def) && typeof index === 'number' ? `at index ${index}: ${issue.message}` : issue.message;
 }
 
 /**
@@ -1521,14 +1535,23 @@ function validateOne(
   // Scalars are wrapped upstream by `normalizeMultiValueFields`; whatever
   // still isn't an array here (objects, nested junk) is a shape error —
   // storing it verbatim corrupts the column for every array-consumer (#2552).
-  if (isMultiValueField(def)) {
-    if (!Array.isArray(value)) {
-      return fail('invalid_type', undefined, 'invalid_type_array');
-    }
+  if (isMultiValueField(def) && !Array.isArray(value)) {
+    return fail('invalid_type', undefined, 'invalid_type_array');
+  }
+  // [#22908] A multi-valued `lookup` / `user` / `file` / `image` holds record
+  // ids or `sys_file` ids, never options, and each ELEMENT's stored form is the
+  // single value's (ADR-0104 D1): `valueSchemaFor` derives `z.array(element)`
+  // for it. So this branch judges option types only, and a value-shape type
+  // falls through to the ADR-0104 arm below, which parses the whole array with
+  // that derived schema under the same posture, the same sink and the same
+  // `invalid_type` refusal as a single value. ⛔ No second shape rule here: an
+  // element rule of this branch's own is the drift this arm's shared schema
+  // exists to prevent. The early `return null` it replaces let an embedded
+  // record, a boolean or a number through as an element on every door,
+  // including a system write. Whether a referenced id EXISTS is still
+  // `assertReferencesResolve`'s question, with its own `isSystem` latitude.
+  if (isMultiValueField(def) && !isValueShapeJudgedType(t)) {
     if (shapeOnly) return null;
-    // Reference / attachment types carry IDs or storage keys, not options —
-    // reference integrity is handled elsewhere.
-    if (t === 'lookup' || t === 'user' || t === 'file' || t === 'image') return null;
     const allowed = optionValues(def.options);
     if (allowed.length === 0) {
       // A picklist-bound field with no options is a list that did not
@@ -1579,10 +1602,10 @@ function validateOne(
   //
   // Two flags rather than one, because they attest two different facts; a
   // deployment can legitimately have passed either without the other.
-  if (REFERENCE_VALUE_TYPES.has(t) || FILE_REFERENCE_TYPES.has(t) || STRUCTURED_JSON_TYPES.has(t)) {
+  if (isValueShapeJudgedType(t)) {
     const parsed = shapeSchemaFor(def).safeParse(value);
     if (!parsed.success) {
-      const detail = valueShapeDetail(parsed.error);
+      const detail = valueShapeDetail(def, parsed.error);
       const isMedia = FILE_REFERENCE_TYPES.has(t);
       if (isMedia ? mediaStrictEffective(mediaStrict) : valueShapeStrictEffective(valueStrict)) {
         return fail('invalid_type', { type: t, detail }, 'invalid_value_shape');
@@ -1729,13 +1752,23 @@ export function mediaPostureSetByEnv(): boolean {
  */
 export function valueShapeViolation(def: FieldDef, value: unknown): string | null {
   if (isMissing(value)) return null;
-  const t = def.type;
-  if (!REFERENCE_VALUE_TYPES.has(t) && !FILE_REFERENCE_TYPES.has(t) && !STRUCTURED_JSON_TYPES.has(t)) {
-    return null;
-  }
+  if (!isValueShapeJudgedType(def.type)) return null;
   const parsed = shapeSchemaFor(def).safeParse(value);
   if (parsed.success) return null;
-  return valueShapeDetail(parsed.error);
+  return valueShapeDetail(def, parsed.error);
+}
+
+/**
+ * Is `type` one the ADR-0104 value-shape arm judges against the spec's
+ * `valueSchemaFor`: a reference, a file reference or a structured-JSON type?
+ *
+ * One predicate for the three places that ask it ({@link validateOne}'s arm,
+ * its multi-value branch, and {@link valueShapeViolation}), so the branch that
+ * hands a multi-valued element to the arm and the arm itself cannot disagree
+ * about which types that is (#22908).
+ */
+function isValueShapeJudgedType(type: string): boolean {
+  return REFERENCE_VALUE_TYPES.has(type) || FILE_REFERENCE_TYPES.has(type) || STRUCTURED_JSON_TYPES.has(type);
 }
 
 /**
