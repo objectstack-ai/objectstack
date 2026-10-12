@@ -752,12 +752,12 @@ describe('audit writers — a user\'s own per-user UI-state write is not mirrore
 
   const OTHER_WRITERS = [
     // An organization admin editing the row from Setup's User Preferences grid.
-    { who: 'another user (an admin)', session: { userId: 'u_admin' }, previous: PREF, result: PREF, actor: 'u_admin' },
+    { who: "another user's write (an admin)", session: { userId: 'u_admin' }, previous: PREF, result: PREF, actor: 'u_admin' },
     // A system or service write: no acting user at all.
     { who: 'a system write with no user', session: { isSystem: true }, previous: PREF, result: PREF, actor: null },
     // The owner moving the row to someone else: not purely their own row.
     {
-      who: 'the owner reassigning the row to another user',
+      who: 'the owner moving the row to another user',
       session: { userId: OWNER },
       previous: PREF,
       result: { ...PREF, user_id: 'u_bob' },
@@ -766,7 +766,7 @@ describe('audit writers — a user\'s own per-user UI-state write is not mirrore
   ] as const;
 
   for (const w of OTHER_WRITERS) {
-    it(`CONTROL: ${w.who} writing a user's preference row keeps its activity row`, async () => {
+    it(`CONTROL: on a user's preference row, ${w.who} keeps its activity row`, async () => {
       const { engine, fire, created } = makeEngine(SCHEMA);
       installAuditWriters(engine as any, 'test.audit');
 
