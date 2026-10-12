@@ -238,7 +238,11 @@ function parseObject(obj: any): { data?: any; reason?: string } {
 function masterLinkOf(name: string, parsed: any): { hop?: ParentWriteReachHop; reason?: string } {
   const links = Object.entries<any>(parsed?.fields ?? {}).filter(([, f]) => f?.type === 'master_detail');
   if (links.length === 0) {
-    return { reason: `${name} declares no master_detail field, so it names no master (ADR-0055 §1: exactly one)` };
+    return {
+      reason:
+        `${name} declares no master_detail field, so its declaration names no master (ADR-0055 §1: exactly one); ` +
+        "a master the runtime would derive through a required lookup is the runtime's own precedence, not compared here",
+    };
   }
   if (links.length > 1) {
     return {
