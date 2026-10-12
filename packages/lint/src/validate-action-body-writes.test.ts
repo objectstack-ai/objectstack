@@ -33,7 +33,7 @@ const SHORTENED_RULE_IDS: readonly string[] = [
   ACTION_RECORD_WRITE_DISCARDED,
   ACTION_BODY_SOURCE_UNPARSEABLE,
 ];
-const firedShortened: Array<{ rule: string; message: string }> = [];
+const firedShortened: Array<{ rule: string; message: string; hint: string }> = [];
 const validateActionBodyWrites: typeof validateActionBodyWritesUnrecorded = (...args) => {
   const findings = validateActionBodyWritesUnrecorded(...args);
   for (const f of findings) if (SHORTENED_RULE_IDS.includes(f.rule)) firedShortened.push(f);
@@ -654,5 +654,46 @@ describe('[#22161] one-line verdicts — the rule ids this file shortened', () =
     expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
     const text = explanation!.paragraphs.join('\n');
     for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
+});
+
+// [#22161] Slice 15: the `fix:` line of the four ids. Each names its remedy in
+// one line, the hook sibling's where there is one; which write shapes are
+// checked and that the warning never blocks a build, how to vouch for or opt
+// out of an unprovisioned anchor, why only a provably dead record write is
+// reported, and what a partially recovered tree leaves unchecked are the
+// explanations'.
+describe('[#22161] one-line fixes — the rule ids this file shortened', () => {
+  it('an unknown field with no near miss gets the remedy without a suggestion', () => {
+    const findings = validateActionBodyWrites(
+      stackWith("await ctx.api.object('crm_deal').update({ totally_unrelated_column: 1 });"),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].hint).toBe("Fix the field name, or declare 'totally_unrelated_column' on the object");
+  });
+
+  it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {
+    // Coverage control: every id fired, the unknown-field line with and
+    // without a suggestion.
+    expect([...new Set(firedShortened.map((f) => f.rule))].sort()).toEqual([...SHORTENED_RULE_IDS].sort());
+    const unknown = firedShortened.filter((f) => f.rule === ACTION_BODY_WRITE_UNKNOWN_FIELD);
+    expect(unknown.some((f) => f.hint.startsWith('Did you mean'))).toBe(true);
+    expect(unknown.some((f) => f.hint.startsWith('Fix the field name'))).toBe(true);
+    for (const f of firedShortened) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  const MOVED_FROM_FIX: Record<string, readonly string[]> = {
+    [ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR]: ['`columnMap`', "`ownership: 'none'`", '`systemFields: { audit: false }`'],
+    [ACTION_BODY_WRITE_UNKNOWN_FIELD]: ['`ACTION_BODY_WRITE_PATTERNS`', 'params bag', 'never blocks a build'],
+    [ACTION_RECORD_WRITE_DISCARDED]: ['provably dead', 'Handed to anything', 'never blocks a build'],
+    [ACTION_BODY_SOURCE_UNPARSEABLE]: ['never executed', 'partially recovered'],
+  };
+
+  it.each([...SHORTENED_RULE_IDS])('`os explain %s` carries what its `fix:` line no longer says', (rule) => {
+    const text = explanationOf(rule);
+    for (const fact of MOVED_FROM_FIX[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
   });
 });
