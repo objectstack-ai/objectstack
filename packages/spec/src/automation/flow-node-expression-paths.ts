@@ -147,10 +147,12 @@ export type FlowNodeExpressionRole =
    * as written; a string is no list, and is refused (`FlowCollectionSlotSchema`).
    *
    * And for a `notify` node's computed values — its `recipients` (each entry
-   * of a list, or the whole value), its `templateData` and `payload` maps,
-   * and its `sourceObject`, `sourceId` and `actorId` — again declared and
-   * evaluated in the same change, before the notification is handed to the
-   * messaging service.
+   * of a list, or the whole value), its `templateData` map and its
+   * `sourceId` — again declared and evaluated in the same change, before the
+   * notification is handed to the messaging service. Its `sourceObject`,
+   * `actorId` and `payload` are literals, read as written: no flow computed
+   * them, so no slot is built there, and a `{…}` token in one is refused by
+   * the contract (`NotifyConfigSchema`).
    */
   | 'value';
 
@@ -287,8 +289,7 @@ export interface FlowNodeExpressionPath {
  * as a bare name and is judged nowhere.
  *
  * So are, since #19939, a `notify` node's computed values: `recipients`,
- * `templateData.*`, `payload.*`, `sourceObject`, `sourceId` and `actorId`,
- * declared through the spec Zod channel (`NotifyConfigSchema` in
+ * `templateData.*` and `sourceId`, declared through the spec Zod channel (`NotifyConfigSchema` in
  * `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`; the descriptor offers them with no
  * marker). `recipients` carries {@link FlowNodeExpressionPath.eachElement}:
  * it is one value or a list of them, and each element of a list is a value
@@ -463,7 +464,8 @@ export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
     // the spec Zod channel (`NotifyConfigSchema`, carried to the ratchet by
     // `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`): the descriptor offers these keys
     // with no marker, the shape its Studio form renders. Its `actionUrl` is a
-    // TEXT slot, not one of these (`flow-text-slot-template.ts`).
+    // TEXT slot, not one of these (`flow-text-slot-template.ts`), and its
+    // `sourceObject`, `actorId` and `payload` are literals.
     //
     // Who the notification goes to: a recipient, or a list of them, each a
     // string or an envelope (`eachElement`), or one envelope evaluating to a
@@ -484,33 +486,14 @@ export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
     label: 'notify templateData value',
   },
   {
-    // Extra values merged into the notification's payload.
-    nodeType: 'notify',
-    path: 'payload.*',
-    role: 'value',
-    label: 'notify payload value',
-  },
-  {
-    // The click-through target, a pair: the object's name…
-    nodeType: 'notify',
-    path: 'sourceObject',
-    role: 'value',
-    label: 'notify sourceObject',
-  },
-  {
-    // …and the record's id. Each must evaluate to a string; `null` drops the
-    // pair, as a half-specified target is dropped.
+    // The click-through target's record id. It must evaluate to a string;
+    // `null` drops the pair, as a half-specified target is dropped. Its
+    // object, `sourceObject`, is a literal, like `actorId` and `payload`: no
+    // flow computed them, so no slot is built there (#19939).
     nodeType: 'notify',
     path: 'sourceId',
     role: 'value',
     label: 'notify sourceId',
-  },
-  {
-    // The user who caused the event (`sys_notification.actor_id`).
-    nodeType: 'notify',
-    path: 'actorId',
-    role: 'value',
-    label: 'notify actorId',
   },
 ];
 

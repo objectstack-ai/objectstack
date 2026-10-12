@@ -234,8 +234,8 @@ registered function's `input`). Those maps — `assignments`, `fields`, `input`,
 positions that hand a value to the client: an object form's `defaults` (each
 field's prefill), a field's `defaultValue`, and an object form's `recordId`,
 the list a `loop` (with a `body`) and a `map` iterate, their `collection`, and a
-`notify` node's computed values: its `recipients`, its `templateData` and
-`payload` maps, and its `sourceObject`, `sourceId` and `actorId`. Each value
+`notify` node's computed values: its `recipients`, its `templateData` map and
+its `sourceId`. Each value
 takes a CEL value envelope or a literal — a `collection`'s literal is an inline
 array, never a string, and a `recipients` list holds one entry per recipient,
 each a string or an envelope. Only a slot's top-level
@@ -347,10 +347,13 @@ nothing. The template handed a whole token holding a list, written as a list
 entry (`['{owners}']`), on as **one** recipient joined with commas (`'u1,u2'`),
 which reached nobody. Guard a recipient field that may be unset —
 `has(record.assignee) ? record.assignee : null` — so it is dropped rather than
-failing the run. `sourceObject`, `sourceId` and `actorId` take a string or an
-envelope evaluating to one: `null` leaves the key unset, and a half-specified
-click-through pair is dropped, as before. The node's `actionUrl` is a text slot
-(below).
+failing the run. `sourceId` takes a string or an envelope evaluating to one:
+`null` leaves the key unset, and a half-specified click-through pair is
+dropped, as before. The node's `sourceObject`, `actorId` and `payload` are
+**literals**, read as written: no flow computed one, so nothing is evaluated
+there — write the value itself (`sourceObject: 'crm_case'`). A `{…}` token
+there is refused, since it would reach the messaging service with its braces,
+and so is an envelope. The node's `actionUrl` is a text slot (below).
 
 **Where an envelope is data, the remedy names none there.** An envelope
 evaluates only as the top-level value of a value slot — `fields`,

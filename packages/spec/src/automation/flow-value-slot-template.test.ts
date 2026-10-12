@@ -830,7 +830,10 @@ describe('a screen\'s value slots: the refusal says what the client is served in
 });
 
 describe('a notify node\'s value slots: located per position, a recipient\'s refusal says what `null` and a list add', () => {
-  it('the six positions are judged, located and labelled by the ledger — each entry of a recipients list at its index', () => {
+  it('the three computed positions are judged, located and labelled by the ledger — each entry of a recipients list at its index', () => {
+    // `sourceObject`, `actorId` and `payload` are literals: no value slot, so
+    // this judge reads none of them (their token is the contract's refusal,
+    // with the literal remedy — `io-node-config.test.ts`).
     expect(flowNodeValueTemplateRefusals('notify', {
       recipients: ['team:ops', '{record.owner}', { dialect: 'cel', source: 'record.watchers' }],
       title: 'Hi {{ record.name }}',
@@ -844,10 +847,7 @@ describe('a notify node\'s value slots: located per position, a recipient\'s ref
     }).map((r) => [r.path, r.label])).toEqual([
       ['recipients[1]', 'notify recipient'],
       ['templateData.name', 'notify templateData value'],
-      ['payload.meta.by', 'notify payload value'],
-      ['sourceObject', 'notify sourceObject'],
       ['sourceId', 'notify sourceId'],
-      ['actorId', 'notify actorId'],
     ]);
   });
 

@@ -1,12 +1,16 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * **A `notify` node's computed values are value slots, and its link is a text
- * slot** (#19939, the rider positions' fourth stage; #11182 ruling D; ADR-0032
- * Decisions 2 and 3). Declared in the expression ledger and evaluated in the
- * same change: `recipients` (the value, or each entry of a list),
- * `templateData.*`, `payload.*`, `sourceObject`, `sourceId` and `actorId` take a
- * CEL value envelope or a literal; `actionUrl` renders `{{ }}` holes.
+ * **A `notify` node's computed values are value slots, its link is a text
+ * slot, and the rest are literals** (#19939, the rider positions' fourth
+ * stage; #11182 ruling D; ADR-0032 Decisions 2 and 3). Declared in the
+ * expression ledger and evaluated in the same change: `recipients` (the value,
+ * or each entry of a list), `templateData.*` and `sourceId` take a CEL value
+ * envelope or a literal; `actionUrl` renders `{{ }}` holes. `sourceObject`,
+ * `actorId` and `payload` are literals, read as written: the 17.x
+ * interpolator resolved them too, but no flow computed one, so no slot is
+ * built there (the S4 ruling) and a `{…}` token or an envelope there is
+ * refused with the literal's remedy.
  *
  * Before this, the executor ran each of them through the single-brace
  * `interpolate()` (measured on the base through this engine, the shipped
@@ -39,6 +43,10 @@
  *  5. **`actionUrl` is a text slot.** A `{{ }}` hole renders; an explicit link
  *     still wins over the synthesized one, and a link that renders nothing
  *     yields to it.
+ *  6. **`sourceObject`, `actorId` and `payload` are literals.** A literal is
+ *     handed on as written; a `{…}` token and an envelope are refused at
+ *     `registerFlow` and by the executor's contract parse, with the literal's
+ *     remedy (`objectstack validate` is pinned in the lint).
  */
 
 import { describe, expect, it } from 'vitest';
@@ -128,11 +136,21 @@ const VALUE_POSITIONS = [
   ['recipients (the value)', (value: unknown) => ({ recipients: value }), 'notify recipient at config.recipients'],
   ['recipients (a list entry)', (value: unknown) => ({ recipients: ['u1', value] }), 'notify recipient at config.recipients[1]'],
   ['templateData', (value: unknown) => ({ recipients: 'u1', title: undefined, template: 'crm.t', templateData: { who: value } }), 'notify templateData value at config.templateData.who'],
-  ['payload', (value: unknown) => ({ recipients: 'u1', payload: { who: value } }), 'notify payload value at config.payload.who'],
-  ['sourceObject', (value: unknown) => ({ recipients: 'u1', sourceObject: value, sourceId: 'r1' }), 'notify sourceObject at config.sourceObject'],
   ['sourceId', (value: unknown) => ({ recipients: 'u1', sourceObject: 'o', sourceId: value }), 'notify sourceId at config.sourceId'],
-  ['actorId', (value: unknown) => ({ recipients: 'u1', actorId: value }), 'notify actorId at config.actorId'],
 ] as const;
+
+/**
+ * Each LITERAL position: the config holding `value` there, the path the
+ * contract's refusal names, and the sentence it leads with.
+ */
+const LITERAL_POSITIONS = [
+  ['sourceObject', (value: unknown) => ({ recipients: 'u1', sourceObject: value, sourceId: 'r1' }), 'sourceObject', '`sourceObject` is the name of the object the notification links to, a literal the executor reads as written:'],
+  ['actorId', (value: unknown) => ({ recipients: 'u1', actorId: value }), 'actorId', '`actorId` is the id of the user who caused the event, a literal the executor reads as written:'],
+  ['payload', (value: unknown) => ({ recipients: 'u1', payload: { who: value } }), 'payload.who', '`payload.who` is a value merged into the notification payload, a literal the executor reads as written:'],
+] as const;
+
+const LITERAL_TOKEN_REMEDY = 'a single-brace token is not resolved here; write the value.';
+const LITERAL_ENVELOPE_REMEDY = 'a CEL value envelope is not evaluated here; write the value.';
 
 describe('1. a `{…}` token is refused at every door', () => {
   it.each(VALUE_POSITIONS)('%s: `registerFlow` refuses a token, located, naming its CEL spelling', (_label, configOf, where) => {
@@ -192,24 +210,18 @@ describe('2. an envelope is evaluated in the run\'s scope; a literal is handed o
     expect((await run({ recipients: 'u1,u2' })).emitted[0].audience).toEqual(['u1,u2']);
   });
 
-  it('templateData and payload: each envelope evaluated, each literal handed on', async () => {
+  it('templateData: each envelope evaluated, each literal handed on', async () => {
     const template = await run(
       { recipients: 'u1', title: undefined, template: 'crm.t', templateData: { who: CEL('owner'), n: 3, label: 'lit' } },
       { owner: 'u9' },
     );
     expect(template.result.success).toBe(true);
     expect(template.emitted[0].payload.templateData).toEqual({ who: 'u9', n: 3, label: 'lit' });
-    const payload = await run({ recipients: 'u1', payload: { who: CEL('owner'), list: CEL('owners') } }, { owner: 'u9', owners: ['a'] });
-    expect(payload.emitted[0].payload).toMatchObject({ who: 'u9', list: ['a'] });
   });
 
-  it('sourceObject, sourceId and actorId: an envelope evaluates to the string', async () => {
-    const { emitted } = await run(
-      { recipients: 'u1', sourceObject: 'crm_case', sourceId: CEL('id'), actorId: CEL('owner') },
-      { id: 'c_42', owner: 'u9' },
-    );
+  it('sourceId: an envelope evaluates to the string', async () => {
+    const { emitted } = await run({ recipients: 'u1', sourceObject: 'crm_case', sourceId: CEL('id') }, { id: 'c_42' });
     expect(emitted[0].source).toEqual({ object: 'crm_case', id: 'c_42' });
-    expect(emitted[0].actorId).toBe('u9');
   });
 });
 
@@ -293,5 +305,48 @@ describe('5. `actionUrl` is a text slot', () => {
     const { emitted } = await run({ recipients: 'u1', sourceObject: 'o', sourceId: 'r1', actionUrl: '{{ id }}' });
     expect(emitted[0].payload.url).toBeUndefined();
     expect(emitted[0].source).toEqual({ object: 'o', id: 'r1' });
+  });
+});
+
+describe('6. `sourceObject`, `actorId` and `payload` are literals, read as written', () => {
+  it('a literal is handed on as written — the object, the actor and the payload\'s data, nested data included', async () => {
+    const { result, emitted } = await run(
+      {
+        recipients: 'u1', sourceObject: 'crm_case', sourceId: CEL('id'), actorId: 'usr_boss',
+        payload: { kind: 'case', meta: { tags: ['a', 'b'], inner: CEL('id') }, n: 3 },
+      },
+      { id: 'c_42' },
+    );
+    expect(result.success).toBe(true);
+    expect(emitted[0].source).toEqual({ object: 'crm_case', id: 'c_42' });
+    expect(emitted[0].actorId).toBe('usr_boss');
+    // An envelope deeper in a value is data, handed on as the object it spells.
+    expect(emitted[0].payload).toMatchObject({ kind: 'case', meta: { tags: ['a', 'b'], inner: CEL('id') }, n: 3 });
+  });
+
+  it.each(LITERAL_POSITIONS)('%s: `registerFlow` refuses a `{…}` token with the literal remedy, at the key', (_label, configOf, at, lead) => {
+    const message = registerError(configOf('{owner}'));
+    expect(message).toContain(`refused at \`${at}\` by the notify contract: ${lead} ${LITERAL_TOKEN_REMEDY}`);
+    expect(message).toContain('Read as written, `{owner}` would reach the messaging service with its braces.');
+    expect(message).not.toContain(VALUE_SLOT_TEMPLATE_REFUSAL);
+  });
+
+  it.each(LITERAL_POSITIONS)('%s: `registerFlow` refuses a CEL value envelope — nothing evaluates it there', (_label, configOf, at, lead) => {
+    const message = registerError(configOf(CEL('owner')));
+    expect(message).toContain(`refused at \`${at}\` by the notify contract: ${lead} ${LITERAL_ENVELOPE_REMEDY}`);
+  });
+
+  it.each(LITERAL_POSITIONS)('%s: the executor\'s contract parse refuses a token and an envelope as a guard', async (_label, configOf, _at, lead) => {
+    for (const value of ['{owner}', CEL('owner')]) {
+      const result = await notifyExecutor().execute(
+        { id: 'node', type: 'notify', label: 'Notify', config: { title: 'T', ...configOf(value) } },
+        new Map<string, unknown>([['owner', 'u9']]),
+        {},
+      );
+      expect(result.success, JSON.stringify(value)).toBe(false);
+      expect(result.errorClass).toBe('guard');
+      expect(result.error).toContain(lead);
+      expect(result.error).toContain(typeof value === 'string' ? LITERAL_TOKEN_REMEDY : LITERAL_ENVELOPE_REMEDY);
+    }
   });
 });

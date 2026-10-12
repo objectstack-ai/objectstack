@@ -669,7 +669,9 @@ function scanFilterForDateEquality(
 //     template dialect;
 //   - every other config string (a `filter`, an `http` payload, …): it
 //     keeps the SINGLE-brace dialect (`{var}` /
-//     `{rec.field}` / `{$User.Id}`).
+//     `{rec.field}` / `{$User.Id}`) — except a notify node's `sourceObject`,
+//     `actorId` and `payload`, literals read as written (#19939), where
+//     neither dialect resolves ({@link NOTIFY_LITERAL_KEYS}).
 // Two wrong-syntax mistakes AI/human authors carry over between them, or from
 // other platforms:
 //   - `{{ai_reply}}`  — double-brace on a single-brace value. NOT flagged on a
@@ -819,6 +821,29 @@ function valueSlotDoubleBraceHint(text: string, at: ValueSlotPosition): string {
 
 /** Config keys whose string values are CEL predicates, not interpolated templates. */
 const CEL_KEYS = new Set(['condition', 'expression', 'conditions']);
+
+/**
+ * [#19939] The `notify` keys the executor reads AS WRITTEN — literals, neither
+ * interpolated nor evaluated (`NotifyConfigSchema`, "notify literals"): no
+ * flow computed one, so no value slot is built there, and the contract refuses
+ * a `{…}` token or an envelope in one. Neither brace dialect resolves there,
+ * so the two hints below name the value itself, never a token the build would
+ * refuse. Kept in step with the contract by a pin in
+ * `lint-flow-patterns.test.ts` ("the notify literals").
+ */
+const NOTIFY_LITERAL_KEYS: ReadonlySet<string> = new Set(['sourceObject', 'actorId', 'payload']);
+
+/** The dotted position (`payload.meta.by`) of a string at a notify literal, or `undefined` elsewhere. */
+function notifyLiteralAt(nodeType: string, path: readonly (string | number)[]): string | undefined {
+  if (nodeType !== 'notify' || typeof path[0] !== 'string' || !NOTIFY_LITERAL_KEYS.has(path[0])) return undefined;
+  return path.map((segment, i) => (typeof segment === 'number' ? `[${segment}]` : `${i === 0 ? '' : '.'}${segment}`)).join('');
+}
+
+/** The hint of either finding at a notify literal: nothing resolves a reference there. */
+const NOTIFY_LITERAL_HINT =
+  'A notify node\'s `sourceObject`, `actorId` and `payload` are literals the executor reads as written: neither '
+  + '`{var}` nor `{{ }}` resolves there, and nothing evaluates a reference, braced or bare — a brace token in one '
+  + 'is refused at `objectstack validate` and `registerFlow`. Write the value itself.';
 
 /** `config` without its node type's `{{ }}` text slots — the strings that keep the single-brace dialect. */
 function withoutTextSlots(nodeType: unknown, config: unknown): unknown {
@@ -1937,6 +1962,28 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
           const valueSlot = DOUBLE_BRACE.test(str) || BARE_DOLLAR_REF.test(str)
             ? valueSlotRefusalAt(at.nodeType, at.config, at.path)?.label
             : undefined;
+          // [#19939] At a notify literal neither dialect resolves: one hint
+          // for both findings, naming the value itself.
+          const literal = notifyLiteralAt(at.nodeType, path);
+          if (literal !== undefined) {
+            if (DOUBLE_BRACE.test(str)) {
+              findings.push({
+                where: nodeWhere,
+                message: `double-brace interpolation \`${str.trim().slice(0, 80)}\` — \`${literal}\` is a literal, read as written.`,
+                hint: NOTIFY_LITERAL_HINT,
+                rule: FLOW_DOUBLE_BRACE_INTERP,
+              });
+            }
+            if (BARE_DOLLAR_REF.test(str)) {
+              findings.push({
+                where: nodeWhere,
+                message: `\`${str.trim().slice(0, 80)}\` looks like a reference written as a literal — a bare \`$ref.field\` at \`${literal}\` is NOT resolved: it is read as written.`,
+                hint: NOTIFY_LITERAL_HINT,
+                rule: FLOW_BARE_DOLLAR_REF,
+              });
+            }
+            continue;
+          }
           if (DOUBLE_BRACE.test(str)) {
             findings.push({
               where: nodeWhere,

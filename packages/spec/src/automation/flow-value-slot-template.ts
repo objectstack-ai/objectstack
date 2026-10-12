@@ -13,9 +13,8 @@
  * a `screen`'s three positions that hand a value to the client —
  * `defaults.*`, `fields[].defaultValue`, `recordId` — the list a `loop`
  * and a `map` iterate, their `collection` — and a `notify` node's computed
- * values — `recipients` (each entry of a list), `templateData.*`,
- * `payload.*`, `sourceObject`, `sourceId`, `actorId` —
- * `FLOW_NODE_EXPRESSION_PATHS`), plus the two legacy
+ * values — `recipients` (each entry of a list), `templateData.*` and
+ * `sourceId` — `FLOW_NODE_EXPRESSION_PATHS`), plus the two legacy
  * `assignment` shapes the executor still reads (the
  * `assignments: [{ variable, value }]` array and the bare
  * `{ <variable>: <value> }` config). Until this retirement every string

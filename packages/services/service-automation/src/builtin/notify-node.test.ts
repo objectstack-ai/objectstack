@@ -174,11 +174,12 @@ describe('notify (baseline node)', () => {
         // `flow-node-notify-config-aliases`, which lifts it. Verified by disabling
         // the lift: `source` comes back `undefined` and this test fails.
         it('accepts the nested source:{object,id} form and forwards actorId', async () => {
+            // [#19939] `actorId` is a literal, read as written.
             engine.registerFlow('notify_flow', notifyFlow({
                 recipients: ['user_1'],
                 title: 'Assigned to you',
                 source: { object: 'opportunity', id: { dialect: 'cel', source: 'dealId' } },
-                actorId: { dialect: 'cel', source: 'dealName' },
+                actorId: 'user_boss',
             }));
 
             const result = await engine.execute('notify_flow', {

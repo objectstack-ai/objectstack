@@ -290,22 +290,21 @@ describe('FLOW_NODE_EXPRESSION_PATHS — the loop and map collection (#19939)', 
 
 /**
  * #19939 (stage S4) — a `notify` node's computed values are `value` slots:
- * `recipients`, `templateData.*`, `payload.*`, `sourceObject`, `sourceId` and
- * `actorId`. `recipients` holds one value or a list of them, so it carries
- * `eachElement`: each element of a list is a value of its own, at its index.
+ * `recipients`, `templateData.*` and `sourceId`. `recipients` holds one value
+ * or a list of them, so it carries `eachElement`: each element of a list is a
+ * value of its own, at its index. `sourceObject`, `actorId` and `payload` are
+ * literals, read as written — no flow computed one, so the ledger declares no
+ * slot there.
  */
 describe('FLOW_NODE_EXPRESSION_PATHS — a notify node\'s value slots (#19939)', () => {
   const ENVELOPE = { dialect: 'cel', source: 'record.owner' };
 
-  it('declares the six notify positions as `value` slots, and only `recipients` reads each element', () => {
+  it('declares the three notify computed values as `value` slots, and only `recipients` reads each element', () => {
     const notify = FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.nodeType === 'notify');
     expect(notify.map((e) => [e.path, e.role, e.label])).toEqual([
       ['recipients', 'value', 'notify recipient'],
       ['templateData.*', 'value', 'notify templateData value'],
-      ['payload.*', 'value', 'notify payload value'],
-      ['sourceObject', 'value', 'notify sourceObject'],
       ['sourceId', 'value', 'notify sourceId'],
-      ['actorId', 'value', 'notify actorId'],
     ]);
     expect(FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.eachElement).map((e) => `${e.nodeType}.${e.path}`))
       .toEqual(['notify.recipients']);
@@ -323,13 +322,13 @@ describe('FLOW_NODE_EXPRESSION_PATHS — a notify node\'s value slots (#19939)',
     expect(resolveFlowNodeValueSlots('notify', { recipients: [] })).toEqual([]);
   });
 
-  it('the maps are read per key, the single values at their key', () => {
+  it('the map is read per key, the single values at their key; the literals are no slot', () => {
     const config = {
-      recipients: 'u1', templateData: { a: ENVELOPE }, payload: { b: 'lit' },
+      recipients: 'u1', templateData: { a: ENVELOPE }, payload: { b: ENVELOPE },
       sourceObject: 'o', sourceId: ENVELOPE, actorId: 'u2', actionUrl: '/x/{{ id }}', topic: '{t}',
     };
     expect(resolveFlowNodeValueSlots('notify', config).map((f) => f.path))
-      .toEqual(['recipients', 'templateData.a', 'payload.b', 'sourceObject', 'sourceId', 'actorId']);
+      .toEqual(['recipients', 'templateData.a', 'sourceId']);
     expect(resolveFlowNodeExpressions('notify', config).map((f) => f.path)).toEqual(['templateData.a', 'sourceId']);
   });
 });
@@ -462,10 +461,7 @@ describe('every entry older than the value role resolves byte-identically (the r
       'screen.recordId (value)',
       'notify.recipients (value)',
       'notify.templateData.* (value)',
-      'notify.payload.* (value)',
-      'notify.sourceObject (value)',
       'notify.sourceId (value)',
-      'notify.actorId (value)',
     ]);
   });
 

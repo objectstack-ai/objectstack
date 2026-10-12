@@ -370,21 +370,19 @@ describe('configSchema ↔ expression-ledger reconciliation (#4027)', () => {
 
   /**
    * [#19939, stage S4] A `notify` node's computed values — `recipients`,
-   * `templateData.*`, `payload.*`, `sourceObject`, `sourceId`, `actorId` — are
-   * `value` slots declared on the spec Zod channel (`NotifyConfigSchema`,
-   * carried by `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`): the descriptor offers
-   * them with no marker (the Studio form keeps its recipients picker and text
-   * inputs), so neither channel declares one slot twice. Its `actionUrl` is a
-   * text slot, which the ledger does not carry.
+   * `templateData.*`, `sourceId` — are `value` slots declared on the spec Zod
+   * channel (`NotifyConfigSchema`, carried by
+   * `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`): the descriptor offers them with no
+   * marker (the Studio form keeps its recipients picker and text inputs), so
+   * neither channel declares one slot twice. Its `actionUrl` is a text slot,
+   * which the ledger does not carry, and its `sourceObject`, `actorId` and
+   * `payload` are literals, which no channel declares.
    */
-  it('notify declares its six value slots on the spec Zod channel alone, and none on its descriptor', () => {
+  it('notify declares its three value slots on the spec Zod channel alone, and none on its descriptor', () => {
     expect(declaredFromDescriptors().filter((d) => d.nodeType === 'notify')).toEqual([]);
     expect(declaredFromSchemalessConfigs().filter((d) => d.nodeType === 'notify').map(key).sort()).toEqual([
-      'notify.actorId (value)',
-      'notify.payload.* (value)',
       'notify.recipients (value)',
       'notify.sourceId (value)',
-      'notify.sourceObject (value)',
       'notify.templateData.* (value)',
     ]);
   });

@@ -34,6 +34,7 @@ import { NON_BLANK_STRING } from '../shared/refinement-projection';
 import { STORED_METADATA_BODY_PRESCRIPTION, isStoredMetadataBodyObject } from '../kernel/stored-metadata-body-objects';
 import { FLOW_REGION_SLOTS_BY_TYPE } from './region-slots';
 import { FLOW_NODE_EXPRESSION_PATHS, isExpressionEnvelopeShaped } from './flow-node-expression-paths';
+import { READ_AS_WRITTEN_PARAM } from './flow-template-token';
 import type { FlowNodeConfigRefusal, FlowSlotRefusalParams, NodeConfigValueKind } from './flow-node-expression-paths';
 // The executor contracts. Read only inside `getBuiltinNodeConfigContracts`,
 // never at module load: `control-flow.zod.ts` sits in the flow-schema import
@@ -372,6 +373,8 @@ interface ContractIssue {
   readonly code: string;
   readonly path: ReadonlyArray<PropertyKey>;
   readonly message: string;
+  /** A custom issue's `params` — {@link READ_AS_WRITTEN_PARAM} is the one the value arm reads. */
+  readonly params?: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -393,7 +396,11 @@ interface ContractIssue {
  *  - a run-resolved key ({@link RUN_RESOLVED_KEYS});
  *  - a value carrying a `{token}` anywhere inside it: it is never refused for
  *    its pre-interpolation type, even where the executor parses the authored
- *    config and so refuses it at the run;
+ *    config and so refuses it at the run — unless the contract marks its
+ *    issue {@link READ_AS_WRITTEN_PARAM} (#19939: a `notify` node's
+ *    `sourceObject`, `actorId` and `payload`, which the executor reads as
+ *    written, never through the interpolator, so the run sees the token the
+ *    build sees and the contract's refusal of it is the run's verdict);
  *  - for a contract parsed after interpolation ({@link
  *    PARSED_AFTER_INTERPOLATION}), a rule (`custom`) when the config carries a
  *    token anywhere.
@@ -408,6 +415,7 @@ function builtinValueJudged(
   if ((FLOW_REGION_SLOTS_BY_TYPE.get(nodeType) ?? []).some((slot) => slot.key === issue.path[0])) return false;
   if (atOrInsideJudgedLedgerSlot(nodeType, authored, issue.path)) return false;
   if ((RUN_RESOLVED_KEYS[nodeType] ?? []).includes(issue.path[0] as string)) return false;
+  if (issue.code === 'custom' && issue.params?.[READ_AS_WRITTEN_PARAM] === true) return true;
   if (carriesInterpolationToken(authoredAt(authored, issue.path))) return false;
   if (PARSED_AFTER_INTERPOLATION.has(nodeType) && issue.code === 'custom' && carriesInterpolationToken(authored)) return false;
   return true;

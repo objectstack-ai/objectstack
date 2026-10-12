@@ -16,10 +16,12 @@ import type { SemanticMigration } from '../../types.js';
 // body and a map iterate (collection), whose literal is an inline array and
 // where a variable's bare name, which the structured loop and map never read,
 // is refused too, and to a notify node's computed values (its recipients,
-// the value or each entry of a list; the templateData and payload maps'
-// values; sourceObject, sourceId and actorId), each evaluated before the
-// notification is handed to the messaging service, where an entry that
-// evaluates to a list adds each of its recipients.
+// the value or each entry of a list; the templateData map's values; sourceId),
+// each evaluated before the notification is handed to the messaging service,
+// where an entry that evaluates to a list adds each of its recipients. The
+// notify node's sourceObject, actorId and payload values, which the template
+// resolved too but no flow computed, are literals now, read as written: a
+// token there is refused with the literal's remedy, and an envelope there too.
 export const entry: SemanticMigration = {
   id: 'flow-value-slot-template-dialect-refused',
   // No backticks in `surface` — build-upgrade-guide renders it inside a code
@@ -30,7 +32,8 @@ export const entry: SemanticMigration = {
     + 'a map to a callee: a subflow node and a map node (the input map, evaluated per item on a map node) and a '
     + 'script node (the inputs map), of a screen node (an object form\'s defaults map and its recordId, and '
     + 'each field\'s defaultValue), and of a notify node (recipients, the value or each entry of a list; the '
-    + 'templateData and payload maps; sourceObject, sourceId and actorId) — a string value, or a '
+    + 'templateData map; sourceId; and the literals sourceObject, actorId and the payload map, where a CEL '
+    + 'value envelope is refused as well) — a string value, or a '
     + 'string anywhere inside an array or object value, carrying a single-brace template token, the run-user '
     + 'paths beginning $User. and the date macros NOW() and TODAY() with an optional day offset included; and the '
     + 'collection of a loop node with a body and of a map node — any string value: a single-brace template token, '
@@ -74,8 +77,10 @@ export const entry: SemanticMigration = {
     + 'list of them, each a string or an envelope; an envelope evaluates, per run, to a recipient, to null or a '
     + 'blank string, which adds none, as the template dropped a token that resolved to nothing, or to a list, whose '
     + 'every recipient is added, so a recipient field that may be unset is guarded to null '
-    + '(has(record.assignee) ? record.assignee : null). Its sourceObject, sourceId and actorId evaluate to a '
-    + 'string, null leaving the key unset, and its templateData and payload values are handed on as evaluated',
+    + '(has(record.assignee) ? record.assignee : null). Its sourceId evaluates to a string, null leaving the key '
+    + 'unset, and its templateData values are handed on as evaluated. Its sourceObject, actorId and payload '
+    + 'values are literals, read as written and never evaluated: write the value itself (the object\'s name, the '
+    + 'user\'s id, the data), with no token and no envelope',
   reason:
     'The interpolator and the CEL engine answer differently for every token spelling authored in flows, so no '
     + 'conversion is lossless (ADR-0087 D2) and none is applied. A path, an absent variable, key or list index '
@@ -107,7 +112,10 @@ export const entry: SemanticMigration = {
     + 'node\'s recipients a whole token holding a list, written as an entry of a list, was handed on as one '
     + 'recipient joined with commas (u1,u2), which reached nobody, where an envelope entry evaluating to that '
     + 'list adds each recipient: rewriting it changes who is notified; and an absent variable there dropped the '
-    + 'recipient under the template, where CEL fails the run unless the value is guarded. A '
+    + 'recipient under the template, where CEL fails the run unless the value is guarded. At a notify node\'s '
+    + 'sourceObject, actorId and payload no authored flow carried a token — none in the shipped metadata, docs '
+    + 'and fixtures, none in the one external app measured — so no expression is read there: they are literals, '
+    + 'and a token, which the template resolved, would now be sent with its braces, so it is refused. A '
     + 'flow carrying '
     + 'a refused value is refused at registration, by objectstack validate and by the executor; a stored flow '
     + 'carrying one is skipped at boot with a warn naming it.',
@@ -129,7 +137,8 @@ export const entry: SemanticMigration = {
     + 'iterated, so decide whether the loop should run at all before rewriting it, and where the list may be '
     + 'absent and the node should iterate nothing, guard it to answer []. For a notify node\'s recipients, guard '
     + 'each recipient field that may be unset so an absent one is dropped, as the template dropped it, and check '
-    + 'that an entry which held a list now reaches each of its recipients. Re-run '
+    + 'that an entry which held a list now reaches each of its recipients. For a notify node\'s sourceObject, '
+    + 'actorId or payload value carrying a token, write the value the token stood for. Re-run '
     + 'the flow paths that write those fields, serve those screens, iterate those lists and send those '
     + 'notifications, and compare the stored and served values, the iterations and the audiences with the ones '
     + 'the template produced.',

@@ -157,16 +157,17 @@ function resolveRecipients(
 }
 
 /**
- * [#19939] A notify value slot holding one string — `sourceObject`, `sourceId`,
- * `actorId`: the string as written, or a CEL value envelope evaluated in the
- * run's scope to one, through the shared per-slot resolver
+ * [#19939] The notify value slot holding one string — `sourceId`, the
+ * click-through record's id: the string as written, or a CEL value envelope
+ * evaluated in the run's scope to one, through the shared per-slot resolver
  * (`resolveValueSlot`). `null` or a blank string leaves the key unset, as a
  * token that resolved to nothing did; anything else fails the node, naming
- * what it evaluated to — never `String(value)`.
+ * what it evaluated to — never `String(value)`. (`sourceObject` and `actorId`
+ * are literals, read as written.)
  */
 function resolveStringSlot(
     engine: AutomationEngine,
-    key: 'sourceObject' | 'sourceId' | 'actorId',
+    key: 'sourceId',
     raw: unknown,
     variables: VariableMap,
     context: AutomationContext,
@@ -177,8 +178,8 @@ function resolveStringSlot(
         ok: false,
         error:
             `notify: ${key} evaluated to ${evaluatedKindOf(evaluated)}, not a string — write a value expression that `
-            + `evaluates to the ${key === 'sourceObject' ? 'object name' : key === 'sourceId' ? 'record id' : 'user id'}, `
-            + `or to \`null\` to leave it unset — source: \`${sourceOf(raw)}\``,
+            + 'evaluates to the record id, or to `null` to leave it unset — source: '
+            + `\`${sourceOf(raw)}\``,
     };
 }
 
@@ -285,14 +286,15 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                         description: 'Severity forwarded to the messaging service',
                     },
                     // ── Click-through target (#2675) ─────────────────────────
-                    // [#19939] These three are VALUE slots: a string, or a CEL
+                    // [#19939] `sourceId` is a VALUE slot: a string, or a CEL
                     // value envelope evaluated per run. `type` stays `string`
                     // because the form's control is a text box (the authoring
                     // surface, as for a screen's `recordId`); the contract is
-                    // `NotifyConfigSchema`.
+                    // `NotifyConfigSchema`. `sourceObject` and `actorId` are
+                    // literals, read as written.
                     sourceObject: {
                         type: 'string',
-                        description: 'Object name of the record the notification links to (writes sys_notification.source_object) — a string, or a CEL value envelope evaluated per run to one; a single-brace {token} is refused. Only takes effect together with sourceId — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link.',
+                        description: 'Object name of the record the notification links to (writes sys_notification.source_object) — read as written: a single-brace {token} is not resolved here and is refused, as is a CEL value envelope; write the value. Only takes effect together with sourceId — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link.',
                     },
                     sourceId: {
                         type: 'string',
@@ -300,7 +302,7 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     },
                     actorId: {
                         type: 'string',
-                        description: 'User id that caused the event (writes sys_notification.actor_id) — a string, or a CEL value envelope evaluated per run to one; a single-brace {token} is refused.',
+                        description: 'User id that caused the event (writes sys_notification.actor_id) — read as written: a single-brace {token} is not resolved here and is refused, as is a CEL value envelope; write the value.',
                     },
                     // `actionUrl` (not `url`) is the deliberate canonical: it is the
                     // name the whole downstream chain uses (sys_notification.action_url,
@@ -313,7 +315,7 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     },
                     payload: {
                         type: 'object',
-                        description: 'Extra values merged into the notification payload — each a CEL value envelope { dialect: \'cel\', source } evaluated per run, or a literal; a single-brace {token} is refused.',
+                        description: 'Extra values merged into the notification payload — read as written: a single-brace {token} in any of its strings is not resolved here and is refused, as is a CEL value envelope written as a value; write the value.',
                     },
                 },
             },
@@ -370,9 +372,10 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             // text is no link (`undefined`), so the synthesized one below still
             // applies — as an empty one did.
             const actionUrl = renderTextSlot(cfg.actionUrl, variables);
-            const payload = cfg.payload
-                ? resolveValueSlotMap(engine, cfg.payload, variables, 'payload', context)
-                : undefined;
+            // [#19939] `payload` is a literal, read as written: no flow
+            // computed one, and the contract refused a `{…}` token or an
+            // envelope in it.
+            const payload = cfg.payload;
 
             // Click-through target: forwarding `source` lets the messaging
             // service persist sys_notification.source_object/source_id and
@@ -383,17 +386,16 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             // `flow-node-notify-config-aliases` (#4045), so no consumer-side
             // fallback survives — and produced only when BOTH halves resolve: a
             // half-specified link is dropped so the inbox never renders a dead
-            // deep-link. [#19939] Each half, and `actorId`, is a VALUE slot.
-            const sourceObject = resolveStringSlot(engine, 'sourceObject', cfg.sourceObject, variables, context);
-            if (!sourceObject.ok) return { success: false, error: sourceObject.error };
+            // deep-link. [#19939] `sourceId` is a VALUE slot; `sourceObject`
+            // and `actorId` are literals, read as written (the contract
+            // refused a `{…}` token in either).
+            const sourceObject = toStr(cfg.sourceObject);
             const sourceId = resolveStringSlot(engine, 'sourceId', cfg.sourceId, variables, context);
             if (!sourceId.ok) return { success: false, error: sourceId.error };
-            const source = sourceObject.value && sourceId.value
-                ? { object: sourceObject.value, id: sourceId.value }
+            const source = sourceObject && sourceId.value
+                ? { object: sourceObject, id: sourceId.value }
                 : undefined;
-            const actor = resolveStringSlot(engine, 'actorId', cfg.actorId, variables, context);
-            if (!actor.ok) return { success: false, error: actor.error };
-            const actorId = actor.value;
+            const actorId = toStr(cfg.actorId);
 
             // With a `template` reference the content lives in the template
             // bundle, resolved by `(name, locale)` at delivery — per recipient,

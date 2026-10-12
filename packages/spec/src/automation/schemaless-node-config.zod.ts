@@ -667,10 +667,10 @@ export type SchemalessNodeType = keyof typeof SCHEMALESS_NODE_CONFIG_SCHEMAS;
  * other two value slots, a field's `defaultValue` and `recordId`, are single
  * values its descriptor offers as unmarked inputs (the Studio form renders
  * them as it always did), so their markers ride `ScreenConfigSchema` too.
- * `notify`'s value slots — `recipients`, `templateData.*`, `payload.*`,
- * `sourceObject`, `sourceId`, `actorId` — are offered by its descriptor with
- * no marker (the Studio form keeps its recipients picker and text inputs), so
- * their markers ride `NotifyConfigSchema`.
+ * `notify`'s value slots — `recipients`, `templateData.*`, `sourceId` — are
+ * offered by its descriptor with no marker (the Studio form keeps its
+ * recipients picker and text inputs), so their markers ride
+ * `NotifyConfigSchema`.
  * `map`'s other expression slot, `collection`, keeps arriving through its
  * descriptor (`xExpression: 'value'` since #19939 made it a value slot; it
  * was `'template'`), and so does `screen`'s

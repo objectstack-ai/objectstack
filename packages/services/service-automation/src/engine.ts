@@ -12271,8 +12271,8 @@ export class AutomationEngine implements IAutomationService {
      * `script` `inputs`), a `screen`'s `defaults`, field `defaultValue` and
      * `recordId`, the list a `loop` (with a `body`) and a `map` iterate,
      * their `collection`, and a `notify` node's `recipients` (the value, or
-     * each entry of a list), `templateData` and `payload` maps,
-     * `sourceObject`, `sourceId` and `actorId` — every one but `assignments`
+     * each entry of a list), `templateData` map and `sourceId` — every one but
+     * `assignments`
      * through `builtin/value-slot-map.ts`, the one per-slot resolver
      * (`resolveValueSlotMap`, `resolveValueSlot`, `resolveCollectionSlot`).
      * The two legacy

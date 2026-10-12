@@ -73,6 +73,9 @@ import {
 } from './builtin-node-config.zod';
 import { isExpressionEnvelopeShaped } from './flow-node-expression-paths';
 import { valueSlotTemplateRefusals } from './flow-value-slot-template';
+// [#19939] The retired dialect's one token grammar, for the notify literals'
+// refusal — the internal module the two slot judges read, never re-spelled.
+import { READ_AS_WRITTEN_PARAM, templateTokensOf } from './flow-template-token';
 
 /**
  * What a rejected key on these contracts silently did before #4001 批 9.
@@ -195,20 +198,22 @@ function notifyTemplateSourceRequired(key: 'title' | 'message'): string {
 
 // ─── notify value slots (#19939) ─────────────────────────────────────
 //
-// A notify node's computed values — `recipients`, the `templateData` and
-// `payload` maps, `sourceObject`, `sourceId` and `actorId` — are VALUE slots
-// (#19939, the C half of #11182 ruling D; ADR-0032 Decision 2, a computed
-// value is whole-field CEL): a CEL value envelope the executor evaluates in the
-// run's scope, or a literal written as it is. A single-brace `{…}` token of the
-// retired template dialect is refused by the one value-slot judge
-// (`valueSlotTemplateRefusals`), naming its CEL spelling. The two maps take
-// `FlowValueSlotSchema` per key, like a screen's `defaults`; the three single
-// values and `recipients` take the unions below, whose literal arm is
-// narrower (a string, a list of strings), like `screen.recordId`'s, so the
-// published JSON Schema and the inferred types keep it. Each union is built
-// eagerly, like `FlowValueSlotSchema`: `.meta()` registers by identity, and its
-// `xExpression: 'value'` marker is what the expression ledger's reconciliation
-// ratchet reads (`LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`).
+// A notify node's computed values — `recipients`, the `templateData` map and
+// `sourceId` — are VALUE slots (#19939, the C half of #11182 ruling D;
+// ADR-0032 Decision 2, a computed value is whole-field CEL): a CEL value
+// envelope the executor evaluates in the run's scope, or a literal written as
+// it is. A single-brace `{…}` token of the retired template dialect is refused
+// by the one value-slot judge (`valueSlotTemplateRefusals`), naming its CEL
+// spelling. The map takes `FlowValueSlotSchema` per key, like a screen's
+// `defaults`; `sourceId` and `recipients` take the unions below, whose literal
+// arm is narrower (a string, a list of strings), like `screen.recordId`'s, so
+// the published JSON Schema and the inferred types keep it. Each union is
+// built eagerly, like `FlowValueSlotSchema`: `.meta()` registers by identity,
+// and its `xExpression: 'value'` marker is what the expression ledger's
+// reconciliation ratchet reads (`LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`).
+//
+// `sourceObject`, `actorId` and the values of `payload` are LITERALS (see
+// "notify literals" below): no flow computed them, so no slot is built there.
 
 /** The `{…}` token refusals of `text`, a literal string at `at` inside a notify value slot. */
 function addTokenRefusals(ctx: z.RefinementCtx, text: string, at: readonly (string | number)[]): void {
@@ -305,13 +310,12 @@ const NotifyRecipientsSlotSchema = z.union([
   });
 
 /**
- * A notify value slot holding ONE string — `sourceObject`, `sourceId`,
- * `actorId` (#19939): the string as written, or a CEL value envelope the
- * executor evaluates per run to a string. An envelope that evaluates to `null`
- * or a blank string leaves the key unset, as a token that resolved to nothing
- * did; anything else that is not a string fails the node, naming what it
- * evaluated to. A `{…}` token in the string is refused by the one value-slot
- * judge.
+ * A notify value slot holding ONE string — `sourceId` (#19939): the string as
+ * written, or a CEL value envelope the executor evaluates per run to a string.
+ * An envelope that evaluates to `null` or a blank string leaves the key unset,
+ * as a token that resolved to nothing did; anything else that is not a string
+ * fails the node, naming what it evaluated to. A `{…}` token in the string is
+ * refused by the one value-slot judge.
  */
 function notifyStringSlotSchema(key: string, what: string, example: string, description: string) {
   const rule =
@@ -330,14 +334,6 @@ function notifyStringSlotSchema(key: string, what: string, example: string, desc
     .meta({ description, xExpression: 'value' });
 }
 
-const NotifySourceObjectSlotSchema = notifyStringSlotSchema(
-  'sourceObject',
-  'the name of the object the notification links to',
-  'targetObject',
-  'Object name of the record the notification links to — a string, or a CEL value envelope `{ dialect: \'cel\', '
-    + 'source }` evaluated per run to one; a `{…}` template token is refused',
-);
-
 const NotifySourceIdSlotSchema = notifyStringSlotSchema(
   'sourceId',
   'the id of the record the notification links to',
@@ -346,13 +342,103 @@ const NotifySourceIdSlotSchema = notifyStringSlotSchema(
     + 'evaluated per run to one; a `{…}` template token is refused',
 );
 
-const NotifyActorIdSlotSchema = notifyStringSlotSchema(
-  'actorId',
-  'the id of the user who caused the event',
-  'current_user.id',
-  'User id that caused the event — a string, or a CEL value envelope `{ dialect: \'cel\', source }` evaluated per '
-    + 'run to one; a `{…}` template token is refused',
-);
+// ─── notify literals (#19939) ────────────────────────────────────────
+//
+// `sourceObject`, `actorId` and the values of `payload` are LITERALS: the
+// executor reads each as written. Until #19939 they passed through the
+// single-brace interpolator like the node's computed values, but no flow
+// computed one — the census found no `{…}` token at any of them in this
+// repository's shipped metadata, docs and fixtures, or in hotcrm — so no value
+// slot is built there (the S4 ruling, on the model of S7's connector inputs:
+// a slot nobody computes is not built). Read as written, a `{…}` token would
+// reach the messaging service with its braces, so it is refused, with the
+// literal's remedy: write the value. An envelope, which a value slot would
+// evaluate, is refused there too — nothing evaluates it.
+//
+// The refusal is the contract's (the `superRefine` of `NotifyConfigSchema`),
+// so it reaches every door that parses the contract: `FlowSchema.parse`,
+// `objectstack validate`, the save door, `registerFlow` and the executor. Its
+// issues carry `READ_AS_WRITTEN_PARAM` (`flow-template-token.ts`), which tells
+// the build doors' value arm (`flow-node-config-refusals.ts`) that the run
+// reads this token as written — a token anywhere else is a value only
+// interpolation decides.
+
+/** What each notify literal is, for its refusals. */
+const NOTIFY_LITERALS = {
+  sourceObject: 'the name of the object the notification links to',
+  actorId: 'the id of the user who caused the event',
+  payload: 'a value merged into the notification payload',
+} as const;
+
+/** The sentence every refusal at a notify literal leads with. */
+function notifyLiteralLead(at: string, what: string): string {
+  return `\`${at}\` is ${what}, a literal the executor reads as written:`;
+}
+
+/** The refusal of a CEL value envelope at a notify literal. */
+function notifyLiteralEnvelopeRefusal(at: string, what: string): string {
+  return `${notifyLiteralLead(at, what)} a CEL value envelope is not evaluated here; write the value.`;
+}
+
+/** The refusal of a `{…}` token in a string at a notify literal, or `undefined` when it carries none. */
+function notifyLiteralTokenRefusal(at: string, what: string, text: string): string | undefined {
+  if (templateTokensOf(text).length === 0) return undefined;
+  return (
+    `${notifyLiteralLead(at, what)} a single-brace token is not resolved here; write the value. Read as written, `
+    + `\`${text}\` would reach the messaging service with its braces.`
+  );
+}
+
+/** `sourceObject` / `actorId` — a string as written; an envelope is refused by name, anything else by type. */
+function notifyLiteralStringSchema(key: keyof typeof NOTIFY_LITERALS) {
+  return z.string({
+    error: (issue) => (isExpressionEnvelopeShaped(issue.input)
+      ? notifyLiteralEnvelopeRefusal(key, NOTIFY_LITERALS[key])
+      : undefined),
+  });
+}
+
+/**
+ * Every refusal at a notify literal of a parsed config: a `{…}` token in
+ * `sourceObject` or `actorId`, and in any string at any depth of a `payload`
+ * value (the interpolator recursed into each), and an envelope written as a
+ * `payload` value. Cycle-safe: a flow built in code may hold a self-reference.
+ */
+function notifyLiteralRefusals(cfg: {
+  readonly sourceObject?: string;
+  readonly actorId?: string;
+  readonly payload?: Readonly<Record<string, unknown>>;
+}): Array<{ path: (string | number)[]; message: string }> {
+  const out: Array<{ path: (string | number)[]; message: string }> = [];
+  for (const key of ['sourceObject', 'actorId'] as const) {
+    const value = cfg[key];
+    if (typeof value !== 'string') continue;
+    const message = notifyLiteralTokenRefusal(key, NOTIFY_LITERALS[key], value);
+    if (message !== undefined) out.push({ path: [key], message });
+  }
+  if (cfg.payload === undefined) return out;
+  const seen = new Set<object>();
+  const visit = (node: unknown, path: (string | number)[]): void => {
+    const at = path.map((segment, i) => (typeof segment === 'number' ? `[${segment}]` : `${i === 0 ? '' : '.'}${segment}`)).join('');
+    if (typeof node === 'string') {
+      const message = notifyLiteralTokenRefusal(at, NOTIFY_LITERALS.payload, node);
+      if (message !== undefined) out.push({ path, message });
+      return;
+    }
+    if (node === null || typeof node !== 'object' || seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) node.forEach((element, index) => visit(element, [...path, index]));
+    else for (const [key, element] of Object.entries(node as Record<string, unknown>)) visit(element, [...path, key]);
+  };
+  for (const [key, value] of Object.entries(cfg.payload)) {
+    if (isExpressionEnvelopeShaped(value)) {
+      out.push({ path: ['payload', key], message: notifyLiteralEnvelopeRefusal(`payload.${key}`, NOTIFY_LITERALS.payload) });
+      continue;
+    }
+    visit(value, ['payload', key]);
+  }
+  return out;
+}
 
 // ─── notify ──────────────────────────────────────────────────────────
 
@@ -399,12 +485,15 @@ const NotifyActorIdSlotSchema = notifyStringSlotSchema(
  *    `objectNavTargetExclusivity` (`ui/app.zod.ts`).
  *  - `title`, `message` and (since #19939) `actionUrl` are TEXT slots: they
  *    render through the formula template engine, so `{{ record.x }}` holes are
- *    legal in them (below). `recipients`, `sourceObject`, `sourceId`,
- *    `actorId` and the VALUES of `templateData` and `payload` are VALUE slots
- *    (#19939): a CEL value envelope the executor evaluates per run, or a
- *    literal written as it is — until #19939 each passed through the flow's
- *    single-brace `interpolate()`, and a `{record.x}` token in one is refused
- *    now, naming its CEL spelling. `channels`, `topic`, `severity` and
+ *    legal in them (below). `recipients`, `sourceId` and the VALUES of
+ *    `templateData` are VALUE slots (#19939): a CEL value envelope the
+ *    executor evaluates per run, or a literal written as it is — until #19939
+ *    each passed through the flow's single-brace `interpolate()`, and a
+ *    `{record.x}` token in one is refused now, naming its CEL spelling.
+ *    `sourceObject`, `actorId` and the values of `payload` passed through it
+ *    too, but no flow computed one: they are LITERALS now, read as written,
+ *    and a `{…}` token or an envelope in one is refused (the `superRefine`
+ *    below — see "notify literals" above). `channels`, `topic`, `severity` and
  *    `template` are read RAW — a `{token}` in those is forwarded verbatim,
  *    never resolved (channel ids are static routing, `severity` is a closed
  *    vocabulary, and `template` is a static metadata cross-reference, not
@@ -522,19 +611,19 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
     .describe('Severity forwarded to the messaging service'),
   /**
    * Click-through target object — only effective together with `sourceId`
-   * (#2675). A `value` slot (#19939, {@link NotifySourceObjectSlotSchema}).
+   * (#2675). A literal, read as written (#19939, "notify literals" above).
    */
-  sourceObject: NotifySourceObjectSlotSchema.optional()
-    .describe('Object name of the record the notification links to (writes sys_notification.source_object) — a string, or a CEL value envelope `{ dialect: \'cel\', source }` evaluated per run to one; a `{…}` template token is refused. Only takes effect together with sourceId — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link.'),
+  sourceObject: notifyLiteralStringSchema('sourceObject').optional()
+    .describe('Object name of the record the notification links to (writes sys_notification.source_object) — a literal, read as written: a single-brace `{token}` is not resolved here and is refused, as is a CEL value envelope; write the value. Only takes effect together with sourceId — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link.'),
   /**
    * Click-through target record id — only effective together with
    * `sourceObject`. A `value` slot (#19939, {@link NotifySourceIdSlotSchema}).
    */
   sourceId: NotifySourceIdSlotSchema.optional()
     .describe('Record id the notification links to (writes sys_notification.source_id) — a string, or a CEL value envelope `{ dialect: \'cel\', source }` evaluated per run to one (`record.id`); a `{…}` template token is refused. Only takes effect together with sourceObject — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link.'),
-  /** User id that caused the event. A `value` slot (#19939, {@link NotifyActorIdSlotSchema}). */
-  actorId: NotifyActorIdSlotSchema.optional()
-    .describe('User id that caused the event (writes sys_notification.actor_id) — a string, or a CEL value envelope `{ dialect: \'cel\', source }` evaluated per run to one (`current_user.id`); a `{…}` template token is refused'),
+  /** User id that caused the event. A literal, read as written (#19939, "notify literals" above). */
+  actorId: notifyLiteralStringSchema('actorId').optional()
+    .describe('User id that caused the event (writes sys_notification.actor_id) — a literal, read as written: a single-brace `{token}` is not resolved here and is refused, as is a CEL value envelope; write the value'),
   /**
    * Explicit click-through URL; overrides the sourceObject/sourceId link. A
    * TEXT slot (#19939): rendered per run with `{{ }}` holes, like `title`; a
@@ -543,11 +632,11 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
   actionUrl: z.string().optional()
     .describe('Explicit click-through URL, rendered per run with `{{ }}` holes like `title` (`/crm_case/{{ record.id }}`); a single-brace `{token}` is refused. Overrides the link synthesized from sourceObject/sourceId.'),
   /**
-   * Extra values merged into the notification payload — a `value` slot per key
-   * (#19939, {@link FlowValueSlotSchema}).
+   * Extra values merged into the notification payload — literals, read as
+   * written (#19939, "notify literals" above).
    */
-  payload: z.record(z.string(), FlowValueSlotSchema).optional()
-    .describe('Extra values merged into the notification payload — each a CEL value envelope `{ dialect: \'cel\', source }` evaluated per run, or a literal written as it is; a `{…}` template token is refused'),
+  payload: z.record(z.string(), z.unknown()).optional()
+    .describe('Extra values merged into the notification payload — literals, read as written: a single-brace `{token}` in any string of one is not resolved here and is refused, as is a CEL value envelope written as a value; write the value'),
 }).superRefine((cfg, ctx) => {
   // #9205 — correct-by-construction (the `objectNavTargetExclusivity`
   // posture, ui/app.zod.ts): `template` combined with inline `title`/`message`
@@ -622,6 +711,14 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
   if (typeof cfg.actionUrl === 'string') {
     const refusal = textSlotTemplateRefusal(cfg.actionUrl);
     if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: ['actionUrl'], message: refusal });
+  }
+  // [#19939] `sourceObject`, `actorId` and `payload` are literals, read as
+  // written ("notify literals" above): a `{…}` token in one would reach the
+  // messaging service with its braces, and an envelope written as a `payload`
+  // value would be handed on as the object it spells. Each issue is marked
+  // `READ_AS_WRITTEN_PARAM`, so the build doors report it as the run would.
+  for (const refusal of notifyLiteralRefusals(cfg)) {
+    ctx.addIssue({ code: 'custom', path: refusal.path, message: refusal.message, params: { [READ_AS_WRITTEN_PARAM]: true } });
   }
 }));
 

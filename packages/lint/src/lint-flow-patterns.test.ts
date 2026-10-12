@@ -3212,3 +3212,70 @@ describe('decision `mode` (#15429)', () => {
     });
   });
 });
+
+/**
+ * [#19939, stage S4] A notify node's `sourceObject`, `actorId` and `payload`
+ * are literals the executor reads as written: no flow computed one, so no
+ * value slot is built there, and the contract refuses a `{…}` token in one.
+ * Neither brace dialect resolves there, so the two wrong-syntax hints name the
+ * value itself — never `{var}`, which the build would refuse there.
+ */
+describe('the notify literals: neither brace dialect resolves, and the hints say so (#19939)', () => {
+  function notifyFlow(config: Record<string, unknown>) {
+    return {
+      flows: [{
+        name: 'literal_notice',
+        label: 'Literal notice',
+        type: 'autolaunched',
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start' },
+          { id: 'tell', type: 'notify', label: 'Tell', config: { recipients: ['u1'], title: 'T', ...config } },
+          { id: 'done', type: 'end', label: 'Done' },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'tell' }, { id: 'e2', source: 'tell', target: 'done' }],
+      }],
+    };
+  }
+  const findingsOf = (config: Record<string, unknown>, rule: string) =>
+    lintFlowPatterns(notifyFlow(config)).filter((f) => f.rule === rule);
+
+  /** The keys the spec contract refuses a `{…}` token at with the literal's lead — asked of the contract, never listed. */
+  function contractLiteralKeys(): string[] {
+    const shape = (NotifyConfigSchema as unknown as { shape: Record<string, unknown> }).shape;
+    return Object.keys(shape).filter((key) => {
+      const value = key === 'payload' ? { k: '{x}' } : '{x}';
+      const parsed = NotifyConfigSchema.safeParse({ recipients: ['u1'], title: 'T', [key]: value });
+      return !parsed.success
+        && parsed.error.issues.some((i) => i.path[0] === key && i.message.includes('a literal the executor reads as written'));
+    });
+  }
+
+  it('the contract\'s literals are the keys this rule reads as literals — in step, both ways', () => {
+    expect(contractLiteralKeys()).toEqual(['sourceObject', 'actorId', 'payload']);
+    for (const [key, config] of [
+      ['sourceObject', { sourceObject: '{{ record.object }}' }],
+      ['actorId', { actorId: '{{ record.owner }}' }],
+      ['payload', { payload: { meta: { by: '{{ record.owner }}' } } }],
+    ] as const) {
+      const found = findingsOf(config, FLOW_DOUBLE_BRACE_INTERP);
+      expect(found, key).toHaveLength(1);
+      expect(found[0]!.message, key).toContain('is a literal, read as written.');
+      expect(found[0]!.hint, key).toContain('neither `{var}` nor `{{ }}` resolves there');
+      expect(found[0]!.hint, key).not.toContain('Use `{var}`');
+    }
+    expect(findingsOf({ payload: { meta: { by: '{{ x }}' } } }, FLOW_DOUBLE_BRACE_INTERP)[0]!.message)
+      .toContain('`payload.meta.by` is a literal');
+    // Control: a notify key outside the contract's literals does not take their hint.
+    const topic = findingsOf({ topic: '{{ record.kind }}' }, FLOW_DOUBLE_BRACE_INTERP);
+    expect(topic).toHaveLength(1);
+    expect(topic[0]!.hint).not.toContain('neither `{var}` nor `{{ }}` resolves there');
+  });
+
+  it('a bare `$ref.field` at a literal is named as read as written — no braces offered', () => {
+    const found = findingsOf({ actorId: '$source.id' }, FLOW_BARE_DOLLAR_REF);
+    expect(found).toHaveLength(1);
+    expect(found[0]!.message).toContain('at `actorId` is NOT resolved: it is read as written.');
+    expect(found[0]!.hint).toContain('Write the value itself.');
+    expect(found[0]!.hint).not.toContain('`{source.id}`');
+  });
+});

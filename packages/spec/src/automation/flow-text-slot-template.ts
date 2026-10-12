@@ -175,8 +175,9 @@ export interface FlowNodeTextSlot {
  * template, and the value slots (`fields.*`, `assignments.*`, the callee maps
  * `subflow.input.*`, `map.input.*`, `script.inputs.*`, a screen's
  * `defaults.*`, field `defaultValue` and `recordId`, the `loop` / `map`
- * `collection`, and a notify node's `recipients`, `templateData.*`,
- * `payload.*`, `sourceObject`, `sourceId` and `actorId`) are CEL's (#19939).
+ * `collection`, and a notify node's `recipients`, `templateData.*` and
+ * `sourceId`) are CEL's (#19939), and a notify node's `sourceObject`,
+ * `actorId` and `payload` are literals, read as written (#19939).
  */
 export const FLOW_NODE_TEXT_SLOTS: readonly FlowNodeTextSlot[] = [
   { nodeType: 'notify', key: 'title', label: 'notify title' },

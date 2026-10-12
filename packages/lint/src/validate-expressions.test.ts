@@ -5064,6 +5064,42 @@ describe('the loop and map collection is a value slot (#19939)', () => {
   });
 });
 
+/**
+ * [#19939, stage S4] A notify node's `sourceObject`, `actorId` and `payload`
+ * are literals the executor reads as written: no flow computed one, so no
+ * value slot is built there. `objectstack validate` refuses a `{…}` token in
+ * one, and an envelope, in the contract's words (the literal's remedy, write
+ * the value) — the same refusal `FlowSchema.parse`, `registerFlow` and the
+ * executor's parse give, since the contract marks it read as written.
+ */
+describe('the notify literals are refused with the literal remedy (#19939)', () => {
+  const stackWith = (config: Record<string, unknown>) => ({
+    flows: [{ name: 'f', nodes: [{ id: 'start', type: 'start' }, { id: 'n', type: 'notify', config: { recipients: 'u1', title: 'T', ...config } }], edges: [] }],
+  });
+  const errorsOf = (stack: unknown) =>
+    validateStackExpressions(stack as never).filter((i) => (i.severity ?? 'error') === 'error');
+  const LITERALS = [
+    ['sourceObject', (v: unknown) => ({ sourceObject: v }), 'sourceObject'],
+    ['actorId', (v: unknown) => ({ actorId: v }), 'actorId'],
+    ['payload', (v: unknown) => ({ payload: { who: v } }), 'payload.who'],
+  ] as const;
+
+  it.each(LITERALS)('%s: a `{…}` token is refused at the key, with the literal remedy', (_label, configOf, at) => {
+    const found = errorsOf(stackWith(configOf('{record.owner}')));
+    expect(found.map((i) => i.where)).toEqual([`flow 'f' · node 'n' (notify) config.${at}`]);
+    expect(found[0]!.message).toContain(`refused at \`${at}\` by the notify contract:`);
+    expect(found[0]!.message).toContain('a literal the executor reads as written: a single-brace token is not resolved here; write the value.');
+    expect(found[0]!.message).not.toContain(VALUE_SLOT_TEMPLATE_REFUSAL);
+  });
+
+  it.each(LITERALS)('%s: an envelope is refused — nothing evaluates it there; a literal is clean', (_label, configOf, at) => {
+    const found = errorsOf(stackWith(configOf({ dialect: 'cel', source: "'u' + '1'" })));
+    expect(found.map((i) => i.where)).toEqual([`flow 'f' · node 'n' (notify) config.${at}`]);
+    expect(found[0]!.message).toContain('a CEL value envelope is not evaluated here; write the value.');
+    expect(errorsOf(stackWith(configOf('crm_case')))).toEqual([]);
+  });
+});
+
 describe('node config an executor requires (#20316)', () => {
   const stackWith = (node: Record<string, unknown>) => ({
     flows: [{ name: 'config_flow', nodes: [{ id: 'start', type: 'start' }, { id: 'n', ...node }], edges: [] }],

@@ -20,6 +20,7 @@ import { z } from 'zod';
 
 import { HttpConfigSchema, NotifyConfigSchema } from './io-node-config.zod.js';
 import { flowNodeConfigRefusals } from './flow-node-config-refusals.js';
+import { FlowSchema } from './flow.zod.js';
 import {
   TYPED_EXPRESSION_DIALECT_ONLY,
   TYPED_EXPRESSION_SOURCE_REQUIRED,
@@ -44,9 +45,10 @@ describe('NotifyConfigSchema — an unknown key is refused, not stripped', () =>
   // except `template`/`templateData`; the template path carries those two in
   // place of `title`/`message`.
   it('accepts every declared key (inline content path — unchanged by the template path)', () => {
-    // [#19939] The value slots take a CEL value envelope or a literal, and
-    // `actionUrl` is a text slot with `{{ }}` holes; a `{…}` token in any of
-    // them is refused (pinned below).
+    // [#19939] The value slots take a CEL value envelope or a literal,
+    // `actionUrl` is a text slot with `{{ }}` holes, and `sourceObject`,
+    // `actorId` and `payload` are literals; a `{…}` token in any of them is
+    // refused (pinned below).
     const full = {
       recipients: ['team:ops', { dialect: 'cel', source: 'record.assignee' }],
       title: 'New task',
@@ -56,9 +58,9 @@ describe('NotifyConfigSchema — an unknown key is refused, not stripped', () =>
       severity: 'info',
       sourceObject: 'showcase_task',
       sourceId: { dialect: 'cel', source: 'record.id' },
-      actorId: { dialect: 'cel', source: 'current_user.id' },
+      actorId: 'usr_admin',
       actionUrl: '/task/{{ record.id }}',
-      payload: { taskName: { dialect: 'cel', source: 'record.name' }, kind: 'task' },
+      payload: { taskName: 'Review', kind: 'task' },
     };
     // Every key survives the parse; `title`/`message` are template slots, so
     // their bare strings come back as the `{ dialect: 'template', source }`
@@ -572,7 +574,7 @@ describe('NotifyConfigSchema — an unknown key is refused, not stripped', () =>
 // envelope or a literal; a `{…}` token is refused by the one value-slot judge,
 // naming its CEL spelling. `actionUrl` renders `{{ }}` holes; a `{…}` token is
 // refused by the one text-slot judge.
-describe('NotifyConfigSchema — the value slots and the `actionUrl` text slot (#19939)', () => {
+describe('NotifyConfigSchema — the value slots, the literals and the `actionUrl` text slot (#19939)', () => {
   const CEL = (source: string) => ({ dialect: 'cel', source });
   const base = { recipients: 'u1', title: 'T' };
 
@@ -590,10 +592,18 @@ describe('NotifyConfigSchema — the value slots and the `actionUrl` text slot (
     ['recipients', (value) => ({ ...base, recipients: value }), ['recipients']],
     ['recipients entry', (value) => ({ ...base, recipients: ['u1', value] }), ['recipients', 1]],
     ['templateData', (value) => ({ recipients: 'u1', template: 'crm.t', templateData: { who: value } }), ['templateData', 'who']],
-    ['payload', (value) => ({ ...base, payload: { who: value } }), ['payload', 'who']],
-    ['sourceObject', (value) => ({ ...base, sourceObject: value }), ['sourceObject']],
     ['sourceId', (value) => ({ ...base, sourceId: value }), ['sourceId']],
-    ['actorId', (value) => ({ ...base, actorId: value }), ['actorId']],
+  ];
+
+  /**
+   * Each LITERAL position — read as written, never evaluated: no flow computed
+   * one, so no value slot is built there (the S4 ruling). The config holding
+   * `value` there, the path a refusal names, and how the refusal names it.
+   */
+  const LITERALS: ReadonlyArray<[string, (value: unknown) => Record<string, unknown>, ReadonlyArray<string | number>, string]> = [
+    ['sourceObject', (value) => ({ ...base, sourceObject: value }), ['sourceObject'], '`sourceObject` is the name of the object the notification links to, a literal the executor reads as written:'],
+    ['actorId', (value) => ({ ...base, actorId: value }), ['actorId'], '`actorId` is the id of the user who caused the event, a literal the executor reads as written:'],
+    ['payload', (value) => ({ ...base, payload: { who: value } }), ['payload', 'who'], '`payload.who` is a value merged into the notification payload, a literal the executor reads as written:'],
   ];
 
   it.each(POSITIONS)('%s: a CEL value envelope parses, newly accepted where the slot was string-typed', (_label, configOf) => {
@@ -628,12 +638,48 @@ describe('NotifyConfigSchema — the value slots and the `actionUrl` text slot (
     expect(issuesAtPath({ ...base, recipients: 42 }, ['recipients'])[0]!.message).toContain('This one is a number.');
   });
 
-  it('sourceObject / sourceId / actorId: a value that is neither a string nor an envelope is refused with the slot\'s rule', () => {
-    for (const key of ['sourceObject', 'sourceId', 'actorId'] as const) {
+  it('sourceId: a value that is neither a string nor an envelope is refused with the slot\'s rule', () => {
+    const issues = issuesAtPath({ ...base, sourceId: 42 }, ['sourceId']);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.message).toContain('`sourceId` is the');
+    expect(issues[0]!.message).toContain('This one is a number.');
+  });
+
+  it.each(LITERALS)('%s (a literal): a string parses, written as it is', (_label, configOf) => {
+    const parsed = NotifyConfigSchema.safeParse(configOf('crm_case'));
+    expect(parsed.success).toBe(true);
+  });
+
+  it.each(LITERALS)('%s (a literal): a `{…}` token is refused at its own path with the literal remedy', (_label, configOf, path, lead) => {
+    const issues = issuesAtPath(configOf('{record.owner}'), path);
+    expect(issues.map((i) => i.code)).toEqual(['custom']);
+    expect(issues[0]!.message.startsWith(lead)).toBe(true);
+    expect(issues[0]!.message).toContain('a single-brace token is not resolved here; write the value.');
+    expect(issues[0]!.message).toContain('Read as written, `{record.owner}` would reach the messaging service with its braces.');
+    // Not the value slots' remedy: nothing evaluates here, so no envelope is offered.
+    expect(issues[0]!.message).not.toContain(VALUE_SLOT_TEMPLATE_REFUSAL);
+    expect(issues[0]!.message).not.toContain("dialect: 'cel'");
+  });
+
+  it.each(LITERALS)('%s (a literal): a CEL value envelope is refused — nothing evaluates it', (_label, configOf, path, lead) => {
+    const issues = issuesAtPath(configOf(CEL('record.owner')), path);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.message).toBe(`${lead} a CEL value envelope is not evaluated here; write the value.`);
+  });
+
+  it('payload (a literal): a token in a string at any depth of a value is refused at that string; data without one parses', () => {
+    const issues = NotifyConfigSchema.safeParse({ ...base, payload: { meta: { by: ['x', 'for {name}'] }, n: 3 } });
+    expect(issues.success).toBe(false);
+    expect(issues.error!.issues.map((i) => i.path)).toEqual([['payload', 'meta', 'by', 1]]);
+    expect(issues.error!.issues[0]!.message.startsWith('`payload.meta.by[1]` is a value merged into the notification payload')).toBe(true);
+    // An envelope deeper in a value is data, as it always was: only a value itself was ever evaluated.
+    expect(NotifyConfigSchema.safeParse({ ...base, payload: { meta: { by: ['x'], inner: { dialect: 'cel', source: 'x' } }, n: 3 } }).success).toBe(true);
+  });
+
+  it('sourceObject / actorId (literals): a value that is not a string is refused for its type', () => {
+    for (const key of ['sourceObject', 'actorId'] as const) {
       const issues = issuesAtPath({ ...base, [key]: 42 }, [key]);
-      expect(issues, key).toHaveLength(1);
-      expect(issues[0]!.message).toContain(`\`${key}\` is the`);
-      expect(issues[0]!.message).toContain('This one is a number.');
+      expect(issues.map((i) => i.code), key).toEqual(['invalid_type']);
     }
   });
 
@@ -659,21 +705,52 @@ describe('NotifyConfigSchema — the value slots and the `actionUrl` text slot (
     expect(flowNodeConfigRefusals('notify', { ...base, sourceId: 42 }).map((r) => r.path)).toEqual(['sourceId']);
   });
 
+  it.each(LITERALS)('%s (a literal): the build doors refuse a token and an envelope in the contract\'s words — the run reads it as written', (_label, configOf, path, lead) => {
+    const where = path.join('.');
+    for (const value of ['{record.owner}', CEL('record.owner')]) {
+      const refusals = flowNodeConfigRefusals('notify', configOf(value));
+      expect(refusals.map((r) => [r.code, r.path]), JSON.stringify(value)).toEqual([['node-config-refused-by-contract', where]]);
+      expect(refusals[0]!.message).toContain(`refused at \`${where}\` by the notify contract: ${lead}`);
+    }
+    // …and `FlowSchema.parse`, which reports through the same judge.
+    const flow = {
+      name: 'f', label: 'F', type: 'autolaunched',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'n', type: 'notify', label: 'N', config: configOf('{record.owner}') },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [{ id: 'e1', source: 'start', target: 'n' }, { id: 'e2', source: 'n', target: 'end' }],
+    };
+    const parsed = FlowSchema.safeParse(flow);
+    expect(parsed.success).toBe(false);
+    expect(parsed.error!.issues.some((i) => i.message.includes(lead))).toBe(true);
+    // A literal with no token passes every door.
+    expect(flowNodeConfigRefusals('notify', configOf('crm_case'))).toEqual([]);
+  });
+
   it('declares each value slot to the expression ledger through the spec Zod channel, keeping the literal arm', () => {
     type Node = { properties?: Record<string, Node>; additionalProperties?: Node; anyOf?: Node[]; type?: string; xExpression?: string };
     for (const json of [
       z.toJSONSchema(NotifyConfigSchema, { target: 'draft-2020-12', io: 'input', unrepresentable: 'any' }) as Node,
       getSchemalessNodeConfigJsonSchemas().notify as Node,
     ]) {
-      for (const key of ['recipients', 'sourceObject', 'sourceId', 'actorId']) {
+      for (const key of ['recipients', 'sourceId']) {
         expect(json.properties?.[key]?.xExpression, key).toBe('value');
       }
-      for (const key of ['templateData', 'payload']) {
-        expect(json.properties?.[key]?.additionalProperties?.xExpression, key).toBe('value');
-      }
+      expect(json.properties?.templateData?.additionalProperties?.xExpression).toBe('value');
       // The literal arms stay in the published shape, beside the envelope.
       expect(json.properties?.recipients?.anyOf?.map((arm) => arm.type)).toEqual(['string', 'array', 'object']);
       expect(json.properties?.sourceId?.anyOf?.map((arm) => arm.type)).toEqual(['string', 'object']);
+      // The literals publish their 17.x shapes, with no marker and no envelope arm.
+      for (const key of ['sourceObject', 'actorId']) {
+        expect(json.properties?.[key]?.type, key).toBe('string');
+        expect(json.properties?.[key]?.xExpression, key).toBeUndefined();
+        expect(json.properties?.[key]?.anyOf, key).toBeUndefined();
+      }
+      expect(json.properties?.payload?.type).toBe('object');
+      expect(json.properties?.payload?.xExpression).toBeUndefined();
+      expect(json.properties?.payload?.additionalProperties?.xExpression).toBeUndefined();
       // The text slots carry no value marker.
       for (const key of ['title', 'message', 'actionUrl']) expect(json.properties?.[key]?.xExpression, key).toBeUndefined();
     }
@@ -681,11 +758,17 @@ describe('NotifyConfigSchema — the value slots and the `actionUrl` text slot (
 
   it('says in each describe what the slot takes, and that a `{…}` token is refused', () => {
     const shape = (NotifyConfigSchema as unknown as { shape: Record<string, { description?: string }> }).shape;
-    for (const key of ['recipients', 'templateData', 'payload', 'sourceObject', 'sourceId', 'actorId'] as const) {
+    for (const key of ['recipients', 'templateData', 'sourceId'] as const) {
       const doc = shape[key]!.description ?? '';
       expect(doc.length, `${key} .describe() must not be empty`).toBeGreaterThan(0);
       expect(doc, key).toContain('CEL value envelope');
       expect(doc, key).toMatch(/template token is refused/);
+    }
+    for (const key of ['sourceObject', 'actorId', 'payload'] as const) {
+      const doc = shape[key]!.description ?? '';
+      expect(doc, key).toContain('read as written');
+      expect(doc, key).toContain('is not resolved here and is refused');
+      expect(doc, key).toContain('write the value');
     }
     expect(shape.actionUrl!.description).toContain('`{{ }}`');
     expect(shape.recipients!.description).toContain('adds each of its recipients');
