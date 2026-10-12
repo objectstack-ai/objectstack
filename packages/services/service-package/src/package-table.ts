@@ -21,6 +21,20 @@ import type { IDataEngine } from '@objectstack/spec/contracts';
  * `(id, version)` key and `TEXT` timestamps, so fresh and adopted databases
  * would disagree on the key. Carrying `(id, version)` that way needs a data
  * migration, so the table keeps its own DDL — spelled per dialect below.
+ *
+ * ## How `os migrate plan` / `apply` reach that DDL anyway (#23022)
+ *
+ * Not being an object kept the table off the managed migration path, so a
+ * deployment that sets `OS_SKIP_SCHEMA_SYNC=1` ("use after running migrations
+ * manually") had no documented way to get it. The plugin now DECLARES the table
+ * in `init()`, the phase a migrate boot runs, as its `package.storage` service:
+ * {@link probePackageTable} is the plan's read-only "is it there?", and
+ * {@link ensurePackageTable} is what `apply` runs. These are the boot's own
+ * statements, so a table `apply` creates is the one the boot creates.
+ * Re-measured for that card on SQLite: a declared `sys_packages` still keys on
+ * `id` alone (a second version refused, `SQLITE_CONSTRAINT_PRIMARYKEY`) and
+ * types the timestamps `datetime`, while the same object adopted over an
+ * existing table reports no drift — fresh and adopted databases would disagree.
  */
 
 /**
@@ -156,6 +170,35 @@ export const PACKAGE_TABLE_STATEMENTS: Readonly<Record<PackageTableDialect, Pack
 };
 
 /**
+ * The table's columns, in the order every dialect's `createTable` declares
+ * them — what a `create_table` line in `os migrate plan` lists (#23022).
+ */
+export const PACKAGE_TABLE_COLUMNS: readonly string[] = [
+  'id', 'version', 'manifest', 'metadata', 'hash', 'created_at', 'updated_at',
+];
+
+/**
+ * [#23022] The catalog read that answers "does `sys_packages` exist?", per
+ * dialect name `SqlDriver.dialectName` answers with — one row means present,
+ * none means absent. Each asks the schema the dialect's unqualified
+ * `CREATE TABLE IF NOT EXISTS` would create the table in: SQLite's `main`,
+ * PostgreSQL's `current_schema()`, MySQL's `DATABASE()`.
+ */
+const PRESENCE_PROBE_FOR_DRIVER_DIALECT: ReadonlyMap<string, string> = new Map<string, string>([
+  ['sqlite', "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'sys_packages' LIMIT 1"],
+  [
+    'postgres',
+    'SELECT 1 AS present FROM information_schema.tables '
+      + "WHERE table_schema = current_schema() AND table_name = 'sys_packages' LIMIT 1",
+  ],
+  [
+    'mysql',
+    'SELECT 1 AS present FROM information_schema.tables '
+      + "WHERE table_schema = DATABASE() AND table_name = 'sys_packages' LIMIT 1",
+  ],
+]);
+
+/**
  * The statement set for each dialect name `SqlDriver.dialectName` answers
  * with. A name not in this table — `'unknown'`, or no answer at all — takes
  * `'standard'` (see {@link resolvePackageTableDialect}).
@@ -196,16 +239,55 @@ const STATEMENT_SET_FOR_DRIVER_DIALECT: ReadonlyMap<string, PackageTableDialect>
  * driver registration could contradict.
  */
 export function resolvePackageTableDialect(objectql: IDataEngine): PackageTableDialect {
-  let named: unknown;
+  const named = defaultDriverDialectName(objectql);
+  return (named === undefined ? undefined : STATEMENT_SET_FOR_DRIVER_DIALECT.get(named)) ?? 'standard';
+}
+
+/**
+ * The `dialectName` the default driver answers with, or `undefined` when it
+ * names none. The one read {@link resolvePackageTableDialect} and
+ * {@link probePackageTable} share, for the reasons the former documents.
+ */
+function defaultDriverDialectName(objectql: IDataEngine): string | undefined {
   try {
     const driverName = objectql.getDefaultDriverName?.();
     const driver = driverName === undefined ? undefined : objectql.getDriverByName?.(driverName);
-    named = (driver as { dialectName?: unknown } | undefined)?.dialectName;
+    const named = (driver as { dialectName?: unknown } | undefined)?.dialectName;
+    return typeof named === 'string' ? named : undefined;
   } catch {
     // A registry or getter that throws names no dialect.
-    named = undefined;
+    return undefined;
   }
-  return (typeof named === 'string' ? STATEMENT_SET_FOR_DRIVER_DIALECT.get(named) : undefined) ?? 'standard';
+}
+
+/**
+ * [#23022] Does `sys_packages` exist on the database {@link ensurePackageTable}
+ * writes to? Read-only: one catalog SELECT, never DDL. This is the question
+ * `os migrate plan` asks before it lists the table as `create_table`.
+ *
+ * `undefined` means "could not tell", and it is never read as absent:
+ *
+ *  - the default driver names no dialect with a catalog probe (`'unknown'`, a
+ *    non-SQL driver, a host with no driver registry), so no SQL is sent; or
+ *  - the seam accepted the probe and returned no result set at all — the read
+ *    guard's case (commit ab47f6974): a seam that cannot answer has not
+ *    answered "absent".
+ *
+ * A probe the database REFUSES throws, whole.
+ */
+export async function probePackageTable(objectql: IDataEngine): Promise<boolean | undefined> {
+  const named = defaultDriverDialectName(objectql);
+  const probe = named === undefined ? undefined : PRESENCE_PROBE_FOR_DRIVER_DIALECT.get(named);
+  if (probe === undefined) return undefined;
+  const result = await objectql.execute!({ sql: probe });
+  if (!isResultSet(result)) return undefined;
+  return hasRows(result);
+}
+
+/** A raw SELECT's answer in one of the shapes the drivers return: rows, `{ rows }`, or mysql2's tuple. */
+function isResultSet(result: unknown): boolean {
+  if (Array.isArray(result)) return true;
+  return Array.isArray((result as { rows?: unknown } | null | undefined)?.rows);
 }
 
 /** One row or more in a result set, across the shapes a raw SELECT returns. */
