@@ -16,7 +16,8 @@
  *
  *  - a valid node of every builtin type;
  *  - a `{token}` value in a typed slot, in each spelling an author writes —
- *    never refused for its pre-interpolation type;
+ *    never refused for its pre-interpolation type (except at a key its
+ *    executor reads as written, a notify or http literal — #19939);
  *  - the places the build cannot know what the run parses, or another judge
  *    owns the finding (key membership, a region slot, a `predicate` / `value`
  *    ledger slot, `http`'s run-resolved `signingSecret`, a legacy `loop` with
@@ -217,11 +218,11 @@ describe('what stays accepted (lit controls)', () => {
   });
 
   it('CONTROL: a token value in a typed slot is never refused for its pre-interpolation type', () => {
+    // [#19939] Not `http`: its executor interpolates nothing since then, so a
+    // token at its `timeoutMs`, `durable` or whole `headers` is read as written
+    // and refused at every door (`io-node-config.test.ts`, the http literals).
     const TOKENS: ReadonlyArray<readonly [string, Config]> = [
       ['get_record', { limit: '{page.size}' }],
-      ['http', { timeoutMs: '{timeout}' }],
-      ['http', { durable: '{{durable_flag}}' }],
-      ['http', { headers: '{headers}' }],
       ['screen', { fields: [{ name: 'qty', min: '${minimum}', max: '{maximum}' }] }],
       ['update_record', { multi: '{bulk}' }],
       ['loop', { maxIterations: '{cap}' }],

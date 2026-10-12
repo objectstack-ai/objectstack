@@ -154,9 +154,10 @@ const GUARDS: Array<{ name: string; why: string; node: Record<string, unknown>; 
         expect: 'does not satisfy the http contract',
     },
     {
-        name: 'http whose signingSecret did not resolve',
-        why: 'the call would leave unsigned — a fault edge must not turn a missing credential into a sent request',
-        // The record carries no `signing_key`, so the template renders nothing.
+        name: 'http whose signingSecret is written as a template',
+        why: 'the call would be signed with the braces, or leave unsigned — a fault edge must not turn an unusable credential into a sent request',
+        // [#19939] `signingSecret` is read as written: the contract parse
+        // refuses the token (until then the template rendered nothing here).
         node: { type: 'http', config: { url: 'http://127.0.0.1:9/never', method: 'POST', signingSecret: '{record.signing_key}' } },
         expect: 'signingSecret',
     },
