@@ -807,6 +807,59 @@ function resolveOverlaySchema(type: string, _item: unknown): z.ZodTypeAny | null
 }
 
 /**
+ * [ADR-0131 D6, ADR-0010 Phase 4.3] The schema the save door judges `key` by on
+ * an item of `type` — read off {@link resolveOverlaySchema}, the door's own
+ * resolver, so no list of which types declare which key is kept anywhere — or
+ * `undefined` when that schema declares no such key (or the type has none).
+ *
+ * Read structurally: the object shapes the schema parses to, through the
+ * wrappers the registered types use (lazy, pipe, union, intersection and the
+ * optional family). A union declares the key when any member does. A schema
+ * this walk cannot read answers `undefined`, which leaves the key to the save
+ * door's own verdict — the direction that changes no refusal.
+ *
+ * The unmanaged import asks it for `protection`: only a type that declares the
+ * block has one to strip (`stripUnmanagedImportLock`); on any other type the
+ * save door judges the block exactly as it did before.
+ */
+export function overlaySchemaDeclaredKey(type: string, key: string): z.ZodTypeAny | undefined {
+    return declaredKeySchema(resolveOverlaySchema(type, undefined), key, 0);
+}
+
+function declaredKeySchema(schema: unknown, key: string, depth: number): z.ZodTypeAny | undefined {
+    if (!schema || depth > 12) return undefined;
+    const def = (schema as { _zod?: { def?: Record<string, any> } })._zod?.def;
+    switch (def?.type) {
+        case 'object': {
+            const shape = (schema as { shape?: Record<string, unknown> }).shape ?? def.shape ?? {};
+            return Object.prototype.hasOwnProperty.call(shape, key) ? shape[key] as z.ZodTypeAny : undefined;
+        }
+        case 'lazy':
+            return declaredKeySchema(def.getter?.(), key, depth + 1);
+        case 'pipe':
+            return declaredKeySchema(def.in, key, depth + 1) ?? declaredKeySchema(def.out, key, depth + 1);
+        case 'intersection':
+            return declaredKeySchema(def.left, key, depth + 1) ?? declaredKeySchema(def.right, key, depth + 1);
+        case 'union':
+            for (const option of (def.options ?? []) as unknown[]) {
+                const found = declaredKeySchema(option, key, depth + 1);
+                if (found) return found;
+            }
+            return undefined;
+        case 'optional':
+        case 'nullable':
+        case 'default':
+        case 'prefault':
+        case 'readonly':
+        case 'nonoptional':
+        case 'catch':
+            return declaredKeySchema(def.innerType, key, depth + 1);
+        default:
+            return undefined;
+    }
+}
+
+/**
  * [#21658, #21689] The save door's refusal of a `hook` that carries no `body`:
  * such a hook can never run once this door has stored it. One predicate, two
  * shapes it meets, one envelope: a hook whose `handler` names a function, and a
@@ -1777,8 +1830,31 @@ type ShippingPackages = {
  * stands in for the overlay layer over `artifactItem` alone, as before: the
  * registry's hydration and a previewed draft, neither of which is a read's
  * lock answer.
+ *
+ * [#23074] An artifact lends its envelope only to a body of its OWN identity.
+ * For a type whose identity is a pair ({@link ITEM_KEY_DISCRIMINATORS}:
+ * `email_template`'s `(name, locale)`), that is the same bundle member, read
+ * by {@link bundleMemberOf}, the identity's one declaration; an artifact of
+ * another member is treated as no artifact at all. So an environment overlay
+ * of a member the package does not ship (a `zh-CN` template beside a shipped
+ * `en-US`) keeps the tenant authorship it was registered with, and is never
+ * read as packaged code: `isCodeArtifactBody` false, no `_packageId` /
+ * `_packageVersion` / `_provenance` stamp, no artifact `_lock*`. Grafted, it
+ * read as the bundle's own artifact of that member to the registry's artifact
+ * lookup and its overlay-entry retirement, and the read doors served it under
+ * the package's provenance. The shipped member's overlay is unchanged: each
+ * caller looks the artifact up at the body's own member
+ * (`lookupArtifactItem`'s `member`), so it still wears that member's
+ * artifact's envelope. A registry that ignores `member` can answer another
+ * member's artifact, and this check is what keeps that answer off the body.
+ * Every other type has no members, so `bundleMemberOf` is `undefined` on both
+ * sides and the merge is exactly what it was. ⛔ The lock family a read
+ * resolved (`itemLock`) is applied before this check and is not moved by it:
+ * a lock binds the NAME, at the read and at the `_lock` gate alike
+ * ({@link resolveItemLock} over every package that ships the name).
  */
 function mergeArtifactProtection(
+    type: string,
     item: unknown,
     artifactItem: unknown,
     itemLock?: ItemLock,
@@ -1788,6 +1864,7 @@ function mergeArtifactProtection(
     if (artifactItem === undefined || artifactItem === null) return item;
     const a = artifactItem as Record<string, unknown>;
     if (typeof a !== 'object') return item;
+    if (bundleMemberOf(type, a) !== bundleMemberOf(type, item)) return item;
     const out: Record<string, unknown> = { ...(item as Record<string, unknown>) };
     if (itemLock === undefined && resolveItemLock({ artifact: [a], overlay: item }).layer === 'artifact') {
         if (a._lock !== undefined) out._lock = a._lock;
@@ -1799,6 +1876,18 @@ function mergeArtifactProtection(
     if (a._packageVersion !== undefined) out._packageVersion = a._packageVersion;
     if (a._provenance !== undefined) out._provenance = a._provenance;
     return out;
+}
+
+/**
+ * [#23074] The bundle member a body IS, for a type whose identity is a pair
+ * ({@link ITEM_KEY_DISCRIMINATORS}): `itemDiscriminator` under the type's
+ * canonical spelling, so the canonical member for a body that declares none.
+ * `undefined` for every other type, which has no members. The member
+ * {@link mergeArtifactProtection} matches an artifact against, and the one
+ * each of its callers looks the artifact up at.
+ */
+function bundleMemberOf(type: string, body: unknown): string | undefined {
+    return itemDiscriminator(canonicalMetaType(type), body);
 }
 
 /**
@@ -9650,7 +9739,9 @@ export class ObjectStackProtocolImplementation implements
             // takes priority; else the item's own `_packageId`.) [#22024]
             // The by-name read takes the same rule ({@link envelopePackageId}).
             const itemPackageId = envelopePackageId(packageId, it);
-            const a = this.lookupArtifactItem(request.type, itemName, itemPackageId);
+            // [#23074] …and to the item's own bundle member, whose artifact
+            // alone may lend it an envelope ({@link mergeArtifactProtection}).
+            const a = this.lookupArtifactItem(request.type, itemName, itemPackageId, bundleMemberOf(request.type, it));
             let itemLock: ItemLock | undefined;
             if (typeof itemName === 'string' && (it as any)?._draft !== true) {
                 const address: ItemAddress = {
@@ -9671,7 +9762,7 @@ export class ObjectStackProtocolImplementation implements
             // is the other exit a client reads field metadata from, and
             // an overlay row wins over the (already-governed) registry
             // entry in the merge above, so it carries the same lie.
-            governed.push(this.governServedObject(request.type, mergeArtifactProtection(it, a, itemLock)));
+            governed.push(this.governServedObject(request.type, mergeArtifactProtection(request.type, it, a, itemLock)));
         }
         return {
             type: request.type,
@@ -10436,8 +10527,11 @@ export class ObjectStackProtocolImplementation implements
         // serves. Before, a read naming no package took the first-registered
         // package's envelope, so a name two packages ship answered one
         // package's stored copy under the other package's `_packageId`.
+        // [#23074] …and at the served item's own bundle member, whose artifact
+        // alone may lend it an envelope ({@link mergeArtifactProtection}): a
+        // member the package does not ship is served as the environment's own.
         const artifactItem = this.lookupArtifactItem(
-            request.type, request.name, envelopePackageId(request.packageId, item),
+            request.type, request.name, envelopePackageId(request.packageId, item), bundleMemberOf(request.type, item),
         );
         // [#21738] The lock is the one item-lock resolution's, over the layers
         // this read resolved from its address: [#21803] every installed
@@ -10458,7 +10552,7 @@ export class ObjectStackProtocolImplementation implements
             request.type,
             this.governServedObject(
                 request.type,
-                mergeArtifactProtection(item, artifactItem, itemLock),
+                mergeArtifactProtection(request.type, item, artifactItem, itemLock),
             ),
         );
         // ADR-0047 — list views additionally get reference-integrity
@@ -18698,7 +18792,15 @@ export class ObjectStackProtocolImplementation implements
             this.hydrateExpandedViewItems(type, data, options, registry);
             return true;
         }
-        const artifact = this.lookupArtifactItem(type, (data as any).name, options.packageId ?? undefined);
+        // [#23074] The artifact of the row's OWN bundle member: an overlay of
+        // a member the package does not ship has none, so it registers as the
+        // tenant row it is ({@link mergeArtifactProtection}). It used to take
+        // the bundle's artifact canonical-first, and a `zh-CN` overlay beside
+        // a shipped `en-US` was registered wearing that envelope, which every
+        // registry reader then took for the package's own `zh-CN` artifact.
+        const artifact = this.lookupArtifactItem(
+            type, (data as any).name, options.packageId ?? undefined, bundleMemberOf(type, data),
+        );
         // [#16702] Say what this row IS before the artifact envelope is grafted
         // on top of it. Every body reaching this hydrator came out of a
         // `sys_metadata` write and is therefore tenant-authored by definition
@@ -18720,7 +18822,7 @@ export class ObjectStackProtocolImplementation implements
         // and its receipt rendered both as the package. Registered as the
         // tenant row it is, it is reported as one and never armed.
         const envelope = canonicalType === 'flow' ? undefined : artifact;
-        registry.registerItem(type, mergeArtifactProtection(stateTenantAuthorship(data), envelope), 'name' as any);
+        registry.registerItem(type, mergeArtifactProtection(type, stateTenantAuthorship(data), envelope), 'name' as any);
         this.hydrateExpandedViewItems(type, data, options, registry);
         return true;
     }
@@ -18872,7 +18974,7 @@ export class ObjectStackProtocolImplementation implements
             // where the item's own artifact exists, its `_provenance` still
             // wins (ADR-0010 §3.3), as it does on the container.
             const authored = options.tenantAuthored ? stateTenantAuthorship(item) : item;
-            out.push(mergeArtifactProtection(authored, ownArtifact) as Record<string, unknown>);
+            out.push(mergeArtifactProtection(type, authored, ownArtifact) as Record<string, unknown>);
         }
         return out;
     }
@@ -24775,9 +24877,13 @@ export class ObjectStackProtocolImplementation implements
      * the environment ledger, through {@link saveMetaItem} — the same save
      * door a Studio edit takes — so every copied item is environment metadata
      * from its first byte: owned by the base, `organization_id` NULL, served
-     * `_provenance: 'org'`, edited by the next save (an item shipped with an
-     * authored `_lock` keeps that lock as written today, and a follow-up on
-     * #15213 strips it per #22971's ruling A), and followed by no upgrade.
+     * `_provenance: 'org'`, edited by the next save, and followed by no
+     * upgrade. The package's protection lock is not copied, in either
+     * spelling — the `_lock` envelope (`_lock`, `_lockReason`, `_lockSource`,
+     * `_lockDocsUrl`) or, on a type that declares it, the `protection` block —
+     * and the answer's `strippedLocks` names each lock dropped with the
+     * package's reason (ADR-0010 §3.3 and Phase 4.3; the ruling on the D6 lock
+     * fork, record 6119681934 — `stripUnmanagedImportLock`).
      * The managed mode is the package install; this verb is what that
      * install's manifest service is to it, and no more (see
      * `package-unmanaged-install.ts` for what is copied, what is refused, and
@@ -24850,6 +24956,9 @@ export class ObjectStackProtocolImplementation implements
             ...(declared.data.targetName !== undefined ? { targetName: declared.data.targetName } : {}),
             // The save door's own predicate — registry-only, the hatch unread.
             isRuntimeCreatable: (type) => ObjectStackProtocolImplementation.isRuntimeCreateAllowed(type),
+            // The save door's own schema, asked which types declare the
+            // `protection` block the copy strips (ADR-0010 Phase 4.3).
+            protectionDeclarationOf: (type) => overlaySchemaDeclaredKey(type, 'protection'),
             loadOrderOf: (type) =>
                 DEFAULT_METADATA_TYPE_REGISTRY.find((entry) => entry.type === type)?.loadOrder ?? Number.MAX_SAFE_INTEGER,
         });
@@ -24965,6 +25074,9 @@ export class ObjectStackProtocolImplementation implements
             namespace,
             copiedCount: copied.length,
             copied,
+            // Planned before the base existed; every item was written, so every
+            // lock listed was dropped from a copy that now exists.
+            strippedLocks: plan.strippedLocks,
         };
     }
 

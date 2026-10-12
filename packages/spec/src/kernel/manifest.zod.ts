@@ -407,11 +407,12 @@ export function manifestIdRefusal(key: string, input: unknown): string {
  *  - `unmanaged`: every metadata item is copied ONCE into the environment
  *    ledger, under a new writable base whose id differs from the package's.
  *    From then on it is the environment's own metadata and the next save
- *    edits it, except that an item shipped with an authored protection lock
- *    (`_lock`) keeps that lock on the copy as written today, and a follow-up
- *    on #15213 strips it per #22971's ruling A; it follows no upgrade. A
- *    deployment whose tenancy posture walls organizations (`group`,
- *    `isolated`) refuses it, whatever the package permits.
+ *    edits it; it follows no upgrade. The package's protection lock is not
+ *    copied, in either spelling (`_lock`, ADR-0010 §3.3, or a `protection`
+ *    block, Phase 4.3): the import's answer names each lock it dropped, with
+ *    the package's reason (the ruling on the D6 lock fork, record
+ *    6119681934). A deployment whose tenancy posture walls organizations
+ *    (`group`, `isolated`) refuses it, whatever the package permits.
  *
  * The spelling is the maintainer's ruling B on the D6 execution card
  * (2026-10-11): `managed` and `unmanaged` are the two states of one property,

@@ -87,10 +87,15 @@
 //   node scripts/measure-test-shard-timings.mjs --run <id> <summary.json>... \
 //     --run <id> <summary.json>... [--merge-into <dataset>] [--out <path>] \
 //     [--spread-out <path>]
+//   node scripts/measure-test-shard-timings.mjs --diff --prior <dataset> \
+//     --refreshed <dataset> [--captures <dir>] [--out <path>]
+//       the refresh PR's regression section (#22949 ruling E): see
+//       "The refresh diff" below
 //   node scripts/measure-test-shard-timings.mjs --self-test
 
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
@@ -168,6 +173,52 @@ export const MINIMUM_EXECUTED_RUNS = 3;
 // the weights rather than in place of them: the partitioner and the drift gate
 // keep reading `packages` as name -> median, unchanged.
 export const CEILING_HEADROOM = 1.25;
+
+// -- Regression detection, from the dataset's own history (#22949 ruling E) --
+//
+// A package's suite wall on a shared runner measures the RUN's load as much as
+// the package: measured, the same package read 82 s on a quiet hour (most of
+// the workspace replayed from the turbo cache) and 209 s on a busy one (the
+// whole workspace executing after `spec`/`core` landed), 2.56x, while the
+// ceiling formula allows 2.0x of weight. So the wall ceiling stopped grading
+// (ruling E item 1) and detection moved here: every refresh DIFFS its window
+// against the previous dataset, and its PR body names what rose. Three numbers
+// carry it, and two of them are the ceiling's own factor on purpose -- one
+// ruled factor throughout, never a second tunable:
+//
+//   RISE_FACTOR                a package whose weight is up by this factor or
+//                              more against the previous dataset is a RISE
+//                              (ruling E item 2: "up by 25 % or more (the
+//                              ceiling's own factor)").
+//   DENSITY_COMPARABLE_FACTOR  "COMPARABLE DENSITY", as a number: two windows
+//                              are comparable when their mean count of
+//                              EXECUTED packages per run (cache replays
+//                              excluded) is within this factor of each other
+//                              -- 20 and 25 are comparable, 20 and 25.1 are
+//                              not. A rise is judged only against a window of
+//                              comparable density; anything else is a
+//                              baseline, said so in the PR body, never a
+//                              finding. The MEAN and not the median because
+//                              hourly runs are bimodal (a run after `spec`
+//                              lands executes nearly everything, the rest
+//                              replay most of it): the median of a bimodal set
+//                              jumps from one mode to the other, the mean
+//                              moves with the mix, which is what the
+//                              contention a weight was measured under follows.
+//                              The same factor also bounds the density guard
+//                              (diffRefresh): a rise whose share of its runs'
+//                              executed total moved by less than it is density
+//                              alone, not a finding.
+//   FILE_BUDGET_SECONDS        a test file over this many seconds of wall in
+//                              the window is listed (objectstack#22998: a file
+//                              over 10 s is a card for the owning lane).
+//
+// ⛔ None of these reds anything. A finding is a card the refresh lane's seat
+// files after the bot PR lands (the workflow's header says who files what);
+// the build stays green whatever this reads.
+export const RISE_FACTOR = CEILING_HEADROOM;
+export const DENSITY_COMPARABLE_FACTOR = CEILING_HEADROOM;
+export const FILE_BUDGET_SECONDS = 10;
 
 // One package's ceiling from its executed per-run readings in this refresh:
 // the slowest of them times the headroom, rounded UP to the hundredth, so the
@@ -502,9 +553,18 @@ export function fallbackRate(measured, fileCounts) {
 export function collectSamples(perSummary) {
   const bySample = new Map();
   const cachedNames = new Set();
-  const push = (name, seconds) => {
+  // #22949 ruling E: the same executed readings again, kept per RUN, because
+  // the density tag (how many packages a run executed) and each package's share
+  // of its run's executed total are both per-run facts (densityOf below). Keyed
+  // by the caller's `--run` id, or null for the one implicit group, and
+  // registered in input order so the tag list reads newest-first the way the
+  // workflow feeds the runs.
+  const runReadings = new Map();
+  const push = (name, seconds, run) => {
     if (!bySample.has(name)) bySample.set(name, []);
     bySample.get(name).push(seconds);
+    if (!runReadings.has(run)) runReadings.set(run, []);
+    runReadings.get(run).push([name, seconds]);
   };
 
   // A file-sharded package (#16173) arrives as n partial windows across n
@@ -547,11 +607,12 @@ export function collectSamples(perSummary) {
   // run is fed without declaring itself.
   const sliceLedger = new Map();
   for (const { samples, skippedCached, slices, run = null } of perSummary) {
+    if (!runReadings.has(run)) runReadings.set(run, []);
     for (const n of skippedCached) cachedNames.add(n);
     for (const [name, seconds] of samples) {
       const slice = slices?.get(name) ?? null;
       if (!slice) {
-        push(name, seconds);
+        push(name, seconds, run);
         continue;
       }
       if (!sliceLedger.has(run)) sliceLedger.set(run, new Map());
@@ -596,7 +657,7 @@ export function collectSamples(perSummary) {
     for (const [name, byCount] of byName) {
       for (const [count, seen] of byCount) {
         if (seen.size === count) {
-          push(name, [...seen.values()].reduce((a, b) => a + b, 0));
+          push(name, [...seen.values()].reduce((a, b) => a + b, 0), run);
           continue;
         }
         const missing = [];
@@ -610,7 +671,7 @@ export function collectSamples(perSummary) {
     }
   }
   incompleteSlices.sort((a, b) => a.localeCompare(b, 'en'));
-  return { bySample, cachedNames, incompleteSlices };
+  return { bySample, cachedNames, incompleteSlices, runReadings };
 }
 
 // The packages whose weight rests on fewer than `minimumRuns` executed runs
@@ -646,6 +707,51 @@ export function provisionalPackages({ bySample, carriedOver, carryProvisional, m
   return [...new Set(names)].sort((a, b) => a.localeCompare(b, 'en'));
 }
 
+// The density reading a refresh records (#22949 ruling E, item 2), from the
+// per-run executed readings collectSamples keeps:
+//
+//   runs     one entry per run that EXECUTED at least one package, in input
+//            order (newest first, the way the workflow feeds them): its id and
+//            `executed`, how many packages it executed -- the run's DENSITY TAG.
+//            Cache replays are not executions and do not count (they are not
+//            readings at all, see samplesFromSummary), nor does a sliced
+//            package whose run could not assemble every slice. A run that
+//            executed nothing carries no tag: it contributed no reading to any
+//            weight, so it says nothing about the density a weight was measured
+//            at. A reading with no `--run` belongs to UNDECLARED_RUN.
+//   shares   per package measured in this window: the MEDIAN, over the runs
+//            that executed it, of its seconds over that run's executed total
+//            (the summed seconds of every package the run executed). The ruled
+//            density guard reads this: "a package whose rise is explained by
+//            density alone (its share of the run's executed total unchanged
+//            within the factor) is not a finding". Four significant digits --
+//            a ratio of two shares is what is read, never a share alone.
+//
+// ⛔ Recorded from the first refresh after ruling E and never reconstructed:
+// a dataset written before it has no `density`, and the diff reads that as "no
+// density reading" (a BASELINE), never as a density of zero.
+export const UNDECLARED_RUN = '(undeclared run)';
+export function densityOf(runReadings) {
+  const runs = [];
+  const sharesByName = new Map();
+  for (const [run, readings] of runReadings) {
+    if (readings.length === 0) continue;
+    const executed = new Set(readings.map(([name]) => name)).size;
+    runs.push({ run: run === null ? UNDECLARED_RUN : String(run), executed });
+    const total = readings.reduce((sum, [, seconds]) => sum + seconds, 0);
+    if (!(total > 0)) continue;
+    for (const [name, seconds] of readings) {
+      if (!sharesByName.has(name)) sharesByName.set(name, []);
+      sharesByName.get(name).push(seconds / total);
+    }
+  }
+  const shares = {};
+  for (const name of [...sharesByName.keys()].sort((a, b) => a.localeCompare(b, 'en'))) {
+    shares[name] = Number(median(sharesByName.get(name)).toPrecision(4));
+  }
+  return { runs, shares };
+}
+
 // `carryProvisional` is the prior dataset's own `provisional` list, or null when
 // that dataset has none (see provisionalPackages above). It matters only for
 // carried packages, so a call with no `carryFrom` never reads it.
@@ -660,7 +766,7 @@ export function buildDataset({
   carryCeilings = null,
   minimumRuns = MINIMUM_EXECUTED_RUNS,
 }) {
-  const { bySample, cachedNames, incompleteSlices } = collectSamples(perSummary);
+  const { bySample, cachedNames, incompleteSlices, runReadings } = collectSamples(perSummary);
 
   if (bySample.size === 0) {
     throw new Error(
@@ -731,7 +837,9 @@ export function buildDataset({
       '`ceilings` is each package\'s suite-duration ceiling, graded by scripts/check-test-suite-ceilings.mjs: ' +
       'its slowest executed run in the refresh window that first set it, times `provenance.ceilingHeadroom`, ' +
       'then held by every later refresh -- raised only by a ruling, never by a refresh. `uncapped` names ' +
-      'the packages with none, and why.',
+      'the packages with none, and why. `density` is the window\'s density reading: each run\'s count of ' +
+      'executed packages (cache replays excluded) and each measured package\'s median share of its runs\' ' +
+      'executed seconds -- what the next refresh\'s diff judges a rise against.',
     // The bar `provisional` was judged against travels with the list, so a
     // reader never has to know which version of this script wrote the file.
     // The ceiling headroom travels the same way (#16468).
@@ -762,6 +870,12 @@ export function buildDataset({
     // as NOT MEASURED rather than as a table with no rows.
     ceilings,
     uncapped,
+    // #22949 ruling E. The window's density reading (densityOf): beside the
+    // weights, never in place of them, for the same reason as `carriedOver`.
+    // Always present, for the same reason as `ceilings`: an ABSENT `density`
+    // is how the diff recognises a dataset written before it, which it reads
+    // as a BASELINE rather than as a window that executed nothing.
+    density: densityOf(runReadings),
   };
 }
 
@@ -848,6 +962,528 @@ export function renderSpread({ bySample, dataset }) {
   return `${lines.join('\n')}\n`;
 }
 
+// -- The refresh diff (#22949 ruling E, items 2 and 3) -----------------------
+//
+// What a refresh PR says about REGRESSIONS, now that the wall ceiling only
+// reports (ruling E item 1). Three readings, all of them reads of numbers the
+// lane already has -- nothing here measures anything new:
+//
+//   RISES     every package whose weight in this window is up by RISE_FACTOR
+//             or more against the previous dataset (the one on `main` before
+//             the refresh), with both numbers and the package's slowest file
+//             in the window. Each rise carries a VERDICT; only `finding` is a
+//             card (see diffRefresh for the rest).
+//   DOWNS     one line: how many packages got lighter, naming the ones down by
+//             the same factor.
+//   FILES     every test file over FILE_BUDGET_SECONDS of wall in the window,
+//             with its package and its slowest run (objectstack#22998).
+//
+// ⚠ THE PER-FILE READING IS NOT IN THE DATASET, although ruling E reads it as
+// if it were. The dataset holds per-PACKAGE weights only; the `Slowest
+// file:` line the ceiling check prints comes from the per-shard captures
+// `report-test-timings.mjs --capture` writes in every Test Core shard and
+// uploads as `test-core-timings-<n>-of-6` -- the SAME runs this refresh reads,
+// retained exactly as long as their run summaries (1 day). So the refresh lane
+// downloads those captures beside the summaries and this reads them: still a
+// read of an existing measurement, never a second test run. A run whose
+// captures did not arrive is named; a package with no file line in the window
+// is named with the reason (carried: every run replayed it, so its file lines
+// are replays of a duration measured outside the window; or executed with no
+// vitest file line captured).
+//
+// ⛔ Nothing here exits non-zero on a reading. A rise, a finding or a file over
+// budget is a card the refresh lane's seat files after the PR lands -- never a
+// red build. The only non-zero exit is a REFUSAL: a dataset whose `density` is
+// present but malformed was generated, so a malformed one is a defect.
+
+// The window density a dataset recorded (densityOf), with its mean executed
+// packages per run, or null when the dataset predates ruling E and carries no
+// `density` at all -- a BASELINE, never a density of zero.
+export function windowDensity(dataset, label = 'dataset') {
+  if (!dataset || typeof dataset !== 'object' || Array.isArray(dataset)) {
+    throw new Error(`${label}: not a JSON object`);
+  }
+  if (!Object.hasOwn(dataset, 'density')) return null;
+  const runs = dataset.density?.runs;
+  const shares = dataset.density?.shares;
+  const runShaped = (r) => typeof r?.run === 'string' && Number.isInteger(r?.executed) && r.executed >= 1;
+  if (!Array.isArray(runs) || runs.length === 0 || !runs.every(runShaped)) {
+    throw new Error(
+      `${label}: \`density.runs\` is ${JSON.stringify(runs)}, not a non-empty list of {run, executed >= 1}. ` +
+        'It is generated: regenerate the dataset rather than reading a guess out of it.'
+    );
+  }
+  const shareShaped = (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0;
+  if (!shares || typeof shares !== 'object' || Array.isArray(shares) || !Object.values(shares).every(shareShaped)) {
+    throw new Error(
+      `${label}: \`density.shares\` is not a map of package -> share of its runs' executed total. ` +
+        'It is generated: regenerate the dataset rather than reading a guess out of it.'
+    );
+  }
+  const mean = runs.reduce((sum, r) => sum + r.executed, 0) / runs.length;
+  return { runs, shares, mean };
+}
+
+// "Comparable density", as the number DENSITY_COMPARABLE_FACTOR says: the two
+// windows' mean executed packages per run are within the factor of each other.
+// A mean of zero is not a density anything is comparable with.
+export function densityComparable(a, b, factor = DENSITY_COMPARABLE_FACTOR) {
+  if (!(a > 0) || !(b > 0)) return false;
+  return Math.max(a, b) <= Math.min(a, b) * factor;
+}
+
+// The verdict each rise carries. Only FINDING is a card.
+export const RISE_VERDICTS = Object.freeze({
+  finding: 'finding',
+  densityOnly: 'density only',
+  provisional: 'provisional',
+  noShare: 'no prior share',
+  baseline: 'baseline',
+});
+
+// The weight diff and its density guard (#22949 ruling E, item 2).
+//
+// A package is compared only when both datasets weigh it and THIS window
+// executed it: a carried weight is the prior number moved forward by a cache
+// HIT, so it cannot have risen, and is counted rather than compared. A rise is
+// `after >= before x factor`. Its verdict, in this order:
+//
+//   baseline       no rise in this diff is judged: the previous dataset has
+//                  no density reading (it predates ruling E -- the FIRST diff
+//                  after this lands reads exactly that), or the two windows
+//                  are not of comparable density (DENSITY_COMPARABLE_FACTOR).
+//                  `baseline` says which, and the PR body says so.
+//   provisional    either weight rests on fewer than MINIMUM_EXECUTED_RUNS
+//                  executed runs -- "fit to balance on, NOT a baseline".
+//   no prior share the package has no share in one of the two readings (the
+//                  previous window carried it, so no run of that window
+//                  executed it): the guard cannot be read, so not a card.
+//   density only   THE GUARD. Its share of its runs' executed total moved by
+//                  less than the factor: the whole run got slower around it,
+//                  which is load, not the package. Not a finding.
+//   finding        up by the factor AND its share up by the factor too: the
+//                  package grew against the rest of the runs it ran in. A card.
+export function diffRefresh({ prior, refreshed, factor = RISE_FACTOR, comparableFactor = DENSITY_COMPARABLE_FACTOR }) {
+  for (const [label, d] of [
+    ['the previous dataset', prior],
+    ['the refreshed dataset', refreshed],
+  ]) {
+    if (!d || typeof d.packages !== 'object' || d.packages === null || Array.isArray(d.packages)) {
+      throw new Error(`${label}: expected {packages:{"<name>":<seconds>}} -- is this a shard-timings dataset at all?`);
+    }
+  }
+  const densityPrior = windowDensity(prior, 'the previous dataset');
+  const densityNow = windowDensity(refreshed, 'the refreshed dataset');
+  const comparable =
+    densityPrior !== null && densityNow !== null && densityComparable(densityPrior.mean, densityNow.mean, comparableFactor);
+  let baseline = null;
+  if (densityNow === null) {
+    baseline =
+      'the refreshed dataset carries no density reading -- it was written by a generator that predates ruling E, ' +
+      'so neither window can be tagged';
+  } else if (densityPrior === null) {
+    baseline =
+      'the previous dataset carries no density reading -- it was written before ruling E, so this window is the ' +
+      'first one with a density reading and becomes the baseline the next refresh is judged against';
+  } else if (!comparable) {
+    baseline =
+      `the two windows are not of comparable density -- ${densityNow.mean.toFixed(1)} executed packages per run ` +
+      `against ${densityPrior.mean.toFixed(1)} (${(Math.max(densityNow.mean, densityPrior.mean) / Math.min(densityNow.mean, densityPrior.mean)).toFixed(2)}x, ` +
+      `over the ${comparableFactor}x that "comparable" allows) -- so this window becomes the baseline instead`;
+  }
+  const carriedNow = new Set(refreshed.carriedOver ?? []);
+  const provisional = new Set([...(refreshed.provisional ?? []), ...(prior.provisional ?? [])]);
+  const before = prior.packages;
+  const after = refreshed.packages;
+  const rises = [];
+  const downs = [];
+  const carried = [];
+  const added = [];
+  const removed = [];
+  const unrated = [];
+  const names = [...new Set([...Object.keys(before), ...Object.keys(after)])].sort((a, b) => a.localeCompare(b, 'en'));
+  for (const name of names) {
+    if (!Object.hasOwn(before, name)) {
+      added.push(name);
+      continue;
+    }
+    if (!Object.hasOwn(after, name)) {
+      removed.push(name);
+      continue;
+    }
+    if (carriedNow.has(name)) {
+      carried.push(name);
+      continue;
+    }
+    const b = before[name];
+    const a = after[name];
+    if (typeof b !== 'number' || typeof a !== 'number' || !(b > 0) || !(a >= 0)) {
+      unrated.push(name);
+      continue;
+    }
+    const ratio = a / b;
+    if (a < b) {
+      downs.push({ name, before: b, after: a, ratio });
+      continue;
+    }
+    if (!(a >= b * factor)) continue;
+    const shareBefore = densityPrior?.shares[name];
+    const shareAfter = densityNow?.shares[name];
+    const shareRatio = shareBefore > 0 && shareAfter >= 0 ? shareAfter / shareBefore : null;
+    let verdict;
+    if (baseline !== null) verdict = RISE_VERDICTS.baseline;
+    else if (provisional.has(name)) verdict = RISE_VERDICTS.provisional;
+    else if (shareRatio === null) verdict = RISE_VERDICTS.noShare;
+    else if (shareAfter >= shareBefore * factor) verdict = RISE_VERDICTS.finding;
+    else verdict = RISE_VERDICTS.densityOnly;
+    rises.push({ name, before: b, after: a, ratio, shareBefore: shareBefore ?? null, shareAfter: shareAfter ?? null, shareRatio, verdict });
+  }
+  rises.sort((x, y) => y.ratio - x.ratio || x.name.localeCompare(y.name, 'en'));
+  downs.sort((x, y) => x.ratio - y.ratio || x.name.localeCompare(y.name, 'en'));
+  return {
+    factor,
+    comparableFactor,
+    density: { prior: densityPrior, now: densityNow, comparable },
+    baseline,
+    rises,
+    findings: rises.filter((r) => r.verdict === RISE_VERDICTS.finding),
+    downs,
+    carried,
+    added,
+    removed,
+    unrated,
+  };
+}
+
+// The schema `report-test-timings.mjs --capture` writes (its CAPTURE_SCHEMA).
+// Spelled here rather than imported: that module imports this one, and the
+// captures are an ARTIFACT contract, read from disk -- a capture under any
+// other schema is named as a problem, never read, so a format change reads
+// NOT MEASURED loudly instead of an empty list quietly.
+//
+// Joined rather than written as one quoted literal, because a quoted
+// `name/1` at module scope is path-shaped and the dispatch derivation would
+// read it as a population this script declares (check:declared-population-
+// live refuses exactly that: a declaration that reaches no tracked path). The
+// marker below is the declaration this script does make:
+// dispatch-gates: no-path-population -- the --self-test drives in-memory fixtures and a temp dir and reads no tracked file; the generator and --diff read only the paths the refresh workflow hands them on argv, and that workflow's own pull_request paths trigger names this file
+export const TIMING_CAPTURE_SCHEMA = ['test-timing-capture', 1].join('/');
+
+// The per-shard captures of the window's runs, laid out by the refresh lane as
+// <dir>/<run id>/<anything>/*.json. `present` is false when the directory
+// itself is absent -- nothing was downloaded at all, which the renderer says.
+export function readWindowCaptures(dir) {
+  const byRun = new Map();
+  const problems = [];
+  let runDirs;
+  try {
+    runDirs = readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort((a, b) => a.localeCompare(b, 'en'));
+  } catch {
+    return { byRun, problems: [`no capture directory at ${dir}`], present: false };
+  }
+  const walk = (d, into) => {
+    for (const entry of readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, entry.name);
+      if (entry.isDirectory()) {
+        walk(p, into);
+        continue;
+      }
+      if (!entry.name.endsWith('.json')) continue;
+      let parsed;
+      try {
+        parsed = JSON.parse(readFileSync(p, 'utf8'));
+      } catch (err) {
+        problems.push(`${path.relative(dir, p)}: unreadable (${err?.message ?? String(err)})`);
+        continue;
+      }
+      if (parsed?.schema !== TIMING_CAPTURE_SCHEMA) {
+        problems.push(
+          `${path.relative(dir, p)}: declares schema ${JSON.stringify(parsed?.schema ?? null)}, not ${TIMING_CAPTURE_SCHEMA}`
+        );
+        continue;
+      }
+      into.push(parsed);
+    }
+  };
+  for (const run of runDirs) {
+    const captures = [];
+    walk(path.join(dir, run), captures);
+    byRun.set(run, captures);
+  }
+  return { byRun, problems, present: true };
+}
+
+// Every test file over the budget in the window (#22949 ruling E, item 3; the
+// budget is objectstack#22998's), and each package's slowest file.
+//
+// ⛔ REPLAYED ROWS ARE EXCLUDED. A capture keeps a cache HIT's file lines and
+// marks them `replayed` (report-test-timings.mjs says why: they are true
+// durations of the run that FILLED the cache). That run is not in this window
+// and its density is unknown, so a replayed row is not a reading of this
+// window -- the same rule the weights follow.
+export function windowFiles({ byRun, runs, dataset, budgetSeconds = FILE_BUDGET_SECONDS }) {
+  const entries = new Map();
+  const measuredPackages = new Set();
+  const runsWithoutCapture = [];
+  const problems = [];
+  let replayedRows = 0;
+  let measuredRows = 0;
+  for (const run of runs) {
+    const captures = byRun.get(run) ?? [];
+    if (captures.length === 0) {
+      runsWithoutCapture.push(run);
+      continue;
+    }
+    for (const capture of captures) {
+      for (const row of capture.files ?? []) {
+        if (row?.replayed === true) {
+          replayedRows += 1;
+          continue;
+        }
+        if (typeof row?.pkg !== 'string' || typeof row?.file !== 'string' || !Number.isFinite(row?.ms)) {
+          problems.push(`run ${run}: a file row without a package, a path or a duration (${JSON.stringify(row)})`);
+          continue;
+        }
+        measuredRows += 1;
+        measuredPackages.add(row.pkg);
+        const project = typeof row.project === 'string' && row.project.length > 0 ? row.project : null;
+        const key = JSON.stringify([row.pkg, project, row.file]);
+        if (!entries.has(key)) {
+          entries.set(key, { pkg: row.pkg, file: row.file, project, slowest: null, runsSeen: new Set(), runsOver: new Set() });
+        }
+        const entry = entries.get(key);
+        entry.runsSeen.add(run);
+        if (row.ms > budgetSeconds * 1000) entry.runsOver.add(run);
+        if (entry.slowest === null || row.ms > entry.slowest.ms) entry.slowest = { run, ms: row.ms };
+      }
+    }
+  }
+  const all = [...entries.values()].sort(
+    (a, b) => b.slowest.ms - a.slowest.ms || a.pkg.localeCompare(b.pkg, 'en') || a.file.localeCompare(b.file, 'en')
+  );
+  const over = all.filter((e) => e.slowest.ms > budgetSeconds * 1000);
+  const slowestByPackage = new Map();
+  for (const e of all) if (!slowestByPackage.has(e.pkg)) slowestByPackage.set(e.pkg, e);
+  const carriedOver = new Set(dataset?.carriedOver ?? []);
+  const withoutReading = { carried: [], noFileLine: [] };
+  for (const name of Object.keys(dataset?.packages ?? {}).sort((a, b) => a.localeCompare(b, 'en'))) {
+    if (measuredPackages.has(name)) continue;
+    (carriedOver.has(name) ? withoutReading.carried : withoutReading.noFileLine).push(name);
+  }
+  return {
+    budgetSeconds,
+    over,
+    slowestByPackage,
+    runsRead: runs.length - runsWithoutCapture.length,
+    runsWithoutCapture,
+    replayedRows,
+    measuredRows,
+    withoutReading,
+    problems,
+  };
+}
+
+// How many rows the PR body prints of the two lists that can grow with the
+// workspace, so the body stays under GitHub's size limit and readable.
+// Findings are NEVER capped -- each one is a card -- and a capped list says how
+// many it left out and where the whole one is.
+export const NON_FINDING_RISE_ROWS = 25;
+export const FILE_ROWS = 100;
+
+const secs = (n) => n.toFixed(2);
+const times = (n) => `${n.toFixed(2)}×`;
+const shareText = (n) => (n === null || n === undefined ? '—' : Number(n.toPrecision(3)).toString());
+
+// The PR body's regression section and the seat's duty, as Markdown.
+// `files` is windowFiles()' result, or null with `filesNotMeasured` saying why.
+export function renderRefreshDiff({ diff, files = null, filesNotMeasured = null, captureProblems = [] }) {
+  const out = [];
+  const { density } = diff;
+  const factorPct = Math.round((diff.factor - 1) * 100);
+  out.push('## Regression readings: rises, density, files over budget');
+  out.push('');
+  out.push(
+    'Regression detection lives here since #22949 ruling E: the suite-duration ceilings only report, and each ' +
+      'refresh diffs its window against the previous dataset instead. Nothing in this section fails a build -- a ' +
+      'finding is a card (see the next section).'
+  );
+  out.push('');
+  if (density.now === null) {
+    out.push('**Density per run:** NOT MEASURED -- the refreshed dataset carries no `density` reading.');
+  } else {
+    const tags = density.now.runs.map((r) => `\`${r.run}\` ${r.executed}`).join(' · ');
+    out.push(
+      `**Density per run** (packages executed, cache replays excluded), newest first: ${tags} -- this window's ` +
+        `mean is **${density.now.mean.toFixed(1)}** over ${density.now.runs.length} run(s).`
+    );
+  }
+  out.push('');
+  if (density.prior === null) {
+    out.push('**Previous window:** no density reading (the previous dataset predates ruling E).');
+  } else {
+    const ratio =
+      density.now === null ? null : Math.max(density.now.mean, density.prior.mean) / Math.min(density.now.mean, density.prior.mean);
+    out.push(
+      `**Previous window:** mean **${density.prior.mean.toFixed(1)}** over ${density.prior.runs.length} run(s)` +
+        (ratio === null
+          ? '.'
+          : ` -- ${density.comparable ? 'comparable' : 'NOT comparable'} (${times(ratio)}; "comparable" is within ` +
+            `${times(diff.comparableFactor)} of each other).`)
+    );
+  }
+  out.push('');
+  if (diff.baseline !== null) {
+    out.push(
+      `**This diff is a BASELINE, not a judgement:** ${diff.baseline}. The rises below are readings -- none is a ` +
+        'finding and none is filed. The next refresh whose window density is comparable with this one judges against it.'
+    );
+    out.push('');
+  }
+  const findings = diff.findings;
+  out.push(`### Packages up by ${factorPct} % or more: ${diff.rises.length} (findings: ${findings.length})`);
+  out.push('');
+  const slowestFile = (name) => {
+    if (files === null) return '(per-file reading not measured)';
+    const e = files.slowestByPackage.get(name);
+    if (!e) return '(no file line captured in this window)';
+    return `\`${e.file}\` ${secs(e.slowest.ms / 1000)} s (run \`${e.slowest.run}\`)`;
+  };
+  if (diff.rises.length === 0) {
+    out.push(`None: no package compared in this window weighs ${times(diff.factor)} or more of its previous weight.`);
+  } else {
+    const shown = [...findings, ...diff.rises.filter((r) => r.verdict !== RISE_VERDICTS.finding).slice(0, NON_FINDING_RISE_ROWS)];
+    const left = diff.rises.length - shown.length;
+    out.push('| package | previous s | this window s | rise | share of its runs\' executed total, previous → now | verdict | slowest file in this window |');
+    out.push('|---|--:|--:|--:|---|---|---|');
+    for (const r of shown) {
+      const share =
+        r.shareRatio === null
+          ? `${shareText(r.shareBefore)} → ${shareText(r.shareAfter)}`
+          : `${shareText(r.shareBefore)} → ${shareText(r.shareAfter)} (${times(r.shareRatio)})`;
+      const verdict = r.verdict === RISE_VERDICTS.finding ? '**finding**' : r.verdict;
+      out.push(`| \`${r.name}\` | ${secs(r.before)} | ${secs(r.after)} | ${times(r.ratio)} | ${share} | ${verdict} | ${slowestFile(r.name)} |`);
+    }
+    if (left > 0) out.push('', `…and ${left} more rise(s) that are not findings, in full in this run's job log.`);
+    out.push('');
+    out.push(
+      `Verdicts: **finding** = up ${times(diff.factor)} or more AND its share up ${times(diff.factor)} or more (a card); ` +
+        `density only = its share moved less than ${times(diff.factor)}, so the run slowed around it (not a card); ` +
+        `provisional = one of the two weights rests on fewer than ${MINIMUM_EXECUTED_RUNS} executed runs (not a baseline); ` +
+        'no prior share = the previous window replayed it, so the guard has nothing to read; baseline = see above.'
+    );
+  }
+  out.push('');
+  const bigDowns = diff.downs.filter((d) => d.after * diff.factor <= d.before);
+  const downNames = bigDowns.slice(0, 10).map((d) => `\`${d.name}\` ${secs(d.before)} → ${secs(d.after)} s`);
+  out.push(
+    `**Down:** ${diff.downs.length} package(s) lighter, ${bigDowns.length} by the same factor or more (at most ` +
+      `${Math.round(100 / diff.factor)} % of the previous weight)` +
+      (downNames.length ? ` -- ${downNames.join(', ')}${bigDowns.length > downNames.length ? `, +${bigDowns.length - downNames.length} more` : ''}` : '') +
+      `. **Not compared:** ${diff.carried.length} carried (a cache HIT re-confirmed the previous weight; no run of ` +
+      `this window executed them), ${diff.added.length} new, ${diff.removed.length} gone` +
+      (diff.unrated.length ? `, ${diff.unrated.length} without a positive previous weight (${diff.unrated.join(', ')})` : '') +
+      '.'
+  );
+  out.push('');
+  const budget = files?.budgetSeconds ?? FILE_BUDGET_SECONDS;
+  if (files === null) {
+    out.push(`### Test files over ${budget} s of wall in this window: NOT MEASURED`);
+    out.push('');
+    out.push(`${filesNotMeasured ?? 'No per-file capture was read.'} This is not "no file is over budget".`);
+  } else {
+    const pkgs = new Set(files.over.map((e) => e.pkg));
+    out.push(`### Test files over ${budget} s of wall in this window: ${files.over.length} in ${pkgs.size} package(s)`);
+    out.push('');
+    if (files.over.length === 0) {
+      out.push(`None: no file measured in this window ran longer than ${budget} s.`);
+    } else {
+      out.push('| file | package | slowest run | its seconds | runs over budget / runs that executed it |');
+      out.push('|---|---|---|--:|--:|');
+      for (const e of files.over.slice(0, FILE_ROWS)) {
+        const label = e.project ? `\`${e.file}\` (${e.project})` : `\`${e.file}\``;
+        out.push(`| ${label} | \`${e.pkg}\` | \`${e.slowest.run}\` | ${secs(e.slowest.ms / 1000)} | ${e.runsOver.size} / ${e.runsSeen.size} |`);
+      }
+      if (files.over.length > FILE_ROWS) {
+        out.push('', `…and ${files.over.length - FILE_ROWS} more file(s) over budget, in full in this run's job log.`);
+      }
+    }
+    out.push('');
+    const missing = files.runsWithoutCapture.length
+      ? ` No capture arrived for ${files.runsWithoutCapture.map((r) => `\`${r}\``).join(', ')}, so its files are not in the list.`
+      : '';
+    out.push(
+      `**Per-file reading:** the window's per-shard captures (\`test-core-timings-N-of-6\`, written by ` +
+        `\`report-test-timings.mjs --capture\`), read for ${files.runsRead} of ${files.runsRead + files.runsWithoutCapture.length} run(s): ` +
+        `${files.measuredRows} file line(s) measured here; ${files.replayedRows} replayed line(s) left out, because a cache ` +
+        `HIT replays a duration measured outside this window.${missing}`
+    );
+    const lacks = [];
+    if (files.withoutReading.carried.length) {
+      lacks.push(
+        `carried, every run of the window replayed it: ${files.withoutReading.carried.map((n) => `\`${n}\``).join(', ')}`
+      );
+    }
+    if (files.withoutReading.noFileLine.length) {
+      lacks.push(
+        'executed, but no vitest file line was captured (its runner prints none, or the runs that executed it left no ' +
+          `capture): ${files.withoutReading.noFileLine.map((n) => `\`${n}\``).join(', ')}`
+      );
+    }
+    out.push('');
+    out.push(lacks.length ? `**No per-file reading for:** ${lacks.join('; ')}.` : '**Every package has a per-file reading in this window.**');
+  }
+  const problems = [...captureProblems, ...(files?.problems ?? [])];
+  if (problems.length) {
+    out.push('');
+    out.push(`**Capture problems** (${problems.length}): ${problems.slice(0, 10).join('; ')}${problems.length > 10 ? '; …' : ''}.`);
+  }
+  out.push('');
+  out.push('## What the seat landing this PR does');
+  out.push('');
+  out.push(
+    'The refresh lane\'s seat, after this PR lands (#22949 ruling E; the workflow\'s header carries the same duty). ' +
+      'The bot files nothing.'
+  );
+  out.push('');
+  if (findings.length === 0) {
+    out.push('1. **Rises:** no card this time -- no rise above is a finding.');
+  } else {
+    out.push(
+      `1. **Rises:** one card per package marked **finding** -- ${findings.length} this time -- for the owning lane ` +
+        '(its `domain:*`, by the package\'s path in the pm-dispatch domain lane table), each with its `Protects:` line:'
+    );
+    for (const r of findings) {
+      out.push(
+        `   - \`Protects: ${r.name} suite weight ${secs(r.before)} s → ${secs(r.after)} s (${times(r.ratio)}) across the ` +
+          `refresh window, its share of its runs' executed total ${shareText(r.shareBefore)} → ${shareText(r.shareAfter)} ` +
+          `(${times(r.shareRatio)}) at comparable density (${density.prior.mean.toFixed(1)} → ${density.now.mean.toFixed(1)} ` +
+          'executed packages per run).`'
+      );
+    }
+  }
+  if (files === null) {
+    out.push(`2. **Files over ${budget} s:** not measured this time (see above) -- nothing to file from this refresh.`);
+  } else if (files.over.length === 0) {
+    out.push(`2. **Files over ${budget} s:** no card this time.`);
+  } else {
+    const pkgs = [...new Set(files.over.map((e) => e.pkg))];
+    out.push(
+      `2. **Files over ${budget} s:** #22998 makes a test file over ${budget} s of wall a card for the owning ` +
+        `lane -- one card per package in the file list above (${pkgs.length} this time), naming each of its files and ` +
+        'its slowest run.'
+    );
+  }
+  out.push(
+    '3. A rise marked density only, provisional, no prior share or baseline is a reading, not a card. A package or ' +
+      'file that already has an open card gets the new numbers there as a comment, not a second card.'
+  );
+  out.push('4. ⛔ Never a red build and never a raise: this PR moves no ceiling and fails no job.');
+  return `${out.join('\n')}\n`;
+}
+
 // -- The self-test's own battery roster and floor (#13489) ------------------
 //
 // `--self-test` reaching its verdict used to be this self-test's ONLY success
@@ -882,11 +1518,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'minimum executed runs per package': 14,
   // #16468: the per-package suite-duration ceilings the refresh writes.
   'suite-duration ceilings (#16468)': 14,
+  // #22949 ruling E: the density reading, the refresh diff and its guard
+  // (the density-only and the code fixture first), and the per-file budget.
+  'refresh diff and per-file budget (#22949 E)': 22,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 4;
+const SELF_TEST_BATTERY_FLOOR = 5;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1908,6 +2547,295 @@ function selfTest() {
     }
   });
 
+  // -- The refresh diff, its density guard and the per-file budget ---------
+  //
+  // #22949 ruling E, items 2 and 3. The two fixtures the ruling's acceptance
+  // names are the first two cases after the pins: a DENSITY-ONLY rise (the
+  // run got denser and every suite in it slowed -- not a finding) and a CODE
+  // rise (one package grew against the rest of its run -- a finding). Every
+  // other case is a way the first two could be read wrong.
+  battery('refresh diff and per-file budget (#22949 E)');
+  const diffCounts = new Map(['a', 'b', 'c', 'd', 'e'].map((n) => [n, 5]));
+  // A window of `n` identical runs, each executing the packages given as
+  // [name, seconds] pairs; `carry` merges into a prior dataset like the lane does.
+  const windowOf = (prefix, pairs, n = 3, extra = {}) =>
+    buildDataset({
+      perSummary: Array.from({ length: n }, (_, i) =>
+        runOf(`${prefix}${i + 1}`, pairs.map(([name, s, status = 'MISS']) => testTask(name, 0, s * 1000, status)))
+      ),
+      fileCounts: diffCounts,
+      provenance: { runs: Array.from({ length: n }, (_, i) => `${prefix}${i + 1}`) },
+      ...extra,
+    });
+  // The previous window: four packages executed per run; `a` is 10 of 100 s.
+  const priorWindow = windowOf('p', [['a', 10], ['b', 30], ['c', 20], ['d', 40]]);
+  // DENSITY ONLY: a fifth package executes in every run (5 per run: 1.25x the
+  // previous 4, comparable) and every suite slows 1.3x around it. `a` is up
+  // 1.3x, but its share of its runs' executed total FELL (13 of 160 s).
+  const denserWindow = windowOf('n', [['a', 13], ['b', 39], ['c', 26], ['d', 52], ['e', 30]]);
+  // CODE: the same four packages at the same density, and `a` alone 2.5x.
+  const codeWindow = windowOf('n', [['a', 25], ['b', 30], ['c', 20], ['d', 40]]);
+
+  check(() => {
+    // "COMPARABLE" IS A NUMBER: two windows are of comparable density when
+    // their mean count of executed packages per run (cache replays excluded)
+    // is within 1.25x of each other -- the ceiling's own factor, which is
+    // also the rise factor and the density guard's. Changing any of the three
+    // is a ruling, not a tune.
+    if (DENSITY_COMPARABLE_FACTOR !== 1.25 || DENSITY_COMPARABLE_FACTOR !== CEILING_HEADROOM) {
+      throw new Error(`diff: "comparable" is ${DENSITY_COMPARABLE_FACTOR}x, not the ruled 1.25x (the ceiling's own factor)`);
+    }
+    if (RISE_FACTOR !== CEILING_HEADROOM) throw new Error(`diff: the rise factor is ${RISE_FACTOR}, not the ceiling's own ${CEILING_HEADROOM}`);
+    if (FILE_BUDGET_SECONDS !== 10) throw new Error(`diff: the per-file budget is ${FILE_BUDGET_SECONDS} s, not objectstack#22998's 10 s`);
+  });
+  check(() => {
+    // The number, on both sides of the line: 20 and 25 executed packages per
+    // run are comparable (exactly 1.25x), 20 and 25.1 are not, the order does
+    // not matter, and a window that executed nothing is comparable with none.
+    if (!densityComparable(20, 25) || !densityComparable(25, 20)) throw new Error('diff: 20 vs 25 (1.25x) read as not comparable');
+    if (densityComparable(20, 25.1) || densityComparable(25.1, 20)) throw new Error('diff: 20 vs 25.1 (over 1.25x) read as comparable');
+    if (densityComparable(0, 5) || densityComparable(5, 0)) throw new Error('diff: a zero density was comparable');
+  });
+  check(() => {
+    // THE DENSITY-ONLY FIXTURE: a rise, and NOT a finding.
+    const d = diffRefresh({ prior: priorWindow, refreshed: denserWindow });
+    const a = d.rises.find((r) => r.name === 'a');
+    if (!a || a.ratio !== 1.3) throw new Error(`diff: the density-only rise was not listed (${JSON.stringify(d.rises)})`);
+    if (a.verdict !== RISE_VERDICTS.densityOnly || d.findings.length !== 0) {
+      throw new Error(`diff: a rise explained by density alone was read as ${a.verdict} (findings ${d.findings.length})`);
+    }
+    if (d.baseline !== null || !d.density.comparable) throw new Error(`diff: 4 vs 5 executed per run was not comparable (${d.baseline})`);
+  });
+  check(() => {
+    // THE CODE FIXTURE: a rise, and a finding -- its share rose with it.
+    const d = diffRefresh({ prior: priorWindow, refreshed: codeWindow });
+    const a = d.rises.find((r) => r.name === 'a');
+    if (!a || a.verdict !== RISE_VERDICTS.finding || d.findings.length !== 1 || d.findings[0].name !== 'a') {
+      throw new Error(`diff: a package that grew against its run was not a finding (${JSON.stringify(d.rises)})`);
+    }
+    if (!(a.shareRatio >= 1.25)) throw new Error(`diff: the finding's share ratio reads ${a.shareRatio}`);
+  });
+  check(() => {
+    // The density tag: one entry per run, newest first as fed, executed count
+    // per run -- and the share is the package's seconds over its run's total.
+    const tags = priorWindow.density.runs;
+    if (tags.map((r) => `${r.run}:${r.executed}`).join(',') !== 'p1:4,p2:4,p3:4') {
+      throw new Error(`diff: the density tags read ${JSON.stringify(tags)}`);
+    }
+    if (priorWindow.density.shares.a !== 0.1 || priorWindow.density.shares.d !== 0.4) {
+      throw new Error(`diff: the shares read ${JSON.stringify(priorWindow.density.shares)}`);
+    }
+  });
+  check(() => {
+    // REPLAYS EXCLUDED from the tag and from the run's executed total: a HIT
+    // beside two executions is a density of 2, and `a`'s share is of 40 s.
+    const ds = windowOf('h', [['a', 10], ['b', 30], ['c', 0.09, 'HIT']]);
+    if (ds.density.runs[0].executed !== 2 || ds.density.shares.a !== 0.25 || Object.hasOwn(ds.density.shares, 'c')) {
+      throw new Error(`diff: a cache replay counted toward the density reading (${JSON.stringify(ds.density)})`);
+    }
+  });
+  check(() => {
+    // A run that executed NOTHING carries no tag: it contributed no reading.
+    const ds = buildDataset({
+      perSummary: [runOf('r1', [testTask('a', 0, 10_000)]), runOf('r2', [testTask('a', 0, 90, 'HIT')])],
+      fileCounts: diffCounts,
+      provenance: {},
+    });
+    if (ds.density.runs.map((r) => r.run).join(',') !== 'r1') {
+      throw new Error(`diff: a fully replayed run was tagged (${JSON.stringify(ds.density.runs)})`);
+    }
+  });
+  check(() => {
+    // A sliced package counts ONCE in a run that assembled every slice, and
+    // not at all in a run that could not -- the weight's own rule.
+    const ds = buildDataset({
+      perSummary: [
+        runOf('r1', [slicedTask('cli', 0, 300_000, 1, 2), testTask('a', 0, 10_000)]),
+        runOf('r1', [slicedTask('cli', 0, 300_000, 2, 2)]),
+        runOf('r2', [slicedTask('cli', 0, 300_000, 1, 2), testTask('a', 0, 10_000)]),
+      ],
+      fileCounts: new Map([['a', 5], ['cli', 300]]),
+      provenance: {},
+    });
+    if (ds.density.runs.map((r) => `${r.run}:${r.executed}`).join(',') !== 'r1:2,r2:1') {
+      throw new Error(`diff: a sliced package was tagged per slice or per partial set (${JSON.stringify(ds.density.runs)})`);
+    }
+  });
+  check(() => {
+    // The factor's boundary: 1.25x is a rise, 1.24x is not.
+    const at = diffRefresh({ prior: priorWindow, refreshed: windowOf('n', [['a', 12.5], ['b', 30], ['c', 20], ['d', 40]]) });
+    const under = diffRefresh({ prior: priorWindow, refreshed: windowOf('n', [['a', 12.4], ['b', 30], ['c', 20], ['d', 40]]) });
+    if (!at.rises.some((r) => r.name === 'a') || under.rises.some((r) => r.name === 'a')) {
+      throw new Error('diff: the rise boundary is not "up by 1.25x or more"');
+    }
+  });
+  check(() => {
+    // THE FIRST DIFF AFTER THIS LANDS: the previous dataset predates ruling E,
+    // so nothing is judged -- the code rise is listed as a BASELINE reading,
+    // no finding, and the reason says why.
+    const { density: _drop, ...legacy } = priorWindow;
+    const d = diffRefresh({ prior: legacy, refreshed: codeWindow });
+    if (d.findings.length !== 0 || d.rises.some((r) => r.verdict !== RISE_VERDICTS.baseline)) {
+      throw new Error(`diff: a diff against a pre-ruling dataset judged a rise (${JSON.stringify(d.rises)})`);
+    }
+    if (!/before ruling E/.test(d.baseline ?? '')) throw new Error(`diff: the baseline reason is ${JSON.stringify(d.baseline)}`);
+  });
+  check(() => {
+    // NOT COMPARABLE: 6 executed per run against 4 (1.5x). The code rise is a
+    // baseline reading, not a finding -- like is compared only with like.
+    const busy = windowOf('n', [['a', 25], ['b', 30], ['c', 20], ['d', 40], ['e', 30], ['f', 5]]);
+    const d = diffRefresh({ prior: priorWindow, refreshed: busy });
+    if (d.findings.length !== 0 || d.density.comparable || !/not of comparable density/.test(d.baseline ?? '')) {
+      throw new Error(`diff: windows 1.5x apart in density were compared (${d.baseline})`);
+    }
+  });
+  check(() => {
+    // PROVISIONAL: a weight on fewer than three executed runs is not a
+    // baseline, so its rise is a reading, not a finding.
+    const d = diffRefresh({ prior: priorWindow, refreshed: windowOf('n', [['a', 25], ['b', 30], ['c', 20], ['d', 40]], 2) });
+    const a = d.rises.find((r) => r.name === 'a');
+    if (a?.verdict !== RISE_VERDICTS.provisional || d.findings.length !== 0) {
+      throw new Error(`diff: a provisional rise read as ${a?.verdict}`);
+    }
+  });
+  check(() => {
+    // CARRIED: re-confirmed by a cache HIT and executed in no run of this
+    // window -- counted, never compared, whatever the weights say.
+    const refreshed = windowOf('n', [['a', 25], ['b', 30], ['c', 20], ['d', 0.09, 'HIT']], 3, {
+      carryFrom: { d: 40 },
+      carryProvisional: [],
+    });
+    const d = diffRefresh({ prior: priorWindow, refreshed });
+    if (d.carried.join(',') !== 'd' || d.rises.some((r) => r.name === 'd') || d.downs.some((r) => r.name === 'd')) {
+      throw new Error(`diff: a carried weight was compared (${JSON.stringify(d.carried)})`);
+    }
+  });
+  check(() => {
+    // NO PRIOR SHARE: the previous window carried `d`, so it has no share to
+    // judge against -- listed, not filed.
+    // Four executed per run on both sides of the diff, so the density is
+    // comparable and the missing share is the only thing in the way.
+    const priorCarried = windowOf('p', [['a', 10], ['b', 30], ['c', 20], ['e', 30], ['d', 0.09, 'HIT']], 3, {
+      carryFrom: { d: 40 },
+      carryProvisional: [],
+    });
+    const d = diffRefresh({ prior: priorCarried, refreshed: windowOf('n', [['a', 10], ['b', 30], ['c', 20], ['d', 60]]) });
+    const row = d.rises.find((r) => r.name === 'd');
+    if (row?.verdict !== RISE_VERDICTS.noShare || d.findings.length !== 0) throw new Error(`diff: an unshared rise read as ${row?.verdict}`);
+  });
+  check(() => {
+    // A malformed `density` was generated, so it is refused, never read.
+    for (const density of [{ runs: [], shares: {} }, { runs: [{ run: 'r', executed: 0 }], shares: {} }, { runs: [{ run: 'r', executed: 1 }], shares: 'x' }]) {
+      if (!threw(() => diffRefresh({ prior: { ...priorWindow, density }, refreshed: codeWindow }))) {
+        throw new Error(`diff: a malformed density was read (${JSON.stringify(density)})`);
+      }
+    }
+  });
+
+  // The per-file half: captures as the lane lays them out, one directory per run.
+  const fileRow = (pkg, file, ms, replayed = false, project = null) => ({ pkg, file, project, tests: 1, ms, state: 'pass', replayed });
+  const capture = (files) => ({ schema: TIMING_CAPTURE_SCHEMA, shard: '1/6', files, packages: [], cached: [], problems: [] });
+  const captureByRun = new Map([
+    ['n1', [capture([fileRow('a', 'test/slow.test.ts', 12_000), fileRow('a', 'test/edge.test.ts', 10_000), fileRow('b', 'test/replayed.test.ts', 30_000, true)])]],
+    ['n2', [capture([fileRow('a', 'test/slow.test.ts', 11_000), fileRow('c', 'test/c.test.ts', 9_000)])]],
+  ]);
+  const windowForFiles = windowOf('n', [['a', 25], ['b', 30], ['c', 20], ['d', 0.09, 'HIT']], 3, { carryFrom: { d: 40 }, carryProvisional: [] });
+  const files = windowFiles({ byRun: captureByRun, runs: ['n1', 'n2', 'n3'], dataset: windowForFiles });
+  check(() => {
+    // Over budget means OVER: 12 s is listed with its slowest run, exactly
+    // 10 s is not, and the file counts the runs it ran over in.
+    if (files.over.length !== 1 || files.over[0].file !== 'test/slow.test.ts' || files.over[0].slowest.run !== 'n1') {
+      throw new Error(`files: the over-budget list reads ${JSON.stringify(files.over.map((e) => [e.file, e.slowest]))}`);
+    }
+    if (files.over[0].runsOver.size !== 2 || files.over[0].runsSeen.size !== 2) throw new Error('files: the run counts are wrong');
+  });
+  check(() => {
+    // A REPLAYED line is a duration from outside the window: left out, counted.
+    if (files.over.some((e) => e.file === 'test/replayed.test.ts') || files.replayedRows !== 1) {
+      throw new Error('files: a replayed file line was read as a measurement of this window');
+    }
+  });
+  check(() => {
+    // Which packages have no per-file reading, and why -- and which run left
+    // no capture at all.
+    if (files.withoutReading.carried.join(',') !== 'd' || files.withoutReading.noFileLine.join(',') !== 'b') {
+      throw new Error(`files: the packages without a reading read ${JSON.stringify(files.withoutReading)}`);
+    }
+    if (files.runsWithoutCapture.join(',') !== 'n3' || files.runsRead !== 2) throw new Error(`files: a run with no capture was not named`);
+  });
+  check(() => {
+    // The rendered body: the finding with both numbers and its slowest file,
+    // its ready Protects line, the file over budget, the reasons -- and the
+    // density-only rise is NOT in the seat's list.
+    const d = diffRefresh({ prior: priorWindow, refreshed: codeWindow });
+    const body = renderRefreshDiff({ diff: d, files });
+    if (!body.includes('| `a` | 10.00 | 25.00 | 2.50× |') || !body.includes('`test/slow.test.ts` 12.00 s (run `n1`)')) {
+      throw new Error(`render: the finding row is wrong:\n${body}`);
+    }
+    if (!body.includes('`Protects: a suite weight 10.00 s → 25.00 s (2.50×)')) throw new Error(`render: no Protects line for the finding:\n${body}`);
+    if (!body.includes('| `test/slow.test.ts` | `a` | `n1` | 12.00 | 2 / 2 |')) throw new Error(`render: the file row is wrong:\n${body}`);
+    if (!body.includes('carried, every run of the window replayed it: `d`')) throw new Error('render: the carried package was not named');
+    const densityOnly = renderRefreshDiff({ diff: diffRefresh({ prior: priorWindow, refreshed: denserWindow }), files });
+    if (densityOnly.includes('Protects: a ') || !densityOnly.includes('no card this time')) {
+      throw new Error(`render: a density-only rise reached the seat's filing list:\n${densityOnly}`);
+    }
+  });
+  check(() => {
+    // NOT MEASURED reads as such, never as an empty list; and the body is safe
+    // for GitHub's sanitizer: no less-than character anywhere in it.
+    const body = renderRefreshDiff({ diff: diffRefresh({ prior: priorWindow, refreshed: codeWindow }), files: null, filesNotMeasured: 'No capture.' });
+    if (!body.includes('over 10 s of wall in this window: NOT MEASURED') || !body.includes('This is not "no file is over budget"')) {
+      throw new Error(`render: a missing per-file reading did not say NOT MEASURED:\n${body}`);
+    }
+    if (body.includes('<') || renderRefreshDiff({ diff: diffRefresh({ prior: priorWindow, refreshed: codeWindow }), files }).includes('<')) {
+      throw new Error('render: the body carries a less-than character, which the GitHub sanitizer can eat with everything after it');
+    }
+  });
+  check(() => {
+    // Downs are ONE line, and the down by the factor is named in it.
+    const lighter = windowOf('n', [['a', 10], ['b', 20], ['c', 19], ['d', 40]]);
+    const body = renderRefreshDiff({ diff: diffRefresh({ prior: priorWindow, refreshed: lighter }), files });
+    const lines = body.split('\n').filter((l) => l.startsWith('**Down:**'));
+    if (lines.length !== 1 || !lines[0].includes('2 package(s) lighter, 1 by the same factor') || !lines[0].includes('`b` 30.00 → 20.00 s')) {
+      throw new Error(`render: the down summary reads ${JSON.stringify(lines)}`);
+    }
+  });
+  check(() => {
+    // The captures reader: a foreign schema is a named problem, an absent
+    // directory is `present: false`, and the CLI round trip writes the body.
+    const dir = mkdtempSync(path.join(tmpdir(), 'os-refresh-diff-'));
+    try {
+      const caps = path.join(dir, 'captures');
+      mkdirSync(path.join(caps, 'n1', '1'), { recursive: true });
+      mkdirSync(path.join(caps, 'n2', '1'), { recursive: true });
+      writeFileSync(path.join(caps, 'n1', '1', 'shard-1.json'), JSON.stringify(captureByRun.get('n1')[0]));
+      writeFileSync(path.join(caps, 'n2', '1', 'shard-1.json'), JSON.stringify({ schema: 'test-timing-capture/999', files: [] }));
+      const read = readWindowCaptures(caps);
+      if (read.byRun.get('n1').length !== 1 || read.byRun.get('n2').length !== 0 || !read.problems.some((p) => p.includes('test-timing-capture/999'))) {
+        throw new Error(`captures: the reader read ${JSON.stringify(read.problems)}`);
+      }
+      if (readWindowCaptures(path.join(dir, 'absent')).present !== false) throw new Error('captures: an absent directory read as present');
+      writeFileSync(path.join(dir, 'prior.json'), JSON.stringify(priorWindow));
+      writeFileSync(path.join(dir, 'refreshed.json'), JSON.stringify(codeWindow));
+      const outFile = path.join(dir, 'diff.md');
+      const quiet = console.error;
+      console.error = () => {};
+      let code;
+      try {
+        code = diffMain(['--diff', '--prior', path.join(dir, 'prior.json'), '--refreshed', path.join(dir, 'refreshed.json'), '--captures', caps, '--out', outFile]);
+      } finally {
+        console.error = quiet;
+      }
+      const md = readFileSync(outFile, 'utf8');
+      if (code !== 0 || !md.includes('**finding**') || !md.includes('`test/slow.test.ts` 12.00 s (run `n1`)')) {
+        throw new Error(`cli: --diff exited ${code} and wrote:\n${md}`);
+      }
+      if (!threw(() => diffMain(['--diff', '--prior', 'x', '--refreshed', 'y', '--bogus', 'z']))) throw new Error('cli: an unknown --diff flag was accepted');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   // -- The floor: every declared battery RAN, and ran its cases (#13489) ----
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -2007,6 +2935,92 @@ function packageDirForName(name) {
   return workspaceDirs.get(name) ?? null;
 }
 
+// `--diff` (#22949 ruling E): the refresh PR's regression section, from the
+// previous dataset, the refreshed one and the window's per-shard captures.
+// Exit 0 on every READING -- a finding is a card, never a red -- and non-zero
+// only on a refusal (an argument it does not know, or a generated field that is
+// malformed), which the workflow quotes into the PR body instead of the section.
+function diffMain(argv) {
+  let prior = null;
+  let refreshed = null;
+  let captures = null;
+  let out = null;
+  for (let i = 0; i < argv.length; i++) {
+    const flag = argv[i];
+    if (flag === '--diff') continue;
+    const value = () => {
+      const v = argv[++i];
+      if (typeof v !== 'string' || v.length === 0 || v.startsWith('--')) throw new Error(`--diff: ${flag} needs a path`);
+      return path.resolve(v);
+    };
+    if (flag === '--prior') prior = value();
+    else if (flag === '--refreshed') refreshed = value();
+    else if (flag === '--captures') captures = value();
+    else if (flag === '--out') out = value();
+    else throw new Error(`--diff: unrecognized argument: ${flag}`);
+  }
+  if (prior === null || refreshed === null) {
+    console.error(
+      'usage: measure-test-shard-timings.mjs --diff --prior <dataset> --refreshed <dataset> ' +
+        '[--captures <dir of run-id/ capture dirs>] [--out <markdown>]'
+    );
+    return 1;
+  }
+  const priorDataset = JSON.parse(readFileSync(prior, 'utf8'));
+  const refreshedDataset = JSON.parse(readFileSync(refreshed, 'utf8'));
+  const diff = diffRefresh({ prior: priorDataset, refreshed: refreshedDataset });
+  let files = null;
+  let filesNotMeasured = null;
+  let captureProblems = [];
+  if (captures === null) {
+    filesNotMeasured = 'No capture directory was given (`--captures`), so no per-file capture was read.';
+  } else {
+    const read = readWindowCaptures(captures);
+    captureProblems = read.problems;
+    if (!read.present) {
+      filesNotMeasured = `No per-file capture was downloaded: ${read.problems[0]}.`;
+      captureProblems = [];
+    } else {
+      // The window is the runs the dataset names; a dataset fed without `--run`
+      // names none, and then every run directory present is the window.
+      const declared = refreshedDataset.provenance?.runs;
+      const runs = Array.isArray(declared) && declared.length > 0 ? declared.map(String) : [...read.byRun.keys()];
+      const read2 = windowFiles({ byRun: read.byRun, runs, dataset: refreshedDataset });
+      if (read2.runsRead === 0) {
+        filesNotMeasured = `No per-file capture arrived for any of the window's ${runs.length} run(s).`;
+      } else {
+        files = read2;
+      }
+    }
+  }
+  const markdown = renderRefreshDiff({ diff, files, filesNotMeasured, captureProblems });
+  if (out === null) process.stdout.write(markdown);
+  else writeFileSync(out, markdown);
+  console.error(
+    `measure-test-shard-timings --diff: ${diff.rises.length} rise(s) of ${diff.factor}x or more, ` +
+      `${diff.findings.length} finding(s)${diff.baseline === null ? '' : ' (BASELINE: none judged)'}; ` +
+      `${diff.downs.length} down; ` +
+      (files === null ? 'files over budget NOT MEASURED' : `${files.over.length} file(s) over ${files.budgetSeconds} s`) +
+      (out === null ? '' : ` -> ${path.relative(REPO_ROOT, out)}`)
+  );
+  // The whole of every list the body caps, so "in full in this run's job log"
+  // is true. Findings are never capped and need no second copy.
+  const restRises = diff.rises.filter((r) => r.verdict !== RISE_VERDICTS.finding);
+  if (restRises.length > NON_FINDING_RISE_ROWS) {
+    console.error('measure-test-shard-timings --diff: every rise that is not a finding:');
+    for (const r of restRises) {
+      console.error(`  ${r.name}  ${r.before.toFixed(2)}s -> ${r.after.toFixed(2)}s  ${r.ratio.toFixed(2)}x  ${r.verdict}`);
+    }
+  }
+  if (files !== null && files.over.length > FILE_ROWS) {
+    console.error(`measure-test-shard-timings --diff: every test file over ${files.budgetSeconds} s:`);
+    for (const e of files.over) {
+      console.error(`  ${e.pkg}  ${e.file}${e.project ? ` (${e.project})` : ''}  ${(e.slowest.ms / 1000).toFixed(2)}s  run ${e.slowest.run}`);
+    }
+  }
+  return 0;
+}
+
 function main() {
   const argv = process.argv.slice(2);
   if (argv.includes('--self-test')) {
@@ -2018,6 +3032,10 @@ function main() {
       );
       process.exit(1);
     }
+    return;
+  }
+  if (argv.includes('--diff')) {
+    process.exitCode = diffMain(argv);
     return;
   }
   let out = DEFAULT_OUT;
@@ -2170,8 +3188,9 @@ function main() {
   }
   // The ceilings (#16468), on the same stderr: how many a package now has, which
   // packages have none and why, and -- the line a reviewer most needs -- any
-  // HELD ceiling a run of this very window already went over, which on `main`
-  // is the brake having fired, not a number to absorb.
+  // HELD ceiling a run of this very window already went over: a reading, not a
+  // red (#22949 ruling E: the ceiling reports on every event; the refresh diff
+  // judges regressions), and not a number to absorb either.
   const uncappedNames = Object.entries(dataset.uncapped);
   const bySampleNow = collectSamples(perSummary).bySample;
   const over = Object.entries(dataset.ceilings)
