@@ -129,7 +129,7 @@ import { recordsOf, suggestName } from './object-graph.js';
 import {
   SYSTEM_FIELDS,
   indexUnprovisionedAnchors,
-  unprovisionedAnchorHint,
+  unprovisionedAnchorFix,
   unprovisionedAnchorVerdict,
 } from './system-fields.js';
 
@@ -361,16 +361,14 @@ export function checkSearchableFieldList(
           `${subject} entry "${name}" is not a field on object "${objectName}", so the ` +
           `engine drops it from the search.` +
           (dotted ? '' : suggestName(name, known)),
-        hint:
-          (dotted
-            ? `'search' scans this object's own columns, so a related record's ` +
-              `column cannot be a search target — expand the relation and search ` +
-              `the related object, or copy the value onto a stored text field here. `
-            : `Fix the name, or add "${name}" to ${objectName}.fields. `) +
-          `Clients echo this declaration verbatim as the '$searchFields' ` +
-          `override, so a stale entry becomes a 400 INVALID_FIELD on list ` +
-          `search, not just a quietly narrowed one.` +
-          (known.size > 0 ? ` Object fields: ${[...known].sort().join(', ')}.` : ''),
+        // [#22161] One remedy line. Why a stale entry is a 400 on list search
+        // and not merely a narrowed one (the `$searchFields` echo) is the id's
+        // `os explain` entry; the field roster is not echoed, since the
+        // verdict's "Did you mean" names the near miss.
+        hint: dotted
+          ? `'search' scans this object's own columns only: copy the value onto a stored text field ` +
+            `here, or search the related object instead`
+          : `Fix the name, or add "${name}" to ${objectName}.fields`,
       });
       continue;
     }
@@ -402,7 +400,7 @@ export function checkSearchableFieldList(
           (role === 'narrowing'
             ? `the list's toolbar search scans an empty column and matches nothing`
             : `'search' never matches it and the searchable set is narrower than it declares`),
-        hint: unprovisionedAnchorHint(objectName, name),
+        hint: unprovisionedAnchorFix(objectName, name),
       });
     }
 
@@ -423,11 +421,11 @@ export function checkSearchableFieldList(
         message:
           `${subject} entry "${name}" on object "${objectName}" is ` +
           `${virtualFieldClause(vtype)}, so 'search' never matches it`,
+        // [#22161] One remedy line; that the ingress gate refuses the entry
+        // with 400 INVALID_FIELD is the id's `os explain` entry.
         hint:
-          `Mirror the computed value onto a stored text field on "${objectName}" and ` +
-          `declare that instead, or drop "${name}". At runtime the ingress gate now ` +
-          `refuses this entry with 400 INVALID_FIELD, the same answer a stale entry ` +
-          `gets.`,
+          `Mirror the computed value onto a stored text field on "${objectName}" and declare that ` +
+          `instead, or drop "${name}"`,
       });
       continue;
     }
@@ -449,10 +447,9 @@ export function checkSearchableFieldList(
         message:
           `${subject} entry "${name}" is outside the declared searchableFields ` +
           `(${declaredRoster(resolution.declaredList)}), so list search answers 400 INVALID_FIELD`,
-        hint:
-          `Add "${name}" to ${objectName}.searchableFields, or drop it from this ` +
-          `view — a view narrows the object's searchable set, never widens it ` +
-          `(ADR-0061).`,
+        // [#22161] One remedy line; that a view narrows the object's set and
+        // never widens it (ADR-0061) is the id's `os explain` entry.
+        hint: `Add "${name}" to ${objectName}.searchableFields, or drop it from this view`,
       });
       continue;
     }
@@ -480,15 +477,13 @@ export function checkSearchableFieldList(
       message:
         `${subject} entry "${name}" is ${why}, so the auto-default search set excludes it ` +
         `and list search answers 400 INVALID_FIELD`,
-      hint:
-        (isReference
-          ? `A ${meta?.type} column stores only the referenced record's id, so it ` +
-            `cannot be a keyword target — drop "${name}" from this view and, to ` +
-            `search by the related record's title, mirror it onto a stored text ` +
-            `field here and declare that instead. `
-          : `Drop "${name}" from this view, or target a text-like field instead. `) +
-        `Declaring 'searchableFields' on object "${objectName}" chooses the ` +
-        `searchable set explicitly.`,
+      // [#22161] One remedy line; that a reference column stores only an id,
+      // and that declaring the object's own set chooses it explicitly, are the
+      // id's `os explain` entry.
+      hint: isReference
+        ? `Drop "${name}" from this view; to search by the related record's title, mirror it onto ` +
+          `a stored text field here and declare that instead`
+        : `Drop "${name}" from this view, or target a text-like field instead`,
     });
   }
   return findings;

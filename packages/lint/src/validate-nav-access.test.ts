@@ -14,7 +14,7 @@ import { explainRule } from './rule-explanations.js';
 // one line of at most 200 characters — every firing variant this suite
 // exercises, not a chosen few. Run the whole file: those cases read what the
 // cases above fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateNavAccess: typeof validateNavAccessUnrecorded = (...args) => {
   const findings = validateNavAccessUnrecorded(...args);
   fired.push(...findings);
@@ -323,6 +323,22 @@ describe('[#22161] one-line verdicts — nav-object-ungranted', () => {
     for (const f of converted) {
       expect(f.message, f.rule).not.toContain('\n');
       expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+});
+
+// [#22161] Slice 14: the `fix:` line names the grant or the removal in one line;
+// that gating the entry does not clear it, and that a grant from another
+// installed package makes it moot, are the explanation's (pinned above).
+describe('[#22161] one-line fix — nav-object-ungranted', () => {
+  it('every `fix:` line the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === NAV_OBJECT_UNGRANTED);
+    // Coverage control: the id fired.
+    expect(converted.length).toBeGreaterThan(0);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+      expect(f.hint).toMatch(/^Add ".+" to a permission set's `objects` with `allowRead: true` \(or `viewAllRecords`\), or drop the entry$/);
     }
   });
 });
