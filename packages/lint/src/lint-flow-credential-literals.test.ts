@@ -81,7 +81,7 @@ const scanControl = () => ({
           Authorization: `Bearer ${S.controlHeader1}`,
           'X-Api-Key': S.controlHeader2,
           'X-Plain': 'plain-value', // control: not a credential
-          'X-Auth-Token': '{run_token}', // control: a template, not a literal
+          'X-Auth-Token': '{{ run_token }}', // control: a template, not a literal
         },
       },
     },
