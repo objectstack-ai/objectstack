@@ -143,6 +143,15 @@ export const POLICY_STAMPS = [
     // The floor the docs already promise. This is the value that split three
     // ways across three scaffolders (#16485).
   },
+  {
+    key: 'devDependencies.vitest',
+    block: 'devDependencies',
+    field: 'vitest',
+    constant: 'SCAFFOLD_VITEST_RANGE',
+    // The range the blank starter's `pnpm test` installs, and the one the
+    // plugin scaffolds of `os init` and `os create` emit. The comment on the
+    // constant holds why it is `~4.0.0` (npm 10 cannot install `^4.0.0`).
+  },
 ];
 
 /**
@@ -604,8 +613,12 @@ const SELF_TEST_BATTERY_FLOOR = 9;
 const UNATTRIBUTED_BATTERY = '(no battery open)';
 const SELF_TEST_VERDICT = 'sync-scaffold-emission-policy self-test reached its verdict';
 
-const SELF_TEST_POLICY = { SCAFFOLD_PNPM_RANGE: '>=99.1', SCAFFOLD_TYPESCRIPT_RANGE: '^9.9.9' };
-const STALE = { SCAFFOLD_PNPM_RANGE: '>=1.0', SCAFFOLD_TYPESCRIPT_RANGE: '^1.0.0' };
+const SELF_TEST_POLICY = {
+  SCAFFOLD_PNPM_RANGE: '>=99.1',
+  SCAFFOLD_TYPESCRIPT_RANGE: '^9.9.9',
+  SCAFFOLD_VITEST_RANGE: '~8.8.0',
+};
+const STALE = { SCAFFOLD_PNPM_RANGE: '>=1.0', SCAFFOLD_TYPESCRIPT_RANGE: '^1.0.0', SCAFFOLD_VITEST_RANGE: '^1.1.0' };
 
 function policySource(policy = SELF_TEST_POLICY) {
   return [
@@ -613,6 +626,8 @@ function policySource(policy = SELF_TEST_POLICY) {
     `export const SCAFFOLD_PNPM_RANGE = '${policy.SCAFFOLD_PNPM_RANGE}';`,
     '',
     `export const SCAFFOLD_TYPESCRIPT_RANGE = '${policy.SCAFFOLD_TYPESCRIPT_RANGE}';`,
+    '',
+    `export const SCAFFOLD_VITEST_RANGE = '${policy.SCAFFOLD_VITEST_RANGE}';`,
     '',
   ].join('\n');
 }
@@ -624,7 +639,11 @@ function templatePkg(policy) {
       private: true,
       engines: { pnpm: policy.SCAFFOLD_PNPM_RANGE },
       dependencies: { '@objectstack/spec': '^17.0.0' },
-      devDependencies: { '@objectstack/cli': '^17.0.0', typescript: policy.SCAFFOLD_TYPESCRIPT_RANGE },
+      devDependencies: {
+        '@objectstack/cli': '^17.0.0',
+        typescript: policy.SCAFFOLD_TYPESCRIPT_RANGE,
+        vitest: policy.SCAFFOLD_VITEST_RANGE,
+      },
     },
     null,
     2,
@@ -753,7 +772,13 @@ function selfTest() {
       ok(write.status === 0, 'the write run exits 0');
       const after = readTemplates(dir);
       ok(
-        after.every((t) => t.includes('"typescript": "^9.9.9"') && t.includes('"pnpm": ">=99.1"') && t.includes('"@objectstack/spec": "^17.0.0"')),
+        after.every(
+          (t) =>
+            t.includes('"typescript": "^9.9.9"') &&
+            t.includes('"vitest": "~8.8.0"') &&
+            t.includes('"pnpm": ">=99.1"') &&
+            t.includes('"@objectstack/spec": "^17.0.0"'),
+        ),
         'EVERY template now emits the policy, with the @objectstack/* ranges untouched',
       );
       ok(runFixture(script, ['--check']).status === 0, '--check is green after the rewrite (idempotent)');
