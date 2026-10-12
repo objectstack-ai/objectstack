@@ -81,7 +81,10 @@ each holding typed `components`. There is no `context:` key — the binding is
 `object` plus `type` (`record` here). `page:header`'s `actions` are the **ids**
 of actions declared on that object — there is no built-in id registry, so
 `edit` / `delete` / `share` resolve nowhere (the host draws its own Edit /
-Delete chrome). Declare the action, placed at `record_header`, then name it:
+Delete chrome). The list is the whole set the header draws: an action that
+declares `record_header` but is not named is not drawn there, and a header with
+no `actions` draws none of the object's own actions. Declare the action,
+placed at `record_header`, then name it:
 
 {/* os:check-yaml action */}
 ```yaml
