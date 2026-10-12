@@ -225,7 +225,10 @@ export interface ArtifactConversionNotice {
   from: string;
   /** The canonical token/shape it was converted to. */
   to: string;
-  /** Where in the stack it applied, e.g. `permissions[0].objects.crm_ticket.allowPurge`. */
+  /**
+   * Where in the stack it applied, e.g. `permissions[0].objects.crm_ticket.allowPurge`;
+   * inside a package body, from the definition's root (`packages[1].manifest.dashboards[0]…`).
+   */
   path: string;
   /** Derived, human-facing one-liner. */
   message: string;
