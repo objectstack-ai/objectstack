@@ -25,6 +25,8 @@
  *    nothing outside it;
  *  - `restrict` refuses with the ADR-0112 envelope naming the tree's own object
  *    as the dependent, and keeps the row; a leaf still deletes;
+ *  - a REQUIRED tree's `set_null` escalates to that refusal, as a required
+ *    `lookup`'s does;
  *  - a cycle in the data terminates: a corrupt row pointing at its own
  *    descendant, and a row pointing at itself;
  *  - a subtree cascade is one unit of work: a refusal from a node deep in it
@@ -297,6 +299,28 @@ describe('[#22957] a tree field\'s deleteBehavior takes effect on a parent delet
 
       expect(driver.rowOf('zt_held', c.id)).toBeUndefined();
       expect(driver.rowOf('zt_held', p.id)).toMatchObject({ name: 'P' });
+    });
+  });
+
+  describe('required', () => {
+    it('a required tree\'s set_null cannot clear the parent, so the parent delete is refused', async () => {
+      // The escalation a required `lookup` already takes: a parent that must
+      // be present cannot be cleared, so the delete is refused rather than
+      // answered with the child's own `required` refusal.
+      const { engine, driver } = await makeEngine([
+        treeObject('zt_rooted', parsedTree('zt_rooted', { required: true })),
+      ]);
+      // A required hierarchy's top points at itself; the engine refuses a
+      // reference to a row that does not exist yet, so it is written at the
+      // driver.
+      const root = await driver.create('zt_rooted', { id: 'root', name: 'root', parent: 'root' });
+      const c = await engine.insert('zt_rooted', { name: 'C', parent: root.id });
+
+      const err = await refusalOf(engine.delete('zt_rooted', { where: { id: root.id } } as any));
+
+      expect(err).toMatchObject({ code: 'DELETE_RESTRICTED', status: 409, dependentObject: 'zt_rooted' });
+      expect(driver.rowOf('zt_rooted', root.id)).toMatchObject({ name: 'root' });
+      expect(driver.rowOf('zt_rooted', c.id)).toMatchObject({ name: 'C', parent: root.id });
     });
   });
 
