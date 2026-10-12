@@ -67,7 +67,7 @@
     },
     "interfaceConfig": {
       "status": "live",
-      "note": "the entire Airtable-parity list surface (source/columns/filterBy/appearance/userFilters/userActions/addRecord/buttons/recordAction/...) — objectui app-shell/src/views/InterfaceListPage.tsx + PageView.tsx. Verified in browser during the dogfood (grid+kanban+filters)."
+      "note": "the entire Airtable-parity list surface (source/columns/filterBy/appearance/userFilters/userActions/addRecord/buttons/recordAction/...) — objectui app-shell/src/views/InterfaceListPage.tsx + PageView.tsx. Verified in browser during the dogfood (grid+kanban+filters). [#23005] This blanket `live` verdict does NOT cover `interfaceConfig.emptyState`, which is PLANNED: the list page's own empty state, the list view's EmptyStateSchema by reference, declared ahead of its renderer, contract first, and marked `[PLANNED — not yet rendered]` in its describe. Measured at objectui 7af0ab3: InterfaceListPage hands ListView the resolved source view's `emptyState` (InterfaceListPage.tsx:503) and reads no `interfaceConfig.emptyState`. Renderer half and carrier: objectstack-ai/objectui#12270. The walk does not read the marker, because `page/interfaceConfig` is a recorded undrilled container (undrilled-containers.baseline.json)."
     },
     "aria": {
       "status": "live",

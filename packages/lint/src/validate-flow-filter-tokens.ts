@@ -100,13 +100,9 @@ function hintFor(name: string): string {
   const didYouMean = suggestion
     ? ` Did you mean '${suggestion}'?${name.includes('.') ? ' Method/namespace call syntax is not supported — write the bare form.' : ''}`
     : '';
-  return (
-    `Flow filter values resolve in two vocabularies: the flow template dialect — `
-    + `{NOW()} / {TODAY()} with an optional ± N day offset, {$User.Id}, {record.<field>}, `
-    + `and the value functions ${FLOW_TEMPLATE_VALUE_FUNCTIONS.join(', ')} — and, for a token `
-    + `the evaluator does not resolve, the filter placeholders ({current_user_id}, {today}, `
-    + `{30_days_ago}).${didYouMean}`
-  );
+  // [#22161] One remedy line naming the value functions, as the run-time
+  // refusal does; the two vocabularies in full are the id's `os explain` entry.
+  return `Call a flow value function (${FLOW_TEMPLATE_VALUE_FUNCTIONS.join(', ')}) or use a filter placeholder.${didYouMean}`;
 }
 
 /** Judge every string inside one authored filter subtree. */
