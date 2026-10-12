@@ -148,6 +148,13 @@ for (const posture of ['isolated', 'group'] as const) {
     let h: Harness;
     const previous = process.env.OS_TENANCY_POSTURE;
     const bGrants = () => grantsOf(h, h.userB, h.orgB);
+    /** B's resolution, as one comparable value. */
+    const bSnapshot = async () => {
+      const g = await bGrants();
+      return JSON.stringify({ sys: [...g.systemPermissions].sort(), sets: [...g.permissions].sort() });
+    };
+    // Each pin below compares B's resolution across its OWN request, so a pin
+    // reads only its own door: an earlier pin's outcome cannot redden it.
     const refused = async (res: Response) => {
       const env = await envelopeOf(res);
       expect({ status: env.status, code: env.code }, env.message).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
@@ -178,31 +185,38 @@ for (const posture of ['isolated', 'group'] as const) {
     });
 
     it('publish-drafts: A publishing the operator\'s pending catalog draft is refused, and B does not gain `manage_metadata`', async () => {
+      const before = await bSnapshot();
       await refused(await call(h.stack, h.tokA, 'POST', `/packages/${OP_PKG}/publish-drafts`, {}));
+      expect(await bSnapshot()).toBe(before);
       expect((await bGrants()).systemPermissions).not.toContain('manage_metadata');
-      expect(await rowsOf(h, { package_id: OP_PKG, type: 'permission', name: OP_SET, state: 'draft' })).toHaveLength(1);
     });
 
     it('revert: A discarding the operator\'s pending catalog draft is refused, and the draft stays', async () => {
+      const drafted = await call(h.stack, h.operator, 'PUT', `/meta/permission/${OP_SET}?package=${OP_PKG}&mode=draft`,
+        set(OP_SET, ['manage_users', 'manage_metadata']));
+      expect(drafted.status, await drafted.clone().text()).toBe(200);
       await refused(await call(h.stack, h.tokA, 'POST', `/packages/${OP_PKG}/revert`, {}));
       expect(await rowsOf(h, { package_id: OP_PKG, type: 'permission', name: OP_SET, state: 'draft' })).toHaveLength(1);
     });
 
     it('rollback: A rolling the operator\'s package back past a catalog commit is refused, and B keeps `manage_users`', async () => {
+      const before = await bSnapshot();
       await refused(await call(h.stack, h.tokA, 'POST', `/packages/${OP_PKG}/rollback`, { commitId: h.c1 }));
-      expect((await bGrants()).systemPermissions).toContain('manage_users');
+      expect(await bSnapshot()).toBe(before);
     });
 
     it('commits/:commitId/revert: A reverting the operator\'s catalog commit is refused, and B keeps `manage_users`', async () => {
+      const before = await bSnapshot();
       await refused(await call(h.stack, h.tokA, 'POST', `/packages/${OP_PKG}/commits/${h.c2}/revert`, {}));
-      expect((await bGrants()).systemPermissions).toContain('manage_users');
+      expect(await bSnapshot()).toBe(before);
     });
 
     it('commits/:commitId/revert: the commit is judged by its own items, whatever package the URL names', async () => {
       const own = await call(h.stack, h.tokA, 'POST', '/packages', { id: 'com.w3.a.url', name: 'url', version: '1.0.0', type: 'app' });
       expect(own.status, await own.clone().text()).toBe(201);
+      const before = await bSnapshot();
       await refused(await call(h.stack, h.tokA, 'POST', `/packages/com.w3.a.url/commits/${h.c2}/revert`, {}));
-      expect((await bGrants()).systemPermissions).toContain('manage_users');
+      expect(await bSnapshot()).toBe(before);
     });
 
     it('duplicate: A copying the operator\'s catalog-carrying package is refused, and nothing is copied', async () => {
