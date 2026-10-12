@@ -2029,7 +2029,9 @@ export const BUNDLE_MEMBER_MAX_LENGTH = 100;
  */
 export function resolveBundleMemberSelector(type: string, member: unknown): string | undefined {
     if (member === undefined) return undefined;
-    const singular = PLURAL_TO_SINGULAR[type] ?? type;
+    // Either spelling of the type: the doors ask after their boundary fold,
+    // and a direct caller may not have folded.
+    const singular = canonicalMetaType(type);
     const disc = ITEM_KEY_DISCRIMINATORS[singular];
     const refuse = (sentence: string): never => {
         const err = new Error(`The "${BUNDLE_MEMBER_SELECTOR}" selector ${sentence}`) as Error & {
@@ -2072,7 +2074,7 @@ export function resolveBundleMemberSelector(type: string, member: unknown): stri
  * member when none was named. `undefined` for a type with no members.
  */
 function bundleMemberDiscriminator(type: string, member: string | undefined): string | undefined {
-    const disc = ITEM_KEY_DISCRIMINATORS[PLURAL_TO_SINGULAR[type] ?? type];
+    const disc = ITEM_KEY_DISCRIMINATORS[canonicalMetaType(type)];
     if (!disc) return undefined;
     return member?.trim() || disc.canonical;
 }
