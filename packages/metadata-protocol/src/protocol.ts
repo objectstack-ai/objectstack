@@ -22498,9 +22498,10 @@ export class ObjectStackProtocolImplementation implements
                 );
             }
         }
-        // [ADR-0094] Awaited projection: runs AFTER the package-door
-        // materializer (which stamps package provenance) so the projector
-        // sees final record state; refuses/no-ops per its own rules.
+        // [ADR-0094] Awaited projection: runs AFTER any materializer
+        // registered for the type, so the projector sees final record state;
+        // refuses/no-ops per its own rules. (No `permission` materializer is
+        // registered since ADR-0131 C3 stage 6b-2.)
         const publishProjection = await this.runMutationProjector({
             type: args.singularType,
             name: args.name,

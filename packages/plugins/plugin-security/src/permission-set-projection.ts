@@ -476,7 +476,7 @@ const isProjectionEcho = (v: any): boolean =>
 
 /**
  * Read the DECLARED (artifact) body for a permission set from the engine's
- * SchemaRegistry — the same source `bootstrapDeclaredPermissions` seeds from,
+ * SchemaRegistry — the same source the retired `bootstrapDeclaredPermissions` seeded from,
  * and the one store the env projection never writes, so it can't be poisoned
  * by our own registry sync. It is the body for a declared set with no overlay
  * at all, and the reset target when an overlay IS lifted off one — which since

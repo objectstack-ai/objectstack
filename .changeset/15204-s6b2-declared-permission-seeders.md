@@ -5,7 +5,7 @@
 '@objectstack/cloud-connection': patch
 ---
 
-feat(plugin-security)!: the boot writes no `sys_permission_set` row — the declared-permission seeder and the platform-default materialization are deleted
+feat(plugin-security)!: no seeder or materializer writes a `sys_permission_set` row — the declared-permission seeder, the platform-default materialization and the `permission` publish materializer are deleted
 
 Clause-②: yes (narrowing)
 
@@ -13,7 +13,7 @@ Clause-②: yes (narrowing)
 
 **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
 
-`SecurityPlugin` no longer writes a `sys_permission_set` row for any permission set: not for the platform defaults (`admin_full_access`, `member_default`, …), not for a set a package declares, not for an organization's copy, and not on a package-door publish, a metadata reload or an organization's creation. Permission sets are served by the security catalog (ADR-0131 D3), and since the grant names its set (`sys_user_permission_set.permission_set`), no grant path needs a row. A fresh database still promotes its first platform administrator, grants organization administrators and self-registered members, and grants every principal what it was granted before. On a database that was already seeded, the existing rows stay as they are; they are no longer refreshed at boot.
+`SecurityPlugin` no longer writes a `sys_permission_set` row for any permission set: not for the platform defaults (`admin_full_access`, `member_default`, …), not for a set a package declares, not for an organization's copy, and not on a metadata reload or an organization's creation. Permission sets are served by the security catalog (ADR-0131 D3), and since the grant names its set (`sys_user_permission_set.permission_set`), no grant path needs a row. A fresh database still promotes its first platform administrator, grants organization administrators and self-registered members, and grants every principal what it was granted before. On a database that was already seeded, the existing rows stay as they are; they are no longer refreshed at boot. Until a later stage retires the ADR-0094 projector, publishing a permission set (a package-door publish, or a writable base's direct publish) still has it write a projection row, `managed_by: 'admin'` with no `package_id` (a package-door publish wrote `managed_by: 'package'` before this release); no authorization path reads it, and uninstalling the package removes it.
 
 - **Accepted package defaults follow every publish.** The `everyone` anchor is derived again after every landed `permission` mutation (publish, direct save or delete, through any door), so an accepted set whose new body no longer qualifies stops granting at once. Before this release the re-derivation ran only inside the publish materializer, and only when the published body carried an `isDefault` key.
 - **`drift_status` and `drift_detail` are gone from `sys_permission_set`**, with the **Needs Attention** list view that listed them. Nothing computes them any more: the declared-versus-enforced diagnostic retired with the rows it compared. A Studio overlay that shadows a packaged set is still named at boot.

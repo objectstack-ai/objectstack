@@ -270,7 +270,7 @@ export const SysPermissionSet = ObjectSchema.create({
       maxLength: 255,
       description:
         'Package that ships this permission set (absent = environment-authored). ' +
-        'Populated by bootstrapDeclaredPermissions; makes package uninstall/upgrade well-defined.',
+        'Set on rows an earlier release seeded for a package\'s set; no current writer sets it.',
       group: 'Provenance',
     }),
 
@@ -291,9 +291,9 @@ export const SysPermissionSet = ObjectSchema.create({
       description:
         "Record provenance, on the one platform / package / admin vocabulary that capabilities, " +
         "permission sets and positions all share: 'platform' = shipped by the " +
-        "platform; 'package' = versioned package metadata (re-seeded on upgrade, read-mostly " +
-        "for admins); 'admin' = created/owned in this environment by an administrator " +
-        "(live-edited, never touched by package seeding). Legacy rows may carry 'user' (== admin).",
+        "platform; 'package' = a row an earlier release seeded for a package's set " +
+        "(read-mostly for admins); 'admin' = created/owned in this environment by an administrator " +
+        "(live-edited). Legacy rows may carry 'user' (== admin).",
       options: [
         { value: 'platform', label: 'Platform' },
         { value: 'package', label: 'Package' },

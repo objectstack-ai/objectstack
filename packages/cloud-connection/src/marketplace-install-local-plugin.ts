@@ -2870,7 +2870,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         if (typeof ctx.trigger !== 'function') {
             ctx.logger?.warn?.(
                 `[MarketplaceInstallLocal] this kernel context cannot announce metadata:reloaded — the record-change flows `
-                + `and permission sets of ${manifestId} take effect only after a restart.`,
+                + `of ${manifestId} take effect only after a restart.`,
             );
             return;
         }
@@ -2879,7 +2879,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         } catch (err: any) {
             ctx.logger?.warn?.(
                 `[MarketplaceInstallLocal] ${manifestId} is installed, but the metadata:reloaded re-sync FAILED — its `
-                + 'record-change flows may not fire and its permission sets may be missing from sys_permission_set '
+                + 'record-change flows may not fire '
                 + `until the runtime restarts (the restart re-reads every installed package). Cause: ${err?.message ?? err}`,
             );
         }
