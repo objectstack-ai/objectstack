@@ -30,16 +30,20 @@
  * could never round a computed money value to its field's declared `scale`,
  * and nothing said why.
  *
- * The interpolator walks objects, arrays, and primitives recursively so it
- * can be applied wholesale to a node's `config.filter` block and its other
- * value-like positions. The value slots (`fields.*`, `assignments.*`) no
- * longer read this dialect (#19939): a `{…}` token there is refused before it
- * gets here (`@objectstack/spec/automation`'s `flow-value-slot-template.ts`),
- * each with its CEL spelling — the run user is the CEL scope's
- * `current_user`, and a date macro is its CEL string form, `isoDate(today())`
- * / `isoDatetime(now())` (the stdlib writes the bytes the date branch below
- * writes). The `{$User.*}` and date branches below still answer the position
- * that keeps this dialect, a `filter`. Nor do the TEXT slots — a notify
+ * The interpolator walks objects, arrays, and primitives recursively. The
+ * value slots (`fields.*`, `assignments.*`, and since #19939 every other
+ * computed value, each operand of a CRUD node's `filter` included) no longer
+ * read this dialect: a `{…}` token there is refused before it gets here
+ * (`@objectstack/spec/automation`'s `flow-value-slot-template.ts`), each with
+ * its CEL spelling — the run user is the CEL scope's `current_user`, and a
+ * date macro is its CEL string form, `isoDate(today())` /
+ * `isoDatetime(now())` (the stdlib writes the bytes the date branch below
+ * writes) — and a query placeholder in a filter (`{current_user_id}`,
+ * `{today}`) is the query engine's, handed to it untouched. What still reaches
+ * this interpolator is the value slots' residual call on a token-free literal
+ * (`value-slot-map.ts`, the identity on its text) and the legacy `assignment`
+ * shapes; both go with the single-brace resolver (ADR-0032 Sequencing 6). Nor
+ * do the TEXT slots — a notify
  * `title` / `message` / `actionUrl`, an http `url` and `headers` values, a
  * screen `title` / `description`, a refusing `end` node's `message` (#22110,
  * ADR-0032 D3; #19939):
@@ -49,7 +53,6 @@
  */
 
 import type { AutomationContext } from '@objectstack/spec/contracts';
-import { isKnownFilterToken } from '@objectstack/spec/data';
 import { nearestName, templateEngine } from '@objectstack/formula';
 import { markGuardRefusal } from '../guard-refusal.js';
 
@@ -502,59 +505,3 @@ export function interpolate<T = unknown>(
     return value;
 }
 
-/**
- * Interpolate a node's **filter** block (framework#3810).
- *
- * A filter value position is the one place where two `{…}` dialects meet: the
- * flow template dialect (`{record.owner}`, `{$User.Id}`) and the filter
- * placeholder dialect (`{current_user_id}`, `{current_year_start}` — declared
- * in `@objectstack/spec` and resolved by `resolveFilterTokens()` in the query
- * engine). Evaluation order decided the winner by accident: the flow
- * interpolator ran first, found no flow variable named `current_year_start`,
- * and returned `undefined` — so the placeholder never reached the engine that
- * knows how to resolve it, and the condition silently vanished from the query.
- *
- * This hands that position back to the dialect that owns it. A whole-string
- * token that (a) no flow variable resolves and (b) IS a recognised filter
- * placeholder is passed through **verbatim** for the engine to expand. That is
- * a transfer of ownership, not a lenient fallback: flow variables still win
- * when both could match, and a token belonging to neither dialect is left to
- * the caller's collapse guard to report.
- *
- * Only filter blocks use this. No other position reads the single-brace
- * dialect any more (#19939: an `http` `url` and its headers are text slots,
- * its `body` a value slot), so a bare `{current_year_start}` anywhere else is
- * refused before a run starts rather than read as a query bound.
- */
-export function interpolateFilter<T = unknown>(
-    value: T,
-    variables: VariableMap,
-    context: AutomationContext,
-): T {
-    if (typeof value === 'string') {
-        const single = /^\{([^{}]+)\}$/.exec(value);
-        if (single) {
-            const resolved = resolveToken(single[1], variables, context);
-            // Flow variables keep precedence — only an unresolved token is
-            // considered for hand-off, so a flow variable that happens to share
-            // a placeholder's name still shadows it (no silent reinterpretation
-            // of a template that works today).
-            if (resolved === undefined && isKnownFilterToken(single[1].trim())) {
-                return value;
-            }
-            return resolved as unknown as T;
-        }
-        return interpolateString(value, variables, context) as unknown as T;
-    }
-    if (Array.isArray(value)) {
-        return value.map(v => interpolateFilter(v, variables, context)) as unknown as T;
-    }
-    if (value && typeof value === 'object') {
-        const out: Record<string, unknown> = {};
-        for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-            out[k] = interpolateFilter(v, variables, context);
-        }
-        return out as unknown as T;
-    }
-    return value;
-}

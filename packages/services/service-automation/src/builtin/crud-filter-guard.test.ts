@@ -1,30 +1,40 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { VALUE_SLOT_TEMPLATE_REFUSAL } from '@objectstack/spec/automation';
 import { AutomationEngine } from '../engine.js';
 import { registerCrudNodes } from './crud-nodes.js';
-import { interpolateFilter } from './template.js';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 /**
- * framework#3810 — a flow filter must never silently widen.
+ * A CRUD node's `filter` — its operands are value slots, and it never widens
+ * silently (#19939 stage S6, Fork R17 → A; framework#3810).
  *
- * The flow interpolator expresses "this token did not resolve" as `undefined`.
- * Everywhere else that is harmless; in a FILTER it removes a condition, and a
- * removed condition matches MORE rows. When it was the only condition,
- * `{ owner: '{record.ownr}' }` became `{}` — and `{}` handed to `deleteMany` is
- * every row in the table. One mistyped field name emptied the object, silently.
+ * Each OPERAND of a `get_record` / `update_record` / `delete_record` filter —
+ * a field's value, an operator's comparand, each element of a list comparand —
+ * is a CEL value envelope the executor evaluates in the run's scope BEFORE the
+ * query, or a literal handed to the query as written. A query placeholder
+ * (`{current_user_id}`, `{current_year_start}`) is a literal of the query
+ * engine's own vocabulary, handed on untouched for it to resolve. A flow
+ * `{…}` token is refused at every door.
  *
- * Two independent fixes are covered here:
- *   1. Filter placeholders (`{current_user_id}`, `{current_year_start}`) are
- *      passed through to the query engine, which owns that dialect.
- *   2. Anything else that fails to resolve — a typo, a missing input, a lookup
- *      hop — refuses the node instead of executing a widened query.
+ * The #3810 guard holds for an envelope that evaluates to nothing: a condition
+ * whose comparand is `null` or nothing is not a narrower query, it is a wider
+ * one — `{ owner: <nothing> }` handed to `deleteMany` was every row in the
+ * table. So an operand envelope that evaluates to `null` REFUSES the node, as a
+ * guard (a `fault` edge may not swallow it), before any query.
+ *
+ * Before S6, the executor interpolated the filter with the single-brace
+ * dialect (`interpolateFilter`): a flow token resolved against the run's
+ * variables, an unresolved one was erased and refused here, and a placeholder
+ * no flow variable shadowed was handed on.
  */
 
 function createTestLogger(): any {
     return { info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, child: () => createTestLogger() };
 }
+
+const CEL = (source: string) => ({ dialect: 'cel', source });
 
 /** A data engine stub that records the `where` each verb actually received. */
 function fakeData() {
@@ -56,8 +66,8 @@ function crudFlow(nodeType: string, config: Record<string, unknown>) {
         label: 'CRUD Flow',
         type: 'autolaunched' as const,
         // Explicit so the ADR-0049 runAs gate (#3760) does not reject the data
-        // op first — these tests are about the filter guard, and a refusal for
-        // the wrong reason would make the negative cases pass vacuously.
+        // op first — these tests are about the filter, and a refusal for the
+        // wrong reason would make the negative cases pass vacuously.
         runAs: 'system' as const,
         nodes: [
             { id: 'start', type: 'start' as const, label: 'Start' },
@@ -71,44 +81,14 @@ function crudFlow(nodeType: string, config: Record<string, unknown>) {
     };
 }
 
-describe('interpolateFilter — filter placeholders are handed to the engine (#3810)', () => {
-    const vars = new Map<string, unknown>([['record', { id: 'r1', owner: 'usr_7' }]]);
-    const ctx = { userId: 'usr_1' } as any;
+/** Each node type, with the verb its data call is recorded under and the `fields` an update needs. */
+const NODES = [
+    ['get_record', 'find', {}],
+    ['update_record', 'update', { fields: { title: 'x' } }],
+    ['delete_record', 'delete', {}],
+] as const;
 
-    it('passes a date macro through verbatim', () => {
-        expect(interpolateFilter({ close_date: { $gte: '{current_year_start}' } }, vars, ctx))
-            .toEqual({ close_date: { $gte: '{current_year_start}' } });
-    });
-
-    it('passes a parameterised macro and a context token through verbatim', () => {
-        expect(interpolateFilter({ a: '{30_days_ago}', b: '{current_user_id}' }, vars, ctx))
-            .toEqual({ a: '{30_days_ago}', b: '{current_user_id}' });
-    });
-
-    it('still resolves flow variables', () => {
-        expect(interpolateFilter({ owner: '{record.owner}' }, vars, ctx)).toEqual({ owner: 'usr_7' });
-    });
-
-    it('mixes both dialects in one filter', () => {
-        expect(
-            interpolateFilter({ owner: '{record.owner}', close_date: { $gte: '{current_year_start}' } }, vars, ctx),
-        ).toEqual({ owner: 'usr_7', close_date: { $gte: '{current_year_start}' } });
-    });
-
-    it('a flow variable still shadows a same-named placeholder', () => {
-        // Precedence guard: a template that resolves today must not start
-        // meaning something else.
-        const shadowed = new Map<string, unknown>([['current_user_id', 'from_flow_var']]);
-        expect(interpolateFilter({ owner: '{current_user_id}' }, shadowed, ctx))
-            .toEqual({ owner: 'from_flow_var' });
-    });
-
-    it('leaves a non-placeholder unresolved token as undefined for the guard to catch', () => {
-        expect(interpolateFilter({ owner: '{record.ownr}' }, vars, ctx)).toEqual({ owner: undefined });
-    });
-});
-
-describe('crud nodes — refuse a filter that lost a condition (#3810)', () => {
+describe('a filter operand envelope is evaluated before the query; a query placeholder is handed on (#19939)', () => {
     let engine: AutomationEngine;
     let data: ReturnType<typeof fakeData>;
 
@@ -118,91 +98,230 @@ describe('crud nodes — refuse a filter that lost a condition (#3810)', () => {
         registerCrudNodes(engine, ctxWith(data.service));
     });
 
-    it('delete_record: a typo\'d field name refuses instead of emptying the object', async () => {
-        engine.registerFlow('crud_flow', crudFlow('delete_record', {
+    it.each(NODES)('%s: every operand position evaluates — a field\'s value, a comparand, a list element, a combinator member, a nested relation', async (nodeType, verb, extra) => {
+        engine.registerFlow('crud_flow', crudFlow(nodeType, {
             objectName: 'deal',
-            filter: { owner: '{record.ownr}' },
+            filter: {
+                owner: CEL('record.owner'),
+                amount: { $gt: CEL('record.amount * 2'), $lte: 1000 },
+                id: { $in: ['d0', CEL('record.id')] },
+                $or: [{ stage: CEL("record.stage + '_review'") }, { stage: 'won' }],
+                account: { region: CEL('record.region') },
+            },
+            ...extra,
         }));
+        const record = { id: 'd1', owner: 'usr_7', amount: 50, stage: 'legal', region: 'emea' };
+        const result = await engine.execute('crud_flow', { record } as any);
 
-        const result = await engine.execute('crud_flow', { record: { id: 'r1', owner: 'usr_7' } } as any);
-
-        expect(result.success).toBe(false);
-        expect(result.error).toContain('{record.ownr}');
-        expect(result.error).toMatch(/deleted it|every remaining row/);
-        expect(data.seen.delete).toBeUndefined();
+        expect(result.success).toBe(true);
+        expect(data.seen[verb]).toEqual({
+            owner: 'usr_7',
+            amount: { $gt: 100, $lte: 1000 },
+            id: { $in: ['d0', 'd1'] },
+            $or: [{ stage: 'legal_review' }, { stage: 'won' }],
+            account: { region: 'emea' },
+        });
     });
 
-    it('update_record: a missing input variable refuses instead of overwriting everything', async () => {
-        engine.registerFlow('crud_flow', crudFlow('update_record', {
+    it.each(NODES)('%s: a query placeholder reaches the engine untouched, beside a literal', async (nodeType, verb, extra) => {
+        engine.registerFlow('crud_flow', crudFlow(nodeType, {
             objectName: 'deal',
-            filter: { owner: '{someInputNeverSet}' },
-            fields: { title: 'x' },
+            filter: { close_date: { $lt: '{current_year_start}' }, a: '{30_days_ago}', b: '{current_user_id}', status: 'open' },
+            ...extra,
         }));
-
-        const result = await engine.execute('crud_flow');
-
-        expect(result.success).toBe(false);
-        expect(result.error).toContain('{someInputNeverSet}');
-        expect(data.seen.update).toBeUndefined();
-    });
-
-    it('refuses when only SOME conditions are lost — a partial filter still widens', async () => {
-        engine.registerFlow('crud_flow', crudFlow('delete_record', {
-            objectName: 'deal',
-            filter: { status: 'open', owner: '{record.ownr}' },
-        }));
-
-        const result = await engine.execute('crud_flow', { record: { id: 'r1', owner: 'usr_7' } } as any);
-
-        expect(result.success).toBe(false);
-        expect(data.seen.delete).toBeUndefined();
-    });
-
-    it('names the lookup hop and points at config.expand', async () => {
-        engine.registerFlow('crud_flow', crudFlow('delete_record', {
-            objectName: 'deal',
-            filter: { owner: '{record.account.name}' },
-        }));
-
-        const result = await engine.execute('crud_flow', { record: { id: 'r1', account: 'acc_1' } } as any);
-
-        expect(result.success).toBe(false);
-        expect(result.error).toContain('expand');
-    });
-
-    it('a filter placeholder is NOT treated as erased — it reaches the engine', async () => {
-        engine.registerFlow('crud_flow', crudFlow('delete_record', {
-            objectName: 'deal',
-            filter: { close_date: { $lt: '{current_year_start}' } },
-        }));
-
         const result = await engine.execute('crud_flow', { record: { id: 'r1' } } as any);
 
         expect(result.success).toBe(true);
-        // Handed on verbatim; the query engine owns the expansion.
-        expect(data.seen.delete).toEqual({ close_date: { $lt: '{current_year_start}' } });
+        expect(data.seen[verb]).toEqual({
+            close_date: { $lt: '{current_year_start}' }, a: '{30_days_ago}', b: '{current_user_id}', status: 'open',
+        });
     });
 
-    it('a fully-resolvable filter still runs untouched', async () => {
-        engine.registerFlow('crud_flow', crudFlow('delete_record', {
-            objectName: 'deal',
-            filter: { owner: '{record.owner}' },
-        }));
-
-        const result = await engine.execute('crud_flow', { record: { id: 'r1', owner: 'usr_7' } } as any);
+    it('a flow variable named like a placeholder no longer shadows it — the variable is read through an envelope', async () => {
+        // Before S6 a flow variable named `current_user_id` won over the
+        // placeholder at `{current_user_id}`. No flow token is read at a filter
+        // operand now: the placeholder is the query engine's, and the variable
+        // is `{ dialect: 'cel', source: 'current_user_id' }`.
+        engine.registerFlow('crud_flow', {
+            ...crudFlow('delete_record', { objectName: 'deal', filter: { a: '{current_user_id}', b: CEL('current_user_id') } }),
+            variables: [{ name: 'current_user_id', type: 'text', isInput: true }],
+        });
+        const result = await engine.execute('crud_flow', { params: { current_user_id: 'from_flow_var' } } as any);
 
         expect(result.success).toBe(true);
+        expect(data.seen.delete).toEqual({ a: '{current_user_id}', b: 'from_flow_var' });
+    });
+
+    it('the node\'s config is never written into — the resolved filter is a copy', async () => {
+        const filter = { owner: CEL('record.owner') };
+        engine.registerFlow('crud_flow', crudFlow('delete_record', { objectName: 'deal', filter }));
+        await engine.execute('crud_flow', { record: { owner: 'usr_7' } } as any);
+
         expect(data.seen.delete).toEqual({ owner: 'usr_7' });
+        expect(filter).toEqual({ owner: CEL('record.owner') });
     });
 
     it('an intentionally empty filter is still allowed (nothing was erased)', async () => {
-        // "Delete everything" must stay expressible — the guard fires on LOSS,
-        // not on emptiness, so an author who wrote no filter is unaffected.
+        // "Delete everything" must stay expressible — the guard fires on an
+        // operand that is nothing, not on emptiness, so an author who wrote no
+        // filter is unaffected.
         engine.registerFlow('crud_flow', crudFlow('delete_record', { objectName: 'deal', filter: {} }));
 
         const result = await engine.execute('crud_flow');
 
         expect(result.success).toBe(true);
         expect(data.seen.delete).toEqual({});
+    });
+
+    it('a literal `null` operand is an authored IS NULL condition, handed on — only a COMPUTED nothing is refused', async () => {
+        engine.registerFlow('crud_flow', crudFlow('delete_record', { objectName: 'deal', filter: { owner: null } }));
+        const result = await engine.execute('crud_flow');
+
+        expect(result.success).toBe(true);
+        expect(data.seen.delete).toEqual({ owner: null });
+    });
+});
+
+describe('crud nodes — refuse a filter whose operand evaluated to nothing (#3810)', () => {
+    let engine: AutomationEngine;
+    let data: ReturnType<typeof fakeData>;
+
+    beforeEach(() => {
+        data = fakeData();
+        engine = new AutomationEngine(createTestLogger());
+        registerCrudNodes(engine, ctxWith(data.service));
+    });
+
+    async function runRefused(nodeType: string, config: Record<string, unknown>, record: Record<string, unknown>) {
+        engine.registerFlow('crud_flow', crudFlow(nodeType, config));
+        const result = await engine.execute('crud_flow', { record } as any);
+        const runs = await engine.listRuns('crud_flow');
+        const step = runs[0]?.steps.find((s) => s.nodeId === 'op');
+        return { result, step };
+    }
+
+    it('delete_record: an envelope that evaluates to null refuses the node instead of emptying the object', async () => {
+        const { result, step } = await runRefused('delete_record', {
+            objectName: 'deal',
+            filter: { owner: CEL('record.owner') },
+        }, { id: 'r1', owner: null });
+
+        expect(result.success).toBe(false);
+        expect(step?.error?.code).toBe('NODE_FAILURE');
+        expect(result.error).toContain('delete_record: refusing to run — 1 filter operand(s) evaluated to nothing');
+        expect(result.error).toContain('`record.owner` (at filter.owner)');
+        expect(result.error).toContain('would have matched every remaining row and deleted it');
+        expect(data.seen.delete).toBeUndefined();
+    });
+
+    it('update_record: an envelope that evaluates to null refuses the node instead of overwriting the rows', async () => {
+        const { result, step } = await runRefused('update_record', {
+            objectName: 'deal',
+            filter: { owner: CEL('record.owner') },
+            fields: { title: 'x' },
+        }, { id: 'r1', owner: null });
+
+        expect(result.success).toBe(false);
+        expect(step?.error?.code).toBe('NODE_FAILURE');
+        expect(result.error).toContain('update_record: refusing to run');
+        expect(result.error).toContain('`record.owner` (at filter.owner)');
+        expect(data.seen.update).toBeUndefined();
+    });
+
+    it('get_record: an envelope that evaluates to null refuses the read', async () => {
+        const { result } = await runRefused('get_record', {
+            objectName: 'deal',
+            filter: { owner: CEL('record.owner') },
+        }, { owner: null });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('get_record: refusing to run');
+        expect(data.seen.find).toBeUndefined();
+    });
+
+    it.each([
+        ['a guarded form answering null', { owner: CEL('has(record.owner) ? record.owner : null') }, 'filter.owner'],
+        ['an operator\'s comparand', { amount: { $gt: CEL('record.cap') } }, 'filter.amount.$gt'],
+        ['an `$in` element', { id: { $in: ['r1', CEL('record.cap')] } }, 'filter.id.$in[1]'],
+        ['a `$or` member\'s value', { $or: [{ status: 'open' }, { owner: CEL('record.cap') }] }, 'filter.$or[1].owner'],
+    ])('delete_record: %s that evaluates to nothing refuses the node — located at the operand', async (_label, filter, at) => {
+        const { result } = await runRefused('delete_record', { objectName: 'deal', filter }, { id: 'r1', cap: null });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain(`(at ${at})`);
+        expect(data.seen.delete).toBeUndefined();
+    });
+
+    it('refuses when only SOME operands are nothing — a partial filter still widens', async () => {
+        const { result } = await runRefused('delete_record', {
+            objectName: 'deal',
+            filter: { status: 'open', owner: CEL('record.owner') },
+        }, { id: 'r1', owner: null });
+
+        expect(result.success).toBe(false);
+        expect(data.seen.delete).toBeUndefined();
+    });
+
+    it('an absent variable or key fails the run with an evaluation fault naming it — no query runs', async () => {
+        const { result, step } = await runRefused('delete_record', {
+            objectName: 'deal',
+            filter: { owner: CEL('record.ownr') },
+        }, { id: 'r1', owner: 'usr_7' });
+
+        expect(result.success).toBe(false);
+        expect(step?.error?.code).toBe('EXECUTION_ERROR');
+        expect(step?.error?.message).toContain('filter.owner: value expression failed to evaluate as CEL');
+        expect(data.seen.delete).toBeUndefined();
+    });
+});
+
+describe('a flow `{…}` token at a filter operand is refused at every door (#19939)', () => {
+    /** The builtin CRUD executor itself — the run-time door, reached without `registerFlow`. */
+    function executorOf(nodeType: string, data: ReturnType<typeof fakeData>) {
+        const executors = new Map<string, { execute: (...args: any[]) => Promise<any> }>();
+        const engine = new AutomationEngine(createTestLogger());
+        const recorder = new Proxy(engine, {
+            get(target, key, receiver) {
+                if (key === 'registerNodeExecutor') return (e: any) => { executors.set(e.type, e); };
+                return Reflect.get(target, key, receiver);
+            },
+        });
+        registerCrudNodes(recorder as AutomationEngine, ctxWith(data.service));
+        return executors.get(nodeType)!;
+    }
+
+    it.each(NODES)('%s: `registerFlow` refuses a token, located at the operand, naming its envelope', (nodeType, _verb, extra) => {
+        const engine = new AutomationEngine(createTestLogger());
+        registerCrudNodes(engine, ctxWith(fakeData().service));
+        expect(() => engine.registerFlow('crud_flow', crudFlow(nodeType, {
+            objectName: 'deal', filter: { owner: '{record.owner}', due: { $lt: '{today}' } }, ...extra,
+        }))).toThrow(`${nodeType} filter operand at config.filter.owner: ${VALUE_SLOT_TEMPLATE_REFUSAL}`);
+    });
+
+    it.each(NODES)('%s: the executor\'s contract parse refuses it as a guard, and nothing is queried', async (nodeType, verb, extra) => {
+        const data = fakeData();
+        const result = await executorOf(nodeType, data).execute(
+            { id: 'op', type: nodeType, label: 'Op', config: { objectName: 'deal', filter: { owner: '{record.owner}' }, ...extra } },
+            new Map<string, unknown>([['record', { owner: 'usr_7' }]]),
+            {},
+        );
+        expect(result.success).toBe(false);
+        expect(result.errorClass).toBe('guard');
+        expect(result.error).toContain(VALUE_SLOT_TEMPLATE_REFUSAL);
+        expect(result.error).toContain("{ dialect: 'cel', source: 'record.owner' }");
+        expect(data.seen[verb]).toBeUndefined();
+    });
+
+    it.each(NODES)('%s: the executor\'s guard refusal for an operand that evaluated to nothing is a guard too', async (nodeType, verb, extra) => {
+        const data = fakeData();
+        const result = await executorOf(nodeType, data).execute(
+            { id: 'op', type: nodeType, label: 'Op', config: { objectName: 'deal', filter: { owner: CEL('record.owner') }, ...extra } },
+            new Map<string, unknown>([['record', { owner: null }]]),
+            {},
+        );
+        expect(result.success).toBe(false);
+        expect(result.errorClass).toBe('guard');
+        expect(result.error).toContain('filter operand(s) evaluated to nothing');
+        expect(data.seen[verb]).toBeUndefined();
     });
 });

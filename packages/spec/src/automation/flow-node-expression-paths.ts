@@ -640,10 +640,13 @@ function isPlainFilterObject(value: unknown): value is Record<string, unknown> {
  * matched as `{ dialect: { $eq: '…' } }`, an operator map. The top-level
  * filter is a condition, never an operand.
  *
- * A malformed member of a combinator (`$and: 'x'`) is handed over as an
- * operand, so every string the filter carries is reached. Cycle-safe: a flow
- * built in code may hold a self-reference. Pure — no judgement about what an
- * operand says.
+ * Whatever sits where a combinator wants a condition and is none — a value
+ * that is no plain object (`$and: 'x'`, `$and: [42]`), or an envelope
+ * (`$not: { dialect: 'cel', … }`) — is handed over as an operand, so every
+ * string the filter carries is reached and an envelope anywhere is evaluated
+ * (what it evaluates to is the query engine's to judge, as any operand's is).
+ * Cycle-safe: a flow built in code may hold a self-reference. Pure — no
+ * judgement about what an operand says.
  */
 export function flowFilterOperands(filter: unknown): FlowFilterOperand[] {
   const out: FlowFilterOperand[] = [];
@@ -655,11 +658,7 @@ export function flowFilterOperands(filter: unknown): FlowFilterOperand[] {
     }
     out.push({ path, value });
   };
-  const condition = (node: unknown, path: readonly (string | number)[]): void => {
-    if (!isPlainFilterObject(node)) {
-      operand(node, path);
-      return;
-    }
+  const conditionKeys = (node: Record<string, unknown>, path: readonly (string | number)[]): void => {
     if (seen.has(node)) return;
     seen.add(node);
     for (const [key, value] of Object.entries(node)) {
@@ -676,14 +675,20 @@ export function flowFilterOperands(filter: unknown): FlowFilterOperand[] {
         if (Object.keys(value).some((k) => k.startsWith('$'))) {
           for (const [op, comparand] of Object.entries(value)) operand(comparand, [...here, op]);
         } else {
-          condition(value, here);
+          conditionKeys(value, here);
         }
         continue;
       }
       operand(value, here);
     }
   };
-  if (isPlainFilterObject(filter)) condition(filter, []);
+  // A combinator's member: a condition, unless it is no plain object or is an
+  // envelope — then it is handed over as an operand.
+  const condition = (node: unknown, path: readonly (string | number)[]): void => {
+    if (!isPlainFilterObject(node) || isExpressionEnvelopeShaped(node)) operand(node, path);
+    else conditionKeys(node, path);
+  };
+  if (isPlainFilterObject(filter)) conditionKeys(filter, []);
   return out;
 }
 
