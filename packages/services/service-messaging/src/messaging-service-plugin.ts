@@ -445,7 +445,7 @@ export class MessagingServicePlugin implements Plugin {
      * `OS_SKIP_SCHEMA_SYNC=1` the way the engine's own boot sync does: a
      * deployment that declared its DDL managed out-of-band ("Use after running
      * migrations manually") gets no table created behind its back. The value is
-     * the one `ObjectQLPlugin` resolved ({@link bootSchemaSyncSkipped}); when it
+     * the one `ObjectQLPlugin` resolved (`bootSchemaSyncSkipped`); when it
      * is set this returns before any DDL or existence probe (the flag protects a
      * cold-start budget) and says once, at `info`, what it did not provision and
      * why. Not `warn`: nothing is degraded, because the operator declared this.

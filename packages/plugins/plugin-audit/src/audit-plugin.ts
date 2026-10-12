@@ -578,7 +578,7 @@ export class AuditPlugin implements Plugin {
    * managed out-of-band ("Use after running migrations manually"), and the
    * engine's boot honours it. This method is boot-time DDL too, so it honours
    * the same declaration: it reads the value `ObjectQLPlugin` resolved, from
-   * the engine ({@link bootSchemaSyncSkipped}), and when it is set it returns
+   * the engine (`bootSchemaSyncSkipped`), and when it is set it returns
    * before any DDL. It issues no existence probe either, because the flag
    * protects a cold-start budget. It says so once, at `info`, naming what it did
    * not provision and why. Not `warn`: nothing is degraded, because the operator
