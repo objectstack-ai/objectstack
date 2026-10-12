@@ -420,9 +420,17 @@ describe('the by-name doors address ONE member by the selector (#22877, stage 2)
             .then(() => undefined, (e: unknown) => e);
         expect(crossed?.code).toBe('VERSION_NOT_FOUND');
         expect(crossed?.status).toBe(404);
-        // CONTROL: the canonical member reverts to its own version by the bare name.
-        expect(await protocol.rollbackMetaItem({ type: T, name: NAME, toVersion: en[0]!.version! })).toMatchObject({ success: true });
-        expect(await servedSubjects(protocol)).toEqual({ 'en-US': 'ADMIN en', 'zh-CN': 'ADMIN zh 1' });
+    });
+
+    it('CONTROL: a revert by the bare name reverts the canonical member to its own version, and leaves zh-CN', async () => {
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const { protocol } = await boot(stores);
+        await protocol.saveMetaItem({ type: T, name: NAME, item: template('en-US', 'ADMIN en 1') });
+        await protocol.saveMetaItem({ type: T, name: NAME, item: template('zh-CN', 'ADMIN zh') });
+        await protocol.saveMetaItem({ type: T, name: NAME, item: template('en-US', 'ADMIN en 2') });
+        const [enFirst] = (await protocol.historyMetaItem({ type: T, name: NAME })).events;
+        expect(await protocol.rollbackMetaItem({ type: T, name: NAME, toVersion: enFirst!.version! })).toMatchObject({ success: true });
+        expect(await servedSubjects(protocol)).toEqual({ 'en-US': 'ADMIN en 1', 'zh-CN': 'ADMIN zh' });
     });
 
     it('a wrong selector is a located 400 on every door, and nothing is read or written', async () => {
