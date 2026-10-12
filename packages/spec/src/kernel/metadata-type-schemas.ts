@@ -139,7 +139,7 @@ const BUILTIN_METADATA_TYPE_SCHEMAS: Partial<Record<MetadataType, z.ZodType>> = 
   // to continue "…and `/meta/types` emits a real JSON Schema so the
   // metadata-admin engine renders a form instead of a raw-JSON textarea".
   // That is no longer the point of the binding: `api` is CODE-ONLY as of #5488
-  // (`allowRuntimeCreate: false` + `allowOrgOverride: false`, maintainer ruling
+  // (`allowRuntimeCreate: false` + `allowEnvironmentOverlay: false`, maintainer ruling
   // 2026-08-07), because a runtime-created endpoint was never served — the
   // matcher reads `listForIndex('api')`, and a runtime write lands in
   // `sys_metadata`, which it does not read. So `PUT /meta/api/:name` is refused

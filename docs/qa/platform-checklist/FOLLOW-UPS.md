@@ -361,7 +361,7 @@ posture, then decide which shape is wanted).
 - **`content/docs/kernel/contracts/metadata-service.mdx`** teaches the superseded
   three-layer overlay protocol as the customization architecture — which ADR-0126 §6.4
   forbids citing — and its worked example overlays an **`object`** (tier B,
-  `allowOrgOverride:false`): the exact `NOT_OVERRIDABLE` phantom write the §6.1 wall refuses.
+  `allowEnvironmentOverlay:false`): the exact `NOT_OVERRIDABLE` phantom write the §6.1 wall refuses.
 - **`content/docs/protocol/objectui/concept.mdx`** (+ `index.mdx`) promises
   per-tenant field-level object customization ("Make phone required", "Add custom field
   vip_status") — contradicts Regime E and the sentence now shipped at
@@ -414,7 +414,7 @@ posture, then decide which shape is wanted).
 - **E1's three-tier language landed verbatim** at `capabilities/integrations.mdx` and
   `build-without-code.mdx`; repo-wide, no unconditional "install then customize in
   Studio" claim remains in `content/docs`.
-- **The dashboard overlay door exists** (`dashboard allowOrgOverride: true`,
+- **The dashboard overlay door exists** (`dashboard allowEnvironmentOverlay: true`,
   `packages/spec/src/kernel/metadata-plugin.zod.ts`) — the display-class item asserts
   the tier-1 promise on both view and dashboard.
 - **`TenancyPostureSchema` is enumSource-pinnable** (direct inline `z.enum`, 3 members) —

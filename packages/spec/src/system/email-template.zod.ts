@@ -15,7 +15,8 @@ import { strictObject } from '../shared/strict-object';
  * `(name, locale)` — the environment's item over each code package's
  * declaration, the built-in auth templates included — so administrators can
  * author/edit/translate templates in Studio without shipping code, and a
- * Studio save overrides a built-in default at environment level. No
+ * Studio save overrides a built-in default at environment level
+ * (`allowEnvironmentOverlay: true` in the metadata registry). No
  * `sys_email_template` row is read or written on the way.
  *
  * Aligned with Salesforce `EmailTemplate` and ServiceNow

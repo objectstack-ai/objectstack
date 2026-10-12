@@ -114,7 +114,7 @@ describe('PUT / DELETE /api/v1/meta/flow/:name on a packaged flow — the refusa
         expect(r.code).toBe('NOT_OVERRIDABLE');
         expect(r.message).toBe(
             `Metadata item 'page/${PACKAGED_PAGE}' is provided by a managed package and is sealed against in-place edits: `
-            + 'its type takes no environment overlay (allowOrgOverride=false), and OS_METADATA_WRITABLE does not open '
+            + 'its type takes no environment overlay (allowEnvironmentOverlay=false), and OS_METADATA_WRITABLE does not open '
             + 'a managed item. Edit the source artifact and redeploy. '
             + 'See docs/adr/0131-total-organization-ownership-no-null-organization-id.md.',
         );

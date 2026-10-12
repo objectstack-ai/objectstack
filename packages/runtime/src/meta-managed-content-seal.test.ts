@@ -326,7 +326,7 @@ describe('[#22411] the dispatcher /meta door: the type listing and the save door
         const listed = (type: string) => {
             const entry = entries.find((e) => e.type === type);
             expect(entry, `${type} is listed`).toBeDefined();
-            return { allowOrgOverride: entry.allowOrgOverride, overrideSource: entry.overrideSource };
+            return { allowEnvironmentOverlay: entry.allowEnvironmentOverlay, overrideSource: entry.overrideSource };
         };
         const save = async (type: string, body: { name: string }) => {
             const res = responseOf(await dispatcher.handleMetadata(`/${type}/${body.name}`, ctx(), 'PUT', body));
@@ -338,7 +338,7 @@ describe('[#22411] the dispatcher /meta door: the type listing and the save door
         };
     }
 
-    const SHUT = { allowOrgOverride: false, overrideSource: 'registry' };
+    const SHUT = { allowEnvironmentOverlay: false, overrideSource: 'registry' };
     const REFUSED = { status: 403, code: 'NOT_CREATABLE', row: false };
 
     for (const environmentId of [undefined, 'env_1']) {
@@ -359,7 +359,7 @@ describe('[#22411] the dispatcher /meta door: the type listing and the save door
             ObjectStackProtocolImplementation.resetEnvWritableCache();
             resetEnvWritableMetadataTypes();
             const both = await readBoth(environmentId);
-            expect(both.job.listed).toEqual({ allowOrgOverride: true, overrideSource: 'env' });
+            expect(both.job.listed).toEqual({ allowEnvironmentOverlay: true, overrideSource: 'env' });
             expect({ status: both.job.saved.status, row: both.job.saved.row }).toEqual({ status: 200, row: true });
             expect(both.picklist).toEqual({ listed: SHUT, saved: REFUSED });
         });
