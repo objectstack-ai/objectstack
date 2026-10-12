@@ -430,6 +430,11 @@ that declares `requires: ['automation']` gets it without this), `orgContext`,
 `databaseFile`, `extraPlugins`, `artifact` (boot the compiled artifact as the
 app, so hooks and actions run their lowered `body`).
 
+The `config` `bootStack` takes is `defineStack` output, as every example above
+passes it: a raw object literal registers its fields as authored, without the
+spec's parse defaults, so an `autonumber` that authors no `unique` gets no
+unique scope and no index.
+
 ## Known limitations
 
 - **Intentional write-transforms read back as fidelity gaps.** The fidelity
