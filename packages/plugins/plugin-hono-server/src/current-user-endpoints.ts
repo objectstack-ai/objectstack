@@ -269,6 +269,66 @@ interface ResolvedPermissionSetLike {
     tabPermissions?: unknown;
 }
 
+/** The tab visibilities `/auth/me/permissions` merges, most-restrictive first. */
+type MePermissionsTabVisibility = 'visible' | 'hidden' | 'default_on' | 'default_off';
+
+/**
+ * The grant half of the `/auth/me/permissions` body on a security-wired stack —
+ * every key besides the caller's identity. All six are REQUIRED, so a caller of
+ * {@link mePermissionsBody} cannot drop one without tsc refusing it.
+ */
+interface MePermissionsGrants {
+    positions: string[];
+    permissionSets: string[];
+    objects: ReturnType<typeof buildEffectiveObjectPermissions>;
+    fields: Record<string, { readable: boolean; editable: boolean }>;
+    systemPermissions: string[];
+    tabPermissions: Record<string, MePermissionsTabVisibility>;
+}
+
+/**
+ * [#23047] The CLOSED grant half: every key present and empty. It is what the
+ * handler answers when it knows WHO the caller is but could not compute what
+ * they hold. `systemPermissions: []` is the load-bearing key: the console reads
+ * an ABSENT one as "a deployment predating ADR-0066 — capabilities unknown" and
+ * fails OPEN on it (ADR-0066: "unknown is not denied", objectui#4656), so a
+ * fault must never answer in that shape. `positions` is empty too rather than
+ * the session's: the server vouches for nothing it did not finish computing.
+ * Fresh values per call, so no response aliases another.
+ */
+function closedMePermissionsGrants(): MePermissionsGrants {
+    return { positions: [], permissionSets: [], objects: {}, fields: {}, systemPermissions: [], tabPermissions: {} };
+}
+
+/**
+ * [#23047] The ONE builder of the authenticated `/auth/me/permissions` body on a
+ * security-wired stack. The success path hands it the computed grants, the
+ * handler's outer `catch` hands it {@link closedMePermissionsGrants}, so the two
+ * answers cannot disagree on which keys exist. It reads nothing but its two
+ * arguments, and the identity is captured before the handler's `try`, so the
+ * `catch` cannot throw again inside it.
+ *
+ * Not used by the deliberate degraded branch (no SecurityPlugin, or no metadata
+ * service): that body omits `systemPermissions` and `tabPermissions` ON PURPOSE,
+ * because there the server enforces nothing either and "unknown" is the truth.
+ */
+function mePermissionsBody(
+    identity: { userId: string; tenantId: string | null },
+    grants: MePermissionsGrants,
+) {
+    return {
+        authenticated: true as const,
+        userId: identity.userId,
+        tenantId: identity.tenantId,
+        positions: grants.positions,
+        permissionSets: grants.permissionSets,
+        objects: grants.objects,
+        fields: grants.fields,
+        systemPermissions: grants.systemPermissions,
+        tabPermissions: grants.tabPermissions,
+    };
+}
+
 /**
  * [#7616] The ONE permission-set resolution both handlers below use —
  * `ISecurityService.resolvePermissionSetsForContext`, reached through the
@@ -771,6 +831,9 @@ export function registerCurrentUserEndpoints(
         if (!execCtx?.userId) {
             return c.json({ authenticated: false });
         }
+        // Captured BEFORE the `try`: the closed body the outer `catch` answers is
+        // built from this alone (see {@link mePermissionsBody}).
+        const identity = { userId: execCtx.userId, tenantId: execCtx.tenantId ?? null };
         try {
             // [#4093] Guarded, not bare: `getService` THROWS on an
             // unregistered slot, and an unclaimed one is the ordinary state of
@@ -832,7 +895,7 @@ export function registerCurrentUserEndpoints(
             const fields: Record<string, { readable: boolean; editable: boolean }> = {};
             const systemPermissions = new Set<string>();
             const tabRank: Record<string, number> = { hidden: 0, default_off: 1, default_on: 2, visible: 3 };
-            const tabPermissions: Record<string, 'visible' | 'hidden' | 'default_on' | 'default_off'> = {};
+            const tabPermissions: Record<string, MePermissionsTabVisibility> = {};
             for (const ps of resolved) {
                 if (ps?.fields) {
                     for (const [key, perm] of Object.entries(ps.fields)) {
@@ -853,7 +916,7 @@ export function registerCurrentUserEndpoints(
                         if (typeof val !== 'string' || !(val in tabRank)) continue;
                         const cur = tabPermissions[app];
                         if (!cur || tabRank[val] > tabRank[cur]) {
-                            tabPermissions[app] = val as 'visible' | 'hidden' | 'default_on' | 'default_off';
+                            tabPermissions[app] = val as MePermissionsTabVisibility;
                         }
                     }
                 }
@@ -875,20 +938,22 @@ export function registerCurrentUserEndpoints(
                     ql?.getSchema?.(name) as (ManagedSchemaLike & ApiExposureSchemaLike) | undefined,
                 logger: ctx.logger,
             });
-            return c.json({
-                authenticated: true,
-                userId: execCtx.userId,
-                tenantId: execCtx.tenantId ?? null,
+            return c.json(mePermissionsBody(identity, {
                 positions: execCtx.positions ?? [],
                 permissionSets: resolved.map((p: any) => p?.name).filter(Boolean),
                 objects,
                 fields,
                 systemPermissions: Array.from(systemPermissions),
                 tabPermissions,
-            });
+            }));
         } catch (err: any) {
             ctx.logger?.warn?.('[hono] /auth/me/permissions failed', { err: err?.message });
-            return c.json({ authenticated: true, userId: execCtx.userId, objects: {}, fields: {} });
+            // [#23047] The same event, for the caller, as the resolver throwing
+            // above: the server failed to compute the answer. So it answers the
+            // same CLOSED shape, `systemPermissions: []` included, and never the
+            // degraded branch's open one (`systemPermissions` absent), which the
+            // console reads as "capabilities unknown" and fails open on.
+            return c.json(mePermissionsBody(identity, closedMePermissionsGrants()));
         }
     }));
 
