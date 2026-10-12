@@ -4,17 +4,26 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
+// The engine-double contract gate: the backfill's double reaches the real
+// engine's update dispatch predicate rather than a looser copy of it.
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+
 import {
+    backfillOverlayBundleMembers,
     buildOverlayDuplicateProbeSql,
     buildOverlayFallbackIndexSql,
     buildOverlayIndexSql,
     ensureMetadataOverlayIndexes,
     ensureOverlayStateIndex,
     overlayIndexKeyParts,
+    overlayMemberOfBody,
+    overlayMemberValue,
+    overlayMemberWhere,
     OVERLAY_INDEX_COLUMNS,
     OVERLAY_INDEX_NAMES,
     OVERLAY_NULL_SENTINELS,
     OVERLAY_PROBE_INDEX_NAMES,
+    type OverlayMemberBackfillEngine,
 } from './overlay-index.js';
 import type { IndexExec } from './partial-index-probe.js';
 
@@ -37,12 +46,15 @@ describe('sys_metadata overlay uniqueness (#6418)', () => {
     let exec: IndexExec;
 
     /**
-     * What `SqlDriver.syncDeclaredIndexes` materializes for
-     * `sys-metadata.object.ts`'s declaration
+     * What `SqlDriver.syncDeclaredIndexes` materialized for
+     * `sys-metadata.object.ts`'s declaration before the member part
      * (`['type','name','organization_id','package_id']`, `unique: true`) — knex's
      * form, mirrored from the sibling test's measured fixture. It is
      * UNRESTRICTED (no `WHERE`) and NULL-distinct, which is exactly why the
-     * runtime migration exists and exactly what it must not destroy.
+     * runtime migration exists and exactly what it must not destroy. Kept in
+     * its four-part form on purpose (#22877): it is the index every deployed
+     * store carries under this name before the next boot re-keys it, and
+     * `syncDeclaredIndexes` skips by name, so it is the one the migration meets.
      */
     const DECLARED_ACTIVE_INDEX_DDL =
         'CREATE UNIQUE INDEX `idx_sys_metadata_overlay_active` on `sys_metadata` ' +
@@ -70,12 +82,13 @@ describe('sys_metadata overlay uniqueness (#6418)', () => {
         org: string | null,
         packageId: string | null,
         state: string,
+        member: string | null = null,
     ): { ok: boolean; error?: string } => {
         try {
             db.prepare(
-                'INSERT INTO sys_metadata (id, type, name, organization_id, package_id, state) '
-                + 'VALUES (?,?,?,?,?,?)',
-            ).run(id, type, name, org, packageId, state);
+                'INSERT INTO sys_metadata (id, type, name, organization_id, package_id, state, bundle_member) '
+                + 'VALUES (?,?,?,?,?,?,?)',
+            ).run(id, type, name, org, packageId, state, member);
             return { ok: true };
         } catch (e) {
             return { ok: false, error: e instanceof Error ? e.message : String(e) };
@@ -99,7 +112,7 @@ describe('sys_metadata overlay uniqueness (#6418)', () => {
         db = new DatabaseSync(':memory:');
         db.exec(`CREATE TABLE sys_metadata (
             id TEXT PRIMARY KEY, type TEXT, name TEXT,
-            organization_id TEXT, package_id TEXT, state TEXT
+            organization_id TEXT, package_id TEXT, state TEXT, bundle_member TEXT
         );`);
         db.exec(DECLARED_ACTIVE_INDEX_DDL);
         exec = async (sql: string) => db.exec(sql);
@@ -508,28 +521,30 @@ describe('sys_metadata overlay uniqueness (#6418)', () => {
     // ── Seams ─────────────────────────────────────────────────────────────
 
     /**
-     * #6418 is an ORDER and REPORTING fix. The key spelling it inherited is
-     * pinned as a literal — byte-identical to what `protocol.ts` issued before
-     * — so a later "while we are in here" re-keying cannot ride in unnoticed:
-     * re-partitioning a live unique index needs its own ADR-0120 D4 ceremony.
+     * The key spelling is pinned as a literal, so a later "while we are in
+     * here" re-keying cannot ride in unnoticed: re-partitioning a live unique
+     * index needs its own ADR-0120 D4 ceremony. The member part is the one
+     * re-keying since #6418 (#22877, ruled), and both NULL-folded parts use the
+     * spelling that shipped for `package_id`.
      */
-    it('pins the key spelling, unchanged by this fix', () => {
-        expect(OVERLAY_INDEX_COLUMNS).toEqual(['type', 'name', 'organization_id', 'package_id']);
-        expect(OVERLAY_NULL_SENTINELS).toEqual({ package_id: '' });
+    it('pins the key spelling — the member part folded the way package_id is', () => {
+        expect(OVERLAY_INDEX_COLUMNS).toEqual(['type', 'name', 'organization_id', 'package_id', 'bundle_member']);
+        expect(OVERLAY_NULL_SENTINELS).toEqual({ package_id: '', bundle_member: '' });
         expect(overlayIndexKeyParts()).toEqual([
             'type',
             'name',
             'organization_id',
             "COALESCE(package_id, '')",
+            "COALESCE(bundle_member, '')",
         ]);
         expect(buildOverlayIndexSql(OVERLAY_INDEX_NAMES.active, 'active')).toEqual(
             'CREATE UNIQUE INDEX IF NOT EXISTS idx_sys_metadata_overlay_active '
-            + "ON sys_metadata (type, name, organization_id, COALESCE(package_id, '')) "
+            + "ON sys_metadata (type, name, organization_id, COALESCE(package_id, ''), COALESCE(bundle_member, '')) "
             + "WHERE state = 'active'",
         );
         expect(buildOverlayIndexSql(OVERLAY_INDEX_NAMES.draft, 'draft')).toEqual(
             'CREATE UNIQUE INDEX IF NOT EXISTS idx_sys_metadata_overlay_draft '
-            + "ON sys_metadata (type, name, organization_id, COALESCE(package_id, '')) "
+            + "ON sys_metadata (type, name, organization_id, COALESCE(package_id, ''), COALESCE(bundle_member, '')) "
             + "WHERE state = 'draft'",
         );
     });
@@ -542,7 +557,7 @@ describe('sys_metadata overlay uniqueness (#6418)', () => {
         const sql = buildOverlayFallbackIndexSql(OVERLAY_INDEX_NAMES.active);
         expect(sql).toEqual(
             'CREATE INDEX IF NOT EXISTS idx_sys_metadata_overlay_active '
-            + 'ON sys_metadata (type, name, organization_id, package_id)',
+            + 'ON sys_metadata (type, name, organization_id, package_id, bundle_member)',
         );
         expect(sql.toUpperCase()).not.toContain('UNIQUE');
         expect(sql).toContain('IF NOT EXISTS');
@@ -558,12 +573,218 @@ describe('sys_metadata overlay uniqueness (#6418)', () => {
         const sql = buildOverlayDuplicateProbeSql('active');
         expect(sql).toEqual(
             'SELECT type, name, organization_id, '
-            + "COALESCE(package_id, '') AS package_id_key, COUNT(*) AS duplicate_rows "
+            + "COALESCE(package_id, '') AS package_id_key, "
+            + "COALESCE(bundle_member, '') AS bundle_member_key, COUNT(*) AS duplicate_rows "
             + "FROM sys_metadata WHERE state = 'active' "
-            + "GROUP BY type, name, organization_id, COALESCE(package_id, '') HAVING COUNT(*) > 1",
+            + "GROUP BY type, name, organization_id, COALESCE(package_id, ''), COALESCE(bundle_member, '') "
+            + 'HAVING COUNT(*) > 1',
         );
-        // Every bare projection is a bare GROUP BY term; the folded one is
-        // projected only through its own expression.
+        // Every bare projection is a bare GROUP BY term; the folded ones are
+        // projected only through their own expressions.
         expect(sql).not.toMatch(/SELECT [^,]*, package_id,/);
+        expect(sql).not.toMatch(/, bundle_member,/);
+    });
+});
+
+/**
+ * The member part of the overlay key (#22877, ruling A): two locales of one
+ * `email_template` are two overlay rows.
+ *
+ * Before it, the key was `(type, name, organization_id, package_id)`, so the
+ * second locale's save replaced the first locale's row and the first locale
+ * served the package wording again at the next boot. These cases run on the
+ * same REAL SQLite as the rest of this file, starting from the four-part index
+ * a deployed store carries, so the re-keying itself is what is measured.
+ */
+describe('sys_metadata overlay key — the bundle member part (#22877)', () => {
+    let db: DatabaseSync;
+    let exec: IndexExec;
+
+    const FOUR_PART_INDEX_DDL =
+        'CREATE UNIQUE INDEX `idx_sys_metadata_overlay_active` on `sys_metadata` ' +
+        '(`type`, `name`, `organization_id`, `package_id`)';
+
+    const insert = (
+        id: string,
+        type: string,
+        name: string,
+        packageId: string | null,
+        state: string,
+        member: string | null,
+        body: Record<string, unknown> = {},
+    ): { ok: boolean; error?: string } => {
+        try {
+            db.prepare(
+                'INSERT INTO sys_metadata (id, type, name, organization_id, package_id, state, bundle_member, metadata) '
+                + 'VALUES (?,?,?,?,?,?,?,?)',
+            ).run(id, type, name, 'org1', packageId, state, member, JSON.stringify(body));
+            return { ok: true };
+        } catch (e) {
+            return { ok: false, error: e instanceof Error ? e.message : String(e) };
+        }
+    };
+
+    /**
+     * The backfill's engine, over this database: `find` by `type`, `update` by
+     * `id` — the two calls it makes. Anything else is refused, so a backfill
+     * that started asking for more could not pass by being ignored.
+     */
+    const sqliteEngine = (): OverlayMemberBackfillEngine & { updates: Array<Record<string, unknown>> } => {
+        const updates: Array<Record<string, unknown>> = [];
+        return {
+            updates,
+            async find(table, options) {
+                const keys = Object.keys(options.where);
+                if (keys.length !== 1 || keys[0] !== 'type') throw new Error(`unexpected where: ${keys.join(',')}`);
+                return db.prepare(`SELECT * FROM ${table} WHERE type = ?`).all(options.where.type as string) as any[];
+            },
+            async update(table, data, options) {
+                assertEngineUpdateDispatch(data, options);
+                const id = options.where.id;
+                if (typeof id !== 'string') throw new Error('update by id only');
+                const columns = Object.keys(data);
+                db.prepare(`UPDATE ${table} SET ${columns.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`)
+                    .run(...columns.map((c) => data[c] as string | null), id);
+                updates.push({ id, ...data });
+                return { id };
+            },
+        };
+    };
+
+    const allRows = (where = '1 = 1') =>
+        db.prepare(`SELECT * FROM sys_metadata WHERE ${where} ORDER BY id`).all() as Array<Record<string, unknown>>;
+
+    beforeEach(() => {
+        db = new DatabaseSync(':memory:');
+        db.exec(`CREATE TABLE sys_metadata (
+            id TEXT PRIMARY KEY, type TEXT, name TEXT,
+            organization_id TEXT, package_id TEXT, state TEXT, bundle_member TEXT, metadata TEXT
+        );`);
+        db.exec(FOUR_PART_INDEX_DDL);
+        exec = async (sql: string) => db.exec(sql);
+    });
+
+    afterEach(() => {
+        db.close();
+    });
+
+    it('BEFORE: the four-part key refuses a second locale of one template — the store keeps one row per (type, name)', () => {
+        expect(insert('e1', 'email_template', 'acme.welcome', 'pkg1', 'active', null).ok).toBe(true);
+        const second = insert('z1', 'email_template', 'acme.welcome', 'pkg1', 'active', 'zh-CN');
+        expect(second.ok).toBe(false);
+        expect(second.error).toContain('UNIQUE constraint failed');
+    });
+
+    it('AFTER the next run: the key is replaced, two members coexist, and a duplicate member is refused loudly', async () => {
+        const result = await ensureMetadataOverlayIndexes(exec);
+        expect(result.active.status).toBe('created');
+        expect(result.draft.status).toBe('created');
+        // The CHANGED key replaced the four-part index under the same name.
+        const ddl = String((db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name=?")
+            .get(OVERLAY_INDEX_NAMES.active) as { sql: string }).sql);
+        expect(ddl).toContain("COALESCE(bundle_member, '')");
+
+        // Two locales, package-bound and package-less alike.
+        expect(insert('e1', 'email_template', 'acme.welcome', 'pkg1', 'active', null).ok).toBe(true);
+        expect(insert('z1', 'email_template', 'acme.welcome', 'pkg1', 'active', 'zh-CN').ok).toBe(true);
+        expect(insert('e2', 'email_template', 'acme.welcome', null, 'active', null).ok).toBe(true);
+        expect(insert('z2', 'email_template', 'acme.welcome', null, 'active', 'zh-CN').ok).toBe(true);
+
+        // A duplicate (type, name, member) is refused by the index — the store
+        // answers it, no caller has to remember to check.
+        const dupMember = insert('z3', 'email_template', 'acme.welcome', 'pkg1', 'active', 'zh-CN');
+        expect(dupMember.ok).toBe(false);
+        expect(dupMember.error).toContain('UNIQUE constraint failed');
+        // The canonical member's NULL is one bucket, as package_id's is.
+        const dupCanonical = insert('e3', 'email_template', 'acme.welcome', null, 'active', null);
+        expect(dupCanonical.ok).toBe(false);
+        expect(dupCanonical.error).toContain('UNIQUE constraint failed');
+        // A member's draft still coexists with its active row.
+        expect(insert('zd', 'email_template', 'acme.welcome', 'pkg1', 'draft', 'zh-CN').ok).toBe(true);
+
+        // The shipped duplicate query sees members as distinct keys.
+        expect(db.prepare(buildOverlayDuplicateProbeSql('active')).all()).toEqual([]);
+    });
+
+    it('the member helpers: undefined for a name-only type, NULL for the canonical member, the value otherwise', () => {
+        expect(overlayMemberValue('view', 'zh-CN')).toBeUndefined();
+        expect(overlayMemberValue('email_template')).toBeNull();
+        expect(overlayMemberValue('email_template', 'en-US')).toBeNull();
+        expect(overlayMemberValue('email_template', '  ')).toBeNull();
+        expect(overlayMemberValue('email_template', ' zh-CN ')).toBe('zh-CN');
+        // The type's other spelling folds to the registry key.
+        expect(overlayMemberValue('emailTemplates', 'zh-CN')).toBe('zh-CN');
+
+        expect(overlayMemberOfBody('email_template', { locale: 'zh-CN' })).toBe('zh-CN');
+        expect(overlayMemberOfBody('email_template', { locale: 'en-US' })).toBeNull();
+        expect(overlayMemberOfBody('email_template', {})).toBeNull();
+        expect(overlayMemberOfBody('view', { locale: 'zh-CN' })).toBeUndefined();
+
+        expect(overlayMemberWhere('view')).toEqual({});
+        expect(overlayMemberWhere('email_template')).toEqual({ bundle_member: null });
+        expect(overlayMemberWhere('email_template', 'ja-JP')).toEqual({ bundle_member: 'ja-JP' });
+    });
+
+    it('backfills a pre-fix row from its body, and leaves every other row byte-identical', async () => {
+        // Rows as the four-part key stored them: no member anywhere.
+        insert('t_zh', 'email_template', 'acme.welcome', null, 'active', null, { name: 'acme.welcome', locale: 'zh-CN', subject: 'zh' });
+        insert('t_en', 'email_template', 'acme.reset', null, 'active', null, { name: 'acme.reset', locale: 'en-US', subject: 'en' });
+        insert('t_bare', 'email_template', 'acme.bare', null, 'active', null, { name: 'acme.bare', subject: 'no locale' });
+        insert('t_draft', 'email_template', 'acme.draft', null, 'draft', null, { name: 'acme.draft', locale: 'ja-JP' });
+        // A row of a type whose identity is `name` alone, carrying a locale key.
+        insert('v1', 'view', 'acme.list', 'pkg1', 'active', null, { name: 'acme.list', locale: 'zh-CN' });
+        insert('tr', 'translation', 'zh-CN', null, 'active', null, { name: 'zh-CN', locale: 'zh-CN' });
+        db.prepare("UPDATE sys_metadata SET metadata = '{not json' WHERE id = 't_bare'").run();
+        const othersBefore = allRows("type <> 'email_template'");
+
+        const engine = sqliteEngine();
+        const result = await backfillOverlayBundleMembers(engine);
+
+        expect(result).toEqual({ status: 'done', backfilled: 2, unparseable: 1 });
+        // Exactly the two non-canonical bodies are written, each by id.
+        expect([...engine.updates].sort((a, b) => String(a.id).localeCompare(String(b.id)))).toEqual([
+            { id: 't_draft', bundle_member: 'ja-JP' },
+            { id: 't_zh', bundle_member: 'zh-CN' },
+        ]);
+        const members = Object.fromEntries(allRows("type = 'email_template'").map((r) => [r.id, r.bundle_member]));
+        expect(members).toEqual({ t_zh: 'zh-CN', t_en: null, t_bare: null, t_draft: 'ja-JP' });
+        // Every other type's rows: byte-identical, every column.
+        expect(allRows("type <> 'email_template'")).toEqual(othersBefore);
+
+        // Idempotent: a backfilled row is skipped.
+        const again = sqliteEngine();
+        expect(await backfillOverlayBundleMembers(again)).toEqual({ status: 'done', backfilled: 0, unparseable: 1 });
+        expect(again.updates).toEqual([]);
+
+        // …and the re-keyed index builds over the backfilled rows, every
+        // other type's rows still untouched.
+        const indexes = await ensureMetadataOverlayIndexes(exec);
+        expect(indexes.active.status).toBe('created');
+        expect(insert('t_en2', 'email_template', 'acme.welcome', null, 'active', null).ok).toBe(true);
+        expect(allRows("type <> 'email_template'")).toEqual(othersBefore);
+    });
+
+    it('a store with no table is nothing to backfill; any other failure is reported at error with its consequence', async () => {
+        const missing: OverlayMemberBackfillEngine = {
+            async find() { throw new Error('no such table: sys_metadata'); },
+            async update() { throw new Error('unreachable'); },
+        };
+        const quiet = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+        expect(await backfillOverlayBundleMembers(missing, quiet)).toEqual({ status: 'done', backfilled: 0, unparseable: 0 });
+        expect(quiet.error).not.toHaveBeenCalled();
+
+        const broken: OverlayMemberBackfillEngine = {
+            async find() { throw new Error('no such column: bundle_member'); },
+            async update() { throw new Error('unreachable'); },
+        };
+        const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+        const result = await backfillOverlayBundleMembers(broken, logger);
+        expect(result.status).toBe('failed');
+        expect(result.detail).toContain('no such column: bundle_member');
+        expect(logger.error).toHaveBeenCalledTimes(1);
+        const msg = String(logger.error.mock.calls[0]![0]);
+        expect(msg).toContain('bundle_member');
+        expect(msg).toContain('answered as the canonical one');
+        expect(msg).toContain('restart');
     });
 });

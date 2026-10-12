@@ -2948,6 +2948,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           user: "用户"
         }
       },
+      bundle_member: {
+        label: "Bundle Member",
+        help: "Bundle member (e.g. the locale of an email template) this overlay row customizes. Null = the canonical member."
+      },
       metadata: {
         label: "元数据",
         help: "元数据负载的 JSON 序列化内容"

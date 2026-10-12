@@ -71,7 +71,11 @@
 import { describe, it, expect } from 'vitest';
 import { inspect } from 'node:util';
 import { redactStatementFromMessage } from '@objectstack/types';
+// The engine-double contract gate: the backfill's double reaches the real
+// engine's update dispatch predicate rather than a looser copy of it.
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
+import { backfillOverlayBundleMembers } from './overlay-index.js';
 import { collectRuntimeIndexPreflight } from './runtime-index-preflight.js';
 import { probeThenReplaceIndex, type IndexExec } from './partial-index-probe.js';
 import {
@@ -540,6 +544,94 @@ describe('[#21418] a bound sentinel reaches no carrier at any site in this packa
             expect(inspect(outcome)).not.toContain(SENTINEL);
             expect(outcome.detail).toContain("for key 't.idx_real'");
         }
+    });
+
+    /**
+     * [#22877] `overlay-index`'s bundle-member backfill writes the helper's
+     * answer to two carriers: the result's `detail`, and the `error`-level
+     * report (`logProblem`: the message, and the `Error` it is handed). It
+     * reads and writes through the ENGINE, so the fault arrives from the
+     * engine's verbs; both are refused with the raw path's envelope here, the
+     * shape whose `cause` the helper walks. The `find` leg binds identifiers
+     * only and is handed the synthetic bound statement; the `update` leg binds
+     * the row's id itself, and the id IS the sentinel.
+     */
+    describe('overlay-index bundle-member backfill — the read leg and the write leg', () => {
+        function recordingLogger() {
+            const lines: string[] = [];
+            return {
+                lines,
+                logger: {
+                    info: (message: string) => { lines.push(message); },
+                    warn: (message: string, meta?: Record<string, unknown>) => {
+                        lines.push(`${message} ${inspect(meta, { depth: 8 })}`);
+                    },
+                    error: (message: string, error?: Error) => {
+                        lines.push(`${message} ${inspect(error, { depth: 8 })} ${String(error?.message)}`);
+                    },
+                },
+            };
+        }
+
+        it('the read leg (`find`) → result `detail` and the error report', async () => {
+            const seen: string[] = [];
+            const engine = {
+                async find() {
+                    seen.push(BOUND_DIALECT_TEXT);
+                    throw rawStatementFault(BOUND_DIALECT_TEXT);
+                },
+                async update(_table: string, data: Record<string, unknown>, options: { where: Record<string, unknown> }) {
+                    assertEngineUpdateDispatch(data, options);
+                    throw new Error('unreachable: the read leg failed first');
+                },
+            };
+            const log = recordingLogger();
+
+            const result = await backfillOverlayBundleMembers(engine, log.logger);
+
+            expect(seen.length, 'the site was never refused').toBeGreaterThan(0);
+            expect(seen.every((m) => m.includes(SENTINEL))).toBe(true);
+            expect(result.status).toBe('failed');
+            expect(result.detail).toContain('no such column: v');
+            expect(inspect(result, { depth: 8 })).not.toContain(SENTINEL);
+            expect(log.lines.length).toBe(1);
+            expect(log.lines.join('\n')).toContain('no such column: v');
+            expect(log.lines.join('\n')).not.toContain(SENTINEL);
+        });
+
+        it('the write leg (`update`, binding the row id) → result `detail` and the error report', async () => {
+            const seen: string[] = [];
+            const engine = {
+                async find() {
+                    return [{
+                        id: SENTINEL, type: 'email_template', name: 'acme.welcome', bundle_member: null,
+                        metadata: JSON.stringify({ name: 'acme.welcome', locale: 'zh-CN' }),
+                    }];
+                },
+                async update(_table: string, data: Record<string, unknown>, options: { where: Record<string, unknown> }) {
+                    assertEngineUpdateDispatch(data, options);
+                    const dump = knexDump(
+                        'update "sys_metadata" set "bundle_member" = ? where "id" = ?',
+                        [data.bundle_member, options.where.id],
+                        'database table is locked',
+                    );
+                    seen.push(dump);
+                    throw rawStatementFault(dump);
+                },
+            };
+            const log = recordingLogger();
+
+            const result = await backfillOverlayBundleMembers(engine, log.logger);
+
+            expect(seen.length, 'the site was never refused').toBeGreaterThan(0);
+            expect(seen.every((m) => m.includes(SENTINEL))).toBe(true);
+            expect(result).toMatchObject({ status: 'failed', backfilled: 0 });
+            expect(result.detail).toContain('database table is locked');
+            expect(inspect(result, { depth: 8 })).not.toContain(SENTINEL);
+            expect(log.lines.length).toBe(1);
+            expect(log.lines.join('\n')).toContain('database table is locked');
+            expect(log.lines.join('\n')).not.toContain(SENTINEL);
+        });
     });
 
     describe('seed-tenancy-backfill — all five sites', () => {
