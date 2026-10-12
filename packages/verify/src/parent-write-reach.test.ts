@@ -290,8 +290,10 @@ describe('runParentWriteReachProofs — the fixture app, booted with parentWrite
  * The negative and attribution controls. `pwc_signed`'s hooks refuse every
  * edit and delete with the platform's own envelope (`403 PERMISSION_DENIED`,
  * `details` naming the write), whoever writes and whatever the master says;
- * `pwc_locked`'s refuse an edit with that envelope naming ANOTHER object, and
- * a delete with the app's own code.
+ * `pwc_frozen`'s hook refuses every edit of the MASTER that way, so its edit
+ * reads refused while nothing stops a write of its details; `pwc_locked`'s
+ * refuse an edit with that envelope naming ANOTHER object, and a delete with
+ * the app's own code.
  */
 const deny = (code: string, status: number, details?: { operation: string; object: string }) => async () => {
   throw Object.assign(new Error(`refused by the app (${code})`), { code, status, ...(details ? { details } : {}) });
@@ -311,6 +313,13 @@ const controlSource = {
       label: 'Locked',
       sharingModel: 'controlled_by_parent',
       fields: { account: { type: 'master_detail', label: 'Account', reference: 'pwc_account' }, title: { type: 'text', label: 'Title' } },
+    },
+    { name: 'pwc_frozen', label: 'Frozen', sharingModel: 'private', fields: { name: { type: 'text', label: 'Name', required: true } } },
+    {
+      name: 'pwc_frozen_line',
+      label: 'Frozen line',
+      sharingModel: 'controlled_by_parent',
+      fields: { frozen: { type: 'master_detail', label: 'Frozen', reference: 'pwc_frozen' }, title: { type: 'text', label: 'Title' } },
     },
   ],
   hooks: [
@@ -333,6 +342,12 @@ const controlSource = {
       object: 'pwc_locked',
       events: ['beforeUpdate'],
       handler: deny('PERMISSION_DENIED', 403, { operation: 'update', object: 'pwc_account' }),
+    },
+    {
+      name: 'pwc_frozen_refuses_every_edit',
+      object: 'pwc_frozen',
+      events: ['beforeUpdate'],
+      handler: deny('PERMISSION_DENIED', 403, { operation: 'update', object: 'pwc_frozen' }),
     },
     {
       name: 'pwc_locked_refuses_a_delete_with_its_own_code',
@@ -369,7 +384,23 @@ describe('runParentWriteReachProofs — NEGATIVE and ATTRIBUTION controls', () =
       // Where the conjunction refuses too, the same refusal holds.
       expect(shape(report, 'pwc_signed', 'detail-only', masters)).toEqual(ALL_REFUSED);
     }
-    expect(report.summary.hardFailures).toBe(1);
+  });
+
+  it('NEGATIVE CONTROL: details admitted under a master whose own edit is refused are reported contradicted', () => {
+    const r = resultFor(report, 'pwc_frozen_line');
+    expect(r.status, formatParentWriteReachReport(report)).toBe('contradicted');
+    for (const masters of ['other', 'own'] as const) {
+      const reach = reachOf(report, 'pwc_frozen_line', 'master-all-records', masters);
+      expect(reach).toMatchObject({ masterEdit: 'not-editable', masterAnswer: { code: 'PERMISSION_DENIED', object: 'pwc_frozen', operation: 'update' } });
+      expect(shape(report, 'pwc_frozen_line', 'master-all-records', masters)).toEqual([
+        'edit/other refused contradicted', 'delete/other refused contradicted',
+        'edit/own refused contradicted', 'delete/own refused contradicted',
+        'create refused contradicted',
+      ]);
+      for (const p of reach.probes) expect(p.detail).toMatch(/was refused an edit of its master pwc_frozen, and the (edit|delete|create) was admitted$/);
+    }
+    // The two negative controls, and nothing else, are the run's hard failures.
+    expect(report.summary).toMatchObject({ contradicted: 2, failed: 0, hardFailures: 2 });
   });
 
   it("ATTRIBUTION CONTROL: an app's own refusal is never read as the platform's, held or contradicted", () => {
