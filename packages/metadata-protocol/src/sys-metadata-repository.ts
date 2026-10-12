@@ -89,6 +89,10 @@ import type { IObjectQLEngine } from '@objectstack/core';
 // door too (that shared-rule argument is the module's whole reason to exist).
 import { isWritablePackage } from './package-writability.js';
 import { isOriginGatedType, managedItemSealedSentence, packagedBaseRegimePrescription } from './packaged-base-regime.js';
+// [#22877] The bundled type's member — the column, and the one derivation of
+// its value from a selector or a body — owned by the migration that keys the
+// overlay index on it, so the key and the write head cannot disagree.
+import { OVERLAY_MEMBER_COLUMN, overlayMemberOfBody, overlayMemberValue } from './migrations/overlay-index.js';
 
 /**
  * Canonicalise a driver-materialised timestamp into the ISO-8601 string the
@@ -229,6 +233,50 @@ function draftBodyLabel(row: any): I18nLabel | null {
   }
   const parsed = I18nLabelSchema.safeParse(body?.label);
   return parsed.success ? parsed.data : null;
+}
+
+/**
+ * [#22877] The `sys_metadata_history` rows of ONE bundle member of `type`, in
+ * their order — every row for an undiscriminated type, which has no members.
+ *
+ * Read off each row's BODY through the member derivation the write head uses
+ * ({@link overlayMemberOfBody}), the identity's one declaration: the history
+ * table carries no member column, and needs none, because its rows already
+ * carry the body that names it. A delete tombstone has no body; it belongs to
+ * the member of the row it removed, whose stamp is its `previous_checksum` and
+ * whose write is in this same log. A tombstone whose parent is not in the log
+ * (a row stored before it was stamped), and a body that does not parse, read
+ * as the canonical member.
+ *
+ * `member` is a selector value (`'zh-CN'`); omitted means the canonical member,
+ * as on every read of this repository.
+ */
+export function historyRowsOfMember<T extends Record<string, unknown>>(
+  type: string,
+  rows: readonly T[],
+  member?: string | null,
+): T[] {
+  const wanted = overlayMemberValue(type, member);
+  if (wanted === undefined) return [...rows];
+  const bodyMember = (row: T): string | null => {
+    try {
+      return overlayMemberOfBody(type, storedRowBody(row)) ?? null;
+    } catch {
+      return null;
+    }
+  };
+  const memberByChecksum = new Map<string, string | null>();
+  for (const row of rows) {
+    if (row.metadata !== null && row.metadata !== undefined && typeof row.checksum === 'string') {
+      memberByChecksum.set(row.checksum, bodyMember(row));
+    }
+  }
+  return rows.filter((row) => {
+    const own = row.metadata === null || row.metadata === undefined
+      ? (typeof row.previous_checksum === 'string' ? memberByChecksum.get(row.previous_checksum) ?? null : null)
+      : bodyMember(row);
+    return own === wanted;
+  });
 }
 
 /**
@@ -569,7 +617,13 @@ export class SysMetadataRepository implements MetadataRepository {
    */
   async get(
     ref: MetaRef,
-    opts?: { state?: OverlayState; packageId?: string | null },
+    /**
+     * [#22877] `member` — the bundle member to read, for a type whose
+     * identity is a pair (`'zh-CN'` of an `email_template`); omitted, the
+     * canonical member, which is what a bare-name read answers. Ignored for
+     * every other type. A LOCAL extension, as `state` and `packageId` are.
+     */
+    opts?: { state?: OverlayState; packageId?: string | null; member?: string | null },
   ): Promise<MetadataItem | null> {
     this.assertOpen();
     const state = opts?.state ?? 'active';
@@ -586,7 +640,12 @@ export class SysMetadataRepository implements MetadataRepository {
     // it scopes its own rows by organization. None of them reaches the data
     // engine as a principal-less context.
     const row = await this.engine.findOne('sys_metadata', {
-      where: this.whereFor(ref, state, opts && 'packageId' in opts ? (opts.packageId ?? null) : undefined),
+      where: this.whereFor(
+        ref,
+        state,
+        opts && 'packageId' in opts ? (opts.packageId ?? null) : undefined,
+        overlayMemberValue(ref.type, opts?.member),
+      ),
       context: { isSystem: true },
     });
     if (!row) return null;
@@ -616,10 +675,17 @@ export class SysMetadataRepository implements MetadataRepository {
    */
   async headAt(
     ref: MetaRef,
-    opts: { state?: OverlayState; packageId?: string | null },
+    /**
+     * [#22877] `member` — the bundle member the write addresses: a save takes
+     * it from the body it writes, so a caller asking for that save's head
+     * passes the body's member (see {@link get} for the rest).
+     */
+    opts: { state?: OverlayState; packageId?: string | null; member?: string | null },
   ): Promise<{ head: MetadataItem | null; packageId: string | null }> {
     this.assertOpen();
-    const { row, targetPackageId } = await this.resolveWriteHead(ref, opts.state ?? 'active', opts.packageId);
+    const { row, targetPackageId } = await this.resolveWriteHead(
+      ref, opts.state ?? 'active', opts.packageId, undefined, overlayMemberValue(ref.type, opts.member),
+    );
     return { head: row ? this.rowToItem(ref, row) : null, packageId: targetPackageId };
   }
 
@@ -654,6 +720,12 @@ export class SysMetadataRepository implements MetadataRepository {
    * ADR-0048), and with no active row — a brand-new item drafted first —
    * there is nothing to inherit and the package-less semantics stand.
    *
+   * [#22877] A write addresses ONE bundle member of a type whose identity is
+   * a pair: `member` is that member as {@link OVERLAY_MEMBER_COLUMN} stores
+   * it (`null` the canonical one), and every lookup below — the inherited
+   * base included — is narrowed to it. `undefined` for every other type, whose
+   * lookups carry no member predicate at all.
+   *
    * @param ctx - The transaction handle when the caller holds one.
    */
   private async resolveWriteHead(
@@ -661,6 +733,7 @@ export class SysMetadataRepository implements MetadataRepository {
     state: OverlayState,
     packageId: string | null | undefined,
     ctx?: Record<string, unknown>,
+    member?: string | null,
   ): Promise<{ row: any | null; targetPackageId: string | null }> {
     const context = { ...ctx, isSystem: true };
     let targetPackageId: string | null = packageId ?? null;
@@ -677,6 +750,7 @@ export class SysMetadataRepository implements MetadataRepository {
         name: ref.name,
         state: 'active',
       };
+      if (member !== undefined) activeWhere[OVERLAY_MEMBER_COLUMN] = member;
       if (this.organizationId != null) {
         activeWhere.$or = [
           { organization_id: this.organizationId },
@@ -690,7 +764,7 @@ export class SysMetadataRepository implements MetadataRepository {
       if (activePkg) targetPackageId = activePkg;
     }
     let row = await this.engine.findOne('sys_metadata', {
-      where: this.whereFor(ref, state, targetPackageId),
+      where: this.whereFor(ref, state, targetPackageId, member),
       context,
     });
     // [#11087] Orphan-draft adoption: when the package binding above was
@@ -701,7 +775,7 @@ export class SysMetadataRepository implements MetadataRepository {
     // (`existingPkg ?? targetPackageId`) then adopts it into the package.
     if (!row && state === 'draft' && packageId == null && targetPackageId !== null) {
       row = await this.engine.findOne('sys_metadata', {
-        where: this.whereFor(ref, state, null),
+        where: this.whereFor(ref, state, null, member),
         context,
       });
     }
@@ -773,6 +847,12 @@ export class SysMetadataRepository implements MetadataRepository {
     // [#21790] Hashed AS ITS TYPE: a map the spec declares ordered (an
     // object's `fields`) keeps its key order, so a pure reorder is a change.
     const hash = hashSpec(body, ref.type);
+    // [#22877] The bundle member this write addresses, from the BODY it
+    // writes (`itemDiscriminator`, the identity's one declaration) — never a
+    // caller's say-so, so a row's member and its body cannot disagree. Two
+    // locales of one email template are two rows; `undefined` for every type
+    // whose identity is `name` alone, whose rows never carry the column.
+    const member = overlayMemberOfBody(ref.type, body);
 
     // Run all reads + writes inside one transaction so the optimistic
     // lock, the parent-row mutation, and the history append are atomic.
@@ -781,7 +861,7 @@ export class SysMetadataRepository implements MetadataRepository {
       // create, from THE write-address resolution ({@link resolveWriteHead}):
       // the one {@link headAt} answers too, so the head a caller was served
       // for this address is the head this lock judges.
-      const { row: existing, targetPackageId } = await this.resolveWriteHead(ref, state, opts.packageId, ctx);
+      const { row: existing, targetPackageId } = await this.resolveWriteHead(ref, state, opts.packageId, ctx, member);
       // The row's stored stamp, as written: the parent link this write records
       // (`previous_checksum`, the event's `parentHash`) and the no-op check's
       // input. `null` for a row stored without one.
@@ -829,6 +909,9 @@ export class SysMetadataRepository implements MetadataRepository {
         version,
         updated_at: now,
       };
+      // [#22877] Only for a type whose identity is a pair: every other type's
+      // row payload stays byte-identical to what it was before the column.
+      if (member !== undefined) parentRowData[OVERLAY_MEMBER_COLUMN] = member;
       // Software-package binding (Studio package authoring workspace).
       // Create: stamp with the requested package (or null). Update: preserve
       // an existing non-null binding so an edit made with a different package
@@ -947,7 +1030,12 @@ export class SysMetadataRepository implements MetadataRepository {
      * should state it too is the open question this card deliberately did not
      * answer — see {@link whereFor} and #6215.
      */
-    opts: DeleteOptions & { state?: OverlayState; packageId?: string | null },
+    opts: DeleteOptions & {
+      state?: OverlayState;
+      packageId?: string | null;
+      /** [#22877] The bundle member to delete; omitted, the canonical one (see {@link get}). */
+      member?: string | null;
+    },
   ): Promise<DeleteResult> {
     this.assertOpen();
     // [#6960] The DELETE verb's own gate — see {@link assertDeleteAllowed}.
@@ -962,6 +1050,7 @@ export class SysMetadataRepository implements MetadataRepository {
           ref,
           state,
           'packageId' in opts ? (opts.packageId ?? null) : undefined,
+          overlayMemberValue(ref.type, opts.member),
         ),
         context: { ...ctx, isSystem: true },
       });
@@ -1124,6 +1213,13 @@ export class SysMetadataRepository implements MetadataRepository {
        * before.
        */
       expectedDraftHash?: string | null;
+      /**
+       * [#22877] The bundle member whose draft is promoted; omitted, the
+       * canonical one (see {@link get}). The draft, the active parent and the
+       * drain are all read under it, and the put writes the member its body
+       * declares — the same one, since the draft row was keyed by its body.
+       */
+      member?: string | null;
     },
   ): Promise<{
     version: string;
@@ -1153,6 +1249,7 @@ export class SysMetadataRepository implements MetadataRepository {
         ref,
         'draft',
         'packageId' in opts ? (opts.packageId ?? null) : undefined,
+        overlayMemberValue(ref.type, opts.member),
       ),
       context: { isSystem: true },
     });
@@ -1175,7 +1272,7 @@ export class SysMetadataRepository implements MetadataRepository {
     // Read the active row through the SAME package scope we will write, so the
     // optimistic-lock `parentVersion` matches the exact row `put` upserts.
     // (Package-less drafts → packageId null → identical to the prior behaviour.)
-    const currentActive = await this.get(ref, { state: 'active', packageId: draftPackageId });
+    const currentActive = await this.get(ref, { state: 'active', packageId: draftPackageId, member: opts.member });
     const activeBody = opts.deriveActiveBody ? opts.deriveActiveBody(draft.body) : draft.body;
     const result = await this.put(ref, activeBody, {
       parentVersion: currentActive?.hash ?? null,
@@ -1249,6 +1346,14 @@ export class SysMetadataRepository implements MetadataRepository {
        * Omitted → the history body is restored byte for byte, as before.
        */
       deriveRestoredBody?: (historyBody: unknown) => unknown;
+      /**
+       * [#22877] The bundle member whose lineage `targetVersion` is taken
+       * from; omitted, the canonical one (see {@link get}). The lineage
+       * counter stays per `(org, type, name)` — the history table's declared
+       * unique key — so a version names exactly one snapshot, and a snapshot
+       * of ANOTHER member of the bundle is not this member's version.
+       */
+      member?: string | null;
     },
   ): Promise<{ version: string; seq: number; item: MetadataItem }> {
     this.assertOpen();
@@ -1280,6 +1385,20 @@ export class SysMetadataRepository implements MetadataRepository {
       throw err;
     }
     const historyBody = typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>);
+    // [#22877] The snapshot must be one of the addressed member's: restoring
+    // another member's body here would be written to THAT member's row (a
+    // put keys by its body), under a parent read from this one's.
+    const member = overlayMemberValue(ref.type, opts.member);
+    if (member !== undefined && (overlayMemberOfBody(ref.type, historyBody) ?? null) !== member) {
+      const err: any = new Error(
+        `No history row at version ${targetVersion} for ${ref.type}/${ref.name} ` +
+          `(${member === null ? 'its canonical member' : `member '${member}'`}) — that version belongs ` +
+          `to another member of the bundle.`,
+      );
+      err.code = 'VERSION_NOT_FOUND';
+      err.status = 404;
+      throw err;
+    }
     const body = opts.deriveRestoredBody ? opts.deriveRestoredBody(historyBody) : historyBody;
     // ADR-0048 / #6215 — read the RAW active row, not just its body, and carry
     // its `package_id` into the write. `put` upserts exactly ONE row and scopes
@@ -1300,7 +1419,7 @@ export class SysMetadataRepository implements MetadataRepository {
     // unbound row, which is the only defined answer: `sys_metadata_history`
     // carries no `package_id` column, so a vanished binding is not recoverable.
     const activeRow = await this.engine.findOne('sys_metadata', {
-      where: this.whereFor(ref, 'active'),
+      where: this.whereFor(ref, 'active', undefined, member),
       context: { isSystem: true },
     });
     const activePackageId =
@@ -1417,7 +1536,14 @@ export class SysMetadataRepository implements MetadataRepository {
    * (type,name) bucket, then by `recorded_at` across buckets (we sort
    * client-side because the test engine doesn't honor `orderBy`).
    */
-  async *history(ref: MetaRef, opts?: HistoryOptions): AsyncIterable<MetadataEvent> {
+  async *history(
+    ref: MetaRef,
+    /**
+     * [#22877] `member` — the bundle member whose lineage to yield; omitted,
+     * the canonical one (see {@link get}). Ignored for every other type.
+     */
+    opts?: HistoryOptions & { member?: string | null },
+  ): AsyncIterable<MetadataEvent> {
     this.assertOpen();
     const full = this.fullRef(ref);
     const where: Record<string, unknown> = {
@@ -1426,7 +1552,12 @@ export class SysMetadataRepository implements MetadataRepository {
       name: full.name,
     };
     // [#21908] The explicit system opt-in, as `get` carries — see its note.
-    const rows = await this.engine.find(this.historyTable, { where, context: { isSystem: true } });
+    // [#22877] One member's rows only — {@link historyRowsOfMember}.
+    const rows = historyRowsOfMember(
+      full.type,
+      await this.engine.find(this.historyTable, { where, context: { isSystem: true } }),
+      opts?.member,
+    );
     rows.sort((a: any, b: any) => {
       const va = typeof a.event_seq === 'number' ? a.event_seq : 0;
       const vb = typeof b.event_seq === 'number' ? b.event_seq : 0;
@@ -2098,6 +2229,14 @@ export class SysMetadataRepository implements MetadataRepository {
     ref: Pick<MetaRef, 'type' | 'name'>,
     state: OverlayState = 'active',
     packageId?: string | null,
+    /**
+     * [#22877] The bundle member, as {@link OVERLAY_MEMBER_COLUMN} stores it
+     * (`null` = the canonical member, IS NULL) — from {@link overlayMemberValue}
+     * or {@link overlayMemberOfBody}. `undefined` adds no predicate: the answer
+     * both give for a type whose identity is `name` alone, so its `where` is
+     * byte-identical to what it was before the column existed.
+     */
+    member?: string | null,
   ): Record<string, unknown> {
     const where: Record<string, unknown> = {
       type: ref.type,
@@ -2128,6 +2267,7 @@ export class SysMetadataRepository implements MetadataRepository {
     // `delete` and `restoreVersion` resolving reads (#6215); they are
     // deliberately unchanged here.
     if (packageId !== undefined) where.package_id = packageId; // string → eq; null → IS NULL
+    if (member !== undefined) where[OVERLAY_MEMBER_COLUMN] = member; // string → eq; null → IS NULL
     return where;
   }
 
@@ -2455,7 +2595,7 @@ export class SysMetadataRepository implements MetadataRepository {
   private async dropPromotedDraftRow(
     ref: MetaRef,
     draftHash: string,
-    opts: { actor: string | null; source?: string; intent?: MetadataWriteIntent },
+    opts: { actor: string | null; source?: string; intent?: MetadataWriteIntent; member?: string | null },
     /**
      * [#8907] ADR-0048 binding of the row that was promoted. Threaded so the
      * drain deletes THAT row rather than re-resolving `(org, type, name)`
@@ -2471,6 +2611,8 @@ export class SysMetadataRepository implements MetadataRepository {
       intent: opts.intent ?? 'override-artifact',
       state: 'draft',
       packageId,
+      // [#22877] …and under the member it was promoted from.
+      member: opts.member,
     });
   }
 

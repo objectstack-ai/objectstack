@@ -520,8 +520,8 @@ export function interpolate<T = unknown>(
  * when both could match, and a token belonging to neither dialect is left to
  * the caller's collapse guard to report.
  *
- * Only filter blocks use this. Every other single-brace position (`url`,
- * `recipients`, …) keeps plain {@link interpolate}, where a bare
+ * Only filter blocks use this. Every other single-brace position (an `http`
+ * `url`, …) keeps plain {@link interpolate}, where a bare
  * `{current_year_start}` is a nonsense reference rather than a query bound.
  */
 export function interpolateFilter<T = unknown>(

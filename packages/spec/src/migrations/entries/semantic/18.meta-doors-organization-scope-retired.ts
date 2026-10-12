@@ -27,7 +27,7 @@ export const entry: SemanticMigration = {
     + '`metaCallerOrganizationId`',
   reason:
     'ADR-0131 D6 retires the per-organization overlay axis: environment metadata written by '
-    + 'Studio, by the cloud build agent or by a template install belongs to the whole deployment. '
+    + 'Studio, by the cloud build agent or by an unmanaged install belongs to the whole deployment. '
     + 'The doors threaded the active organization for view, dashboard, report, translation and '
     + 'email_template, so under the single posture, where the Default Organization is active, '
     + 'every Studio save of those types was stored under that organization. The read and the '

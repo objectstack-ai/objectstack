@@ -614,7 +614,7 @@ const SECURITY_CBP_NO_RELATION_EXPLANATION: RuleExplanation = {
       'refusal does not exempt them.',
     'To fix it, add the master relation this object is derived from, a `master_detail` field with a ' +
       '`reference` and `required: true`. An object with no master decides its own baseline: ' +
-      '\'private\', \'public_read\' or \'public_read_write\'.',
+      '\'private\' (the owner plus explicit shares), \'public_read\' or \'public_read_write\'.',
   ],
 };
 
@@ -634,7 +634,9 @@ const SECURITY_FLS_UNKNOWN_FIELD_EXPLANATION: RuleExplanation = {
     'Not judged: an object this stack does not define, an object with no readable field map, and a ' +
       'registry-injected system column, which is real and addressable. To fix it, point the key at a ' +
       'field the object declares, or delete the entry: an entry that cannot match is not protection, ' +
-      'and if the field was renamed the mask has been off since that rename.',
+      'and if the field was renamed the mask has been off since that rename. If the masking is still ' +
+      'wanted, renaming the key is the fix; the `fix:` line names the nearest declared or injected ' +
+      'column when one is close, rather than listing the object\'s fields.',
   ],
 };
 
@@ -654,6 +656,25 @@ const SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION: RuleExplanation = {
     'To fix it, grant the object in at least one permission set that already grants its master — ' +
       'allowRead, allowCreate and allowEdit. A table no role should ever touch is named `sys_*` or set ' +
       '`isSystem: true`.',
+  ],
+};
+
+const SECURITY_WILDCARD_VAMA_EXPLANATION: RuleExplanation = {
+  rule: 'security-wildcard-vama',
+  covers: 'why the \'*\' entry cannot carry View All / Modify All',
+  paragraphs: [
+    'A permission set\'s `\'*\'` entry applies to every object, and `viewAllRecords` / `modifyAllRecords` ' +
+      '(View All / Modify All Data) are the superuser bypass of ADR-0066: they skip read-side and write-side ' +
+      'row-level security on every object whose posture permits it. Together they make a package-authored ' +
+      'superuser over the whole deployment, objects other packages own included. Only the platform\'s own ' +
+      'admin set may combine the two, and it lives outside every package, so the rule is an error on any ' +
+      'set a stack authors.',
+    'An app needs no wildcard of its own: platform admins already reach every installed package\'s objects ' +
+      'through that platform set. An app-level admin (`crm_admin`, say) is an ordinary set that names the ' +
+      'objects it needs and that the customer binds to a position of their own choosing (ADR-0090 D9), ' +
+      'because "who runs this app" and "who runs the platform" are rarely the same people.',
+    'To fix it, enumerate the objects the set really needs, with `viewAllRecords` / `modifyAllRecords` only ' +
+      'on the entries where the bypass is meant, or drop the two flags from the `\'*\'` entry.',
   ],
 };
 
@@ -999,6 +1020,10 @@ const FLOW_UPDATE_READONLY_FIELD_EXPLANATION: RuleExplanation = {
       'platform-internal object (an engine-owned, append-only or better-auth bucket, or a `sys_` name) ' +
       'is not judged: the engine runs no create-side strip there. The rule gates because a literal ' +
       'field name against a declared `readonly: true` is a certain no-op.',
+    'So if automation is meant to maintain the field, declare the flow `runAs: \'system\'`; otherwise ' +
+      'remove the field from the node. Seeding a readonly column at create time is a SYSTEM act, so a ' +
+      '`create_record` has a third route: stamp the value in a `beforeInsert` hook on the object, because a ' +
+      'hook-assigned key is the hook\'s write, not a caller-supplied one, and survives the strip.',
   ],
 };
 
@@ -1010,6 +1035,9 @@ const FLOW_UPDATE_READONLY_WHEN_FIELD_EXPLANATION: RuleExplanation = {
     ...READONLY_WHEN_STRIP,
     'So a `runAs: \'system\'` flow is judged here like any other, and the verdict names the run ' +
       'identity it was judged under. Only `update_record` is judged.',
+    'To fix it, derive the value in a `beforeUpdate` hook on the record\'s own object, or make sure the ' +
+      'node only targets records whose `readonlyWhen` predicate is FALSE; otherwise remove the field from ' +
+      'the `update_record` node. The warning never blocks a build.',
   ],
 };
 
@@ -1063,6 +1091,10 @@ const ACTION_API_UPDATE_READONLY_WHEN_FIELD_EXPLANATION: RuleExplanation = {
     'Only `ctx.api.object(NAME).update / updateById(…)` is judged. `ctx.record` is not a write surface ' +
       '(`action-record-write-discarded` owns that shape), and `id` in an update payload is the write\'s ' +
       'address, not a field write.',
+    'Elevation is no way out here: the body already runs system-elevated and the lock still applies, so ' +
+      '`ctx.api.sudo()` changes nothing. So derive the value in a `beforeUpdate` hook on the record\'s own ' +
+      'object, or make sure the call only targets records whose `readonlyWhen` predicate is FALSE; ' +
+      'otherwise drop the field from the payload. The warning never blocks a build.',
   ],
 };
 
@@ -1436,6 +1468,12 @@ const SHARING_RULE_OBJECT_NOT_SHAREABLE_EXPLANATION: RuleExplanation = {
     'Here the refusal reads "\'OBJECT\' is not under record-sharing enforcement". Measured: `buildReadFilter` ' +
       'returns `null` for such an object — NO record-level filter at all — so every principal already reads ' +
       'every row, and the rule advertises a restriction that does not exist.',
+    'To fix it, decide which half is wrong. If the ACCESS is right — everyone should read and write these ' +
+      'records — the rule is dead metadata: delete it (ADR-0049 enforce-or-remove). If the RULE is right — ' +
+      'only the named audience should reach these records — the object\'s OWD is the defect: set ' +
+      '`sharingModel: \'private\'` (the owner plus explicit shares) or `\'public_read\'`, and the rule starts ' +
+      'enforcing. Do not re-home the rule onto another public object; that moves the inertness instead of ' +
+      'removing it.',
   ],
 };
 
@@ -1449,6 +1487,10 @@ const SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT_EXPLANATION: RuleExplanation = {
     'Here the refusal reads "\'OBJECT\' is controlled by its parent (master-detail); share the master record ' +
       'instead", and the recipients the rule names get whatever the MASTER grants them — which may be nothing. ' +
       'The grant is declared and does not exist.',
+    'To fix it, move the rule onto the MASTER object (the one the detail\'s master_detail field names) and ' +
+      'share that: the detail rows follow. If the detail is meant to carry a record-level baseline of its ' +
+      'own, that is a different decision: change its `sharingModel` to \'private\' (the owner plus explicit ' +
+      'shares) or \'public_read\', and the rule becomes enforceable where it stands.',
   ],
 };
 
@@ -1537,7 +1579,9 @@ const FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE_EXPLANATION: RuleExplanation = {
       'else declares a trigger the flow binds to nothing and never fires.',
     'A descriptor is an object: `{ object, dateField, and exactly one of withinDays | offsetDays }`, plus ' +
       'an optional `filter` and `maxRecords`. HOW OFTEN the sweep runs is the sibling key ' +
-      '`config.schedule` on the same start node.',
+      '`config.schedule` on the same start node, which means daily at 08:00 UTC when omitted, so it is ' +
+      'usually left out. The descriptor is `TimeRelativeTriggerSchema`, documented in ' +
+      'content/docs/references/automation/time-relative-trigger.mdx.',
     FLOW_GATE_REACH,
   ],
 };
@@ -1576,7 +1620,8 @@ const FLOW_TRIGGER_UNKNOWN_EVENT_EXPLANATION: RuleExplanation = {
     'An array-form `triggerType` (`[\'record-after-create\', \'record-after-delete\']`) is a multi-event ' +
       'shape the engine does not support: a start node takes one trigger event, so the flow binds to ' +
       'nothing and never fires. For "created or updated" use `record-after-write`; any other combination ' +
-      'is one flow per event.',
+      'is one flow per event. Multi-event arrays are deferred until two independent projects need a ' +
+      'combination other than created-or-updated.',
     FLOW_GATE_REACH,
   ],
 };
@@ -1602,6 +1647,29 @@ const FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION: RuleExplanation = {
     'At the runtime publish gate a signed flow\'s ordinary edit arrives without its secret, because the ' +
       'read path withholds it; the gate passes the positions the stored secret will be restored to, and ' +
       'the rule reads those as present. A secretless api flow is refused there.',
+    'A flow that is only ever started explicitly and never receives inbound posts is `type: ' +
+      '\'autolaunched\'`, with no `triggerType: \'api\'` on its start node: that flow binds no api trigger ' +
+      'and needs no secret.',
+  ],
+};
+
+// `flow-trigger-unknown-object` lives in the same rule file but is not one of
+// the five: its verdict depends on packages a build cannot see, so it warns.
+
+const FLOW_TRIGGER_UNKNOWN_OBJECT_EXPLANATION: RuleExplanation = {
+  rule: 'flow-trigger-unknown-object',
+  covers: 'why an unknown trigger object only warns',
+  paragraphs: [
+    'A record-triggered flow binds an ObjectQL hook filtered to the exact name in its start node\'s ' +
+      '`config.objectName`, and a time-relative sweep queries the exact name in `config.timeRelative.object`. ' +
+      'Names match exactly — `app_candidate`, not `candidate` — so when no object answers to that name the ' +
+      'flow never fires, or the sweep matches nothing, and the runtime says nothing about it.',
+    'The rule asks whether this stack defines the object. One it does not define may be declared by ' +
+      'another installed package, which a build of this stack cannot see, so the finding is a warning and ' +
+      'can be ignored when such a package declares the object; a `sys_` name is a platform object and is ' +
+      'not judged. Of the findings that say a flow never fires, it is the only one that stays advisory: ' +
+      'the others are settled by contracts this repository ships. At the runtime publish gate it is a save advisory, ' +
+      'judged against the live object registry, never a refusal.',
   ],
 };
 
@@ -2116,6 +2184,11 @@ const ACTION_DISPATCH_CONTRACT_MISMATCH_EXPLANATION: RuleExplanation = {
       '(ADR-0104), so the strict params gate admits either bag, and no single parse sees both ends — ' +
       'the wiring lives on the view, the declaration on the action. The verdict names both contracts ' +
       'because the fix is a choice between them.',
+    'To fix it, pick the contract the body is actually written for and make both ends say it: change the ' +
+      'action\'s `execution` to the wiring\'s when the body was written for the wiring, or rewire the view ' +
+      'to the declaration when it was written for the declaration. If the two wirings are both wanted, ' +
+      'they are two actions: one call and N calls have different side effects, which is why the platform ' +
+      'will not silently unify them.',
     'Not reported: an action that declares no `execution` (undeclared is not defaulted to either ' +
       'contract; the ADR-0087 migration `action-bulk-dispatch-contract-undeclared` derives ' +
       'declarations where a wiring is unambiguous); a name declared with different contracts, or ' +
@@ -3221,6 +3294,10 @@ const PAGE_VISUALIZATION_WITHOUT_BINDING_EXPLANATION: RuleExplanation = {
       'screen. A warning otherwise: the type is filtered out of the visualization switcher SILENTLY, ' +
       'while the switcher still appears (it is shown on the whitelist\'s length), with no message at ' +
       'build time or at run time.',
+    'To fix it, point `interfaceConfig.sourceView` at a list view of the source object that declares the ' +
+      'visualization\'s block (`sourceView: \'VIEW_KEY\'`), give the object a field the derivation finds ' +
+      '(the `fix:` line names the type half; the name fallback above also binds), or drop the visualization ' +
+      'from `appearance.allowedVisualizations`.',
     'Not judged: a page that is not `type: \'list\'` or carries no `interfaceConfig`; an object this ' +
       'stack does not define, or one with no readable field map; `grid`, which needs no binding, and ' +
       '`chart`, `tree` and any other value the renderer derives nothing for; and a `sourceView` ' +
@@ -3253,6 +3330,11 @@ const FLOW_CREDENTIAL_LITERAL_EXPLANATION: RuleExplanation = {
       '`api-key` with `paramName`. A credential in `connectorConfig.input` is dropped instead, ' +
       'because the connector authenticates through its own `auth`. No variant carries a secret in a ' +
       'url path, so a url path is not judged and no fix line promises one.',
+    // [#22161] What the fix line stopped saying. The variants are held to the
+    // spec's connector auth schema by the rule's test.
+    'The `connectors:` entry also names a `provider` (\'rest\' for a plain HTTP API). A Basic pair is ' +
+      '`auth: { type: \'basic\', username, credentialRef }`, and `username` is no secret. The connector guide ' +
+      'is content/docs/automation/connectors.mdx.',
     'Always a warning, and nothing is refused: the predicate is a heuristic (a value under a name ' +
       'that reads as a credential, or a value that opens with an auth scheme), so a key named ' +
       '`token` can hold something that is not a secret, and a false positive costs a line of ' +
@@ -3735,6 +3817,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SECURITY_CBP_NO_RELATION_EXPLANATION.rule]: SECURITY_CBP_NO_RELATION_EXPLANATION,
   [SECURITY_FLS_UNKNOWN_FIELD_EXPLANATION.rule]: SECURITY_FLS_UNKNOWN_FIELD_EXPLANATION,
   [SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION.rule]: SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION,
+  [SECURITY_WILDCARD_VAMA_EXPLANATION.rule]: SECURITY_WILDCARD_VAMA_EXPLANATION,
   [SECURITY_OWD_ALIAS_EXPLANATION.rule]: SECURITY_OWD_ALIAS_EXPLANATION,
   [SECURITY_DELEGATION_MISSING_REASON_EXPLANATION.rule]: SECURITY_DELEGATION_MISSING_REASON_EXPLANATION,
   [VISIBILITY_ROOT_MISLAYERED_EXPLANATION.rule]: VISIBILITY_ROOT_MISLAYERED_EXPLANATION,
@@ -3770,6 +3853,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [FLOW_TRIGGER_UNROUTABLE_EXPLANATION.rule]: FLOW_TRIGGER_UNROUTABLE_EXPLANATION,
   [FLOW_TRIGGER_UNKNOWN_EVENT_EXPLANATION.rule]: FLOW_TRIGGER_UNKNOWN_EVENT_EXPLANATION,
   [FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION.rule]: FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION,
+  [FLOW_TRIGGER_UNKNOWN_OBJECT_EXPLANATION.rule]: FLOW_TRIGGER_UNKNOWN_OBJECT_EXPLANATION,
   [VALIDATION_RULE_REGEX_UNCOMPILABLE_EXPLANATION.rule]: VALIDATION_RULE_REGEX_UNCOMPILABLE_EXPLANATION,
   [VALIDATION_RULE_JSON_SCHEMA_UNCOMPILABLE_EXPLANATION.rule]: VALIDATION_RULE_JSON_SCHEMA_UNCOMPILABLE_EXPLANATION,
   [VALIDATION_RULE_JSON_SCHEMA_UNKNOWN_FORMAT_EXPLANATION.rule]: VALIDATION_RULE_JSON_SCHEMA_UNKNOWN_FORMAT_EXPLANATION,

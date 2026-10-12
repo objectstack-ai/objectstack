@@ -149,24 +149,36 @@ const RELEASE_RE = /^v\d+(\.\d+)?$/;
 
 /**
  * The field rules an item's `status` implies, as a pure function so the battery
- * can drive every status through it with no tree to read.
+ * can drive every status through it with no tree to read. Three rules: one for
+ * `planned`, one for `retired`, and the active rule for `active` and `draft`.
  *
- * `planned` is the only status that RELAXES anything, and it relaxes exactly
- * the three fields that cannot honestly exist before the capability does:
- * `since` (no release has introduced it), `steps` (nothing to drive) and
- * `acceptance` (no oracle to consult — handled at its own site below). In
- * exchange it REQUIRES `personas`: who the capability is for is what makes a
- * gap readable to the next sweep, and it is knowable the day the gap is found.
+ * `planned` relaxes exactly the three fields that cannot honestly exist before
+ * the capability does: `since` (no release has introduced it), `steps`
+ * (nothing to drive) and `acceptance` (no oracle to consult — handled at its
+ * own site below). In exchange it REQUIRES `personas`: who the capability is
+ * for is what makes a gap readable to the next sweep, and it is knowable the
+ * day the gap is found.
+ *
+ * `retired` is judged by the README's Retire step — `status: "retired"` plus
+ * `retiredReason`, and nothing else — because an item leaves service from
+ * either side of `active`. One retired after it shipped keeps its release and
+ * its steps; one retired while still `planned` never had either. So
+ * `retiredReason` must be a non-empty string, `since` is `null` or
+ * release-shaped, and `steps` is not judged at all: no selector runs a retired
+ * item (`scripts/checklist-select.mjs` puts it in neither the runnable pool nor
+ * the planned one). `supersededBy` is not read here — whether it lands on a
+ * real id is a whole-ledger question, answered after the walk.
  *
  * ⚠️ On `since` the claim is kept as narrow as the enforcement. What is checked
  * is the SHAPE — `null`, or a release-looking string. Whether the release named
  * has already SHIPPED is not checkable here and is not checked: this ledger
  * holds no release timeline and `RELEASE_RE` is a spelling rule. A planned item
- * targeting a release that is already out is an authoring error, and it passes.
- * Saying otherwise in the refusal would advertise a check that does not exist,
- * which is the one thing a refusal must never do.
+ * targeting a release that is already out is an authoring error, and it passes;
+ * so does a retired item whose `null` should have been the release that
+ * shipped it. Saying otherwise in the refusal would advertise a check that does
+ * not exist, which is the one thing a refusal must never do.
  *
- * @param {{status?: string, since?: unknown, steps?: unknown, personas?: unknown}} item
+ * @param {{status?: string, since?: unknown, steps?: unknown, personas?: unknown, retiredReason?: unknown}} item
  * @returns {string[]}
  */
 function statusFieldProblems(item) {
@@ -183,6 +195,18 @@ function statusFieldProblems(item) {
     }
     if (!Array.isArray(item.personas) || item.personas.length === 0) {
       problems.push('a planned item must name its "personas" — who the capability is for is what makes the gap readable before anything exists to run');
+    }
+    return problems;
+  }
+
+  // Its own rule, not the active one: a capability retired before it was
+  // implemented never shipped and has nothing to drive.
+  if (item.status === 'retired') {
+    if (typeof item.retiredReason !== 'string' || !item.retiredReason) {
+      problems.push('a retired item must carry "retiredReason" as a non-empty string');
+    }
+    if (!(item.since === null || isRelease)) {
+      problems.push('"since" on a retired item must be null (retired before any release introduced it) or the release that did, e.g. "v16". ⛔ Only the SHAPE is checked here: this ledger holds no release timeline, so which of the two is true is an authoring fact no gate can see');
     }
     return problems;
   }
@@ -340,7 +364,7 @@ function statusBindingProblems(source) {
   };
   bound(
     /for \(const msg of statusFieldProblems\(item\)\) where\(msg\);/g,
-    'the item walk does not consume `statusFieldProblems(item)` — every status-keyed field rule (a planned item\'s `since`/`steps`/`personas`, and the release-and-steps rules for every other status) is then declared and never applied',
+    'the item walk does not consume `statusFieldProblems(item)` — every status-keyed field rule (a planned item\'s `since`/`steps`/`personas`, a retired item\'s `retiredReason`/`since`, and the release-and-steps rules for active and draft) is then declared and never applied',
   );
   bound(
     /const \{ problems, bearing \} = coverageEntryProblems\(entry\.items, statusOf\);/g,
@@ -1030,7 +1054,7 @@ const BATTERY_UNREFERENCED_RECIPES = 'selfTestUnreferencedRecipes: the reverse d
 const BATTERY_META_CALL_SPELLING = 'selfTestMetaCallSpelling: the folded `/meta` plural, read from the live contract';
 const BATTERY_LINE_CITATION_BINDING = 'selfTestLineCitationBinding: the corpus declaration, the absent fork, and the binding driven both ways';
 const BATTERY_SYMBOL_ANCHORS = 'selfTestSymbolAnchors: the corpus registration, the binding to the shared resolver, the residual and the floor';
-const BATTERY_PLANNED_STATUS = 'selfTestPlannedStatus: the `planned` accept set, the fields it relaxes, and the coverage ratchet driven BOTH ways';
+const BATTERY_PLANNED_STATUS = 'selfTestPlannedStatus: the `planned` accept set, the fields it relaxes, the `retired` rule beside it, and the coverage ratchet driven BOTH ways';
 
 const SELF_TEST_BATTERIES = Object.freeze({
   [BATTERY_TRAP_VOCABULARY]: 22,
@@ -1073,7 +1097,15 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // G12 records in an assertion what the pin still cannot see. Measured on this
   // branch at `b835196bc1`: reverting the mask reds G9, G10 and G11 and nothing
   // else.
-  [BATTERY_PLANNED_STATUS]: 42,
+  //
+  // 42 → 54: R1–R12, the `retired` rule. Before it a retired item fell through
+  // to the active rule, so a planned item retired before it was implemented had
+  // no legal shape. Measured at `ce66b832d` (this repo): making the branch dead
+  // (`if (false && …)`) reds R1 and R3–R11 — ten rows; R2 and R12 stay green
+  // because the active rule accepts both. The G-rows stay green too: a dead
+  // branch is one of the semantic severings G12 discloses, so these fixture
+  // rows, not the text pin, are what hold the branch.
+  [BATTERY_PLANNED_STATUS]: 54,
 });
 const SELF_TEST_BATTERY_FLOOR = 7;
 
@@ -2354,6 +2386,30 @@ function selfTestPlannedStatus() {
   t('F16 and the refusal says so, so an author is never told this gate checks a timeline it cannot read',
     planned({ since: 'someday' })[0]?.includes('Only the SHAPE is checked'));
 
+  // ── the `retired` rule — the README's Retire step, from either side of `active`
+  // Before this rule a retired item fell through to the active one, so a
+  // planned item retired before it was implemented — `since: null`, no steps,
+  // exactly what the README's Retire step leaves it with — had no legal shape.
+  const retired = (over = {}) => statusFieldProblems({ status: 'retired', since: null, retiredReason: 'ruled out, no successor', ...over });
+
+  t('R1 a planned item retired before it was implemented — `since: null`, no steps — is clean', retired().length === 0, retired().join('; '));
+  t('R2 an item retired AFTER it shipped keeps its release and its steps and still passes — the shape `dashboards.saved-report-ownership` carries',
+    retired({ since: 'v15.1', steps: ['open the report'] }).length === 0, retired({ since: 'v15.1', steps: ['open the report'] }).join('; '));
+  t('R3 an empty steps array passes too — steps are not judged on an item no selector runs', retired({ steps: [] }).length === 0);
+  t('R4 a retired item with no `retiredReason` is refused', retired({ retiredReason: undefined }).length === 1);
+  t('R5 an empty `retiredReason` is refused the same way', retired({ retiredReason: '' }).length === 1);
+  t('R6 and that refusal names the field', retired({ retiredReason: undefined })[0]?.includes('"retiredReason"'));
+  t('R7 a `since` that is neither null nor a release is refused', retired({ since: 'someday' }).length === 1);
+  t('R8 and that message names both legal spellings and says only the SHAPE is checked',
+    retired({ since: 'someday' })[0]?.includes('null') && retired({ since: 'someday' })[0]?.includes('Only the SHAPE is checked'));
+  t('R9 a retired item with NO `since` key is refused — the rule admits null, not absence, as the planned one does',
+    retired({ since: undefined }).length === 1);
+  t('R10 `supersededBy` passes — whether it resolves is the referential pass\'s question, not this rule\'s',
+    retired({ supersededBy: 'area.next' }).length === 0);
+  t('R11 a retired item owes no personas — the planned requirement did not travel', retired({ personas: undefined }).length === 0);
+  t('R12 the rule is keyed on `retired` alone — a DRAFT item with `since: null` and no steps is still refused by the active rule, twice',
+    statusFieldProblems({ status: 'draft', since: null }).length === 2);
+
   // ── the coverage ratchet, both directions ────────────────────────────────
   // A miniature ledger: one kind's worth of ids, each with a status.
   const LEDGER = new Map([
@@ -2547,7 +2603,8 @@ if (process.argv.slice(2).includes('--self-test')) {
         ' and the `/meta` call-spelling refusal reads its vocabulary out of the live generated contract, fires on every folded spelling a `call` can instruct, and stays silent on the canonical singular, on parameter placeholders, and on the `why`/`expect`/`source`/`requires` prose that narrates the fold;' +
         ' and the line-citation limb DETECTS NOTHING ITSELF EITHER: the last forked grammar in this file went into the shared core at #18592, so what is pinned here is the BINDING — the corpus declaring `pathlessLineCitations`, a source read finding no citation regex and no detector while the same read DOES find the declaration, the binding driven ON and OFF against ONE text so the green is the declaration working rather than a text that would have matched anyway, the DARK case that a citation both grammars already agreed on keeps its verdict either way, the refusal to over-fire on this ledger\'s own HTTP statuses, config literals, URL ports, clock times and quoted JSON, and the live zero with the control that says it is a reading;' +
         ' and the symbol-anchor limb DETECTS NOTHING AND RESOLVES NOTHING ITSELF: it is a registered corpus (#18107), so the grammar, the walk and the verdict are all `scripts/symbol-anchors.mjs`\'s, pinned here by a source read that finds no local extension set, no anchor regex and no detector while the same read DOES find the registration, by the anchorable-extension vocabulary being the shared OBJECT rather than a copy of it, by the `runs/` exclusion driven three ways on the live corpus (the subtree holds files, none is swept, the areas beside it still are, and dropping the exclusion puts them back), and by the #16898 binding re-taken through the registration — a call site / import / local parameter / string-substring all reading ABSENT, the positive control that a declaration and a complete quoted token still resolve, a `.json` key resolving where a `.json` value does not, an INLINE object-literal key reading absent where one at the start of a line resolves — with the closed, grow-never residual and the per-file anchor floor held in both directions beside it;' +
-        ` and the \`planned\` status is driven on fixtures — the accept set widened without losing its closure, \`since: null\`/no-steps/personas relaxed for planned alone while the ${plannedStatus.liveItems} live items are judged exactly as before, and the coverage ratchet held BOTH ways: a planned item beside an active one is silent, a kind whose only items are planned is UNMAPPED, and the bearing set is pinned NOT to contain \`planned\`; and the two CALL SITES those rules ride on are pinned by a source read over comment-MASKED source driven ON and OFF, because severing either one — by deletion OR by commenting it out in place — left this very self-test green; \u26d4 that pin is a TEXT pin and G12 records the three semantic severings it cannot see.`,
+        ` and the \`planned\` status is driven on fixtures — the accept set widened without losing its closure, \`since: null\`/no-steps/personas relaxed for planned alone while the ${plannedStatus.liveItems} live items are judged exactly as before, and the coverage ratchet held BOTH ways: a planned item beside an active one is silent, a kind whose only items are planned is UNMAPPED, and the bearing set is pinned NOT to contain \`planned\`; and the two CALL SITES those rules ride on are pinned by a source read over comment-MASKED source driven ON and OFF, because severing either one — by deletion OR by commenting it out in place — left this very self-test green; \u26d4 that pin is a TEXT pin and G12 records the three semantic severings it cannot see;` +
+        ' and the `retired` status is judged by its own rule, driven both ways \u2014 a non-empty `retiredReason`, `since` null or release-shaped, steps unjudged \u2014 so a planned item retired before it was implemented is legal, an item retired after it shipped stays legal, and a retired item with no reason or a non-release `since` is refused.',
     );
     process.exit(0);
   }
@@ -2780,9 +2837,9 @@ for (const { file, stem, doc } of parsed) {
       }
     }
 
-    if (item.status === 'retired') {
-      if (typeof item.retiredReason !== 'string' || !item.retiredReason) where('retired items must carry "retiredReason"');
-    } else {
+    // A retired item owes no acceptance clause; its `retiredReason` is judged
+    // by `statusFieldProblems` above, with the rest of its status's rule.
+    if (item.status !== 'retired') {
       if (!Array.isArray(item.acceptance) || item.acceptance.length === 0) {
         // A planned item has no oracle to consult yet — that is what `planned`
         // MEANS. Requiring a clause here would buy one written against a

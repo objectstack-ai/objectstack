@@ -45,7 +45,9 @@
  * family the merge-queue build answers it: on `merge_group` every filter output
  * widens to `'true'` and the family runs on the merged tree before anything
  * reaches `main` (the `|| 'true'` half of ci.yml's filter contract, pinned by
- * `--self-test`). For the event- and label-conditional advisory jobs the reason
+ * `--self-test`) — except the full-battery-only jobs (ci.yml's THE TWO SPEEDS),
+ * which skip on every PR head and queue build and are answered by `main`'s
+ * push and hourly runs instead. For the event- and label-conditional advisory jobs the reason
  * column names the condition a reader checks by hand. Deriving expectedness
  * live from the workflows' `paths` filters would answer the diff question, at
  * the cost of a SECOND evaluator of the platform's own semantics — the
@@ -209,6 +211,8 @@ const EVENT_REASON =
   "job-level `if:` excludes the `labeled` / `unlabeled` / `edited` pull_request events; each such event is its own run on the same head, beside the `opened` / `synchronize` run that concluded";
 const CORE_REASON =
   "gated on ci.yml's `filter` job `core` output; a diff outside the core path set skips it on the PR head, and the merge-queue build widens every output to 'true' and runs it on the merged tree";
+const FULL_BATTERY_REASON =
+  "full battery only (ci.yml's THE TWO SPEEDS): its `if:` excludes `pull_request` and `merge_group`, so it skips on every PR head and every queue build and runs on main's push, hourly schedule and dispatch runs";
 
 /**
  * THE ROSTER — declared once, here, as data. One row per check-run NAME that
@@ -277,21 +281,21 @@ export const EXPECTED_SKIPS = Object.freeze([
     workflow: 'ci.yml',
     job: 'temporal-conformance',
     gate: CORE_GATE,
-    reason: `${CORE_REASON} (a REQUIRED context: the queue build is where its verdict is taken)`,
+    reason: `${FULL_BATTERY_REASON}; on a push it also needs the \`filter\` job's \`core\` output`,
   },
   {
     name: 'Dogfood Regression Gate (${{ matrix.shard }}/3)',
     workflow: 'ci.yml',
     job: 'dogfood',
     gate: CORE_GATE,
-    reason: `${CORE_REASON}; the raw matrix template IS the name a job skipped before matrix expansion reports (the aggregate \`Dogfood Regression Gate\` runs \`if: always()\` and never skips)`,
+    reason: `${FULL_BATTERY_REASON}; the raw matrix template IS the name a job skipped before matrix expansion reports (the aggregate \`Dogfood Regression Gate\` runs \`if: always()\` and never skips)`,
   },
   {
     name: 'Dogfood Verify CLI',
     workflow: 'ci.yml',
     job: 'dogfood-verify',
     gate: CORE_GATE,
-    reason: CORE_REASON,
+    reason: `${FULL_BATTERY_REASON}; on a push it also needs the \`filter\` job's \`core\` output`,
   },
   {
     name: 'Test Core (${{ matrix.shard }}/6)',
@@ -313,7 +317,7 @@ export const EXPECTED_SKIPS = Object.freeze([
     workflow: 'ci.yml',
     job: 'console-pin',
     gate: { kind: 'filter-output', outputs: ['console'] },
-    reason: "gated on ci.yml's `filter` job `console` output (the `.objectui-sha` pin, the console build/probe scripts, and the spec's entry layout: `packages/spec/package.json` and `packages/spec/tsup.config.ts`); a diff that moves none of them skips the pinned-console build",
+    reason: `${FULL_BATTERY_REASON}; on a push it also needs the \`filter\` job's \`console\` output (the \`.objectui-sha\` pin, the console build/probe scripts, and the spec's entry layout: \`packages/spec/package.json\` and \`packages/spec/tsup.config.ts\`)`,
   },
 ]);
 

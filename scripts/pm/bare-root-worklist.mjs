@@ -539,6 +539,11 @@ const SPELLINGS = new Map([
     claim: "every file inside a skill's references folder, at any depth",
     holds: (s) => s[0] === 'skills' && s.length >= 4 && s[2] === 'references',
   }],
+  ['published skill markdown', {
+    segments: ['skills', '**', '*.md'],
+    claim: 'every `.md` file at any depth under the skills root, the README at its top included',
+    holds: (s) => s[0] === 'skills' && s.length >= 2 && s[s.length - 1].endsWith('.md'),
+  }],
   ['driver package files', {
     // The WHOLE subtree, which is what the gate declares -- and the widest of
     // the entries here for that reason. Its row's `why` records the direction
@@ -774,6 +779,22 @@ const TRIAGE = new Map([
       + 'HERE, by the liveness and precision pins this record now carries — a declaration that '
       + 'can drift from the scan is worse than none. The row stays in the sweep: the bare root is '
       + 'still not covered',
+  }],
+  ['scripts/pm/check-skill-id-lint.mjs PUBLISHED_SCAN_ROOT skills', {
+    verdict: 'DECLARED-NARROWER',
+    spelling: 'published skill markdown',
+    why: 'written with the constant, on 2026-10-12, when the maintainer ruled the published catalog '
+      + 'into this gate scan set as a widening rather than a new gate. Measured at commit 0a07f2f2c '
+      + 'by driving the gate own lintTree() over the repo root: its walk reads 53 markdown files '
+      + 'under the root, and the recorded spelling reaches exactly those 53 of the 65 tracked there, '
+      + '81.5%, SET-EQUAL in both directions. The 12 it passes over are the eval JSON files in each '
+      + 'skill evals folder, which the gate never opens — so declaring the bare root wholesale would '
+      + 'name it for files it does not read, the costlier error this map names. The consumer is '
+      + 'that ruling itself and it is measured, not argued: before the declaration the derivation '
+      + 'for a change set holding one skill entrypoint printed 30 commands and not this gate, after '
+      + 'it 31 with this gate among them. The row STAYS in the sweep because the bare root is still '
+      + 'not covered — no arbitrary file at the top of the root is reached — which is what this '
+      + 'verdict says and is correct, not outstanding debt',
   }],
   ['scripts/check-dual-build-cjs-loads.mjs SCAN_ROOT packages', {
     verdict: 'DECLARED-NARROWER',
