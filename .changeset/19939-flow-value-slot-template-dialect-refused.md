@@ -18,18 +18,13 @@ Clause-②: yes (narrowing)
 
 **Not converted.** No D2 conversion rewrites any spelling: every token spelling authored in flows answers differently under CEL for some input (measured through both engines over the same variables, 13 of 25 probes the same, 12 different), so a rewrite would change what some flow writes. Where a value may be absent, whether the field should take nothing, `null` or a default was decided silently by the template; it is now the author's decision.
 
-**What is still accepted, unchanged.** A CEL value envelope, every literal (a token-free string, numbers, booleans, `null`, arrays, objects), and two spellings CEL cannot write yet, which keep their meaning until it can:
-
-- the date macros — `{NOW()}`, `{TODAY()}`, with an optional `± N` day offset. CEL's `now()` / `today()` / `daysFromNow()` / `addDays()` yield a Timestamp, which reaches the data engine as a `Date` object rather than the ISO text the macro wrote, and CEL has no string form for one;
-- the run user — `{$User.<path>}`. The flow CEL scope binds no user.
-
-A string whose tokens include one of these is not refused. Text slots (`notify` `title` / `message`, a screen `description`, …) and `filter` values keep the template dialect.
+**What is still accepted, unchanged.** A CEL value envelope and every literal (a token-free string, numbers, booleans, `null`, arrays, objects). A `filter` value keeps the template dialect; a text slot (`notify` `title` / `message`, a screen `description`, …) reads `{{ }}` holes and refuses a single-brace token.
 
 ## FROM → TO
 
 | you wrote | write instead | what changes |
 |:--|:--|:--|
-| `'{record.owner}'`, `'{x}'` | `{ dialect: 'cel', source: 'record.owner' }` | CEL refuses an absent variable or key where the template wrote nothing — guard one that may be absent: `has(record.owner) ? record.owner : null`, `has(vars.x) ? vars.x : null` (writes `null`) |
+| `'{record.owner}'`, `'{x}'` | `{ dialect: 'cel', source: 'record.owner' }` | CEL refuses an absent variable or key where the template wrote nothing — guard one that may be absent a step at a time from `vars`: `has(vars.record) && has(vars.record.owner) ? vars.record.owner : null`, `has(vars.x) ? vars.x : null` (writes `null`) |
 | `'{items.0}'` | `{ dialect: 'cel', source: 'items[0]' }` | an empty list fails the run |
 | `'{$error.message}'` | `{ dialect: 'cel', source: 'vars["$error"].message' }` | a `$`-named variable is read through `vars` |
 | `'{round(x * 100) / 100}'` | `{ dialect: 'cel', source: 'round(x * 100) / 100.0' }` | CEL divides two integers as integers: keep a decimal operand on every division, or `123.46` becomes `123` |
@@ -38,7 +33,7 @@ A string whose tokens include one of these is not refused. Text slots (`notify` 
 
 **The one-line fix: write the CEL spelling the refusal names, and guard a value that may be absent.**
 
-**Who is affected, measured.** A TypeScript-AST census of every `create_record` / `update_record` `fields` value and `assignment` value (all three shapes, same-file spreads included): this repository at `959c209d5` carried 21 authored sites (`examples/**` and `packages/verify/src`) — 20 refused (9 bare references, 10 dotted paths, 1 `$error` path, all migrated in this change) and 1 kept (`{$User.Id}`, `examples/app-todo`); hotcrm at `c529de2` carries 91 (2 of them through a same-file spread) — 71 refused (31 bare references, 36 dotted paths, 4 text with holes) and 20 kept (15 date macros, 5 `{$User.Id}`). Deployed metadata and other repositories were not measured.
+**Who is affected, measured.** A TypeScript-AST census of every `create_record` / `update_record` `fields` value and `assignment` value (all three shapes, same-file spreads included): this repository at `959c209d5` carried 21 authored sites (`examples/**` and `packages/verify/src`) — 20 refused by this change (9 bare references, 10 dotted paths, 1 `$error` path, all migrated in this change) and 1 `{$User.Id}` (`examples/app-todo`), which the run-user refusal on this line refuses and migrates; hotcrm at `c529de2` carries 91 (2 of them through a same-file spread) — 71 refused by this change (31 bare references, 36 dotted paths, 4 text with holes) and 20 that the date-macro and run-user refusals on this line refuse (15 date macros, 5 `{$User.Id}`). Deployed metadata and other repositories were not measured.
 
 ### The kit
 

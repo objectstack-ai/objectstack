@@ -194,9 +194,14 @@ export interface DeclaredValueJudge {
  * no lock, so nothing is reported for it, nor for an item that carries no lock.
  *
  * Handed on UNTOUCHED, with no report, so the save door judges the body as the
- * package declared it and refuses it as before:
+ * package declared it and refuses it:
  *  - a lock key whose value its declaration refuses (`_lock: 'locked'`, a
- *    reason that is not a string, a malformed `protection` block);
+ *    reason that is not a string, a malformed `protection` block). A refused
+ *    `_lock*` value fails the door's parse, `422 INVALID_METADATA`. On a type
+ *    that declares `protection`, a body still carrying its block (a malformed
+ *    block, or one beside a refused `_lock*` value) meets the door's
+ *    `protection` refusal first, `400 VALIDATION_ERROR`
+ *    (`protectionBlockRefusal` in `protocol.ts`);
  * and left in place:
  *  - a `protection` block on a type whose schema does not declare one
  *    (`protectionDeclaration` absent) — the door refuses it as an

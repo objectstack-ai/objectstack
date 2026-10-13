@@ -83,8 +83,8 @@
 
 import { findClosestMatches, formatSuggestion } from '@objectstack/spec/shared';
 
-import { PARSE_FAILURE_HINT } from './checked-parse.js';
-import { indexUnprovisionedAnchors, unprovisionedAnchorHint } from './system-fields.js';
+import { PARSE_FAILURE_FIX } from './checked-parse.js';
+import { indexUnprovisionedAnchors, unprovisionedAnchorFix } from './system-fields.js';
 import {
   bodyParseFailureVerdict,
   extractHookBodyWriteSet,
@@ -339,9 +339,10 @@ export function validateActionBodyWrites(stack: AnyRec): ActionBodyWriteFinding[
         rule: ACTION_BODY_SOURCE_UNPARSEABLE,
         where,
         path: site.path,
-        // [#22161] The hook twin's sentence, from the one function both use.
+        // [#22161] The hook twin's sentence, from the one function both use;
+        // so is the one-line fix.
         message: bodyParseFailureVerdict(parseFailure),
-        hint: PARSE_FAILURE_HINT,
+        hint: PARSE_FAILURE_FIX,
       });
     }
 
@@ -362,18 +363,17 @@ export function validateActionBodyWrites(stack: AnyRec): ActionBodyWriteFinding[
           rule: ACTION_RECORD_WRITE_DISCARDED,
           where,
           path: site.path,
-          // [#22161] One verdict sentence; that the snapshot is read-only by
-          // design whether or not the field is declared, and why only a
-          // provably dead write is reported, is
+          // [#22161] One verdict sentence and one remedy line; that the
+          // snapshot is read-only by design whether or not the field is
+          // declared, why only a provably dead write is reported, and that the
+          // warning never blocks a build, are
           // `os explain action-record-write-discarded`.
           message:
             `body assigns ctx.record.${w.field}, but an action's ctx.record is a snapshot the runtime never ` +
             `writes back, so the assignment is discarded while the action returns success`,
           hint:
             `To persist it, write through the API: ctx.api.object('<object>').updateById(ctx.recordId, ` +
-            `{ ${w.field}: … }). Reported only because ctx.record is never passed anywhere in this body — ` +
-            `mutating the snapshot and then handing it to an API write is a live payload and is not flagged. ` +
-            `This warning never blocks a build.`,
+            `{ ${w.field}: … })`,
         });
       }
     }
@@ -408,7 +408,7 @@ export function validateActionBodyWrites(stack: AnyRec): ActionBodyWriteFinding[
           where,
           path: site.path,
           message: unprovisionedAnchorWriteVerdict(w.object, w.field, `the body's ${w.method ?? 'update'}(…) write`),
-          hint: unprovisionedAnchorHint(w.object, w.field),
+          hint: unprovisionedAnchorFix(w.object, w.field),
         });
         continue;
       }
@@ -436,10 +436,8 @@ export function validateActionBodyWrites(stack: AnyRec): ActionBodyWriteFinding[
 /** Did-you-mean (declared + system columns as candidates) plus the fix. */
 function fixHint(field: string, declared: string[]): string {
   const suggestion = formatSuggestion(findClosestMatches(field, [...declared, ...IMPLICIT_FIELDS]));
-  return (
-    (suggestion ? `${suggestion} ` : '') +
-    `Fix the field name, or declare '${field}' on the object. Only the literal write patterns in ` +
-    `ACTION_BODY_WRITE_PATTERNS are checked — an action's ctx.input is its params bag, so it is not a ` +
-    `record-write surface and is never resolved against fields — and this warning never blocks a build.`
-  );
+  // [#22161] One remedy line, the hook sibling's; which write shapes are
+  // checked, why `ctx.input` is not one, and that the warning never blocks a
+  // build, are `os explain action-body-write-unknown-field`.
+  return `${suggestion ? `${suggestion} ` : ''}Fix the field name, or declare '${field}' on the object`;
 }

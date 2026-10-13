@@ -26,7 +26,9 @@
  *   - a refused withdrawal is reported on the response as a failed outcome,
  *     never swallowed, the cleanups still run, and the cause goes to the
  *     operator log only;
- *   - a registry that does not hold the package has nothing to withdraw.
+ *   - a registry that does not hold the package has nothing to withdraw;
+ *   - [ADR-0090 D5] the permission-set names the package held are captured
+ *     just BEFORE the withdrawal releases them, and handed to the cleanups.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -103,12 +105,20 @@ async function bootPlugin(opts: {
     registered?: string[];
     refuseWithdrawal?: string;
     auth?: unknown;
+    held?: string[];
 } = {}) {
     const events: Array<{ step: string; id: string; ledgerOnDisk: boolean }> = [];
+    const handed: unknown[] = [];
     const packages = new Map((opts.registered ?? [APP_ID, USER_CODE_ID]).map((id) => [id, { manifest: { id } }]));
     const registry = {
         getAllPackages: () => [...packages.values()],
         getPackage: (id: string) => packages.get(id),
+        ...(opts.held ? {
+            securityCatalogNamesHeldBy: (id: string) => {
+                events.push({ step: 'capture', id, ledgerOnDisk: existsSync(ledgerFile()) });
+                return packages.has(id) ? opts.held : [];
+            },
+        } : {}),
         uninstallPackage: vi.fn((id: string) => {
             events.push({ step: 'withdraw', id, ledgerOnDisk: existsSync(ledgerFile()) });
             if (opts.refuseWithdrawal) throw new Error(opts.refuseWithdrawal);
@@ -123,8 +133,9 @@ async function bootPlugin(opts: {
         auth: opts.auth ?? installerAuthService(),
         objectql: withInstallerGrants({ syncSchemas: async () => undefined, registry }),
         protocol: {
-            runUninstallCleanups: vi.fn(async (request: { packageId: string }) => {
+            runUninstallCleanups: vi.fn(async (request: { packageId: string; declared?: unknown }) => {
                 events.push({ step: 'cleanups', id: request.packageId, ledgerOnDisk: existsSync(ledgerFile()) });
+                handed.push(request.declared);
                 return CLEANUP_OUTCOMES;
             }),
         },
@@ -145,7 +156,7 @@ async function bootPlugin(opts: {
     const uninstall = async (manifestId = APP_ID) =>
         rawApp.routes.get('DELETE /api/v1/marketplace/install-local/:manifestId')!(makeDeleteC(manifestId));
     const warnings = () => logger.warn.mock.calls.map((c: any[]) => String(c[0]));
-    return { uninstall, events, packages, registry, warnings };
+    return { uninstall, events, packages, registry, warnings, handed };
 }
 
 describe('#21576: an install-local uninstall withdraws the package from the running kernel', () => {
@@ -167,6 +178,27 @@ describe('#21576: an install-local uninstall withdraws the package from the runn
         // A withdrawal that succeeded adds nothing to the outcomes.
         expect(res.payload.data.cleanups).toEqual(CLEANUP_OUTCOMES);
         expect(warnings()).toEqual([]);
+    });
+
+    it('[ADR-0090 D5] captures the package\'s permission-set names BEFORE the withdrawal, and hands them to the cleanups', async () => {
+        seedLedger();
+        const { uninstall, events, handed } = await bootPlugin({ held: ['tasks_app_task_user'] });
+
+        const res = await uninstall();
+
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(events.map((e) => e.step)).toEqual(['capture', 'withdraw', 'cleanups']);
+        expect(handed).toEqual([{ permission: ['tasks_app_task_user'] }]);
+    });
+
+    it('control — a registry that cannot say what the package held hands the cleanups nothing', async () => {
+        seedLedger();
+        const { uninstall, events, handed } = await bootPlugin();
+
+        await uninstall();
+
+        expect(events.map((e) => e.step)).toEqual(['withdraw', 'cleanups']);
+        expect(handed).toEqual([undefined]);
     });
 
     it('a refused caller withdraws nothing', async () => {

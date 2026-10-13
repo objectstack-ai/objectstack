@@ -39,7 +39,9 @@
  * ## The goldens
  *
  * The census and the write ledger: no boot writes a `sys_position` row in any
- * scenario, and an existing database keeps exactly the rows it had. The census
+ * scenario, and an existing database keeps exactly the rows it had. Since
+ * stage 6b-2 no boot writes a `sys_permission_set` row either, and the grant
+ * golden holds without one. The census
  * instrument is proven able to see a row by a positive control (one
  * organization-authored create, read back as exactly one row).
  *
@@ -183,6 +185,14 @@ interface Booted {
   ledger: string[];
   /** The rows the boot left, one string per row. */
   census: string[];
+  /** [C3 stage 6b-2] The `sys_permission_set` rows the boot left, by name. */
+  permissionSetCensus: string[];
+}
+
+/** Every `sys_permission_set` row's name and organization, past every scope. */
+async function permissionSetCensus(engine: ObjectQL): Promise<string[]> {
+  const rows = (await engine.find('sys_permission_set', { where: {}, limit: 5000, context: SYS })) as any[];
+  return rows.map((r) => `${r.name} | ${r.organization_id ?? '-'}`).sort();
 }
 
 /** Every `sys_position` row, one string per row, past every scope. */
@@ -337,22 +347,14 @@ async function boot(scenario: Scenario): Promise<Booted> {
   }
   recording = false;
 
-  return { engine, metadata, ledger, census: await positionCensus(engine) };
+  return { engine, metadata, ledger, census: await positionCensus(engine), permissionSetCensus: await permissionSetCensus(engine) };
 }
 
 /** The four principals' resolved grants — needs the organization and its memberships. */
 async function grantsByPrincipal(engine: ObjectQL, posture: 'single' | 'isolated'): Promise<Record<string, unknown>> {
-  const orgCtx = { isSystem: true, tenantId: ORG };
-  // Walled: the organization's own copies of the sets its grants point at
-  // (the per-organization catalog), cloned from the platform bucket the boot
-  // just wrote — as the name-column equivalence suite does.
-  if (posture === 'isolated') {
-    for (const name of ['organization_admin', 'organization_admin_no_bypass', 'viewer_readonly']) {
-      const [bucket] = await engine.find('sys_permission_set', { where: { name }, context: SYS });
-      const { id: _id, created_at: _c, updated_at: _u, ...rest } = bucket as any;
-      await engine.insert('sys_permission_set', { ...rest, id: `ps_${name}_${ORG}`, organization_id: ORG }, { context: orgCtx } as any);
-    }
-  }
+  // [C3 stage 6b-2] No `sys_permission_set` row exists in any posture: every
+  // grant below names its set, and the resolver takes the set from the
+  // security catalog (ADR-0131 D3/D4).
   // [ADR-0131 D4] The boot's organization-admin backfill already granted it by
   // name, in every posture — no organization copy of the set is needed — so
   // the reconcile finds nothing to do.
@@ -360,13 +362,9 @@ async function grantsByPrincipal(engine: ObjectQL, posture: 'single' | 'isolated
   expect(reconciled.action).toBe('noop');
 
   // The member's set, granted through the data door by an administrator.
-  const [viewer] = await engine.find('sys_permission_set', {
-    where: { name: 'viewer_readonly', ...(posture === 'isolated' ? { organization_id: ORG } : {}) },
-    context: SYS,
-  });
   await engine.insert(
     'sys_user_permission_set',
-    { user_id: 'usr_member', permission_set: (viewer as any).name },
+    { user_id: 'usr_member', permission_set: 'viewer_readonly' },
     { context: { userId: 'usr_orgadmin', positions: [], permissions: ['qa_admin'], tenantId: ORG } } as any,
   );
 
@@ -496,6 +494,27 @@ for (const name of Object.keys(SCENARIOS) as ScenarioName[]) {
       ]);
       await engine.delete('sys_position', { where: { id: 'pos_census_control' }, context } as any);
       expect(await positionCensus(engine)).toEqual(census);
+    });
+
+    // [C3 stage 6b-2] The catalog seeders are retired: no boot writes a
+    // `sys_permission_set` row — not the platform defaults, not a package's
+    // sets, not an organization's copies (the late organization included) —
+    // while the first platform administrator and the organization
+    // administrator are still granted (the grant golden below) by name.
+    it('writes no sys_permission_set row, and still grants the first platform admin and the organization admin', async () => {
+      const { engine, permissionSetCensus: rows } = booted.get(name)!;
+      expect(rows).toEqual([]);
+      const holders = (await engine.find('sys_user_permission_set', { where: {}, limit: 100, context: SYS })) as any[];
+      const held = holders.map((g) => `${g.user_id} -> ${g.permission_set}`).sort();
+      if (scenario.posture === 'single') expect(held).toContain('usr_admin -> admin_full_access');
+      if (scenario.organizationAtBoot) {
+        expect(held.some((h) => h.startsWith('usr_orgadmin -> organization_admin'))).toBe(true);
+      }
+      // Positive control: the census sees a row — one insert reads back as one.
+      await engine.insert('sys_permission_set', { id: 'ps_census_control', name: 'zz_census_control', label: 'Control' }, { context: SYS } as any);
+      expect(await permissionSetCensus(engine)).toEqual(['zz_census_control | -']);
+      await engine.delete('sys_permission_set', { where: { id: 'ps_census_control' }, context: SYS } as any);
+      expect(await permissionSetCensus(engine)).toEqual([]);
     });
 
     if (scenario.organizationAtBoot) {

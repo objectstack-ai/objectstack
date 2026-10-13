@@ -1728,6 +1728,17 @@ const actionObject = () => strictObject({
    * hop (no full page load, immune to popup blocking); an absolute URL is a
    * document navigation.
    *
+   * **The scheme set** is a `type: 'url'` target's (`navigation-target.ts`,
+   * ruling A+ on objectstack-ai/objectui#12191): `navigate` is an `http://` or
+   * `https://` URL, a `mailto:` address, an in-app path that starts with `/`
+   * or `./`, or a template that opens with `${` — which the runner judges
+   * after interpolation, so `${result.redirectUrl}` is left alone here. Every
+   * other scheme, a protocol-relative `//host`, a `/` followed by a backslash,
+   * a tab / line feed / carriage return anywhere, and a bare relative template
+   * (`tasks/${result.id}`) are refused at parse: the runner
+   * (`navigateOnSuccess`) classifies the interpolated URL with the same set
+   * and performs no navigation for any of them.
+   *
    * **`openIn`** is a CLOSED two-member enum — `'self'` (default: navigate in
    * place) or `'newTab'` — deliberately not a general navigation DSL.
    * The default is MATERIALIZED (`.default('self')`, the file's convention —
@@ -1785,7 +1796,7 @@ const actionObject = () => strictObject({
         "the tab choice is the closed enum `openIn: 'self' | 'newTab'` — write `openIn: 'newTab'`.",
     },
   }, {
-    navigate: z.string().describe("Route/URL template navigated to after the action succeeds. Interpolates ${param.*} (params-dialog values), ${ctx.*} (origin/apiBase/user/org/recordId/selection) and ${result.*} (the action's server response payload — NEW with this key, e.g. ${result.id}). Relative = SPA route hop; renderers MUST encodeURIComponent values in query positions."),
+    navigate: z.string().describe("Route/URL template navigated to after the action succeeds. Interpolates ${param.*} (params-dialog values), ${ctx.*} (origin/apiBase/user/org/recordId/selection) and ${result.*} (the action's server response payload — NEW with this key, e.g. ${result.id}). An http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ (an SPA route hop); a template that opens with ${ is judged after interpolation. Every other scheme and a protocol-relative //host are refused. Renderers MUST encodeURIComponent values in query positions."),
     openIn: z.enum(['self', 'newTab'], {
       error: (issue) => (issue.input === 'new-tab'
         ? "`onSuccess.openIn` spells the new-tab member `'newTab'` (matching the handler-return "
@@ -1793,7 +1804,7 @@ const actionObject = () => strictObject({
           + "to the top-level `openIn` key for `type:'url'` actions. Write `openIn: 'newTab'`."
         : undefined),
     }).default('self').describe("Where to perform the post-success navigation: 'self' (default — in-place SPA navigation, immune to popup blocking) or 'newTab'. Closed enum — no general navigation DSL."),
-  }).optional().describe("Post-success navigation for type:'api' and type:'script' actions. `navigate` is a route/URL template interpolating ${param.*}, ${ctx.*} and ${result.*} (the server response); `openIn` defaults 'self'. The handler-return convention ({ redirectUrl } without openIn) keeps its 17.0.0 new-tab behavior."),
+  }).superRefine(refuseUnopenableOnSuccessNavigate).optional().describe("Post-success navigation for type:'api' and type:'script' actions. `navigate` is a route/URL template interpolating ${param.*}, ${ctx.*} and ${result.*} (the server response); `openIn` defaults 'self'. The handler-return convention ({ redirectUrl } without openIn) keeps its 17.0.0 new-tab behavior."),
 
   // `aria` REMOVED (ADR-0049 enforce-or-remove; the triage record on the card,
   // comment 5860351140 on #20323, follows the `ChartConfig.aria` retirement
@@ -2047,6 +2058,24 @@ function refuseUnopenableUrlTarget(subject: string) {
     const refusal = navigationTargetRefusal(data.target, subject);
     if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: ['target'], message: refusal });
   };
+}
+
+/**
+ * The scheme set of `onSuccess.navigate`, the post-success hop. The grammar is
+ * `navigation-target.ts`'s, unscoped: unlike `target`, `navigate` has no other
+ * meaning to protect — on both types that may declare it (`api`, `script`) it
+ * is only ever a URL the runner navigates to after interpolation. A template
+ * that opens with `${` keeps the predicate's own rule (judged at the hop, after
+ * interpolation); an empty value is judged like any other and refused, since
+ * the runner's shape guard (`readOnSuccessNavigation`) drops an empty
+ * `navigate` and no hop happens.
+ */
+function refuseUnopenableOnSuccessNavigate(
+  data: { navigate: string },
+  ctx: z.core.$RefinementCtx,
+): void {
+  const refusal = navigationTargetRefusal(data.navigate, "An action's `onSuccess.navigate`");
+  if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: ['navigate'], message: refusal });
 }
 
 export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
