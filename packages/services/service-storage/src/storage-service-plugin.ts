@@ -4,6 +4,9 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import {
   resolveAuthzContext,
   isAuthzStoreUnavailableError,
+  // ADR-0069 — a gate the deployment declared active whose session read fails
+  // is the authorization-store outage REST answers it with (#13906).
+  AuthzStoreUnavailableError,
   // [#16013] The download door's tenancy-posture read, in ONE call: the
   // posture IN FORCE (ADR-0093 D4/D5 - a deployment REQUESTING `isolated`
   // without the `@objectstack/organizations` runtime is `single` in force), taken
@@ -33,8 +36,8 @@ import type { S3StorageAdapterOptions } from './s3-storage-adapter.js';
 import { StorageMetadataStore } from './metadata-store.js';
 import type { FileRecord } from './metadata-store.js';
 import type { TenancyPosture } from '@objectstack/spec/security';
-import { registerStorageRoutes } from './storage-routes.js';
-import type { FileReadVerdict, StorageUploadSession } from './storage-routes.js';
+import { registerStorageFamily } from './storage-routes.js';
+import type { FileReadVerdict, StorageGatedSessionReader, StorageUploadSession } from './storage-routes.js';
 import { installAttachmentLifecycleHooks, createSysFileReapGuard, createUploadSessionReapGuard, findFileHolder, findHeldFiles } from './attachment-lifecycle.js';
 import { installFileReferenceHooks } from './file-reference-lifecycle.js';
 import { installAttachmentAccessHooks, installAttachmentReadVisibility } from './attachment-access-hooks.js';
@@ -1017,6 +1020,7 @@ export function composeStorageRoutes(
   const engine = composition.engine;
   const store = new StorageMetadataStore(engine);
   const resolveSession = buildAuthSessionResolver(registry);
+  const readGatedSessionUser = buildAuthGateSessionReader(registry);
   const authorizeFileRead = buildFileReadAuthorizer(registry, engine);
   const resolveFileHolder =
     engine && typeof (engine as any).find === 'function'
@@ -1033,17 +1037,24 @@ export function composeStorageRoutes(
     ? () => limitsCarrier.getLimitsSnapshot!()
     : undefined;
 
-  registerStorageRoutes(http, composition.storage, store, {
-    basePath,
-    presignedTtl: composition.presignedTtl,
-    sessionTtl: composition.sessionTtl,
-    limitsSnapshot,
-    downloadTtl: composition.downloadTtl,
-    resolveSession,
-    authorizeFileRead,
-    resolveFileHolder,
-    logger: composition.logger,
-  });
+  registerStorageFamily(
+    http,
+    composition.storage,
+    store,
+    {
+      basePath,
+      presignedTtl: composition.presignedTtl,
+      sessionTtl: composition.sessionTtl,
+      limitsSnapshot,
+      downloadTtl: composition.downloadTtl,
+      resolveSession,
+      authorizeFileRead,
+      resolveFileHolder,
+      logger: composition.logger,
+    },
+    // ADR-0069 — bound here with the other gates, so both mounts carry it.
+    readGatedSessionUser,
+  );
 
   return {
     basePath,
@@ -1098,6 +1109,54 @@ function buildAuthSessionResolver(
     } catch {
       return null;
     }
+  };
+}
+
+/**
+ * ADR-0069 — read a request's session user for the authentication-policy gate
+ * the storage family's door asks (`registerStorageFamily`). `undefined` when
+ * the kernel has no `auth` service, so the gate is not bound at all.
+ *
+ * Shaped like the two seams that already gate on it. Only when a gate feature
+ * is active (`isAuthGateActive()`, a cheap synchronous check) is the session
+ * read, so a deployment with no password-expiry or MFA policy pays nothing; a
+ * probe that throws never declared a gate and reads as inactive. When the
+ * gate IS active and the session read fails, that is the authorization-store
+ * outage REST answers `503` (#13906 decision 2 option B) — never the silent
+ * "no session" a failed read would otherwise look like.
+ *
+ * This is a second session read beside {@link buildAuthSessionResolver}'s,
+ * accepted so that the posture travels without moving any exported
+ * declaration (`StorageUploadSession` stays as it is).
+ */
+function buildAuthGateSessionReader(registry: StorageGateRegistry): StorageGatedSessionReader | undefined {
+  let authService: { isAuthGateActive?(): boolean } | undefined;
+  try {
+    authService = registry.getService<{ isAuthGateActive?(): boolean }>('auth');
+  } catch {
+    return undefined;
+  }
+  if (!authService) return undefined;
+  const getSession = buildGetSession(registry);
+  if (!getSession) return undefined;
+  const auth = authService;
+  return async (req) => {
+    let active = false;
+    try {
+      active = typeof auth.isAuthGateActive === 'function' && auth.isAuthGateActive() === true;
+    } catch {
+      active = false;
+    }
+    if (!active) return undefined;
+    const headers = toWebHeaders(req);
+    if (!headers) return undefined;
+    let session: any;
+    try {
+      session = await getSession(headers);
+    } catch (err) {
+      throw new AuthzStoreUnavailableError('auth_gate', err);
+    }
+    return session?.user;
   };
 }
 
