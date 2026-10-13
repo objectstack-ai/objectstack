@@ -198,8 +198,11 @@ const CALLERS: Record<string, Caller> = {
       label: 'migrate organization-ownership',
       argv: ['--out', '@DIR@/organization-ownership-plan.json', '--database-url', '@DB@', '--json'],
     }],
-    write: [],
-    note: 'the ADR-0131 D10 preflight: it has no writing mode until the ceremony\'s apply lands',
+    // `--apply` writes the ceremony's fates and its report file; never a seed.
+    write: [{
+      label: 'migrate organization-ownership --apply',
+      argv: ['--apply', '--backup-taken', '--out', '@DIR@/organization-ownership-apply.json', '--database-url', '@DB@', '--json'],
+    }],
   },
   'commands/migrate/plan.ts': {
     run: invoke(MigratePlan),

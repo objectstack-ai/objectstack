@@ -103,8 +103,9 @@ const FAMILY: Record<string, string[]> = {
   'migrate files-to-references': [],
   'migrate meta': ['--stored'],
   'migrate multi-value-columns': [],
-  // Its bare form is its only mode — a read-only plan (`deferSchemaDdl` +
-  // `readOnlyProbe`). The fixture's database holds none of the platform tables
+  // Its bare form — a read-only plan (`deferSchemaDdl` + `readOnlyProbe`) —
+  // is the one driven here; `--apply` emits through the same two `emitJson`
+  // paths after the same shutdown. The fixture's database holds none of the platform tables
   // the ceremony inventories, so the face driven here is its REFUSAL face
   // (`plan_refused`, `emitJson(…, 1, { compact: true })`), emitted after the
   // stack is shut down. A refused plan writes no plan file, so the fixture
