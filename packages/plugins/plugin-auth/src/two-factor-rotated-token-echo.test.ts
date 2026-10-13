@@ -320,8 +320,11 @@ beforeEach(() => {
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
-afterEach(async () => {
-  vi.restoreAllMocks();
+afterEach(() => vi.restoreAllMocks());
+// [#23184] Once the file is done, not after each case: the cases run
+// concurrently (below), and an `afterEach` here would close a database a
+// still-running case holds. Each in-memory sqlite database is its own case's.
+afterAll(async () => {
   while (engines.length) {
     const e = engines.pop();
     try {
@@ -337,13 +340,12 @@ afterEach(async () => {
  * scrypt derivation under a fresh salt), and every later password check
  * (`enable`, `get-totp-uri`, the challenge sign-in) derives the same password
  * against the same salt, which the memo answers from the bytes the sign-up
- * produced (`__tests__/scrypt-memo.testkit.ts`). Each in-memory case builds
- * its own engine, manager and user and reads no state another case writes, so
- * those suites run their cases concurrently. The real-SqlDriver suite at the
- * end stays sequential: the `afterEach` above destroys every engine in
- * `engines`, which would close a database a concurrent case still holds. The
- * console stubs above are the only other shared state; lifted early by
- * another case's `restoreAllMocks`, they cost log output and no assertion.
+ * produced (`__tests__/scrypt-memo.testkit.ts`). Each case builds its own
+ * backend (in-memory engine, or its own `:memory:` sqlite database), manager
+ * and user and reads no state another case writes, so the suites run their
+ * cases concurrently. The console stubs above are the only shared state;
+ * lifted early by another case's `restoreAllMocks`, they cost log output and
+ * no assertion.
  */
 const scrypt = memoizeScrypt();
 afterAll(scrypt.restore);
@@ -820,7 +822,7 @@ describe.concurrent('#16535 — condition ④: the failure posture is inherited'
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-describe('#16535 — the same measurement on a real SqlDriver', () => {
+describe.concurrent('#16535 — the same measurement on a real SqlDriver', () => {
   it('condition ①, at driver level: the echo equals the stored column', async () => {
     // The card measured this twice for a reason: a test that never reaches an
     // adapter cannot tell "the echo tracks the row" from "the echo happens to
