@@ -166,7 +166,7 @@ function timeUpdateIntervalRefusalMessage(input: unknown): string {
   const declared = DateGranularity.options.join(', ');
   if (typeof input === 'string' && (RETIRED_SUB_DAY_INTERVALS as readonly string[]).includes(input)) {
     return (
-      `Time interval ${received} was retired in protocol 18 (ADR-0049 enforce-or-remove). `
+      `Time interval ${received} was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove). `
       + 'No backend ever bucketed it and none could advertise it: the canonical bucket-key '
       + 'vocabulary and `supports.queryDateGranularity` both stop at '
       + `${declared}, so the name resolved to a refusal or to one group per distinct timestamp. `

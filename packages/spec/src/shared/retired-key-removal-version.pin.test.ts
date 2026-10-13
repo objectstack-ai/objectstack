@@ -57,8 +57,10 @@
  *     least one derives an older major, so the derivation is exercised in both
  *     directions on real entries, never vacuously.
  *
- * The three older rows are entries a 17.x minor shipped. Each is `toMajor: 18`
- * like the rest, so `toMajor` cannot be what tells them apart.
+ * The four older rows are entries a 17.x minor shipped. Each is `toMajor: 18`
+ * like the rest, so `toMajor` cannot be what tells them apart. One of them,
+ * the sub-day time interval, guards the opposite direction: a prescription for
+ * a shape a 17.x minor already refused must not name the next major.
  *
  * Out of reach by construction: a retirement with no D2 conversion carries no
  * `retiredAfter`, so nothing here can derive its release (a retired-key-only
@@ -74,6 +76,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { ALL_CONVERSIONS } from '../conversions/registry';
+import { TimeUpdateInterval } from '../data/analytics.zod';
 import { IndexSchema } from '../data/object.zod';
 import { ManifestPermissionsSchema } from '../kernel/manifest.zod';
 import { PROTOCOL_MAJOR } from '../kernel/protocol-version';
@@ -212,6 +215,9 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   'page-header-breadcrumb-removed': [tombstone(PageHeaderProps, 'page:header', 'breadcrumb')],
   'object-grid-default-sort-removed': [tombstone(ObjectGridPropsSchema, 'object-grid', 'defaultSort')],
   'object-kanban-quick-add-removed': [tombstone(ObjectKanbanPropsSchema, 'object-kanban', 'quickAdd')],
+  'cube-sub-day-granularities-removed': [
+    refusal('a sub-day TimeUpdateInterval member', () => TimeUpdateInterval.safeParse('minute')),
+  ],
 };
 
 /** Every major a prescription names as a release: `@objectstack/spec N[.x.y]` or `protocol N`. */
