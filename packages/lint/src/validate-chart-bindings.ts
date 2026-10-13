@@ -336,19 +336,6 @@ const UNKNOWN_CONSEQUENCE: Record<Exclude<MeasurePosition, 'query'>, string> = {
     + 'it re-points nothing',
 };
 
-/** Presentation position → the shape sentence in the hint. */
-const SHAPE_HINT: Record<Exclude<MeasurePosition, 'query'>, string> = {
-  'report-series':
-    '`series[].name` selects WHICH derived series the label and per-series presentation '
-    + 'land on; it cannot add, remove or re-point one.',
-  'page-series':
-    '`series[].name` cannot add, remove or re-point a series on a dataset-bound chart — '
-    + 'membership belongs to the dataset selection.',
-  'page-axis':
-    '`yAxis[]` carries presentation only (title, min/max, position, gridlines); the '
-    + 'plotted columns come from `values`.',
-};
-
 /**
  * Position → the consequence of naming a DECLARED measure outside the
  * selection, as the verdict's closing clause. [#22161] Which selection each
@@ -452,12 +439,15 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
               ? `, so this series comes back empty (result rows are keyed by measure name, ` +
                 `not the base field)`
               : `: ${UNKNOWN_CONSEQUENCE[position]}`),
+          // [#22161] One remedy line plus the nearest declared measure; the
+          // dataset's measure list is not echoed, and what each presentation
+          // position carries (and that no `suppressWarnings` key silences it)
+          // is `os explain chart-measure-unknown`.
           hint:
-            `Dataset measures: ${list(ds.measures)}.${suggestName(name, ds.measures)} ` +
             (position === 'query'
-              ? `Declare the measure on the dataset, or bind an existing one.`
-              : `${SHAPE_HINT[position]} Correct the name or drop the entry — this ` +
-                `surface carries no \`suppressWarnings\` key to silence the advisory with.`),
+              ? `Bind a measure that dataset "${dsName}" declares, or declare "${name}" on it.`
+              : `Correct the name to a measure that dataset "${dsName}" declares, or drop the entry.`) +
+            suggestName(name, ds.measures),
         });
         return;
       }

@@ -1,5 +1,273 @@
 # @objectstack/service-external-datasource
 
+## 18.0.0-next.0
+
+### Minor Changes
+
+- 8532783: feat(service-datasource,metadata-core)!: the datasource-admin plugin reads the environment's stored `datasource` rows only; a legacy organization-scoped row is neither loaded at boot nor served (ADR-0131 D6)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered metadata-read-organization-scope-retired) That entry retires every metadata read of a row stored organization-scoped, the boot hydration included, and states that such a row is served by no read and loaded by no boot. This changeset carries the same rule to the datasource-admin plugin's own reads of sys_metadata: no key, export or stored shape is removed, renamed or re-shaped, and nothing is rewritten. -->
+  
+  **BREAKING (narrowing).** Graded `minor` on the v18 prerelease line, as the read narrowing it completes.
+  
+  **What changes.** `DatasourceAdminServicePlugin` reads stored `datasource` rows in five places — the boot restore (`restoreRuntimeDatasources`), the by-name read behind cluster convergence and the `/meta` door's datasource projection, and the existence probes behind its own create, update and remove. Each now reads the environment's rows only, judged by the same row-value test the metadata reads apply. A row stored organization-scoped by an earlier release:
+  
+  - is no longer registered at boot, so the datasource-admin door and the metadata read door no longer serve it, and no live pool is opened from it;
+  - is never updated or deleted by an admin create, update or remove under its name — those write and remove an environment row of their own;
+  - stays at rest, and the boot report `[metadata_org_scoped_unserved]` keeps naming it. Nothing is deleted or rewritten; the v18 migration ceremony (`os migrate`, ADR-0131 D10) carries it.
+  
+  **What moves for consumers.**
+  
+  | From | To |
+  |:--|:--|
+  | a legacy organization-scoped runtime datasource a deployment relied on | re-create it through the datasource-admin door or save it through the `/meta` door to make it environment-wide now, or wait for the v18 migration ceremony |
+  
+  `@objectstack/metadata-core` exports `isLegacyOrganizationRow`, the one row-value test for such a row; `@objectstack/objectql`'s authored hook and action binders now read it from there, with no change in what they bind.
+
+### Patch Changes
+
+- 8a399b2: The datasource admin door and the metadata door agree on a runtime datasource: a datasource saved through `/api/v1/meta/datasource/:name` is listed and editable through `/api/v1/datasources` in the same boot and after a restart, and one created through the admin door can be edited and removed through the metadata door (#21923)
+  
+  Clause-②: no
+  
+  `DatasourceSchema.origin` publishes `runtime` as "created via the Studio wizard, persisted in the runtime metadata store, environment-scoped, editable", and says `origin` is never accepted from client input. Three things broke that for a datasource the metadata door wrote, or one the admin door wrote:
+  
+  - **The admin door read `origin` from the record.** It served `origin ?? 'code'`, so after a restart a datasource saved through the metadata door (whose body carries no `origin`, or asserts `origin: 'code'`) was served as code-defined, and `PATCH /api/v1/datasources/:name` answered `400 DATASOURCE_ADMIN_ERROR` ("… is code-defined and cannot be edited at runtime."). It now serves `code` only for a name the host registers from code (the host's code-datasource set, the one the boot restore and the metadata door's refusal read), and `runtime` for every other name, whatever the record says. Boot pool rehydration follows the served origin, so such a datasource also gets its live pool after a restart.
+  - **A metadata-door write never reached the admin door until a restart.** The metadata door persisted the row but never registered it where the admin door lists, so in the same boot `GET /api/v1/datasources` omitted it and `PATCH` answered "not found". The datasource-admin plugin now registers the protocol's awaited `datasource` mutation projector: after a metadata-door save, publish, revert, rollback or delete, the admin door's registry follows the stored row and the live pool converges on it (opened on a create, rebuilt on a connectivity change, evicted on a delete) before the metadata door answers. A write under a name the host defines in code changes nothing here, so the metadata door's `DELETE` of a leftover row under such a name still leaves the code definition served.
+  - **An admin-created row could not be edited or removed through the metadata door.** The admin door stored its `sys_metadata` row with no `checksum`, the column the metadata door's optimistic lock compares, so `PUT` and `DELETE /api/v1/meta/datasource/:name` answered `409 METADATA_CONFLICT` for every admin-created datasource. The admin door now stamps the checksum the metadata door's repository stamps (`hashSpec` from `@objectstack/metadata-core`, which becomes a runtime dependency of this package). A row stored before this release has no checksum until the admin door next writes it: editing that datasource through the admin door once makes it editable through the metadata door.
+  
+  Cluster convergence (a peer replica's signal after an admin-door write) decides "code" from the same set, so a stored row under a code-defined name never opens a pool there, and every other stored row is pooled as runtime.
+  
+  **Unchanged.** A code-defined datasource stays read-only through both doors: the admin door's `PATCH` and `DELETE` still answer `400 DATASOURCE_ADMIN_ERROR`, and the metadata door's still answer `403 NOT_OVERRIDABLE`. A host that composes no code-datasource producer (neither `AppPlugin` nor `DefaultDatasourcePlugin`) registers no set, and the admin door then serves every datasource as runtime, as its boot restore already treats every stored row.
+- 4f4c4ed: fix(auth,services): the remaining in-process session reads no longer renew a browser session behind its cookie (#22258)
+  
+  **What was wrong.** better-auth's `getSession` renews a session older than `session.updateAge`: it moves `sys_session.expires_at` to `now + expiresIn` and stages the renewed session cookie on that call's own response. Nine doors in these packages read the session in-process (`auth.api.getSession({ headers })`) and answer with their own response, so the renewal landed in the database and its cookie was discarded. The browser kept its old cookie, which then expired before the session: a dead cookie beside a live bearer, after which every cookie-only path saw a signed-out user. The doors: `POST /api/v1/auth/admin/oauth2/toggle-disabled`, every `/api/v1/auth/admin/*` mount behind the shared platform-admin gate, `POST /api/v1/auth/admin/unlock-user` and `POST /api/v1/auth/admin/has-permission` (`@objectstack/plugin-auth`); `POST /api/v1/webhooks/redeliver`; the storage upload and download doors (`/api/v1/storage/*`); the share-link management routes (`/api/v1/share-links`); the settings routes (`/api/settings`); and the datasource-admin routes (`/api/v1/datasources/*`).
+  
+  **The rule now** is the one the REST, dispatcher, current-user and cloud-connection doors already follow. Each of these reads goes through `inProcessSessionReadInput(headers)` from `@objectstack/types`:
+  
+  - **A request carrying a session cookie** (a browser, including a console that sends its cookie beside its bearer) reads with `query.disableRefresh`. The session renews only through `GET /api/v1/auth/get-session`, which re-issues the cookie with `Max-Age = expiresIn`, so cookie and session expire together.
+  - **A bearer-only request** (`@objectstack/client` outside a browser, the `os` CLI) is unchanged: a read past `updateAge` still renews the session, and no cookie is set on a response to a request that sent none.
+  
+  **Upgrading.** Nothing to change. `@objectstack/plugin-webhooks` now depends on `@objectstack/types` directly; it already reached it through `@objectstack/core`.
+- 6a6a4d3: fix: a refused on-demand schema sync (`syncObjectSchema`) is logged at `error`, naming what was not created and how to fix it (#22985)
+  
+  Three places create an object's storage after the boot's own schema sync has run. When the driver refused that DDL, each of them logged a `warn` and carried on, so the deployment looked healthy while a table did not exist. Each now logs one `error` line that says what was not created, that nothing else will look wrong, and what fixes it. The driver's refusal is kept out of the line itself. Nothing else changes: the boot, the connect and the publish still complete as before.
+  
+  - **`@objectstack/service-messaging`**: boot-time provisioning of the eight notification tables. A refused table logs `[messaging] could not provision <table> storage — its storage was NOT created. …` at `error`, once per table per boot, with the refusal in the record's meta. The fix it names: resolve the refusal, then restart or run `os migrate apply`. This used to be a `warn`. Under `skipSchemaSync` / `OS_SKIP_SCHEMA_SYNC=1` the provisioning still issues no DDL, so this line cannot appear.
+  - **`@objectstack/service-datasource`**: connecting a declared datasource re-runs the schema sync of every object bound to it. A refused object logs `datasource '<name>': object '<object>' has NO working storage here — …` at `error`, once per object per connect, with the refusal in meta. On a logger that has no `error`, the same line is logged at `warn`. The fix it names: resolve the refusal, then restart. This used to be a `warn` reading `syncObjectSchema('<object>') failed`.
+  - **`@objectstack/metadata-protocol`**: publishing an object whose storage sync is refused logs `[Protocol] object '<name>' was published but its storage was NOT created or altered — …` with `console.error`. The driver's refusal is the second argument. The fix it names: resolve the refusal, then publish the object again or restart. The publish still answers success. This replaces the `console.warn` line `[Protocol] table sync failed for object '<name>': …`, so a log search for that text now finds nothing.
+- Updated dependencies [317cddd]
+- Updated dependencies [fec87e7]
+- Updated dependencies [c28f317]
+- Updated dependencies [2e10c9a]
+- Updated dependencies [67b669e]
+- Updated dependencies [0253192]
+- Updated dependencies [bfc15d2]
+- Updated dependencies [2ff0825]
+- Updated dependencies [7aa8d51]
+- Updated dependencies [95a8435]
+- Updated dependencies [9e9e6f9]
+- Updated dependencies [60bcfe7]
+- Updated dependencies [d112087]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [7de0265]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [c8b062f]
+- Updated dependencies [117d34d]
+- Updated dependencies [6729e10]
+- Updated dependencies [1920cf3]
+- Updated dependencies [41d0d40]
+- Updated dependencies [c52bfb4]
+- Updated dependencies [c7d6037]
+- Updated dependencies [72b26ed]
+- Updated dependencies [2d21b9c]
+- Updated dependencies [f66fdc7]
+- Updated dependencies [9fdb127]
+- Updated dependencies [615c696]
+- Updated dependencies [968acc8]
+- Updated dependencies [111ffff]
+- Updated dependencies [12b9daf]
+- Updated dependencies [d85615d]
+- Updated dependencies [6a06e3b]
+- Updated dependencies [0e9e7b7]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [9c93ce6]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [04e776b]
+- Updated dependencies [a7df552]
+- Updated dependencies [2f70c22]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [a87d8be]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [ad381fd]
+- Updated dependencies [2b61f2d]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3b49318]
+- Updated dependencies [4e9fe9f]
+- Updated dependencies [9ad3d24]
+- Updated dependencies [326a90a]
+- Updated dependencies [9fe7448]
+- Updated dependencies [2e11d90]
+- Updated dependencies [4578c56]
+- Updated dependencies [c512c25]
+- Updated dependencies [215e662]
+- Updated dependencies [3d886ee]
+- Updated dependencies [f4069c5]
+- Updated dependencies [d8d0711]
+- Updated dependencies [a45d5d8]
+- Updated dependencies [f6e1d49]
+- Updated dependencies [e9a1f5c]
+- Updated dependencies [40a6ee5]
+- Updated dependencies [5910b5e]
+- Updated dependencies [7098aca]
+- Updated dependencies [97610a5]
+- Updated dependencies [081e6a0]
+- Updated dependencies [1884948]
+- Updated dependencies [3089848]
+- Updated dependencies [e23eccb]
+- Updated dependencies [ac8f2c5]
+- Updated dependencies [db9cf80]
+- Updated dependencies [e75dced]
+- Updated dependencies [9af0005]
+- Updated dependencies [9af0005]
+- Updated dependencies [440bed6]
+- Updated dependencies [b2549a8]
+- Updated dependencies [ee8751d]
+- Updated dependencies [96e4be4]
+- Updated dependencies [35ef501]
+- Updated dependencies [faf6348]
+- Updated dependencies [557ae7c]
+- Updated dependencies [6a3fe25]
+- Updated dependencies [7731d70]
+- Updated dependencies [3073b72]
+- Updated dependencies [c76edeb]
+- Updated dependencies [5b12503]
+- Updated dependencies [514bf3c]
+- Updated dependencies [20e7d52]
+- Updated dependencies [b3a3634]
+- Updated dependencies [3e72f93]
+- Updated dependencies [86f53a4]
+- Updated dependencies [f89b5f5]
+- Updated dependencies [d25b187]
+- Updated dependencies [0e00d36]
+- Updated dependencies [d748ae8]
+- Updated dependencies [dab6bf4]
+- Updated dependencies [ed1de8c]
+- Updated dependencies [a00cf99]
+- Updated dependencies [5fb1746]
+- Updated dependencies [29a163f]
+- Updated dependencies [e223152]
+- Updated dependencies [9f5eca5]
+- Updated dependencies [9963322]
+- Updated dependencies [b27b894]
+- Updated dependencies [874a38d]
+- Updated dependencies [02d9f69]
+- Updated dependencies [f53f14b]
+- Updated dependencies [a800912]
+- Updated dependencies [d973c34]
+- Updated dependencies [156ddfa]
+- Updated dependencies [5081090]
+- Updated dependencies [b6eb25f]
+- Updated dependencies [165587e]
+- Updated dependencies [e04759d]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [b32ee3e]
+- Updated dependencies [91f46d0]
+- Updated dependencies [e5899a6]
+- Updated dependencies [d7b26df]
+- Updated dependencies [490cb6d]
+- Updated dependencies [e865300]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [c74d843]
+- Updated dependencies [6d5191e]
+- Updated dependencies [85edd61]
+- Updated dependencies [e84aeb3]
+- Updated dependencies [322ff1e]
+- Updated dependencies [7b0a9c9]
+- Updated dependencies [5fc57b3]
+- Updated dependencies [fe58bbc]
+- Updated dependencies [c4e7fa5]
+- Updated dependencies [581ca7d]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [b7cd1af]
+- Updated dependencies [9814035]
+- Updated dependencies [55382dc]
+- Updated dependencies [b1d701b]
+- Updated dependencies [efcbac7]
+- Updated dependencies [51f36e7]
+- Updated dependencies [20028df]
+- Updated dependencies [69d4218]
+- Updated dependencies [5ce6773]
+- Updated dependencies [8532783]
+- Updated dependencies [9432bac]
+- Updated dependencies [3f69471]
+- Updated dependencies [8bc7836]
+- Updated dependencies [e5687cb]
+- Updated dependencies [1e62f71]
+- Updated dependencies [ec7f7f8]
+- Updated dependencies [038d4c9]
+- Updated dependencies [5677add]
+- Updated dependencies [147a0d1]
+- Updated dependencies [1959aac]
+- Updated dependencies [e1deaef]
+- Updated dependencies [1badd31]
+- Updated dependencies [58f5c90]
+- Updated dependencies [55828c5]
+- Updated dependencies [7856110]
+- Updated dependencies [9b37edb]
+- Updated dependencies [a22e67b]
+- Updated dependencies [62ce45d]
+- Updated dependencies [c5b43b6]
+- Updated dependencies [39e93ef]
+- Updated dependencies [02bec6c]
+- Updated dependencies [719183f]
+- Updated dependencies [8464380]
+- Updated dependencies [8c10776]
+- Updated dependencies [252a582]
+- Updated dependencies [f931e76]
+- Updated dependencies [e5f9f01]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [de70e97]
+- Updated dependencies [74c4b34]
+- Updated dependencies [e040b8c]
+- Updated dependencies [f451a59]
+- Updated dependencies [ba95607]
+- Updated dependencies [b53b949]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [1e44436]
+- Updated dependencies [2acff87]
+- Updated dependencies [299a2c6]
+- Updated dependencies [e23eccb]
+- Updated dependencies [bf492c8]
+- Updated dependencies [c7a3234]
+  - @objectstack/spec@18.0.0-next.0
+  - @objectstack/core@18.0.0-next.0
+  - @objectstack/driver-sql@18.0.0-next.0
+  - @objectstack/metadata-core@18.0.0-next.0
+  - @objectstack/types@18.0.0-next.0
+  - @objectstack/driver-turso@18.0.0-next.0
+  - @objectstack/driver-memory@18.0.0-next.0
+  - @objectstack/driver-mongodb@18.0.0-next.0
+  - @objectstack/driver-sqlite-wasm@18.0.0-next.0
+
 ## 17.7.0
 
 ### Minor Changes

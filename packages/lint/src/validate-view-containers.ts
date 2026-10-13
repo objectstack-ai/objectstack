@@ -132,10 +132,10 @@ export function validateViewContainers(stack: Record<string, unknown>): ViewCont
         message:
           'A ViewItem record (`viewKind`) is not a view container: `views:` carries containers only, '
           + 'so the stack schema, this rule and the registration loop all refuse it.',
-        hint: 'Wrap it in a defineView container: defineView({ list: { type, data, columns, ... }, '
-          + 'listViews: { ... } }) — or author the standalone view through the metadata door '
-          + '(Studio / `PUT /api/v1/meta/view`). Machine-assembled manifests carry it under '
-          + '`viewItems:`.',
+        // [#22161] One remedy line; that machine-assembled manifests carry a
+        // ViewItem under `viewItems:` is the explanation's.
+        hint: 'Wrap it in a defineView container (defineView({ list: { type, data, columns, ... }, '
+          + 'listViews: { ... } })), or author it through the metadata door (Studio / `PUT /api/v1/meta/view`)',
       });
       continue;
     }
