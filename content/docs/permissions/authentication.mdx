@@ -593,12 +593,20 @@ often before the account-level lock engages.
 |---|---|
 | `allowed_ip_ranges` | Restrict authenticated access to one or more IPv4 CIDR ranges. IP is extracted with trust-proxy awareness (`x-forwarded-for` / `cf-connecting-ip` / `x-real-ip`); requests whose IP can't be determined fail open. |
 
-> **How enforcement works.** Password expiry and enforced MFA share a single
-> *session-validation gate*: `customSession` stamps the session with an
-> `authGate` posture, and the REST server + runtime dispatcher block gated
-> sessions from data access (auth, health, and a small allowlist still pass so
-> the user can remediate). This is why a non-compliant user can sign in but
-> can't read data until they fix the issue.
+> **How enforcement works.** Password expiry (an administrator-forced password
+> change included) and enforced MFA share a single *session-validation gate*.
+> `customSession` stamps the session user with an `authGate` posture, and every
+> transport seam that resolves a caller from the session consults it through
+> the one shared decision in `@objectstack/core` (`evaluateAuthGate` and its
+> helpers): the REST server, the runtime dispatcher (which also serves the MCP
+> HTTP endpoint), and every route family that a plugin or service mounts
+> directly on the host server and that resolves its own caller, at the family's
+> own door. A gated session gets `403` with the gate's own code
+> (`PASSWORD_EXPIRED` or `MFA_REQUIRED`) at whichever of them serves the
+> request. The auth endpoints and a short allow-list kept with that decision
+> (health and discovery among them) still pass, so the user can remediate. This
+> is why a non-compliant user can sign in but can't read or change data until
+> they fix the issue.
 
 ---
 

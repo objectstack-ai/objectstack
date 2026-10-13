@@ -346,8 +346,8 @@ function reportDroppedManifestPermissions(
  * Collect every currently-declared audience-binding suggestion: each
  * `isDefault: true` permission set the security catalog serves
  * (`securityCatalogReaderOf`, ADR-0131 D3 — the engine registry, then the
- * metadata service) with an owning package (`_packageId`, ADR-0010; spec
- * `packageId`, ADR-0086 D3). The catalog is what the authorization resolver
+ * metadata service) with an owning package: its binding (`_packageId`,
+ * ADR-0010), read by {@link declaredOwnerOf}. The catalog is what the authorization resolver
  * reads a set's body from, so a set it does not serve could grant nothing
  * once accepted, and is not offered.
  *
@@ -397,10 +397,22 @@ export async function collectDeclaredSuggestions(
   return [...out.values()];
 }
 
-/** The package a catalog entry's set is declared by (module doc of {@link collectDeclaredSuggestions}). */
-function declaredOwnerOf(entry: { packageId?: string; definition: Readonly<Record<string, unknown>> }): string | undefined {
-  const spec = entry.definition.packageId;
-  return entry.packageId ?? (typeof spec === 'string' && spec !== '' ? spec : undefined);
+/**
+ * The package a catalog entry's set is declared by: its binding, the
+ * `_packageId` the catalog serves as `entry.packageId`, and nothing else
+ * (ADR-0086 D3, "absent ⇒ env-authored").
+ *
+ * ⛔ The body's own `packageId` is NOT read, not even when the entry names no
+ * binding. It used to be, as a fallback, and that let a set the binding calls
+ * environment-authored be suggested, accepted and derived into `everyone` as
+ * a package's. The metadata save and publish doors now refuse a body
+ * `packageId` that disagrees with the binding, an unbound one included, so a
+ * body that agrees adds nothing the binding does not say, and one that
+ * disagrees never reaches `active` through them. A stored row written before
+ * that refusal keeps its bytes and is read by its binding, here as everywhere.
+ */
+function declaredOwnerOf(entry: { packageId?: string }): string | undefined {
+  return entry.packageId;
 }
 
 /**

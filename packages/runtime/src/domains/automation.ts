@@ -19,7 +19,11 @@ import { handleInboundHookRequest } from './automation-hooks.js';
 // [ADR-0126 §5] The shared activation write-authority gate — one
 // implementation, one refusal envelope, per-door wording. See its header for
 // the posture rule and the measurement behind it (commit 02b41232d).
-import { refuseUngrantedActivationWrite, FLOW_ACTIVATION_SUBJECT } from './activation-gate.js';
+import { refuseUngrantedActivationWrite, FLOW_ACTIVATION_SUBJECT, readEffectiveTenancyPosture } from './activation-gate.js';
+// [ADR-0131 D3 · D12 items 7–8] The walled refusal's one predicate: under a
+// wall the environment's metadata, flow definitions included, is the platform
+// operator's. The same verdict every `/meta` and `/packages` write door asks.
+import { walledCatalogWriteVerdict } from '@objectstack/metadata-core';
 // [#19874] What the run-lifecycle refusal names as the remedy is read off the
 // SAME inputs the platform-admin derivation reads — the requested posture, the
 // wall predicate, the declared-administrator variable and the set name — so
@@ -628,6 +632,33 @@ function refuseUngrantedFlowWrite(
     return {
         handled: true,
         response: deps.error(message, FLOW_WRITE_DENY_STATUS, { code: FLOW_WRITE_DENY_CODE }),
+    };
+}
+
+/**
+ * [ADR-0131 D3 · D12 items 7–8] The walled refusal at the `/automation`
+ * definition writes (`POST /`, `PUT /:name`, `DELETE /:name`,
+ * `POST /:name/clone`). The decision is `walledCatalogWriteVerdict`'s
+ * (`@objectstack/metadata-core`), never restated: admitted under `single`, with
+ * no `tenancy` service, for `isSystem` and for the `PLATFORM_ADMIN` rung;
+ * refused for everyone else under a wall, with this domain's
+ * `403 PERMISSION_DENIED`.
+ */
+async function refuseWalledFlowDefinitionWrite(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): Promise<HttpDispatcherResult | undefined> {
+    const ec: any = context?.executionContext;
+    const verdict = walledCatalogWriteVerdict({
+        type: 'flow',
+        tenancyPosture: await readEffectiveTenancyPosture(deps, context),
+        isSystem: ec?.isSystem === true,
+        callerPosture: ec?.posture,
+    });
+    if (verdict.allowed) return undefined;
+    return {
+        handled: true,
+        response: deps.error(verdict.message, FLOW_WRITE_DENY_STATUS, { code: FLOW_WRITE_DENY_CODE }),
     };
 }
 
@@ -2350,6 +2381,21 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // predicate rather than by adding a check here.
     if (isFlowAuthoringWrite(parts, m)) {
         const refusal = refuseUngrantedFlowWrite(deps, context, parts, m);
+        if (refusal) return refusal;
+    }
+
+    // [ADR-0131 D3 · D12 items 7–8] WALLED DEFINITION-WRITE GATE — under
+    // `group` / `isolated` every organization shares the environment's
+    // metadata, and a flow definition is registered at environment scope, so
+    // creating, updating, deregistering or cloning one is the platform
+    // operator's (ruling A on #23231, record 6145019463). Measured before it:
+    // an organization's `manage_metadata` holder (rung `TENANT_ADMIN`) created
+    // a flow here, `200`, and another organization's member read it. Directly
+    // after the capability gate, for that gate's reasons. The enablement door
+    // is not judged here: the ADR-0126 §5 activation gate below already
+    // refuses it to every caller but the operator under a wall.
+    if (isFlowAuthoringWrite(parts, m) && !isFlowEnablementWrite(parts, m)) {
+        const refusal = await refuseWalledFlowDefinitionWrite(deps, context);
         if (refusal) return refusal;
     }
 

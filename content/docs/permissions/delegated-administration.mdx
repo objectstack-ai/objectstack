@@ -181,9 +181,12 @@ issuance:
 
 Without the cap the role would be a ladder: invite an `admin`, and acceptance
 auto-elevates that membership to `organization_admin` → tenant admin — the
-grade the delegation exists to withhold. `sys_member` is not one of the gate's
-governed objects and the acceptance write runs outside the issuer's context, so
-the cap is the defense on that path.
+grade the delegation exists to withhold. `sys_member` *is* one of the gate's
+governed objects (the "Membership is not delegable" rule above), but the
+acceptance write never reaches the gate: better-auth writes the membership row
+as the system (`isSystem`), and the security middleware passes a system write
+through before the gate runs. So the cap — judged at issuance, while the
+inviter is still the actor — is the defense on that path.
 
 Both halves are pinned end-to-end over the real HTTP route by
 `packages/qa/dogfood/test/delegated-admin-invite.dogfood.test.ts`: a

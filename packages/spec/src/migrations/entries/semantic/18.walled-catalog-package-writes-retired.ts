@@ -20,10 +20,10 @@ export const entry: SemanticMigration = {
     + 'positions or permission sets on the runtime dispatcher',
   replacement:
     'the platform operator (the `PLATFORM_ADMIN` rung, the deployment\'s declared '
-    + '`OS_PLATFORM_OWNER_EMAIL` owner) installs, upgrades, uninstalls and deletes those packages; '
-    + 'a package with no catalog item installs, upgrades and uninstalls exactly as before. A custom '
-    + 'package door asks `walledCatalogWriteVerdict` (`@objectstack/metadata-core`) once per catalog '
-    + 'type the package declares, after its capability gate',
+    + '`OS_PLATFORM_OWNER_EMAIL` owner) installs, upgrades, uninstalls and deletes those packages. '
+    + 'walled-environment-metadata-writes-retired then refuses the same caller every other package '
+    + 'write too, whatever the package carries. A custom package door asks `walledCatalogWriteVerdict` '
+    + '(`@objectstack/metadata-core`) after its capability gate',
   reason:
     'ADR-0131 D3: on a shared-database multi-tenant deployment tenant admins cannot create or edit '
     + 'catalog items, and the operator defines the catalog for every tenant, including through '
@@ -37,8 +37,7 @@ export const entry: SemanticMigration = {
     + 'set another organization\'s member holds: the answer is 403 FORBIDDEN, the message names the '
     + 'posture, and the member resolves exactly what it resolved before. The same owner\'s uninstall '
     + 'of that package answers 403 FORBIDDEN, and DELETE /api/v1/packages/<id> of a runtime package '
-    + 'holding a permission set answers 403 PERMISSION_DENIED; the member keeps the set. The same owner '
-    + 'installs, upgrades and uninstalls a package with no catalog item with 200. The platform operator '
-    + 'does all of it with 200, and on a single deployment a manage_metadata holder does all of it '
-    + 'exactly as before.',
+    + 'holding a permission set answers 403 PERMISSION_DENIED; the member keeps the set. The platform '
+    + 'operator does all of it with 200, and on a single deployment a manage_metadata holder does all '
+    + 'of it exactly as before.',
 };

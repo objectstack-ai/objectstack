@@ -204,9 +204,13 @@ describe('ADR-0126 §5 — the activation write is operator-gated in walled post
                 expect(message).toContain(posture);
                 expect(message).toContain('INSTALL-WIDE');
                 expect(message).toContain('ADR-0126 §5');
-                // ADR-0126 §7: a refusal names what the caller CAN do. Here
-                // that is the clone path (§7.1), which needs no operator.
-                expect(message).toMatch(/clone/i);
+                // ADR-0126 §7: a refusal names what the caller CAN do. Under a
+                // wall that is the platform operator: cloning is environment
+                // authoring there, refused to the tenant like every other
+                // environment-metadata write (ADR-0131 D12 items 7–8), so the
+                // refusal must not recommend it.
+                expect(message).toContain('ask your platform operator');
+                expect(message).not.toMatch(/clone/i);
                 // #7450 — a denial says nothing about the caller's own
                 // positions or permission-set names.
                 expect(message).not.toContain('org_owner');
@@ -254,7 +258,7 @@ describe('ADR-0126 §5 — the activation write is operator-gated in walled post
                 expect(h.toggleFlow).not.toHaveBeenCalled();
             });
 
-            it('does NOT gate the clone door — cloning is the path the refusal recommends', async () => {
+            it('the clone door is not THIS gate, and under a wall it refuses the tenant too: a clone is environment authoring', async () => {
                 const h = boot(posture);
 
                 const { response } = await h.dispatcher.handleAutomation(
@@ -262,10 +266,15 @@ describe('ADR-0126 §5 — the activation write is operator-gated in walled post
                     TENANT_ADMIN(), undefined,
                 );
 
-                // Whatever the clone route answers, it must not be THIS gate:
-                // a clone creates an ordinary new artifact and takes nothing
-                // away from any tenant (§7.1).
-                expect(codeOf(response)).not.toBe('PERMISSION_DENIED');
+                // [ADR-0131 D12 items 7–8] A clone registers a new flow at
+                // environment scope, which under a wall is the platform
+                // operator's: the walled definition-write gate refuses it,
+                // naming the written type, not the activation switch.
+                expect(statusOf(response)).toBe(403);
+                expect(codeOf(response)).toBe('PERMISSION_DENIED');
+                expect(messageOf(response)).toContain(`'${posture}' tenancy posture`);
+                expect(messageOf(response)).not.toContain('INSTALL-WIDE');
+                expect(h.toggleFlow).not.toHaveBeenCalled();
             });
 
             it('does not over-block the legacy execution door for a flow named `toggle`', async () => {
