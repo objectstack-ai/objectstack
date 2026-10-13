@@ -647,6 +647,10 @@ const COMMENT_FIELDS = {
   thread_id: { name: 'thread_id', label: 'Thread', type: 'text' as const },
   author_id: { name: 'author_id', label: 'Author', type: 'text' as const },
   body: { name: 'body', label: 'Body', type: 'text' as const },
+  // The edit stamp `installCommentAccessHooks` also registers (#23124) writes
+  // these on a body change; declared as `sys_comment` declares them.
+  is_edited: { name: 'is_edited', label: 'Edited', type: 'boolean' as const, readonly: true },
+  edited_at: { name: 'edited_at', label: 'Edited At', type: 'datetime' as const, readonly: true },
 };
 const sysCommentObject = { name: 'sys_comment', label: 'Comment', fields: COMMENT_FIELDS };
 const crmOpportunityObject = {
