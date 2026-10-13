@@ -6,7 +6,7 @@
  * half landed in PR #15113.
  *
  * Before this, an `assignment` value that was an `{ dialect: 'cel', source }`
- * envelope went to `interpolate()`, which recursed into it as a plain object
+ * envelope went to the 17.x `interpolate()`, which recursed into it as a plain object
  * and wrote it into the variable VERBATIM — `notify` then rendered
  * `{"dialect":"cel","source":"…"}` as JSON into a message body. The whole
  * declared CEL stdlib was unreachable from metadata, because CEL was only ever
@@ -44,7 +44,7 @@ import { EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec';
 import { ExpressionEngine } from '@objectstack/formula';
 import { AutomationEngine } from '../engine.js';
 import { registerLogicNodes } from './logic-nodes.js';
-import { interpolate } from './template.js';
+import { copyLiteral } from './value-slot-map.js';
 
 /** The thrown error, so a pin can assert its message substance rather than `toThrow()` alone. */
 function catchError(fn: () => unknown): Error {
@@ -458,7 +458,6 @@ describe('[#19939] where an envelope is literal data, the refusal names a spelli
     return { ...flow, variables: [{ name: 'name', type: 'text', isInput: true }, ...flow.variables] };
   }
   const RUN = { params: { name: 'Ada' } } as any;
-  const VARIABLES = new Map<string, unknown>([['name', 'Ada']]);
 
   /** The envelope source a refusal message names after `lead` — read off the message, never re-spelled. */
   function envelopeAfter(message: string, lead: string): string {
@@ -483,7 +482,6 @@ describe('[#19939] where an envelope is literal data, the refusal names a spelli
     engine.registerFlow('assign_flow', literalFlow({ assignments: { greeting: { dialect: 'cel', source } } }, ['greeting']));
     const result = await engine.execute('assign_flow', RUN);
     expect(result.success).toBe(true);
-    expect(result.output).toEqual({ greeting: interpolate('Hello {name}', VARIABLES, {} as any) });
     expect(result.output).toEqual({ greeting: 'Hello Ada' });
   });
 
@@ -518,7 +516,6 @@ describe('[#19939] where an envelope is literal data, the refusal names a spelli
     engine.registerFlow('assign_flow', literalFlow({ assignments: { o: { dialect: 'cel', source: whole } } }, ['o']));
     const result = await engine.execute('assign_flow', RUN);
     expect(result.success).toBe(true);
-    expect(result.output).toEqual({ o: interpolate(value, VARIABLES, {} as any) });
     expect(result.output).toEqual({ o: { who: 'Ada', meta: { note: 'for Ada' } } });
 
     // Control: the envelope the old remedy named at the nested position is data.
@@ -541,6 +538,34 @@ describe('[#19939] where an envelope is literal data, the refusal names a spelli
     }, ['o']));
     const result = await engine.execute('assign_flow', RUN);
     expect(result.success).toBe(true);
-    expect(result.output).toEqual({ o: interpolate({ who: '{name}', n: 3 }, VARIABLES, {} as any) });
+    expect(result.output).toEqual({ o: { who: 'Ada', n: 3 } });
+  });
+
+  // [#19939 S7] A literal is assigned as a copy of what was written. The
+  // single-brace interpolator walked every object's own entries, so a `Date`
+  // written in a code-defined flow was assigned as `{}`.
+  it.each([
+    ['the canonical map', (due: Date) => ({ assignments: { due } })],
+    ['the legacy `assignments` array', (due: Date) => ({ assignments: [{ variable: 'due', value: due }] })],
+    ['the legacy bare config', (due: Date) => ({ due })],
+  ] as const)('%s: a `Date` literal is assigned as the `Date`', async (_label, configOf) => {
+    const due = new Date('2026-10-13T08:00:00.000Z');
+    engine.registerFlow('assign_flow', literalFlow(configOf(due), ['due']));
+    const result = await engine.execute('assign_flow', RUN);
+    expect(result.success, result.error).toBe(true);
+    expect((result.output as { due: unknown }).due).toBeInstanceOf(Date);
+    expect(((result.output as { due: Date }).due).toISOString()).toBe('2026-10-13T08:00:00.000Z');
+  });
+
+  it('`copyLiteral` copies arrays and plain objects at every depth, and hands every other value on as it is', () => {
+    const due = new Date('2026-10-13T08:00:00.000Z');
+    const literal = { by: 'Ada', tags: ['a', { due }], none: null };
+    const copy = copyLiteral(literal) as typeof literal;
+    expect(copy).toEqual(literal);
+    expect(copy).not.toBe(literal);
+    expect(copy.tags).not.toBe(literal.tags);
+    expect(copy.tags[1]).not.toBe(literal.tags[1]);
+    expect((copy.tags[1] as { due: Date }).due).toBe(due);
+    expect(copyLiteral('{x}')).toBe('{x}');
   });
 });

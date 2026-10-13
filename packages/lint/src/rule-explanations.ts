@@ -2295,8 +2295,9 @@ const FILTER_PRESET_COMPARAND_EXPLANATION: RuleExplanation = {
       '`$ne`, `$in` / `$nin` and their spellings — is refused only on a declared `date` / `datetime` ' +
       'field, because a picklist column may store a value named like a preset. A bare value is ' +
       'reported under the operator it lowers to, `$eq`.',
-    'The fix is the preset\'s `{date-macro}` window, which the verdict names — a rolling preset is ' +
-      '`{ $gte: START }`, a calendar one `{ $between: [START, END] }` — or an ISO date. The schema ' +
+    'The fix is the preset\'s `{date-macro}` window, which the verdict names — ' +
+      '`{ $between: [START, END] }`, its first day through its last, and a rolling preset\'s last day ' +
+      'is `{today}` — or an ISO date. The schema ' +
       'door refuses the Mongo-shape ordering positions too, with the whole explanation in its ' +
       'refusal; this rule also reaches view filter rules and filter-array triples, which no condition ' +
       'parse touches, and is the one door for the equality arm.',

@@ -47,7 +47,7 @@ import {
 /** A frozen reference instant, deliberately mid-week, mid-month, mid-quarter. */
 const NOW = new Date('2026-09-09T12:34:56.789Z');
 
-/** The rolling family — the only presets whose upper bound is NOW. */
+/** The rolling family — closed on today, like every calendar preset. */
 const ROLLING: readonly DateRangePreset[] = ['last_7_days', 'last_30_days', 'last_90_days'];
 
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -132,17 +132,52 @@ describe('#16322 — the START of every window is the token the spec already pre
     });
 });
 
-describe('#16322 — the upper bound is half-open for a calendar window, and NOW for a rolling one', () => {
-    it('the ten calendar presets are endExclusive, the three rolling ones are not', () => {
+describe('#16322 — the upper bound is half-open for every preset, the rolling ones included', () => {
+    it('all thirteen presets are endExclusive', () => {
         for (const preset of DATE_RANGE_PRESETS) {
             const w = resolveAnalyticsDateRangePreset(preset, { now: NOW });
-            expect(w.endExclusive, preset).toBe(!ROLLING.includes(preset));
+            expect(w.endExclusive, preset).toBe(true);
         }
     });
 
-    it('a rolling window ends at the reference instant exactly', () => {
+    it("a rolling window stops where `today` stops — before tomorrow begins, never at the reference instant", () => {
+        // The spec closes the rolling windows on `{today}`, the same last day
+        // `today` names, so the two must share one end instant in every zone.
+        for (const tz of SWEEP_ZONES) {
+            const today = resolveAnalyticsDateRangePreset('today', { now: NOW, timezone: tz });
+            for (const preset of ROLLING) {
+                const w = resolveAnalyticsDateRangePreset(preset, { now: NOW, timezone: tz });
+                expect(w.end, `${preset} @ ${tz ?? 'UTC'}`).toBe(today.end);
+                expect(w.end, `${preset} @ ${tz ?? 'UTC'}`).not.toBe(NOW.toISOString());
+            }
+        }
+        expect(resolveAnalyticsDateRangePreset('last_30_days', { now: NOW })).toEqual({
+            start: '2026-08-10T00:00:00.000Z',
+            end: '2026-09-10T00:00:00.000Z',
+            endExclusive: true,
+        });
+    });
+
+    it('a rolling window counts a row five days ago and NOT a row five days ahead', () => {
+        // The measurement that found the open arm, at this face: one row dated
+        // today−5 and one dated today+5. Counted the way each face compares a
+        // preset window — `>= start` and `< end` for an exclusive end.
+        const rows = ['2026-09-04T00:00:00.000Z', '2026-09-14T00:00:00.000Z']; // NOW's day − 5, + 5
         for (const preset of ROLLING) {
-            expect(resolveAnalyticsDateRangePreset(preset, { now: NOW }).end).toBe(NOW.toISOString());
+            const w = resolveAnalyticsDateRangePreset(preset, { now: NOW });
+            const counted = rows.filter((r) => Date.parse(r) >= Date.parse(w.start) && Date.parse(r) < Date.parse(w.end));
+            expect(counted, preset).toEqual(['2026-09-04T00:00:00.000Z']);
+        }
+    });
+
+    it("a rolling window keeps the rest of today — a row later today than the reference instant is inside", () => {
+        // The extent the spec's `{today}` end means: the whole of today. An end
+        // at the reference instant dropped this row.
+        const laterToday = '2026-09-09T20:00:00.000Z';
+        expect(Date.parse(laterToday)).toBeGreaterThan(NOW.getTime());
+        for (const preset of ROLLING) {
+            const w = resolveAnalyticsDateRangePreset(preset, { now: NOW });
+            expect(Date.parse(laterToday), preset).toBeLessThan(Date.parse(w.end));
         }
     });
 
@@ -272,45 +307,37 @@ describe('#16322 — a string outside the vocabulary is REFUSED, not widened', (
     });
 });
 
-describe('#17341 — the END of every calendar window is one CALENDAR day after the prescription', () => {
+describe('#17341 — the END of every window is one CALENDAR day after the prescription', () => {
     // The docblock above `PRESET_WINDOW_TOKENS` records WHY this table states
     // its own ends instead of reading `DATE_RANGE_PRESET_MACRO_WINDOWS`: that
     // table is written for `$between`, whose bare-day upper bound covers the
     // whole day, so its end names the day BEFORE the one this table stops at.
     //
-    // ⛔ That sentence carried a hand-typed count ("the eight period presets")
-    // and went false the moment the spec corrected `today` and `yesterday` to
-    // close on their own last day — a count is a census and a census goes
-    // stale silently. Nothing here counts: the two families are READ OFF the
-    // prescription, so an eleventh preset reds this file instead of rotting
-    // that sentence.
-    const PRESCRIBED_CLOSED = DATE_RANGE_PRESETS.filter(
-        (p) => DATE_RANGE_PRESET_MACRO_WINDOWS[p][1] !== null,
-    );
-    const PRESCRIBED_OPEN = DATE_RANGE_PRESETS.filter(
-        (p) => DATE_RANGE_PRESET_MACRO_WINDOWS[p][1] === null,
-    );
+    // ⛔ That sentence once carried a hand-typed count ("the eight period
+    // presets") and went false the moment the spec corrected `today` and
+    // `yesterday` to close on their own last day — a count is a census and a
+    // census goes stale silently. Nothing here counts: the cases iterate the
+    // prescription itself, so a fourteenth preset reds this file instead of
+    // rotting that sentence.
 
-    it('the split is DERIVED from the spec table, and it is the same one `endExclusive` draws', () => {
-        // Two partitions of one vocabulary, computed from opposite sides: the
-        // spec's open arm, and this module's rolling family. They must be the
-        // same set — if they ever diverge, one of the two docblock sentences
-        // that name a family is describing presets that are not in it.
-        expect(PRESCRIBED_CLOSED.length + PRESCRIBED_OPEN.length).toBe(DATE_RANGE_PRESETS.length);
-        expect([...PRESCRIBED_OPEN].sort()).toEqual([...ROLLING].sort());
-        for (const preset of PRESCRIBED_CLOSED) {
+    it('the spec closes every window, and every window here is endExclusive', () => {
+        // The spec retired its open arm: the rolling windows close on
+        // `{today}`. So no preset here may fall back to an inclusive end at the
+        // reference instant — every one names a day it stops before.
+        for (const preset of DATE_RANGE_PRESETS) {
+            const prescribedEnd: unknown = DATE_RANGE_PRESET_MACRO_WINDOWS[preset][1];
+            expect(typeof prescribedEnd, preset).toBe('string');
             expect(resolveAnalyticsDateRangePreset(preset, { now: NOW }).endExclusive, preset).toBe(true);
         }
-        // The control: without it a filter that selected NOTHING would pass
-        // every assertion below by vacuity.
-        expect(PRESCRIBED_CLOSED.length).toBeGreaterThan(0);
-        expect(PRESCRIBED_OPEN.length).toBeGreaterThan(0);
+        // The control: the sweep below must reach the rolling family, the
+        // windows this card closed.
+        for (const preset of ROLLING) expect(DATE_RANGE_PRESETS, preset).toContain(preset);
     });
 
-    it.each([...PRESCRIBED_CLOSED])(
+    it.each([...DATE_RANGE_PRESETS])(
         "%s stops before the day AFTER the prescription's inclusive last day",
         (preset) => {
-            const prescribedEnd = DATE_RANGE_PRESET_MACRO_WINDOWS[preset][1]!.replace(/^\{|\}$/g, '');
+            const prescribedEnd = DATE_RANGE_PRESET_MACRO_WINDOWS[preset][1].replace(/^\{|\}$/g, '');
             for (const now of SWEEP_INSTANTS) {
                 for (const tz of SWEEP_ZONES) {
                     const where = `${preset} @ ${tz ?? 'UTC'} @ ${now.toISOString()}`;
@@ -340,14 +367,5 @@ describe('#17341 — the END of every calendar window is one CALENDAR day after 
         const end = Date.parse(resolveAnalyticsDateRangePreset('this_week', { now, timezone: tz }).end);
         expect(end - lastDayStart).toBe(25 * 60 * 60 * 1000);
         expect(end - lastDayStart).not.toBe(24 * 60 * 60 * 1000);
-    });
-
-    it('the open-arm presets have no end to be earlier — `null` on BOTH sides', () => {
-        for (const preset of PRESCRIBED_OPEN) {
-            expect(DATE_RANGE_PRESET_MACRO_WINDOWS[preset][1], preset).toBeNull();
-            const w = resolveAnalyticsDateRangePreset(preset, { now: NOW });
-            expect(w.endExclusive, preset).toBe(false);
-            expect(w.end, preset).toBe(NOW.toISOString());
-        }
     });
 });

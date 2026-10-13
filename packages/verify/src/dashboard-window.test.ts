@@ -190,7 +190,7 @@ describe('runDashboardWindowProofs — the fixture app', () => {
     expect(report.timezone).toBe('UTC');
     expect(report.presets.map((p) => p.preset)).toEqual([...DATE_RANGE_PRESETS]);
     const byPreset = new Map(report.presets.map((p) => [p.preset, p]));
-    expect(byPreset.get('last_7_days')!.condition).toEqual({ $gte: '{7_days_ago}' });
+    expect(byPreset.get('last_7_days')!.condition).toEqual({ $gte: '{7_days_ago}', $lte: '{today}' });
     expect(byPreset.get('this_month')!.condition).toEqual({ $gte: '{month_start}', $lte: '{month_end}' });
     for (const p of report.presets) expect(p.resolved.$gte).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });

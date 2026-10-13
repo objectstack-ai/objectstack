@@ -32,7 +32,7 @@ import type { AnalyticsQuery, Cube } from '@objectstack/spec/data';
 import { InMemoryDriver } from './memory-driver.js';
 import { MemoryAnalyticsService } from './memory-analytics.js';
 
-/** Frozen so the three rolling presets, whose bound is NOW, are comparable. */
+/** Frozen so the presets, every one anchored on NOW's calendar day, are comparable. */
 const NOW = new Date('2026-09-09T12:34:56.789Z');
 
 const CUBE: Cube = {

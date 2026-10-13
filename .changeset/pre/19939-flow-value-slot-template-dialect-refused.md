@@ -18,7 +18,7 @@ Clause-②: yes (narrowing)
 
 **Not converted.** No D2 conversion rewrites any spelling: every token spelling authored in flows answers differently under CEL for some input (measured through both engines over the same variables, 13 of 25 probes the same, 12 different), so a rewrite would change what some flow writes. Where a value may be absent, whether the field should take nothing, `null` or a default was decided silently by the template; it is now the author's decision.
 
-**What is still accepted, unchanged.** A CEL value envelope and every literal (a token-free string, numbers, booleans, `null`, arrays, objects). A `filter` value keeps the template dialect; a text slot (`notify` `title` / `message`, a screen `description`, …) reads `{{ }}` holes and refuses a single-brace token.
+**What is still accepted, unchanged.** A CEL value envelope and every literal (a token-free string, numbers, booleans, `null`, arrays, objects). A text slot (`notify` `title` / `message`, a screen `description`, …) reads `{{ }}` holes and refuses a single-brace token.
 
 ## FROM → TO
 

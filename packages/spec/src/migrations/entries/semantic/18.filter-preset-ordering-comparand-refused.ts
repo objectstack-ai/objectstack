@@ -28,7 +28,7 @@ export const entry: SemanticMigration = {
     + 'flow CRUD node\'s config.filter). The lint is likewise what refuses a preset in an '
     + 'ordering filter triple wherever its walk meets one',
   replacement:
-    'the date-macro window the preset already means — { $gte: "{30_days_ago}" } for '
+    'the date-macro window the preset already means — { $between: ["{30_days_ago}", "{today}"] } for '
     + 'last_30_days, { $between: ["{week_start}", "{week_end}"] } for this_week, and so on '
     + '(the rejection names the exact window per preset; DATE_RANGE_PRESET_MACRO_WINDOWS in '
     + '@objectstack/spec/data is the table) — or an ISO date such as 2026-01-15. The preset '
