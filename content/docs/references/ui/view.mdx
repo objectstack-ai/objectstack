@@ -402,7 +402,7 @@ Form-view select option — the object-field option shape minus the per-option `
 | **drawerSide** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Drawer side (drawer forms) |
 | **drawerWidth** | `string` | optional | [DEPRECATED → size buckets] Drawer width, e.g. "480px". A pixel width cannot be chosen without knowing the client viewport — the renderer derives it. |
 | **modalSize** | `Enum<'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'>` | optional | Modal size (modal forms) |
-| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **sections** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional |  |
 | **groups** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional | [LEGACY ALIAS → `sections`] Accepted for back-compat and folded onto `sections` at parse; `sections` wins when both are present. Prefer `sections`. |
 | **subforms** | `{ childObject: string; relationshipField?: string; columns?: object[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
@@ -419,14 +419,6 @@ Form-view select option — the object-field option shape minus the per-option `
 | :--- | :--- | :--- | :--- |
 | **provider** | `'object'` | ✅ |  |
 | **object** | `string` | ✅ | Target object name |
-
-### Nested Shape: `FormView.data[provider='api']`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **provider** | `'api'` | ✅ |  |
-| **read** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
-| **write** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
 
 ### Nested Shape: `FormView.data[provider='value']`
 
@@ -563,7 +555,7 @@ Gallery/card view configuration
 | **viewMode** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional | Timeline granularity — one column per day/week/month/quarter/year (also the resource-view column granularity; renderer default 'day') |
 | **borderColorField** | `string` | optional | Field carrying a per-task alert stroke color — any CSS color or semantic palette name (red, orange, …): the bar keeps its fill and gains an outline plus halo in that color (e.g. red for overdue, orange for due-soon; typically a server-computed alert field). Empty or null means no stroke |
 | **lockField** | `string` | optional | Field marking a row view-only (truthy means locked): a locked bar cannot be dragged or resized, its progress cannot be dragged, no dependency can be drawn from it and its inline-edit and edit/delete menu entries are hidden — clicking it (open drawer, jump) still works. Independent of the global readOnly; freezes individual levels while siblings stay editable |
-| **objectField** | `string` | optional | Field carrying the row's OWN object API name, for mixed-object trees (an api provider composing parent-object rows with child-object rows): the detail drawer and its full-page link follow each row's real object instead of the view's bound object. Empty or missing falls back to the bound object |
+| **objectField** | `string` | optional | Field carrying the row's OWN object API name, for mixed-object trees (a row set composing parent-object rows with child-object rows): the detail drawer and its full-page link follow each row's real object instead of the view's bound object. Empty or missing falls back to the bound object |
 | **summaryExtent** | `Enum<'children' \| 'self'>` | optional | How a summary bar's span is computed. 'children' (renderer default) rolls the bar up from its children — min start, max end, duration-weighted progress — and ignores the record's own dates; 'self' renders the record's OWN start, end and progress and falls back to rollup only for records without dates (use it when the parent's schedule is authoritative, e.g. a shift plan whose work-order children are locked history) |
 | **defaultCollapsedDepth** | `integer` | optional | Auto-collapse tree nodes at or below this 0-indexed depth on first render (roots are depth 0): every node at that depth or deeper that has children starts folded; the user can still expand them. Omit to start fully expanded |
 | **dependencyTypes** | `boolean` | optional | Whether the backing store persists dependency link TYPES (fs, ss, ff, sf); renderer default true. Set false when dependencies are bare predecessor ids: the link menu hides the type switcher (a switch would be silently reverted on refetch) and drag-created links are always finish-to-start |
@@ -776,7 +768,7 @@ Map view configuration
 | **name** | `string` | optional | Internal view name (lowercase snake_case) |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
-| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns — the PROJECTION of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: this list is the candidate set AND the baseline order; `hiddenFields` subtracts from it and `fieldOrder` orders what survives. `hiddenFields` and `fieldOrder` cannot add a field omitted here. An empty list declares no projection, so neither of them applies: which columns show is then left to the renderer (objectui's `ListView` grid derives the object's default columns). |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
@@ -831,14 +823,6 @@ Map view configuration
 | :--- | :--- | :--- | :--- |
 | **provider** | `'object'` | ✅ |  |
 | **object** | `string` | ✅ | Target object name |
-
-### Nested Shape: `ListView.data[provider='api']`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **provider** | `'api'` | ✅ |  |
-| **read** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
-| **write** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
 
 ### Nested Shape: `ListView.data[provider='value']`
 
@@ -962,7 +946,7 @@ View filter rule
 | **viewMode** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional | Timeline granularity — one column per day/week/month/quarter/year (also the resource-view column granularity; renderer default 'day') |
 | **borderColorField** | `string` | optional | Field carrying a per-task alert stroke color — any CSS color or semantic palette name (red, orange, …): the bar keeps its fill and gains an outline plus halo in that color (e.g. red for overdue, orange for due-soon; typically a server-computed alert field). Empty or null means no stroke |
 | **lockField** | `string` | optional | Field marking a row view-only (truthy means locked): a locked bar cannot be dragged or resized, its progress cannot be dragged, no dependency can be drawn from it and its inline-edit and edit/delete menu entries are hidden — clicking it (open drawer, jump) still works. Independent of the global readOnly; freezes individual levels while siblings stay editable |
-| **objectField** | `string` | optional | Field carrying the row's OWN object API name, for mixed-object trees (an api provider composing parent-object rows with child-object rows): the detail drawer and its full-page link follow each row's real object instead of the view's bound object. Empty or missing falls back to the bound object |
+| **objectField** | `string` | optional | Field carrying the row's OWN object API name, for mixed-object trees (a row set composing parent-object rows with child-object rows): the detail drawer and its full-page link follow each row's real object instead of the view's bound object. Empty or missing falls back to the bound object |
 | **summaryExtent** | `Enum<'children' \| 'self'>` | optional | How a summary bar's span is computed. 'children' (renderer default) rolls the bar up from its children — min start, max end, duration-weighted progress — and ignores the record's own dates; 'self' renders the record's OWN start, end and progress and falls back to rollup only for records without dates (use it when the parent's schedule is authoritative, e.g. a shift plan whose work-order children are locked history) |
 | **defaultCollapsedDepth** | `integer` | optional | Auto-collapse tree nodes at or below this 0-indexed depth on first render (roots are depth 0): every node at that depth or deeper that has children starts folded; the user can still expand them. Omit to start fully expanded |
 | **dependencyTypes** | `boolean` | optional | Whether the backing store persists dependency link TYPES (fs, ss, ff, sf); renderer default true. Set false when dependencies are bare predecessor ids: the link menu hides the type switcher (a switch would be silently reverted on refetch) and drag-created links are always finish-to-start |
@@ -1171,7 +1155,7 @@ View filter rule
 | **name** | `string` | optional | Internal view name (lowercase snake_case) |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
-| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns — the PROJECTION of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: this list is the candidate set AND the baseline order; `hiddenFields` subtracts from it and `fieldOrder` orders what survives. `hiddenFields` and `fieldOrder` cannot add a field omitted here. An empty list declares no projection, so neither of them applies: which columns show is then left to the renderer (objectui's `ListView` grid derives the object's default columns). |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
@@ -1226,14 +1210,6 @@ View filter rule
 | :--- | :--- | :--- | :--- |
 | **provider** | `'object'` | ✅ |  |
 | **object** | `string` | ✅ | Target object name |
-
-### Nested Shape: `ObjectListView.data[provider='api']`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **provider** | `'api'` | ✅ |  |
-| **read** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
-| **write** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
 
 ### Nested Shape: `ObjectListView.data[provider='value']`
 
@@ -1347,7 +1323,7 @@ View filter rule
 | **viewMode** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional | Timeline granularity — one column per day/week/month/quarter/year (also the resource-view column granularity; renderer default 'day') |
 | **borderColorField** | `string` | optional | Field carrying a per-task alert stroke color — any CSS color or semantic palette name (red, orange, …): the bar keeps its fill and gains an outline plus halo in that color (e.g. red for overdue, orange for due-soon; typically a server-computed alert field). Empty or null means no stroke |
 | **lockField** | `string` | optional | Field marking a row view-only (truthy means locked): a locked bar cannot be dragged or resized, its progress cannot be dragged, no dependency can be drawn from it and its inline-edit and edit/delete menu entries are hidden — clicking it (open drawer, jump) still works. Independent of the global readOnly; freezes individual levels while siblings stay editable |
-| **objectField** | `string` | optional | Field carrying the row's OWN object API name, for mixed-object trees (an api provider composing parent-object rows with child-object rows): the detail drawer and its full-page link follow each row's real object instead of the view's bound object. Empty or missing falls back to the bound object |
+| **objectField** | `string` | optional | Field carrying the row's OWN object API name, for mixed-object trees (a row set composing parent-object rows with child-object rows): the detail drawer and its full-page link follow each row's real object instead of the view's bound object. Empty or missing falls back to the bound object |
 | **summaryExtent** | `Enum<'children' \| 'self'>` | optional | How a summary bar's span is computed. 'children' (renderer default) rolls the bar up from its children — min start, max end, duration-weighted progress — and ignores the record's own dates; 'self' renders the record's OWN start, end and progress and falls back to rollup only for records without dates (use it when the parent's schedule is authoritative, e.g. a shift plan whose work-order children are locked history) |
 | **defaultCollapsedDepth** | `integer` | optional | Auto-collapse tree nodes at or below this 0-indexed depth on first render (roots are depth 0): every node at that depth or deeper that has children starts folded; the user can still expand them. Omit to start fully expanded |
 | **dependencyTypes** | `boolean` | optional | Whether the backing store persists dependency link TYPES (fs, ss, ff, sf); renderer default true. Set false when dependencies are bare predecessor ids: the link menu hides the type switcher (a switch would be silently reverted on refetch) and drag-created links are always finish-to-start |
@@ -1736,9 +1712,9 @@ Tab configuration for multi-tab view interface
 | **name** | `string` | optional | Item name — supplied by the metadata door; for an object-scoped container it is the object name. |
 | **label** | `string \| Record<string, string>` | optional | Human-readable label shown in metadata lists. |
 | **object** | `string` | optional | Object this container binds to — how a stack-level `views: [...]` entry says which object its views belong to; read by `getViewsByObject()` / `GET /meta/view?object=`. |
-| **list** | `{ name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| … +3 more; … }` | optional |  |
+| **list** | `{ name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| object \| object; … }` | optional |  |
 | **form** | `{ type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal'>; columns?: integer; title?: string; … }` | optional |  |
-| **listViews** | `Record<string, { name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| … +3 more; … }>` | optional | Additional named list views (views mode — dropdown userFilters allowed, no tabs; ADR-0047) |
+| **listViews** | `Record<string, { name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| object \| object; … }>` | optional | Additional named list views (views mode — dropdown userFilters allowed, no tabs; ADR-0047) |
 | **formViews** | `Record<string, { type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal'>; columns?: integer; title?: string; … }>` | optional | Additional named form views |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this view. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
@@ -1756,7 +1732,7 @@ Tab configuration for multi-tab view interface
 | **name** | `string` | optional | Internal view name (lowercase snake_case) |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
-| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns — the PROJECTION of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: this list is the candidate set AND the baseline order; `hiddenFields` subtracts from it and `fieldOrder` orders what survives. `hiddenFields` and `fieldOrder` cannot add a field omitted here. An empty list declares no projection, so neither of them applies: which columns show is then left to the renderer (objectui's `ListView` grid derives the object's default columns). |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
@@ -1824,7 +1800,7 @@ Tab configuration for multi-tab view interface
 | **drawerSide** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Drawer side (drawer forms) |
 | **drawerWidth** | `string` | optional | [DEPRECATED → size buckets] Drawer width, e.g. "480px". A pixel width cannot be chosen without knowing the client viewport — the renderer derives it. |
 | **modalSize** | `Enum<'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'>` | optional | Modal size (modal forms) |
-| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **sections** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional |  |
 | **groups** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional | [LEGACY ALIAS → `sections`] Accepted for back-compat and folded onto `sections` at parse; `sections` wins when both are present. Prefer `sections`. |
 | **subforms** | `{ childObject: string; relationshipField?: string; columns?: object[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
@@ -1842,7 +1818,7 @@ Tab configuration for multi-tab view interface
 | **name** | `string` | optional | Internal view name (lowercase snake_case) |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
-| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns — the PROJECTION of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: this list is the candidate set AND the baseline order; `hiddenFields` subtracts from it and `fieldOrder` orders what survives. `hiddenFields` and `fieldOrder` cannot add a field omitted here. An empty list declares no projection, so neither of them applies: which columns show is then left to the renderer (objectui's `ListView` grid derives the object's default columns). |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
@@ -1910,7 +1886,7 @@ Tab configuration for multi-tab view interface
 | **drawerSide** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Drawer side (drawer forms) |
 | **drawerWidth** | `string` | optional | [DEPRECATED → size buckets] Drawer width, e.g. "480px". A pixel width cannot be chosen without knowing the client viewport — the renderer derives it. |
 | **modalSize** | `Enum<'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'>` | optional | Modal size (modal forms) |
-| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **sections** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional |  |
 | **groups** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional | [LEGACY ALIAS → `sections`] Accepted for back-compat and folded onto `sections` at parse; `sections` wins when both are present. Prefer `sections`. |
 | **subforms** | `{ childObject: string; relationshipField?: string; columns?: object[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
@@ -1955,44 +1931,12 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `'api'` | ✅ |  |
-| **read** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
-| **write** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
-
-### Nested Shape: `ViewData[provider='api'].read`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **url** | `string` | ✅ | API endpoint URL |
-| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>` | optional (default: `"GET"`) | HTTP method |
-| **headers** | `Record<string, string>` | optional | Custom HTTP headers |
-| **params** | `Record<string, any>` | optional | Query parameters |
-| **body** | `any` | optional | Request body for POST/PUT/PATCH |
-
-### Nested Shape: `ViewData[provider='api'].write`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **url** | `string` | ✅ | API endpoint URL |
-| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>` | optional (default: `"GET"`) | HTTP method |
-| **headers** | `Record<string, string>` | optional | Custom HTTP headers |
-| **params** | `Record<string, any>` | optional | Query parameters |
-| **body** | `any` | optional | Request body for POST/PUT/PATCH |
-
----
-
-#### Option 3
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
 | **provider** | `'value'` | ✅ |  |
 | **items** | `any[]` | ✅ | Static data array |
 
 ---
 
-#### Option 4
+#### Option 3
 
 ### Properties
 
@@ -2058,7 +2002,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **viewKind** | `'list'` | ✅ |  |
-| **config** | `{ name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| … +3 more; … }` | ✅ | List-family view configuration. |
+| **config** | `{ name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| object \| object; … }` | ✅ | List-family view configuration. |
 | **name** | `string` | ✅ | Globally-unique view id, `<object>.<viewKey>`. |
 | **object** | `string` | ✅ | Bound object name — the foreign key used to aggregate views. |
 | **label** | `string \| Record<string, string>` | optional | Display label (supports i18n). |
@@ -2083,7 +2027,7 @@ This schema accepts one of the following structures:
 | **name** | `string` | optional | Internal view name (lowercase snake_case) |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
-| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns — the PROJECTION of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: this list is the candidate set AND the baseline order; `hiddenFields` subtracts from it and `fieldOrder` orders what survives. `hiddenFields` and `fieldOrder` cannot add a field omitted here. An empty list declares no projection, so neither of them applies: which columns show is then left to the renderer (objectui's `ListView` grid derives the object's default columns). |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
@@ -2186,7 +2130,7 @@ This schema accepts one of the following structures:
 | **drawerSide** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Drawer side (drawer forms) |
 | **drawerWidth** | `string` | optional | [DEPRECATED → size buckets] Drawer width, e.g. "480px". A pixel width cannot be chosen without knowing the client viewport — the renderer derives it. |
 | **modalSize** | `Enum<'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'>` | optional | Modal size (modal forms) |
-| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **sections** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional |  |
 | **groups** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional | [LEGACY ALIAS → `sections`] Accepted for back-compat and folded onto `sections` at parse; `sections` wins when both are present. Prefer `sections`. |
 | **subforms** | `{ childObject: string; relationshipField?: string; columns?: object[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
@@ -2232,7 +2176,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **viewKind** | `'list'` | ✅ |  |
-| **config** | `{ name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| … +3 more; … }` | ✅ | List-family view configuration. |
+| **config** | `{ name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| object \| object; … }` | ✅ | List-family view configuration. |
 | **name** | `string` | ✅ | Globally-unique view id, `<object>.<viewKey>`. |
 | **object** | `string` | ✅ | Bound object name — the foreign key used to aggregate views. |
 | **label** | `string \| Record<string, string>` | optional | Display label (supports i18n). |
@@ -2262,7 +2206,7 @@ This schema accepts one of the following structures:
 | **name** | `string` | optional | Internal view name (lowercase snake_case) |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
-| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns — the PROJECTION of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: this list is the candidate set AND the baseline order; `hiddenFields` subtracts from it and `fieldOrder` orders what survives. `hiddenFields` and `fieldOrder` cannot add a field omitted here. An empty list declares no projection, so neither of them applies: which columns show is then left to the renderer (objectui's `ListView` grid derives the object's default columns). |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
@@ -2377,7 +2321,7 @@ This schema accepts one of the following structures:
 | **drawerSide** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Drawer side (drawer forms) |
 | **drawerWidth** | `string` | optional | [DEPRECATED → size buckets] Drawer width, e.g. "480px". A pixel width cannot be chosen without knowing the client viewport — the renderer derives it. |
 | **modalSize** | `Enum<'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'>` | optional | Modal size (modal forms) |
-| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **sections** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional |  |
 | **groups** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional | [LEGACY ALIAS → `sections`] Accepted for back-compat and folded onto `sections` at parse; `sections` wins when both are present. Prefer `sections`. |
 | **subforms** | `{ childObject: string; relationshipField?: string; columns?: object[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |

@@ -41,10 +41,10 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SysJwks, SysMember, SysUser, SysVerification } from '@objectstack/platform-objects/identity';
 import { SecurityPlugin } from './security-plugin.js';
-import { SysPosition } from './objects/sys-position.object.js';
+import { SysPosition } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
-import { SysPermissionSet } from './objects/sys-permission-set.object.js';
-import { SysPositionPermissionSet } from './objects/sys-position-permission-set.object.js';
+import { SysPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
+import { SysPositionPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 
 const CREDENTIAL_OBJECTS = ['sys_verification', 'sys_jwks'] as const;

@@ -14,6 +14,10 @@ import {
   // own argument and not the helper's.
   classifyAdmissionTenancyPosture,
   type TenancyPostureSource,
+  // ADR-0069 — the session's authentication-policy posture, normalized by the
+  // one producer-side reader and carried on the envelope the share-link door
+  // reads (`ExecutionContext.authGate`).
+  normalizeAuthGate,
 } from '@objectstack/core';
 import type { EngineMiddleware, OperationContext } from '@objectstack/objectql';
 import type {
@@ -921,6 +925,10 @@ export class SharingServicePlugin implements Plugin {
             // `ShareLinkExecutionContext` in the contract for that boundary).
             const ql = engine;
             const verifiedContextFromRequest = async (req: IHttpRequest): Promise<ExecutionContext> => {
+              // ADR-0069 — the user of the session the resolver below reads,
+              // kept so the envelope carries THAT session's policy posture: one
+              // read, the identity and the posture both off it.
+              let sessionUser: unknown;
               try {
                 const headers = new Headers();
                 for (const [k, v] of Object.entries(req.headers ?? {})) {
@@ -938,7 +946,9 @@ export class SharingServicePlugin implements Plugin {
                     const authService = ctx.getService<IAuthService>('auth');
                     let api: AuthSessionApi | undefined = authService?.api;
                     if (!api && typeof authService?.getApi === 'function') api = await authService.getApi();
-                    return await api?.getSession?.(inProcessSessionReadInput(h));
+                    const session = await api?.getSession?.(inProcessSessionReadInput(h));
+                    sessionUser = (session as { user?: unknown } | null | undefined)?.user;
+                    return session;
                   } catch {
                     return undefined;
                   }
@@ -951,11 +961,18 @@ export class SharingServicePlugin implements Plugin {
                 // the value an admission decision may read.
                 const tenancyPosture = await this.resolveAdmissionTenancyPosture(ctx);
                 const authz = await resolveAuthzContext({ ql, headers, getSession, tenancyPosture });
+                // [ADR-0069] The session's policy posture, normalized by the
+                // shared reader exactly as REST's `computeExecCtx` lifts it,
+                // and read by the share-link family's door
+                // (`registerShareLinkRoutes`), which refuses a held session
+                // with the gate's `403`. Absent for every healthy session and
+                // for an API-key caller (no session to hold).
+                const authGate = normalizeAuthGate(sessionUser) ?? undefined;
                 // `isSystem: false` states what the absence of the flag already
                 // means (ADR-0118 D2: absence is never system) and matches what
                 // both sibling transports build — `rest-server.ts` and
                 // `runtime/src/security/resolve-execution-context.ts`.
-                return { ...authz, isSystem: false };
+                return { ...authz, isSystem: false, ...(authGate ? { authGate } : {}) };
               } catch (err) {
                 // [commit 6a180e42d] Degrading an outage to `{}` answers 401 — the same
                 // answer a genuine anonymous caller gets. Re-raised so the

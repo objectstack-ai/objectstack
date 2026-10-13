@@ -66,7 +66,7 @@ const homePage = {
 | `regions` | `PageRegion[]` | optional | Layout regions with components (default `[]` — `list` pages render via `interfaceConfig`, and an empty `record`/`home`/`app` page falls back to the synthesized default layout) |
 | `source` | `string` | optional | Page source text — required (and authoritative over `regions`) when `kind` is `'html'` or `'react'`. For `kind: 'html'` it is constrained JSX/HTML compiled to the tree by `@objectstack/sdui-parser` at save time (parse, never execute). For `kind: 'react'` it is real React/JSX executed at render by `@object-ui/react-runtime` (trusted tier). See [React Pages](/docs/ui/react-pages) |
 | `variables` | `PageVariable[]` | optional | Local state variables |
-| `isDefault` | `boolean` | optional | Is default page for its type |
+| `isDefault` | `boolean` | optional | The default record page of its `object` — the page that object's record view opens. At most one `isDefault: true` record page per object per deployment: a second is refused by `defineStack` / `os validate`, at package registration and at metadata save, naming both pages. Saving a page under the existing default's own name is that page, not a second default. Outside the rule on a page that is not a record page bound to an object |
 
 ### Page Types
 

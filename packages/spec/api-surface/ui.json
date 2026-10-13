@@ -505,6 +505,7 @@
     "compileListViewGroupRowsQuery (function)",
     "dashboardForm (const)",
     "datasetForm (const)",
+    "defaultRecordPageObject (function)",
     "defineAction (function)",
     "defineApp (function)",
     "defineDataset (function)",

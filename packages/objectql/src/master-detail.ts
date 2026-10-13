@@ -13,10 +13,12 @@
  * This module answers exactly one question — *which field points at the master,
  * and which object is it?* — so the write path can resolve the header row
  * without re-deriving the relationship at each call site. `plugin-security`
- * keeps its own `controlled_by_parent` resolver: that one is deliberately more
- * permissive (it falls back to a required `lookup`) because a CBP object with
- * no derivable master must deny reads rather than open them, which is a
- * different question from "what does `parent` mean in this predicate".
+ * keeps its own `controlled_by_parent` resolver because a CBP object with no
+ * derivable master must deny reads rather than open them, which is a different
+ * question from "what does `parent` mean in this predicate". (It used to be
+ * more permissive than this one — falling back to any `master_detail`, then a
+ * required `lookup`; since #23100 it resolves exactly one required
+ * `master_detail`, ADR-0055 §1, and nothing else.)
  *
  * ## Why `parent` is not guessed
  *

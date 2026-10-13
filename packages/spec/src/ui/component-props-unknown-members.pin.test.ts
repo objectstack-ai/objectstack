@@ -202,11 +202,11 @@ const EXPRESSION_AST: Reason = {
   owner: 'shared/expression.zod.ts `ExpressionSchema.ast`',
   why: 'the engine-native AST `objectstack compile` fills beside `source` — opaque at the spec layer by design; each engine validates its own shape',
 };
-const HTTP_REQUEST: Reason = {
-  kind: 'shared',
-  owner: 'shared/http.zod.ts `HttpRequestSchema`',
-  why: 'the query parameters and request body an `api` data source sends, forwarded verbatim to the endpoint the author names; their shape is that endpoint\'s',
-};
+// `HTTP_REQUEST` — the `data.read.params{}` / `data.read.body` /
+// `data.write.*` members `HttpRequestSchema` carried into every record-source
+// block — left this ledger with the view-level `api` data source (ADR-0049,
+// maintainer ruling 2026-10-12 letter C): the `api` arm of `ViewDataSchema` is
+// retired, so no `data` member reaches a request block any more.
 const INLINE_JSON_SCHEMA: Reason = {
   kind: 'shared',
   owner: 'ui/view.zod.ts `ViewDataSchema` (`provider: \'schema\'`)',
@@ -241,7 +241,9 @@ const on = (types: readonly string[], paths: readonly string[], reason: Reason):
   for (const type of types) for (const path of paths) LEDGER.set(`${type} ${path}`, reason);
 };
 
-const ACTION_RUNNER_PATHS = ['params', 'bodyExtra', 'bodyShape', 'operation', 'patch', 'toast', 'resultDialog', 'onSuccess'];
+// `onSuccess` left this list when the rows took `ActionSchema`'s own
+// post-success block (`component-action-row-on-success-executor.test.ts`).
+const ACTION_RUNNER_PATHS = ['params', 'bodyExtra', 'bodyShape', 'operation', 'patch', 'toast', 'resultDialog'];
 const VIEW_DATA_TYPES = ['object-grid', 'object-map', 'object-gantt', 'object-tree'];
 
 // Composition slots.
@@ -280,7 +282,6 @@ on(['action:button', 'action:icon'], ACTION_RUNNER_PATHS, RUNNER);
 on(['action:group', 'action:menu'], ACTION_RUNNER_PATHS.map((p) => `actions[].${p}`), RUNNER);
 
 // The data-source binding every record-source block shares.
-on(VIEW_DATA_TYPES, ['data.read.params{}', 'data.read.body', 'data.write.params{}', 'data.write.body'], HTTP_REQUEST);
 on(VIEW_DATA_TYPES, ['data.items[]'], RECORDS);
 on(VIEW_DATA_TYPES, ['data.schema{}'], INLINE_JSON_SCHEMA);
 
@@ -418,14 +419,15 @@ describe('§2 each recorded reason holds', () => {
     }
   });
 
-  it('a `shared` member really is the owner\'s: an `ast` beside a `source`, a request beside a `url`', () => {
+  it('a `shared` member really is the owner\'s: an `ast` beside a `source`', () => {
     for (const [key, reason] of entries) {
       if (reason !== EXPRESSION_AST) continue;
       expect(key, 'an expression-AST line names the `ast` member').toMatch(/\.ast$/);
     }
-    for (const [key, reason] of entries) {
-      if (reason !== HTTP_REQUEST) continue;
-      expect(key, 'an HTTP-request line names `params` or `body` under `read` / `write`').toMatch(/ data\.(read|write)\.(params\{\}|body)$/);
+    // No `data.read.*` / `data.write.*` line may come back: the request block
+    // left the record-source blocks with the retired view-level `api` source.
+    for (const [key] of entries) {
+      expect(key, 'a request-block member on a record-source block means the retired `api` arm is being undone').not.toMatch(/ data\.(read|write)\./);
     }
   });
 });

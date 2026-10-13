@@ -162,7 +162,7 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSp
 // live transport in through `attachMetadataMutationPubSub`.
 import type { IObjectQLEngine, IPubSub, ISecurityService } from '@objectstack/spec/contracts';
 import { applyConversionsToFlow, applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
-import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer, resolveI18nLabel } from '@objectstack/spec/ui';
+import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer, resolveI18nLabel, defaultRecordPageObject } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
 // structurally mention `FormFieldInput` (FormView `sections[].fields`), and
 // this file imports BOTH `@objectstack/spec` (root, for
@@ -19485,6 +19485,13 @@ export class ObjectStackProtocolImplementation implements
      * that no package ships, is registered as before. [#22057] The question is
      * {@link anotherPackageShips}, the one the container row's own
      * registration asks too.
+     *
+     * ## [#23149] Each registration is recorded for the delete's heal
+     *
+     * Every name registered here is recorded against the container's name
+     * ({@link recordViewExpansion}), and the delete's heal
+     * ({@link restoreArtifactRegistryView}) heals exactly those names. A name
+     * skipped above is not recorded, so the heal never touches it.
      */
     private hydrateExpandedViewItems(
         type: string,
@@ -19497,7 +19504,61 @@ export class ObjectStackProtocolImplementation implements
             shipping ??= this.shippingPackagesOf(type);
             if (this.anotherPackageShips(type, String(item.name), item._packageId, shipping)) continue;
             registry.registerItem(type, item, 'name' as any);
+            ObjectStackProtocolImplementation.recordViewExpansion(
+                registry, (data as { name?: unknown }).name, item.name,
+            );
         }
+    }
+
+    /**
+     * [#23149] The names {@link hydrateExpandedViewItems} registered, per
+     * registry and then per container name: what a reset of that container
+     * has to heal.
+     *
+     * The registry holds no link from an expanded item back to its container,
+     * and the container row is gone by the time the heal runs. Expanding the
+     * body again at reset time would also answer from registry state that may
+     * have moved since the publish: a package installed in between changes
+     * which names {@link anotherPackageShips} skips. So the heal reads this
+     * record instead, and heals the names that were registered, no more.
+     *
+     * Keyed on the registry, not on the protocol instance, for the reason
+     * `meta-overlay-cache.ts` keys its bucket on the engine: two protocol
+     * instances over one registry share the entries they write. A `WeakMap`,
+     * so the record lives as long as the registry and no longer.
+     *
+     * Two rows of one name (a package-less row and a package-bound one) record
+     * into one set. A reset of either heals the set, as the plain-key heal
+     * already lifts the one bare entry the name has, and the remaining row is
+     * hydrated again on the next list read.
+     */
+    private static readonly registeredViewExpansions = new WeakMap<object, Map<string, Set<string>>>();
+
+    /** [#23149] Records one expansion registration. See {@link registeredViewExpansions}. */
+    private static recordViewExpansion(registry: unknown, container: unknown, expanded: unknown): void {
+        if (!registry || typeof registry !== 'object') return;
+        if (typeof container !== 'string' || container === '') return;
+        if (typeof expanded !== 'string' || expanded === '') return;
+        let byContainer = this.registeredViewExpansions.get(registry);
+        if (byContainer === undefined) this.registeredViewExpansions.set(registry, (byContainer = new Map()));
+        let names = byContainer.get(container);
+        if (names === undefined) byContainer.set(container, (names = new Set()));
+        names.add(expanded);
+    }
+
+    /**
+     * [#23149] Removes and returns the expansions recorded for a view
+     * container, for the heal to heal once. Empty for every type but `view`,
+     * and for a name no container registered expansions under.
+     */
+    private static takeViewExpansions(registry: unknown, type: string, container: string): string[] {
+        if (canonicalMetaType(type) !== 'view') return [];
+        if (!registry || typeof registry !== 'object') return [];
+        const byContainer = this.registeredViewExpansions.get(registry);
+        const names = byContainer?.get(container);
+        if (byContainer === undefined || names === undefined) return [];
+        byContainer.delete(container);
+        return [...names];
     }
 
     /**
@@ -19735,6 +19796,31 @@ export class ObjectStackProtocolImplementation implements
      * still guards re-registration only, because that is a fact about the
      * kernel this protocol instance serves, not about the row in hand.
      *
+     * ## [#23149] A view container's expansions are healed too
+     *
+     * A view container row registers more than its plain key: every view it
+     * expands to is registered under its own name `<object>.<viewKey>`
+     * ({@link hydrateExpandedViewItems}). The tiers above healed the container's
+     * plain key alone, so after a reset of a packaged view container that
+     * answered `reset: true`, the list doors kept serving the overlay's
+     * expanded views until a restart. Measured on a real `SchemaRegistry`: the
+     * packaged expansions sit under `<packageId>:<object>.<viewKey>`, untouched
+     * by the publish, and the overlay's under the bare names, where the reset
+     * left them.
+     *
+     * So each name the container registered ({@link takeViewExpansions}) is
+     * healed by this same walk, as a `(type, name)` of its own: a packaged view
+     * of that name is un-shadowed, a baseline is re-registered, and a name no
+     * layer serves is retired. Each name inherits every gate above: an
+     * organization-scoped heal touches none of them, and only a control-plane
+     * kernel re-registers. A name the hydration skipped because another
+     * package ships it was never recorded, so it is never touched.
+     *
+     * The names are taken before the walk, so each registration is healed
+     * once. A walk that stops on a degraded baseline read leaves that name
+     * registered until the container is published and reset again, or until a
+     * restart.
+     *
      * Best-effort: a failure must never block the delete that already
      * succeeded; the next full reload fixes the registry anyway.
      */
@@ -19756,6 +19842,15 @@ export class ObjectStackProtocolImplementation implements
         // [#6780] ADR-0005 — the plain-key entry belongs to the env-wide row,
         // so only an env-wide removal may heal (or retire) it.
         if (organizationId !== null && organizationId !== undefined) return;
+        // [#23149] The view container's expansions, each by this same walk.
+        // See the header. Ahead of the container's own walk, which returns
+        // early from three of its tiers.
+        const expansions = ObjectStackProtocolImplementation.takeViewExpansions(
+            (this.engine as any)?.registry, type, name,
+        );
+        for (const expanded of expansions) {
+            await this.restoreArtifactRegistryView(type, expanded, organizationId);
+        }
         try {
             const registry: any = this.engine.registry;
             const singular = PLURAL_TO_SINGULAR[type] ?? type;
@@ -20227,6 +20322,123 @@ export class ObjectStackProtocolImplementation implements
             this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
             return false;
         }
+    }
+
+    /**
+     * [#23015] The save door's half of "one default record page per object per
+     * deployment" (maintainer ruling A, record 6134056653; `PageSchema.isDefault`).
+     *
+     * A `page` body that is the default record page of an object
+     * (`defaultRecordPageObject`, the one reading `defineStack` and the
+     * registry judge by too) is refused when another page already holds that
+     * object's default. The holders are the two sources a deployment serves
+     * pages from, judged by name:
+     *
+     *  - **the stored pages** — the environment-wide active rows
+     *    ({@link readActiveOverlayRows}, parsed by {@link storedOverlayEntries}),
+     *    a row bound to a package naming that package;
+     *  - **the registry's pages** — `SchemaRegistry.defaultRecordPageHoldersOf`
+     *    (the reading the registration refusals judge by: packaged pages, their
+     *    install claims, and the environment items written through), for every
+     *    name no stored row holds. A stored row under a name stands in for
+     *    every registry slot of that name, as it does on every read
+     *    (ADR-0005), so its own body decides for the name.
+     *
+     * Asked twice: by `saveMetaItem` on the body it is about to store (draft or
+     * publish mode), and by the draft publish (`promoteDraftForPublish`) on the
+     * draft body it is about to promote — the save judged only the pages
+     * active at that moment, and another may have taken the default since.
+     *
+     * The page saved under `saveName` is never its own holder: a save under the
+     * existing default's own name is an overlay of that page (ADR-0005), not a
+     * second default, and stays accepted. A registry with no such reading (a
+     * host engine that is not `SchemaRegistry`) contributes no packaged holder;
+     * the stored rows are still judged.
+     *
+     * An UNPROVISIONED store counts as "no stored pages"; any other read
+     * failure propagates ({@link rethrowUnlessMetadataStoreUnprovisioned}):
+     * answering "no other default" from a read that never happened would
+     * accept the very second default this exists to refuse.
+     *
+     * `DEFAULT_RECORD_PAGE_CONFLICT` / 422 — the envelope the registry's
+     * registration refusal carries for the same condition, so a client reads
+     * one code whether the second default arrived by a save or by an install.
+     * The message names this page and the holder, then the prescription, then
+     * why: a 4xx message crosses the REST boundary truncated at its tail. ⛔ It
+     * never prescribes overlaying a page a package ships by name: the save door
+     * refuses that write (`NOT_OVERRIDABLE`). Runtime words carry no tracker
+     * number.
+     */
+    private async defaultRecordPageSaveRefusal(
+        type: string,
+        item: unknown,
+        saveName: string,
+        verb: 'saved' | 'published' = 'saved',
+    ): Promise<(Error & { code: 'DEFAULT_RECORD_PAGE_CONFLICT'; status: 422 }) | undefined> {
+        if (type !== 'page') return undefined;
+        const object = defaultRecordPageObject(item);
+        if (object === undefined) return undefined;
+
+        // `shipped`: a page a package ships through the registry, which no save
+        // can edit; a stored row (bound to a package or not) is editable here.
+        type Holder = { page: string; packageId?: string; shipped: boolean };
+        const holders: Holder[] = [];
+        let records: any[] = [];
+        try {
+            // [ADR-0131 D6] A save lands environment-wide, so the pages it meets
+            // are the environment-wide rows.
+            records = await this.readActiveOverlayRows({ type }, undefined);
+        } catch (error) {
+            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+        }
+        const stored = this.storedOverlayEntries({ type }, records);
+        const storedNames = new Set(stored.map((entry) => entry.name));
+        for (const entry of stored) {
+            if (entry.name === saveName || defaultRecordPageObject(entry.data) !== object) continue;
+            holders.push(entry.packageId
+                ? { page: entry.name, packageId: entry.packageId, shipped: false }
+                : { page: entry.name, shipped: false });
+        }
+        const registry = this.engine.registry;
+        if (typeof registry?.defaultRecordPageHoldersOf === 'function') {
+            const registered = registry.defaultRecordPageHoldersOf(object) as Array<
+                { kind: 'package'; packageId: string; page: string } | { kind: 'environment'; page: string }
+            >;
+            for (const holder of registered) {
+                if (holder.page === saveName || storedNames.has(holder.page)) continue;
+                holders.push(holder.kind === 'package'
+                    ? { page: holder.page, packageId: holder.packageId, shipped: true }
+                    : { page: holder.page, shipped: false });
+            }
+        }
+        if (holders.length === 0) return undefined;
+
+        const seen = new Set<string>();
+        const unique = holders.filter((h) => {
+            const key = `${h.packageId ?? ''}|${h.page}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+        const describe = (h: Holder) =>
+            h.packageId ? `page '${h.page}' of package '${h.packageId}'` : `page '${h.page}', authored in this environment`;
+        const named = unique.map(describe);
+        const others = named.length === 1 ? `${named[0]} already is` : `${named.join(' and ')} already are`;
+        const remedy = unique.some((h) => h.shipped)
+            ? `Save '${saveName}' with \`isDefault: false\`: a page a package ships stays the default unless the `
+              + `deployment is composed without that package.`
+            : `Save '${saveName}' with \`isDefault: false\`, or first save ${unique.map((h) => `'${h.page}'`).join(' and ')} `
+              + `with \`isDefault: false\` to make '${saveName}' the default instead.`;
+        const err = new Error(
+            `Default record page conflict: page '${saveName}' cannot be ${verb} as the default record page of object `
+            + `'${object}': ${others}. ${remedy} At most one \`isDefault: true\` record page may exist for an object `
+            + `in a deployment: the record view opens that page with no tie-break.`,
+        ) as Error & { code: 'DEFAULT_RECORD_PAGE_CONFLICT'; status: 422; object: string; holders: readonly Holder[] };
+        err.code = 'DEFAULT_RECORD_PAGE_CONFLICT';
+        err.status = 422;
+        err.object = object;
+        err.holders = unique;
+        return err;
     }
 
     /**
@@ -21356,6 +21568,19 @@ export class ObjectStackProtocolImplementation implements
         {
             const hookRefusal = runtimeHookWithoutBodyRefusal(singularType, request.item, request.name);
             if (hookRefusal) throw hookRefusal;
+        }
+
+        // One default record page per object per deployment (maintainer ruling
+        // A on objectstack#23015): a page saved as the default record page of an
+        // object another page already holds — a stored page, or a page a
+        // package ships — is refused, naming both, in draft and in publish mode,
+        // after the schema (the body is a page) and before the authoring gate
+        // and every write. A save under the existing default's own name is an
+        // overlay of that page, not a second default. See
+        // {@link defaultRecordPageSaveRefusal}.
+        {
+            const defaultPageRefusal = await this.defaultRecordPageSaveRefusal(singularType, request.item, request.name);
+            if (defaultPageRefusal) throw defaultPageRefusal;
         }
 
         // The #4463 runtime authoring gate — the shared author-time rule
@@ -22934,6 +23159,16 @@ export class ObjectStackProtocolImplementation implements
         if (draftForGate) {
             const nameRefusal = savedItemNameRefusal(singularType, draftForGate.body, request.name, 'publish');
             if (nameRefusal) throw nameRefusal;
+        }
+        // [#23015] …and one default record page per object per deployment: a
+        // draft saved while no other page held its object's default can meet
+        // one by the time it is published, since the save door judged only the
+        // ACTIVE pages of that moment. Judged again here, on the draft body and
+        // with the save door's own predicate and envelope, before
+        // `repo.promoteDraft` writes — so a batch publish aborts on it too.
+        if (draftForGate) {
+            const defaultPageRefusal = await this.defaultRecordPageSaveRefusal(singularType, draftForGate.body, request.name, 'published');
+            if (defaultPageRefusal) throw defaultPageRefusal;
         }
         // [#9176] The gate's return is its advisory half (#4717): captured and
         // handed out so `publishMetaItem` can attach it to the 2xx this

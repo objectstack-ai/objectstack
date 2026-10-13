@@ -65,6 +65,15 @@ import {
   securityCatalogTypeLabel,
   type SecurityCatalogHolder,
 } from './security-catalog-namespace.js';
+// One default record page per object per deployment — the holders and the one
+// place a manifest's default record pages are read from (module doc).
+import {
+  declaredDefaultRecordPages,
+  defaultRecordPageHolderKey,
+  describeDefaultRecordPageHolder,
+  type DefaultRecordPageHolder,
+} from './default-record-page.js';
+import { defaultRecordPageObject } from '@objectstack/spec/ui';
 // [#14553] The ONE resolution of "does this nav group id exist?" and the ONE
 // wording of the diagnostic when it does not. `os build` calls the same two
 // (`checkNavContributionGroups`), so the compile-time door and this read-time
@@ -1541,6 +1550,15 @@ export const DUPLICATE_ARTIFACT_OBJECT_NAME_CODE = 'DUPLICATE_ARTIFACT_OBJECT_NA
 export const OBJECT_OWNERSHIP_CONFLICT_CODE = 'OBJECT_OWNERSHIP_CONFLICT' as const;
 
 /**
+ * {@link DefaultRecordPageConflictError}'s code — one default record page per
+ * object per deployment (maintainer ruling A on objectstack#23015). The save
+ * door in `@objectstack/metadata-protocol` stamps the same string for the same
+ * condition; that package cannot import this one, so it spells it once and the
+ * ledger lists it under both.
+ */
+export const DEFAULT_RECORD_PAGE_CONFLICT_CODE = 'DEFAULT_RECORD_PAGE_CONFLICT' as const;
+
+/**
  * Raised when a package is installed whose `manifest.namespace` is already owned
  * by a **different** installed package in this installation (ADR-0048 Phase 1).
  *
@@ -1704,6 +1722,70 @@ export class SecurityCatalogNameConflictError extends Error {
     this.catalogName = first.name;
     this.incomingPackageId = first.incomingPackageId;
     this.existingHolder = first.existingHolder;
+  }
+}
+
+/** One second default record page {@link DefaultRecordPageConflictError} refused. */
+export interface DefaultRecordPageConflict {
+  /** The object both pages are the default record page of. */
+  readonly object: string;
+  /** The page whose registration this refusal stopped. */
+  readonly incoming: DefaultRecordPageHolder;
+  /** The page that already holds the object's default record page. */
+  readonly existing: DefaultRecordPageHolder;
+}
+
+/**
+ * Raised when a package registers a record page as the default record page of
+ * an object another page already holds — another package's page, an
+ * environment's page, or a second page of the same manifest
+ * (`default-record-page.ts` states the rule, the holders, and what is not a
+ * second default).
+ *
+ * The ADR-0112 envelope (`code` + `status: 422`), the shape of its sibling
+ * {@link SecurityCatalogNameConflictError}, so a wire door answers `422`, never
+ * the `500` fallback. Its own code, not the namespace gate's: the condition is
+ * not a name already taken but an object's one default slot already held, and
+ * the remedy differs — keep one default (`isDefault: false` on the other), or
+ * compose the deployment without the package shipping the other page; renaming
+ * fixes nothing.
+ *
+ * Every conflict the registration carries is listed — `conflicts` — so one boot
+ * reports all of them; the top-level fields repeat the first.
+ */
+export class DefaultRecordPageConflictError extends Error {
+  readonly code = DEFAULT_RECORD_PAGE_CONFLICT_CODE;
+  readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors, which read it. */
+  readonly httpStatus = 422;
+  /** Every second default this registration would have created, in declaration order. */
+  readonly conflicts: readonly DefaultRecordPageConflict[];
+  /** The first conflict's object. */
+  readonly object: string;
+  /** The first conflict's incoming page. */
+  readonly incoming: DefaultRecordPageHolder;
+  /** The first conflict's existing holder. */
+  readonly existing: DefaultRecordPageHolder;
+
+  constructor(conflicts: readonly DefaultRecordPageConflict[]) {
+    const [first] = conflicts;
+    const lines = conflicts.map(
+      (c) =>
+        `${describeDefaultRecordPageHolder(c.incoming)} cannot be the default record page of object ` +
+        `"${c.object}": ${describeDefaultRecordPageHolder(c.existing)} already is`,
+    );
+    super(
+      `Default record page conflict: ${lines.join('; ')}. Keep one default per object: set ` +
+        `\`isDefault: false\` on one of the two pages, or compose the deployment without the package that ` +
+        `ships the other. At most one \`isDefault: true\` record page may exist for an object in a ` +
+        `deployment: the record view opens that page with no tie-break, so with two the page would be ` +
+        `chosen by registration order.`,
+    );
+    this.name = 'DefaultRecordPageConflictError';
+    this.conflicts = conflicts;
+    this.object = first.object;
+    this.incoming = first.incoming;
+    this.existing = first.existing;
   }
 }
 
@@ -2382,6 +2464,167 @@ export class SchemaRegistry {
   getNamespaceOwners(namespace: string): string[] {
     const owners = this.namespaceRegistry.get(namespace);
     return owners ? Array.from(owners) : [];
+  }
+
+  // ==========================================
+  // One default record page per object per deployment
+  // ==========================================
+
+  /**
+   * Object → package → the page that package declared as the object's default
+   * record page at install, recorded by {@link installPackage} once its
+   * declarations pass {@link refuseDefaultRecordPageConflicts}, forgotten by
+   * {@link uninstallPackage}.
+   *
+   * The item store answers who holds an object's default only for pages
+   * something registered into it, and `installPackage` registers none (a bare
+   * install — `POST /api/v1/packages` — stores the manifest alone). The claim
+   * is how the package door remembers what a package declared, so a second
+   * package declaring a default for the same object is refused like any other
+   * second holder. Unlike the security catalog's claims a re-install REPLACES
+   * the package's claims: a default the package moved or dropped is no longer
+   * its declaration, and the pages an earlier registration left in the item
+   * store keep answering for themselves.
+   */
+  private defaultRecordPageClaims = new Map<string, Map<string, string>>();
+
+  /**
+   * Every page holding the default record page of `object`, each tagged with
+   * whether it holds through the registry's bare slot (an environment item,
+   * which stands in for every slot of its name — module doc, "What is not a
+   * second default").
+   *
+   * Read, per page name: the bare slot when there is one — its own body
+   * decides, and the composite slots and claims of that name are shadowed by
+   * it; otherwise every composite `PACKAGE:NAME` slot, and every install claim.
+   * A bare-slot item carrying a real package stamp is that package's page as
+   * overlaid in this environment (the protocol grafts the package's envelope
+   * onto an overlay of a packaged page), and is named as that package's page.
+   * A disabled package is still installed, and its pages still hold.
+   */
+  private defaultRecordPageSlots(object: string): Array<{ holder: DefaultRecordPageHolder; bare: boolean }> {
+    const found = new Map<string, { holder: DefaultRecordPageHolder; bare: boolean }>();
+    const add = (holder: DefaultRecordPageHolder, bare: boolean) => {
+      found.set(defaultRecordPageHolderKey(holder), { holder, bare });
+    };
+    const bareNames = new Set<string>();
+    const composites: Array<{ packageId: string; page: string; item: unknown }> = [];
+    for (const [key, item] of this.metadata.get('page') ?? []) {
+      const sep = key.lastIndexOf(':');
+      const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
+      if (sep < 0) {
+        bareNames.add(key);
+        if (defaultRecordPageObject(item) !== object) continue;
+        const packaged =
+          typeof stamped === 'string' && stamped !== '' && stamped !== 'sys_metadata' && !isTenantAuthored(item);
+        add(packaged ? { kind: 'package', packageId: stamped, page: key } : { kind: 'environment', page: key }, true);
+      } else {
+        composites.push({
+          packageId: typeof stamped === 'string' && stamped !== '' ? stamped : key.slice(0, sep),
+          page: key.slice(sep + 1),
+          item,
+        });
+      }
+    }
+    for (const { packageId, page, item } of composites) {
+      if (bareNames.has(page) || defaultRecordPageObject(item) !== object) continue;
+      add({ kind: 'package', packageId, page }, false);
+    }
+    for (const [packageId, page] of this.defaultRecordPageClaims.get(object) ?? []) {
+      if (bareNames.has(page)) continue;
+      add({ kind: 'package', packageId, page }, false);
+    }
+    return [...found.values()];
+  }
+
+  /**
+   * Every page that holds the default record page of `object` in this
+   * registry — the reading both registration refusals judge by, and the
+   * registry half the metadata save door (`@objectstack/metadata-protocol`'s
+   * `saveMetaItem`) meets with the stored pages before it refuses a second
+   * default. Read-only: it records nothing and refuses nothing.
+   *
+   * An environment item under a page's name stands in for that page, so a
+   * name appears once, as the bare slot's verdict, whatever the slots it
+   * shadows say. See {@link defaultRecordPageSlots}.
+   */
+  defaultRecordPageHoldersOf(object: string): DefaultRecordPageHolder[] {
+    return this.defaultRecordPageSlots(object).map(({ holder }) => holder);
+  }
+
+  /**
+   * The holders of `object`'s default record page that a package registering
+   * `page` as that default would meet as a SECOND default — every holder but
+   * the package's own pages and the bare-slot item of the same name (the
+   * environment's overlay of the very page being registered).
+   */
+  private otherDefaultRecordPageHolders(object: string, page: string, packageId: string): DefaultRecordPageHolder[] {
+    return this.defaultRecordPageSlots(object)
+      .filter(({ holder, bare }) => {
+        if (holder.kind === 'package' && holder.packageId === packageId) return false;
+        return !(bare && holder.page === page);
+      })
+      .map(({ holder }) => holder);
+  }
+
+  /**
+   * The package door's half of the rule: refuse a package whose declared
+   * default record pages meet another holder — a second page of the same
+   * manifest for the same object, or a page another package or the environment
+   * holds — ahead of every mutation {@link installPackage} makes, so a refused
+   * package leaves no record, no namespace ownership and no claim behind.
+   *
+   * Every conflict is collected, so one refusal reports all of them. A package
+   * with no identity (`artifactPackageId` answers nothing) registers under no
+   * package at all and has nothing to hold; it is not judged here.
+   *
+   * @throws {DefaultRecordPageConflictError} ADR-0112 envelope, naming both
+   *   pages of each conflict.
+   */
+  private refuseDefaultRecordPageConflicts(manifest: ObjectStackManifest, selfId: string | undefined): void {
+    if (selfId === undefined) return;
+    const conflicts: DefaultRecordPageConflict[] = [];
+    // object → the first page this manifest declares for it.
+    const firstDeclared = new Map<string, string>();
+    for (const { object, page } of declaredDefaultRecordPages(manifest)) {
+      const incoming: DefaultRecordPageHolder = { kind: 'package', packageId: selfId, page };
+      const first = firstDeclared.get(object);
+      if (first === undefined) {
+        firstDeclared.set(object, page);
+        for (const existing of this.otherDefaultRecordPageHolders(object, page, selfId)) {
+          conflicts.push({ object, incoming, existing });
+        }
+      } else if (first !== page) {
+        // Two pages of one manifest for one object. One page declared twice
+        // under one name is one page (the stack contract refuses the repeat).
+        conflicts.push({ object, incoming, existing: { kind: 'package', packageId: selfId, page: first } });
+      }
+    }
+    if (conflicts.length > 0) throw new DefaultRecordPageConflictError(conflicts);
+  }
+
+  /**
+   * Replace `packageId`'s claims with what `manifest` declares (see
+   * {@link defaultRecordPageClaims} for why a re-install replaces).
+   */
+  private recordDefaultRecordPageClaims(packageId: string, manifest: ObjectStackManifest): void {
+    this.forgetDefaultRecordPageClaims(packageId);
+    for (const { object, page } of declaredDefaultRecordPages(manifest)) {
+      let byPackage = this.defaultRecordPageClaims.get(object);
+      if (!byPackage) {
+        byPackage = new Map();
+        this.defaultRecordPageClaims.set(object, byPackage);
+      }
+      if (!byPackage.has(packageId)) byPackage.set(packageId, page);
+    }
+  }
+
+  /** Drop every default record page claim `packageId` holds. */
+  private forgetDefaultRecordPageClaims(packageId: string): void {
+    for (const [object, byPackage] of this.defaultRecordPageClaims) {
+      byPackage.delete(packageId);
+      if (byPackage.size === 0) this.defaultRecordPageClaims.delete(object);
+    }
   }
 
   // ==========================================
@@ -4246,6 +4489,30 @@ export class SchemaRegistry {
       }
     }
 
+    // One default record page per object per deployment — the item seam
+    // (maintainer ruling A on objectstack#23015; `default-record-page.ts`): a
+    // package registering a page as the default record page of an object
+    // another page already holds is refused BEFORE anything below stamps or
+    // stores it. The package door ({@link installPackage}) has already judged
+    // what a manifest declares; this is the seam every OTHER package-bound page
+    // registration reaches (a nested plugin's pages, a plugin registering
+    // through the registry directly). The package's own pages, and the
+    // environment's overlay of this very page by name, are not a second
+    // default. ⛔ A registration with no `packageId` is the bare slot —
+    // `sys_metadata` hydration, the metadata write-through — and is never
+    // judged here: the metadata save door refuses a second default before it
+    // is stored.
+    if (packageId && type === 'page') {
+      const object = defaultRecordPageObject(item);
+      if (object !== undefined) {
+        const holders = this.otherDefaultRecordPageHolders(object, baseName, packageId);
+        if (holders.length > 0) {
+          const incoming: DefaultRecordPageHolder = { kind: 'package', packageId, page: baseName };
+          throw new DefaultRecordPageConflictError(holders.map((existing) => ({ object, incoming, existing })));
+        }
+      }
+    }
+
     // ADR-0010 §3.7 — translate the author-facing `protection` block
     // into the private `_lock` envelope and stamp package provenance.
     // This call knows the package id only. A caller that holds the package's
@@ -5092,6 +5359,14 @@ export class SchemaRegistry {
     // `collisionPolicy` downgrade (`security-catalog-namespace.ts`).
     this.refuseSecurityCatalogNameConflicts(manifest, selfId);
 
+    // One default record page per object per deployment (maintainer ruling A
+    // on objectstack#23015; `default-record-page.ts`) — also ahead of every
+    // mutation, for the same reason. No co-owner exemption and no
+    // `collisionPolicy` downgrade: two packages of one artifact shipping a
+    // default for one object leave the record view to registration order
+    // exactly as two strangers do.
+    this.refuseDefaultRecordPageConflicts(manifest, selfId);
+
     const now = new Date().toISOString();
 
     // [#18877] 「缺省 = 保持，有旗 = 设置」 — an install that was not asked to move
@@ -5169,6 +5444,8 @@ export class SchemaRegistry {
     // The names this package now holds, recorded whether or not an item store
     // entry will carry them (see `securityCatalogClaims`).
     if (selfId !== undefined) this.recordSecurityCatalogClaims(selfId, manifest);
+    // …and the default record pages it declares (see `defaultRecordPageClaims`).
+    if (selfId !== undefined) this.recordDefaultRecordPageClaims(selfId, manifest);
     this.log(`[Registry] Installed package: ${manifest.id} (${manifest.name})`);
     return pkg;
   }
@@ -5267,6 +5544,9 @@ export class SchemaRegistry {
     // …and the security catalog names it held, so an uninstalled package's
     // names are free for the next package to declare.
     this.forgetSecurityCatalogClaims(id);
+    // …and the default record pages it declared, so the next package may
+    // declare a default for those objects.
+    this.forgetDefaultRecordPageClaims(id);
 
     // [#18877] The boot seed forgets the id together with the row. A package
     // that no longer exists has no lifecycle state to preserve, so the next
