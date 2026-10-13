@@ -186,7 +186,7 @@ describe.each(TOPOLOGIES)('%s kernel — a page saved as a second default record
         const { save, storedPages } = await boot(topology);
         const outcome = await save('env_org_detail', recordPage('env_org_detail', 'acme_org'));
         expectRefusal(outcome, 'env_org_detail', 'acme_org', `page 'acme_org_detail' of package '${PKG}'`);
-        expect(String(outcome.error.message)).toContain(
+        expect(String((outcome as { error?: any }).error?.message)).toContain(
             "Save 'env_org_detail' with `isDefault: false`: a page a package ships stays the default unless the deployment "
             + 'is composed without that package.',
         );
@@ -198,7 +198,7 @@ describe.each(TOPOLOGIES)('%s kernel — a page saved as a second default record
         expect((await save('env_task_a', recordPage('env_task_a', 'acme_task'))).ok).toBe(true);
         const outcome = await save('env_task_b', recordPage('env_task_b', 'acme_task'));
         expectRefusal(outcome, 'env_task_b', 'acme_task', "page 'env_task_a', authored in this environment");
-        expect(String(outcome.error.message)).toContain(
+        expect(String((outcome as { error?: any }).error?.message)).toContain(
             "Save 'env_task_b' with `isDefault: false`, or first save 'env_task_a' with `isDefault: false` to make "
             + "'env_task_b' the default instead.",
         );
