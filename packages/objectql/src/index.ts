@@ -82,6 +82,7 @@ export {
   NAMESPACE_CONFLICT_CODE,
   DUPLICATE_ARTIFACT_OBJECT_NAME_CODE,
   OBJECT_OWNERSHIP_CONFLICT_CODE,
+  DEFAULT_RECORD_PAGE_CONFLICT_CODE,
 } from './registry.js';
 
 // [#22371] The package half of the cold-boot check's holder reading (ADR-0048

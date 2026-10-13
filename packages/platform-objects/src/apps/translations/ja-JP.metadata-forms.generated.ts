@@ -1307,7 +1307,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       isDefault: {
         label: "既定",
-        helpText: "このページ種別の既定ページに設定"
+        helpText: "このオブジェクトのレコードを開くときにこのレコードページを使います。既定のレコードページはオブジェクトごとに 1 つだけで、2 つ目は拒否されます。"
       },
       kind: {
         label: "モード",
