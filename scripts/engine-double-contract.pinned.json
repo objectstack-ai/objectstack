@@ -3392,21 +3392,6 @@
       "pinned": 1
     },
     {
-      "file": "packages/plugins/plugin-security/src/permission-set-echo-package-owner.test.ts",
-      "verb": "delete",
-      "pinned": 1
-    },
-    {
-      "file": "packages/plugins/plugin-security/src/permission-set-echo-package-owner.test.ts",
-      "verb": "findOne",
-      "pinned": 1
-    },
-    {
-      "file": "packages/plugins/plugin-security/src/permission-set-echo-package-owner.test.ts",
-      "verb": "update",
-      "pinned": 1
-    },
-    {
       "file": "packages/plugins/plugin-security/src/permission-set-projection.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -3458,6 +3443,21 @@
     },
     {
       "file": "packages/plugins/plugin-security/src/row-write-widener-composition.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/security-catalog-echo.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/security-catalog-echo.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/security-catalog-echo.test.ts",
       "verb": "update",
       "pinned": 1
     },

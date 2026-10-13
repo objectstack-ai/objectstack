@@ -450,8 +450,10 @@ describe('the boot pass echoes every stored env-wide overlay, and only those', (
     ];
     const engine = {
       registry: { listItems: () => [] },
-      find: async (object: string, query: { where: Row }) =>
-        (object === 'sys_metadata' ? rows.filter((row) => matches(row, query.where)) : []),
+      find: async (object: string, query: { where: Row; limit?: number }) => {
+        const hits = object === 'sys_metadata' ? rows.filter((row) => matches(row, query.where)) : [];
+        return typeof query?.limit === 'number' ? hits.slice(0, query.limit) : hits;
+      },
     };
     const overlays: Record<string, { body: Row }> = {};
     for (const row of rows) {
