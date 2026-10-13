@@ -37,7 +37,8 @@
  * same two doors, so it gets the same home rather than a second one.
  *
  * Living beside {@link sendError} is what makes the REST side automatic: that
- * writer is the single exit for every nested-envelope 5xx, so the direct-mount
+ * writer and its caught-fault sibling `sendServerFault` are the exits for every
+ * nested-envelope 5xx, and each logs the line itself, so the direct-mount
  * registrars need no per-door call and cannot forget one. Each transport logs
  * at its own single exit, so a fault costs one line and never two.
  *

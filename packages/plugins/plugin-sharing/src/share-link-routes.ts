@@ -32,7 +32,10 @@
 
 import type { IHttpServer, IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
 // The declared envelope is written in ONE place for the whole platform (#3973).
-import { sendOk, sendError } from '@objectstack/types';
+// [#23174] The door's catch-all fault answers through `sendServerFault`: the
+// route's `failure` text on the wire, the caught error with its stack in the
+// fault log.
+import { sendOk, sendError, sendServerFault } from '@objectstack/types';
 // [#22049] The one reading of the password header pair, shared with the
 // dispatcher twin — see `presentedPassword` below.
 import { readSharePasswordHeader, SHARE_PASSWORD_VARY, type SharePasswordHeaderReading } from '@objectstack/types';
@@ -133,8 +136,8 @@ function refuseHeldSession(res: IHttpResponse, ctx: ExecutionContext): boolean {
  * - `serve` is the route's own work, handed the caller's resolved context. It
  *   runs only for a caller the door admitted.
  * - `failure` is the message of the route's own `catch` arm, which the door
- *   writes for anything thrown — by the context resolver or by `serve` — as
- *   that arm always did.
+ *   writes for a throw — by the context resolver or by `serve` — that declares
+ *   no status of its own, in place of the caught error's text (#23174).
  * - `publicRoute` marks a token route: its no-store response headers are set
  *   on every outcome, the door's own refusal included.
  */
@@ -272,7 +275,8 @@ export function registerShareLinkRoutes(
    * ({@link refuseHeldSession}); then the route's own work with that context.
    * A throw from any of them is answered by the route's own `catch` arm, as
    * before — an authorization-store outage the resolver raises keeps its
-   * declared status and code.
+   * declared status and code. A throw that declares no status answers `500`
+   * with the route's `failure` text, never its own (#23174).
    */
   const mountFamilyRoute = (verb: 'get' | 'post' | 'delete', path: string, route: ShareLinkFamilyRoute): void => {
     http[verb](path, (async (req, res) => {
@@ -282,7 +286,17 @@ export function registerShareLinkRoutes(
         if (refuseHeldSession(res, ctx)) return;
         await route.serve(req, res, ctx);
       } catch (err: any) {
-        sendError(res, err?.status ?? 500, err?.code ?? 'INTERNAL', err?.message ?? route.failure);
+        // [#23174] A throw that declares its own status keeps the envelope its
+        // producer declared: a coded 4xx refusal, the branded authorization-
+        // store outage, an authored 5xx. A throw that declares none is the
+        // catch-all fault, and its own text is not the caller's to read: the
+        // route's `failure` text goes on the wire and the caught error, with
+        // its stack, to the fault log.
+        if (err?.status === undefined || err?.status === null) {
+          sendServerFault(res, 500, err?.code ?? 'INTERNAL', route.failure, err);
+          return;
+        }
+        sendError(res, err.status, err?.code ?? 'INTERNAL', err?.message ?? route.failure);
       }
     }) satisfies RouteHandler);
   };
