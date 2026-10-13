@@ -1176,27 +1176,18 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // while a schema error elsewhere in the stack cannot take these findings down
   // with it.
   //
-  // Advisory, deliberately, and this is the whole shape of #5068's first step:
-  // wiring the parse is the precondition for enforcement, not the enforcement
-  // (#5020, one surface over). The live corpus violates the declarations in two
-  // places that are open contract questions — inline i18n label maps on three
-  // published platform pages (#5728) and the record picker's declared-but-unread
-  // `displayField` (#5775) — so gating today would fail the platform's own pages
-  // to enforce declarations the platform does not keep. The error upgrade is a
-  // separate step, once the warning-period inventory is empty.
-  //
-  // #5775 settled the record picker's half: `displayField` is retired in favour
-  // of the `labelField` the renderer actually reads. Its claim that "the rest of
-  // the keys the renderers honour are declared" did NOT hold — #6776 found five
-  // more (`page:header` `recordChrome`/`showStar`/`showCopyId`,
-  // `page:accordion.variant`, and the tab strip's visual style, whose declared
-  // spelling `page:tabs.type` collided with the component node's own dispatch
-  // key and so was unauthorable in the flat and JSX carriers). All five are
-  // declared as of #6776, the last as the renamed `tabStyle`. What remains
-  // before the error upgrade is #5728 and two page rewrites.
+  // Gating since #23026, for ONE class: a `retiredKey()` tombstone's verdict is
+  // an `error`, so `os validate`, `os build` and `os lint` refuse a retired
+  // prop with its prescription. Every other finding stays a `warning`. #5068's
+  // first step was advisory on purpose — wiring the parse is the precondition
+  // for enforcement, not the enforcement (#5020, one surface over) — and the
+  // error upgrade was to be its own step once the warning-period inventory was
+  // empty. Its blockers (#5728, #5775, #6776's undeclared props, two page
+  // rewrites) are all closed, and the inventory measured 0. The rule's module
+  // header records the measurement and why the other classes stay advisory.
   {
     name: 'validateComponentProps',
-    tier: 'advisory',
+    tier: 'gating',
     input: 'normalized',
     commands: ALL,
     source: 'packages/lint/src/validate-component-props.ts',
