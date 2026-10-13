@@ -200,9 +200,9 @@ export const RecalcEstimateAction = defineAction({
  * now refused at authoring time instead of quietly recalculating one row. The
  * renderer then dispatches it ONCE for the whole selection, with every
  * selected id in `params._selectedIds` — the recalc endpoint's flow runs the
- * per-task recalculation for every one of them in that single call (the "one zip for N devices"
- * shape, minus the zip). Contrast with RecalcEstimateAction above: same
- * endpoint, one POST per record.
+ * per-task recalculation for every one of them in that single call (the
+ * "one zip for N devices" shape, minus the zip). Contrast with
+ * RecalcEstimateAction above: same endpoint, one POST per record.
  *
  * `locations` is a SEPARATE declaration from that selection-bar entry, which
  * the view owns. It is not redundant, and it is not an opt-out of anything:
