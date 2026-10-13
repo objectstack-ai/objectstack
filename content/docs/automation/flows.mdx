@@ -2146,9 +2146,10 @@ keyed by flow name, on `GET /api/v1/meta/flow`. The verdict is one of three:
 
 A save, a publish or a reload that registers a corrected body ends the
 `refused` state. The field is absent where no automation service answered the
-read. On the item read it is published where `lock` is, by the uncached read,
-and not by the default cached one; the list carries it on every deployment.
-It is the verdict of the engine in the process that answered.
+read. The item read carries it on the default cached read as well as the
+uncached one: it is read live on every call and kept out of the ETag, so a
+read that carries it is always answered in full, never with `304 Not
+Modified`. It is the verdict of the engine in the process that answered.
 
 ## Expressions in flows
 

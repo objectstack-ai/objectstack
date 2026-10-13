@@ -508,9 +508,11 @@ const MetadataProtectionEnvelopeFields = {
  * reason `lock` is one: it is a fact about the item that the document cannot
  * carry. The stored `status` is the author's declared state, and a flow the
  * engine refused at boot used to be served as `status: 'active'` with nothing
- * beside it. It shares the protection keys' posture — the uncached branch
- * publishes it, the cached branch does not — and it is absent wherever no
- * automation engine answered, so absence is never read as `registered`.
+ * beside it. Unlike the protection keys it is published by BOTH branches:
+ * the cached branch is the default door, so it carries the verdict too, read
+ * live and kept out of the ETag ({@link GetMetaItemCachedResponseSchema}). It
+ * is absent wherever no automation engine answered, so absence is never read
+ * as `registered`.
  */
 export const GetMetaItemResponseSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
@@ -545,10 +547,11 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
     'The automation engine\'s verdict on this flow (see `FlowRegistrationSchema`): `registered`, or '
     + '`refused` with the engine\'s `reason` verbatim, or `unregistered`. Present only on a `flow` read '
     + 'answered by a process that runs an automation service; absent otherwise, and absence means no '
-    + 'engine judged it, never `registered`. Like the protection keys it is published by the uncached '
-    + 'branch only, and it is absent on a draft read, whose pending body no engine holds. The verdict '
-    + 'is the answering process\'s engine. Beside `item`, never inside it: the item\'s `status` stays '
-    + 'what its author declared.',
+    + 'engine judged it, never `registered`. Unlike the protection keys it is published by the cached '
+    + 'branch too, read live and never part of the ETag, so a cached read that carries it is never '
+    + 'answered 304; it is absent on a draft read, whose pending body no engine holds. The verdict is '
+    + 'the answering process\'s engine. Beside `item`, never inside it: the item\'s `status` stays what '
+    + 'its author declared.',
   ),
 }));
 
