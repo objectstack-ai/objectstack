@@ -1,5 +1,783 @@
 # @objectstack/verify
 
+## 18.0.0-next.0
+
+### Minor Changes
+
+- 34dba5a: `bootStack` boots the production `single` shape: the Default Organization exists from the boot, every sign-up is its member, and the harness admin is its owner
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A change in what the verification harness boots, following the runtime it verifies: no key of any metadata schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. `BootOptions.orgContext` keeps its name and type; what it asserts is described below. The package publishes (not unpublished); no ADR-0087 id covers this rule and this diff adds none (not registered / already-registered). -->
+  
+  **BREAKING** for fixtures that relied on an organization-less `single` boot, shipped as `minor` under the repo's launch-window convention for breaking changes (ADR-0131 D3, D11).
+  
+  - **What `bootStack` boots now.** Under `single`, `@objectstack/plugin-auth` creates the Default Organization before the seeds load, so every boot has one, and `bootStack` no longer turns off the platform admin's owner bind. The harness admin is the Default Organization's `owner`, every user a fixture signs up is its `member`, and their sessions carry it as the active organization. This is the shape `objectstack dev` and `objectstack serve` boot. Before, `bootStack` pinned `autoDefaultOrganization: false` and booted a `single` stack with no organization at all, a shape no deployment runs after this release.
+  - **`orgContext` asserts, it no longer switches.** `orgContext: true` keeps its refusal: the boot fails when the harness admin holds no membership, and it still refuses to compose with `multiTenant`. The bind itself happens on every boot.
+  - **Unchanged.** `multiTenant` boots a walled posture as before, and the open default-organization bootstrap still abstains under it.
+  
+  **The remedy.** A fixture that needs a principal outside the organization's `org_member` domain removes that user's membership (an administrator's act a real deployment performs) instead of booting without an organization. A fixture that minted its own `slug: 'default'` organization reads the one the boot created. A fixture that ran on `databaseDriver: 'memory'` and signs a user in meets the memory driver's tenant-scope refusal (`503`) until ADR-0131 C8; run that leg on the SQL in-memory driver.
+- aa71c4d: `sys_user_permission_set` gains `permission_set`, the name of the permission set a grant holds, written beside `permission_set_id` (ADR-0131 D4)
+  
+  Clause-②: yes (widening)
+  
+  - **The column.** `permission_set` is a read-only text column, at most 100 characters, holding the `name` of the `sys_permission_set` row that `permission_set_id` points at. It is readable everywhere the grant row is readable. A grant written before this release has `NULL` here until the backfill stage rewrites it. No reader uses the column yet: the grant is still resolved from `permission_set_id`, which stays until it is dropped in a later major (ADR-0131 D10).
+  - **The platform writes it, on every write that carries `permission_set_id`, for every caller.** Two `@objectstack/plugin-security` engine hooks (`beforeInsert` and `beforeUpdate` on `sys_user_permission_set`) look up the set by id and store its name. A write that sends only the id, which is how the data door and the Setup forms write, gets the name filled in.
+  - **A name that names a different set is refused** with `400 VALIDATION_FAILED`, `invalid_value` at `permission_set`. This covers a name that disagrees with the id written beside it, or with the id already stored when only the name is written. For a non-system caller it also covers a name beside an id that names no set this caller's organization can see. A name that agrees is accepted. A cleared name (`null`) is not stored as a clear: the derived name is written back. Before this change the column did not exist, so a write naming it was refused with `400 INVALID_FIELD`. No write that was accepted before is refused now.
+  - **Every platform grant writer writes both columns:** the organization-admin reconcile and the platform-admin promotion in `@objectstack/plugin-security`, the self-registration grant in `@objectstack/plugin-auth`, and the RLS probe persona in `@objectstack/verify`.
+  - **Nothing to migrate.** No principal's grants change. To fill the column on grants written by your own code, write the set's name as `permission_set`, or leave it out and the platform fills it in. Do not write any other value there.
+- 54f062b: feat(verify): the dashboard date-window family — every widget a dashboard's `dateRange` binds counts, under each preset of the picker, the rows that window selects, runnable as `os verify --dashboard-windows` (#15953)
+  
+  Clause-②: yes
+  
+  A seventh derived proof family beside `runCrudVerification`, `runRlsProofs`, `runReferenceShapeProofs`, `runDeleteBehaviorProofs`, `runUniqueScopeProofs` and `runParentWriteReachProofs`. It needs no hand-written test: from the app's own dashboards and datasets, read through the spec's own parse (`DashboardSchema`, `DatasetSchema`), it takes every dashboard that declares a `dateRange` and every widget that window binds, and asks the dataset door what each one counts.
+  
+  Where each half of the promise is read from:
+  
+  - the field a widget's window lands on is `DashboardWidgetSchema.filterBindings`' contract: `filterBindings.dateRange` names it, `false` opts the widget out (reported `unbound`), and absent means the dashboard's `dateRange.field` (`created_at` when unauthored). It resolves against the object behind the widget's dataset, as the stack registers it, and must be a `date` or `datetime` field;
+  - a preset's window is `DATE_RANGE_PRESET_MACRO_WINDOWS`, the `{date-macro}` pair each of the 13 `DATE_RANGE_PRESETS` names. It is handed to `POST /analytics/dataset/query` as written (`{ $gte: '{7_days_ago}' }`, `{ $gte: '{month_start}', $lte: '{month_end}' }`), ANDed with the widget's own filter as `runtimeFilter`, and the server resolves the tokens;
+  - the days a window selects, for the ground truth, are that same window resolved by `@objectstack/core`'s `resolveFilterTokens` on the caller's reference timezone (UTC unless the `ExecutionContext` carries one), first and last day inclusive.
+  
+  Per bound widget and count measure, fixture rows are written through the seed door on every preset's first and last day and the day either side (never after today), each stamped at UTC noon (a `date` field takes the day itself), owned by the caller, with every column the widget's filter, the dataset's filter and the measure's filter compare held to a value they select, and read back before anything is judged. The widget is asked as the signed-in caller with no window and under every preset, before and after the fixtures, so each count is a difference and the app's own rows cancel out. With no window it must count every fixture row before any window is judged. Under each preset it must count exactly the fixture rows that window selects: a widget that shows nothing there is `blank`, one that counts another number is contradicted, and one whose every preset answers what no window answers is named inert.
+  
+  A widget is `proven`, `contradicted` (a preset went blank or counted other rows), `failed` (the door refused or faulted on a windowed query while the widget's own query answered), `inconclusive` (a fixture could not be written or did not read back as written, the widget with no window did not count every fixture row, its own query is refused, the day turned mid-probe, or the caller's timezone is not UTC), `unbound` or `excluded` (`excludedKind` names why: no count measure, a filter the ground truth cannot model, a window on a missing or non-temporal field, an undeclared or unparsed dataset or dashboard, an object the app does not declare or the CRUD derivation cannot synthesize). `contradicted + failed` widgets are the report's `hardFailures`. An average, a sum or a derived measure is counted as excluded; a held column is an equality, an `$in`, a `$nin` or `$ne` on a field that declares its options, or `{current_user_id}`.
+  
+  **`@objectstack/verify` — new exports.**
+  
+  - `runDashboardWindowProofs(stack, token, config, { now? })` → `DashboardWindowReport`. Run it on a fresh stack of its own, as a principal that reads the dashboards' objects: it writes fixture rows.
+  - `deriveDashboardWindowCases(config)`, `formatDashboardWindowReport(report)`.
+  - Types: `DashboardWindowExclusion`, `DashboardWindowMeasureCase`, `DashboardWindowCase`, `DashboardWindowDashboard`, `DashboardWindowPreset`, `DashboardWindowAnswer`, `DashboardWindowPresetProbe`, `DashboardWindowMeasureResult`, `DashboardWindowWidgetStatus`, `DashboardWindowWidgetResult`, `DashboardWindowReport`, `DashboardWindowProofOptions`.
+  
+  ```ts
+  import { bootStack, runDashboardWindowProofs, formatDashboardWindowReport } from '@objectstack/verify';
+  
+  const stack = await bootStack(myApp);
+  const report = await runDashboardWindowProofs(stack, await stack.signIn(), myApp);
+  console.log(formatDashboardWindowReport(report)); // report.presets names what each preset handed the door
+  expect(report.summary.hardFailures).toBe(0);
+  await stack.stop();
+  ```
+  
+  **`@objectstack/cli` — `os verify --dashboard-windows`.** Opt-in, like `--unique-scopes` and `--parent-write-reach`, on a fresh boot of its own, as the signed-in admin. A widget that went blank or counted other rows than its window selects, or a windowed query the door refused or faulted, counts in `hardFailures` and fails the run. The `--json` document carries the report as `dashboardWindows` when the flag is given; without the flag the run and its document are unchanged.
+- 9f4b652: feat(verify): the delete-behaviour family — every `deleteBehavior` a reference field declares is what a delete of the referenced record does, runnable as `os verify --delete-behaviors` (#15953)
+  
+  Clause-②: yes
+  
+  A fourth derived proof family beside `runCrudVerification`, `runRlsProofs` and `runReferenceShapeProofs`. It needs no hand-written test: from the app's own objects it takes every field whose type is in `REFERENCE_VALUE_TYPES` (`lookup`, `master_detail`, `user`, `tree`) and reads what the declaration states through the spec's own parse of the field (`FieldSchema`), which is the value a built artifact carries: a `lookup` or `tree` that authors nothing states `set_null`, an authored value is kept, and a bare `master_detail` states none. For each field it creates a fresh target record and a holder referencing it, deletes the target by id, and reads back what the engine left, through two doors: the REST data route as the signed-in caller, and the engine's own delete as the system principal.
+  
+  - `cascade` holds when the holder is gone with the target.
+  - `set_null` holds when the holder survives and no longer references the deleted record.
+  - `restrict` holds when the delete is refused with `DELETE_RESTRICTED` naming the holder's object, and both records are still there.
+  - In every case a second holder, referencing another record of the same target object, must be untouched.
+  
+  A refusal for any other reason (a hook's veto, a validation rule, a permission) is `unattributed`, so an engine that refused every delete would not read as a proven `restrict`. A field is `proven`, `contradicted` (a delete did something else), `failed` (a door faulted), `inconclusive` (an unattributed refusal, or a fixture the app refused; the report says why), `excluded` or `not-derivable`. `contradicted + failed` is the report's `hardFailures`.
+  
+  Two shapes are `excluded` rather than given an expectation, because an engine rule decides what a delete does to them, not the declaration: a `set_null` on a required reference (it cannot be cleared), and a field whose parse carries no `deleteBehavior` (a bare `master_detail`, a `user`). A field is `not-derivable` when no fixture can be built from the app's metadata: its target is not an object the app declares (such as `sys_user`), it is `readonly` or `system`, or the CRUD derivation cannot synthesize its holder or target. Only by-id deletes are asked; a predicate or multi-row delete is outside the family.
+  
+  **`@objectstack/verify` — new exports.**
+  
+  - `runDeleteBehaviorProofs(stack, token, config, { doors? })` → `DeleteBehaviorReport`. Run it on a fresh stack of its own: every `restrict` probe leaves its records behind.
+  - `deriveDeleteBehaviorCases(config)`, `formatDeleteBehaviorReport(report)`.
+  - Types: `DeclaredDeleteBehavior`, `DeleteBehaviorCase`, `DeleteBehaviorDoor`, `DeleteBehaviorAnswer`, `DeleteBehaviorProbeResult`, `DeleteBehaviorFieldStatus`, `DeleteBehaviorFieldResult`, `DeleteBehaviorReport`, `DeleteBehaviorProofOptions`.
+  
+  ```ts
+  import { bootStack, runDeleteBehaviorProofs, formatDeleteBehaviorReport } from '@objectstack/verify';
+  
+  const stack = await bootStack(myApp);
+  const report = await runDeleteBehaviorProofs(stack, await stack.signIn(), myApp);
+  console.log(formatDeleteBehaviorReport(report));
+  expect(report.summary.hardFailures).toBe(0);
+  await stack.stop();
+  ```
+  
+  **`@objectstack/cli` — `os verify --delete-behaviors`.** Opt-in, like `--reference-shapes`, on a fresh boot of its own. A contradicted declaration, or a door that faulted, counts in `hardFailures` and fails the run. A `tree` field's delete is not honoured today (deleting the parent leaves the child's reference in place), so an app that declares one fails the run with the flag. The `--json` document carries the report as `deleteBehaviors` when the flag is given; without the flag the run and its document are unchanged.
+- 965a1bf: feat(verify): the parent-derived write reach family — a write on a `controlled_by_parent` detail is admitted exactly when the caller holds that verb on the detail and can edit its master, runnable as `os verify --parent-write-reach` (#15953)
+  
+  Clause-②: yes
+  
+  A sixth derived proof family beside `runCrudVerification`, `runRlsProofs`, `runReferenceShapeProofs`, `runDeleteBehaviorProofs` and `runUniqueScopeProofs`. It needs no hand-written test: from the app's own objects it takes every object the spec's own parse (`ObjectSchema`) declares `sharingModel: 'controlled_by_parent'` with exactly one `master_detail` field, walks the chain of masters above it to the first one that governs its own rows, and asks the engine what a detail write meets as a signed-in caller: the insert, update and delete by id the REST data route makes, with the caller's context, where a refusal keeps the object and the operation it names (the REST envelope names the route's object whatever was refused). The system door bypasses authorization and is not asked.
+  
+  The promise is ADR-0055 §3 and its chain amendment: editing, deleting or creating a detail requires edit access to its master, and the detail's own object permission is the first door. So each write is expected admitted exactly when both halves hold:
+  
+  - the caller holds the verb on the detail's object — read from the server's effective permissions for the caller (`GET /auth/me/permissions`), folded by `objectPermissionGrants`;
+  - the caller can edit the master — measured, never re-derived: an empty update of the master as the caller, which runs every write gate the master has, the gate above a master that is itself controlled by its parent included.
+  
+  The writes are made by three verifier personas whose permission sets the family authors from the app's own objects — the root master by the all-records grant (`modifyAllRecords`) with every verb on the detail; the root master readable but not editable with every verb on the detail; the all-records grant with no delete on the detail — and by one persona per position the app declares, whose capability is what the app binds to the position. Each writes under a master chain another principal owns (so the all-records grant, not ownership, is exercised) and one it owns, on a detail another principal owns and one it owns. A refusal holds only as the platform's `403 PERMISSION_DENIED` naming the detail and the operation; any other refusal (a rule, a hook's own code, a refusal on another object) is `unattributed`. An object is `proven`, `contradicted` (a write met the other answer), `failed` (a door faulted), `inconclusive`, `excluded` (no one master: none, two, an undeclared one, a cycle, or a chain at the write gate's depth bound) or `not-derivable`. `contradicted + failed` objects, plus personas that could not be provisioned, are the report's `hardFailures`.
+  
+  A detail two levels below its root master (a line under a quote under an account) is answered the same way: its write is admitted exactly when the caller holds the verb on the detail and may update the middle master directly, which also needs edit access to the root, and refused otherwise, so the family reports such a chain `proven`.
+  
+  **`@objectstack/verify` — new exports.**
+  
+  - `runParentWriteReachProofs(stack, config)` → `ParentWriteReachReport`. Run it on a fresh stack of its own, booted with `parentWriteReachSecurity(config)`: it signs up personas and writes, deletes and creates details. On a stack booted without it the verifier personas are reported not run, with the reason, and counted.
+  - `parentWriteReachSecurity(config)` → the `SecurityPlugin` that registers the verifier personas' permission sets beside the app's declared default profile.
+  - `deriveParentWriteReachCases(config)`, `formatParentWriteReachReport(report)`.
+  - Types: `ParentWriteReachHop`, `ParentWriteReachCase`, `ParentWriteReachVerb`, `ParentWriteReachOwner`, `ParentWriteReachAnswer`, `ParentWriteReachProbeResult`, `ParentWriteReachReach`, `ParentWriteReachObjectStatus`, `ParentWriteReachObjectResult`, `ParentWriteReachPersona`, `ParentWriteReachReport`.
+  
+  ```ts
+  import { bootStack, runParentWriteReachProofs, formatParentWriteReachReport, parentWriteReachSecurity } from '@objectstack/verify';
+  
+  const stack = await bootStack(myApp, { security: parentWriteReachSecurity(myApp) });
+  const report = await runParentWriteReachProofs(stack, myApp);
+  console.log(formatParentWriteReachReport(report)); // report.personas names who wrote
+  expect(report.summary.hardFailures).toBe(0);
+  await stack.stop();
+  ```
+  
+  **`@objectstack/cli` — `os verify --parent-write-reach`.** Opt-in, like `--delete-behaviors` and `--unique-scopes`, on a fresh boot of its own with the verifier personas' sets registered. A write whose answer disagrees, a door that faulted, or a persona that could not be provisioned counts in `hardFailures` and fails the run. The `--json` document carries the report as `parentWriteReach` when the flag is given; without the flag the run and its document are unchanged.
+  
+  **The unique-scope family — one change and one correction.** `runUniqueScopeProofs` is new in this same release, and two sentences of its own entry in these notes no longer hold:
+  
+  - **Attribution changed.** A unique refusal that names no field is now `unattributed` where a unique `indexes[]` entry covers the probed column. That entry refuses the same second holder, naming no field either, and admits the twin, so there the refusal may be the entry's rather than the field's own declaration. This is a change to the family's attribution rule: a field-less refusal is attributed to the field only when its twin with only the probed value changed is admitted AND no unique `indexes[]` entry covers the field.
+  - **How the second organization is provisioned, corrected.** The family provisions it by `signUp`, then `POST /auth/organization/create`, not by a sign-up that creates its own organization as that entry's parenthetical says.
+- eab7236: feat(verify): the reference-value shape family — every client-writable reference field refuses a value that is not a record id (ADR-0104 D1), runnable as `os verify --reference-shapes` (#15953)
+  
+  Clause-②: yes
+  
+  A third derived proof family beside `runCrudVerification` and `runRlsProofs`. It needs no hand-written test: from the app's own objects it takes every field whose type is in `REFERENCE_VALUE_TYPES` (`lookup`, `master_detail`, `user`, `tree`), reads what the declaration promises from `valueSchemaFor(field, 'stored')` (a record-id string, or an array of them when the field is multi-valued), and asks the engine whether three wrong-shaped values are refused: a boolean, a number, and an embedded record object (the expanded read shape written back). A multi-valued field gets each one as an array element. Every probe is written on insert and on update, through two doors: the REST data routes as the signed-in caller, and the engine's own write as the system principal.
+  
+  A probe counts as refused only when the engine names the probed field in its refusal. A refusal that names something else is reported `unattributed`, so an engine that refused every write would not read as proven. A field is `proven` (every probe refused), `holes` (a probe was admitted), `failed` (a door faulted), `inconclusive` (a probe could not be attributed or written; the report says why) or `excluded` (declared `readonly` or `system`, which the caller does not write). `holes + failed` is the report's `hardFailures`.
+  
+  **`@objectstack/verify` — new exports.**
+  
+  - `runReferenceShapeProofs(stack, token, config, { doors? })` → `ReferenceShapeReport`. Run it on a fresh stack of its own: a door that admits a probe lands a row.
+  - `deriveReferenceShapeCases(config)`, `referenceShapeProbeValue(kind, multiple, id)`, `formatReferenceShapeReport(report)`, `REFERENCE_SHAPE_PROBE_ID`.
+  - Types: `ReferenceShapeCase`, `ReferenceShapeDoor`, `ReferenceShapeOperation`, `ReferenceShapeProbeKind`, `ReferenceShapeProbeResult`, `ReferenceShapeFieldStatus`, `ReferenceShapeFieldResult`, `ReferenceShapeReport`, `ReferenceShapeProofOptions`.
+  
+  ```ts
+  import { bootStack, runReferenceShapeProofs, formatReferenceShapeReport } from '@objectstack/verify';
+  
+  const stack = await bootStack(myApp);
+  const report = await runReferenceShapeProofs(stack, await stack.signIn(), myApp);
+  console.log(formatReferenceShapeReport(report));
+  expect(report.summary.hardFailures).toBe(0);
+  await stack.stop();
+  ```
+  
+  **`@objectstack/cli` — `os verify --reference-shapes`.** Opt-in, like `--rls`, on a fresh boot of its own. It is opt-in because the engine still admits wrong-shaped elements on a `multiple: true` `lookup` or `user` field (#22908), so an app that declares one would fail the run until the engine refuses them. A field with holes, or a door that faulted, counts in `hardFailures` and fails the run. The `--json` document carries the report as `referenceShapes` when the flag is given; without the flag the run and its document are unchanged.
+- f93bf12: feat(verify): the unique-scope family — every field declared `unique` collides as its declared scope says, runnable as `os verify --unique-scopes` (#15953)
+  
+  Clause-②: yes
+  
+  A fifth derived proof family beside `runCrudVerification`, `runRlsProofs`, `runReferenceShapeProofs` and `runDeleteBehaviorProofs`. It needs no hand-written test: from the app's own objects it takes every field whose `unique` the spec's own parse of the field (`FieldSchema`) declares — the value a built artifact carries, so an `autonumber` that authors no `unique` states `'organization'` — and asks the engine what a second holder of one value meets, through two doors: the REST data route as a signed-in caller, and the engine's own write as the system principal.
+  
+  - **Within one organization** — by insert and by update — the second holder must be refused, whatever the scope. On a `single`-posture boot that organization is the install's one: the untenanted install, where every write lands in it.
+  - **Across two organizations** — on an org-scoped boot only — the family provisions a second organization the way a user makes one (a sign-up that creates its own) and offers it the value. A `true` or `'organization'` field must admit it; a `'global'` field, or any field of an object with no organization column (`tenancy.enabled: false`), must refuse it. On a boot with one organization this leg is reported not run, with the reason, on the report's `boot`.
+  
+  A refusal proves the collision only when it is the platform's unique refusal (`UNIQUE_VIOLATION` at the REST door, `DUPLICATE_RECORD` at the system door) and it is this field's: it names the field, or it names none and the same record with only the probed value changed is admitted. A per-organization constraint is an expression index, which the driver reports by index name, so its refusal carries no `field`, and that twin is what attributes it. Any other refusal (an app hook's own dedupe, a validation rule, a permission, a constraint on another field) is `unattributed`, so an engine that refused every write would not read as a proven scope. A field is `proven`, `contradicted` (a second holder met something other than its scope), `failed` (a door faulted), `inconclusive`, `excluded` or `not-derivable`. `contradicted + failed` is the report's `hardFailures`.
+  
+  A field the caller cannot set (`readonly`, `system`, a runtime-issued `autonumber`) is probed through the system door only, which keeps an explicit value. A derived value (`formula`, `summary`) is `excluded`; a field with no fresh values to offer (a `boolean`, a `select`, a multi-valued reference, a target the app does not declare) is `not-derivable`. The population is the field-level declaration: a unique `indexes[]` entry is a different surface, with its own meaning of bare `true`, and is not in it.
+  
+  **`@objectstack/verify` — new exports.**
+  
+  - `runUniqueScopeProofs(stack, token, config, { doors? })` → `UniqueScopeReport`. Run it on a fresh stack of its own: it writes duplicates on purpose. Boot the stack with `{ multiTenant: true }` to run the cross-organization leg.
+  - `deriveUniqueScopeCases(config)`, `formatUniqueScopeReport(report)`.
+  - Types: `DeclaredUniqueScope`, `UniqueScopeCase`, `UniqueScopeDoor`, `UniqueScopeLeg`, `UniqueScopeOperation`, `UniqueScopeAnswer`, `UniqueScopeProbeResult`, `UniqueScopeFieldStatus`, `UniqueScopeFieldResult`, `UniqueScopeReport`, `UniqueScopeProofOptions`.
+  
+  ```ts
+  import { bootStack, runUniqueScopeProofs, formatUniqueScopeReport } from '@objectstack/verify';
+  
+  const stack = await bootStack(myApp, { multiTenant: true });
+  const report = await runUniqueScopeProofs(stack, await stack.signIn(), myApp);
+  console.log(formatUniqueScopeReport(report)); // report.boot names the legs this boot ran
+  expect(report.summary.hardFailures).toBe(0);
+  await stack.stop();
+  ```
+  
+  **`@objectstack/cli` — `os verify --unique-scopes`.** Opt-in, like `--reference-shapes` and `--delete-behaviors`, on a fresh boot of its own; with `--multi-tenant` it runs both legs. A second holder met wrongly, or a door that faulted, counts in `hardFailures` and fails the run. The `--json` document carries the report as `uniqueScopes` when the flag is given; without the flag the run and its document are unchanged.
+- 7098aca: `bootStack` mounts the always-on capability slate `objectstack serve` mounts for every app, and builds each provider from the app's configuration the way `serve` builds it
+  
+  Clause-②: yes (narrowing: a configuration whose mail or SMS settings, or the OS_EMAIL_* / OS_SMS_* environment, name a transport that cannot deliver, now fails bootStack where it booted; widening: bootStack mounts the always-on slate objectstack serve mounts for every app and hands each provider the app's configuration, so the app's analytics cubes now reach the registry, where it mounted fewer and built them with defaults)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling or stored shape is removed, renamed or re-shaped, and no stored row is read, rewritten, converted or dropped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the in-process verification boot of @objectstack/verify: a configuration whose mail or SMS settings (or the OS_EMAIL_* / OS_SMS_* environment) name a transport that cannot deliver now fails the boot where the provider was absent or built with defaults. The other categories are closed on facts: every bumped package publishes (not unpublished); no ADR-0087 id covers these paths and this diff adds none (not registered / already-registered); and the narrowed surface is a runtime boot function, not an interface or a type (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  **`@objectstack/verify` — the composition `serve` mounts, built the way `serve` builds it.** For one configuration, `bootStack(config, opts)` already mounted the providers the app's `requires` names and the plugins in its own `plugins` array. It now also:
+  
+  - **Mounts the always-on slate** `serve` mounts for every app, whether or not `requires` names it: `queue`, `job`, `cache`, `settings`, `email`, `storage`, `sms`, `sharing`, `messaging`, `analytics` and `package-registry`. Before, a slate provider was mounted only where a mounted plugin hard-depended on it, so an app's tests ran without the inbox delivery, the mail service, the file storage and the package registry its users' server has.
+  - **Builds each provider from the app's configuration**, by the same rule `serve` reads: the analytics service gets the app's `analyticsCubes` (the top level, then each package body's), the email service the app's `email` block with `OS_EMAIL_*` over it, the SMS service the `sms` block with `OS_SMS_*` over it, and the storage service the `OS_STORAGE_LOCAL_ROOT` root (`.objectstack/data/uploads` under the working directory by default). Before, each was built with its own defaults: no cubes, no mail configuration. So the app's cubes now reach the analytics registry; a cube the service refuses (one over an object the API does not serve) is warned and skipped by the service, under `bootStack` as under `serve`, and no boot fails on it.
+  - A caller's `extraPlugins`, `security` and `analytics` instances still take precedence by identity, and are not handed the configuration. A suite that needs a provider configured its own way (a temporary storage root, a mail transport) passes its instance in `extraPlugins`.
+  - Not mounted, because they are decisions about a server process rather than about the configuration: `serve`'s MCP endpoint (`OS_MCP_SERVER_ENABLED`) and its pinyin search (`OS_SEARCH_PINYIN_ENABLED`). A suite that exercises either passes the provider in `extraPlugins`.
+  
+  **What now fails that booted before (the narrowing).** A provider `bootStack` constructs and cannot build fails the boot, naming the capability token and the package — whether the app declared the token or the slate appended it. `serve` logs a slate provider it cannot build and boots on; a test boot does not, so an app's tests never pass on a composition its server does not run. In practice:
+  
+  - a configuration whose `email` or `sms` settings, or the `OS_EMAIL_*` / `OS_SMS_*` environment of the test process, name a transport that cannot deliver (`provider: 'smtp'` with no host, `resend` / `postmark` with no API key, an unknown provider tag) is refused with the reader's own remedy. Set `OS_EMAIL_PROVIDER=log` / `OS_SMS_PROVIDER=log` in the test environment if it is not meant to send mail or SMS.
+  
+  **`@objectstack/core`** exports the rule both boots read: `resolveServedCapabilities` (given the tokens a stack declares, which capability tokens a served boot mounts providers for — those, `email` for a declared `auth`, the host's own defaults, the always-on slate unless the preset is `minimal`, and `job` / `queue` ahead of what schedules background work) and `resolveCapabilityArgument` (what each provider is constructed with), with their `ServedCapabilities`, `CapabilityArgumentInput` and `CapabilityArgument` types; and `resolveStorageCapabilityArg`, `resolveStorageLocalRootEnv` and `StorageCapabilityArg`, moved here from the CLI.
+  
+  **`@objectstack/plugin-email`** exports `resolveEmailCapabilityArg`, `resolveDeploymentAppName` and `EmailCapabilityArg`, and **`@objectstack/service-sms`** exports `resolveSmsCapabilityArg` and `SmsCapabilityArg` — the readers that build each provider from the deployment's configuration, moved from the CLI to sit beside the transport vocabulary they refuse against. `resolveCapabilityArgument` reads each off the provider module it is handed.
+  
+  **`@objectstack/cli`**: `serve` reads both rules from `@objectstack/core` and composes exactly what it composed before. `os migrate plan` / `apply`'s declaration boot reads the same token rule for the providers it composes (the same set as before; a declared `auth` now places `email` right after the declared tokens, as `serve` does). `os verify` boots through `bootStack`, so it now mounts the always-on slate and builds the providers from the app's configuration. The moved functions stay importable from the `serve` command module.
+- 97610a5: `bootStack` composes what `objectstack serve` composes from the same configuration: the providers the app's `requires` names, and the plugins in the app's own `plugins` array
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling or stored shape is removed, renamed or re-shaped, and no stored row is read, rewritten, converted or dropped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the in-process verification boot of @objectstack/verify: a second live boot of one configuration object is refused, and an entry of the app's own `plugins` array that cannot be loaded or registered fails the boot instead of being absent. The other categories are closed on facts: every bumped package publishes (not unpublished); no ADR-0087 id covers these paths and this diff adds none (not registered / already-registered); and the narrowed surface is a runtime boot function, not an interface or a type (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  **`@objectstack/verify` — one composition rule.** For one configuration, `bootStack(config, opts)` now mounts what `objectstack serve` mounts from it, so an app's tests boot the composition its users get:
+  
+  - **The providers the app's `requires` names**, by `serve`'s own reader and table (top-level `requires`, otherwise each package body's), plus the always-on providers a mounted plugin hard-depends on. An app no longer lists them in `extraPlugins` by hand.
+  - **The plugins in the app's own `plugins` array**, by `serve`'s rule for an entry: an instance is mounted as written, a plain bundle is wrapped into `AppPlugin`, a package name is loaded from the app's root (`hostRoot`).
+  - **The caller wins by identity.** An `extraPlugins` instance takes precedence over a `requires` provider it is (exact `name` or class name) and over an app plugin with the same `name`; that app plugin is not mounted. `security` and `analytics` instances take precedence over an app plugin of the same `name` the same way.
+  - **`hostRoot` is the app's root** in the two places `serve` uses the config's directory: the automation service's `packageRoot` (where a declarative connector's package-relative file ref is read) — now also when `automation: true` asks for the service — and the root a string `plugins` entry is resolved from. A suite that does not run from the app's directory passes it.
+  - **Offline CI.** An app whose `plugins` array wires the marketplace-facing `@objectstack/cloud-connection` plugins gets them mounted, pointed at `OS_CLOUD_URL` (by default the public catalog). Set `OS_CLOUD_URL=off` in the test environment, before the configuration module is imported, to keep the suite offline.
+  
+  **What now fails that booted before (the narrowing).**
+  
+  - **A second live boot of the same configuration object is refused** with `code: 'RESOURCE_CONFLICT'`, `status: 409`, and so is a copy (`{ ...config }`) that carries an app-plugin instance a live boot mounted: the instances in a `plugins` array are module-level, and two kernels must not share them. Live means until `stop()` resolves. Remedy: `stop()` the first stack before booting again; or share one boot with `bootStackOnce(config, opts)`; or, to keep two stacks of one app live at once, boot the second on a configuration built again (call its builder once more, or import a fresh module instance of it). A `{ ...config }` spread is not a configuration of its own: a live boot keeps references into the configuration's nested definitions.
+  - **An app `plugins` entry that cannot be loaded or registered fails the boot**, naming the entry (`plugins[i]`) and its remedy. `serve` logs such an entry and boots on; a test boot does not, so a plugin the app declares is never silently absent from its tests.
+  - **A provider or app plugin that refuses to start fails the boot** where the fixed plugin set never mounted it — for example a declarative connector whose package-relative file ref does not resolve from `hostRoot`.
+  
+  **`@objectstack/core`** exports the pieces both boots read: `CAPABILITY_PROVIDERS`, `CapabilitySpec`, `CapabilityIdentities` and `providesCapability` (the `requires` token → provider table and its exact identity match); `stackDeclaredCapabilities`, `resolveStackCollection`, `declaredPackageEntries`, `stackPackageBodies` and `collectFromPackageBodies` (the package-owned collection reader); and `materializeStackPlugin` with `StackPluginLoaders` (what a `plugins` entry becomes).
+  
+  **`@objectstack/cli`**: `os verify` boots the app anchored at the directory holding its config (`hostRoot`), as `serve` anchors it, so `os verify --app path/to/objectstack.config.ts` run from another directory reads the app's package-relative files (a declarative connector's spec, a string `plugins` entry) and resolves `--multi-tenant`'s organizations package from the app, not from the working directory. `serve` itself does not change: `Serve.CAPABILITY_PROVIDERS` and `Serve.providesCapability` are handles over the `@objectstack/core` declarations, the stack-collection readers are re-exported from there, and `serve`'s `plugins` loop reads the entry rule from there.
+- fbb065f: feat(verify): the handle gains a door to the automation engine's condition evaluator
+  
+  Clause-②: yes (widening)
+  
+  An app's tests can evaluate a flow condition on the booted stack's own evaluator through the in-process handle, so a suite no longer calls the booted kernel's `automation` service by hand for a condition's truth table.
+  
+  - **`stack.automation.evaluateCondition(condition, variables)`** calls the booted `automation` service's `evaluateCondition`, the method a flow's start gate, its edges and its `decision` branches are decided by. It resolves with the engine's boolean, unchanged. It is for a truth table over variable shapes no write produces.
+  - **`condition`** takes the shapes the engine takes, and is handed over as given: an envelope (`{ dialect: 'cel', source }`) or a string, which the engine reads as CEL unless it carries a `{var}` hole (the legacy template dialect). The engine's own flow sites hand the evaluator an envelope (a start node's string `condition` and a `decision` branch's `expression` are wrapped as `{ dialect: 'cel', source }`, and an edge's condition already is one), so pass the envelope to model any of them.
+  - **`variables`** is a plain object. Each own key becomes one entry of the `Map` the engine takes: `{ record, previous }` binds `record` and `previous`.
+  - **Refusals are not the handle's.** A condition the engine cannot evaluate rejects with the engine's own error, never `false`. On a stack with no automation service it rejects with the kernel's own `SERVICE_NOT_REGISTERED` error, whose `serviceName` is `'automation'` (`isServiceNotRegisteredError` from `@objectstack/core` answers `true`). Boot with `automation: true`, or have the app declare `requires: ['automation']`. No error code is added.
+- 27f0d83: feat(verify): `bootStack(config, { artifact })` boots the compiled artifact as the app, so a test runs each hook's and action's lowered `body` in the sandbox, as a deployment does
+  
+  Clause-②: yes (widening)
+  
+  `objectstack build` lowers each inline hook `handler` and action `target` it can into a metadata-only `body`, and a deployment runs that body in the runtime's QuickJS sandbox, against the sandbox's `ctx`. `bootStack` mounted the source configuration only, so a handle test ran the function in-process, and a handler that refuses once lowered passed every test.
+  
+  - **`BootOptions.artifact`** names the compiled `objectstack.json`: a path, resolved against `hostRoot` (so `'dist/objectstack.json'` names the app's own build), or an `http(s)://` URL. The artifact is read by the runtime's own artifact loader (`loadArtifactBundle`, with the options every artifact boot reads it with) and mounted as the app, in place of `config`. `AppPlugin` binds each hook's `body` ahead of its `handler`, through the same sandbox runner every artifact boot uses, so every door (`hooks.run`, `actions.run`, `api`, …) runs what the build shipped.
+  - **A refused body answers as the body-only path answers.** The handle rejects with the sandbox's `SandboxError`, which carries a `code` and `status` the body declared on its throw. A body that crashes (a `TypeError`) carries none, and REST answers it `500` `INTERNAL_ERROR`. For example, a handler that writes to `ctx.dispatch.scope` passes in-process and refuses every insert once lowered, because the sandbox hands a body `ctx.dispatch` without `scope`.
+  - **The rest of the stack is still composed from `config`**: its `requires`, its own `plugins`, its declared default profile, its datasources. `objectstack serve <config>` composes the same way. So `config` is the configuration the artifact was built from.
+  - **A local artifact gets its `objectstack-runtime.*.mjs` merged**, so a callable the build could not lower runs in-process from it, as under `objectstack start`. `objectstack build --strict-body` refuses such a callable at build time, and its artifact is body-only.
+  - **Refused before anything boots**, each with its `code` and `status`: an artifact that cannot be loaded (`RESOURCE_NOT_FOUND`, 404; the boot never falls back to the source), an artifact built from another app (`RESOURCE_CONFLICT`, 409), and a configuration carrying `onEnable` (`INVALID_REQUEST`, 400). No artifact carries `onEnable`; for a configuration that mounts no plugin instance of its own, `objectstack serve <config>` grafts it from the configuration module, a `@objectstack/cli` rule this package does not re-derive. No error code is added.
+  - The handle lowers nothing: build the artifact first. A stale artifact boots stale bodies.
+- a8f24b0: feat(verify): the handle gains a door that observes the writes the engine receives, a hook's refused write included
+  
+  Clause-②: yes (widening)
+  
+  An app's tests can see what a hook handed the engine through the in-process handle, so a suite no longer wraps the booted engine's write methods in a spy to find a refused write, to wait for a fire-and-forget hook, or to stage a refusal.
+  
+  - **`stack.observeWrites(fn)`** runs `fn` and resolves with every insert, update and delete the booted engine received meanwhile, in the order each reached it. Each entry (`ObservedWrite`) carries `object`, `operation`, the payload (`data`), the update or delete selection (`where`), `multi`, the execution context the write carried (`context`), and the engine's answer (`outcome`): `pending`, then `resolved` with its result, or `refused` with the error the engine threw, unchanged, and that error's own `code`.
+  - **What it is.** One global middleware on the engine's own chain (`registerMiddleware`), added on the first call. It passes every operation on unchanged and decides nothing. So it sits after the write gates the boot registered. Every write those gates let through is recorded, from any door (`hooks.run`, `seed`, a flow, a route, a hook's `ctx.api`), and so is every refusal the engine raises past them: a declared validation rule (`VALIDATION_FAILED`), a hook's throw, a unique conflict (`DUPLICATE_RECORD`). A write a gate refuses, the permission check among them, never reaches it and leaves no entry. Its refusal still reaches whoever made the write.
+  - **An outcome is the engine's answer to that call, not a statement about stored rows.** A write an `after*` hook refuses was refused after the driver wrote, and its row can stay. Read rows back with `stack.rows`.
+  - **The window is time, not cause.** A write the stack makes for its own reasons while `fn` runs is recorded too, so filter by `object`.
+  - **An `async: true` hook.** Its write reaches the engine after the write that fired it has returned. `fn` is handed the live observation (`WriteObservation`), and `observation.settled(match)` resolves with the first write `match` accepts once the engine has answered it. It rejects after `timeoutMs` (default 2000), naming every write observed, or when the observation closes first. A hook that writes nothing leaves nothing to observe.
+  - **Staging a refusal.** Arrange one the engine makes itself: seed the row that already holds a unique value the hook will write, or set up the state a declared validation rule refuses. The handle has no switch that refuses a write in the engine's place.
+  - A `fn` that is not a function, a `match` that is not a function, and a `timeoutMs` that is not a positive number are refused with `code: 'INVALID_REQUEST'`, `status: 400`. A rejection of `fn` is rethrown unchanged once the observation has closed. No error code is added.
+  - New exported types: `ObservedWrite`, `ObservedWriteOutcome`, `WriteObservation`.
+- b4ce5e2: feat(verify): `hooks.run` takes the system principal on an insert and a delete, so a user-less record trigger can be driven
+  
+  Clause-②: yes (widening)
+  
+  An app's tests can drive a record-change flow fired by a write with no user (an integration's or a system job's insert or delete) through the in-process handle, so a suite no longer hands a flow a record through the booted kernel's `automation` service by hand.
+  
+  - **`hooks.run(object, 'insert' | 'delete', input, { system: true })`** is the engine's own `insert` / `delete` under `{ isSystem: true }`, the same call the person's write makes with only the context changed. `{ system: true }` on `update` is unchanged. No permission gate applies. The bound hooks still run (they see `session.isSystem` and no `userId`), declared validations still refuse, and the record-change trigger fires the object's flows with no trigger user.
+  - **A record the engine no longer holds.** A system (or a person's) delete hands a `record-after-delete` flow the row's pre-image as `record` and as `previous`, and by then the engine no longer holds the row: the flow's `get_record` of that id finds nothing. A `record-before-delete` flow on the same delete still finds it.
+  - **Not `seed`.** `seed(object, rows)` also runs as the system, and it sets `skipTriggers`, so it fires no record-change flow: use it for end-state fixture data, and `{ system: true }` for a write the app should react to.
+  - A call naming both callers (`{ as: token, system: true }`) is still refused with `code: 'INVALID_REQUEST'`, `status: 400`, before anything is written. Every other refusal is the engine's own error, unchanged: assert on its `code` and `status`.
+- 5910b5e: feat(verify): the handle gains a system-context update door and a predicate update door
+  
+  Clause-②: yes (widening)
+  
+  An app's tests reach two more engine write paths through the in-process handle, so a suite no longer calls the booted kernel's `objectql` service by hand for them.
+  
+  - **The system principal on an update.** `hooks.run(object, 'update', { id, ...fields }, { system: true })` writes one row by id under `{ isSystem: true }`, the context a system job or an integration writes under. No permission gate applies. The bound hooks still run (they see `session.isSystem` and no `userId`), declared validations still refuse, and the record-change trigger fires its flows with no trigger user. The new type is `AsSystem` (`{ system: true }`), exported beside `AsUser`.
+    - `{ system: true }` beside an `as` token is refused with `code: 'INVALID_REQUEST'`, `status: 400` before anything is written. Fixture rows are still `seed(object, rows)`, which also skips record triggers. (`insert` and `delete` take `{ system: true }` too: see the system insert and delete entry.)
+  - **The predicate update.** `hooks.updateWhere(object, where, data, opts)` is the engine's own predicate path, `update(object, data, { where, multi: true, context })`. It writes one payload to every row `where` selects and resolves with the affected-row count. The engine dispatches `beforeUpdate` and `afterUpdate` once per matched row, each bound to that row's own pre-image as `previous`, so record-change flows evaluate and fire per row. No REST door reaches this path: `POST /data/:object/updateMany` writes by id. The caller is `{ as: token }` or `{ system: true }`.
+    - It refuses with `code: 'INVALID_REQUEST'`, `status: 400`, before the engine is touched, a `where` that is not an object, and a call the engine's own update dispatch would write by id: a `where` that names only an `id`, or an `id` in `data` beside a `where` that selects by nothing else. Write one row by id through `hooks.run(object, 'update', { id, ...fields }, opts)`. An `id` inside a larger predicate (`{ id, status: 'open' }`) stays a predicate update. An `id` in `data` beside a real predicate is refused by the engine itself, as it is on every caller.
+  
+  Every other refusal from either door is the engine's own error, unchanged: assert on its `code` and `status`.
+- a6f3a13: fix(verify)!: `hooks.run(object, 'delete', …)` resolves with what the engine's `delete` answers, not with a row
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/verify/src/handle.ts#VerifyHandle) One TypeScript-only declaration moves, and it is not metadata: the `hooks.run` member of the published `VerifyHandle` interface, whose `delete` answer narrows from a row to the engine's own declared delete answer. No spec key, authorable spelling, Zod schema, export name or stored shape moves, and no runtime behaviour changes, so `objectstack migrate meta` has nothing to rewrite. The party affected is a TypeScript author who read a field of a delete's answer: the compiler names that read at their own call site, and the body says what to assert instead. The other categories are closed on facts: the package publishes (not `unpublished`); no ADR-0087 id covers a test handle's return type, and this diff adds none (not `registered` / `already-registered`); and the member was typed with the named `EngineRow` at the merge base, which predicate 4 reads as concrete, not erased (not `type-surface-only`). -->
+  
+  **BREAKING** for TypeScript code that reads the answer of a `hooks.run` delete. It ships as `minor` under the launch-window convention for breaking changes. No runtime behaviour changes.
+  
+  `hooks.run(object, 'delete', { id }, opts)`, for a person (`{ as }`) and for the system (`{ system: true }`), was declared to resolve with a row (`Promise<EngineRow>`). The engine's `delete` answers `true` for the row it removed. So a test that read a field of the answer type-checked, and then read `undefined`.
+  
+  **What `hooks.run` declares now.** Both overloads are generic over the operation.
+  
+  - An `insert` or an `update` resolves with the row, as before.
+  - A `delete` resolves with the engine's own declared delete answer, `boolean | number`. It is read off `ObjectQL['delete']` rather than re-declared, and a `hooks.run` delete, which is always by id, answers `true`.
+  - A call whose operation is the union `'insert' | 'update' | 'delete'` still type-checks, and resolves with the union of the answers.
+  
+  **If your code read a field of a delete's answer.** That read was always `undefined` at run time, and it is now a compile error. Assert the answer itself, `expect(await stack.hooks.run(object, 'delete', { id }, opts)).toBe(true)`. If the test needs the deleted row, read it with `stack.rows(object, { id })` before the delete.
+
+### Patch Changes
+
+- 0253192: Grants name their permission set, with no `sys_permission_set` row read (ADR-0131 D4)
+  
+  - `@objectstack/plugin-auth`: the self-registration grant names the declared set alone. Admission asks the security catalog and the activation ledger whether the set grants, and the settlement writes `{ user_id, permission_set }` with no row read, so a deployment with no `sys_permission_set` row for the set still grants it. The last-administrator guard reads which set a grant holds from its name only; writing `permission_set_id` moves no standing.
+  - `@objectstack/verify`: the RLS probe persona's grant names the registered probe set alone; it no longer needs, or refuses for want of, a boot-seeded `sys_permission_set` row.
+  - `@objectstack/platform-objects`: Setup's user page grants a permission set by name: the Add picker stores the set's machine name (`valueField: 'name'`, `linkField: 'permission_set'`), and the list shows the name column. The picker still lists `sys_permission_set` rows; listing the security catalog itself is a console change.
+- e078506: fix(verify): the RLS probe persona is provisioned through the registry — `provisionRlsProbePersona` no longer mints a `sys_permission_set` row
+  
+  Clause-②: no
+  
+  `provisionRlsProbePersona` used to find-or-create a `sys_permission_set` row named `verify_rls_probe` and grant it. Under ADR-0131 D3/D4 a permission set's one home is the registry: the authorization resolver reads the grant's `permission_set` name and takes the definition from the security catalog, never from a row. So a row this function minted was a copy of a definition nothing read.
+  
+  It now:
+  
+  - asks the security catalog (`securityCatalogReaderOf`, the read the resolver itself uses) whether `verify_rls_probe` is registered. `rlsProbeSecurity(config)` registers it at boot;
+  - reads the id of the row the boot already seeded for that registered set, because `sys_user_permission_set.permission_set_id` is still a required column;
+  - writes the one grant, carrying both columns.
+  
+  It throws, writing nothing, when the catalog does not serve the probe set or the boot seeded no row for it. `objectstack verify --rls` reports either as a degraded probe persona and fails the run, as it already does for any provisioning failure. Fix for a caller that hits it: boot the stack with `rlsProbeSecurity(config)` as the `security` option of `bootStack`.
+- 37c7114: docs(verify): `hooks.run` names the anonymous public-form door a booted stack already serves
+  
+  Clause-②: no
+  
+  An app's web-to-lead or web-to-case branch runs on an anonymous public-form submission, and a booted stack already serves that write: it is the form's own route, `api('/forms/:slug/submit', { method: 'POST', body })` with no token. `bootStack` mounts that route, and the in-process handle has no method for it, by design: its one owner is `@objectstack/rest`. Nothing changes in what the package does. `hooks.run`'s documentation now names the door, so a suite reaches it instead of calling the engine with a hand-built guest context.
+  
+  What the door does, as the package's own tests now pin it on a booted stack:
+  
+  - It hands the engine the route's own context: the form's one-object grant, the `guest_portal` permission set, and `anonymous`. There is no user and no system principal.
+  - A bound hook sees no session and no user, so an app's guest branch runs, and the record-change trigger fires the object's flows with no trigger user.
+  - It keeps only the fields the form collects and answers `201` with `{ id }`. Read the row back with `rows(object, { id })`.
+  - An unknown slug, or a form that is shared but not anonymous, is answered `404` with `code: 'FORM_NOT_FOUND'`, and nothing is written.
+- 1e62f71: Inbound mail lands as a capability: `requires: ['mailbox']` registers the mirrored message `sys_mail_message`, its record links `sys_mail_association` and the mailbox directory `sys_mailbox`, with an unassociated pool restricted to mailbox owners and the new `manage_mailboxes` capability
+  
+  Clause-②: yes (widening)
+  
+  - **`@objectstack/spec`.** Two closed vocabularies each gain one entry; every stack and permission set that parsed before parses unchanged.
+    - **`mailbox`** is a platform capability token (`PLATFORM_CAPABILITY_TOKENS`, provider `@objectstack/service-mailbox`, open edition). It is not on the always-on slate: an app that wants mailboxes declares `requires: ['mailbox']`.
+    - **`manage_mailboxes`** is a curated organization capability (`PLATFORM_CAPABILITIES`), held by default by platform administrators (`ADMIN_FULL_ACCESS_CAPABILITIES`). Its holder reads the mailbox directory, and every mirrored message and association of its organization past the mail read gates, the unassociated pool included. Object grants and field-level security still apply to a holder.
+  - **`@objectstack/service-mailbox`** (new). `MailboxServicePlugin` owns the three objects (ADR-0029 D1/D2: registered only where the capability is required) and installs two read gates on the data middleware, so a list's `total` agrees with its rows:
+    - `sys_mail_message`, the RFC 5322 mirror of one inbound message (participants, Message-ID and threading headers, subject, text and HTML bodies, attachments as `sys_attachment` rows). A row is served to a caller who can read a record one of its associations names, to the owner of the mailbox it arrived in, or to a `manage_mailboxes` holder. A message no record matched (`association_state: 'unassociated'`) is therefore refused to an ordinary member as not found (`404 RECORD_NOT_FOUND`), never shown organization-wide.
+    - `sys_mail_association`, one row per (message, record) link with the participant address and email field that matched. A row is served to a caller who can read the record it names, or to a `manage_mailboxes` holder.
+    - `sys_mailbox`, the mailbox's address and owner, served only to a `manage_mailboxes` holder (`requiredPermissions`).
+    - All three are `engine-owned` and the data API serves `get` and `list` only. The HTML body is plain text (`textarea`), never rendered markup. Nothing writes these rows yet: the IMAP connector and the ingest engine, which stamp associations from the email fields an app flags with `mailAssociation`, ship next in this package.
+  - **`@objectstack/core`.** `resolveReadableParentIds` ("which of these parent records can the caller read", one caller-scoped engine read per parent object) is exported, so every parent-derived read gate asks the one evaluator. `CAPABILITY_PROVIDERS` gains the `mailbox` row.
+  - **`@objectstack/plugin-security`.** `organization_admin` (and its derived no-bypass variant) holds `manage_mailboxes`: an organization administrator reads its own organization's mailboxes and pool.
+  - **`@objectstack/plugin-audit`, `@objectstack/service-storage`.** The comment, activity, ledger and attachment gates import `resolveReadableParentIds` from `@objectstack/core` instead of carrying their own copies. The two copies were byte-identical, so no gate's answer changes.
+  - **`@objectstack/cli`, `@objectstack/verify`.** Both depend on `@objectstack/service-mailbox`, so `objectstack serve` and `bootStack` mount the provider an app's `requires: ['mailbox']` names. The ADR-0131 organization-ownership inventory carries a row for each new object.
+- de24373: fix(verify): `bootStack` composes the artifact-less `MetadataPlugin` that `objectstack serve` gives a host configuration, so a stack's declared `apis` endpoints answer under the harness as they answer under `serve` (#23088)
+  
+  Clause-②: no
+  
+  `bootStack`'s `metadata` slot was the kernel's in-memory fallback, which has no endpoint matcher (`matchEndpoint`). So every `apis` endpoint a stack declared answered `404 ENDPOINT_NOT_FOUND` in a test boot while `objectstack serve` of the same stack served it, and the boot logged `AppPlugin`'s "no endpoint matcher" warning. The harness now composes `@objectstack/metadata`'s `MetadataPlugin` the way `serve` composes it for a host configuration: no artifact, `bootstrap: 'lazy'`, and `rootDir` set to `BootOptions.hostRoot`. It reads none of the stack, so `AppPlugin` stays the single registrar of the stack's metadata.
+  
+  - A declared endpoint answers as it does under `serve`: `401` without a session where it is `authRequired`, and its declared answer with one. An undeclared path under the same mount keeps the bare `404`.
+  - A `MetadataPlugin` you pass in `BootOptions.extraPlugins`, or one your app declares in its own `plugins`, takes the composed one's place. Pass your own to boot an artifact-backed one.
+  - Two other answers of a test boot move with the slot: `GET /api/v1/discovery` reports the `metadata` service as `available` instead of `degraded`, and `GET /api/v1/dev/metadata-events` (the development-only metadata reload stream, mounted because `bootStack` boots in the development posture) answers `200` instead of `404`, as under `objectstack dev`. The `GET /api/v1/meta/TYPE` answers are unchanged, measured over 22 types on the showcase and CRM examples.
+- Updated dependencies [317cddd]
+- Updated dependencies [fec87e7]
+- Updated dependencies [34dba5a]
+- Updated dependencies [34dba5a]
+- Updated dependencies [34dba5a]
+- Updated dependencies [959c209]
+- Updated dependencies [c28f317]
+- Updated dependencies [17e4425]
+- Updated dependencies [7d7943d]
+- Updated dependencies [aa71c4d]
+- Updated dependencies [19bb55e]
+- Updated dependencies [19bb55e]
+- Updated dependencies [ba8af87]
+- Updated dependencies [99801d8]
+- Updated dependencies [2e10c9a]
+- Updated dependencies [67b669e]
+- Updated dependencies [0253192]
+- Updated dependencies [0253192]
+- Updated dependencies [0253192]
+- Updated dependencies [48cca4a]
+- Updated dependencies [45e206e]
+- Updated dependencies [bfc15d2]
+- Updated dependencies [2ff0825]
+- Updated dependencies [e7e6544]
+- Updated dependencies [e7e6544]
+- Updated dependencies [cd3d391]
+- Updated dependencies [149294c]
+- Updated dependencies [990341a]
+- Updated dependencies [9646991]
+- Updated dependencies [7aa8d51]
+- Updated dependencies [95a8435]
+- Updated dependencies [c8a9783]
+- Updated dependencies [9e9e6f9]
+- Updated dependencies [2fbe1fd]
+- Updated dependencies [60bcfe7]
+- Updated dependencies [d112087]
+- Updated dependencies [d112087]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [8c5aa50]
+- Updated dependencies [7de0265]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [c8b062f]
+- Updated dependencies [117d34d]
+- Updated dependencies [6729e10]
+- Updated dependencies [1920cf3]
+- Updated dependencies [1920cf3]
+- Updated dependencies [41d0d40]
+- Updated dependencies [c52bfb4]
+- Updated dependencies [c7d6037]
+- Updated dependencies [240890c]
+- Updated dependencies [72b26ed]
+- Updated dependencies [2d21b9c]
+- Updated dependencies [f66fdc7]
+- Updated dependencies [9fdb127]
+- Updated dependencies [615c696]
+- Updated dependencies [968acc8]
+- Updated dependencies [111ffff]
+- Updated dependencies [12b9daf]
+- Updated dependencies [d85615d]
+- Updated dependencies [6a06e3b]
+- Updated dependencies [0e9e7b7]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [9c93ce6]
+- Updated dependencies [77a94d8]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [879bd38]
+- Updated dependencies [a7a48b7]
+- Updated dependencies [b88c356]
+- Updated dependencies [a3bcbcf]
+- Updated dependencies [8a399b2]
+- Updated dependencies [04e776b]
+- Updated dependencies [1c563af]
+- Updated dependencies [1c563af]
+- Updated dependencies [a7df552]
+- Updated dependencies [2f70c22]
+- Updated dependencies [78f841b]
+- Updated dependencies [f0022c4]
+- Updated dependencies [1fb274e]
+- Updated dependencies [1fb274e]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [f85a83b]
+- Updated dependencies [0db5ad5]
+- Updated dependencies [93125ae]
+- Updated dependencies [29678f2]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [56bf27a]
+- Updated dependencies [e67ba80]
+- Updated dependencies [c8d06a9]
+- Updated dependencies [cdeabec]
+- Updated dependencies [4935c66]
+- Updated dependencies [c6fe02d]
+- Updated dependencies [c6fe02d]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [a87d8be]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [a543e24]
+- Updated dependencies [51290bc]
+- Updated dependencies [ad381fd]
+- Updated dependencies [4e4111c]
+- Updated dependencies [6ff6ed6]
+- Updated dependencies [2b61f2d]
+- Updated dependencies [d0bb78e]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3b49318]
+- Updated dependencies [4e9fe9f]
+- Updated dependencies [fe98cc6]
+- Updated dependencies [98998ca]
+- Updated dependencies [3aa0c7b]
+- Updated dependencies [3aa0c7b]
+- Updated dependencies [9ad3d24]
+- Updated dependencies [036bf1d]
+- Updated dependencies [326a90a]
+- Updated dependencies [9fe7448]
+- Updated dependencies [2e11d90]
+- Updated dependencies [7518ee3]
+- Updated dependencies [4049cac]
+- Updated dependencies [7ebbc01]
+- Updated dependencies [0e9371f]
+- Updated dependencies [0b7ba4d]
+- Updated dependencies [0b7ba4d]
+- Updated dependencies [4578c56]
+- Updated dependencies [fbcbcf1]
+- Updated dependencies [fbcbcf1]
+- Updated dependencies [c512c25]
+- Updated dependencies [ffb31fc]
+- Updated dependencies [0b997ea]
+- Updated dependencies [3513ac7]
+- Updated dependencies [81bd9fa]
+- Updated dependencies [215e662]
+- Updated dependencies [3d886ee]
+- Updated dependencies [f4069c5]
+- Updated dependencies [d8d0711]
+- Updated dependencies [0ee2d15]
+- Updated dependencies [a45d5d8]
+- Updated dependencies [4f4c4ed]
+- Updated dependencies [79c35d4]
+- Updated dependencies [f6e1d49]
+- Updated dependencies [f2626c7]
+- Updated dependencies [e175479]
+- Updated dependencies [59d993c]
+- Updated dependencies [e9a1f5c]
+- Updated dependencies [40a6ee5]
+- Updated dependencies [e87070e]
+- Updated dependencies [5910b5e]
+- Updated dependencies [7098aca]
+- Updated dependencies [97610a5]
+- Updated dependencies [081e6a0]
+- Updated dependencies [c8c803c]
+- Updated dependencies [f05649f]
+- Updated dependencies [e030d43]
+- Updated dependencies [ca135dc]
+- Updated dependencies [e36ee53]
+- Updated dependencies [1884948]
+- Updated dependencies [3599fef]
+- Updated dependencies [8a995b8]
+- Updated dependencies [54c3ce1]
+- Updated dependencies [3089848]
+- Updated dependencies [e23eccb]
+- Updated dependencies [ac8f2c5]
+- Updated dependencies [43fc500]
+- Updated dependencies [746637e]
+- Updated dependencies [00bee27]
+- Updated dependencies [fdfdd7e]
+- Updated dependencies [db9cf80]
+- Updated dependencies [e75dced]
+- Updated dependencies [9af0005]
+- Updated dependencies [3403be8]
+- Updated dependencies [f66c440]
+- Updated dependencies [440bed6]
+- Updated dependencies [c572fe2]
+- Updated dependencies [166a94f]
+- Updated dependencies [dd986d8]
+- Updated dependencies [b53b949]
+- Updated dependencies [b2549a8]
+- Updated dependencies [7806a14]
+- Updated dependencies [ee8751d]
+- Updated dependencies [96e4be4]
+- Updated dependencies [35ef501]
+- Updated dependencies [faf6348]
+- Updated dependencies [ce3d0ad]
+- Updated dependencies [ce3d0ad]
+- Updated dependencies [e148ca9]
+- Updated dependencies [557ae7c]
+- Updated dependencies [f782f17]
+- Updated dependencies [6a3fe25]
+- Updated dependencies [7731d70]
+- Updated dependencies [5495331]
+- Updated dependencies [da989bb]
+- Updated dependencies [3073b72]
+- Updated dependencies [c76edeb]
+- Updated dependencies [5b12503]
+- Updated dependencies [514bf3c]
+- Updated dependencies [20e7d52]
+- Updated dependencies [b3a3634]
+- Updated dependencies [3e72f93]
+- Updated dependencies [f89b5f5]
+- Updated dependencies [d25b187]
+- Updated dependencies [d25b187]
+- Updated dependencies [0e00d36]
+- Updated dependencies [d1d42ec]
+- Updated dependencies [d303b3e]
+- Updated dependencies [018b077]
+- Updated dependencies [0fea05f]
+- Updated dependencies [e194ab4]
+- Updated dependencies [86bf9ed]
+- Updated dependencies [d748ae8]
+- Updated dependencies [dab6bf4]
+- Updated dependencies [25be876]
+- Updated dependencies [ed1de8c]
+- Updated dependencies [b98e984]
+- Updated dependencies [76bc1e0]
+- Updated dependencies [a00cf99]
+- Updated dependencies [a00cf99]
+- Updated dependencies [a00cf99]
+- Updated dependencies [5fb1746]
+- Updated dependencies [29a163f]
+- Updated dependencies [e223152]
+- Updated dependencies [18d9990]
+- Updated dependencies [9f5eca5]
+- Updated dependencies [9963322]
+- Updated dependencies [b27b894]
+- Updated dependencies [26aa999]
+- Updated dependencies [874a38d]
+- Updated dependencies [3d0eeef]
+- Updated dependencies [cb3bb93]
+- Updated dependencies [83b8b80]
+- Updated dependencies [1b99388]
+- Updated dependencies [ad14957]
+- Updated dependencies [02d9f69]
+- Updated dependencies [f53f14b]
+- Updated dependencies [e8c6666]
+- Updated dependencies [a800912]
+- Updated dependencies [4b7c630]
+- Updated dependencies [87cd458]
+- Updated dependencies [86da194]
+- Updated dependencies [d973c34]
+- Updated dependencies [156ddfa]
+- Updated dependencies [156ddfa]
+- Updated dependencies [1bb1da1]
+- Updated dependencies [5081090]
+- Updated dependencies [5081090]
+- Updated dependencies [5081090]
+- Updated dependencies [243dd3c]
+- Updated dependencies [615cba8]
+- Updated dependencies [b6eb25f]
+- Updated dependencies [165587e]
+- Updated dependencies [3b5475a]
+- Updated dependencies [7399080]
+- Updated dependencies [e04759d]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [b32ee3e]
+- Updated dependencies [b62260c]
+- Updated dependencies [91f46d0]
+- Updated dependencies [e5899a6]
+- Updated dependencies [d7b26df]
+- Updated dependencies [9859e4e]
+- Updated dependencies [490cb6d]
+- Updated dependencies [e865300]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [896a434]
+- Updated dependencies [c74d843]
+- Updated dependencies [6d5191e]
+- Updated dependencies [85edd61]
+- Updated dependencies [e84aeb3]
+- Updated dependencies [8558668]
+- Updated dependencies [0984817]
+- Updated dependencies [322ff1e]
+- Updated dependencies [680a86b]
+- Updated dependencies [d952358]
+- Updated dependencies [7b0a9c9]
+- Updated dependencies [8bd0fcd]
+- Updated dependencies [5fc57b3]
+- Updated dependencies [fe58bbc]
+- Updated dependencies [75b6d6a]
+- Updated dependencies [c4e7fa5]
+- Updated dependencies [c4e7fa5]
+- Updated dependencies [581ca7d]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [b7cd1af]
+- Updated dependencies [f313fbc]
+- Updated dependencies [9814035]
+- Updated dependencies [f9c7588]
+- Updated dependencies [55382dc]
+- Updated dependencies [b1d701b]
+- Updated dependencies [c11b758]
+- Updated dependencies [f9ebb7d]
+- Updated dependencies [bb0db13]
+- Updated dependencies [efcbac7]
+- Updated dependencies [51f36e7]
+- Updated dependencies [31b5a5f]
+- Updated dependencies [20028df]
+- Updated dependencies [20028df]
+- Updated dependencies [69d4218]
+- Updated dependencies [5ce6773]
+- Updated dependencies [8532783]
+- Updated dependencies [eb20c33]
+- Updated dependencies [9432bac]
+- Updated dependencies [6373952]
+- Updated dependencies [3caae97]
+- Updated dependencies [3f69471]
+- Updated dependencies [8bc7836]
+- Updated dependencies [e5687cb]
+- Updated dependencies [1e62f71]
+- Updated dependencies [ec7f7f8]
+- Updated dependencies [038d4c9]
+- Updated dependencies [3fdb92d]
+- Updated dependencies [8d8f965]
+- Updated dependencies [147a0d1]
+- Updated dependencies [21914c3]
+- Updated dependencies [6a40a09]
+- Updated dependencies [1959aac]
+- Updated dependencies [e1deaef]
+- Updated dependencies [117817e]
+- Updated dependencies [4663801]
+- Updated dependencies [8e4a230]
+- Updated dependencies [3071d3e]
+- Updated dependencies [d294951]
+- Updated dependencies [6a6a4d3]
+- Updated dependencies [0cbfb7c]
+- Updated dependencies [7f2f081]
+- Updated dependencies [4267484]
+- Updated dependencies [1badd31]
+- Updated dependencies [58f5c90]
+- Updated dependencies [55828c5]
+- Updated dependencies [7856110]
+- Updated dependencies [9b37edb]
+- Updated dependencies [a22e67b]
+- Updated dependencies [62ce45d]
+- Updated dependencies [84c4fff]
+- Updated dependencies [c5b43b6]
+- Updated dependencies [6662e3f]
+- Updated dependencies [39e93ef]
+- Updated dependencies [02bec6c]
+- Updated dependencies [719183f]
+- Updated dependencies [0aef788]
+- Updated dependencies [8464380]
+- Updated dependencies [8c10776]
+- Updated dependencies [c4b84ad]
+- Updated dependencies [252a582]
+- Updated dependencies [abf8655]
+- Updated dependencies [f931e76]
+- Updated dependencies [0511341]
+- Updated dependencies [a3d47c2]
+- Updated dependencies [21c8644]
+- Updated dependencies [dfb3ba2]
+- Updated dependencies [e5f9f01]
+- Updated dependencies [5d63c37]
+- Updated dependencies [dc93781]
+- Updated dependencies [20949e7]
+- Updated dependencies [3d6392f]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [8311650]
+- Updated dependencies [8311650]
+- Updated dependencies [de70e97]
+- Updated dependencies [74c4b34]
+- Updated dependencies [e040b8c]
+- Updated dependencies [f451a59]
+- Updated dependencies [ba95607]
+- Updated dependencies [b53b949]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [1e44436]
+- Updated dependencies [2acff87]
+- Updated dependencies [299a2c6]
+- Updated dependencies [e23eccb]
+- Updated dependencies [bf492c8]
+- Updated dependencies [c7a3234]
+  - @objectstack/spec@18.0.0-next.0
+  - @objectstack/runtime@18.0.0-next.0
+  - @objectstack/plugin-security@18.0.0-next.0
+  - @objectstack/objectql@18.0.0-next.0
+  - @objectstack/plugin-auth@18.0.0-next.0
+  - @objectstack/core@18.0.0-next.0
+  - @objectstack/platform-objects@18.0.0-next.0
+  - @objectstack/service-automation@18.0.0-next.0
+  - @objectstack/plugin-sharing@18.0.0-next.0
+  - @objectstack/rest@18.0.0-next.0
+  - @objectstack/plugin-email@18.0.0-next.0
+  - @objectstack/metadata@18.0.0-next.0
+  - @objectstack/plugin-audit@18.0.0-next.0
+  - @objectstack/service-settings@18.0.0-next.0
+  - @objectstack/service-realtime@18.0.0-next.0
+  - @objectstack/service-storage@18.0.0-next.0
+  - @objectstack/service-messaging@18.0.0-next.0
+  - @objectstack/service-datasource@18.0.0-next.0
+  - @objectstack/plugin-approvals@18.0.0-next.0
+  - @objectstack/service-analytics@18.0.0-next.0
+  - @objectstack/types@18.0.0-next.0
+  - @objectstack/plugin-hono-server@18.0.0-next.0
+  - @objectstack/mcp@18.0.0-next.0
+  - @objectstack/plugin-webhooks@18.0.0-next.0
+  - @objectstack/service-sms@18.0.0-next.0
+  - @objectstack/trigger-api@18.0.0-next.0
+  - @objectstack/service-mailbox@18.0.0-next.0
+  - @objectstack/service-package@18.0.0-next.0
+  - @objectstack/service-cache@18.0.0-next.0
+  - @objectstack/service-job@18.0.0-next.0
+  - @objectstack/service-queue@18.0.0-next.0
+  - @objectstack/trigger-record-change@18.0.0-next.0
+  - @objectstack/trigger-schedule@18.0.0-next.0
+  - @objectstack/plugin-pinyin-search@18.0.0-next.0
+
 ## 17.7.0
 
 ### Patch Changes

@@ -1,5 +1,413 @@
 # @objectstack/cloud-connection
 
+## 18.0.0-next.0
+
+### Minor Changes
+
+- 4806b18: Under a walled posture a package that carries security catalog items is the platform operator's: tenants are refused installing, upgrading, uninstalling or deleting it
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered walled-catalog-package-writes-retired -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes (ADR-0131 D3: "Shared-DB multi-tenant (`group` / `isolated`): tenant admins cannot create or edit catalog items; the operator defines the catalog for every tenant (managed packages, Studio).").
+  
+  **Why.** A package registers its positions, permission sets and capabilities environment-wide, and every organization resolves them by name. Measured on a booted `isolated` and `group` stack, with an organization owner granted `manage_metadata` inside their own organization (never the platform operator):
+  - the owner re-installed an operator-installed package at a new version through `install-local`, adding `manage_users` to a permission set another organization's member holds, and that member's next resolution carried `manage_users`;
+  - the owner's `install-local` uninstall of that package took the set away from that member;
+  - the owner's `DELETE /api/v1/packages/:id` of a runtime package the operator had saved a permission set into did the same.
+  
+  The existing name-conflict refusal stops only a package that shadows a name another holder has, never a write by the package that holds it.
+  
+  **FROM → TO**, on a `group` or `isolated` deployment, for a caller below the platform operator (the `PLATFORM_ADMIN` rung: the deployment's declared `OS_PLATFORM_OWNER_EMAIL` owner):
+  
+  - `POST /api/v1/marketplace/install-local` (`@objectstack/cloud-connection`) of a package whose incoming version declares a position, permission set or capability, or, on an upgrade, whose installed version does: **FROM** admitted to any `manage_metadata` holder **TO** `403 FORBIDDEN`, before the package is registered or the ledger written. The whole package is refused, since a package installs whole. The message names the posture, and `error.details.catalogItems` lists the items.
+  - `DELETE /api/v1/marketplace/install-local/:id` of a package whose installed version declares one: **FROM** admitted to any `manage_metadata` holder **TO** `403 FORBIDDEN`, before the ledger is touched.
+  - `DELETE /api/v1/packages/:id` on the runtime dispatcher, of a writable package holding stored positions or permission sets: **FROM** admitted to any `manage_metadata` holder **TO** `403 PERMISSION_DENIED`, before anything is deleted.
+  
+  **Unchanged.** A package with no catalog item installs, upgrades and uninstalls as before, for the same callers. The platform operator does all of the above as before. Under `single` (and with no `tenancy` service) nothing changes. Disabling a package is unchanged: it was measured not to change what any organization resolves.
+  
+  **The remedy.** The platform operator installs, upgrades and removes catalog-carrying packages. `@objectstack/spec` registers the change as the ADR-0087 semantic entry `walled-catalog-package-writes-retired`. Both doors ask the one predicate the catalog's other write doors ask, `walledCatalogWriteVerdict` (`@objectstack/metadata-core`), once per catalog type the package declares. `@objectstack/objectql` now exports `declaredSecurityCatalogNames`, the engine's own reading of what a manifest declares, so a package door judges the declarations the engine registers.
+- c7d6037: A package declares how it may be installed — `installModes: ['managed', 'unmanaged']` — and `os package install --install-mode unmanaged` copies it once into the environment as the environment's own metadata (ADR-0131 D6)
+  
+  Clause-②: yes (widening: the new optional manifest key `installModes`; the new exports `INSTALL_MODES`, `InstallModeSchema`, `InstallMode`, `DEFAULT_INSTALL_MODES`, `resolveInstallModes`, `UNMANAGED_INSTALL_KEY_DISPOSITIONS`, `UNMANAGED_INSTALL_REFUSING_DISPOSITIONS`, `UnmanagedInstallKeyDisposition`, `unmanagedInstallValueCarries` and `unmanagedInstallPostureRefusal`; the install-local body field `installMode`; the CLI option `--install-mode`; the error codes `STACK_UNMANAGED_INSTALL_UNCOPYABLE` and `INSTALL_MODE_NOT_PERMITTED`)
+  
+  A package installs one of two ways. **Managed**: it is registered as code, stays the authority, upgrades, and nothing it ships is edited in place. **Unmanaged**: its metadata is copied once into this environment under a new writable base; the copy's items are this environment's own metadata, the next save edits them, and it follows no upgrade. This entry adds the manifest key that declares the modes a package permits, and the install door that honours it; the copy itself is the companion entry `15213-unmanaged-import-verb`.
+  
+  - **`installModes`** (`@objectstack/spec`, `ManifestSchema`). Optional, a non-empty list of `'managed'` / `'unmanaged'`. Absent means `['managed']`, read through one resolver, `resolveInstallModes(manifest)`; there is no parse-time default, so no existing manifest changes by a byte. A package may permit `unmanaged` alone.
+  - **Refused at authoring.** `defineStack` — so `os validate` and `os build` — refuses a package that permits `unmanaged` while it carries what the copy cannot write as environment metadata: a non-empty collection of a type the metadata-type registry declares runtime-uncreatable (`agents`, `apis`, `capabilities`, `jobs`, `picklists`), code (`functions`, `onEnable`, `plugins`, a plugin artifact's `main` / `runtime` / `packaging` / `integrity`), or an extension of another package's items (`objectExtensions`, `picklistExtensions`, `navigationContributions`, `contributes`). The refusal is `STACK_UNMANAGED_INSTALL_UNCOPYABLE` (422), one `issues` entry per key. Fix: remove `'unmanaged'` from `manifest.installModes`, or move what cannot be copied out of the package. The install door judges the same body with the same key classification (`UNMANAGED_INSTALL_KEY_DISPOSITIONS`), so a package that passes `os validate` is not refused at install for a key nobody named.
+  - **The install door** (`@objectstack/cloud-connection`, `POST /api/v1/marketplace/install-local`). The body takes `installMode: 'managed' | 'unmanaged'`; absent means `managed`, so every existing caller is unchanged. Before anything is written, on the catalog and the air-gapped source alike:
+    - a mode the package's `installModes` does not permit answers `422 INSTALL_MODE_NOT_PERMITTED`, with `details.permitted`;
+    - `unmanaged` on a deployment whose requested tenancy posture walls organizations (`group`, `isolated`, or an unrecognised value) answers `409 UNMANAGED_INSTALL_WALLED_POSTURE`, naming the posture;
+    - a managed install of a package whose namespace a writable base holds — its unmanaged copy — answers `409 RESOURCE_CONFLICT`, naming that base: a managed install would otherwise take the namespace and stop serving the edited copies.
+    An unmanaged install writes no install-ledger entry, registers nothing under the package's id and does not load its sample data (the answer says so under `seeded`). The answer names the new base, the items copied and `installedFrom` (the source package id and version, for information only). The package's translation bundles are copied as `translation` items, so they reload at every boot with the environment's own translations.
+  - **`os package install --install-mode managed|unmanaged`** (`@objectstack/cli`). Without the option, nothing is sent and the runtime installs managed. An unmanaged answer prints the base, the item count and the source. A runtime that predates the install mode ignores the option and installs managed; the command then exits 1 and says so. The command's help now calls the catalog and the air-gapped artifact the two *sources*, so "mode" means one thing.
+  - **Copy semantics** (`@objectstack/metadata-protocol`). `importUnmanagedPackage` copies `translations` (each locale of each bundle as one `translation` item named `<namespace>_<locale>`, bundles merged in order), reads `installModes` without writing it onto the base, and no longer refuses an empty code container (`functions: {}`, `plugins: []`). `unmanagedInstallPostureRefusal` is exported, so the door and the import answer the walled posture with one sentence.
+  
+  Nothing existing is removed: every new key, field and option is optional, and an install that does not name a mode is managed, as before, with one stricter answer. That answer is the refusal above: a managed install of a package whose namespace a writable base holds now answers `409 RESOURCE_CONFLICT` before anything is written, where a catalog install of it answered `200`.
+- 2d21b9c: An unmanaged install no longer copies a package's protection lock, in either spelling: every copied item is editable, and the install's answer names each lock it dropped with the package's reason (ADR-0131 D6, ADR-0010)
+  
+  Clause-②: yes (widening: the new response field `strippedLocks` on `ImportUnmanagedPackageResponseSchema`, relayed on the install-local answer for `installMode: 'unmanaged'`)
+  
+  An unmanaged install copies a package into this environment as the environment's own metadata. A package can lock an item in two spellings: the `_lock` envelope (`_lock`, with `_lockReason`, `_lockSource` and `_lockDocsUrl`), or the author-facing `protection: { lock, reason, docsUrl }` block that a managed install translates into it. Until now an item locked with `_lock` was copied with that lock, so the next save of the copy answered `403 ITEM_LOCKED`; an item locked with `protection` was copied with an inert block that bound nothing, so the vendor's lock vanished without a word. The package permitted the unmanaged install through its `installModes`, so it chose to let environments take editable copies; a lock whose source is the package does not survive the copy.
+  
+  - **The copy** (`@objectstack/metadata-protocol`). `importUnmanagedPackage` writes every item without `_lock`, `_lockReason`, `_lockSource` and `_lockDocsUrl`, and, on a type whose schema declares one, without its `protection` block. Its answer gains `strippedLocks`: one entry per lock that bound (`no-overlay`, `no-delete` or `full`), in the order the items were written — `{ type, name, lock, reason? }`, with `reason` the package's reason verbatim and absent when it gave none. Each entry is the lock a managed install of the same item would have bound: an item carrying both spellings is reported once, with the `protection` block's lock and reason, because that is the one a managed install binds. A package that locks nothing answers `strippedLocks: []`.
+  - **Refusals are unchanged.** A lock the spec's declarations refuse (an unknown `_lock` value, a reason that is not a string, a malformed `protection` block) is not stripped: the save door refuses that item as before, `422 INVALID_METADATA`, and the install is rolled back. So is a `protection` block on a type whose schema does not declare one (`action`, `hook`, `page`). A managed install is unchanged: the package stays the authority, and its locks bind.
+  - **The declaration** (`@objectstack/spec`). `ImportUnmanagedPackageResponseSchema` declares `strippedLocks`; `lock` takes the three binding values of `MetadataLockSchema`.
+  - **The install door** (`@objectstack/cloud-connection`, `POST /api/v1/marketplace/install-local` with `installMode: 'unmanaged'`). The answer carries the import's `strippedLocks` as the import states it.
+  - **`os package install --install-mode unmanaged`** (`@objectstack/cli`). Each dropped lock prints as one line under `Locks removed`, spelled `<type>.<name>: <lock> — <reason>`, so the installer reads why the vendor locked an item before editing it. An answer from a runtime that states no list prints no lock line.
+  
+  Nothing is removed or narrowed: the answer gains a field, and every refusal of the unmanaged install is unchanged.
+
+### Patch Changes
+
+- c8a9783: feat(plugin-security)!: no seeder or materializer writes a `sys_permission_set` row — the declared-permission seeder, the platform-default materialization and the `permission` publish materializer are deleted
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime change on a platform object's rows and on TypeScript surfaces, not on any metadata schema: no key of any spec schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. The rows the retired seeders wrote stay in the table until a later ADR-0131 stage; nothing reads them for authorization. The package publishes (not unpublished); no ADR-0087 id covers this rule and this diff adds none (not registered / already-registered). -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  `SecurityPlugin` no longer writes a `sys_permission_set` row for any permission set: not for the platform defaults (`admin_full_access`, `member_default`, …), not for a set a package declares, not for an organization's copy, and not on a metadata reload or an organization's creation. Permission sets are served by the security catalog (ADR-0131 D3), and since the grant names its set (`sys_user_permission_set.permission_set`), no grant path needs a row. A fresh database still promotes its first platform administrator, grants organization administrators and self-registered members, and grants every principal what it was granted before. On a database that was already seeded, the existing rows stay as they are; they are no longer refreshed at boot. Until a later stage retires the ADR-0094 projector, publishing a permission set (a package-door publish, or a writable base's direct publish) still has it write a projection row, `managed_by: 'admin'` with no `package_id` (a package-door publish wrote `managed_by: 'package'` before this release); no authorization path reads it, and uninstalling the package removes it.
+  
+  - **Accepted package defaults follow every publish.** The `everyone` anchor is derived again after every landed `permission` mutation (publish, direct save or delete, through any door), so an accepted set whose new body no longer qualifies stops granting at once. Before this release the re-derivation ran only inside the publish materializer, and only when the published body carried an `isDefault` key.
+  - **`drift_status` and `drift_detail` are gone from `sys_permission_set`**, with the **Needs Attention** list view that listed them. Nothing computes them any more: the declared-versus-enforced diagnostic retired with the rows it compared. A Studio overlay that shadows a packaged set is still named at boot.
+  - **Uninstalling a package still revokes every grant of its permission sets** (ADR-0090 D5, "no ghost grants"). With no row standing for a package's set, both uninstall doors (`deletePackage` and `DELETE /api/v1/marketplace/install-local/:id`) capture the set names the package held just before they withdraw it from the registry, and the `security.package-permissions` cleanup revokes every `sys_user_permission_set` grant naming them. The withdrawal still runs before the cleanups. A grant naming such a set would otherwise survive the uninstall and be live again on reinstall. Grants written before the name column, and position bindings, are still reached through a legacy `sys_permission_set` row where an already-seeded database holds one.
+  - `bootstrapPlatformAdmin` no longer takes the `resync` option and no longer reports `seeded`, `resynced` or `resyncSkipped`. A refused read of the legacy `admin_full_access` row (the restrict-only reach to a grant written before the name column existed) withholds the promotion and says so once.
+  
+  Added (additive, nothing an author writes changes):
+  
+  - `@objectstack/metadata-protocol`: the optional `declared?: UninstallDeclared` argument of `UninstallCleanup` (and of `runUninstallCleanups`' request), the `UninstallDeclared` type, and `captureUninstallDeclared(registry, packageId, stored?)`, the one capture both doors call. A cleanup that ignores `declared` behaves as before.
+  - `@objectstack/objectql`: `SchemaRegistry.securityCatalogNamesHeldBy(packageId, type)`.
+  - `@objectstack/plugin-security`: `cleanupPackagePermissions` takes an optional fourth argument, the captured names.
+  
+  Removed from `@objectstack/plugin-security`'s public exports, with no replacement:
+  
+  - `bootstrapDeclaredPermissions`
+  - `normalizeManagedByVocab`
+  - `computePermissionSetDriftDiagnostics`, `persistPermissionSetDriftDiagnostics`, `runPermissionSetDriftDiagnostics`, and the types `PermissionSetDriftStatus`, `PermissionSetDriftDiagnostic`, `DriftDiagnosticsOptions`
+  - `CAPABILITY_DECLARATION_UNOWNED`, `CAPABILITY_PLATFORM_NAME_REFUSED`, `PERMISSION_SET_DECLARATION_UNOWNED`, `capabilityDeclarationUnownedDiagnostic`, `capabilityPlatformNameRefusedDiagnostic`, `permissionSetDeclarationUnownedDiagnostic`, `reportCapabilityDeclarationUnowned`, `reportCapabilityPlatformNameRefused`, `reportPermissionSetDeclarationUnowned`, and the types `CapabilityDeclarationUnownedDiagnostic`, `CapabilityPlatformNameRefusedDiagnostic`, `PermissionSetDeclarationUnownedDiagnostic`
+- 8601526: `RuntimeConfigPluginConfig.controlPlaneUrl`'s published docblock no longer says that an empty string declares "this runtime IS the cloud". It now says what the constructor does: `''` keeps marketplace and install requests on this origin, and that is all it says.
+  
+  Clause-②: no
+  
+  - The runtime that passes `''` may serve the catalog itself or proxy a control plane it does not name. The CLI's cloud-connected `os serve` passes `''` while its marketplace proxy forwards to the control plane `resolveCloudUrl()` answers. So `''` reads neither as "this runtime is the cloud" nor as "there is no upstream". This matches the `AppShellRuntimeConfig.cloudUrl` doc in `@object-ui/app-shell`.
+  - A runtime with no control plane says so with a decline spelling (`'off'` / `'none'` / `'local'` / `'disabled'`), in `controlPlaneUrl` or in `OS_CLOUD_URL`. The docblock now says this too.
+  - ⛔ No code, type, export or default change. The served `cloudUrl` and the telemetry posture do not change.
+- a45d5d8: fix(auth): a server-side session read no longer renews a browser session behind its cookie (#22258)
+  
+  **What was wrong.** better-auth's `getSession` renews a session older than `session.updateAge`: it moves `sys_session.expires_at` to `now + expiresIn` and stages the renewed session cookie on that call's own response. Ten doors read the session in-process (`auth.api.getSession`) and answer with their own response, so the renewal landed in the database and its cookie was discarded. The browser kept its old cookie, later `GET /api/v1/auth/get-session` calls found a fresh row and re-issued nothing, and the cookie expired first: a dead cookie beside a live bearer, and every cookie-only path then saw a signed-out user. Measured on a fresh dev stack (better-auth 1.7.3, `expiresIn` 604800 s, `updateAge` 86400 s, a session aged to `now + expiresIn − updateAge − 60 s`): `GET /api/v1/data/:object`, `GET /api/v1/auth/me/permissions`, `GET /api/v1/meta/object`, `GET /api/v1/i18n/locales`, `GET /api/v1/packages`, `GET /api/v1/marketplace/install-local` and the MCP door each moved `expires_at` by +86460 s and set no session cookie.
+  
+  **The rule now, decided by what the request carries.**
+  
+  - **A session cookie** (a browser, including a console that sends its cookie beside its bearer): the in-process read passes `query.disableRefresh`. The session renews only through `GET /api/v1/auth/get-session`, which re-issues the cookie with `Max-Age = expiresIn`, so cookie and session expire together. Measured after the change: every door above leaves `expires_at` unchanged on a cookie request and sets no cookie.
+  - **No session cookie** (a bearer-only client: `@objectstack/client` outside a browser, the `os` CLI): unchanged. A data read past `updateAge` still renews the session (+86460 s, measured on the same doors), so an active bearer client keeps sliding forward without calling `get-session`. No cookie is ever set on a response to a request that sent none.
+  
+  **Upgrading.** Nothing to change. A browser session renews whenever the app calls `GET /api/v1/auth/get-session`; a tab that never calls it now signs out at the session's real expiry instead of keeping a live bearer beside a dead cookie.
+  
+  `@objectstack/types` gains `inProcessSessionReadInput(headers)` (the `getSession` input for an in-process read: the request's own headers, plus `query: { disableRefresh: true }` when they carry a better-auth session cookie), `carriesSessionCookie(headers)` and the `InProcessSessionReadInput` type. A host that calls `auth.api.getSession` itself should read through `inProcessSessionReadInput` for the same reason.
+  
+  The same rule is applied to the in-process `auth.api.getSession` readers in `@objectstack/plugin-auth`, `@objectstack/plugin-webhooks`, `@objectstack/plugin-sharing`, `@objectstack/service-storage`, `@objectstack/service-settings` and `@objectstack/service-datasource` by their own changeset.
+- a360cee: fix(cloud-connection): install-local's `hotLoaded` reports whether the running kernel loaded the package (#22695)
+  
+  Clause-②: no
+  
+  - **What was wrong.** `POST /api/v1/marketplace/install-local` always answered `hotLoaded: true`. When the manifest came from the cloud catalog and `manifest.register` threw, the install still wrote the package to its ledger and answered `200` (the lenient path). The package loads at the next restart, but the answer said the running kernel held it already, and its `note` said the app was "now available in this runtime".
+  - **What it answers now.** On that path the answer carries `hotLoaded: false` and a new string key, `hotLoadError`, holding the register error's message. The `note` says the package is installed and cached, that the running kernel could not load it, and that the runtime registers it again at its next restart. A reader can then say "installed, loads at the next restart" instead of reporting a false success.
+  - **What did not change.** An install whose register succeeds answers exactly as before: `hotLoaded: true`, and no `hotLoadError` key. An inline (file-import) manifest whose register throws is still refused with `422 PLUGIN_REGISTER_FAILED`, and nothing is written. The lenient path still installs: the ledger entry is written, and the package loads at the next restart.
+- Updated dependencies [317cddd]
+- Updated dependencies [fec87e7]
+- Updated dependencies [34dba5a]
+- Updated dependencies [34dba5a]
+- Updated dependencies [34dba5a]
+- Updated dependencies [c28f317]
+- Updated dependencies [2e10c9a]
+- Updated dependencies [67b669e]
+- Updated dependencies [0253192]
+- Updated dependencies [45e206e]
+- Updated dependencies [bfc15d2]
+- Updated dependencies [2ff0825]
+- Updated dependencies [cd3d391]
+- Updated dependencies [7aa8d51]
+- Updated dependencies [95a8435]
+- Updated dependencies [c8a9783]
+- Updated dependencies [9e9e6f9]
+- Updated dependencies [60bcfe7]
+- Updated dependencies [d112087]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [7de0265]
+- Updated dependencies [8c105e3]
+- Updated dependencies [e02833c]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [c8b062f]
+- Updated dependencies [117d34d]
+- Updated dependencies [6729e10]
+- Updated dependencies [1920cf3]
+- Updated dependencies [1920cf3]
+- Updated dependencies [41d0d40]
+- Updated dependencies [c52bfb4]
+- Updated dependencies [c7d6037]
+- Updated dependencies [240890c]
+- Updated dependencies [72b26ed]
+- Updated dependencies [2d21b9c]
+- Updated dependencies [f66fdc7]
+- Updated dependencies [9fdb127]
+- Updated dependencies [615c696]
+- Updated dependencies [968acc8]
+- Updated dependencies [111ffff]
+- Updated dependencies [12b9daf]
+- Updated dependencies [d85615d]
+- Updated dependencies [6a06e3b]
+- Updated dependencies [0e9e7b7]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [9c93ce6]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [b88c356]
+- Updated dependencies [a3bcbcf]
+- Updated dependencies [1abfc58]
+- Updated dependencies [db87a02]
+- Updated dependencies [04e776b]
+- Updated dependencies [a7df552]
+- Updated dependencies [6befe19]
+- Updated dependencies [8caa131]
+- Updated dependencies [2f70c22]
+- Updated dependencies [78f841b]
+- Updated dependencies [1fb274e]
+- Updated dependencies [1fb274e]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [f85a83b]
+- Updated dependencies [f85a83b]
+- Updated dependencies [2015c54]
+- Updated dependencies [73a0a6b]
+- Updated dependencies [f2a45db]
+- Updated dependencies [aa9447c]
+- Updated dependencies [3d91885]
+- Updated dependencies [8fc50b7]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [ae97841]
+- Updated dependencies [c8d06a9]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [a87d8be]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [a543e24]
+- Updated dependencies [a543e24]
+- Updated dependencies [51290bc]
+- Updated dependencies [ad381fd]
+- Updated dependencies [2b61f2d]
+- Updated dependencies [d0bb78e]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3b49318]
+- Updated dependencies [4e9fe9f]
+- Updated dependencies [fe98cc6]
+- Updated dependencies [3aa0c7b]
+- Updated dependencies [9ad3d24]
+- Updated dependencies [bb4f5cc]
+- Updated dependencies [326a90a]
+- Updated dependencies [9fe7448]
+- Updated dependencies [2e11d90]
+- Updated dependencies [4578c56]
+- Updated dependencies [fbcbcf1]
+- Updated dependencies [c512c25]
+- Updated dependencies [0b997ea]
+- Updated dependencies [35afb15]
+- Updated dependencies [215e662]
+- Updated dependencies [3d886ee]
+- Updated dependencies [f4069c5]
+- Updated dependencies [d8d0711]
+- Updated dependencies [a45d5d8]
+- Updated dependencies [f6e1d49]
+- Updated dependencies [b1f7a7a]
+- Updated dependencies [e9a1f5c]
+- Updated dependencies [40a6ee5]
+- Updated dependencies [e87070e]
+- Updated dependencies [3f80f17]
+- Updated dependencies [5910b5e]
+- Updated dependencies [7098aca]
+- Updated dependencies [97610a5]
+- Updated dependencies [081e6a0]
+- Updated dependencies [c8c803c]
+- Updated dependencies [f05649f]
+- Updated dependencies [e030d43]
+- Updated dependencies [ca135dc]
+- Updated dependencies [1884948]
+- Updated dependencies [3089848]
+- Updated dependencies [e23eccb]
+- Updated dependencies [ac8f2c5]
+- Updated dependencies [746637e]
+- Updated dependencies [fdfdd7e]
+- Updated dependencies [db9cf80]
+- Updated dependencies [e75dced]
+- Updated dependencies [9af0005]
+- Updated dependencies [9af0005]
+- Updated dependencies [46692c1]
+- Updated dependencies [440bed6]
+- Updated dependencies [c572fe2]
+- Updated dependencies [3ca71b6]
+- Updated dependencies [b53b949]
+- Updated dependencies [b2549a8]
+- Updated dependencies [ee8751d]
+- Updated dependencies [96e4be4]
+- Updated dependencies [35ef501]
+- Updated dependencies [faf6348]
+- Updated dependencies [557ae7c]
+- Updated dependencies [6a3fe25]
+- Updated dependencies [7731d70]
+- Updated dependencies [da989bb]
+- Updated dependencies [3073b72]
+- Updated dependencies [c76edeb]
+- Updated dependencies [5b12503]
+- Updated dependencies [514bf3c]
+- Updated dependencies [20e7d52]
+- Updated dependencies [b3a3634]
+- Updated dependencies [3e72f93]
+- Updated dependencies [f89b5f5]
+- Updated dependencies [d25b187]
+- Updated dependencies [0e00d36]
+- Updated dependencies [018b077]
+- Updated dependencies [0fea05f]
+- Updated dependencies [d748ae8]
+- Updated dependencies [dab6bf4]
+- Updated dependencies [ed1de8c]
+- Updated dependencies [a00cf99]
+- Updated dependencies [5fb1746]
+- Updated dependencies [29a163f]
+- Updated dependencies [e223152]
+- Updated dependencies [9f5eca5]
+- Updated dependencies [9963322]
+- Updated dependencies [b27b894]
+- Updated dependencies [26aa999]
+- Updated dependencies [874a38d]
+- Updated dependencies [cb3bb93]
+- Updated dependencies [ad14957]
+- Updated dependencies [02d9f69]
+- Updated dependencies [f53f14b]
+- Updated dependencies [a800912]
+- Updated dependencies [87cd458]
+- Updated dependencies [d973c34]
+- Updated dependencies [156ddfa]
+- Updated dependencies [1bb1da1]
+- Updated dependencies [5081090]
+- Updated dependencies [5081090]
+- Updated dependencies [c63028e]
+- Updated dependencies [615cba8]
+- Updated dependencies [b6eb25f]
+- Updated dependencies [165587e]
+- Updated dependencies [3b5475a]
+- Updated dependencies [e04759d]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [b32ee3e]
+- Updated dependencies [b62260c]
+- Updated dependencies [91f46d0]
+- Updated dependencies [e5899a6]
+- Updated dependencies [d7b26df]
+- Updated dependencies [490cb6d]
+- Updated dependencies [e865300]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [c74d843]
+- Updated dependencies [6d5191e]
+- Updated dependencies [85edd61]
+- Updated dependencies [e84aeb3]
+- Updated dependencies [8558668]
+- Updated dependencies [322ff1e]
+- Updated dependencies [7b0a9c9]
+- Updated dependencies [5fc57b3]
+- Updated dependencies [fe58bbc]
+- Updated dependencies [c4e7fa5]
+- Updated dependencies [581ca7d]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [b7cd1af]
+- Updated dependencies [9814035]
+- Updated dependencies [55382dc]
+- Updated dependencies [b1d701b]
+- Updated dependencies [efcbac7]
+- Updated dependencies [51f36e7]
+- Updated dependencies [20028df]
+- Updated dependencies [20028df]
+- Updated dependencies [69d4218]
+- Updated dependencies [5ce6773]
+- Updated dependencies [8532783]
+- Updated dependencies [eb20c33]
+- Updated dependencies [9432bac]
+- Updated dependencies [6373952]
+- Updated dependencies [3caae97]
+- Updated dependencies [3f69471]
+- Updated dependencies [8bc7836]
+- Updated dependencies [e5687cb]
+- Updated dependencies [1e62f71]
+- Updated dependencies [ec7f7f8]
+- Updated dependencies [038d4c9]
+- Updated dependencies [5677add]
+- Updated dependencies [8d8f965]
+- Updated dependencies [147a0d1]
+- Updated dependencies [21914c3]
+- Updated dependencies [1959aac]
+- Updated dependencies [e1deaef]
+- Updated dependencies [117817e]
+- Updated dependencies [4663801]
+- Updated dependencies [d294951]
+- Updated dependencies [6a6a4d3]
+- Updated dependencies [0cbfb7c]
+- Updated dependencies [7f2f081]
+- Updated dependencies [4267484]
+- Updated dependencies [1badd31]
+- Updated dependencies [58f5c90]
+- Updated dependencies [55828c5]
+- Updated dependencies [7856110]
+- Updated dependencies [9b37edb]
+- Updated dependencies [a22e67b]
+- Updated dependencies [62ce45d]
+- Updated dependencies [c5b43b6]
+- Updated dependencies [6662e3f]
+- Updated dependencies [39e93ef]
+- Updated dependencies [0a29bec]
+- Updated dependencies [02bec6c]
+- Updated dependencies [719183f]
+- Updated dependencies [8464380]
+- Updated dependencies [8c10776]
+- Updated dependencies [252a582]
+- Updated dependencies [abf8655]
+- Updated dependencies [f931e76]
+- Updated dependencies [a3d47c2]
+- Updated dependencies [21c8644]
+- Updated dependencies [e5f9f01]
+- Updated dependencies [aa5bfdf]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [de70e97]
+- Updated dependencies [74c4b34]
+- Updated dependencies [e040b8c]
+- Updated dependencies [f451a59]
+- Updated dependencies [ba95607]
+- Updated dependencies [b53b949]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [1e44436]
+- Updated dependencies [2acff87]
+- Updated dependencies [299a2c6]
+- Updated dependencies [e23eccb]
+- Updated dependencies [bf492c8]
+- Updated dependencies [c7a3234]
+  - @objectstack/spec@18.0.0-next.0
+  - @objectstack/runtime@18.0.0-next.0
+  - @objectstack/metadata-protocol@18.0.0-next.0
+  - @objectstack/objectql@18.0.0-next.0
+  - @objectstack/core@18.0.0-next.0
+  - @objectstack/metadata-core@18.0.0-next.0
+  - @objectstack/types@18.0.0-next.0
+
 ## 17.7.0
 
 ### Minor Changes

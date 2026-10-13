@@ -12,10 +12,10 @@ description: >
   or for plugin / kernel hooks (see objectstack-platform). CEL expressions:
   load objectstack-formula alongside.
 license: Apache-2.0
-compatibility: Requires @objectstack/spec 17.x (Zod v4 schemas)
+compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "17.7.0"
+  version: "18.0.0-next.0"
   domain: data
   tags: object, field, validation, index, relationship, hook, schema, permission, rls, security, seed, fixture
 ---
