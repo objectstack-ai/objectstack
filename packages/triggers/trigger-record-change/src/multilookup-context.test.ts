@@ -85,7 +85,7 @@ describe('record-change context hydrates multi-lookup from input (#1872)', () =>
       name: 'cta_default', label: 'CTA', type: 'autolaunched',
       nodes: [
         { id: 'start', type: 'start', label: 'Start', config: { objectName: 'piece', triggerType: 'record-after-create', condition: 'record.target_channels != null' } },
-        { id: 'stamp', type: 'update_record', label: 'Stamp', config: { objectName: 'piece', filter: { id: '{record.id}' }, fields: { stamp: { dialect: 'cel', source: 'record.target_channels[0]' } } } },
+        { id: 'stamp', type: 'update_record', label: 'Stamp', config: { objectName: 'piece', filter: { id: { dialect: 'cel', source: 'record.id' } }, fields: { stamp: { dialect: 'cel', source: 'record.target_channels[0]' } } } },
         { id: 'end', type: 'end', label: 'End' },
       ],
       edges: [ { id: 'e1', source: 'start', target: 'stamp' }, { id: 'e2', source: 'stamp', target: 'end' } ],

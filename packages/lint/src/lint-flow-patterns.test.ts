@@ -173,7 +173,7 @@ describe('lintFlowPatterns — date-equality in query filter (#1874)', () => {
       expect(lintFlowPatterns(filterFlow({ status: 'open', due_date: { $lt: CEL('today()') } }))).toHaveLength(0);
     });
     it('equality against a non-time value (status, interpolated id)', () => {
-      expect(lintFlowPatterns(filterFlow({ status: 'active', id: '{record.id}' }))).toHaveLength(0);
+      expect(lintFlowPatterns(filterFlow({ status: 'active', id: CEL('record.id') }))).toHaveLength(0);
       expect(lintFlowPatterns(filterFlow({ amount: { $eq: CEL('record.threshold') } }))).toHaveLength(0);
     });
   });
@@ -1781,14 +1781,18 @@ describe('lintFlowPatterns — unbounded bulk write (#5482)', () => {
       ).toHaveLength(0);
     });
 
-    it('a filter whose only condition is a TEMPLATE — that is #3810\'s fact, at run time', () => {
-      // `{record.ownr}` (a typo) interpolates to nothing and the run-time guard
-      // REFUSES the node. At authoring time the condition is written, so warning
-      // "nothing bounds this" here would be false — and would put two diagnostics
-      // on one defect, one of them wrong about what the author did.
+    // [#19939, stage S6] RE-JUDGED IN PLACE: the operand was a `{record.ownr}`
+    // token, refused at every door since S6; the run-time fact is the same for
+    // an operand envelope that evaluates to nothing.
+    it('a filter whose only operand is COMPUTED — that is #3810\'s fact, at run time', () => {
+      // An operand envelope that evaluates to nothing (a record with no owner)
+      // and the run-time guard REFUSES the node. At authoring time the
+      // condition is written, so warning "nothing bounds this" here would be
+      // false — and would put two diagnostics on one defect, one of them wrong
+      // about what the author did.
       expect(
         lintFlowPatterns(purgeFlow('delete_record', {
-          objectName: 'lead', filter: { owner: '{record.ownr}' }, multi: true,
+          objectName: 'lead', filter: { owner: CEL('record.owner') }, multi: true,
         })),
       ).toHaveLength(0);
     });
@@ -2000,7 +2004,7 @@ describe('lintFlowPatterns — unbounded bulk write (#5482)', () => {
       expect(lintFlowPatterns(loopBodyFlow({
         nodes: [{
           id: 'sweep', type: 'delete_record',
-          config: { objectName: 'campaign_member', filter: { lead_id: '{lead.id}' }, multi: true },
+          config: { objectName: 'campaign_member', filter: { lead_id: CEL('lead.id') }, multi: true },
         }],
         edges: [],
         // Scoped to this rule: a bounded write is still an uncontained one, so
@@ -2079,10 +2083,10 @@ describe('per-iteration containment (#13681 / #14394)', () => {
 
     it('flags every fallible builtin in the body, once each', () => {
       const fallible = [
-        { id: 'n1', type: 'get_record', label: 'Get', config: { objectName: 'case', filter: { id: '{currentCase.id}' } } },
+        { id: 'n1', type: 'get_record', label: 'Get', config: { objectName: 'case', filter: { id: CEL('currentCase.id') } } },
         { id: 'n2', type: 'create_record', label: 'Create', config: { objectName: 'task' } },
-        { id: 'n3', type: 'update_record', label: 'Update', config: { objectName: 'case', fields: { seen: true }, filter: { id: '{currentCase.id}' } } },
-        { id: 'n4', type: 'delete_record', label: 'Delete', config: { objectName: 'task', filter: { case_id: '{currentCase.id}' } } },
+        { id: 'n3', type: 'update_record', label: 'Update', config: { objectName: 'case', fields: { seen: true }, filter: { id: CEL('currentCase.id') } } },
+        { id: 'n4', type: 'delete_record', label: 'Delete', config: { objectName: 'task', filter: { case_id: CEL('currentCase.id') } } },
         { id: 'n5', type: 'http', label: 'Call', config: { url: 'https://example.test' } },
         { id: 'n6', type: 'notify', label: 'Notify', config: { title: 'x' } },
         { id: 'n7', type: 'connector_action', label: 'Connector', config: { connectorId: 'c', action: 'a' } },
@@ -2686,7 +2690,7 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
       });
 
       it('reads a `$` root the engine binds as that variable (`$error.message`)', () => {
-        const [f] = bareDollar(valueFlow('update_record', { objectName: 'task', filter: { id: '{record.id}' }, fields: { note: '$error.message' } }));
+        const [f] = bareDollar(valueFlow('update_record', { objectName: 'task', filter: { id: CEL('source.id') }, fields: { note: '$error.message' } }));
         expect(f!.message).toContain('in the update_record field value');
         expect(f!.hint).toContain(judgeSpelling('{$error.message}'));
         expect(prescribedSources(f!.hint!)).toEqual(['vars["$error"].message']);
@@ -2696,7 +2700,9 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         ['$User.Id', 'create_record', (v: unknown) => ({ objectName: 'task', fields: { v } })],
         ['$source.id', 'create_record', (v: unknown) => ({ objectName: 'task', fields: { v } })],
         ['$User.Email', 'create_record', (v: unknown) => ({ objectName: 'task', fields: { v } })],
-        ['$error.message', 'update_record', (v: unknown) => ({ objectName: 'task', filter: { id: '{record.id}' }, fields: { v } })],
+        // [#19939, stage S6] The filter operand is an envelope over a bound
+        // variable: a `{record.id}` token there is refused since S6.
+        ['$error.message', 'update_record', (v: unknown) => ({ objectName: 'task', filter: { id: CEL('source.id') }, fields: { v } })],
         ['$User.Id', 'assignment', (v: unknown) => ({ assignments: { v } })],
         // [#19939] The maps a node hands to a callee joined the value slots:
         // the hint flips there by asking the judge, with no line of its own.
@@ -2794,14 +2800,23 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         expect(refusalsOf(valueFlow('create_record', { objectName: 'task', fields: { who: CEL(guard) } }))).toEqual(NONE);
       });
 
-      it('control: outside the value and text slots the single brace still resolves, and the hint still names it', () => {
-        // [#19939] A CRUD `filter` value — the position S6 has not reached; an
-        // `http` body is a value slot since S5.
+      // [#19939, stage S6] RE-JUDGED IN PLACE: the control's position was a
+      // CRUD `filter` value — "the position S6 has not reached". Each filter
+      // operand is a value slot since S6, so the hint there names the operand's
+      // envelope and the filter operand's remedy; the single-brace arm is kept
+      // for a position no slot judges (a plugin node's own config).
+      it('control: a filter operand names its envelope now; outside every slot the hint keeps its single-brace arm', () => {
         const filtered = (owner: string) => valueFlow('get_record', { objectName: 'task', filter: { owner } });
         const [f] = bareDollar(filtered('$source.id'));
-        expect(f!.hint).toContain('Wrap it and bind a variable: `{source.id}`');
-        expect(flowNodeValueTemplateRefusals('get_record', { objectName: 'task', filter: { owner: '{source.id}' } })).toEqual([]);
-        // …and the http body names its envelope now.
+        expect(f!.message).toContain('in the get_record filter operand');
+        expect(f!.hint).toContain('A value slot reads a CEL value envelope');
+        expect(f!.hint).toContain('an operand envelope is evaluated before the query');
+        expect(prescribedSources(f!.hint!)).toEqual(['source.id']);
+        expect(refusalsOf(valueFlow('get_record', { objectName: 'task', filter: { owner: CEL('source.id') } }))).toEqual(NONE);
+        expect(flowNodeValueTemplateRefusals('get_record', { objectName: 'task', filter: { owner: '{source.id}' } })).toHaveLength(1);
+        const [plugin] = bareDollar(valueFlow('acme_custom_step', { note: '$source.id' }));
+        expect(plugin!.hint).toContain('Wrap it and bind a variable: `{source.id}`');
+        // …and the http body names its envelope.
         const [body] = lintFlowPatterns(httpFlow({ ticket: '$source.id' })).filter((x) => x.rule === FLOW_BARE_DOLLAR_REF);
         expect(body!.hint).toContain('A value slot reads a CEL value envelope');
       });
@@ -2902,10 +2917,15 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         expect(refusalsOf(valueFlow('screen', configOf(CEL("'Re: ' + record.title"))))).toEqual(NONE);
       });
 
-      it('control: outside the value and text slots the single brace still resolves, and the double-brace hint still names it', () => {
-        // [#19939] A CRUD `filter` value — the position S6 has not reached.
+      // [#19939, stage S6] RE-JUDGED IN PLACE, as the bare-`$` control above:
+      // a CRUD `filter` operand is a value slot since S6.
+      it('control: a filter operand names its envelope now; outside every slot the double-brace hint keeps its single-brace arm', () => {
         const [f] = doubleBrace(valueFlow('get_record', { objectName: 'task', filter: { title: '{{ record.title }}' } }));
-        expect(f!.hint).toContain('Use `{var}` (e.g. `{record.title}`)');
+        expect(f!.message).toContain('the get_record filter operand reads a CEL value envelope, not a template');
+        expect(f!.hint).not.toContain('Use `{var}`');
+        expect(prescribedSources(f!.hint!)).toEqual(['record.title']);
+        const [plugin] = doubleBrace(valueFlow('acme_custom_step', { note: '{{ record.title }}' }));
+        expect(plugin!.hint).toContain('Use `{var}` (e.g. `{record.title}`)');
         // …and the http body, a value slot since S5, names its envelope.
         const [body] = lintFlowPatterns(httpFlow({ title: '{{ record.title }}' })).filter((x) => x.rule === FLOW_DOUBLE_BRACE_INTERP);
         expect(body!.hint).not.toContain('Use `{var}`');

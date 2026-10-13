@@ -60,10 +60,12 @@ interface Captured {
   body: any;
 }
 
-/** An authorized admin: verified, holding the branding manifest's capabilities. */
-const admin = () => ({ enforced: true, permissions: ['setup.access', 'setup.write'] });
-/** Anonymous + enforced — the module's secure default. */
+/** An authorized admin: verified, signed in, holding the branding manifest's capabilities. */
+const admin = () => ({ enforced: true, permissions: ['setup.access', 'setup.write'], userId: 'usr_admin' });
+/** Anonymous + enforced — the module's secure default, refused by the family's anonymous floor. */
 const anon = () => ({ enforced: true });
+/** Signed in, holding no capability — the caller the manifest's own gate refuses. */
+const member = () => ({ enforced: true, permissions: [], userId: 'usr_member' });
 
 function mount(contextFromRequest: any = admin, env: Record<string, string> = {}) {
   // `env: {}` so a real `OS_BRANDING_*` in the environment cannot lock a key
@@ -199,11 +201,22 @@ describe('settings envelope (#3843) — success bodies', () => {
 describe('settings envelope (#3843) — error bodies', () => {
   const CASES: Array<{ name: string; status: number; code: string; run: () => Promise<Captured> }> = [
     {
+      // ADR-0056 D2 — the family's anonymous floor answers before the
+      // manifest's capability gate, in the same declared envelope.
       name: 'anonymous read of a capability-gated namespace',
+      status: 401,
+      code: 'UNAUTHENTICATED',
+      run: async () => {
+        const { http } = mount(anon);
+        return drive(http, 'GET /api/settings/:namespace', { params: { namespace: 'branding' } });
+      },
+    },
+    {
+      name: 'a signed-in read without the namespace\'s capability',
       status: 403,
       code: 'SETTINGS_FORBIDDEN',
       run: async () => {
-        const { http } = mount(anon);
+        const { http } = mount(member);
         return drive(http, 'GET /api/settings/:namespace', { params: { namespace: 'branding' } });
       },
     },
@@ -230,8 +243,8 @@ describe('settings envelope (#3843) — error bodies', () => {
     },
     {
       name: 'anonymous write',
-      status: 403,
-      code: 'SETTINGS_FORBIDDEN',
+      status: 401,
+      code: 'UNAUTHENTICATED',
       run: async () => {
         const { http } = mount(anon);
         return drive(http, 'PUT /api/settings/:namespace', {
@@ -338,7 +351,7 @@ describe('settings envelope (#4224) — the four ad-hoc keys travel in the decla
       details: { namespace: 'branding' },
       gone: ['namespace'],
       run: async () => {
-        const { http } = mount(anon);
+        const { http } = mount(member);
         return drive(http, 'GET /api/settings/:namespace', { params: { namespace: 'branding' } });
       },
     },

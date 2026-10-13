@@ -52,8 +52,8 @@ const NOTIFY: Config = { recipients: { dialect: 'cel', source: 'record.owner' },
 const VALID: Readonly<Record<string, Config>> = {
   get_record: { objectName: 'task', filter: { status: 'open' }, limit: 5, outputVariable: 'rows' },
   create_record: { objectName: 'task', fields: { title: 'X' }, outputVariable: 'created' },
-  update_record: { objectName: 'task', filter: { id: '{recordId}' }, fields: { title: 'X' } },
-  delete_record: { objectName: 'task', filter: { id: '{recordId}' } },
+  update_record: { objectName: 'task', filter: { id: { dialect: 'cel', source: 'recordId' } }, fields: { title: 'X' } },
+  delete_record: { objectName: 'task', filter: { id: { dialect: 'cel', source: 'recordId' } } },
   notify: NOTIFY,
   http: { url: 'https://example.test/hook', method: 'POST', headers: { 'X-Any': 'y' } },
   screen: { title: 'T', fields: [{ name: 'a', type: 'select', options: [{ label: 'A', value: 'a' }] }] },
@@ -211,7 +211,7 @@ describe('the remainder: every other builtin, refused at save', () => {
   });
 
   it('a pre-conversion alias is converted first where the door converts, and refused at a direct parse', () => {
-    const config = { objectName: 'task', filters: { id: '{recordId}' }, fields: { title: 'X' } };
+    const config = { objectName: 'task', filters: { id: { dialect: 'cel', source: 'recordId' } }, fields: { title: 'X' } };
     expect(issuesOf(flowWith('update_record', config)).map((i) => i.path)).toEqual(['nodes.1.config.filters']);
     const stack = {
       manifest: { id: 'com.example.alias', name: 'alias', version: '1.0.0', type: 'app', namespace: 'als' },

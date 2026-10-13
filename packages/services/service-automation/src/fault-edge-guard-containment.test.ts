@@ -63,9 +63,13 @@ describe('#3863 — a fault edge must not swallow a guard refusal', () => {
     });
 
     /**
-     * The exact shape #3810 exists to stop, with a fault edge bolted on:
-     * `{record.ownr}` is a typo, so the only condition is erased and the filter
-     * would collapse to `{}` — every row in the object.
+     * The exact shape #3810 exists to stop, with a fault edge bolted on: the
+     * only condition's operand evaluates to nothing — the record carries no
+     * `manager`, so the guarded read answers `null` — and the filter would
+     * match every row in the object. ([#19939, stage S6] It was a
+     * `{record.ownr}` typo that interpolated to nothing; a flow token at a
+     * filter operand is refused by the contract parse now, and the guard holds
+     * for an operand envelope.)
      */
     function guardedDeleteWithHandler() {
         return {
@@ -79,7 +83,7 @@ describe('#3863 — a fault edge must not swallow a guard refusal', () => {
                     id: 'op',
                     type: 'delete_record' as any,
                     label: 'Delete',
-                    config: { objectName: 'deal', filter: { owner: '{record.ownr}' } },
+                    config: { objectName: 'deal', filter: { owner: { dialect: 'cel', source: 'has(record.manager) ? record.manager : null' } } },
                 },
                 { id: 'handler', type: 'script' as any, label: 'Handler', config: { function: 'noop' } },
                 { id: 'end', type: 'end' as const, label: 'End' },

@@ -45,6 +45,10 @@ export * from './filter-subtree-provenance';
 // operator, so no request can spell it; its brand is a `Symbol.for` key on the
 // provenance mark's device, so a copy that crossed JSON or a structured clone
 // arrives unbranded and the comparand-shape door refuses it as a non-list.
+// [ADR-0139 D2] Beside it, the two things the engine's composition reads: the
+// RLS deny sentinel (`RLS_DENY_FILTER`, recognised by identity, D2 step 2) and
+// the composed leaf `{ object, scope }` (`ReadableIds.compose`,
+// `isComposedReadableIds`, D2 step 3).
 export * from './readable-ids';
 // [#8371] The FILTER axis' dotted-path verdict — ONE head-type classification
 // consumed by both doors (metadata-protocol's ingress gate and objectql's
