@@ -7,7 +7,7 @@
  * `@objectstack/metadata/view-container-name`).
  *
  * Section 4 pins the second half of the body against its address, with the
- * same envelope at the save door and the draft promotion: a permission set
+ * same envelope at the save door, the restore doors and the draft promotion: a permission set
  * whose body `packageId` disagrees with the package the row is written into
  * (ADR-0086 D3, `permissionSetOwnerBindingRefusal`). It shares this file's
  * double and its staging of a stored body.
@@ -516,7 +516,8 @@ describe('[#21470] the draft promotion refuses a stored draft whose `name` is no
 //
 // The second half of "the body against its address": a permission set whose
 // body `packageId` disagrees with the package the row is written into is
-// refused at the save door (draft and publish mode) and at the draft
+// refused at the save door (draft and publish mode), at the restore doors
+// (`rollbackMetaItem` and `revertCommit`'s restore limb) and at the draft
 // promotion (the per-item publish and the package publish), with the name
 // judge's envelope. Measured on `origin/main` `175e8d414` before the change:
 // every refused case below was accepted, and the stored row's `package_id`
@@ -684,6 +685,107 @@ describe('[ADR-0086 D3] the draft promotion refuses a permission-set draft whose
             { row: 'probe_ok', state: 'active', binding: BOUND, body: undefined },
             { row: 'probe_member', state: 'active', binding: BOUND, body: BOUND },
         ]);
+    });
+});
+
+/**
+ * A permission set at v1, v2, v3 through the real door, saved into `binding`
+ * (or into no package); v2's stored history body then declares `declared` —
+ * a version stored before the save door judged the key.
+ */
+async function threeSetVersionsWithOwnerResidueAtV2(h: Harness, binding: string | null, declared: string) {
+    const save = (label: string) => h.protocol.saveMetaItem({
+        type: 'permission', name: 'probe_member', item: { ...perm('probe_member'), label },
+        ...(binding === null ? {} : { packageId: binding }),
+    });
+    await save('v1');
+    await save('v2');
+    await save('v3');
+    const v2 = h.historyRows.find((r) => r.type === 'permission' && r.name === 'probe_member' && r.version === 2);
+    if (!v2?.metadata) throw new Error('no history row permission/probe_member@2');
+    v2.metadata = JSON.stringify({ ...JSON.parse(v2.metadata), packageId: declared });
+    h.saveDoor.mockClear();
+    return { historyBefore: h.historyRows.length, activeBefore: JSON.stringify(storedSets(h)) };
+}
+
+/** The label of the active stored set — which version a restore left active. */
+const activeLabel = (h: Harness) => {
+    const row = Array.from(h.rows.values()).find((r) => r.type === 'permission' && r.name === 'probe_member' && r.state === 'active');
+    return row ? JSON.parse(row.metadata).label : undefined;
+};
+
+describe('[ADR-0086 D3] the restore doors refuse a stored version whose body `packageId` disagrees with the row it is restored into', () => {
+    it('rollbackMetaItem: a version declaring another package is refused with the restore remedy; the active row and the history are unchanged', async () => {
+        const h = makeProtocol();
+        const before = await threeSetVersionsWithOwnerResidueAtV2(h, BOUND, OTHER);
+
+        const { error } = await attempt(() => h.protocol.rollbackMetaItem({ type: 'permission', name: 'probe_member', toVersion: 2 }));
+
+        expectOwnerRefusal(error, OTHER, BOUND);
+        expect(error.message.indexOf(`Save permission set 'probe_member' again with \`packageId\` dropped or set to '${BOUND}', instead of restoring this version.`)).toBe(0);
+        expect(error.message).toContain('Nothing was restored.');
+        expect(JSON.stringify(storedSets(h))).toBe(before.activeBefore);
+        expect(activeLabel(h)).toBe('v3');
+        expect(h.historyRows.length).toBe(before.historyBefore);
+        expect(h.saveDoor).not.toHaveBeenCalled();
+    });
+
+    it('rollbackMetaItem: a version declaring a package, restored into a row bound to none, is refused (absent = environment-authored)', async () => {
+        const h = makeProtocol();
+        const before = await threeSetVersionsWithOwnerResidueAtV2(h, null, OTHER);
+
+        const { error } = await attempt(() => h.protocol.rollbackMetaItem({ type: 'permission', name: 'probe_member', toVersion: 2 }));
+
+        expectOwnerRefusal(error, OTHER, null);
+        expect(error.message.indexOf("Save permission set 'probe_member' again with `packageId` dropped, instead of restoring this version.")).toBe(0);
+        expect(JSON.stringify(storedSets(h))).toBe(before.activeBefore);
+        expect(h.historyRows.length).toBe(before.historyBefore);
+    });
+
+    it('CONTROL: rollbackMetaItem restores a version whose body agrees with the binding, and one that carries no key', async () => {
+        const h = makeProtocol();
+        await threeSetVersionsWithOwnerResidueAtV2(h, BOUND, BOUND);
+
+        const agreeing = await h.protocol.rollbackMetaItem({ type: 'permission', name: 'probe_member', toVersion: 2 });
+        expect(agreeing.success).toBe(true);
+        expect(activeLabel(h)).toBe('v2');
+        expect(storedSets(h)).toEqual([{ row: 'probe_member', state: 'active', binding: BOUND, body: BOUND }]);
+
+        const bare = await h.protocol.rollbackMetaItem({ type: 'permission', name: 'probe_member', toVersion: 1 });
+        expect(bare.success).toBe(true);
+        expect(activeLabel(h)).toBe('v1');
+        expect(storedSets(h)).toEqual([{ row: 'probe_member', state: 'active', binding: BOUND, body: undefined }]);
+    });
+
+    it('revertCommit\'s restore limb reports a disagreeing version in failed[] with the envelope\'s code; nothing is written', async () => {
+        const h = makeProtocol();
+        const before = await threeSetVersionsWithOwnerResidueAtV2(h, BOUND, OTHER);
+        h.serveCommit(commitRow([{ type: 'permission', name: 'probe_member', existedBefore: true, prevVersion: 2 }]));
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+        const res = await h.protocol.revertCommit({ commitId: 'c1' });
+
+        expect(res.revertedCount).toBe(0);
+        expect(res.failed).toHaveLength(1);
+        expect(res.failed[0]).toMatchObject({ type: 'permission', name: 'probe_member', code: 'VALIDATION_ERROR' });
+        expect(res.failed[0].error).toContain('instead of restoring this version');
+        expect(res.failed[0].error).toContain(`declares \`packageId\` '${OTHER}'`);
+        expect(JSON.stringify(storedSets(h))).toBe(before.activeBefore);
+        expect(h.historyRows.length).toBe(before.historyBefore);
+        expect(h.saveDoor).not.toHaveBeenCalled();
+    });
+
+    it('CONTROL: revertCommit\'s restore limb restores a version whose body agrees with the binding', async () => {
+        const h = makeProtocol();
+        await threeSetVersionsWithOwnerResidueAtV2(h, BOUND, BOUND);
+        h.serveCommit(commitRow([{ type: 'permission', name: 'probe_member', existedBefore: true, prevVersion: 2 }]));
+
+        const res = await h.protocol.revertCommit({ commitId: 'c1' });
+
+        expect(res.revertedCount).toBe(1);
+        expect(res.failed).toEqual([]);
+        expect(activeLabel(h)).toBe('v2');
+        expect(storedSets(h)).toEqual([{ row: 'probe_member', state: 'active', binding: BOUND, body: BOUND }]);
     });
 });
 

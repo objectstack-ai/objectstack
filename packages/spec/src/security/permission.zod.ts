@@ -837,12 +837,12 @@ export const PermissionSetSchema = lazySchema(() => strictObject(
    * uninstall well-defined (remove the package's own sets).
    *
    * The owner is the package the set is saved into: every reader of a set's
-   * owner reads that binding. So the metadata save and publish doors refuse a
-   * body `packageId` that disagrees with it — another package's id, or any
-   * value on a set saved into no package — rather than accept it and override
-   * it silently; a value equal to the binding is accepted.
+   * owner reads that binding. So the metadata save, restore and publish doors
+   * refuse a body `packageId` that disagrees with it — another package's id,
+   * or any value on a set saved into no package — rather than accept it and
+   * override it silently; a value equal to the binding is accepted.
    */
-  packageId: z.string().optional().describe('[ADR-0086 D3] Owning package id for a package-shipped set (absent = env-authored); the metadata save and publish doors refuse a value that disagrees with the package the set is saved into'),
+  packageId: z.string().optional().describe('[ADR-0086 D3] Owning package id for a package-shipped set (absent = env-authored); the metadata save, restore and publish doors refuse a value that disagrees with the package the set is saved into'),
 
   /**
    * [ADR-0086 D3] Per-record provenance on the existing

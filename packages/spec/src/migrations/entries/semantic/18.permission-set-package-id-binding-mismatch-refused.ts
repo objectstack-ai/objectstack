@@ -3,7 +3,7 @@
 import type { SemanticMigration } from '../../types.js';
 
 // A permission set's body `packageId` that disagrees with the package the set
-// is saved into is refused at the metadata save and publish doors. Stored rows
+// is saved into is refused at the metadata save, restore and publish doors. Stored rows
 // are deliberately not rewritten: every reader already takes the owner from
 // the row's binding, so a stored disagreement reads as its binding and is
 // refused on its next write.
@@ -26,11 +26,12 @@ export const entry: SemanticMigration = {
     + 'accepted ADR). Ownership has always followed the binding — the stored row\'s package_id, served '
     + 'as _packageId — in the by-name read, the security catalog and the suggestion reader, so a body '
     + 'that declared another owner was accepted and silently overridden: an author, an AI build above '
-    + 'all, wrote an owner it never got and was never told. The save door (draft and publish mode) and '
-    + 'the draft promotion behind the per-item publish and the package publish now refuse it, '
+    + 'all, wrote an owner it never got and was never told. The save door (draft and publish mode), '
+    + 'the restore doors (a version rollback and the restore limb of a commit revert) and the draft '
+    + 'promotion behind the per-item publish and the package publish now refuse it, '
     + '400 VALIDATION_ERROR with issues[] at packageId, naming both values and the two remedies; a '
     + 'package publish that meets one aborts the whole batch, as it does on a draft whose name '
-    + 'disagrees with its row. The binding judged is the one the write resolves: a draft save that '
+    + 'disagrees with its row, and a commit revert reports it in failed[]. The binding judged is the one the write resolves: a draft save that '
     + 'names no package lands in the package of the item\'s active row and is judged against it. '
     + 'Package duplication copies a set that declares its source package as declaring the target. '
     + 'The audience-binding suggestion reader stops reading the body key as a fallback owner for a set '
@@ -38,7 +39,7 @@ export const entry: SemanticMigration = {
     + 'package. ⚠️ STORED ROWS ARE NOT REWRITTEN and there is no D2 conversion: a conversion sees the '
     + 'body alone, never the row\'s binding, so it cannot tell a disagreeing value from an agreeing '
     + 'one. A stored disagreement keeps loading and reads as its binding, exactly as before; it is '
-    + 'refused on its next save or publish. The one reading that changes is the suggestion reader\'s '
+    + 'refused on its next save, publish, or restore of a version that carries it. The one reading that changes is the suggestion reader\'s '
     + 'for a stored set bound to no package whose body names one: its pending suggestion is no longer '
     + 'offered, and an acceptance recorded under that package is withheld from the everyone anchor at '
     + 'the next derivation, reported at warn with its reason. Ships at once, no grace window and no '
@@ -50,6 +51,9 @@ export const entry: SemanticMigration = {
     + 'package it names. Reads never refuse, so a clean boot is NOT a completed sweep: the save or '
     + 'publish that next writes such a row answers 400 VALIDATION_ERROR at packageId, and '
     + '`os migrate meta --stored --apply` records it as that row\'s failure when it rewrites the row. '
+    + 'A stored history version (sys_metadata_history) can carry one too and is never rewritten: a '
+    + 'rollback to it, or a commit revert that restores it, answers 400 VALIDATION_ERROR at packageId '
+    + '(failed[] for the revert); save the set again with the key dropped or set to its package instead. '
     + 'For a set bound to no package whose body named one, check the audience-binding suggestions in '
     + 'Setup: a suggestion that set produced under the named package is no longer offered, and an '
     + 'accepted one is withheld from everyone with a warn line naming the set; bind the set to a '
