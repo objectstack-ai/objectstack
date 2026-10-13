@@ -6,7 +6,8 @@
  * before any application seed loads and before the server accepts a request.
  *
  * ⛔ Internal on purpose: this module is NOT re-exported from the package
- * barrel. Its one caller is `AuthPlugin`; the owner bind it hands over to stays
+ * barrel. Its two callers are `AuthPlugin.start()` and
+ * `IdentityObjectsPlugin.start()`; the owner bind it hands over to stays
  * with `ensureDefaultOrganization` (`ensure-default-organization.ts`), which is
  * the published helper.
  */
