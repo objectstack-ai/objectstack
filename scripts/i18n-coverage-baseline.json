@@ -9,6 +9,7 @@
   "packages/plugins/plugin-security/scripts/i18n-extract.config.ts": 0,
   "packages/plugins/plugin-sharing/scripts/i18n-extract.config.ts": 0,
   "packages/plugins/plugin-webhooks/scripts/i18n-extract.config.ts": 0,
+  "packages/services/service-mailbox/scripts/i18n-extract.config.ts": 0,
   "packages/services/service-messaging/scripts/i18n-extract.config.ts": 0,
   "packages/services/service-realtime/scripts/i18n-extract.config.ts": 0,
   "packages/services/service-storage/scripts/i18n-extract.config.ts": 0

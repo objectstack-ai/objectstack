@@ -57,6 +57,11 @@ export const PLATFORM_CAPABILITY_TOKENS: readonly string[] = Object.freeze([
   'marketplace',
   'package-registry',
   'email',
+  // Inbound mail (ruling 6116489638 on the inbound-mail record): the mirrored
+  // message, its record associations and their read gates. Not on the
+  // always-on slate — its objects are registered only where an app asks for
+  // mailboxes (ADR-0029 D2).
+  'mailbox',
   'sms',
   'sharing',
   'pinyin-search',
@@ -205,6 +210,7 @@ export const PLATFORM_CAPABILITY_PROVIDERS: Readonly<Record<string, PlatformCapa
     // engine-lane half, which this row deliberately does not pre-empt.
     'package-registry': { package: '@objectstack/service-package', edition: 'open' },
     email: { package: '@objectstack/plugin-email', edition: 'open' },
+    mailbox: { package: '@objectstack/service-mailbox', edition: 'open' },
     sms: { package: '@objectstack/service-sms', edition: 'open' },
     sharing: { package: '@objectstack/plugin-sharing', edition: 'open' },
     'pinyin-search': { package: '@objectstack/plugin-pinyin-search', edition: 'open' },

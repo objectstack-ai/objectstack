@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { withoutOperationPrivateKeys } from '@objectstack/core';
+import { resolveReadableParentIds, withoutOperationPrivateKeys } from '@objectstack/core';
 import type { StandardErrorCode } from '@objectstack/spec/api';
 import type { ISecurityService, ISharingService } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -221,54 +221,6 @@ function attachmentParentOf(row: Record<string, unknown>): { object: string; id:
   return { object: po, id: String(pid) };
 }
 
-/**
- * Which of these parent records can the CALLER read? Answered per parent
- * object by ONE caller-scoped engine read of the candidate ids, so the parent
- * object's own OWD/sharing, RLS and object-level CRUD decide.
- *
- * This is the one answer both halves of this module ask: the read-visibility
- * middleware (which attachments a read may return) and the write gate's
- * not-visible check (#21755). One evaluator, so an attachment can never be
- * hidden by the read door and named by the write door.
- *
- * An object whose read throws (unknown to the engine, refused, driver fault)
- * contributes no visible id — fail closed.
- *
- * [#7145] The caller's envelope, minus the operation-private keys: this probe
- * reads a DIFFERENT object than the one the middleware resolved its depth for,
- * and `__readScope` / `__expandRead` are widening inputs that would arrive
- * attached to the wrong question (the security middleware re-stamps the depth
- * for THIS object when it resolves any set, so the only thing dropping them can
- * do is leave the owner-match at its narrowest — the safe direction). Same rule
- * as `callerContext` below, and the same half of #7141 / PR #7143 the comment
- * kit already carries.
- */
-async function resolveReadableParentIds(
-  engine: Pick<AttachmentLifecycleEngine, 'find'>,
-  callerContext: Record<string, unknown> | undefined,
-  idsByObject: ReadonlyMap<string, ReadonlySet<string>>,
-): Promise<Map<string, Set<string>>> {
-  const callerEnvelope = withoutOperationPrivateKeys((callerContext ?? {}) as Record<string, unknown>);
-  const visibleByObject = new Map<string, Set<string>>();
-  for (const [parentObject, idSet] of idsByObject) {
-    const ids = [...idSet];
-    let visible: string[] = [];
-    try {
-      const rows = await engine.find(parentObject, {
-        where: { id: { $in: ids } },
-        fields: ['id'],
-        limit: ids.length,
-        context: { ...callerEnvelope },
-      });
-      visible = rows.map((r) => String(r.id)).filter(Boolean);
-    } catch {
-      // Unknown/failing parent object → none visible (fail closed).
-      visible = [];
-    }
-    visibleByObject.set(parentObject, new Set(visible));
-  }
-  return visibleByObject;
-}
 
 function asIdList(id: unknown): Array<string | number> | null {
   if (typeof id === 'string' || typeof id === 'number') return [id];
