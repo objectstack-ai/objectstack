@@ -160,9 +160,11 @@ covered in [Self-Hosted Deployment](https://objectstack.ai/docs/deployment/self-
 - Add an AI agent: see `objectstack-ai`.
 
 Skills live in `.claude/skills/` and are committed with this project, once.
-They are installed one agent runtime at a time (see `AGENTS.md`), and also show
-up in the in-IDE assistant catalog:
+They come from the `@objectstack/skills` dev dependency, at the version of
+`@objectstack/spec`, are installed one agent runtime at a time (see
+`AGENTS.md`), and also show up in the in-IDE assistant catalog. Re-install them
+from `node_modules` after upgrading the `@objectstack/*` packages:
 
 ```bash
-npx skills add objectstack-ai/objectstack/skills --skill '*' --agent claude-code -y
+npx skills@1.7.2 experimental_sync --agent claude-code --copy -y
 ```

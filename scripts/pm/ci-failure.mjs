@@ -112,10 +112,17 @@
  *     below distinguishes "no assertion" from "no failure".
  *
  *   roster/aggregate jobs — `Test Core`, `Dogfood Regression Gate` (no shard
- *     suffix): their annotations are the attestation gate's own sentences. They
- *     carry NO assertion, but they DO name the failing leg (`test-1-of-3`).
- *     They are ranked below informative jobs and labelled, the same call
- *     `.github/workflows/merge-queue-triage.yml` makes for the same reason.
+ *     suffix), `Lint & Repo Gates`, `TypeScript Type Check`: each is a job that
+ *     declares `OS_AGGREGATOR_MEMBERS`, and its failed step only judges what
+ *     those member jobs concluded. Their annotations are that verdict's own
+ *     sentences: NO assertion, but they DO name the failing leg or lane
+ *     (`test-1-of-3`, `lint-repo-tooling`). They are ranked below informative
+ *     jobs and labelled, the same call `.github/workflows/merge-queue-triage.yml`
+ *     makes for the same reason, and their substitute names the member rows
+ *     that carry the answer instead of the verdict's own command, which reads
+ *     the runner's `needs` context and reproduces nothing locally (#23249).
+ *     Which jobs are aggregators is read from the workflows' own roster
+ *     declarations, never from a step-name pattern (`aggregatorRoster`).
  *
  *   repo gates and tsc — `Lint & Repo Gates`, `TypeScript Type Check`:
  *     annotations with no file anchor — often just `Process completed with exit
@@ -316,6 +323,12 @@ import {
   resolveSweepRepo,
 } from './check-half-states.mjs';
 import { PROXY_FLAG, PROXY_REARM_GUARD as GOVERNED_MERGES_GUARD, proxyRearmPlan } from './check-governed-merges.mjs';
+// The roster declaration's key and splitter, imported from the gate that holds
+// every aggregator's declaration equal to its `needs:` (#23249): one spelling
+// of what makes a job an aggregator, read by both files. Import-safe — that
+// module's CLI is entry-guarded and its YAML parser loads only inside its own
+// reader, which this file never calls (this one must run before `pnpm install`).
+import { MEMBERS_KEY, REQUIRED_AGGREGATORS, declaredIds } from '../check-aggregator-roster.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
@@ -340,7 +353,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'stepsIntegrity: the pre/post numbering gap is NOT truncation': 8,
   'assertionStatus: four answers, not two': 11,
   'the job log (#10141)': 34,
-  'isRosterJob': 5,
+  'isRosterJob': 19,
+  'roster verdict: the substitute names the member lanes': 13,
   'runIdOf': 3,
   'stepBodies / resolveStep': 9,
   'Lane verdict: the red gates, not the verdict (#23223)': 22,
@@ -354,7 +368,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 15;
+const SELF_TEST_BATTERY_FLOOR = 16;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -934,18 +948,133 @@ export function stepsIntegrity(steps) {
 }
 
 /**
+ * A `${{ … }}` expression that reads the `needs` context — what OTHER jobs of
+ * the run concluded, which only the runner has.
+ */
+const READS_NEEDS = /\$\{\{[^}]*\bneeds\b/;
+
+/**
+ * Every aggregator in the workflow tree, read from its own roster declaration
+ * (#23249): a job whose job-level `env:` declares `OS_AGGREGATOR_MEMBERS` (the
+ * key `scripts/check-aggregator-roster.mjs` holds equal to that job's `needs:`).
+ *
+ *   context       the job's display `name:` — the check-run name the API
+ *                 returns for it.
+ *   members       the declared member job ids, each with ITS display name, so
+ *                 a red aggregator can name the member rows that carry the
+ *                 answer (`memberLanes`).
+ *   verdictSteps  the job's steps that read the `needs` context: the roster
+ *                 verdict proper. Not every step of an aggregator is one — the
+ *                 `Test Core` job also checks package suite-duration ceilings,
+ *                 a gate with an assertion of its own, and its log is the
+ *                 answer when that step is the red one.
+ *
+ * Why the declaration and not a step-name pattern. The pattern this replaces,
+ * `/^Verify .* results$/`, knew the two ci.yml gates and missed the two lint.yml
+ * ones (`Verify every lint lane succeeded`, `Verify every type-check lane
+ * succeeded`), so those rows ranked first, had a log fetched for nothing, and
+ * offered the verdict's own `$OS_NEEDS` heredoc as the reproduction. Widening
+ * the pattern would have matched non-aggregator steps such as `Verify build
+ * outputs`; the declaration names exactly the jobs that aggregate, and a new
+ * aggregator that declares a roster is covered without editing this file.
+ */
+export function aggregatorRoster(workflows) {
+  const roster = [];
+  for (const wf of workflows ?? []) {
+    const jobs = workflowJobs(wf.text);
+    const byId = new Map(jobs.map((j) => [j.id, j]));
+    for (const job of jobs) {
+      if (job.members === null) continue;
+      roster.push({
+        file: wf.file,
+        job: job.id,
+        context: job.name,
+        members: job.members.map((id) => ({ id, name: byId.get(id)?.name ?? null })),
+        verdictSteps: job.steps.filter((s) => READS_NEEDS.test(s.raw)).map((s) => s.name),
+      });
+    }
+  }
+  return roster;
+}
+
+/**
+ * The aggregator whose roster verdict EVERY one of these failed steps is, or
+ * null. A job with any other failed step is not a roster job: that step may
+ * carry the assertion. Where two aggregators share a verdict step name, the one
+ * whose `context` is this check's name wins.
+ */
+export function rosterVerdictFor(failedStepNames, roster, { checkName = null } = {}) {
+  const names = (failedStepNames ?? []).map(String);
+  if (names.length === 0) return null;
+  const candidates = (roster ?? []).filter((a) => names.every((n) => a.verdictSteps.includes(n)));
+  return candidates.find((a) => a.context === checkName) ?? candidates[0] ?? null;
+}
+
+/**
  * A failing job that is only a roster verdict about OTHER jobs.
  *
- * `Test Core` and `Dogfood Regression Gate` fail with a `Verify … results` step
- * when a shard did not attest; the assertion is in the shard job, which is a
- * separate check-run on the same sha and is therefore already in this walk.
- * Ranking these last (rather than dropping them) is the same call
- * merge-queue-triage.yml makes — they are real failures, they just are not
- * where the answer is.
+ * Its answer is in a member job, which is a separate check-run on the same sha
+ * and is therefore already in this walk. Ranking these last (rather than
+ * dropping them) is the same call merge-queue-triage.yml makes — they are real
+ * failures, they just are not where the answer is. `roster` is
+ * `aggregatorRoster(readWorkflows())`; with no roster in hand nothing is
+ * classified, rather than falling back to a guess at names.
  */
-export function isRosterJob(failedStepNames) {
-  const names = failedStepNames ?? [];
-  return names.length > 0 && names.every((n) => /^Verify .* results$/.test(String(n)));
+export function isRosterJob(failedStepNames, roster, options = {}) {
+  return rosterVerdictFor(failedStepNames, roster, options) !== null;
+}
+
+/**
+ * Failing rows in report order: every roster job after every other row, each
+ * group in walk order. Stable on purpose — the order inside a group is the
+ * order the check-runs were listed.
+ */
+export function rankFailing(failing) {
+  return [...(failing ?? [])].sort((a, b) => Number(Boolean(a.roster)) - Number(Boolean(b.roster)));
+}
+
+/**
+ * Whether the walk spends the job-log request on this check (#10141): only
+ * where the annotations produced no file-anchored assertion, never for a roster
+ * job (its log is a verdict about OTHER jobs whose own rows are in this walk),
+ * and never without a paired job id (a guessed id returns some other job's log).
+ */
+export function shouldFetchJobLog({ assertions = [], roster = false, jobId = null } = {}) {
+  return (assertions?.length ?? 0) === 0 && !roster && Boolean(jobId);
+}
+
+/**
+ * A job `name:` as a matcher for the check-run names it produces. A `${{ … }}`
+ * expression in it (a matrix value: `Test Core (${{ matrix.shard }}/6)`)
+ * matches any non-empty text; everything else matches literally and whole.
+ */
+export function checkNameMatcher(jobName) {
+  const parts = String(jobName ?? '').split(/\$\{\{.*?\}\}/);
+  const escaped = parts.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const re = new RegExp(`^${escaped.join('.+?')}$`);
+  return (name) => re.test(String(name ?? ''));
+}
+
+/**
+ * Which of an aggregator's members did NOT succeed, read from the check-runs
+ * already listed for the sha — no request. `matched` counts every member row
+ * found, so "none found" and "all found, all green" stay two answers.
+ *
+ * A member is matched by its job's display name and, where both are known, by
+ * run id: an aggregator's members run in its own workflow run, so a same-named
+ * job in another workflow is not one of them.
+ */
+export function memberLanes(aggregator, checks, { runId = null } = {}) {
+  const members = (aggregator?.members ?? []).map((m) => ({ ...m, matches: checkNameMatcher(m.name ?? m.id) }));
+  const matched = [];
+  for (const check of checks ?? []) {
+    const checkRun = runIdOf(check);
+    if (runId && checkRun && checkRun !== runId) continue;
+    const member = members.find((m) => m.matches(check?.name));
+    if (!member) continue;
+    matched.push({ member: member.id, name: String(check.name), status: check.status ?? null, conclusion: check.conclusion ?? null });
+  }
+  return { matched: matched.length, notSucceeded: matched.filter((m) => m.conclusion !== 'success') };
 }
 
 /**
@@ -1005,9 +1134,83 @@ export function workflowSteps(workflowText) {
       body.push(lines[j]);
     }
     const command = commandOf(body);
-    if (command) found.push({ name: unquote(head[2]), ...command });
+    // `raw` is the step's whole body (env:, with:, if: and the command), which
+    // `aggregatorRoster` reads for the `needs` context; `text` stays the command.
+    if (command) found.push({ name: unquote(head[2]), ...command, raw: body.join('\n') });
   }
   return found;
+}
+
+/**
+ * Every job in one workflow text: `{ id, name, members, steps }`, by the same
+ * hand-rolled scan as `workflowSteps` and for the same reason (no `yaml`
+ * before `pnpm install`).
+ *
+ *   name     the job's display `name:`, which is the check-run name; the job id
+ *            when it declares none, which is what GitHub shows then.
+ *   members  the ids its job-level `env:` declares under `OS_AGGREGATOR_MEMBERS`
+ *            (split by the roster gate's own `declaredIds`), or null when it
+ *            declares none. Only a key directly under the JOB's `env:` counts:
+ *            a step-level `env:`, or the key's name inside a `run:` script, is
+ *            not a declaration — the same scope the roster gate reads.
+ *   steps    `workflowSteps` over the job's body.
+ *
+ * The `jobs:` map ends at the next top-level key; comment and blank lines never
+ * end a job.
+ */
+export function workflowJobs(workflowText) {
+  const lines = String(workflowText ?? '').split('\n');
+  const significant = (l) => !/^\s*$/.test(l) && !/^\s*#/.test(l);
+  const indentOf = (l) => l.match(/^\s*/)[0].length;
+  const top = lines.findIndex((l) => /^jobs:\s*(?:#.*)?$/.test(l));
+  if (top === -1) return [];
+
+  const blocks = [];
+  let jobIndent = null;
+  let current = null;
+  for (let i = top + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!significant(line)) {
+      if (current) current.body.push(line);
+      continue;
+    }
+    const indent = indentOf(line);
+    if (indent === 0) break;
+    jobIndent ??= indent;
+    if (indent <= jobIndent) {
+      const key = /^\s*([A-Za-z_][A-Za-z0-9_-]*):\s*(?:#.*)?$/.exec(line);
+      current = key && indent === jobIndent ? { id: key[1], body: [] } : null;
+      if (current) blocks.push(current);
+      continue;
+    }
+    if (current) current.body.push(line);
+  }
+
+  return blocks.map(({ id, body }) => {
+    const keyIndent = body.filter(significant).map(indentOf)[0] ?? null;
+    let name = null;
+    let members = null;
+    for (let i = 0; i < body.length; i++) {
+      if (!significant(body[i]) || indentOf(body[i]) !== keyIndent) continue;
+      const nameLine = /^\s*name:\s*(.*?)\s*$/.exec(body[i]);
+      if (nameLine && name === null) name = scalarOf(nameLine[1]);
+      if (!/^\s*env:\s*(?:#.*)?$/.test(body[i])) continue;
+      for (let j = i + 1; j < body.length; j++) {
+        if (!significant(body[j])) continue;
+        if (indentOf(body[j]) <= keyIndent) break;
+        const entry = /^\s*([A-Za-z_][A-Za-z0-9_]*):\s*(.*?)\s*$/.exec(body[j]);
+        if (entry && entry[1] === MEMBERS_KEY) members = declaredIds(scalarOf(entry[2])) ?? [];
+      }
+    }
+    return { id, name: name || id, members, steps: workflowSteps(body.join('\n')) };
+  });
+}
+
+/** A one-line YAML scalar's value: quotes removed, or a plain scalar's ` #` comment cut. */
+function scalarOf(raw) {
+  const s = String(raw ?? '').trim();
+  if (s[0] === '"' || s[0] === "'") return unquote(s.replace(/\s+#[^"']*$/, ''));
+  return s.replace(/\s+#.*$/, '');
 }
 
 function unquote(raw) {
@@ -1082,9 +1285,24 @@ export function resolveStep(workflows, stepName) {
  * the gates it named red, the ones it could not read or saw not run, a
  * fail-fast or refusal sentence — so a red verdict that names no red gate is
  * reported as exactly that rather than as a step that resolves to nothing.
+ *
+ * A second name class resolves to no command of its own (#23249): an
+ * aggregator's roster verdict step (`aggregatorRoster`). Its `run:` reads the
+ * runner's `needs` context, so run locally it reproduces nothing; it carries
+ * `rosterVerdict` — the aggregator's file, job, context and members — and the
+ * walk adds `lanes` (`memberLanes`) once every check-run is listed.
  */
-export function resolveFailedStep(workflows, step, { annotations = [], logErrors = [], annotationsRead = true, logRead = false } = {}) {
+export function resolveFailedStep(
+  workflows,
+  step,
+  { annotations = [], logErrors = [], annotationsRead = true, logRead = false, roster = null, checkName = null } = {},
+) {
   const base = { number: step?.number ?? null, name: String(step?.name ?? '') };
+  const aggregator = rosterVerdictFor([base.name], roster ?? aggregatorRoster(workflows), { checkName });
+  if (aggregator) {
+    const { file, job, context, members } = aggregator;
+    return { ...base, repro: [], laneVerdict: null, rosterVerdict: { file, job, context, members } };
+  }
   if (base.name !== LANE_VERDICT_STEP) return { ...base, repro: resolveStep(workflows, base.name), laneVerdict: null };
   const reading = readLaneVerdict({ annotations, logErrors, annotationsRead, logRead });
   const red = reading.red.map((g) => ({ ...g, repro: resolveStep(workflows, g.name) }));
@@ -1108,6 +1326,9 @@ export function renderSubstitute(failedSteps) {
   const out = [];
   const steps = failedSteps ?? [];
   for (const step of steps) if (step.laneVerdict) out.push(...renderLaneVerdict(step));
+  // #23249: a roster verdict's own command is never offered either — it reads
+  // the runner's `needs` context. What it judged is named instead.
+  for (const step of steps) if (step.rosterVerdict) out.push(...renderRosterVerdict(step));
   const repros = steps.flatMap((s) => (s.repro ?? []).map((r) => ({ step: s.name, ...r })));
   if (repros.length > 0) {
     out.push('    substitute   run the failing step locally — it prints the same assertion:');
@@ -1121,6 +1342,9 @@ export function renderSubstitute(failedSteps) {
     }
   } else if (steps.some((s) => s.laneVerdict)) {
     out.push('    substitute   none — the lane verdict above says why. Its own command is not one.');
+  } else if (steps.some((s) => s.rosterVerdict)) {
+    out.push('    substitute   none of its own — the member row(s) named above carry the answer, each');
+    out.push('                 with its own substitute. The roster verdict\'s command is not one.');
   } else {
     out.push('    substitute   none — the failing step name resolves to no `run:` block in .github/workflows/,');
     out.push('                 so there is no offline reproduction to offer. Open the job URL above.');
@@ -1168,6 +1392,45 @@ function renderLaneVerdict(step) {
     out.push(`${pad}cannot be named here. Either that wording changed and this reader`);
     out.push(`${pad}(LANE_VERDICT_SENTENCES) is stale with it, or the verdict died before it printed.`);
     out.push(`${pad}Read the verdict step's own lines in the job log.`);
+  }
+  return out;
+}
+
+/**
+ * The reading of one failed roster verdict step, as report lines (#23249).
+ *
+ * `lanes` is attached by the walk once every check-run is listed; a step
+ * resolved without it (no walk) still says where the answer is, in general.
+ */
+function renderRosterVerdict(step) {
+  const v = step.rosterVerdict;
+  const pad = '                 ';
+  const out = [
+    `    roster verdict #${step.number} "${step.name}" judges other jobs, not this tree: job \`${v.job}\``,
+    `${pad}(${v.file}) declares ${v.members.length} member(s) in ${MEMBERS_KEY}, and this step`,
+    `${pad}reads what they concluded from the runner's \`needs\` context, so its own command`,
+    `${pad}reproduces nothing locally.`,
+  ];
+  const lanes = v.lanes;
+  if (!lanes) {
+    out.push(`${pad}The member rows above carry the answer.`);
+  } else if (lanes.matched === 0) {
+    out.push(`${pad}NONE of its members was found among this sha's check-runs (renamed, or absent from`);
+    out.push(`${pad}this tree?), so no row here carries the answer. Open the job URL above.`);
+  } else if (lanes.notSucceeded.length === 0) {
+    out.push(`${pad}Every one of the ${lanes.matched} member row(s) found here succeeded, so none carries the`);
+    out.push(`${pad}answer: its annotations above say what it judged (a roster or \`needs:\` mismatch is one).`);
+  } else {
+    out.push(`${pad}Member(s) that did not succeed in this walk:`);
+    for (const lane of lanes.notSucceeded) {
+      const where =
+        lane.conclusion === 'failure' || lane.conclusion === 'timed_out'
+          ? 'its own row is above'
+          : lane.status !== 'completed'
+            ? 'still running, so it has not answered yet'
+            : 'no row above: a lane that did not finish proves nothing — open its job';
+      out.push(`${pad}  ✗ "${lane.name}" (${lane.member}) — ${lane.conclusion ?? lane.status ?? 'unknown'}; ${where}`);
+    }
   }
   return out;
 }
@@ -1610,6 +1873,8 @@ async function walkInto(sha, progress) {
   }
 
   const workflows = readWorkflows();
+  // Read once: which jobs aggregate others, from their own declarations (#23249).
+  const roster = aggregatorRoster(workflows);
   const failing = [];
   for (const check of failingRuns) {
     const runId = runIdOf(check);
@@ -1638,8 +1903,8 @@ async function walkInto(sha, progress) {
     // trusted and the log is not fetched: a wrong job id would return SOME
     // other job's log, which is worse than no log.
     const annotationAssertions = annotations.filter((a) => a.kind === 'assertion');
-    const roster = isRosterJob(failedSteps.map((s) => s.name));
-    const needsLog = annotationAssertions.length === 0 && !roster && job?.id;
+    const rosterJob = isRosterJob(failedSteps.map((s) => s.name), roster, { checkName: check.name });
+    const needsLog = shouldFetchJobLog({ assertions: annotationAssertions, roster: rosterJob, jobId: job?.id ?? null });
     const log = needsLog ? await fetchJobLog(job.id) : null;
 
     failing.push({
@@ -1652,14 +1917,21 @@ async function walkInto(sha, progress) {
       // #23223: a `Lane verdict` step resolves to the red gates it names, read
       // from the annotations above and the log's error lines — both already in
       // hand, so this costs no request.
-      failedSteps: failedSteps.map((s) =>
-        resolveFailedStep(workflows, s, {
+      failedSteps: failedSteps.map((s) => {
+        const resolved = resolveFailedStep(workflows, s, {
           annotations,
           logErrors: log?.ok ? (log.finding?.errors ?? []) : [],
           annotationsRead: retrievalError === null,
           logRead: Boolean(log?.ok),
-        })),
-      roster,
+          roster,
+          checkName: check.name,
+        });
+        // #23249: the member rows that carry a roster verdict's answer, from the
+        // check-runs already listed — no request.
+        if (resolved.rosterVerdict) resolved.rosterVerdict.lanes = memberLanes(resolved.rosterVerdict, kept, { runId });
+        return resolved;
+      }),
+      roster: rosterJob,
       annotations,
       assertions: annotationAssertions,
       retrievalError,
@@ -1667,8 +1939,7 @@ async function walkInto(sha, progress) {
     });
   }
 
-  failing.sort((a, b) => Number(a.roster) - Number(b.roster));
-  return { sha, total: kept.length, pending, failing, superseded, checkRunCount: all.length };
+  return { sha, total: kept.length, pending, failing: rankFailing(failing), superseded, checkRunCount: all.length };
 }
 
 // ---------------------------------------------------------------------------
@@ -1695,8 +1966,9 @@ function render(result, target) {
     say(`✗ ${check.name}   (check-run ${check.checkRunId}${check.runId ? ` · run ${check.runId}` : ''})`);
     if (check.url) say(`    ${check.url}`);
     if (check.roster) {
-      say("    ROSTER JOB — it verifies other jobs' attestations and holds no assertion of its own.");
-      say('    The answer is in the shard job listed above; this row is kept so the count is honest.');
+      say('    ROSTER JOB — its failed step only judges what its declared member jobs concluded, and it');
+      say('    holds no assertion of its own. The answer is in those members\' rows, listed above; this');
+      say('    row is kept so the count is honest.');
     }
     if (check.jobsError) say(`    steps        unavailable: ${check.jobsError}`);
     else {
@@ -1814,7 +2086,7 @@ function render(result, target) {
       } else if (check.log) {
         say('                 The job log is where that stdout lives, and it was not read (above).');
       } else if (check.roster) {
-        say('                 No job log was fetched: a roster job\'s log is a verdict about the shard');
+        say('                 No job log was fetched: a roster job\'s log is a verdict about the member');
         say('                 jobs listed above, whose own rows already carry their assertions.');
       } else {
         say('                 No job log was fetched: this check-run could not be paired with a job,');
@@ -2235,12 +2507,288 @@ async function selfTest() {
   );
 
   // -- isRosterJob ----------------------------------------------------------
+  //
+  // #23249: which jobs aggregate is read from their OWN roster declaration
+  // (`OS_AGGREGATOR_MEMBERS`), never from a step-name pattern. The fixture
+  // carries every shape the scan must tell apart; the real tree follows.
   battery('isRosterJob');
-  t('the aggregate roster job is recognised', isRosterJob(['Verify test shard results']), true);
-  t('...and the dogfood one', isRosterJob(['Verify dogfood shard results']), true);
-  t('a shard job is not a roster job', isRosterJob(["Run this shard's tests"]), false);
-  t('a mixed job is not a roster job', isRosterJob(['Verify test shard results', 'Upload reports']), false);
-  t('no failed steps is not a roster job', isRosterJob([]), false);
+  const rosterWf = [
+    'name: Fixture',
+    'on: [pull_request]',
+    'jobs:',
+    '  gate:',
+    '    name: Fixture Gates',
+    '    needs: [lane-a, lane-b]',
+    '    env:',
+    '      # the roster, as lint.yml spells it',
+    `      ${MEMBERS_KEY}: lane-a lane-b`,
+    '    if: always()',
+    '    steps:',
+    '      - name: Checkout repository',
+    '        uses: actions/checkout@v7',
+    '      - name: Verify every fixture lane succeeded',
+    '        env:',
+    '          OS_NEEDS: ${{ toJSON(needs) }}',
+    '        run: |',
+    '          printf \'%s\' "$OS_NEEDS" > "$RUNNER_TEMP/needs.json"',
+    `          // ${MEMBERS_KEY}: a mention inside the script is not a declaration`,
+    '      - name: Check the per-package ceilings',
+    '        if: always()',
+    '        run: node scripts/ceilings.mjs',
+    '',
+    '  # a comment at the jobs indent never ends a job',
+    '  lane-a:',
+    "    name: 'Fixture · lane A'",
+    '    steps:',
+    '      - name: Verify build outputs',
+    '        env:',
+    `          ${MEMBERS_KEY}: not-a-job-level-declaration`,
+    '        run: pnpm check:outputs',
+    '  lane-b:',
+    '    name: Fixture shard (${{ matrix.shard }}/3)',
+    '    steps:',
+    '      - name: Run the shard',
+    '        run: pnpm test',
+    '  unnamed:',
+    '    steps:',
+    '      - run: echo hi',
+    'concurrency: fixture',
+  ].join('\n');
+  const fixtureTree = [{ file: '.github/workflows/fixture.yml', text: rosterWf }];
+  const fixtureRoster = aggregatorRoster(fixtureTree);
+  t(
+    'the roster is read from the job-level declaration: one aggregator, its context, its members and their names',
+    fixtureRoster.map((a) => [a.job, a.context, a.members.map((m) => [m.id, m.name])]),
+    [['gate', 'Fixture Gates', [['lane-a', 'Fixture · lane A'], ['lane-b', 'Fixture shard (${{ matrix.shard }}/3)']]]],
+  );
+  t(
+    'only the step that reads `needs` is the verdict — not the checkout, not the ceiling gate beside it',
+    fixtureRoster[0]?.verdictSteps ?? null,
+    ['Verify every fixture lane succeeded'],
+  );
+  t(
+    'a step-level env carrying the key, or the key named inside a script, declares nothing',
+    workflowJobs(rosterWf).map((j) => [j.id, j.members]),
+    [['gate', ['lane-a', 'lane-b']], ['lane-a', null], ['lane-b', null], ['unnamed', null]],
+  );
+  t('a job with no `name:` is shown under its id, as GitHub shows it', workflowJobs(rosterWf).at(-1)?.name ?? null, 'unnamed');
+  t('the aggregator verdict is a roster job', isRosterJob(['Verify every fixture lane succeeded'], fixtureRoster), true);
+  t(
+    'CONTROL: a non-aggregator `Verify …` step is not a roster job',
+    isRosterJob(['Verify build outputs'], fixtureRoster),
+    false,
+  );
+  t(
+    "CONTROL: an aggregator's own gate step that judges no other job is not a roster job",
+    isRosterJob(['Check the per-package ceilings'], fixtureRoster),
+    false,
+  );
+  t('a shard job is not a roster job', isRosterJob(['Run the shard'], fixtureRoster), false);
+  t(
+    'a mixed job is not a roster job',
+    isRosterJob(['Verify every fixture lane succeeded', 'Check the per-package ceilings'], fixtureRoster),
+    false,
+  );
+  t('no failed steps is not a roster job', isRosterJob([], fixtureRoster), false);
+  t(
+    'the old name pattern is gone: with no roster in hand, no name is a roster job',
+    [isRosterJob(['Verify test shard results'], []), isRosterJob(['Verify test shard results'], undefined)],
+    [false, false],
+  );
+  t(
+    'two aggregators sharing a verdict name: the check name picks its own',
+    rosterVerdictFor(['Verify'], [
+      { context: 'One', verdictSteps: ['Verify'] },
+      { context: 'Two', verdictSteps: ['Verify'] },
+    ], { checkName: 'Two' })?.context ?? null,
+    'Two',
+  );
+
+  // The REAL tree — the card's two pins and its control, plus the two ci.yml
+  // gates the old pattern did know, so the swap loses none of them.
+  const realTree = readWorkflows();
+  const realRoster = aggregatorRoster(realTree);
+  const realContext = (step) => rosterVerdictFor([step], realRoster)?.context ?? null;
+  t(
+    'the real tree: `Verify every lint lane succeeded` is a roster job, of `Lint & Repo Gates`',
+    realContext('Verify every lint lane succeeded'),
+    'Lint & Repo Gates',
+  );
+  t(
+    'the real tree: `Verify every type-check lane succeeded` is a roster job, of `TypeScript Type Check`',
+    realContext('Verify every type-check lane succeeded'),
+    'TypeScript Type Check',
+  );
+  t(
+    'the real tree: the two shard-attestation verdicts stay roster jobs',
+    [realContext('Verify test shard results'), realContext('Verify dogfood shard results')],
+    ['Test Core', 'Dogfood Regression Gate'],
+  );
+  t(
+    'the real tree CONTROL: `Verify build outputs` exists, and is not a roster job',
+    [resolveStep(realTree, 'Verify build outputs').length > 0, isRosterJob(['Verify build outputs'], realRoster)],
+    [true, false],
+  );
+  t(
+    "the real tree CONTROL: `Test Core`'s own ceiling gate exists, and is not a roster job",
+    [
+      resolveStep(realTree, 'Check the per-package suite-duration ceilings').length > 0,
+      isRosterJob(['Check the per-package suite-duration ceilings'], realRoster),
+    ],
+    [true, false],
+  );
+  // Held against the roster gate's own floor: every aggregator that carries a
+  // required context is found by THIS scan, under that context, with a verdict.
+  t(
+    "the real tree: this scan finds every one of check-aggregator-roster's required aggregators, each with a verdict step",
+    REQUIRED_AGGREGATORS.map((r) => {
+      const hit = realRoster.find((a) => a.file === `.github/workflows/${r.workflow}` && a.job === r.job);
+      return [r.job, hit?.context ?? null, (hit?.verdictSteps.length ?? 0) > 0];
+    }),
+    REQUIRED_AGGREGATORS.map((r) => [r.job, r.context, true]),
+  );
+  t(
+    'the real tree: every declared member resolves to a job in its own file, so its row can be named',
+    realRoster.flatMap((a) => a.members.filter((m) => m.name === null).map((m) => `${a.job}/${m.id}`)),
+    [],
+  );
+
+  // -- roster verdict: the substitute names the member lanes (#23249) -------
+  battery('roster verdict: the substitute names the member lanes');
+  const rosterStep = { number: 2, name: 'Verify every fixture lane succeeded' };
+  t(
+    'the defect: by its own name the verdict step resolves to its `$OS_NEEDS` heredoc',
+    resolveStep(fixtureTree, rosterStep.name).some((h) => h.text.includes('OS_NEEDS')),
+    true,
+  );
+  const rosterResolved = resolveFailedStep(fixtureTree, rosterStep, { roster: fixtureRoster, checkName: 'Fixture Gates' });
+  t(
+    'the fix: a roster verdict step resolves to no command, and carries its aggregator',
+    [rosterResolved.repro, rosterResolved.rosterVerdict?.job ?? null, rosterResolved.rosterVerdict?.members.length ?? null],
+    [[], 'gate', 2],
+  );
+  t(
+    'resolved without a roster handed in, the step reads the roster off the same tree',
+    resolveFailedStep(fixtureTree, rosterStep).rosterVerdict?.context ?? null,
+    'Fixture Gates',
+  );
+  const runUrl = (run) => `https://github.com/o/r/actions/runs/${run}/job/1`;
+  const fixtureChecks = [
+    { name: 'Fixture Gates', status: 'completed', conclusion: 'failure', details_url: runUrl(7) },
+    { name: 'Fixture · lane A', status: 'completed', conclusion: 'failure', details_url: runUrl(7) },
+    { name: 'Fixture shard (1/3)', status: 'completed', conclusion: 'success', details_url: runUrl(7) },
+    { name: 'Fixture shard (2/3)', status: 'completed', conclusion: 'cancelled', details_url: runUrl(7) },
+    { name: 'Fixture shard (3/3)', status: 'in_progress', conclusion: null, details_url: runUrl(7) },
+    { name: 'Fixture · lane A', status: 'completed', conclusion: 'failure', details_url: runUrl(8) },
+    { name: 'Fixture · lane AB', status: 'completed', conclusion: 'failure', details_url: runUrl(7) },
+  ];
+  const lanes = memberLanes(fixtureRoster[0], fixtureChecks, { runId: '7' });
+  // Lanes are attached only to a step that DID resolve as a roster verdict: a
+  // regression must be REPORTED by this harness, not crash it (see the job-log
+  // battery). Measured while ablating the roster read — spreading an absent
+  // verdict built a truthy one with no members, and the renderer threw.
+  const withLanes = (resolved, l) =>
+    resolved.rosterVerdict ? { ...resolved, rosterVerdict: { ...resolved.rosterVerdict, lanes: l } } : resolved;
+  t(
+    'memberLanes: the members that did not succeed, by job name and run — not the aggregator, not another run, not a prefix',
+    [lanes.matched, lanes.notSucceeded.map((l) => [l.member, l.name, l.conclusion])],
+    [4, [['lane-a', 'Fixture · lane A', 'failure'], ['lane-b', 'Fixture shard (2/3)', 'cancelled'], ['lane-b', 'Fixture shard (3/3)', null]]],
+  );
+  t(
+    'checkNameMatcher: a matrix expression matches its value, a literal name matches only whole',
+    [
+      checkNameMatcher('Fixture shard (${{ matrix.shard }}/3)')('Fixture shard (2/3)'),
+      checkNameMatcher('Fixture shard (${{ matrix.shard }}/3)')('Fixture shard (/3)'),
+      checkNameMatcher('Lint · ESLint')('Lint · ESLint'),
+      checkNameMatcher('Lint · ESLint')('Lint · ESLint (retry)'),
+      checkNameMatcher('Lint & Repo Gates (a.b)')('Lint & Repo Gates (axb)'),
+    ],
+    [true, false, true, false, false],
+  );
+  const laneLines = renderSubstitute([withLanes(rosterResolved, lanes)]);
+  t(
+    'the substitute never offers the heredoc, and says it has none of its own',
+    [
+      laneLines.some((l) => /OS_NEEDS|needs\.json|printf/.test(l)),
+      laneLines.some((l) => l.includes('    substitute   none of its own — the member row(s) named above carry the answer')),
+    ],
+    [false, true],
+  );
+  t(
+    '...and names each member that did not succeed, saying which have a row above',
+    [
+      laneLines.some((l) => l.includes('✗ "Fixture · lane A" (lane-a) — failure; its own row is above')),
+      laneLines.some((l) => l.includes('✗ "Fixture shard (2/3)" (lane-b) — cancelled; no row above')),
+      laneLines.some((l) => l.includes('✗ "Fixture shard (3/3)" (lane-b) — in_progress; still running')),
+    ],
+    [true, true, true],
+  );
+  const lanesSay = (l) => renderSubstitute([withLanes(rosterResolved, l)]);
+  t(
+    'no member found is NONE found, never "all green"',
+    [
+      lanesSay({ matched: 0, notSucceeded: [] }).some((l) => l.includes('NONE of its members was found')),
+      lanesSay({ matched: 0, notSucceeded: [] }).some((l) => l.includes('found here succeeded')),
+    ],
+    [true, false],
+  );
+  t(
+    'every member found green says so, and points at the annotations',
+    lanesSay({ matched: 3, notSucceeded: [] }).some((l) => l.includes('Every one of the 3 member row(s) found here succeeded')),
+    true,
+  );
+  t(
+    'a roster row ranks after every other row, both groups keeping walk order',
+    rankFailing([
+      { name: 'Lint & Repo Gates', roster: true },
+      { name: 'Test Core (1/6)', roster: false },
+      { name: 'Test Core', roster: true },
+      { name: 'Lint · repo & tooling gates', roster: false },
+    ]).map((f) => f.name),
+    ['Test Core (1/6)', 'Lint · repo & tooling gates', 'Lint & Repo Gates', 'Test Core'],
+  );
+  t(
+    'no job log is fetched for a roster job; one is for an unanchored non-roster job; none without a job id',
+    [
+      shouldFetchJobLog({ assertions: [], roster: true, jobId: 115216483696 }),
+      shouldFetchJobLog({ assertions: [], roster: false, jobId: 115216483696 }),
+      shouldFetchJobLog({ assertions: [{ kind: 'assertion' }], roster: false, jobId: 1 }),
+      shouldFetchJobLog({ assertions: [], roster: false, jobId: null }),
+    ],
+    [false, true, false, false],
+  );
+
+  // The measured specimen, run 38373082677 (PR head 5301220a): `Lint & Repo
+  // Gates` failed at step #2 with one red lane. Resolved against the REAL tree.
+  const specimenRun = '38373082677';
+  const lintVerdict = resolveFailedStep(realTree, { number: 2, name: 'Verify every lint lane succeeded' }, {
+    roster: realRoster,
+    checkName: 'Lint & Repo Gates',
+  });
+  const specimenChecks = [
+    { name: 'Lint & Repo Gates', status: 'completed', conclusion: 'failure', details_url: runUrl(specimenRun) },
+    { name: 'Lint · repo & tooling gates', status: 'completed', conclusion: 'failure', details_url: runUrl(specimenRun) },
+    { name: 'Lint · ESLint', status: 'completed', conclusion: 'success', details_url: runUrl(specimenRun) },
+  ];
+  const lintLines = renderSubstitute([
+    withLanes(lintVerdict, memberLanes(lintVerdict.rosterVerdict, specimenChecks, { runId: specimenRun })),
+  ]);
+  t(
+    'the specimen: the lint verdict names `Lint · repo & tooling gates` and prints no line of its heredoc',
+    [
+      lintLines.some((l) => l.includes('✗ "Lint · repo & tooling gates" (lint-repo-tooling) — failure; its own row is above')),
+      lintLines.some((l) => /OS_NEEDS|verify-lanes\.mjs|readFileSync/.test(l)),
+    ],
+    [true, false],
+  );
+  t(
+    'the same for `TypeScript Type Check` and for the shard gates: no verdict command is offered',
+    ['Verify every type-check lane succeeded', 'Verify test shard results', 'Verify dogfood shard results'].map((name) => {
+      const lines = renderSubstitute([resolveFailedStep(realTree, { number: 1, name }, { roster: realRoster })]);
+      return lines.some((l) => /OS_NEEDS|check-shard-attestation\.mjs/.test(l));
+    }),
+    [false, false, false],
+  );
 
   // -- runIdOf --------------------------------------------------------------
   battery('runIdOf');
@@ -3041,7 +3589,9 @@ async function selfTest() {
     '    annotation shapes classify, with the unrecognised one kept rather than dropped; a check that\n' +
     '    carried a gate sentence is told apart from one that carried only an exit status and from one\n' +
     '    that carried a real assertion; the pre/post step-numbering jump reads COMPLETE while an\n' +
-    '    interior gap reads possibly-truncated; roster jobs are told from shard jobs; step names\n' +
+    '    interior gap reads possibly-truncated; roster jobs are read from the workflows\' own\n' +
+    '    aggregator roster declarations, so a non-aggregator Verify step stays unclassified, and a\n' +
+    '    roster verdict names its member lanes instead of offering its own command; step names\n' +
     '    resolve to their run: blocks in fixtures and in the real workflow tree; a live run behind an\n' +
     '    HTTPS proxy re-arms itself with --use-env-proxy while the offline modes never do; --help\n' +
     '    still carries every documented invocation of this file; and the exit table holds — zero\n' +
