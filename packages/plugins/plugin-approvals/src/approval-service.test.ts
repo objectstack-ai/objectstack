@@ -1288,6 +1288,63 @@ describe('ApprovalService (node era)', () => {
     expect(rows[0].record_title).toBe('Snapshot Title');
   });
 
+  // [#23157] The approve action is `type: 'api'` against the decide route,
+  // which answers decide()'s result verbatim; its success copy interpolates
+  // `${result.*}` over that answer (the scope `ActionSchema.successMessage`
+  // declares). So the toast names what was approved only while decide()'s
+  // answer carries the title the copy reads, finalized or not.
+  describe('the approve action\'s success copy, filled from decide()\'s answer', () => {
+    const approveCopy = (): string => {
+      const action = (SysApprovalRequest as any).actions.find((a: any) => a.name === 'approval_approve');
+      return action.successMessage;
+    };
+    /** The copy's `${result.<path>}` tokens, each filled from the answer; an unresolved path reads as ''. */
+    const fill = (copy: string, result: unknown): { text: string; unresolved: string[] } => {
+      const unresolved: string[] = [];
+      const text = copy.replace(/\$\{result\.([\w.]+)\}/g, (_m, path: string) => {
+        const v = path.split('.').reduce<any>((acc, k) => (acc == null ? undefined : acc[k]), result);
+        if (v == null || String(v) === '') unresolved.push(path);
+        return v == null ? '' : String(v);
+      });
+      return { text, unresolved };
+    };
+
+    it('reads the answer: the copy carries at least one `${result.*}` token', () => {
+      expect(approveCopy()).toMatch(/\$\{result\.[\w.]+\}/);
+    });
+
+    it('a finalizing approve: the toast names the record, the way the inbox row\'s inline Approve does', async () => {
+      engine._tables['opportunity'] = [{ id: 'opp1', name: 'Acme Renewal', amount: 100 }];
+      const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+      const out = await svc.decide(req.id, { decision: 'approve', actorId: 'u9' }, SYS);
+      expect(out.finalized).toBe(true);
+      const { text, unresolved } = fill(approveCopy(), out);
+      expect(unresolved).toEqual([]);
+      expect(text).toBe('Approved "Acme Renewal"');
+    });
+
+    it('an approve that leaves the step waiting on others still names the record', async () => {
+      engine._tables['opportunity'] = [{ id: 'opp1', name: 'Acme Renewal', amount: 100 }];
+      const req = await svc.openNodeRequest(openInput(['u1', 'u2'], {}, { behavior: 'unanimous' }), CTX);
+      const out = await svc.decide(req.id, { decision: 'approve', actorId: 'u1' }, SYS);
+      expect(out.finalized).toBe(false);
+      const { text, unresolved } = fill(approveCopy(), out);
+      expect(unresolved).toEqual([]);
+      expect(text).toContain('Acme Renewal');
+      expect(text).not.toBe('Approved.');
+    });
+
+    it('a record whose row is gone is named from the payload snapshot, as the inbox names it', async () => {
+      const req = await svc.openNodeRequest(
+        openInput(['u9'], { record: { id: 'opp1', name: 'Snapshot Title', amount: 1 } }), CTX,
+      );
+      const out = await svc.decide(req.id, { decision: 'approve', actorId: 'u9' }, SYS);
+      const { text, unresolved } = fill(approveCopy(), out);
+      expect(unresolved).toEqual([]);
+      expect(text).toBe('Approved "Snapshot Title"');
+    });
+  });
+
   it('enrichment resolves lookup foreign keys in the payload to record titles', async () => {
     (engine as any).getSchema = (name: string) =>
       name === 'opportunity'
