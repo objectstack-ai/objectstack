@@ -35,7 +35,7 @@ Clause-②: yes (narrowing: a string is refused at loop.collection and map.colle
 
 **Newly accepted.** A CEL value envelope at `loop.collection` and `map.collection`: the published JSON Schema for both gains the envelope arm (a list, or the envelope object), and so do the inferred `LoopConfig['collection']` and `MapConfig['collection']`, which lose `string`. `FlowCollectionSlotSchema` (`@objectstack/spec/automation`) is the contract both take.
 
-**Still accepted, unchanged.** An inline array at both, and on a body-less `loop` any `collection` its legacy form reads. The single-brace dialect keeps resolving where it still lives, a CRUD `filter` value.
+**Still accepted, unchanged.** An inline array at both, and on a body-less `loop` any `collection` its legacy form reads.
 
 ### The kit
 

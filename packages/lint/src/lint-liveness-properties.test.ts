@@ -440,7 +440,7 @@ describe('lintLivenessProperties', () => {
       expect(refused.success, key).toBe(false);
       expect(refused.error?.issues[0]?.path, key).toEqual([key]);
       expect(refused.error?.issues[0]?.message, key).toMatch(
-        new RegExp(`^\`email_template\\.${key}\` was removed in @objectstack/spec 17`),
+        new RegExp(`^\`email_template\\.${key}\` was removed in @objectstack/spec 18`),
       );
     }
   });

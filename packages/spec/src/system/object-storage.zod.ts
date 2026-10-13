@@ -44,7 +44,7 @@ import { enumWithRetiredValues, retiredKey } from '../shared/retired-key';
 // no authored source to rewrite. Module-private and written with `//`, never
 // `/** */`: prose an enum's error map consumes, not documented surface.
 const STORAGE_SCOPE_PUBLIC_RETIRED =
-  '`public` was removed from `StorageScope` in @objectstack/spec 17.8.0 (ADR-0049 '
+  '`public` was removed from `StorageScope` in @objectstack/spec 18 (ADR-0049 '
   + 'enforce-or-remove) — no storage scope ever made a file publicly readable. A file is '
   + 'served without sign-in only when its stored file record carries `acl: \'public_read\'` '
   + '(ADR-0104), the one opt-in for anonymous download. Name another scope, or omit `scope` '

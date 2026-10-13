@@ -2019,8 +2019,9 @@ function refuseControlledByParentWithoutOneMaster(
     path: ['sharingModel'],
     message:
       `Object '${name}' declares sharingModel 'controlled_by_parent' but no required \`master_detail\` field. `
-      + 'ADR-0055 §1: a controlled-by-parent object derives its master from exactly one `master_detail` field '
-      + 'declared `required: true`, and from nothing else, so as declared the platform derives no master '
+      + 'ADR-0055 §1: since @objectstack/spec 18, a controlled-by-parent object derives its master from exactly '
+      + 'one `master_detail` field declared `required: true`, and from nothing else, so as declared the '
+      + 'platform derives no master '
       + '(every read is denied, every write refused). '
       + (found.length > 0 ? `${found.join('; ')}. ` : '')
       + 'If the rows must outlive their parent, this object is not a detail: give it its own sharingModel '

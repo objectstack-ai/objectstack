@@ -171,9 +171,6 @@ import { DecisionConfigSchema } from '@objectstack/spec/automation';
 // driver-sql, driver-mongodb and driver-memory execute. This linter asks it
 // rather than hand-writing a fourth copy; see {@link filterCarriesNoCondition}.
 import { reduceFilterVerdict } from '@objectstack/spec/data';
-// [#19939] The lint's pinned mirror of the 17.x interpolator's token dispatch —
-// here only to tell a bare run-user reference (`$User.Id`) from a variable.
-import { classifyFlowTemplateToken } from './flow-template-grammar.js';
 import { stripRegions, ownRegionKeys, REGION_SLOTS, MAX_REGION_DEPTH } from './flow-walk.js';
 import { recordsOf } from './object-graph.js';
 
@@ -667,15 +664,16 @@ function scanFilterForDateEquality(
 //     `actionUrl`, an http `url` and each `headers` value, a screen `title` /
 //     `description`, an `end` `message` — `FLOW_NODE_TEXT_SLOTS`): they render
 //     the `{{ }}` holes of the formula template dialect;
-//   - every other config string (a `filter`, …): it keeps the SINGLE-brace
-//     dialect (`{var}` / `{rec.field}` / `{$User.Id}`) — except a node's
-//     literals, read as written (#19939: a notify node's `sourceObject`,
+//   - every other config string (a plugin node's own config, a
+//     `connector_action` input, …): read as written — no flow template dialect
+//     resolves there (#19939 S7 deleted the single-brace interpolator).
+//     A node's declared literals (#19939: a notify node's `sourceObject`,
 //     `actorId` and `payload`; an http node's `method`, `durable`, `timeoutMs`
-//     and `signingSecret`), where neither dialect resolves
-//     ({@link LITERAL_KEYS}).
+//     and `signingSecret`, {@link LITERAL_KEYS}) are the same reading, named
+//     key by key, and the contract refuses a token there.
 // Two wrong-syntax mistakes AI/human authors carry over between them, or from
 // other platforms:
-//   - `{{ai_reply}}`  — double-brace on a single-brace value. NOT flagged on a
+//   - `{{ai_reply}}`  — double-brace outside a text slot. NOT flagged on a
 //                       text slot, where it is the spelling; the reverse
 //                       mistake there — a single-brace token on a text slot —
 //                       is refused at `error` by the build door
@@ -684,8 +682,8 @@ function scanFilterForDateEquality(
 //   - `$source.id`    — a `$`-prefixed reference written bare (resolves as a
 //                       literal string). Its hint names what the judge of the
 //                       slot it sits in accepts: the CEL envelope in a value
-//                       slot, the `{{ }}` hole in a text slot, `{source.id}`
-//                       elsewhere.
+//                       slot, the `{{ }}` hole in a text slot, and elsewhere
+//                       that the value is read as written.
 const DOUBLE_BRACE = /\{\{\s*[\w$][\w$.\s]*\}\}/;
 // A `$Ident.field` not immediately inside a `{` (so `{$User.Id}` is NOT flagged).
 // Require a letter/_ after `$` so currency like `$5.00` is never matched.
@@ -697,6 +695,17 @@ const BARE_DOLLAR_REFS = /(?:^|[^{])(\$[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+)/g;
 /** The distinct bare `$name.path` references in `text`, in order. */
 function bareDollarRefsOf(text: string): string[] {
   return [...new Set([...text.matchAll(BARE_DOLLAR_REFS)].map((m) => m[1]!))];
+}
+
+/**
+ * Whether `ref` is a run-user reference (`$User.Id`, `$User.<path>`) — the
+ * retired dialect's `$User.` shortcut, whose value-slot remedy is the CEL
+ * scope's `current_user` (the spec's value-slot judge names it). The lint's
+ * mirror of that dialect's grammar went with its interpolator (#19939 S7);
+ * this is the one arm of it the hint below reads.
+ */
+function isRunUserRef(ref: string): boolean {
+  return ref.startsWith('$User.');
 }
 
 /**
@@ -784,7 +793,7 @@ function valueSlotBareDollarHint(text: string, at: ValueSlotPosition): string {
     + 'text it spells, so a bare `$` reference is stored as written.',
   ];
   for (const ref of bareDollarRefsOf(text)) {
-    const ownVariable = classifyFlowTemplateToken(ref).kind !== 'user-context' && !engineBindsRootOf(ref);
+    const ownVariable = !isRunUserRef(ref) && !engineBindsRootOf(ref);
     const root = ref.split('.')[0]!;
     const token = ownVariable ? `{${ref.slice(1)}}` : `{${ref}}`;
     parts.push(
@@ -840,6 +849,18 @@ const LITERAL_KEYS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ['http', new Set(['method', 'durable', 'timeoutMs', 'signingSecret'])],
 ]);
 
+/**
+ * [#19939 S7] The hint of either finding at a config string outside every value
+ * slot, text slot and declared literal — a plugin node's own config, a
+ * `connector_action` input, … No executor renders a template there, and the
+ * single-brace interpolator is deleted, so nothing resolves a reference in
+ * either dialect: the hint names the value itself — never a `{var}` token,
+ * which nothing reads.
+ */
+const ELSEWHERE_HINT =
+  'This flow node value is read as written: neither `{var}` nor `{{ }}` resolves here, and nothing evaluates a '
+  + 'reference, braced or bare. Write the value itself.';
+
 /** The hint of either finding at a node's literal, by node type: nothing resolves a reference there. */
 const LITERAL_HINTS: ReadonlyMap<string, string> = new Map([
   [
@@ -869,7 +890,7 @@ function literalAt(nodeType: string, path: readonly (string | number)[]): { at: 
   return { at, hint };
 }
 
-/** `config` without its node type's `{{ }}` text slots — the strings that keep the single-brace dialect. */
+/** `config` without its node type's `{{ }}` text slots — the strings no template renders. */
 function withoutTextSlots(nodeType: unknown, config: unknown): unknown {
   if (!config || typeof config !== 'object' || Array.isArray(config)) return config;
   const keys = FLOW_NODE_TEXT_SLOTS.filter((slot) => slot.nodeType === nodeType).map((slot) => slot.key);
@@ -1922,9 +1943,9 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
       // top-level list did (#16910). Belt and braces, ⛔ not one repair twice.
       const graphEdges = recordsOf(graph.edges);
 
-      // (b) #1315 — wrong interpolation syntax in any node's template values. Flow
-      //     node values use SINGLE braces; double-brace `{{ }}` and bare `$ref.x`
-      //     are carried over from the formula template dialect / other platforms.
+      // (b) #1315 — wrong interpolation syntax in any node's values. Double-brace
+      //     `{{ }}` outside a text slot and a bare `$ref.x` are carried over from
+      //     the formula template dialect / other platforms.
       for (const node of graphNodes) {
         const nodeWhere = `${at} · node '${node.id}' (${node.type})`;
 
@@ -1984,7 +2005,8 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
         for (const { value: str, path } of strings) {
           // [#19939] In a value slot both hints name the CEL envelope the
           // value-slot judge accepts, asked at the string's own position;
-          // everywhere else the single brace still resolves, and they name it.
+          // everywhere else nothing resolves a reference (#19939 S7 deleted
+          // the single-brace interpolator), and they say so.
           const at: ValueSlotPosition = { nodeType: String(node.type), config: templateConfig, path };
           const valueSlot = DOUBLE_BRACE.test(str) || BARE_DOLLAR_REF.test(str)
             ? valueSlotRefusalAt(at.nodeType, at.config, at.path)?.label
@@ -2016,11 +2038,10 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
             findings.push({
               where: nodeWhere,
               message: valueSlot === undefined
-                ? `double-brace interpolation \`${str.trim().slice(0, 80)}\` — this flow node value uses SINGLE braces.`
+                ? `double-brace interpolation \`${str.trim().slice(0, 80)}\` — nothing renders a template here: this flow node value is read as written.`
                 : `double-brace interpolation \`${str.trim().slice(0, 80)}\` — the ${valueSlot} reads a CEL value envelope, not a template.`,
               hint: valueSlot === undefined
-                ? `Use \`{var}\` (e.g. \`{record.title}\`): this flow node value is a string template in which only ` +
-                  `single-brace \`{…}\` tokens resolve and all other text is literal. Double-brace \`{{ }}\` is ` +
+                ? `${ELSEWHERE_HINT} Double-brace \`{{ }}\` is ` +
                   `the template dialect of the text slots only — a notify \`title\` / \`message\` / \`actionUrl\`, an http \`url\` and \`headers\` values, a screen ` +
                   `\`title\` / \`description\`, an \`end\` \`message\`.`
                 : valueSlotDoubleBraceHint(str, at),
@@ -2031,12 +2052,10 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
             findings.push({
               where: nodeWhere,
               message: valueSlot === undefined
-                ? `\`${str.trim().slice(0, 80)}\` looks like a reference written as a literal — a bare \`$ref.field\` is NOT interpolated.`
+                ? `\`${str.trim().slice(0, 80)}\` looks like a reference written as a literal — a bare \`$ref.field\` is NOT resolved: this flow node value is read as written.`
                 : `\`${str.trim().slice(0, 80)}\` looks like a reference written as a literal — a bare \`$ref.field\` in the ${valueSlot} is NOT evaluated.`,
               hint: valueSlot === undefined
-                ? `Wrap it and bind a variable: \`{source.id}\` (or \`{$User.Id}\` for the current user) — a flow ` +
-                  `node value is a string template in which only single-brace \`{…}\` tokens resolve and all ` +
-                  `other text is literal.`
+                ? ELSEWHERE_HINT
                 : valueSlotBareDollarHint(str, at),
               rule: FLOW_BARE_DOLLAR_REF,
             });

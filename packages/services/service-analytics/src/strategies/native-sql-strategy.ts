@@ -1317,9 +1317,9 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
           // until #5930 step 4.
           //
           // [#16322] A RESOLVED window states its own upper reading, and its ends
-          // are instants the lowering never widens: the ten calendar presets stop
-          // BEFORE their end instant (`$lt`), the three rolling ones end at NOW
-          // and reach it (`$lte`). ⛔ An explicit `[a, b]` a CALLER wrote keeps the
+          // are instants the lowering never widens: every preset stops BEFORE its
+          // end instant (`$lt`), the three rolling ones before tomorrow begins, as
+          // `today` does. ⛔ An explicit `[a, b]` a CALLER wrote keeps the
           // inclusive reading it has always had — the #16179 separation, on this
           // side too.
           const bounds = resolved?.endExclusive ? { $gte: start, $lt: end } : { $gte: start, $lte: end };

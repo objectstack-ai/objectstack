@@ -758,7 +758,7 @@ describe('#19542 — group C: wired, dispatched, and silent by ledger (email_tem
     const refused = door!.safeParse({ ...item, category: 'workflow' });
     expect(refused.success).toBe(false);
     expect(refused.error?.issues[0]?.path).toEqual(['category']);
-    expect(refused.error?.issues[0]?.message).toMatch(/^`email_template\.category` was removed in @objectstack\/spec 17/);
+    expect(refused.error?.issues[0]?.message).toMatch(/^`email_template\.category` was removed in @objectstack\/spec 18/);
   });
 
   it('[#21127] a `mapping` write that DOES author `connectorSource` is judged silent — not thrown on', () => {

@@ -3107,7 +3107,7 @@ const elementFlatBindingRetired = (
     : type === 'element:number' && key === 'filter'
       ? 'where `dataSource.filter` already has rules, append these to it, since the two always AND-combined'
       : 'where `dataSource` already sets it, delete this one, since the binding\'s value always won';
-  return `\`${type}\` property \`${key}\` was removed in @objectstack/spec 17 (ADR-0087 D2) — `
+  return `\`${type}\` property \`${key}\` was removed in @objectstack/spec 18 (ADR-0087 D2) — `
     + `${why}. Use \`dataSource.${key}\` on the component `
     + 'node, a sibling of `type` rather than a key inside `properties`. Move the key; the value '
     + `(${ELEMENT_FLAT_BINDING_VALUE[key]}) is unchanged, and ${both}. `
@@ -4088,7 +4088,7 @@ function refuseRowUrlExecutorAlias(executorKey: 'actionType' | 'type', subject: 
       code: 'custom',
       path: [executorKey],
       message:
-        `${subject} is the console runner's local alias of \`'url'\`, and the url executor has one spelling. `
+        `${subject} is the console runner's local alias of \`'url'\`, refused on page action rows since @objectstack/spec 18, and the url executor has one spelling. `
         + `Write \`${executorKey}: 'url'\`: on a page action row the alias runs the same navigator on the same `
         + '`target` and `openIn`, so nothing else changes, and a `\'url\'` row\'s `target` is judged by the url '
         + 'scheme set.',
@@ -5464,7 +5464,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * a record-form value it moves is converted at `filter` like any other.
    */
   defaultFilters: retiredKey(
-    '`object-grid` property `defaultFilters` was removed in @objectstack/spec 17 (ADR-0087 D2) — '
+    '`object-grid` property `defaultFilters` was removed in @objectstack/spec 18 (ADR-0087 D2) — '
     + 'it was the legacy second spelling of `filter`: the same rules, read only when `filter` lowered to '
     + 'nothing, so one intent had two spellings and a grid authoring both silently ignored this one. Use '
     + '`filter`. Rename the key where `filter` is empty; the value (a ViewFilterRule array, '

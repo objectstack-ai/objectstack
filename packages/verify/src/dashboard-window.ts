@@ -19,8 +19,8 @@
 //     `DatasetSchema`), never as authored.
 //   - WHAT a preset's window is: `DATE_RANGE_PRESET_MACRO_WINDOWS`
 //     (`@objectstack/spec/data`), the `{date-macro}` pair each preset of
-//     `DATE_RANGE_PRESETS` names — its first and last day, inclusive, the last
-//     open for the three rolling `last_N_days` presets. It is handed to the
+//     `DATE_RANGE_PRESETS` names — its first and last day, inclusive; the
+//     three rolling `last_N_days` presets end on `{today}`. It is handed to the
 //     door as written, `{ $gte: start, $lte: end }`, ANDed with the widget's
 //     own filter (`{ $and: [filter, window] }`, the shipped console's merge):
 //     ⛔ never lowered to dates here. The server resolves the tokens.
@@ -501,7 +501,7 @@ function fixtureDays(presets: DashboardWindowPreset[], today: string): string[] 
   return [...days].sort().reverse();
 }
 
-/** Is `day` inside a resolved window? The table's convention: first and last day inclusive, the rolling end open. */
+/** Is `day` inside a resolved window? The table's convention: first and last day inclusive (every preset names its last day). */
 const selects = (resolved: Record<string, unknown>, day: string): boolean =>
   day >= String(resolved.$gte) && (resolved.$lte === undefined || day <= String(resolved.$lte));
 

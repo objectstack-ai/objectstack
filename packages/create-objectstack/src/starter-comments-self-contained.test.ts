@@ -227,7 +227,7 @@ describe('shipped template comments are followable by a stranger', () => {
       file: 'blank/README.md',
       facts: [
         { what: 'that a provider-bound connector is materialized into a live, dispatchable connector at boot (not written by hand)', re: /materializ\w*[^.]*?\bat\s+boot\b/i },
-        { what: 'the followable skills install command (`npx skills add objectstack-ai/objectstack/skills`)', re: /npx skills add objectstack-ai\/objectstack\/skills/i },
+        { what: 'the followable skills install command (`npx skills@<pin> experimental_sync … --copy`, reading the installed package)', re: /npx skills@\d+\.\d+\.\d+ experimental_sync --agent \S+ --copy/i },
       ],
     },
   ];

@@ -44,7 +44,7 @@ Clause-②: no (narrowing)
 
 **Who is affected, measured.** This repository's examples carry no date macro in a value slot; its own test fixtures and docs that did are migrated in this change. The census taken for this retirement's first change measured 15 date-macro value-slot sites in hotcrm at `c529de2` (8 `{NOW()}`, 3 `{TODAY()}`, 3 `{TODAY() + N}`, 1 `{TODAY() + var}`); they migrate there. Deployed metadata and other repositories were not measured here.
 
-**Still accepted, unchanged.** A CEL value envelope and every literal. The single-brace dialect, date macros included, keeps resolving where it still lives, a CRUD `filter` value.
+**Still accepted, unchanged.** A CEL value envelope and every literal.
 
 ### The kit
 

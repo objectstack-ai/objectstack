@@ -128,6 +128,7 @@ describe('ViewDataSchema', () => {
     const issue = result.error!.issues.find((i) => i.path.join('.') === 'provider');
     expect(issue, JSON.stringify(result.error!.issues)).toBeDefined();
     expect(issue!.message).toMatch(/`view\.data\.provider: 'api'` was removed/);
+    expect(issue!.message).toContain('was removed in @objectstack/spec 18 (');
   });
 
   it('should accept value provider with static items', () => {

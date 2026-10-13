@@ -309,7 +309,7 @@ describe('[#16178] a sub-day granularity is refused, not dropped', () => {
       expect(parsed.success, granularity).toBe(false);
       if (parsed.success) return;
       const message = parsed.error.issues.map((i) => i.message).join(' ');
-      expect(message, granularity).toContain('retired in protocol 18');
+      expect(message, granularity).toContain('removed in @objectstack/spec 17.5.0');
       expect(message, granularity).toContain('os migrate meta --from 17');
     },
   );
