@@ -15,8 +15,8 @@
  * read-then-write one. Neither can two `@libsql/client` instances in ONE
  * Node process, whose native calls run on the one JS thread.
  *
- * So this file spawns two child processes (through `tsx`, over the package's
- * SOURCE, the way `packages/spec`'s process-boundary pins do). For each round
+ * So this file spawns two child processes, each running the package's SOURCE
+ * compiled by `tsx`, as `packages/spec`'s process-boundary pins do. For each round
  * the parent creates a fresh database, and each writer opens its own
  * `@libsql/client` connection to it — the native `file:` backend, which is
  * libSQL itself, the engine behind a Turso endpoint — drives its own
@@ -34,19 +34,25 @@
  * # What the file waits on, and what it no longer waits on
  *
  * Measured at `d4aaeaf0e` on a 4-vCPU box, one round of the earlier shape
- * (writers spawned per round, 200 writes each, the default
- * `synchronous = FULL`) took about 4.4 s: about 2.2 s to start each writer
- * (`tsx` plus the driver's source graph, mostly `@objectstack/driver-sql`),
- * and about 2.2 s of writes. The writes were fsync-bound: one `create` is three
+ * (writers spawned per round under `node --import tsx`, 200 writes each, the
+ * default `synchronous = FULL`) took about 4.4 s: about 2.2 s to start each
+ * writer and about 2.2 s of writes. Of a writer's start-up, the package's own
+ * source took about 40 ms to compile; the rest was its dependencies' built code
+ * (`@objectstack/driver-sql` and what it imports, `@objectstack/spec`,
+ * `@libsql/client`), which loads in about 1.2 s under plain Node and about 2 s
+ * under tsx's hook. The writes were fsync-bound: one `create` is three
  * statements (reserve, insert, read back), and a single writer took 5.9 ms per
  * `create` with fsync and 1.2 ms with `synchronous = OFF`. CI's hourly full
  * battery measured the file at up to 29.3 s, over 10 s in 6 of the 7 runs that
  * executed it, and every retry round paid both start-ups again.
  *
- * Two changes, neither touching what is asserted:
+ * Three changes, none touching what is asserted:
  *
  * - The writers start ONCE per test and serve every round over stdin/stdout.
  *   A retry round therefore costs its writes, not two more process start-ups.
+ * - A writer loads the driver's dependencies with plain Node first, then
+ *   registers tsx and requires the source. The source is still compiled by
+ *   tsx, and the dependencies are the same modules, loaded without the hook.
  * - Each writer sets `PRAGMA synchronous = OFF` on its own connection.
  *   `synchronous` decides only whether SQLite flushes to disk at a commit,
  *   which matters for a power cut and not for a throwaway temp file. The lock
@@ -115,7 +121,15 @@ import { TursoDriver } from './index.js';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const PKG_ROOT = join(HERE, '..');
-const DRIVER_ENTRY = new URL('./index.ts', import.meta.url).href;
+const DRIVER_ENTRY = fileURLToPath(new URL('./index.ts', import.meta.url));
+/**
+ * What the driver's source imports at runtime from `node_modules` (its type-only
+ * imports are erased). The writer loads these BEFORE tsx is registered: they
+ * are built code, not this package's source, and tsx's require hook roughly
+ * doubles their load. A dependency missing from this list still loads, under
+ * tsx, so the list is a cost, never a correctness, question.
+ */
+const PRELOADED_DEPENDENCIES = ['@libsql/client', '@objectstack/driver-sql', '@objectstack/spec/api', '@objectstack/spec/data'];
 
 const WRITES_PER_WORKER = 200;
 /** Rounds a loaded box gets to let the two writers overlap before the overlap evidence is declared NOT MEASURED. */
@@ -146,9 +160,12 @@ interface WorkerReport {
 }
 
 /**
- * The writer. Runs under `tsx` so it imports the driver's SOURCE, like the
- * test itself does, and pays that start-up once for every round. It reads one
- * JSON command per line on stdin and answers one JSON line on stdout:
+ * The writer. Loads the driver's dependencies with plain Node, then registers
+ * tsx through its public CJS API and requires the driver's SOURCE, like the
+ * test itself does — so the source is compiled by tsx, to CJS (this package
+ * has no `"type": "module"`), and its requires of those dependencies are cache
+ * hits. It pays that start-up once for every round. It reads one JSON command
+ * per line on stdin and answers one JSON line on stdout:
  *
  * - `{ open: <db path> }` — connect to that round's database, register the
  *   schema (the tables already exist — the parent created them — so
@@ -159,13 +176,13 @@ interface WorkerReport {
  * stdin closing ends the loop, and the process exits.
  */
 const WORKER_SOURCE = `
-  import { createClient } from '@libsql/client';
+  import { createRequire } from 'node:module';
   import { createInterface } from 'node:readline';
-  // tsx compiles this package's .ts to CJS (no "type": "module"), so the
-  // class may arrive under \`default\` — the spelling packages/spec's
-  // process-boundary pins use.
-  const driverModule = await import(${JSON.stringify(DRIVER_ENTRY)});
-  const TursoDriver = driverModule.TursoDriver ?? driverModule.default?.TursoDriver;
+  const require = createRequire(${JSON.stringify(join(PKG_ROOT, 'package.json'))});
+  for (const dependency of ${JSON.stringify(PRELOADED_DEPENDENCIES)}) require(dependency);
+  require('tsx/cjs/api').register();
+  const { TursoDriver } = require(${JSON.stringify(DRIVER_ENTRY)});
+  const { createClient } = require('@libsql/client');
   const { OS_TEST_TAG } = process.env;
   const reply = (message) => process.stdout.write(JSON.stringify(message) + '\\n');
   let driver = null;
@@ -209,7 +226,7 @@ interface Writer {
 function startWriter(tag: string): Writer {
   const child = spawn(
     process.execPath,
-    ['--import', 'tsx', '--input-type=module', '-e', WORKER_SOURCE],
+    ['--input-type=module', '-e', WORKER_SOURCE],
     { cwd: PKG_ROOT, env: { ...process.env, OS_TEST_TAG: tag }, stdio: ['pipe', 'pipe', 'pipe'] },
   );
   const inbox: unknown[] = [];
@@ -286,10 +303,13 @@ async function round(writers: Writer[]): Promise<number> {
 
   // Release both only once both are connected and registered, so the
   // writes contend rather than queue behind connection set-up.
+  const opened = Date.now();
   for (const w of writers) w.send({ open: dbPath });
   await Promise.all(writers.map((w) => w.next('ready')));
+  const released = Date.now();
   for (const w of writers) w.send({ go: WRITES_PER_WORKER });
   const reports = await Promise.all(writers.map((w) => w.next<WorkerReport>('report')));
+  const written = Date.now();
 
   // Different processes, and not this one.
   const pids = reports.map((r) => r.pid);
@@ -334,7 +354,12 @@ async function round(writers: Writer[]): Promise<number> {
   const inOrder = [...owner.keys()].sort((a, b) => a - b).map((n) => owner.get(n)!);
   let switches = 0;
   for (let i = 1; i < inOrder.length; i++) if (inOrder[i] !== inOrder[i - 1]) switches++;
-  process.stdout.write(`[turso-remote-autonumber-concurrency] pids ${pids.join('/')} · ${total} writes · ${new Set(all).size} distinct · ${switches} writer change(s)\n`);
+  // The phase times say where a slow run went: "ready" includes both process
+  // start-ups on the first round only, "writes" is the contention itself.
+  process.stdout.write(
+    `[turso-remote-autonumber-concurrency] pids ${pids.join('/')} · ${total} writes · ${new Set(all).size} distinct · ` +
+      `${switches} writer change(s) · ready ${released - opened}ms · writes ${written - released}ms\n`,
+  );
   return switches;
 }
 
