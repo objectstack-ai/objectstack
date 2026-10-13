@@ -12,6 +12,8 @@ Clause-②: no (narrowing)
 
 The `_lock` family (`_lock`, `_lockReason`, `_lockDocsUrl`, `_lockSource`) is the runtime's private lock envelope. A code package's loader stamps it from the package's `protection` block, and an install or a migration's re-save carries a stored one. ADR-0010 strips it on write and reattaches it on load (§4.1), and an item saved through the metadata API is authored in the environment, which takes no package lock (§3.5).
 
+**This entry supersedes one sentence of the entry `23096-save-door-protection`, in this same release.** That entry says, under its unchanged behaviour, "A body without `protection` saves as before". What holds now: a body without `protection` saves as before only when it also sends no `_lock*` key, or sends back exactly the `_lock*` family a read of that item serves; a body whose `_lock*` family would set, change or remove the item's lock answers `400 VALIDATION_ERROR` and writes nothing, as this entry states. Where the two entries disagree, this one is current.
+
 **FROM.** `PUT /api/v1/meta/{type}/{name}` stored a body's `_lock*` family verbatim. A hand-written `{ "_lock": "full" }`, or one an author or an AI copied from another item's served body, answered `200`, and the item then read `lock: 'full'`, `editable: false`, `deletable: false`: its next save and its delete both answered `403 ITEM_LOCKED`, and no door unlocks it. Any holder of the authoring capability could make an environment item permanently uneditable and undeletable. The other way round, an author save that sent no `_lock*` key dropped a lock the platform had stamped on the row, so a `no-delete` stopped refusing the delete.
 
 **TO.** An author's save keeps the lock family the row it writes already stores.
