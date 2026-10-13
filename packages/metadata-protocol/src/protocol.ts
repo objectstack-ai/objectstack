@@ -15332,7 +15332,7 @@ export class ObjectStackProtocolImplementation implements
      * environment → code read order (ADR-0131 D6) — the whole reason this
      * method delegates rather than re-reading.
      */
-    async getMetaItemCached(request: { type: string, name: string, cacheRequest?: MetadataCacheRequest, locale?: string }): Promise<MetadataCacheResponse> {
+    async getMetaItemCached(request: { type: string, name: string, cacheRequest?: MetadataCacheRequest, locale?: string }): Promise<MetadataCacheResponse & { registration?: FlowRegistration }> {
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. The ETag
         // and the cache entry are keyed by type, so two spellings would cache
         // the same item twice and invalidate only one of them.
@@ -15346,6 +15346,11 @@ export class ObjectStackProtocolImplementation implements
                 name: request.name,
             });
             const item = (result as any)?.item;
+            // [#23316] The automation engine's verdict on a flow, as the
+            // delegate read above just resolved it — live, on every call. It
+            // rides beside `data` for the REST layer's default door, and is
+            // never hashed into the ETag below (see the 304 note there).
+            const registration = (result as { registration?: FlowRegistration } | undefined)?.registration;
 
             if (!item) {
                 // [#5532] Structured: 404 + the catalog's `RESOURCE_NOT_FOUND`.
@@ -15399,7 +15404,16 @@ export class ObjectStackProtocolImplementation implements
             const etag = { value: hash, weak: false };
 
             // Check If-None-Match header
-            if (request.cacheRequest?.ifNoneMatch) {
+            //
+            // [#23316] …except for a read that carries `registration`: the
+            // served body holds the engine's verdict and this validator does
+            // not (it hashes the document alone, and the verdict stays out of
+            // it), so a 304 here would pin the caller to the verdict it was
+            // served before — after the engine re-registered or refused the
+            // flow under an unchanged body. Such a read is always answered in
+            // full; the work is the same either way, since this method always
+            // performs the delegate read.
+            if (request.cacheRequest?.ifNoneMatch && registration === undefined) {
                 const clientEtag = request.cacheRequest.ifNoneMatch.replace(/^"(.*)"$/, '$1').replace(/^W\/"(.*)"$/, '$1');
                 if (clientEtag === hash) {
                     // Return 304 Not Modified
@@ -15413,6 +15427,7 @@ export class ObjectStackProtocolImplementation implements
             // Return full metadata with cache headers
             return {
                 data: item,
+                ...(registration !== undefined ? { registration } : {}),
                 etag,
                 lastModified: new Date().toISOString(),
                 cacheControl: {

@@ -2019,8 +2019,22 @@ export const GetMetaItemCachedRequestSchema = lazySchema(() => z.object({
 /**
  * Get Metadata Item with Cache Response
  * Uses MetadataCacheResponse from http-cache.zod.ts
+ *
+ * [#23316] …plus `registration`: the cached read is the DEFAULT door of
+ * `GET /meta/flow/:name`, so the automation engine's verdict on a stored flow
+ * rides it too, read live from the delegate read on every call. It is never
+ * folded into `etag`, so a read that carries it is never answered
+ * `notModified`: a 304 would pin the caller to the verdict it was served
+ * before, which the validator cannot see change.
  */
-export const GetMetaItemCachedResponseSchema = lazySchema(() => MetadataCacheResponseSchema);
+export const GetMetaItemCachedResponseSchema = lazySchema(() => MetadataCacheResponseSchema.extend({
+  registration: FlowRegistrationSchema.optional().describe(
+    'The automation engine\'s verdict on the flow in `data`, read live on every call and never part of '
+    + '`etag` (see `FlowRegistrationSchema`). Present only for a `flow` read answered by a process that '
+    + 'runs an automation service; a read that carries it is never answered `notModified`. Absent '
+    + 'otherwise, and absence means no engine judged it, never `registered`.',
+  ),
+}));
 
 /**
  * Get UI View Request
