@@ -2017,8 +2017,9 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '(JSON-quoted against ISO text), and a whole-slot object differently in a screen or `end` text or a '
       + 'notify link, and an `http` url or header that was one token holding anything but a string was refused '
       + 'after the interpolation where the engine renders it as text, so '
-      + 'the rewrite is the author\'s to check. Every other flow string keeps the single-brace dialect. Its '
-      + 'D3 record is the semantic entry `flow-text-slot-single-brace-refused`.',
+      + 'the rewrite is the author\'s to check. No other flow string reads the single-brace dialect either: '
+      + 'the value slots take a CEL value envelope, a node\'s literals are read as written, and the 17.x '
+      + 'interpolator is deleted. Its D3 record is the semantic entry `flow-text-slot-single-brace-refused`.',
   },
   {
     id: 'flow-text-slot-unbound-dollar-root-refused',
@@ -2039,10 +2040,18 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     text:
       'It retires the single-brace `{…}` template dialect from the flow VALUE slots (the C half of the '
       + 'maintainer\'s ruling D on the flow expression dialects): the `assignment` node\'s values, in all '
-      + 'three shapes, and the `fields` map of `create_record` and `update_record`, where a CEL value '
-      + 'envelope is already the expression form. A string there is now the literal '
-      + 'text it spells, and one carrying a `{…}` token is refused — by `FlowValueSlotSchema`, '
-      + '`registerFlow`, `objectstack validate` and the executor alike — with the CEL spelling of each token. '
+      + 'three shapes; the `fields` map of `create_record` and `update_record`; the maps a node hands to a '
+      + 'callee (a `subflow`\'s and a `map`\'s `input`, a `script`\'s `inputs`); a `screen`\'s `defaults`, each '
+      + 'field\'s `defaultValue` and its `recordId`; the `collection` a `loop` with a `body` and a `map` '
+      + 'iterate; a `notify` node\'s `recipients`, `templateData` and `sourceId`; an `http` node\'s `body`; and '
+      + 'each operand of a `get_record`, `update_record` or `delete_record` `filter`. A CEL value envelope is '
+      + 'the expression form in each. A string there is now the literal text it spells (a `collection`\'s '
+      + 'literal is an inline array), and one carrying a `{…}` token is refused — by the node contracts, '
+      + '`registerFlow`, `objectstack validate` and the executor alike — with the CEL spelling of each token; '
+      + 'a whole-string query placeholder at a filter operand (`{current_user_id}`, `{today}`) stays the '
+      + 'query engine\'s. A `notify` node\'s `sourceObject`, `actorId` and `payload` and an `http` node\'s '
+      + '`method`, `durable`, `timeoutMs` and `signingSecret` are literals read as written, where a token is '
+      + 'refused too. '
       + 'No D2 conversion exists: every authored spelling was measured lossy (an absent key writes nothing '
       + 'under the template and fails under CEL; CEL divides two integers as integers), so which value an '
       + 'absent key should write is the author\'s judgment. The `$User` paths are refused too: the flow CEL '

@@ -2165,12 +2165,12 @@ describe('AutomationEngine - Safe Expression Evaluation', () => {
         const vars = new Map<string, unknown>();
         vars.set('amount', 500);
 
-        expect(engine.evaluateCondition('{amount} > 100', vars)).toBe(true);
-        expect(engine.evaluateCondition('{amount} < 100', vars)).toBe(false);
-        expect(engine.evaluateCondition('{amount} == 500', vars)).toBe(true);
-        expect(engine.evaluateCondition('{amount} >= 500', vars)).toBe(true);
-        expect(engine.evaluateCondition('{amount} <= 500', vars)).toBe(true);
-        expect(engine.evaluateCondition('{amount} != 100', vars)).toBe(true);
+        expect(engine.evaluateCondition('amount > 100', vars)).toBe(true);
+        expect(engine.evaluateCondition('amount < 100', vars)).toBe(false);
+        expect(engine.evaluateCondition('amount == 500', vars)).toBe(true);
+        expect(engine.evaluateCondition('amount >= 500', vars)).toBe(true);
+        expect(engine.evaluateCondition('amount <= 500', vars)).toBe(true);
+        expect(engine.evaluateCondition('amount != 100', vars)).toBe(true);
     });
 
     it('should evaluate boolean literals', () => {
@@ -2215,16 +2215,12 @@ describe('AutomationEngine - Safe Expression Evaluation', () => {
         const vars = new Map<string, unknown>();
         vars.set('status', 'active');
 
-        expect(engine.evaluateCondition('{status} == active', vars)).toBe(true);
-        expect(engine.evaluateCondition('{status} != inactive', vars)).toBe(true);
-        // #4336 — a QUOTED literal on the right compares as its contents. This is
-        // the spelling the flow docs show for a decision node, and it used to
-        // compare `active` against `'active'` (quotes included) and be false for
-        // every value of `status`.
-        expect(engine.evaluateCondition("{status} == 'active'", vars)).toBe(true);
-        expect(engine.evaluateCondition('{status} == "active"', vars)).toBe(true);
-        expect(engine.evaluateCondition("{status} == 'closed'", vars)).toBe(false);
-        expect(engine.evaluateCondition("{status} != 'closed'", vars)).toBe(true);
+        // A string literal is quoted, either quote — the spelling the flow docs
+        // show for a decision node.
+        expect(engine.evaluateCondition("status == 'active'", vars)).toBe(true);
+        expect(engine.evaluateCondition('status == "active"', vars)).toBe(true);
+        expect(engine.evaluateCondition("status == 'closed'", vars)).toBe(false);
+        expect(engine.evaluateCondition("status != 'closed'", vars)).toBe(true);
     });
 });
 
@@ -2269,34 +2265,52 @@ describe('AutomationEngine - bare-string conditions evaluate as CEL (#4336)', ()
         expect(engine.evaluateCondition("lead_record.status == 'new'", vars)).toBe(false);
     });
 
-    it('refuses a brace-wrapped reference that resolves to nothing, naming it', () => {
-        const vars = new Map<string, unknown>([['lead_record', { status: 'converted' }]]);
-        // Silently false today even though the status IS 'converted'.
-        expect(() => engine.evaluateCondition("{lead_record.status} == 'converted'", vars))
-            .toThrow(/`\{lead_record\.status\}` did not resolve/);
-        expect(() => engine.evaluateCondition("{lead_record.status} == 'converted'", vars))
-            .toThrow(/Drop the braces/);
-        // Same for a brace-wrapped truthy gate.
-        expect(() => engine.evaluateCondition('{record.isActive}', new Map<string, unknown>([['record', { isActive: true }]])))
-            .toThrow(/did not resolve/);
+    // [#19939 S7] The legacy `{var}` template path is deleted with the
+    // single-brace resolver (ADR-0032 Sequencing 6). It answered `{flag}`,
+    // `{count}` and `{amount} > 100` by substituting text; `registerFlow`
+    // refuses every one of them at every condition slot, so only a direct call
+    // reached it. A braced condition is now the #1491 brace trap: refused as a
+    // CEL fault naming its source, whatever the variables hold.
+    it.each([
+        ["{lead_record.status} == 'converted'", new Map<string, unknown>([['lead_record', { status: 'converted' }]])],
+        ['{record.isActive}', new Map<string, unknown>([['record', { isActive: true }]])],
+        ['{status}', new Map<string, unknown>([['status', 'open']])],
+        ['{flag}', new Map<string, unknown>([['flag', true]])],
+        ['{count}', new Map<string, unknown>([['count', 3]])],
+        ['{amount} > 100', new Map<string, unknown>([['amount', 500]])],
+    ])('refuses the retired `{var}` spelling %s as the brace trap, naming its source', (source, vars) => {
+        let thrown: Error | undefined;
+        try {
+            engine.evaluateCondition(source, vars);
+        } catch (err) {
+            thrown = err as Error;
+        }
+        expect(thrown, source).toBeInstanceOf(Error);
+        expect(thrown!.message).toContain('condition failed to evaluate as CEL');
+        expect(thrown!.message).toContain('do not wrap field references in `{…}` template braces');
+        expect(thrown!.message).toContain(`source: \`${source}\``);
     });
 
-    it('refuses a template-dialect condition it cannot turn into a predicate', () => {
-        // `{status}` substitutes to `open` — not a boolean, not a number, and no
-        // operator to compare it with. That used to be `false`.
-        expect(() => engine.evaluateCondition('{status}', new Map([['status', 'open']])))
-            .toThrow(/is not a predicate/);
-        // A boolean or numeric value still reads as a gate.
-        expect(engine.evaluateCondition('{flag}', new Map([['flag', true]]))).toBe(true);
-        expect(engine.evaluateCondition('{flag}', new Map([['flag', false]]))).toBe(false);
-        expect(engine.evaluateCondition('{count}', new Map([['count', 3]]))).toBe(true);
-        expect(engine.evaluateCondition('{count}', new Map([['count', 0]]))).toBe(false);
+    it.each(['template', 'flow'])('refuses a `%s` envelope before evaluating it — braced or not', (dialect) => {
+        const vars = new Map<string, unknown>([['status', 'open']]);
+        for (const source of ["{status} == 'open'", "status == 'open'"]) {
+            let thrown: Error | undefined;
+            try {
+                engine.evaluateCondition({ dialect, source }, vars);
+            } catch (err) {
+                thrown = err as Error;
+            }
+            expect(thrown, source).toBeInstanceOf(Error);
+            expect(thrown!.message).toContain(`the \`${dialect}\` dialect is not evaluated`);
+            expect(thrown!.message).toContain(`source: \`${source}\``);
+        }
+        // Control: the same brace-free source, as CEL, evaluates.
+        expect(engine.evaluateCondition({ dialect: 'cel', source: "status == 'open'" }, vars)).toBe(true);
     });
 
     it('does not mistake braces inside a string literal for a template hole', () => {
-        // `'{pending}'` is text the predicate compares AGAINST, not a reference to
-        // substitute. The dialect sniff reads the source outside string literals,
-        // so this stays CEL and compares the field.
+        // `'{pending}'` is text the predicate compares AGAINST, not a reference:
+        // a CEL string literal, so the field is compared.
         expect(engine.evaluateCondition("record.label == '{pending}'",
             new Map<string, unknown>([['record', { label: '{pending}' }]]))).toBe(true);
         expect(engine.evaluateCondition("record.label == '{pending}'",
@@ -2304,9 +2318,8 @@ describe('AutomationEngine - bare-string conditions evaluate as CEL (#4336)', ()
     });
 
     it('keeps braces inside an explicit CEL envelope a hard error', () => {
-        // The dialect sniff applies only where no dialect was stated. `dialect:
-        // 'cel'` is the author saying "this is CEL", where `{…}` is a map literal
-        // and the #1491 brace-trap.
+        // `dialect: 'cel'` is the author saying "this is CEL", where `{…}` is a
+        // map literal and the #1491 brace-trap — as it is in bare text.
         expect(() => engine.evaluateCondition({ dialect: 'cel', source: '{record.rating} >= 4' },
             new Map<string, unknown>([['record', { rating: 5 }]]))).toThrow(/source:/);
     });

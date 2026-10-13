@@ -150,19 +150,22 @@ describe('stack.automation.evaluateCondition (#22301 item 8)', () => {
     }
   });
 
-  it('never rewrites the condition: a bare `{var}` string keeps the template dialect the engine gives it', async () => {
+  it('never rewrites the condition: a bare `{var}` string reaches the engine as written, and is refused as the engine refuses it', async () => {
     const holed = '{amount} > 100';
     const spy = vi.spyOn(engine, 'evaluateCondition');
 
-    // The engine reads a bare string with a `{…}` hole as the template dialect.
-    expect(await stack.automation.evaluateCondition(holed, { amount: 5000 })).toBe(true);
-    expect(spy.mock.calls[0][0]).toBe(holed);
-
-    // The same text in a CEL envelope is the brace trap, and the engine refuses it.
-    const { door, direct } = await both({ dialect: 'cel', source: holed }, { amount: 5000 });
-    expect(direct.fault).toBeInstanceOf(Error);
-    expect(door.fault).toBeInstanceOf(Error);
-    expect((door.fault as Error).message).toBe((direct.fault as Error).message);
+    // The engine reads every condition as CEL — the legacy `{var}` template
+    // dialect is deleted (#19939) — so a `{…}` hole is the brace trap, bare
+    // or in a CEL envelope, and the door hands the engine's refusal back.
+    for (const condition of [holed, { dialect: 'cel', source: holed }]) {
+      spy.mockClear();
+      const { door, direct } = await both(condition, { amount: 5000 });
+      expect(spy.mock.calls[0][0]).toBe(condition);
+      expect(direct.fault).toBeInstanceOf(Error);
+      expect(door.fault).toBeInstanceOf(Error);
+      expect((door.fault as Error).message).toBe((direct.fault as Error).message);
+      expect((door.fault as Error).message).toContain('do not wrap field references');
+    }
   });
 
   it("rejects with the engine's own error when the condition faults, never `false`", async () => {

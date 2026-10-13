@@ -55,13 +55,19 @@ you so rather than failing as an unknown template.
    **namespace** is derived from the project name (`my-app` → `my_app`) and
    every object name in the template is re-prefixed to match
    (`blank_note` → `my_app_note`).
-2. Installs dependencies (pnpm if available, otherwise npm).
-3. Installs the ObjectStack AI skills bundle for **one** coding agent —
-   `npx skills add objectstack-ai/objectstack/skills --skill '*' --agent claude-code -y`,
-   scoped to the curated `skills/` catalog. One agent, not `--all`, so the
-   bundle lands in exactly one directory (`.claude/skills/`) and a scaffolded
-   project commits it once; `src/skills-install.ts` carries the measurement.
-   The closing summary prints the same command for any other runtime.
+2. Installs dependencies (pnpm if available, otherwise npm). They include
+   `@objectstack/skills`, the ObjectStack AI skills catalog, at the same
+   version as `@objectstack/spec`.
+3. Installs that catalog for **one** coding agent, from `node_modules` —
+   `npx -y skills@1.7.2 experimental_sync --agent claude-code --copy -y` — so
+   the skills teach the version the project runs, never the repository's
+   unreleased `main`. One agent and `--copy`, so the catalog lands as real
+   files in exactly one directory (`.claude/skills/`) and a scaffolded project
+   commits it once; `src/skills-install.ts` carries the measurement. The
+   closing summary prints the same command for any other runtime, and for
+   re-installing after an upgrade. With `--skip-install` nothing is in
+   `node_modules` yet, so no skills are installed and the summary says how to
+   get them.
 4. Writes `AGENTS.md` and `.github/copilot-instructions.md` with the project
    conventions — unless the template ships its own.
 

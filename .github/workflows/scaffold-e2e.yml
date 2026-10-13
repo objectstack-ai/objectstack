@@ -235,11 +235,14 @@ jobs:
 
       - name: 'Skills boundary: only the curated skills/ catalog installs'
         # 15.1 third-party eval: the repo-internal dogfood-verification skill
-        # (.claude/skills/) leaked into scaffolded projects. Two leak paths,
-        # two assertions against THIS checkout:
-        #   1. The scaffolder/docs command is `skills add …/objectstack/skills
-        #      --all` — the /skills subpath is the hard boundary, because the
-        #      skills CLI's --all implies --skill '*' which INCLUDES
+        # (.claude/skills/) leaked into scaffolded projects. The scaffolder no
+        # longer reads GitHub — it syncs the installed @objectstack/skills
+        # package, asserted by the step after the pinned shape below — so
+        # these two assertions now guard the GitHub path the docs keep as the
+        # `next` channel, against THIS checkout:
+        #   1. The documented command is `skills add …/objectstack/skills …` —
+        #      the /skills subpath is the hard boundary, because the skills
+        #      CLI's --all implies --skill '*' which INCLUDES
         #      metadata.internal skills. Install from the subpath and assert
         #      set-equality with the curated catalog.
         #   2. Interactive `skills add …/framework` (no --all) relies on
@@ -293,8 +296,10 @@ jobs:
         # never RUNNING — a scaffolder that stops calling it, or an install path
         # that no longer leaves a resolvable CLI behind.
         #
-        # `--skip-skills` is kept: skills install after the pin, so dropping it
-        # would only add a network fetch, never coverage.
+        # No `--skip-skills` either: the scaffolder's skills step reads the
+        # catalog out of the node_modules this same install wrote, so this is
+        # the one project in the job whose skills a real user would get. The
+        # step after this one asserts them.
         #
         # The unpublished-version window is the one degradation, and it is
         # evidenced rather than blanket. The install step above carries the
@@ -337,7 +342,7 @@ jobs:
         #     still catches a genuinely broken scaffolder install.
         run: |
           cd "$RUNNER_TEMP"
-          node "$GITHUB_WORKSPACE/packages/create-objectstack/bin/create-objectstack.js" pinned-probe --skip-skills
+          node "$GITHUB_WORKSPACE/packages/create-objectstack/bin/create-objectstack.js" pinned-probe
           cd pinned-probe
 
           if [ ! -f node_modules/@objectstack/cli/package.json ]; then
@@ -376,6 +381,58 @@ jobs:
             exit 1
           fi
           echo "pinned as expected: FROM tag == resolved CLI ($RESOLVED)"
+
+      - name: 'Skills: the scaffolder installed exactly the @objectstack/skills catalog'
+        # The pinned-shape project above was scaffolded the way a real user
+        # does it, skills included. The scaffolder syncs the catalog out of the
+        # @objectstack/skills package its own install put in node_modules — at
+        # the range it gives every @objectstack/* dependency, so the version of
+        # @objectstack/spec — into .claude/skills/ as real files (the measured
+        # shapes live in packages/create-objectstack/src/skills-install.ts).
+        # So the catalog this step compares against is the package's, read off
+        # the registry-installed node_modules, never this checkout's skills/:
+        # the same skill names, the same count, copied rather than linked.
+        #
+        # The unpublished-version window degrades the way the pinned-shape step
+        # does, and only that window: with nothing installed at all, that step
+        # has already classified the registry answer and failed on any other
+        # cause, so this step asserts the degraded shape — no skills from
+        # anywhere — instead of nothing. An install that resolved the CLI but
+        # no @objectstack/skills is a template that lost its dependency: red.
+        run: |
+          cd "$RUNNER_TEMP/pinned-probe"
+          PKG=node_modules/@objectstack/skills
+          if [ ! -f "$PKG/package.json" ]; then
+            if [ -f node_modules/@objectstack/cli/package.json ]; then
+              echo "::error::the scaffolder's install resolved @objectstack/cli but no @objectstack/skills, so this project got no skills catalog at its own version — the template no longer depends on the package"
+              exit 1
+            fi
+            if [ -e .claude/skills ]; then
+              echo "::error::nothing was installed, yet .claude/skills exists — the scaffolder installed skills from a source other than the @objectstack/skills package"
+              exit 1
+            fi
+            echo "::warning::no @objectstack/skills is installed — the unpublished-version window the pinned-shape step classified. Catalog EQUALITY is SKIPPED for this run; the degraded shape (no skills from any source) was asserted."
+            exit 0
+          fi
+
+          skills_in() { for d in "$1"/*/; do [ -f "${d}SKILL.md" ] && [ ! -L "${d%/}" ] && basename "$d"; done | sort; }
+          expected=$(skills_in "$PKG/dist/skills")
+          installed=$(skills_in .claude/skills)
+          echo "@objectstack/skills@$(node -p "require('./$PKG/package.json').version") catalog ($(echo "$expected" | grep -c .) skills):"; echo "$expected"
+          echo "installed in .claude/skills ($(echo "$installed" | grep -c .) skills):"; echo "$installed"
+          if [ -z "$expected" ]; then
+            echo "::error::the installed @objectstack/skills holds no dist/skills/<skill>/SKILL.md — the layout the scaffolder reads has moved"
+            exit 1
+          fi
+          if [ "$installed" != "$expected" ]; then
+            echo "::error::the skills the scaffolder installed are not the installed package's catalog (names and counts above)"
+            exit 1
+          fi
+          if [ -e .agents ] || [ -n "$(find .claude -type l)" ]; then
+            echo "::error::the scaffolder linked the catalog instead of copying it — a clone of this project would hold dangling links into node_modules"
+            exit 1
+          fi
+          echo "skills as expected: .claude/skills == the installed @objectstack/skills catalog"
 
       - name: Build official runtime image from this checkout
         # The scaffolded app's Dockerfile builds FROM

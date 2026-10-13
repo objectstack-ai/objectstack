@@ -319,15 +319,14 @@ describe('reference-integrity suite — every member actually runs', () => {
         runAs: 'user',
         nodes: [
           { id: 'start', type: 'start', config: { objectName: 'crm_lead', triggerType: 'record-after-create' } },
-          // validateFlowTemplatePaths: `budget` is not a field on crm_lead. In a
-          // FILTER position an erased condition widens the query rather than
-          // narrowing it, so the runtime refuses the node — gating, not advisory
-          // (#3810). This member is the suite's only source of `error` findings
-          // from a flow, so it also pins that both severities survive the suite.
+          // validateFlowTemplatePaths: `budget` is not a field on crm_lead, so
+          // the text slot's hole renders a blank on every run — advisory. (A
+          // CRUD filter operand is a value slot since #19939, which this rule
+          // no longer scans: its `{…}` token is the value-slot judge's refusal.)
           {
-            id: 'fetch',
-            type: 'get_record',
-            config: { objectName: 'crm_lead', filter: { name: '{record.budget}' } },
+            id: 'notice',
+            type: 'notify',
+            config: { title: 'Budget: {{ record.budget }}', message: 'x' },
           },
           // validateFlowNodeWrites: the node's structural write map names a
           // field crm_lead does not declare — the third surface in the #4271
@@ -406,12 +405,13 @@ describe('reference-integrity suite — every member actually runs', () => {
     expect(sort?.path).toBe('objects[0].listViews.aging.sort[0]');
   });
 
-  it('carries a gating flow-template finding through the suite (#3810)', () => {
+  it('carries the flow-template finding through the suite at its own severity', () => {
     const findings = validateReferenceIntegrity(stack);
     const flow = findings.find((f) => f.rule === 'flow-template-unknown-field');
-    // A filter-position miss must reach the CLI as an ERROR, or `os lint` and
-    // `os compile` would print a yellow line and ship a flow that cannot run.
-    expect(flow?.severity).toBe('error');
+    // A blank in a rendered text slot: advisory. (Its filter-position ERROR
+    // went with the dialect that read a token there, #19939.)
+    expect(flow?.severity).toBe('warning');
+    expect(flow?.message).toContain("'{{ record.budget }}'");
   });
 
   it('concatenates in list order and carries the common finding shape', () => {
