@@ -802,7 +802,8 @@ export interface IAutomationService {
      *   `condition` envelopes, deliberately WITHOUT schema defaults, so a
      *   written-back row is not frozen on today's default values), plus the
      *   conversions applied, any rewrite the guard refused, and (`todos`) the
-     *   sites left as stored for want of a lossless rewrite.
+     *   sites left as stored for want of a lossless rewrite, and the sites
+     *   {@link registerFlow} refuses once the parse has accepted the flow.
      * @throws when the definition cannot be canonicalized at all (a strict-schema
      *   violation, a malformed control-flow region) — such a flow cannot be
      *   registered either, so a caller reports it rather than persisting a guess.
@@ -817,7 +818,11 @@ export interface IAutomationService {
          * rewrite exists — a value slot carrying a `{…}` token among them, which
          * {@link registerFlow} refuses although the parse accepts it — so
          * `os migrate meta --stored` lists a flow the boot refuses (#23269);
-         * absent reads as none.
+         * absent reads as none. [#23317] It also lists every other site
+         * {@link registerFlow} refuses once the parse has accepted the flow (a
+         * text slot's template hole, a decision's `mode`, a malformed
+         * predicate), each under the `conversionId` `'registerFlow'`, so the
+         * stored pass previews registration's whole verdict, not one judge's.
          */
         todos?: ConversionTodoNotice[];
     };
