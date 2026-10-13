@@ -93,31 +93,32 @@ describe('#23088 bootStack serves a declared endpoint, as objectstack serve does
   it('composes a matcher, so the declared path is gated and served, and no matcher warning is logged', async () => {
     const booted = await bootCapturing(stackWithApi());
     stack = booted.stack;
-
-    // CONTROL on the composition: the slot carries the endpoint matcher.
-    const metadata = stack.kernel.getService<{ matchEndpoint?: unknown }>('metadata');
-    expect(typeof metadata.matchEndpoint).toBe('function');
-
-    const anonymous = await stack.api(FEED, { method: 'GET' });
-    const refused = (await anonymous.json()) as { error?: { code?: string; status?: number } };
-    expect(anonymous.status, JSON.stringify(refused)).toBe(401);
-    expect(refused.error?.code).toBe('UNAUTHENTICATED');
-
     const token = await stack.signIn();
-    const served = await stack.apiAs(token, 'GET', FEED);
-    expect(served.status, await served.clone().text()).toBe(200);
 
-    // CONTROL: an undeclared path under the same mount keeps the bare 404.
-    const undeclared = await stack.apiAs(token, 'GET', '/apps/mdoor/no-such-endpoint');
-    const miss = (await undeclared.json()) as { error?: { code?: string } };
-    expect(undeclared.status).toBe(404);
-    expect(miss.error?.code).toBe('ENDPOINT_NOT_FOUND');
-
-    const matcherWarnings = booted.lines.filter((line) => {
-      const fields = warnFields(line);
-      return fields?.appId === APP_ID && line.includes('MetadataPlugin');
+    const answer = async (res: Response) => ({
+      status: res.status,
+      code: ((await res.json()) as { error?: { code?: string } }).error?.code,
     });
-    expect(matcherWarnings).toEqual([]);
+    const observed = {
+      // The slot carries the endpoint matcher.
+      matcher: typeof stack.kernel.getService<{ matchEndpoint?: unknown }>('metadata').matchEndpoint,
+      anonymous: await answer(await stack.api(FEED, { method: 'GET' })),
+      signedIn: (await stack.apiAs(token, 'GET', FEED)).status,
+      // CONTROL: an undeclared path under the same mount keeps the bare 404.
+      undeclared: await answer(await stack.apiAs(token, 'GET', '/apps/mdoor/no-such-endpoint')),
+      matcherWarnings: booted.lines.filter((line) => {
+        const fields = warnFields(line);
+        return fields?.appId === APP_ID && line.includes('MetadataPlugin');
+      }),
+    };
+    // One composite, so a failure shows every observation at once.
+    expect(observed).toEqual({
+      matcher: 'function',
+      anonymous: { status: 401, code: 'UNAUTHENTICATED' },
+      signedIn: 200,
+      undeclared: { status: 404, code: 'ENDPOINT_NOT_FOUND' },
+      matcherWarnings: [],
+    });
   }, BOOT_TIMEOUT);
 
   it("a caller's own MetadataPlugin in extraPlugins holds the slot, and the composed one is never registered", async () => {
