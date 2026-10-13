@@ -8,6 +8,7 @@ import { dirname, join, resolve } from 'node:path';
 // Loaded at module top, so the first transform is paid during collection
 // rather than inside a clocked test body (`check:test-source-alias`).
 import { AppPlugin } from '@objectstack/runtime';
+import { buildIndexName } from '@objectstack/driver-sql';
 import { loadConfig } from './config.js';
 import { bootSchemaStack } from './schema-migrate.js';
 
@@ -24,17 +25,22 @@ import { bootSchemaStack } from './schema-migrate.js';
  *
  * The fixture is cloud#1695's shape, built by the platform rather than by hand:
  * a host `objectstack.config.ts` composing `SecurityPlugin`, the tables created
- * through the migrate path itself, and then `sys_position`'s per-organization
- * composite unique swapped back to the pre-#8323 global spelling
- * (`uniq_sys_position_name`) — the exact index a deployed control DB was still
- * carrying.
+ * through the migrate path itself, and then a per-organization composite unique
+ * swapped back to its pre-#8323 global spelling — the drift a deployed control
+ * DB was carrying. The measured index was `sys_position`'s
+ * (`uniq_sys_position_name`); C3 stage 8 retired that object (ADR-0131 D3), so
+ * the swap is now made on the one organization-respelled unique the plugin
+ * still declares: `sys_audience_binding_suggestion`'s
+ * `(package_id, permission_set_name, anchor)`, the #8323 declared-index arm of
+ * the same `replace_unique_index` plan.
  *
  * Four things are pinned, and the fourth is an ABSENCE. Composing a host
- * config means composing arbitrary code, and `SecurityPlugin` seeds its
- * built-in permission sets from `start()`: measured, that produced 14 insert
- * attempts against `sys_permission_set` during a run documented as writing
- * nothing. `sys_permission_set` staying EMPTY across a plan is what proves the
- * declaration-phase composition actually holds.
+ * config means composing arbitrary code. Measured before the catalog seeders
+ * retired, `SecurityPlugin.start()` made 14 insert attempts against
+ * `sys_permission_set` during a run documented as writing nothing. That table
+ * is retired with its object; the plugin's tables holding exactly the
+ * fixture's rows across a plan is what still shows the declaration-phase
+ * composition holds.
  */
 
 const require_ = createRequire(import.meta.url);
@@ -62,6 +68,19 @@ const ARTIFACTLESS_BASELINE_TABLES = [
   'sys_metadata_commit',
   'sys_metadata_history',
 ];
+
+/**
+ * The organization-respelled declared unique the drift cases below put back to
+ * its global spelling: `sys_audience_binding_suggestion`'s
+ * `(package_id, permission_set_name, anchor)`, declared `unique: 'organization'`.
+ * Both names are the driver's own (`buildIndexName`), never spelled by hand.
+ */
+const RESPELLED = {
+  table: 'sys_audience_binding_suggestion',
+  listed: ['package_id', 'permission_set_name', 'anchor'],
+} as const;
+const LEGACY_UNIQUE = buildIndexName(RESPELLED.table, [...RESPELLED.listed], true);
+const ORG_UNIQUE = buildIndexName(RESPELLED.table, ['organization_id', ...RESPELLED.listed], true);
 
 describe('os migrate plan/apply compose the deployment\'s own object set (#12938)', () => {
   let dir: string;
@@ -147,9 +166,9 @@ describe('os migrate plan/apply compose the deployment\'s own object set (#12938
   };
 
   /**
-   * Put `sys_position` back into the pre-respelling physical shape — the
-   * per-organization composite retired, the global single-column unique
-   * present. This is cloud#1695's index, verbatim.
+   * Put {@link RESPELLED} back into the pre-respelling physical shape — the
+   * per-organization composite retired, the global unique on the listed
+   * columns present. cloud#1695's shape, on a table the plugin still declares.
    *
    * Idempotent, and called by every test that needs it, so the cases below do
    * not depend on each other's order. An integration file whose third test only
@@ -160,18 +179,20 @@ describe('os migrate plan/apply compose the deployment\'s own object set (#12938
     const stack = await bootLikeMigrate();
     try {
       const k = (stack.driver as any).knex;
-      const present = await indexNames(stack.driver, 'sys_position');
-      if (present.includes('uniq_sys_position_organization_id_name')) {
-        await k.raw('DROP INDEX uniq_sys_position_organization_id_name');
+      const present = await indexNames(stack.driver, RESPELLED.table);
+      if (present.includes(ORG_UNIQUE)) {
+        await k.raw(`DROP INDEX ${ORG_UNIQUE}`);
       }
-      if (!present.includes('uniq_sys_position_name')) {
-        await k.raw('CREATE UNIQUE INDEX uniq_sys_position_name ON sys_position (name)');
+      if (!present.includes(LEGACY_UNIQUE)) {
+        await k.raw(`CREATE UNIQUE INDEX ${LEGACY_UNIQUE} ON ${RESPELLED.table} (${RESPELLED.listed.join(', ')})`);
       }
-      if (await countRows(stack.driver, 'sys_position') === 0) {
-        await k('sys_position').insert({
-          id: 'pos_1',
-          name: 'org_admin',
-          label: 'Org Admin',
+      if (await countRows(stack.driver, RESPELLED.table) === 0) {
+        await k(RESPELLED.table).insert({
+          id: 'abs_1',
+          package_id: 'com.acme.crm',
+          permission_set_name: 'sales_readonly',
+          anchor: 'everyone',
+          status: 'pending',
           organization_id: 'org_jia',
         });
       }
@@ -196,15 +217,18 @@ describe('os migrate plan/apply compose the deployment\'s own object set (#12938
       expect(stack.composition.hostConfigPath).toBe(join(dir, 'objectstack.config.ts'));
 
       // The number the consumer-side coverage gate reads. Strictly greater than
-      // the baseline, and by more than one: the security plugin alone brings six
-      // RBAC tables and the platform floor another four.
+      // the baseline, and by more than one: the security plugin alone brings
+      // three tables (its assignment objects and the audience-binding
+      // suggestions; the catalog row objects retired in C3 stage 8) and the
+      // platform floor another four.
       expect(stack.managedTableCount).toBeGreaterThan(ARTIFACTLESS_BASELINE_TABLES.length);
 
       const pending = stack.pendingSchemaWork.map((p) => p.table);
-      // The two tables the issue names by hand, neither of which was reachable
-      // from a migrate boot at all.
-      expect(pending).toContain('sys_position');
-      expect(pending).toContain('sys_permission_set');
+      // The issue named `sys_position` and `sys_permission_set` by hand, neither
+      // reachable from a migrate boot at all; both objects are retired now
+      // (ADR-0131 D3), and the security plugin's tables that remain stand in.
+      expect(pending).toContain('sys_user_position');
+      expect(pending).toContain('sys_user_permission_set');
       // …and the platform floor `serve` composes unconditionally.
       expect(pending).toContain('sys_migration');
       for (const table of ARTIFACTLESS_BASELINE_TABLES) expect(pending).toContain(table);
@@ -225,15 +249,15 @@ describe('os migrate plan/apply compose the deployment\'s own object set (#12938
     try {
       const drift = await stack.driver!.detectManagedDrift();
       const entry = drift.find(
-        (d) => d.table === 'sys_position' && d.op.type === 'replace_unique_index',
+        (d) => d.table === RESPELLED.table && d.op.type === 'replace_unique_index',
       );
       expect(entry, 'the legacy platform-wide unique must be planned, not invisible').toBeDefined();
       expect(entry!.category).toBe('safe');
       expect(entry!.op).toMatchObject({
-        table: 'sys_position',
-        dropIndexNames: ['uniq_sys_position_name'],
-        createIndexName: 'uniq_sys_position_organization_id_name',
-        createColumns: ['organization_id', 'name'],
+        table: RESPELLED.table,
+        dropIndexNames: [LEGACY_UNIQUE],
+        createIndexName: ORG_UNIQUE,
+        createColumns: ['organization_id', ...RESPELLED.listed],
       });
       // The prescription that made this a contract rather than an incomplete report.
       expect(entry!.message).toContain('os migrate apply');
@@ -249,13 +273,15 @@ describe('os migrate plan/apply compose the deployment\'s own object set (#12938
     try {
       await stack.driver!.detectManagedDrift();
 
-      // The absence that matters. `SecurityPlugin.start()` bootstraps
-      // `admin_full_access`, `organization_admin`, `member_default` and the rest;
-      // fully started, it attempted 14 inserts into this table during a plan.
-      expect(await countRows(stack.driver, 'sys_permission_set')).toBe(0);
-      expect(await countRows(stack.driver, 'sys_position')).toBe(1);
+      // The absence that matters: the security plugin's tables hold exactly
+      // the fixture's rows. (Fully started, `SecurityPlugin.start()` once made
+      // 14 insert attempts into `sys_permission_set` during a plan; that seeder
+      // and that object are retired, ADR-0131 D3.)
+      expect(await countRows(stack.driver, 'sys_user_permission_set')).toBe(0);
+      expect(await countRows(stack.driver, 'sys_user_position')).toBe(0);
+      expect(await countRows(stack.driver, RESPELLED.table)).toBe(1);
       // The legacy index is still there — a plan proposes, it does not apply.
-      expect(await indexNames(stack.driver, 'sys_position')).toContain('uniq_sys_position_name');
+      expect(await indexNames(stack.driver, RESPELLED.table)).toContain(LEGACY_UNIQUE);
     } finally {
       await stack.shutdown();
     }
@@ -274,10 +300,10 @@ describe('os migrate plan/apply compose the deployment\'s own object set (#12938
         expect(applied.some((d) => d.op.type === 'replace_unique_index')).toBe(true);
         expect(skipped).toHaveLength(0);
 
-        const after = await indexNames(stack.driver, 'sys_position');
-        expect(after).toContain('uniq_sys_position_organization_id_name');
-        expect(after).not.toContain('uniq_sys_position_name');
-        expect(await countRows(stack.driver, 'sys_position')).toBe(1);
+        const after = await indexNames(stack.driver, RESPELLED.table);
+        expect(after).toContain(ORG_UNIQUE);
+        expect(after).not.toContain(LEGACY_UNIQUE);
+        expect(await countRows(stack.driver, RESPELLED.table)).toBe(1);
       } finally {
         await stack.shutdown();
       }
@@ -464,11 +490,13 @@ describe('a host that brings its OWN ObjectQL engine (#13028 — cloud\'s measur
       // being a second, differently-derived number.
       expect(stack.managedTableCount).toBe(coverage!.examinedObjects);
 
-      // The two tables #12938 named by hand as the proof the five-table set was
-      // wrong. Pre-#13028 this shape reached NEITHER.
+      // #12938 named `sys_position` and `sys_permission_set` by hand as the proof
+      // the five-table set was wrong; pre-#13028 this shape reached neither. Both
+      // objects are retired now (ADR-0131 D3), so the security plugin's tables
+      // that remain carry the same proof.
       const pending = stack.pendingSchemaWork.map((p) => p.table);
-      expect(pending).toContain('sys_position');
-      expect(pending).toContain('sys_permission_set');
+      expect(pending).toContain('sys_user_position');
+      expect(pending).toContain('sys_user_permission_set');
 
       // Full coverage means SILENCE about coverage: the honesty note exists to
       // mark a shortfall, and one that printed anyway would train readers to
@@ -493,7 +521,7 @@ describe('a host that brings its OWN ObjectQL engine (#13028 — cloud\'s measur
       // assignment on the driver. If it had reached `initObjects` instead, the
       // table would exist here.
       const k = (stack.driver as any).knex;
-      const exists = await k.schema.hasTable('sys_permission_set');
+      const exists = await k.schema.hasTable('sys_user_permission_set');
       expect(exists, 'a plan must not create a table on its way to a coverage number').toBe(false);
     } finally {
       await stack.shutdown();

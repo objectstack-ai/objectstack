@@ -380,7 +380,7 @@
       "title": "Every demonstrable flow node type authors in the designer, executes in a run, and surfaces its step in run logs",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -422,7 +422,7 @@
       "steps": [
         "boot showcase isolated (dogfood §0); sign in as the dev admin",
         "GET /api/v1/automation/actions (the designer palette feed) and record the descriptor list; open the Studio flow-designer palette and screenshot it",
-        "record_change chain: POST a showcase_task then PATCH status→done — fires showcase_task_completed (script+notify), showcase_fan_out_notify (parallel+http), showcase_resilient_sync (try_catch), showcase_task_done_notify_owner (subflow); the create also fires showcase_task_follow_up (wait) and showcase_declarative_connector_ping / showcase_mcp_connector_echo (connector_action)",
+        "record_change chain: POST a showcase_task WITH `assignee` set to a real user's email, under a project that has an `owner`, then PATCH status→done — fires showcase_task_completed (script+notify), showcase_fan_out_notify (parallel+http), showcase_resilient_sync (try_catch), showcase_task_done_notify_owner (subflow); the create also fires showcase_task_follow_up (wait) and showcase_declarative_connector_ping / showcase_mcp_connector_echo (connector_action). ⚠ The notify steps address the task's assignee and its project's owner: a task created without an assignee, or under a project without an owner, makes them fail LOUDLY for want of a recipient — a correct refusal, not a notify FAIL (QA run #23166)",
         "on-demand chain: POST /api/v1/automation/<name>/trigger for showcase_batch_reminders {params:{tasks:[…]}} (loop), showcase_inquiry_purge (get_record+decision+delete_record — seed at least one closed showcase_inquiry first), showcase_release_signoff {params:{items:[…]}} (map)",
         "browser chain: run the Tasks row action showcase_bulk_reassign → showcase_reassign_wizard (screen + update_record)",
         "approval chain: PATCH a showcase_expense_report to submitted (approval via showcase_expense_signoff); PATCH a showcase_project budget above 100000 to open showcase_budget_approval, then POST /api/v1/approvals/requests/:id/revise so the run parks at the approval_revise node",
@@ -517,6 +517,12 @@
           "date": "2026-10-05",
           "change": "clauses 1 and 2 re-pointed (assertion defects, #21784 VF4), plus a knownGap from FE13. spec automation/flow.zod.ts FLOW_STRUCTURAL_NODE_TYPES = ['start','end']: those have no executor and no descriptor, so they are not in GET /automation/actions, and the palette clause now covers the 19 non-structural variants. The service-automation engine's executeNode returns on end before any step push, while start logs a success step, so end is proven by the run reaching completed. The verifier's wording is used for both. FE13: showcase_fan_out_notify needs Slack egress, so parallel / http are proven on another run where egress is denied",
           "ref": "#21797"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-13",
+          "change": "steps[2] sets an assignee on the run-created task (recipe note, #23166 A1; parked on #23121, carried by #23169). The chain's notify steps address the task's assignee and its project's owner (showcase_task_done_notify_owner hops record.project.owner), so a task created without them makes notify refuse loudly for want of a recipient, which is correct. QA run #23166 met that refusal on tasks and projects created without an assignee or owner; its notify cell still passed (only A1-http was blocked, for egress). No clause changed",
+          "ref": "#23169"
         }
       ],
       "enumSource": {
@@ -753,7 +759,7 @@
       "title": "Screen flow round-trip: action trigger → paused run → rendered dialog → resume with inputs → persisted write",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -772,7 +778,7 @@
         "boot showcase isolated (dogfood §0); sign in as the dev admin; open /apps/showcase_app/showcase_task",
         "start capturing POSTs to /api/v1/automation/**",
         "open the first row's action menu ([data-testid=row-action-trigger]) and click row-action-showcase_bulk_reassign",
-        "record the trigger POST; GET /api/v1/automation/showcase_reassign_wizard/runs to find the new run — status must be paused",
+        "record the launch POST — POST /api/v1/actions/showcase_task/showcase_bulk_reassign (the action door; see clause 1) — and GET /api/v1/automation/showcase_reassign_wizard/runs to find the new run — status must be paused",
         "GET /api/v1/automation/showcase_reassign_wizard/runs/:runId/screen and record the served screen contract",
         "the console renders the screen as a dialog: screenshot it (heading 'New Assignee')",
         "fill #ff-new_assignee with a unique value and Submit; record the resume POST body",
@@ -785,7 +791,7 @@
         {
           "clause": "the flow action triggers a run that pauses at the screen node",
           "oracle": "network",
-          "verify": "a POST matching /automation/[^/]+/trigger was issued and the run reads status=paused at node 'collect'",
+          "verify": "a POST to /api/v1/actions/showcase_task/showcase_bulk_reassign (or its /:recordId form) was issued and answers the pause, and the run reads status=paused at node 'collect'. A click on a DECLARED type:'flow' action launches through the action door, POST /api/v1/actions/:object/:action, so every server-side gate the action declares applies (objectui useConsoleActionRuntime flow handler, objectui#12037); only an undeclared flow start (an inline page button, a dashboard header's synthesized action) stays on POST /api/v1/automation/:flow/trigger, so a trigger-route POST here would mean the console bypassed the declared action",
           "evidence": "network trace + run read"
         },
         {
@@ -862,6 +868,12 @@
           "date": "2026-08-21",
           "change": "recorded on the item that its automation is pinned exclusively in the objectui repo and is therefore neither runnable nor pin-evidenced from this checkout — one of 23 items in that position, each of which every sweep had been re-deriving from scratch. The knownGap names the two honest ways to score it (hand-drive it as a manual run, or run the pin in an objectui checkout and cite the revision) and forbids the third: treating the `automated` field itself as coverage. The protocol and the exclusive-vs-mixed distinction live once in RUNNER.md; this line is the pointer (#10236 A5)",
           "ref": "#10236"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-13",
+          "change": "acceptance[0].verify and steps[3] re-pointed from the trigger route to the action door (stale spec, #23163 A0; parked on #23121, carried by #23169). Since objectui#12037 a click on a declared type:'flow' action — showcase_bulk_reassign is one — launches through POST /api/v1/actions/:object/:action, which runs the flow and answers the pause; the trigger route is left to undeclared flow starts. QA run #23163 saw POST /actions, the run paused at 'collect', and every other clause pass. Re-read from objectui source at 1fb1ced36243 (useConsoleActionRuntime.tsx), still this repo's .objectui-sha; the framework door is runtime route-ledger.ts /api/v1/actions/:object/:action",
+          "ref": "#23169"
         }
       ]
     },
@@ -1140,7 +1152,7 @@
       "title": "The developer Flow Runs page triggers a run with typed inputs and drives a screen flow's pause to completion (no orphaned paused rows)",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -1159,7 +1171,7 @@
         "typed-input run: select 'Batch Task Reminders (Loop)' (showcase_batch_reminders); the Test Run panel shows the `tasks` input as a JSON `list` textarea; paste three task-shaped objects [{id,title,owner}×3] and click 'Run Flow'",
         "record the trigger POST (client.automation.execute → POST /api/v1/automation/showcase_batch_reminders/trigger) and screenshot the Result envelope; confirm a fresh row appeared in the Recent Runs panel (client.automation.listRuns → GET /automation/showcase_batch_reminders/runs)",
         "GET /api/v1/automation/showcase_batch_reminders/runs and match the newest run id/status against the panel row",
-        "screen-flow run: select 'showcase_reassign_wizard'; fill recordId (a real showcase_task id) + new_assignee, click 'Run Flow' — the Result reads 'Waiting for input' (status=paused) and the FlowRunner dialog opens on THIS page",
+        "screen-flow run: select 'showcase_reassign_wizard'; fill recordId (a real showcase_task id) and LEAVE new_assignee EMPTY, click 'Run Flow' — the Result reads 'Waiting for input' (status=paused) and the FlowRunner dialog opens on THIS page. ⚠ A non-empty new_assignee satisfies the screen's one required field up front (the caller supplied a declared field — packages/services/service-automation/src/screen-input-contract.ts), so the run completes WITHOUT pausing and never reaches the FlowRunner hand-off this item exists for",
         "screenshot the FlowRunner dialog; fill #ff-new_assignee and Submit; record the resume POST (POST /runs/:runId/resume)",
         "GET /api/v1/automation/showcase_reassign_wizard/runs — the driven run reads status=completed; count the paused rows for this flow before vs after and assert the count did not grow (the framework#3528 orphaned-paused regression)",
         "re-read the target task over /api/v1/data/showcase_task/:id — its assignee equals the submitted value",
@@ -1219,6 +1231,12 @@
           "date": "2026-08-08",
           "change": "initial — pins the developer Flow Runs page's typed-input trigger + the framework#3528 screen-flow hand-off (paused run driven to completion, no orphaned row); distinct from flow-run-step-nesting which reads the designer's Runs preview",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-13",
+          "change": "steps[5] leaves new_assignee empty (assertion defect, minor, #23166 A2; parked on #23121, carried by #23169). Filling it at Run supplies the screen's one required field, so the run completes without pausing and the hand-off is never exercised (service-automation screen-input-contract: caller-supplied declared fields satisfy the screen). QA run #23166 left it empty, met the pause, the FlowRunner dialog and the resume, and passed every clause",
+          "ref": "#23169"
         }
       ]
     },
@@ -1729,7 +1747,7 @@
       "title": "The Setup packaged-automation page: reachable from Setup nav, lists packaged flows + packaged actions, toggle persists, clone on flow rows only, no lineage surface, server refusals verbatim in role=alert",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1745,7 +1763,8 @@
         ],
         "knownGaps": [
           "REPO OWNERSHIP (ADR-0054): the PAGE — markup, testids, dialogs, refusal rendering — is objectui's (packages/app-shell/src/views/setup/PackagedAutomationPage.tsx + PackagedActionsSection.tsx, registered as ref 'automation:packaged' in services/builtinComponents.tsx); the Setup NAV METADATA that reaches it is objectstack's (packages/platform-objects/src/apps/setup-nav.contributions.ts — nav_packaged_automation, landed by #12457). A locator or copy fix goes to objectui; a nav-entry regression goes HERE. Conflating the two repos is how the original nav gap survived both repos' tests — each side now pins its own half (framework: setup-packaged-automation-nav.test.ts; objectui: PackagedAutomationPage.navContribution.test.tsx), and only the live sidebar click observes the seam between them",
-          "AUTOMATION IS PINNED IN THE objectui REPO — `automated.ref` names objectui component tests exclusively, so from this checkout the item is neither runnable nor pin-evidenced; and those tests are the MOCKED half only (stubbed fetch): they prove the page against faked responses and structurally cannot see the missing framework nav entry, a live server's refusal bodies, or persistence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact"
+          "AUTOMATION IS PINNED IN THE objectui REPO — `automated.ref` names objectui component tests exclusively, so from this checkout the item is neither runnable nor pin-evidenced; and those tests are the MOCKED half only (stubbed fetch): they prove the page against faked responses and structurally cannot see the missing framework nav entry, a live server's refusal bodies, or persistence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact",
+          "MEMBER POSTURE MEASURED, NOT ADJUDICATED (QA run #23163, objectstack 36b2889c, objectui 1fb1ced36243): a plain member could NOT open the Setup app — so neither the page nor its switches — and its read of sys_metadata_activation answered 403. That is the opposite of the posture acceptance[7] was authored against (the member reaches the page; the ledger and meta reads are open), and of the 'Reads stay open' note in packages/platform-objects/src/system/sys-metadata-activation.object.ts. The maintainer question the clause flags is still open; this note only records what the run met. While the member cannot reach the page, acceptance[5]'s member-toggle cell cannot be driven through it either: score that cell on the reachability a run actually meets, and say which"
         ]
       },
       "steps": [
@@ -1803,7 +1822,7 @@
           "evidence": "dialog screenshots: disabled submit, the 400 alert text, the post-clone notice"
         },
         {
-          "clause": "posture record (not a pass/fail gate): a plain member REACHES the page and sees the switches — the component route has no capability gate and the ledger/meta reads are open — with the refusal arriving only after a click; record the posture as observed",
+          "clause": "posture record (not a pass/fail gate): record whether a plain member REACHES the page and sees the switches, which lists load, what the activation read answers, and where the first refusal arrives. Authored (#12438) against a posture where the member reached the page with open reads and met the refusal only after a click; at 36b2889c the member could not open Setup and the activation read answered 403 (knownGaps[2]). Record the posture as observed",
           "oracle": "dom",
           "verify": "ComponentNavView resolves the ref with no authz check (objectui ComponentNavView.tsx) and sys_metadata_activation reads are open by ruling (sys-metadata-activation.object.ts), so the member sees real install-wide state with dead controls. Whether that read-exposure is intended is a maintainer question tracked in the #12438 sweep's follow-ups — this clause RECORDS what a member sees (which lists load, what the first refusal moment is); it does not adjudicate",
           "evidence": "the member's pre-click page screenshot + the list of requests the page made and their statuses"
@@ -1848,6 +1867,12 @@
           "date": "2026-08-30",
           "change": "inverted the nav clause from expected-fail to a positive assertion: #12457 landed the missing framework nav entry (setup-nav.contributions.ts — nav_packaged_automation → 'automation:packaged', verified at head) with its own pin (setup-packaged-automation-nav.test.ts), so the clause now asserts the entry in the served setup app body + a real sidebar landing, including the entry's two deliberate absences (no requiresService, no requiredPermissions — #12419 / server-side gating) so neither is 'fixed' into a regression. The 'missing nav entry goes HERE' knownGap is rewritten as the two-pins-one-seam ownership note; the typed-URL fallback in steps is re-scoped to regression handling. D16 is fixed — a red here is a NEW regression, not the old finding re-found",
           "ref": "#12457"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-13",
+          "change": "knownGaps[2] (new) and acceptance[7].clause record the member posture QA run #23163 measured, without adjudicating it (maintainer question, #23163 A7; parked on #23121, carried by #23169). At objectstack 36b2889c with objectui 1fb1ced36243 a plain member could not open the Setup app, and the sys_metadata_activation read answered 403, where the clause expected a reachable page and open reads. The clause asks the run to record, not judge, so the edit records the measured posture beside the authored one, and notes that acceptance[5]'s member cell is unreachable through the page while that posture holds. The maintainer question stays open",
+          "ref": "#23169"
         }
       ]
     }

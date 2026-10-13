@@ -14,29 +14,27 @@ ObjectStack ships a set of **domain-specific skills** that teach AI assistants (
 
 ## Installing skills
 
-The catalog ships as the npm package [`@objectstack/skills`](https://www.npmjs.com/package/@objectstack/skills), released together with every other `@objectstack/*` package at one shared version. Install it at the version of the `@objectstack/spec` your project has installed — the catalog's version is then your spec's, so the skills teach what that spec accepts — and sync it from `node_modules` into your coding agent's skills directory:
+The catalog ships as the npm package [`@objectstack/skills`](https://www.npmjs.com/package/@objectstack/skills), released together with every other `@objectstack/*` package at one shared version. Install it at the version of the `@objectstack/spec` your project has installed — the catalog's version is then your spec's, so the skills teach what that spec accepts — and copy it from `node_modules` into your coding agent's skills directory:
 
 ```bash
 # 1 · the catalog, at the version of your installed @objectstack/spec
 npm install --save-dev "@objectstack/skills@$(node -p "require('@objectstack/spec/package.json').version")"
 
-# 2 · link it from node_modules into your agent's skills directory
-npx skills experimental_sync --agent claude-code -y
+# 2 · copy it from node_modules into your agent's skills directory
+npx skills@1.7.2 experimental_sync --agent claude-code --copy -y
 ```
 
-Step 2 is the [skills CLI](https://www.npmjs.com/package/skills)'s sync from `node_modules`: it finds the skills under `node_modules/@objectstack/skills/dist/skills/`, links each one into `.agents/skills/<skill>` (and, for `claude-code`, `.claude/skills/<skill>` to that), and records the source and version in `skills-lock.json`. Name your own runtime after `--agent` (`codex`, `cursor`, …). Add `--copy` to write real files instead of links — for `claude-code` the catalog then lands once, in `.claude/skills/`, and nowhere else. A bare `npm install --save-dev @objectstack/skills` installs whichever version the registry tags `latest`, not your spec's — keep the version in step 1.
+Step 2 is the [skills CLI](https://www.npmjs.com/package/skills)'s sync from `node_modules`: it finds the skills under `node_modules/@objectstack/skills/dist/skills/`, copies each one into your agent's directory — for `claude-code`, real files in `.claude/skills/<skill>` and nowhere else — and records the source and version in `skills-lock.json`. Commit both with the project. Keep `--copy`: without it the sync writes links into `node_modules`, which is not committed, so a clone of the project gets dangling links and no skills. The CLI is pinned because `experimental_sync` is that tool's own unstable interface; `create-objectstack` runs the same version. Name your own runtime after `--agent` (`codex`, `cursor`, …), one runtime per run — never `--agent '*'`, which copies the catalog into dozens of agent directories at once. A bare `npm install --save-dev @objectstack/skills` installs whichever version the registry tags `latest`, not your spec's — keep the version in step 1.
 
-**Updating.** The catalog is versioned as **one bundle**, and it moves only with your ObjectStack version — you never track or update a skill on its own: bump `@objectstack/skills` with the other `@objectstack/*` packages, then re-run the sync (step 2, same flags).
+**Updating.** The catalog is versioned as **one bundle**, and it moves only with your ObjectStack version — you never track or update a skill on its own: bump `@objectstack/skills` with the other `@objectstack/*` packages, then re-run the sync (step 2, same flags) and commit what it changed.
 
-**Which versions exist.** `@objectstack/skills` is published from `18.0.0-next.0` on; there is no 17.x release of it. A project on `@objectstack/spec` 17.x therefore has no catalog bound to its version: step 1 refuses with `ETARGET` (`No matching version found`).
+**Which versions exist.** `@objectstack/skills` is published from `18.0.0-next.0` on; there is no 17.x release of it. A project on `@objectstack/spec` 17.x therefore has no catalog bound to its version: step 1 refuses with `ETARGET` (`No matching version found`), and moving it to 18 includes [a skills step](/docs/upgrading#moving-the-dependency-pins). One scaffolder is the exception to the next paragraph: `create-objectstack@18.0.0-next.0` still installed the skills from the repository's `main` with `skills add`, and step 2 skips every skill a `skills add` installed (it prints `Skipped … installed with skills add` and exits 0), so in a project it scaffolded run `npx skills remove --all` — or remove the `objectstack-*` skills by name, as the [upgrade step](/docs/upgrading#moving-the-dependency-pins) does, if you added others — and then steps 1 and 2.
 
-**New projects.** `create-objectstack` installs the skills for one agent runtime while it scaffolds — once, into `.claude/skills/` — and its closing summary prints the command for any other runtime you use.
+**New projects.** `create-objectstack` runs both steps while it scaffolds: the `package.json` it writes depends on `@objectstack/skills` at the same version as `@objectstack/spec`, its dependency install puts the catalog in `node_modules`, and step 2 copies it for one agent runtime, into `.claude/skills/`. Its closing summary prints step 2 again — to re-run after an upgrade, and with another `--agent` for any other runtime you use.
 
 ```bash
 npm create objectstack@latest my-app
 ```
-
-Through `18.0.0-next.0` the scaffolder takes those skills from the `next` channel below with `skills add`, not from `@objectstack/skills`, and step 2 skips every skill a `skills add` installed (it prints `Skipped … installed with skills add`). To bind a scaffolded project's skills to a version the package is published at, remove them first — `npx skills remove --all` removes every installed skill; name the `objectstack-*` ones instead (`npx skills remove objectstack-data objectstack-ui …`) if you added others — then run steps 1 and 2.
 
 **The `next` channel.** `npx skills add objectstack-ai/objectstack/skills --skill '*' --agent claude-code -y` reads the catalog straight from the repository's unreleased `main` — for trying the next version's skills, not for a released project.
 

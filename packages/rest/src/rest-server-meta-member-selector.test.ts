@@ -143,7 +143,7 @@ describe('[#22877] each by-name /meta door declares a closed query set, the memb
 
     it('the measured sets — paging, switches and the read a frame down included', () => {
         expect([...META_ITEM_READ_PARAMS].sort()).toEqual(['layers', 'locale', 'member', 'package', 'preview', 'state']);
-        expect([...META_ITEM_RESET_PARAMS].sort()).toEqual(['dropStorage', 'member', 'state']);
+        expect([...META_ITEM_RESET_PARAMS].sort()).toEqual(['dropStorage', 'member', 'package', 'state']);
         expect([...META_ITEM_HISTORY_PARAMS].sort()).toEqual(['limit', 'member', 'sinceSeq']);
         expect([...META_ITEM_PUBLISH_PARAMS].sort()).toEqual(['member', 'package']);
         expect([...META_ITEM_ROLLBACK_PARAMS].sort()).toEqual(['member', 'toVersion']);
@@ -207,6 +207,27 @@ describe('[#22877] PRESERVATION — the request each protocol door receives', ()
         expect(protocol.deleteMetaItem.mock.calls[0][0]).toEqual({
             type: 'email_template', name: 'acme.welcome', actor: 'u1', state: 'draft', member: 'zh-CN',
         });
+    });
+
+    it('[#23165] DELETE item: `?package=` reaches `deleteMetaItem` as `packageId`; `all` and an empty value name none', async () => {
+        for (const [raw, packageId] of [['com.acme.mail', 'com.acme.mail'], ['all', undefined], ['', undefined]] as const) {
+            const { protocol, drive } = boot();
+            const answer = await drive('DELETE', ITEM, { package: raw });
+            expect(answer.status, `${raw}: ${JSON.stringify(answer.body)}`).toBe(200);
+            expect(protocol.deleteMetaItem.mock.calls[0][0], raw).toEqual({
+                type: 'email_template', name: 'acme.welcome', actor: 'u1',
+                ...(packageId !== undefined ? { packageId } : {}),
+            });
+        }
+    });
+
+    it('[#23165] DELETE item: REFUSAL — a repeated `?package=` is a located 400 and the protocol is never called', async () => {
+        const { protocol, drive } = boot();
+        const answer = await drive('DELETE', ITEM, { package: ['com.acme.mail', 'com.acme.other'] });
+        expect(answer.status).toBe(400);
+        expect(answer.body?.error?.code).toBe('VALIDATION_ERROR');
+        expect(answer.body?.error?.message).toContain('"package" query parameter was supplied 2 times');
+        expect(protocol.deleteMetaItem).not.toHaveBeenCalled();
     });
 
     it('GET /history: the member reaches `historyMetaItem` beside the paging pair', async () => {

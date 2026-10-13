@@ -1,6 +1,6 @@
 ---
 title: "Tour · System"
-description: Guided tour of the system domain — datasources & federation, i18n, email templates, docs-as-metadata, and the custom endpoint.
+description: Guided tour of the system domain — datasources & federation, i18n, email templates, docs-as-metadata, and the declared HTTP endpoints.
 ---
 
 # Guided tour — System
@@ -33,12 +33,16 @@ reading, exposed publicly through the library portal. The
 [documentation guide](./showcase_docs_guide.md) states the authoring rules
 this very page obeys.
 
-## Code-only surfaces
+## HTTP endpoints
 
-`src/system/server/recalc-endpoint.ts` mounts a custom REST endpoint
-imperatively — the code-level counterpart of the `router` / `function` /
-`service` kinds, which have no declarative authoring surface today (waived
-in the coverage manifest with the tracking issue).
+`src/system/apis/` declares every endpoint this app serves, under its own
+`/api/v1/apps/showcase/` namespace. None has handler code: each one names
+a pipeline the platform already runs, a data operation or a flow. The
+**Recalculate Estimate** and **Recalculate Selection** buttons on a task
+call `POST /api/v1/apps/showcase/recalc`, whose flow recomputes the
+estimate from the task's schedule window and writes it as the person who
+clicked. Someone who may not edit the task is refused, and nothing is
+written.
 
 Continue with the [Security tour](./showcase_tour_security.md), or go back
 to the [overview](./showcase_index.md).

@@ -280,6 +280,5 @@ export const en: TranslationData = {
     // mirrors the literal in the page metadata, as above.
     sys_user_detail: { label: 'User' },
     sys_organization_detail: { label: 'Organization' },
-    sys_position_detail: { label: 'Position' },
   },
 };

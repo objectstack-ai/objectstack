@@ -226,7 +226,7 @@ cannot read, and they are neither in nor out.
 | write call sites on the application surface | **228** |
 | …whose object name is statically decidable | 155 |
 | …whose object name is chosen at run time | 73 |
-| …against an object with tenancy ENABLED | 154 |
+| …against an object with tenancy ENABLED | 151 |
 | …against an object that declares tenancy off | 1 |
 | threading a tenant context | 167 |
 | PROVABLY carrying none (options read, no context key) | **8** |
@@ -240,9 +240,9 @@ cannot read, and they are neither in nor out.
 | how the instrument reached the site | count |
 | :--- | ---: |
 | receiver carried a readable engine type | 186 |
-| receiver erased, placed by the object NAME | 30 |
+| receiver erased, placed by the object NAME | 27 |
 | receiver erased, placed by an `object: string` PARAMETER | 7 |
-| receiver erased, placed by an `UNTYPED_RECEIVERS` row | 5 |
+| receiver erased, placed by an `UNTYPED_RECEIVERS` row | 8 |
 
 | object name spelled inline | 103 |
 | object name spelled through a `const` | 52 |
@@ -297,13 +297,13 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-13 at `ae14c39c5`.
+Measured on 2026-10-13 at `7c01d30c9`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 654 |
+| tracked non-test sources scanned | 650 |
 | engine-shaped types recognised | 73 |
-| declared objects in the registry | 120 |
+| declared objects in the registry | 116 |
 | same-named calls subtracted as non-engine | 160 |
 
 {/* END GENERATED: tenant-audit-census */}

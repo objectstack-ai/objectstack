@@ -3312,12 +3312,12 @@ const CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION: RuleExplanation = {
     'A `requiredPermissions` entry names a capability the caller must hold. It is a free string, so ' +
       'a typo (`mange_users` for `manage_users`) parses and fails CLOSED at run time: the gate denies ' +
       'its callers, the safe direction, and nothing tells the author the capability exists nowhere.',
-    // The four sources are held to the rule by its test, each one silencing it.
+    // The three sources are held to the rule by its test, each one silencing it.
     'A capability is known when it is a built-in platform capability, when the stack declares it ' +
-      'with `defineCapability` (`stack.capabilities`, ADR-0066 D1), when a permission set in the ' +
-      'stack grants it through `systemPermissions` (granting declares it), or when a ' +
-      '`sys_capability` seed row ships it. `systemPermissions` itself is never reported: it is the ' +
-      'declaration side.',
+      'with `defineCapability` (`stack.capabilities`, ADR-0066 D1), or when a permission set in the ' +
+      'stack grants it through `systemPermissions` (granting declares it). A seed row is no source: ' +
+      'no runtime reader consults one, so ship the capability with `defineCapability` instead. ' +
+      '`systemPermissions` itself is never reported: it is the declaration side.',
     // The positions are held to the rule by its test, each fired.
     'Judged at every position the key is declared: an object\'s `requiredPermissions` (the array ' +
       'form, or each operation of the per-operation map), each field\'s, each object action\'s and ' +

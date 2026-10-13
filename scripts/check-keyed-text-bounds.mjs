@@ -78,26 +78,42 @@
  *
  * ## The provenance of a floor, and how to reproduce it
  *
- * `MEASURED` is a claim about ONE named commit -- `MEASURED.ref` -- and never
- * about `main`. It is the census the floors under it were derived from, not a
- * statement about the tree you are running on.
+ * `MEASURED` is a claim about ONE named tree, and never about `main`. It is the
+ * census the floors under it were derived from, not a statement about the tree
+ * you are running on.
  *
- * ⚠️ `MEASURED.ref` is this gate's PR BASE, and this gate DOES NOT EXIST in
- * that tree: the census was taken on the PR branch, and the base is the sha the
- * branch had to record. So the obvious recipe -- check the ref out and run the
- * gate there -- fails with `MODULE_NOT_FOUND` (measured 2026-08-29), and the
- * reader who tries it learns nothing about the record. Reproduce it by running
- * TODAY's instrument AGAINST that tree instead. `sweep` is exported and takes a
- * root for exactly this:
+ * ⚠️ `MEASURED.ref` is the BASE of the PR that last wrote the record, and the
+ * census is that PR's own tree: the base plus the PR's diff, which is the tree
+ * of the commit that landed the record on `main`. A branch sha would not
+ * survive a squash landing, so the base is the sha the branch can record. Two
+ * consequences:
  *
- *   git worktree add --detach ../os-keyed-provenance "$REF"   # $REF = MEASURED.ref
- *   node --input-type=module -e "import('./scripts/check-keyed-text-bounds.mjs')
- *     .then((m) => console.log(m.sweep('../os-keyed-provenance').counts))"
+ *   - Checking the ref out and running the gate there may fail with
+ *     `MODULE_NOT_FOUND` (measured 2026-08-29, when the PR that wrote the first
+ *     record also added this gate). Run TODAY's instrument AGAINST a tree
+ *     instead; `sweep` is exported and takes a root for exactly this:
+ *
+ *       git worktree add --detach ../os-keyed-provenance "$TREE"
+ *       node --input-type=module -e "import('./scripts/check-keyed-text-bounds.mjs')
+ *         .then((m) => console.log(m.sweep('../os-keyed-provenance').counts))"
+ *
+ *   - Against the ref ALONE the instrument reads the base's census, which
+ *     differs from the record by exactly what the writing PR changed. The record
+ *     itself reproduces on the landing commit (or on the ref with that PR's diff
+ *     applied).
  *
  * All five counts are source-only, so where the tree is available the
- * re-derivation is cheap: no install and no build. Re-derived at `MEASURED.ref`
- * on 2026-08-29: 113/118/255/594/151 -- exactly the record, which is the
- * measurement that rules out "the original count was written wrong".
+ * re-derivation is cheap: no install and no build. The first record
+ * (113/118/255/594/151, ref `fa5d137ab0`, written by a PR whose diff declared no
+ * object) re-derived at its ref on 2026-08-29 -- exactly the record, which is
+ * the measurement that ruled out "the original count was written wrong". The
+ * current record is C3 stage 8's: 111/116/236/592/148, re-derived on 2026-10-13
+ * on the stage-8 tree (ref `6d7f4df3c9` plus the stage-8 diff). Against the ref
+ * alone the instrument reads 115/120/248/612/152. The difference is the four
+ * retired security-catalog object files (-4 files, -4 objects, -12 index
+ * entries, -21 text fields, -5 keyed columns), less one text field the same diff
+ * adds: `sys_user_permission_set.permission_set_id` became `Field.text` and is
+ * keyed by its unique index (+1 text field, +1 keyed column).
  *
  * ⚠️ A SHALLOW clone cannot do this at all -- `MEASURED.ref` predates the
  * default checkout window, so the commit is simply absent. That is why the
@@ -378,21 +394,27 @@ const ALLOWLIST_KINDS = new Set(['unboundable', 'pending']);
 // make visible in a diff.
 
 const MEASURED = Object.freeze({
-  // The commit this census describes. ⚠️ It is this gate's PR BASE, not a tree
-  // the gate ever ran in -- see the header for the recipe that actually
-  // reproduces it, and for why that distinction is not a detail. Immutable, so
-  // the record stays reproducible forever even as `main` moves away from it.
-  // ⛔ Never repoint it without re-running all five counts against the new ref.
-  ref: 'fa5d137ab0',
-  files: 113,
-  objects: 118,
-  indexEntries: 255,
-  textFields: 594,
-  keyedTextColumns: 151,
+  // The base of the PR that last wrote this census; the census is that base
+  // plus the PR's diff. ⚠️ Not a tree the five counts hold on by itself -- see
+  // the header for the recipe that actually reproduces it, and for why that
+  // distinction is not a detail. Immutable, so the record stays reproducible
+  // forever even as `main` moves away from it.
+  // ⛔ Never repoint it without re-running all five counts against the new tree.
+  //
+  // [C3 stage 8] Re-measured, all five, when the four security-catalog row
+  // objects retired (ADR-0131 D3): net 4 files, 4 objects, 12 index entries, 20
+  // text fields and 4 keyed columns fewer (the header itemises it). The census is
+  // the stage-8 tree's, the ref its base.
+  ref: '6d7f4df3c9',
+  files: 111,
+  objects: 116,
+  indexEntries: 236,
+  textFields: 592,
+  keyedTextColumns: 148,
 });
 const MIN_FILES = 105;
 const MIN_OBJECTS = 110;
-const MIN_INDEX_ENTRIES = 235;
+const MIN_INDEX_ENTRIES = 210;
 const MIN_TEXT_FIELDS = 550;
 const MIN_KEYED_TEXT_COLUMNS = 140;
 
@@ -1763,11 +1785,14 @@ export function selfTest() {
       + 'Every other site interpolates it, so a count and its tree cannot be edited apart',
       ownCode.split(MEASURED.ref).length - 1 === 1,
       `${ownCode.split(MEASURED.ref).length - 1} code occurrence(s) of the ref literal`);
-    const provDrifted = provenanceLine({
-      files: 112, objects: 117, indexEntries: 251, textFields: 589, keyedTextColumns: 148,
-    });
+    // A census just below the record, derived from it, so a re-measure moves it too.
+    const drifted = {
+      files: MEASURED.files - 1, objects: MEASURED.objects - 1, indexEntries: MEASURED.indexEntries - 4,
+      textFields: MEASURED.textFields - 5, keyedTextColumns: MEASURED.keyedTextColumns - 3,
+    };
+    const provDrifted = provenanceLine(drifted);
     t('PROVENANCE — a passing run shows the census it read AND the census the floors came from',
-      provDrifted.includes('112/117/251/589/148')
+      provDrifted.includes(FLOORS.map(([key]) => drifted[key]).join('/'))
       && provDrifted.includes(FLOORS.map(([key]) => MEASURED[key]).join('/'))
       && provDrifted.includes(FLOORS.map(([, min]) => min).join('/'))
       && provDrifted.includes(MEASURED.ref), provDrifted);

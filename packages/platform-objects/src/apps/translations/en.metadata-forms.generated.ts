@@ -2303,7 +2303,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       description: {
         label: "Description",
-        helpText: "Human-readable description shown in Setup (persisted as sys_permission_set.description)."
+        helpText: "Human-readable description shown in Setup."
       },
       isDefault: {
         label: "Is Default",

@@ -223,7 +223,6 @@
         "access-security.sharing-rule-authoring-ui",
         "access-security.owd-save-gate",
         "access-security.share-link-capability-tokens",
-        "access-security.packaged-permission-set-lifecycle",
         "access-security.platform-owner-email-anchor",
         "access-security.me-permissions-aggregation-parity",
         "api-backend.api-methods-verb-gate"

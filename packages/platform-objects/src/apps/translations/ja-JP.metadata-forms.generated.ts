@@ -2303,7 +2303,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       description: {
         label: "説明",
-        helpText: "Setup に表示される説明文（sys_permission_set.description として保存されます）。"
+        helpText: "Setup に表示される説明文。"
       },
       isDefault: {
         label: "既定の権限セット",

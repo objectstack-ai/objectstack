@@ -24,8 +24,8 @@
   "predicate": "resolveTenantFieldName(registered schema) !== null, where the registered schema is the authored schema plus the columns resolveInjectedSystemColumns says the registration injects (the applySystemFields pass). Both functions are loaded from source and executed; neither is re-spelled here.",
   "population": "every object registered by a tracked packages/**/*.object.ts module whose name carries a platform prefix (sys_ / cloud_ / ai_). The cloud repository's own cloud_ objects are not in this tree and so not in this census.",
   "totals": {
-    "registered": 87,
-    "inReach": 52,
+    "registered": 83,
+    "inReach": 48,
     "outOfReach": 35
   },
   "reasonTotals": {
@@ -136,13 +136,6 @@
     {
       "name": "sys_business_unit_member",
       "file": "packages/platform-objects/src/identity/sys-business-unit-member.object.ts",
-      "reach": "in",
-      "tenantField": "organization_id",
-      "reasons": []
-    },
-    {
-      "name": "sys_capability",
-      "file": "packages/plugins/plugin-security/src/objects/sys-capability.object.ts",
       "reach": "in",
       "tenantField": "organization_id",
       "reasons": []
@@ -473,13 +466,6 @@
       ]
     },
     {
-      "name": "sys_permission_set",
-      "file": "packages/plugins/plugin-security/src/objects/sys-permission-set.object.ts",
-      "reach": "in",
-      "tenantField": "organization_id",
-      "reasons": []
-    },
-    {
       "name": "sys_platform_setting",
       "file": "packages/platform-objects/src/system/sys-platform-setting.object.ts",
       "reach": "out",
@@ -487,20 +473,6 @@
       "reasons": [
         "systemFields.tenant: false"
       ]
-    },
-    {
-      "name": "sys_position",
-      "file": "packages/plugins/plugin-security/src/objects/sys-position.object.ts",
-      "reach": "in",
-      "tenantField": "organization_id",
-      "reasons": []
-    },
-    {
-      "name": "sys_position_permission_set",
-      "file": "packages/plugins/plugin-security/src/objects/sys-position-permission-set.object.ts",
-      "reach": "in",
-      "tenantField": "organization_id",
-      "reasons": []
     },
     {
       "name": "sys_presence",
