@@ -483,7 +483,7 @@ describe('validatePresetComparands — arm 2, the FIELD-TYPED equality / members
     // rest of the shared refusal is the id's `os explain` entry.
     expect(f.message).toBe(
       '"last_30_days" is a dashboard date-range PRESET name, not a filter value as a bare "$eq" '
-      + "comparand; its window is { $gte: '{30_days_ago}' }",
+      + "comparand; its window is { $between: ['{30_days_ago}', '{today}'] }",
     );
     expect(f.hint).toBe(
       'Presets belong to the dashboard date-filter bar (dateRange.defaultRange, a '
