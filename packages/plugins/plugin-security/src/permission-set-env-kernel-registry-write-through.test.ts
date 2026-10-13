@@ -19,11 +19,12 @@
  *
  * An ENVIRONMENT kernel (`environmentId` set) booted as `ObjectQLPlugin.start()`
  * boots one with `hydrateMetadataFromDb`: the protocol's own store hydrated
- * into the engine's own registry (`loadMetaFromDb`). Since the plugin's
- * permission-set echo stopped being registered, nothing but the door's own
- * registry write-through puts a saved set in the catalog there. Before #23298
- * that write-through skipped every type but `object` on any kernel with an
- * `environmentId`, so a set published after boot was in no reader at all.
+ * into the engine's own registry (`loadMetaFromDb`). The catalog reads that
+ * registry first, and the door's own registry write-through is what puts a
+ * saved set there. Before #23298 that write-through skipped every type but
+ * `object` on any kernel with an `environmentId`; with the plugin's
+ * permission-set echo no longer registered, a set published after boot was
+ * then in no reader at all.
  *
  * The set's body declares the spec's `packageId` (ADR-0086 D3), as the input
  * that was measured does. A set whose body names no package is served by the

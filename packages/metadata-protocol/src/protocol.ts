@@ -19889,10 +19889,11 @@ export class ObjectStackProtocolImplementation implements
      *  - **An unscoped (control-plane) kernel: yes**, as always. Its rows are
      *    the ones its registry's unscoped callers read.
      *  - **An environment kernel that has hydrated its own store into the
-     *    registry ({@link loadMetaFromDb}): yes.** Every body the store holds is
-     *    in that registry already, so registering the body a write just made
-     *    live adds no row the registry did not take at boot; it only stops the
-     *    registry serving the boot-time body until a rebuild.
+     *    registry ({@link loadMetaFromDb}): yes.** That registry takes every
+     *    body the store holds at each boot, so registering the body a write
+     *    just made live registers nothing the next boot would not; it only
+     *    stops the registry serving the boot-time body, or no body, until a
+     *    rebuild.
      *    `ObjectQLPlugin.start()` calls `loadMetaFromDb` on an environment
      *    kernel only when the composition declares `hydrateMetadataFromDb`,
      *    whose stated precondition is that the kernel's registry is
