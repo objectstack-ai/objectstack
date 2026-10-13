@@ -49,7 +49,8 @@ function mount(
     revokeLink: raise,
     resolveToken: raise,
   } as unknown as ShareLinkService;
-  const engine = { find: raise, getSchema: () => undefined, insert: raise, update: raise, delete: raise } as unknown as SharingEngine;
+  // The routes read the engine through `find` (the token routes' probe and messages) alone.
+  const engine = { find: raise, getSchema: () => undefined } as unknown as SharingEngine;
   const routes = new Map<string, RouteHandler>();
   const http = {
     get: (p: string, h: RouteHandler) => { routes.set(`GET ${p}`, h); },
