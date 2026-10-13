@@ -1301,6 +1301,25 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'retired from the load path.',
   },
   {
+    id: 'cbp-master-relation-tiers-retired',
+    order: 95,
+    text:
+      'It also enforces ADR-0055 §1 (ADR-0049 enforce-or-remove, maintainer ruling B): a '
+      + '`controlled_by_parent` object derives its master from exactly one `master_detail` field '
+      + 'declared `required: true`, and from nothing else. The parse now refuses the object with none or '
+      + 'with two, naming it and the rule. The security runtime\'s two unrecorded fallback tiers retire: '
+      + 'any `master_detail`, then a required `lookup`, picked by field order. The runtime derives no '
+      + 'master from those shapes, denying every read and refusing every write with 422 '
+      + 'INVALID_METADATA, and the linter\'s two rules read the same one tier. One shape converts '
+      + 'losslessly: an omitted `required` on the object\'s one `master_detail`, which objectui\'s '
+      + 'Studio writes. The D2 conversion `cbp-master-detail-required-defaulted` gives it the builder\'s '
+      + 'own `required: true`, retired from the load path so a live author is refused at parse while '
+      + 'stored rows and `os migrate meta` replay it. A required `lookup` is not converted, because '
+      + 'turning it into a `master_detail` changes what deleting the master does. Neither is an explicit '
+      + '`required: false` or a second master. Its D3 record is the semantic entry '
+      + '`cbp-master-relation-tiers-retired`.',
+  },
+  {
     id: 'chart-config-aria-retired',
     order: 31,
     text:

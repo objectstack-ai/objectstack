@@ -517,10 +517,13 @@ Five mechanisms — four CI-time, one runtime — make the security posture a
   wider than internal (`security-external-wider-than-internal`), `'*'`
   wildcards carrying View/Modify All outside the platform admin set,
   high-privilege `isDefault` (everyone-suggested) sets, the reserved word
-  "role" in security identifiers, a `controlled_by_parent` object with no
-  relation the platform can derive access from (ADR-0055: no required
-  `master_detail`, no `master_detail` at all, and no required `lookup` — so
-  the runtime denies every read and refuses every write), and the ADR-0091
+  "role" in security identifiers, a `controlled_by_parent` object without
+  exactly one required `master_detail` to derive access from (ADR-0055 §1:
+  `security-controlled-by-parent-no-relation` when it declares none — a
+  `master_detail` without `required: true` and a required `lookup` derive
+  nothing — and `security-controlled-by-parent-ambiguous-relation` when it
+  declares two or more; either way the runtime denies every read and refuses
+  every write), and the ADR-0091
   grant-lifecycle rules (a seed grant already expired at authoring time; a
   delegation row missing its mandatory `reason`) — every error rule mirrors
   a runtime gate.

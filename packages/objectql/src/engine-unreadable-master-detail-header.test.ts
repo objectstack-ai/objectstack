@@ -104,12 +104,19 @@ const RO_ITEM_OBJECT = {
   },
 };
 
-/** The ADR-0055 §3 detail: the same rule, and the same answers. */
+/**
+ * The ADR-0055 §3 detail: the same rule, and the same answers. Its one
+ * `master_detail` is declared `required: true` — the only master a
+ * `controlled_by_parent` object may declare (ADR-0055 §1, refused at parse
+ * otherwise since #23100). The flag is set on THIS object only, so the plain,
+ * requiredWhen and readonlyWhen fixtures keep the reference exactly as before.
+ */
 const CBP_LINE_OBJECT = {
   ...REQ_LINE_OBJECT,
   name: CBP_LINE,
   label: 'Controlled line',
   sharingModel: 'controlled_by_parent',
+  fields: { ...REQ_LINE_OBJECT.fields, invoice: { ...invoiceField, required: true } },
 };
 
 /** A plain `lookup` to the same object: its probe is not this rule's. */

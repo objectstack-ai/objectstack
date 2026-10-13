@@ -1958,13 +1958,21 @@ function refuseAttachedBlockConflicts(attachedOnRead: unknown, fields: unknown, 
  * always has two required ones and is refused. A field's `reference` needs no
  * test here: `FieldSchema` already refuses a `master_detail` without one.
  *
- * Metadata at rest still LOADS: the stored-row seams register an object that
- * fails its parse with a `[metadata_spec_invalid]` diagnostic carrying this
- * message (ADR-0087's 2026-07-31 addendum, "reads diagnose, never drop"), and
- * the save door refuses it with 422. No conversion rewrites it: turning a
- * `lookup` into a `master_detail` changes the delete behaviour of every row
- * (a detail cascades with its master), and whether an object should rather
- * leave `controlled_by_parent` is the author's decision, not a mapping.
+ * Metadata at rest still LOADS. The stored-row seams first replay the ADR-0087
+ * D2 conversion `cbp-master-detail-required-defaulted`, which gives an OMITTED
+ * `required` on an object's one `master_detail` the builder's own `true`. That
+ * is the one lossless shape, and objectui's Studio writes it. An object that
+ * still fails this parse registers anyway, under a `[metadata_spec_invalid]`
+ * diagnostic carrying this message (ADR-0087's 2026-07-31 addendum, "reads
+ * diagnose, never drop"), and the save door refuses it with 422. The other
+ * shapes are not converted:
+ *   - an explicit `required: false` — the builder refuses it, too;
+ *   - two masters — choosing one is the pick §1 refuses;
+ *   - a required `lookup` — turning it into a `master_detail` changes what
+ *     deleting the master does to every row, and whether the object should
+ *     rather leave `controlled_by_parent` is the author's decision.
+ * The conversion is retired from the authoring load path, so a live author
+ * still meets this refusal.
  */
 function refuseControlledByParentWithoutOneMaster(
   objectName: unknown,
