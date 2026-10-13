@@ -49,7 +49,7 @@
  * console reads the route and not the predicate.
  */
 
-import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, afterAll, beforeEach, vi } from 'vitest';
 import { Hono } from 'hono';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
@@ -60,6 +60,7 @@ import { AuthPlugin } from './auth-plugin.js';
 import { SELF_REGISTRATION_CLOSED } from './audience-posture.js';
 import { decideDevAdminSeedGate } from './dev-admin-seed-gate.js';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
+import { memoizeScrypt } from './__tests__/scrypt-memo.testkit.js';
 
 const BASE = 'http://localhost:3000';
 const AUTH_BASE = '/api/v1/auth';
@@ -107,6 +108,22 @@ afterEach(async () => {
     }
   }
 });
+
+/**
+ * [#23184] A sign-in after the seed (or after a sign-up) verifies the password
+ * against the hash just stored: the same password against the same salt, which
+ * the memo answers from the bytes the first production-parameter derivation
+ * produced (`__tests__/scrypt-memo.testkit.ts`). Every fresh salt is still a
+ * real derivation, and a stored hash is byte-for-byte what it was.
+ *
+ * The cases stay sequential (each sets `process.env` for its own seed), and
+ * the vendor's first module load stays inside the first case on purpose:
+ * better-auth captures `NODE_ENV` when its env module is first evaluated, and
+ * every case here runs under `NODE_ENV=development`, so loading it at module
+ * top would change what the vendor believes it runs under.
+ */
+const scrypt = memoizeScrypt();
+afterAll(scrypt.restore);
 
 async function bootEngine(): Promise<ObjectQL> {
   const engine = new ObjectQL();

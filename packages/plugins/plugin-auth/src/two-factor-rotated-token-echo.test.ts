@@ -48,7 +48,9 @@ import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
 // module evaluation on a dev container. The list is what the managers in this
 // file (and the bearer-rotation cases it imports) boot through; a module it
 // misses is still loaded in the first case, as before. The module cache hands
-// `AuthManager` these same instances, so nothing a case runs is different.
+// `AuthManager` these same instances, and this file changes no environment the
+// vendor reads at load (better-auth captures `NODE_ENV` when its env module is
+// first evaluated), so nothing a case runs is different.
 import 'better-auth';
 import 'better-auth/api';
 import 'better-auth/plugins';
