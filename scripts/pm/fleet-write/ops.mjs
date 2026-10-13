@@ -117,23 +117,56 @@
  * `POST /repos/{repo}/actions/workflows/{file}/dispatches` starts a run of a
  * workflow file at a ref and needs `actions: write` on the token — a grant that
  * also reaches cancelling, re-running and deleting runs, and the cache,
- * artifact, secret and variable endpoints. So the row is fenced four ways:
+ * artifact, secret and variable endpoints. So the row is fenced five ways:
  * `workflow` is a closed enum — `WORKFLOW_DISPATCH_ALLOWLIST`, one file name
  * per entry, matched whole, joined only by a PR that adds the entry here and
- * never at request time; `ref` is a closed enum of exactly
- * `WORKFLOW_DISPATCH_REF`; a stroke carrying this op carries exactly that one
- * action (`alone`), so the wider token serves one request and nothing beside
- * it; and the grant is minted only for such a stroke — the validator writes
- * `permission_actions=write` for it and an empty value for every other stroke,
- * and the mint action skips an empty `permission-*` input, so every other
- * stroke's token is what it was before this row. The op sends no `inputs`: the
- * one allowlisted workflow declares none and the platform refuses inputs on a
- * workflow that declares none, so a workflow with inputs joins the list by the
- * PR that also spells its inputs here. `REFUSED_PATH_FAMILIES` refuses every
- * other `actions/*` path, and `validate.mjs --self-test` pins that the dispatch
- * call is the only one the table reaches. The dispatch answers 204 with no
- * body, so the run it starts is read back by the SEAT (`dispatch.mjs`): the
- * newest `workflow_dispatch` run of that file created since the dispatch.
+ * never at request time; its `inputs` are closed per file (below); `ref` is a
+ * closed enum of exactly `WORKFLOW_DISPATCH_REF`; a stroke carrying this op
+ * carries exactly that one action (`alone`), so the wider token serves one
+ * request and nothing beside it; and the grant is minted only for such a
+ * stroke — the validator writes `permission_actions=write` for it and an empty
+ * value for every other stroke, and the mint action skips an empty
+ * `permission-*` input, so every other stroke's token is what it was before
+ * this row. `REFUSED_PATH_FAMILIES`
+ * refuses every other `actions/*` path, and `validate.mjs --self-test` pins
+ * that the dispatch call is the only one the table reaches. The dispatch
+ * answers 204 with no body, so the run it starts is read back by the SEAT
+ * (`dispatch.mjs`): the newest `workflow_dispatch` run of that file created
+ * since the dispatch.
+ *
+ * ## A workflow's inputs are CLOSED per file — `WORKFLOW_DISPATCH_INPUTS`
+ *
+ * An input picks which of a workflow's lanes the run takes, so the inputs are
+ * part of the allowlist, never a value a seat chooses: each allowlisted file
+ * carries its ONE inputs object beside its name, and a file joins the list by
+ * the PR that spells both here. `null` is a workflow that declares no inputs —
+ * the platform refuses inputs on such a workflow, so an action naming it
+ * carries no `inputs` key. An object is the exact `inputs` an action naming
+ * that file must carry: every key, every value, nothing beside it — a missing
+ * key, another value or any other key is refused by name with zero writes.
+ * The seat SPELLS the inputs rather than having them filled in, so a payload
+ * says which lane it starts and a stroke that does not say so is refused; the
+ * request body is built from this table, never from the action, so what
+ * leaves is this spelling even where the two would differ.
+ *
+ * `release.yml` is on the list for its bookkeeping lane alone (the maintainer's
+ * ruling, comment 6139629628, item 5: a seat refreshes the Version Packages PR
+ * through the relay after each fix lands on `main`). Its entry is
+ * `{ refresh_version_pr: true }`: the `version-pr` job runs on a dispatch
+ * carrying it, and `release-integrity`, `stale-prompts`, `full-battery` and
+ * `publish` refuse such a dispatch in their own `if:` (`docker` runs only on a
+ * publish those two report). `force` is not in the entry and
+ * `refresh_version_pr: false` is not its value, so the publish-repair lane —
+ * a dispatch WITHOUT `refresh_version_pr` — is unreachable from the relay.
+ * `validate.mjs --self-test` reads the workflow from disk and pins every
+ * input here declared there, and every job of that file classified by its
+ * guard, so a job added there reds until it is classified.
+ *
+ * On the wire every value is a STRING (`dispatchInputsOnTheWire`): `"true"`
+ * is the spelling measured to start the bookkeeping lane alone (runs
+ * 38351525685 and 38357219168, each answering `Version PR maintenance` success
+ * and the other five jobs skipped). A JSON boolean on that endpoint is not
+ * measured, so it is never sent.
  *
  * ## The one row whose token reaches a SECOND repository — `transfer`
  *
@@ -200,12 +233,35 @@ export const TARGET_OWNER = 'objectstack-ai';
 export const TRANSFER_TARGETS = Object.freeze(GOVERNED_REPOS.map((r) => r.slug));
 
 /**
+ * The workflow files a `workflow_dispatch` may start, each with the ONE inputs
+ * object an action naming it carries (header: "A workflow's inputs are CLOSED
+ * per file"). `null`: the workflow declares no inputs, and the action carries
+ * no `inputs` key. An object: the action's `inputs`, spelled exactly.
+ * `validate.mjs --self-test` pins every key here to an input the file declares
+ * under its `workflow_dispatch` trigger, with the type the value has.
+ */
+export const WORKFLOW_DISPATCH_INPUTS = Object.freeze({
+  'shard-timings-refresh.yml': null,
+  // The bookkeeping lane alone — never `force`, never `refresh_version_pr: false` (the publish-repair lane).
+  'release.yml': Object.freeze({ refresh_version_pr: true }),
+});
+/**
  * The workflow files a `workflow_dispatch` may start — one file name per
  * entry, matched whole (never a path, never a glob), joined only by a PR that
- * adds the entry here. `validate.mjs --self-test` pins that every entry is a
- * file under `.github/workflows/` declaring a `workflow_dispatch` trigger.
+ * adds the entry, with its inputs, to `WORKFLOW_DISPATCH_INPUTS` above.
+ * `validate.mjs --self-test` pins that every entry is a file under
+ * `.github/workflows/` declaring a `workflow_dispatch` trigger.
  */
-export const WORKFLOW_DISPATCH_ALLOWLIST = Object.freeze(['shard-timings-refresh.yml']);
+export const WORKFLOW_DISPATCH_ALLOWLIST = Object.freeze(Object.keys(WORKFLOW_DISPATCH_INPUTS));
+/**
+ * The `inputs` object the dispatch request sends for a closed entry — every
+ * value as a string, the spelling measured on the dispatch endpoint (header).
+ * Pure; `null` for an entry that declares none.
+ */
+export function dispatchInputsOnTheWire(declared) {
+  if (declared === null || declared === undefined) return null;
+  return Object.fromEntries(Object.entries(declared).map(([name, value]) => [name, String(value)]));
+}
 /** The one ref a `workflow_dispatch` may start a run at. ⛔ Never a free string. */
 export const WORKFLOW_DISPATCH_REF = 'main';
 /** The shape of the one `actions/*` path the table reaches — the dispatch call, nothing beside it. */
@@ -271,7 +327,10 @@ export const TARGET_REPO_SHAPE = new RegExp(`^${TARGET_OWNER}/[A-Za-z0-9_.-]+$`)
  *   `list`  an array of 1..`max` non-empty strings, each at most `itemMax` bytes;
  *   `enum`  one of `values`;
  *   `sha`   a full commit sha — exactly 40 lowercase hex characters, never a
- *           short one (that is refused here, not by the platform's 422).
+ *           short one (that is refused here, not by the platform's 422);
+ *   `inputs` a JSON object naming at least one input, each value a JSON
+ *           boolean (the one type an allowlisted input has) — its keys and
+ *           values are then judged against the row's `closedInputs` entry.
  */
 export const FIELDS = Object.freeze({
   issue: Object.freeze({ kind: 'int' }),
@@ -291,6 +350,7 @@ export const FIELDS = Object.freeze({
   target_repo: Object.freeze({ kind: 'enum', values: TRANSFER_TARGETS }),
   workflow: Object.freeze({ kind: 'enum', values: WORKFLOW_DISPATCH_ALLOWLIST }),
   ref: Object.freeze({ kind: 'enum', values: Object.freeze([WORKFLOW_DISPATCH_REF]) }),
+  inputs: Object.freeze({ kind: 'inputs' }),
 });
 
 /**
@@ -421,6 +481,10 @@ export function transferRemedy(source, target) {
  *                 must reach — `transfer`'s alone (header above);
  *   `alone`       (optional) true for a row whose stroke carries exactly that
  *                 one action — `workflow_dispatch`'s alone (header above);
+ *   `closedInputs` (optional) the per-workflow closed inputs —
+ *                 `WORKFLOW_DISPATCH_INPUTS`, `workflow_dispatch`'s alone: the
+ *                 action's `inputs` must be exactly the entry its `workflow`
+ *                 names, and absent where that entry is `null` (header above);
  *   `alsoSpends`  (optional) grants the row spends beside `permission` —
  *                 each a literal mint input, never a stroke-scoped one
  *                 (`validate.mjs --self-test` pins it): `pr_create`'s
@@ -578,13 +642,18 @@ export const OPS = Object.freeze({
     requests: (a) => [{ verb: 'POST', path: '/graphql', graphql: { mutation: 'transferIssue', query: TRANSFER_MUTATION, issue: a.issue, target_repo: a.target_repo } }],
   }),
   // The one row whose token carries `actions: write`, minted for a stroke carrying this op alone — see the header.
-  // `workflow` and `ref` are closed enums; the body carries no `inputs` (the allowlisted workflow declares none).
+  // `workflow` and `ref` are closed enums, and so are a workflow's `inputs`: exactly its `WORKFLOW_DISPATCH_INPUTS`
+  // entry, absent where that is null. The body's `inputs` is built from the TABLE's entry, never from the action.
   workflow_dispatch: Object.freeze({
     permission: 'actions',
     required: Object.freeze(['workflow', 'ref']),
-    optional: Object.freeze([]),
+    optional: Object.freeze(['inputs']),
     alone: true,
-    requests: (a, repo) => [{ verb: 'POST', path: `/repos/${repo}/actions/workflows/${enc(a.workflow)}/dispatches`, body: { ref: a.ref } }],
+    closedInputs: WORKFLOW_DISPATCH_INPUTS,
+    requests: (a, repo) => {
+      const inputs = dispatchInputsOnTheWire(Object.hasOwn(WORKFLOW_DISPATCH_INPUTS, a.workflow) ? WORKFLOW_DISPATCH_INPUTS[a.workflow] : null);
+      return [{ verb: 'POST', path: `/repos/${repo}/actions/workflows/${enc(a.workflow)}/dispatches`, body: { ref: a.ref, ...(inputs ? { inputs } : {}) } }];
+    },
   }),
 });
 
