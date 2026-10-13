@@ -45,7 +45,12 @@
 // is the only one that ships any, so the synced set is exactly its catalog.
 // With no package to read it prints "Nothing to sync." and exits 0 — which is
 // why the scaffolder checks both sides itself (`listSkills` below) instead of
-// reading the exit code as "installed".
+// reading the exit code as "installed". It also exits 0 when it SKIPS a skill
+// whose directory is already there and was not put there by a sync — one from
+// `skills add`, say ("Skipped objectstack-data from @objectstack/skills:
+// installed with `skills add` …"), leaving that copy and its lock entry as
+// they were. So a directory being present proves nothing either; the lock
+// entry naming the package (`skillsSyncedFromPackage`) does.
 //
 // The CLI is pinned to the version measured. `experimental_` is that package's
 // own word for an interface it may change, and an unpinned `npx skills` would
@@ -140,6 +145,27 @@ export function installedSkillsVersion(projectDir: string): string | null {
     return typeof pkg.version === 'string' ? pkg.version : null;
   } catch {
     return null;
+  }
+}
+
+/** The skills CLI's record of what it installed, at the project root. */
+export const SKILLS_LOCK_FILE = 'skills-lock.json';
+
+/**
+ * The skills the project's `skills-lock.json` records as synced from the
+ * installed `@objectstack/skills` package (`source` the package,
+ * `sourceType: node_modules`). Empty when there is no readable lock.
+ */
+export function skillsSyncedFromPackage(projectDir: string): Set<string> {
+  try {
+    const lock = JSON.parse(fs.readFileSync(path.join(projectDir, SKILLS_LOCK_FILE), 'utf8'));
+    return new Set(
+      Object.entries((lock?.skills ?? {}) as Record<string, { source?: unknown; sourceType?: unknown }>)
+        .filter(([, entry]) => entry?.source === SKILLS_PACKAGE && entry?.sourceType === 'node_modules')
+        .map(([name]) => name),
+    );
+  } catch {
+    return new Set();
   }
 }
 

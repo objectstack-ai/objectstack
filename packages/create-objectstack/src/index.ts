@@ -86,6 +86,7 @@ import {
   listSkills,
   skillsInstallHint,
   skillsPackageDir,
+  skillsSyncedFromPackage,
 } from './skills-install.js';
 import { renderVersionBanner } from './banner.js';
 
@@ -390,10 +391,11 @@ function writeIfAbsent(filePath: string, contents: string) {
 // version installed, or `null` after a warning naming the remedy.
 //
 // The sync's exit code is not the verdict: with no package to read it prints
-// "Nothing to sync." and exits 0 (`skills-install.ts`). So both sides are read
-// here — a catalog in the package before the call, and every one of its skills
-// in the agent's directory after it — and a gap on either is said out loud
-// rather than summarised as "Installed".
+// "Nothing to sync." and exits 0, and it exits 0 having skipped a skill it did
+// not install (`skills-install.ts`). So both sides are read here — a catalog
+// in the package before the call, and every one of its skills in the agent's
+// directory, recorded in the lock as synced from the package, after it — and
+// a gap on either is said out loud rather than summarised as "Installed".
 function installSkillsFromPackage(
   targetDir: string,
   installed: boolean,
@@ -430,13 +432,17 @@ function installSkillsFromPackage(
     return null;
   }
 
+  // Both the files and the lock entry: the sync leaves an existing directory
+  // it did not write (one from `skills add`) in place and still exits 0.
   const landed = new Set(listSkills(path.join(targetDir, DEFAULT_SKILLS_DIR)));
-  const missing = catalog.filter((skill) => !landed.has(skill));
+  const synced = skillsSyncedFromPackage(targetDir);
+  const missing = catalog.filter((skill) => !landed.has(skill) || !synced.has(skill));
   if (missing.length > 0) {
     printWarning(
       `Skills installation incomplete: ${missing.length} of ${catalog.length} skill(s) in ` +
-        `${SKILLS_PACKAGE}@${version} did not land in ${DEFAULT_SKILLS_DIR} as files ` +
-        `(${missing.join(', ')}). Run manually:\n${hint}`,
+        `${SKILLS_PACKAGE}@${version} are not in ${DEFAULT_SKILLS_DIR} as files synced from it ` +
+        `(${missing.join(', ')}). The sync leaves a skill installed earlier with \`skills add\` ` +
+        `in place: remove it (\`npx skills remove <name> -y\`), then run:\n${hint}`,
     );
     console.log('');
     return null;

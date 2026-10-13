@@ -22,7 +22,9 @@
 //   -y           .agents/skills/<skill>  links into node_modules/<package>/…
 //                .claude/skills/<skill>  links into .agents/skills/<skill>
 //
-// and with nothing to read it prints "Nothing to sync." and exits 0.
+// With nothing to read it prints "Nothing to sync." and exits 0; a skill whose
+// directory is already there and whose lock entry is not a sync's (one from
+// `skills add`) is SKIPPED, left as it was, and the run still exits 0.
 //
 // ## Why both CLIs are stubbed, and how the stubs are kept honest
 //
@@ -164,21 +166,32 @@ for (const dep of deps) {
   }
 }
 if (found.length === 0) { console.log('Nothing to sync.'); process.exit(0); }
+const lockPath = path.join(cwd, 'skills-lock.json');
+let prior = { version: 1, skills: {} };
+try { prior = JSON.parse(fs.readFileSync(lockPath, 'utf8')); } catch {}
+const synced = found.filter((skill) => {
+  const taken = SHAPES[key].some((dest) => fs.existsSync(path.join(cwd, dest.dir, skill.name)));
+  if (taken && prior.skills?.[skill.name]?.sourceType !== 'node_modules') {
+    console.warn('Skipped ' + skill.name + ' from ' + skill.dep + ': installed with skills add');
+    return false;
+  }
+  return true;
+});
 for (const dest of SHAPES[key]) {
   fs.mkdirSync(path.join(cwd, dest.dir), { recursive: true });
-  for (const skill of found) {
+  for (const skill of synced) {
     const target = path.join(cwd, dest.dir, skill.name);
     if (dest.kind === 'copy') fs.cpSync(skill.src, target, { recursive: true });
     else if (dest.kind === 'link-package') fs.symlinkSync(path.relative(path.dirname(target), skill.src), target);
     else fs.symlinkSync(dest.into + '/' + skill.name, target);
   }
 }
-const lock = { version: 1, skills: {} };
-for (const s of found) {
+const lock = { version: 1, skills: { ...prior.skills } };
+for (const s of synced) {
   lock.skills[s.name] = { source: s.dep, sourceType: 'node_modules', skillPath: s.skillPath, version: s.version };
 }
 fs.writeFileSync(path.join(cwd, 'skills-lock.json'), JSON.stringify(lock, null, 2) + '\\n');
-console.log('npx-stub: synced ' + found.length + ' skills');
+console.log('npx-stub: synced ' + synced.length + ' skills');
 `;
 }
 
@@ -425,6 +438,33 @@ describe('without a package to read, no skills — and the run says how to get t
     const block = skillsBlock(run.stdout);
     expect(block).toMatch(/^AI Skills \(recommended\)/);
     expect(block).toContain(skillsInstallHint(DEFAULT_SKILLS_AGENT));
+  });
+
+  // Scaffolding into the current directory is the one path onto existing
+  // content. A skill that `skills add` put there earlier is SKIPPED by the
+  // sync, exit 0, its directory still present — so neither the exit code nor
+  // the directory can be the verdict; the lock entry naming the package is.
+  it('a skill already there from `skills add` is reported, not counted as installed', () => {
+    const project = path.join(TMP, 'here-app');
+    const legacy = path.join(project, '.claude', 'skills', 'objectstack-data');
+    fs.mkdirSync(legacy, { recursive: true });
+    fs.writeFileSync(path.join(legacy, 'SKILL.md'), '---\nname: objectstack-data\n---\n\n# from main\n');
+    fs.writeFileSync(
+      path.join(project, 'skills-lock.json'),
+      JSON.stringify({ version: 1, skills: { 'objectstack-data': { source: 'objectstack-ai/objectstack', sourceType: 'github' } } }) + '\n',
+    );
+    const receipt = path.join(TMP, 'here-app.npx-argv.log');
+    const stdout = execFileSync(TSX, [INDEX_TS], {
+      cwd: project,
+      encoding: 'utf8',
+      env: { ...process.env, NPX_STUB_RECEIPT: receipt, PATH: `${BIN}${path.delimiter}${process.env.PATH ?? ''}` },
+    });
+    expect(fs.readFileSync(receipt, 'utf8').trim().split('\n')).toHaveLength(1);
+    expect(listSkills(path.join(project, DEFAULT_SKILLS_DIR))).toEqual(STUB_CATALOG);
+    expect(fs.readFileSync(path.join(legacy, 'SKILL.md'), 'utf8')).toContain('# from main');
+    expect(stdout).toContain('1 of 3 skill(s)');
+    expect(stdout).toContain('(objectstack-data)');
+    expect(stdout).not.toContain('Installed for');
   });
 
   // The sync exits 0 with "Nothing to sync." when there is no package, so a
