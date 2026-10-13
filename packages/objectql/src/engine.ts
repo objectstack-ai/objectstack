@@ -1235,6 +1235,12 @@ function lowerWhereFilterArray<T extends object | undefined>(
   // deleted rather than kept as a gate that reads live and never fires. The
   // OBJECT branch above keeps its call: that `where` never passes
   // `parseFilterAST` at all, which is the whole reason both branches exist.
+  // [ADR-0139 D1] The object branch's `ReadableIds` rule, on the LOWERED
+  // condition: `parseFilterAST` admits no leaf as a `$in` comparand (it does
+  // not opt in, so that spelling is its 400), but a leaf it lowers by
+  // reference into any other position is refused here by name, as the object
+  // branch refuses it — first, before the doors below read it as a value.
+  collectComposableReadableIds(object, operation, condition, 'where');
   // [#8296] Same door as the object branch above, on the LOWERED condition —
   // the array sugar (`[['is_open','=',true]]`) names fields too, and a gate on
   // one branch would answer one mistake two ways depending on the spelling.
