@@ -1,22 +1,20 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#22169] `bootstrapPlatformAdmin`'s existence read: a read that did not
+ * [#22169] `bootstrapPlatformAdmin`'s one catalog read: a read that did not
  * answer is not an absent row.
  *
- * The seed loop reads each default permission set BY NAME and inserts when it
- * finds none. Its `tryFind` answers `[]` for a refused read as well as for an
- * empty table, and the loop inserted on both — so on a table without the
- * per-organization unique index a refused read minted a second row of a set
- * that already existed, and a table holding such duplicates can never build
- * that index again. Measured on a real engine with that index dropped: two
- * declared sets, two INSERTs, under a refused read.
+ * [ADR-0131 D3/D4] The bootstrap writes no `sys_permission_set` row. It still
+ * READS the legacy `admin_full_access` row an older release seeded, because
+ * that row's id is how the holder scan reaches a grant written before the
+ * name column existed (leg C, restrict-only). A refused read cannot say no
+ * such grant exists, so the promotion is withheld — loudly — rather than risk
+ * minting a second administrator.
  *
- * The double below has no `update` or `delete` member — the seed pass without
- * `resync` calls neither — so it is not an engine double those dispatch
- * contracts govern. Its `find` answers from its rows, bounded by the caller's
- * `limit`; the refused read is a spy laid over it, so the two inputs the pass
- * must tell apart — an answer, and a throw — come from one table.
+ * The double has no `update` or `delete` member — the bootstrap calls neither —
+ * so it is not an engine double those dispatch contracts govern. Its `find`
+ * answers from its rows, bounded by the caller's `limit`; the refused read is a
+ * spy laid over it.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -26,7 +24,7 @@ afterEach(() => { vi.restoreAllMocks(); });
 
 function makeQl(seedRows: any[] = []) {
   const rows: any[] = seedRows.map((r) => ({ ...r }));
-  const inserted: any[] = [];
+  const inserted: Array<{ object: string; data: any }> = [];
   return {
     rows,
     inserted,
@@ -40,9 +38,7 @@ function makeQl(seedRows: any[] = []) {
       return typeof q?.limit === 'number' ? matched.slice(0, q.limit) : matched;
     },
     async insert(object: string, data: any) {
-      if (object !== 'sys_permission_set') return null;
-      inserted.push({ ...data });
-      rows.push({ ...data });
+      inserted.push({ object, data: { ...data } });
       return { id: data.id };
     },
   };
@@ -64,43 +60,30 @@ function capture() {
   return { warns, logger: { info: () => {}, warn: (msg: string, meta?: any) => warns.push({ msg, meta }) } };
 }
 
-describe('#22169 — bootstrapPlatformAdmin declines the insert when its existence read was refused', () => {
-  it('a refused read inserts NOTHING, and says so once for the whole pass', async () => {
+describe('#22169 — bootstrapPlatformAdmin withholds the promotion when its legacy read was refused', () => {
+  it('a refused read writes NOTHING, reports the read that failed, and says so once', async () => {
     const ql = makeQl([{ id: 'ps_existing', name: 'admin_full_access' }]);
     refuseSetReads(ql);
     const { warns, logger } = capture();
 
-    const r = await bootstrapPlatformAdmin(ql, [set('admin_full_access'), set('member_default'), set('viewer_readonly')], { logger });
+    const r = await bootstrapPlatformAdmin(ql, [set('admin_full_access'), set('member_default')], { logger });
 
-    expect(ql.inserted, '⛔ no row minted on a read that did not answer').toEqual([]);
-    expect(r.seeded).toBe(0);
-    const lines = warns.filter((w) => w.msg.includes('could not be read'));
-    expect(lines, 'one line per pass, never one per set').toHaveLength(1);
-    expect(lines[0]!.meta).toMatchObject({
-      unreadable: 3, total: 3, names: ['admin_full_access', 'member_default', 'viewer_readonly'],
-    });
-    // The promotion half reports the read that failed, not a set that is "missing".
+    expect(ql.inserted, '⛔ nothing written on a read that did not answer').toEqual([]);
     expect(r.reason).toBe('admin_permission_set_unreadable');
+    expect(r.adminPromoted).toBe(false);
+    expect(warns.filter((w) => w.msg.includes('promotion WITHHELD'))).toHaveLength(1);
   });
 
-  it('control: an EMPTY answer is still "absent" — a fresh install seeds every default set', async () => {
+  it('control: an EMPTY answer is "no legacy row" — the pass goes on, and writes no catalog row', async () => {
     const ql = makeQl();
     const { warns, logger } = capture();
 
     const r = await bootstrapPlatformAdmin(ql, [set('admin_full_access'), set('member_default')], { logger });
 
-    expect(ql.inserted.map((row) => row.name)).toEqual(['admin_full_access', 'member_default']);
-    expect(r.seeded).toBe(2);
-    expect(warns.filter((w) => w.msg.includes('could not be read'))).toEqual([]);
-  });
-
-  it('control: an existing row is found and left alone — no insert, no unreadable line', async () => {
-    const ql = makeQl([{ id: 'ps_existing', name: 'member_default' }]);
-    const { warns, logger } = capture();
-
-    await bootstrapPlatformAdmin(ql, [set('member_default')], { logger });
-
-    expect(ql.inserted).toEqual([]);
-    expect(warns.filter((w) => w.msg.includes('could not be read'))).toEqual([]);
+    expect(ql.inserted.filter((w) => w.object === 'sys_permission_set')).toEqual([]);
+    // No users in this double, so the pass ends at "nobody to promote yet" —
+    // past the legacy read, which is the point.
+    expect(r.reason).toBe('no_users');
+    expect(warns.filter((w) => w.msg.includes('promotion WITHHELD'))).toEqual([]);
   });
 });

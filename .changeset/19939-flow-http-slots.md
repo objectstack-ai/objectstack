@@ -41,7 +41,7 @@ Clause-②: yes (narrowing: a {…} token is refused at http url, each headers v
 
 **Newly refused in the body.** An object naming a `dialect` was data before and was sent as written; it is an expression now, evaluated per run, and a malformed one is refused. An envelope nested inside a literal body is still data, sent as written.
 
-**Still accepted, unchanged.** Every literal at these keys, and the published shapes of `url` (a string), `headers` (a map of strings), `method`, `durable`, `timeoutMs` and `signingSecret`. The single-brace dialect keeps resolving where it still lives, a CRUD `filter` value. The notify changeset on this line lists an `http` body among those positions; this one supersedes that line.
+**Still accepted, unchanged.** Every literal at these keys, and the published shapes of `url` (a string), `headers` (a map of strings), `method`, `durable`, `timeoutMs` and `signingSecret`. The single-brace dialect keeps resolving where it still lives, a CRUD `filter` value.
 
 ### The kit
 

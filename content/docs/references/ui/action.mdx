@@ -161,7 +161,7 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **navigate** | `string` | ✅ | Route/URL template navigated to after the action succeeds. Interpolates $`{param.*}` (params-dialog values), $`{ctx.*}` (origin/apiBase/user/org/recordId/selection) and $`{result.*}` (the action's server response payload — NEW with this key, e.g. $`{result.id}`). Relative = SPA route hop; renderers MUST encodeURIComponent values in query positions. |
+| **navigate** | `string` | ✅ | Route/URL template navigated to after the action succeeds. Interpolates $`{param.*}` (params-dialog values), $`{ctx.*}` (origin/apiBase/user/org/recordId/selection) and $`{result.*}` (the action's server response payload — NEW with this key, e.g. $`{result.id}`). An http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ (an SPA route hop); a template that opens with $&#123; is judged after interpolation. Every other scheme and a protocol-relative //host are refused. Renderers MUST encodeURIComponent values in query positions. |
 | **openIn** | `Enum<'self' \| 'newTab'>` | optional (default: `"self"`) | Where to perform the post-success navigation: 'self' (default — in-place SPA navigation, immune to popup blocking) or 'newTab'. Closed enum — no general navigation DSL. |
 
 

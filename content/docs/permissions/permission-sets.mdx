@@ -161,8 +161,9 @@ the anchor decides *which* unit `unit*` means.
 
 ## Built-in permission sets
 
-Auto-seeded on boot by `plugin-security`
-(`objects/default-permission-sets.ts`):
+Declared by `plugin-security` on its own manifest
+(`objects/default-permission-sets.ts`) and served from the security catalog —
+the boot writes no row for them:
 
 | Name | Scope | What it unlocks | Notes |
 |:--|:--|:--|:--|
@@ -337,9 +338,10 @@ tenant-level.
 
 ## Provenance — package vs environment sets (ADR-0086)
 
-A package ships its own sets (`managedBy: 'package'` + `packageId`), seeded
-idempotently at boot and re-seeded on upgrade; environment-authored sets
-(`platform`/`user`) are never clobbered. The data layer refuses forging package
+A package ships its own sets as registry items stamped with the owning package
+(`packageId`), served from the security catalog — the boot writes no row for
+them, and an upgrade is served as soon as the package registers its new
+version; environment-authored sets are never clobbered. The data layer refuses forging package
 provenance through the admin door (two-doors separation, evolved by ADR-0094 —
 an edit of a set shipped in code is refused; clone it instead, see below), which
 is what makes package uninstall well-defined — and enforced: uninstalling a
@@ -430,47 +432,21 @@ it was copied from, so changes to the source never reach the copy.
 
 ### Declared ≠ enforced — diagnosing a frozen package set
 
-A package-declared set's *enforced* grants (what `sys_permission_set` stores
-and what the evaluator resolves) can diverge from its shipped *artifact*
-(what the package currently declares) through two independent mechanisms —
-either can be live on one row, and they need different remedies:
+A package-declared set's *enforced* grants (what the security catalog serves
+and the evaluator resolves) can diverge from its shipped *artifact* (what the
+package currently declares) in one way:
 
 - **Overlay shadow.** An active `sys_metadata` overlay for the set's name
   (from a Studio save made while overlaying was still permitted, or through
-  the `OS_METADATA_WRITABLE` escape hatch) is re-projected onto the record on
-  every boot, unconditionally — the overlay wins forever, regardless of what
-  the package ships next. No door creates such an overlay any more: the
-  metadata door refuses a save over a packaged set, and so does the data door
-  (clone the set instead). **Remedy:** delete the overlay row. From the
-  release that adds ADR-0048's cold-boot check, a deployment that still holds
-  one does not boot: `os migrate security-catalog-overlays` lists every such
-  row with no server running, and `--apply` deletes them, after which the
-  package's definition is served again.
-- **Provenance skip.** The record's `managed_by` column predates package
-  provenance tracking (a legacy insert without `managed_by: 'package'` —
-  typically a database first initialized on an older release line), so boot
-  seeding treats it as environment-authored and never reconciles it with the
-  package — permanently. There is currently no automated adoption path for
-  this case (boot-time auto-adoption and a bulk `os meta
-  adopt-permission-sets` command were both deliberately deferred as migration
-  machinery for a customer population that does not yet exist — see the
-  discussion on the tracking issue for this section). The manual recovery is
-  the same one-time SQL a field remediation used, run against the
-  environment's database with a backup first:
-
-  ```sql
-  UPDATE sys_permission_set
-  SET managed_by = 'package', package_id = '<owning package id>'
-  WHERE name = '<permission set name>';
-  ```
-
-  Restart the environment afterward so boot seeding re-adopts the row as
-  package-owned and reconciles its grants to the shipped artifact.
-
-Both mechanisms are surfaced on the record itself: `drift_status`
-(`'overlay_shadow'` / `'provenance_skip'`) and `drift_detail` name the cause,
-recomputed every boot, and the **Needs Attention** list view collects every
-currently drifted set — an in-sync set is never listed there.
+  the `OS_METADATA_WRITABLE` escape hatch) answers ahead of the package's
+  definition — the overlay wins forever, regardless of what the package ships
+  next. No door creates such an overlay any more: the metadata door refuses a
+  save over a packaged set, and so does the data door (clone the set instead).
+  The boot names every such set in its log. **Remedy:** delete the overlay
+  row. From the release that adds ADR-0048's cold-boot check, a deployment
+  that still holds one does not boot: `os migrate security-catalog-overlays`
+  lists every such row with no server running, and `--apply` deletes them,
+  after which the package's definition is served again.
 
 ---
 

@@ -27,7 +27,7 @@ import {
 // fired, and the last cases in this file hold each recorded verdict to one line
 // of at most 200 characters — every firing variant this suite exercises, not a
 // chosen few. Run the whole file: those cases read what the cases above fired.
-const fired: Array<{ rule: string; message: string; path: string }> = [];
+const fired: Array<{ rule: string; message: string; path: string; hint: string }> = [];
 const validateTranslatableSections: typeof validateTranslatableSectionsUnrecorded = (...args) => {
   const findings = validateTranslatableSectionsUnrecorded(...args);
   fired.push(...findings);
@@ -116,10 +116,13 @@ describe('validateTranslatableSections — the HotCRM shape (#5417)', () => {
     expect(findings[0].hint).toContain("`name: 'case'`");
     expect(findings[0].hint).toContain('objects.crm_case._sections.case.label');
     expect(findings[2].hint).toContain("`name: 'resolution'`");
-    // The renderer resolves by name only. Saying so in the hint is what keeps an
-    // author (or an AI author) from assuming the label text is itself a key —
-    // the slug-fishing fallback objectui#3373 pinned as WRONG.
-    expect(findings[0].hint).toContain('never a key derived from the label');
+    // The renderer resolves by name only. Saying so is what keeps an author (or
+    // an AI author) from assuming the label text is itself a key — the
+    // slug-fishing fallback objectui#3373 pinned as WRONG. [#22161] Said in the
+    // explanation now, which `os explain` prints; the `fix:` line is the remedy.
+    expect(explainRule(TRANSLATION_SECTION_NAME_MISSING)!.paragraphs.join('\n')).toContain(
+      'never a key derived from the label',
+    );
   });
 
   it('says nothing once the sections carry names', () => {
@@ -568,5 +571,34 @@ describe('[#22161] one-line verdict — translation-section-name-missing', () =>
     ]) {
       expect(text, fact).toContain(fact);
     }
+  });
+});
+
+// [#22161] Slice 15: the `fix:` line names the name to write and the key to
+// translate, in one line; that the name is a suggestion to write down and never
+// a key derived from the label is the explanation's (pinned above).
+describe('[#22161] one-line fix — translation-section-name-missing', () => {
+  it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === TRANSLATION_SECTION_NAME_MISSING);
+    // Coverage control: the id fired, on a view's form sections and on a
+    // page's `record:details` sections.
+    expect(converted.some((f) => f.path.startsWith('views['))).toBe(true);
+    expect(converted.some((f) => f.path.includes('.properties.sections['))).toBe(true);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('reads as one remedy', () => {
+    const [first] = validateTranslatableSections({
+      objects: [crmCase],
+      views: [{ name: 'case_views', formViews: { edit: { type: 'simple', data, sections: hotcrmSections } } }],
+      translations: caseTranslated,
+    });
+    expect(first!.hint).toBe(
+      "Give the section a stable `name` (snake_case), e.g. `name: 'case'`, then translate it as " +
+        '`objects.crm_case._sections.case.label` in each locale bundle',
+    );
   });
 });

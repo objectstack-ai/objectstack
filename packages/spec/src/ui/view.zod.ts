@@ -5193,9 +5193,11 @@ export const ViewSchema = lazySchema(() => strictObject({
     formViews: z.record(z.string(), FormViewSchema).optional().describe('Additional named form views'),
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package
-   * authors declare lock policy here; the loader translates it
-   * into the private `_lock` envelope at registration time and
-   * strips this block before persistence. See
+   * authors declare lock policy here, in a code package's source;
+   * the loader translates it into the private `_lock` envelope at
+   * registration time and strips this block. The metadata API's
+   * save door does not translate it and refuses it (`400
+   * VALIDATION_ERROR`), so that door never stores it. See
    * `shared/protection.zod.ts`.
    */
   protection: ProtectionSchema.optional().describe(
@@ -5413,8 +5415,9 @@ function viewItemBaseShape() {
     owner: retiredKey(VIEW_ITEM_OWNER_RETIRED),
     hidden: retiredKey(VIEW_ITEM_HIDDEN_RETIRED),
     /**
-     * Package author protection block — same envelope as {@link ViewSchema};
-     * the loader translates it into the private `_lock` envelope.
+     * Package author protection block — same envelope as {@link ViewSchema}:
+     * the loader translates it into the private `_lock` envelope, and the
+     * metadata API's save door refuses it.
      */
     protection: ProtectionSchema.optional().describe(
       'Package author protection block — lock policy for this view.',

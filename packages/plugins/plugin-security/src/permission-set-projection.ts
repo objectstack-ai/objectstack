@@ -134,8 +134,8 @@ export async function tryFind(ql: any, object: string, where: any, limit = 100, 
  * every caller that wants "the rows I could see", wrong for anyone who has to
  * decide whether a row is GONE. `[]` from that helper means "no row matched OR
  * the read blew up", and a caller reading it as "gone" reports a deletion that
- * an outage invented. `listSeedOrganizationIds` in `per-organization-catalog.ts`
- * states the same rule for the same shape: zero organizations is "nothing to
+ * an outage invented. The retired seeder's organization enumeration
+ * stated the same rule for the same shape: zero organizations is "nothing to
  * seed", an unreadable table is "we do not know".
  *
  * So `unknown` is its own answer and the caller must decide what it means —
@@ -476,7 +476,7 @@ const isProjectionEcho = (v: any): boolean =>
 
 /**
  * Read the DECLARED (artifact) body for a permission set from the engine's
- * SchemaRegistry — the same source `bootstrapDeclaredPermissions` seeds from,
+ * SchemaRegistry — the same source the retired `bootstrapDeclaredPermissions` seeded from,
  * and the one store the env projection never writes, so it can't be poisoned
  * by our own registry sync. It is the body for a declared set with no overlay
  * at all, and the reset target when an overlay IS lifted off one — which since
