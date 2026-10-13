@@ -26,7 +26,7 @@
 // seam the framework's data routes use — `auth.api.getSession({ headers })`,
 // literally what `runtime/src/security/resolve-session-principal.ts` calls.
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
 import { AuthManager } from './auth-manager';
 // ⚠️ Imported from a sibling TEST file on purpose, and the cost is measured, not
@@ -45,6 +45,7 @@ import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import { ADMIN_SESSION_RECOVERY_RESPONSE_HEADER } from './impersonation-bearer-rotation';
 import { USER_NOT_FOUND } from './admin-impersonate-endpoint';
 import { inviteForAudienceGate } from './audience-gate-test-support';
+import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const PASSWORD = 'S3cure!Passw0rd-9968';
@@ -175,8 +176,24 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
+/**
+ * [#23184] Every case signs up three users (three production-parameter scrypt
+ * derivations under fresh salts) and signs two of them in again (the same
+ * password against the same salt, answered by the memo from the bytes the
+ * sign-up produced: `__tests__/scrypt-memo.testkit.ts`). Each case builds its
+ * own engine, manager and users and reads no state another case writes, so
+ * the suites below run their cases concurrently and the fresh derivations
+ * overlap on the libuv pool. The one exception is the last suite, which stays
+ * sequential: it reads what `console.error` received during its boot, and a
+ * concurrent case could both write to that spy and lift it mid-case. The
+ * console stubs above are the only other shared state; lifted early, they cost
+ * log output and no assertion.
+ */
+const scrypt = memoizeScrypt();
+afterAll(scrypt.restore);
+
 // ───────────────────────────────────────────────────────────────────────────
-describe('ADR-0068 D2 — /admin/impersonate-user admits the ObjectStack platform admin', () => {
+describe.concurrent('ADR-0068 D2 — /admin/impersonate-user admits the ObjectStack platform admin', () => {
   it('a platform admin granted via admin_full_access is ADMITTED (not the legacy scalar)', async () => {
     const { manager, adminBearer, targetId } = await arrange();
 
@@ -218,7 +235,7 @@ describe('ADR-0068 D2 — /admin/impersonate-user admits the ObjectStack platfor
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-describe('the other direction — a non-entitled caller is still refused', () => {
+describe.concurrent('the other direction — a non-entitled caller is still refused', () => {
   it('a signed-in plain member is refused 403 YOU_ARE_NOT_ALLOWED_TO_IMPERSONATE_USERS', async () => {
     const { manager, memberBearer, targetId } = await arrange();
 
@@ -286,7 +303,7 @@ describe('the other direction — a non-entitled caller is still refused', () =>
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-describe('the target guard means something again after ADR-0068 D2', () => {
+describe.concurrent('the target guard means something again after ADR-0068 D2', () => {
   it('a platform-admin TARGET cannot be impersonated — 403 YOU_CANNOT_IMPERSONATE_ADMINS', async () => {
     const { engine, manager, adminBearer, targetId } = await arrange();
     // The vendor guards this by reading `targetUser.role` against
@@ -311,7 +328,7 @@ describe('the target guard means something again after ADR-0068 D2', () => {
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-describe('#8243 — the rotation hook is STILL ATTACHED after the re-authorization', () => {
+describe.concurrent('#8243 — the rotation hook is STILL ATTACHED after the re-authorization', () => {
   // This is the guard against the forbidden shape creeping back. A raw Hono
   // mount shadowing `/admin/impersonate-user` detaches the path-keyed global
   // `hooks.after`, and every assertion in the two suites above would still
@@ -355,7 +372,7 @@ describe('#8243 — the rotation hook is STILL ATTACHED after the re-authorizati
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-describe('the restated vendor constant cannot drift', () => {
+describe.concurrent('the restated vendor constant cannot drift', () => {
   it('USER_NOT_FOUND still equals better-auth\'s own BASE_ERROR_CODES entry', async () => {
     // `admin-impersonate-endpoint.ts` restates this constant instead of
     // importing the `better-auth` ROOT entry, because pulling the root in there

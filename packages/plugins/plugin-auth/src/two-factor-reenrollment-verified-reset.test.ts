@@ -52,13 +52,14 @@
 // `auth.api.getSession` — the same seam
 // `runtime/src/security/resolve-session-principal.ts` calls.
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import { createHmac } from 'node:crypto';
 import { AuthManager } from './auth-manager';
 // The SAME in-memory engine the #8243 and #10701 harnesses drive. A third fake
 // would be a third looseness risk and a new `check:engine-double-contract`
 // ledger entry, for no added fidelity.
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
+import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const PASSWORD = 'S3cure!Passw0rd-10700';
@@ -285,8 +286,22 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
+/**
+ * [#23184] Every case signs one user up (one production-parameter scrypt
+ * derivation under a fresh salt), and every later password check (`enable`,
+ * the challenge sign-in, `disable`) derives the same password against the
+ * same salt, which the memo answers from the bytes the sign-up produced
+ * (`__tests__/scrypt-memo.testkit.ts`). Each case builds its own engine,
+ * manager and user and reads no state another case writes, so the suites
+ * below run their cases concurrently. The console stubs above are the only
+ * shared state; lifted early by another case's `restoreAllMocks`, they cost
+ * log output and no assertion.
+ */
+const scrypt = memoizeScrypt();
+afterAll(scrypt.restore);
+
 // ───────────────────────────────────────────────────────────────────────────
-describe('#10700 — first enrollment still completes (the still-works floor)', () => {
+describe.concurrent('#10700 — first enrollment still completes (the still-works floor)', () => {
   it('enable → confirm → the challenge accepts the confirmed secret and signs the user in', async () => {
     const { manager, userId, firstSecret } = await arrangeConfirmedEnrolment();
 
@@ -302,7 +317,7 @@ describe('#10700 — first enrollment still completes (the still-works floor)', 
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-describe('#10700 — the inheritance path is now REFUSED at the route (better-auth 1.7.3)', () => {
+describe.concurrent('#10700 — the inheritance path is now REFUSED at the route (better-auth 1.7.3)', () => {
   /**
    * [#17440] What changed under the family lift, and why this is a stronger
    * pin rather than a weaker one.
@@ -429,7 +444,7 @@ describe('#10700 — the inheritance path is now REFUSED at the route (better-au
  * every re-enrollment would satisfy the refusal pins above while breaking
  * every legitimate secret rotation.
  */
-describe('#10700 — a legitimate rotation still completes, end to end', () => {
+describe.concurrent('#10700 — a legitimate rotation still completes, end to end', () => {
   it('disable → enable → confirm makes the NEW secret live and the old one dead', async () => {
     const { engine, manager, userId, firstSecret, sessionCookie } = await arrangeConfirmedEnrolment();
 

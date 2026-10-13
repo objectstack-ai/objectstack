@@ -23,7 +23,7 @@
 //     engine and the same session;
 //   - the two envelopes are deep-equal, per caller class.
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 // [#10126] A static import, so this dist-resolved workspace dep's first
 // transform is paid at module load rather than inside a clocked test body.
 import { resolveAuthzContext } from '@objectstack/core';
@@ -32,6 +32,7 @@ import { AuthManager } from './auth-manager';
 // be a second looseness risk and a new `check:engine-double-contract` row).
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import { inviteForAudienceGate } from './audience-gate-test-support';
+import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const PASSWORD = 'S3cure!Passw0rd-grants-once';
@@ -242,7 +243,22 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-describe('the real customSession hook and resolveAuthzContext resolve the caller\'s grants once per request', () => {
+/**
+ * [#23184] Every case signs up four users (four production-parameter scrypt
+ * derivations under fresh salts) and signs all four in again (the same
+ * password against the same salt, answered by the memo from the bytes the
+ * sign-up produced: `__tests__/scrypt-memo.testkit.ts`). Each case builds its
+ * own engine, instrumentation and manager, and the read counts are taken on
+ * that case's own engine (core's request memo is scoped per request and per
+ * engine), so the cases run concurrently and the fresh derivations overlap on
+ * the libuv pool. The console stubs above are the only shared state; lifted
+ * early by another case's `restoreAllMocks`, they cost log output and no
+ * assertion.
+ */
+const scrypt = memoizeScrypt();
+afterAll(scrypt.restore);
+
+describe.concurrent('the real customSession hook and resolveAuthzContext resolve the caller\'s grants once per request', () => {
   it('organization member: one resolution of grant reads, the same envelope as the two-resolution path', async () => {
     const a = await arrangeWarm();
     const once = await resolveRequest(a, a.bearers.member);

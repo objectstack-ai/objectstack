@@ -24,7 +24,7 @@
 // that is literally what `runtime/src/security/resolve-session-principal.ts`
 // calls.
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { AuthManager } from './auth-manager';
 import { inviteForAudienceGate } from './audience-gate-test-support';
@@ -33,6 +33,7 @@ import {
   ADMIN_SESSION_RECOVERY_RESPONSE_HEADER,
 } from './impersonation-bearer-rotation';
 import { bindTestSecurityCatalog, catalogFromTables } from './__tests__/security-catalog.testkit';
+import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
 
 /**
  * In-memory IDataEngine — same fake as the #4785 session-of-record harness,
@@ -271,8 +272,30 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
+/**
+ * [#23184] These ten cases also run inside every suite that imports
+ * `createMemoryEngine` from this file (the import re-registers its `describe`s
+ * there; `admin-impersonate-endpoint.test.ts` records that trade at its own
+ * import), so their wall is paid once per importer, and in several importers
+ * it was most of the wall. Two things keep it small, and neither touches what
+ * a case asserts:
+ *
+ *  - each sign-in verifies the password its own sign-up just hashed, against
+ *    the same salt, so the scrypt memo answers that second derivation from the
+ *    bytes the first one produced (`__tests__/scrypt-memo.testkit.ts`); every
+ *    fresh salt is still a real derivation;
+ *  - every case builds its own engine, manager and users and reads no state
+ *    another case writes, so the three suites run their cases concurrently and
+ *    the sign-ups' derivations overlap on the libuv pool instead of queueing.
+ *    The console stubs above are the only state the cases share. A finishing
+ *    case's `restoreAllMocks` can lift them while another case still runs,
+ *    which costs at most log output: no case here reads them.
+ */
+const scrypt = memoizeScrypt();
+afterAll(scrypt.restore);
+
 // ───────────────────────────────────────────────────────────────────────────
-describe('#8243 pin 1 — a bearer client that impersonates STOPS resolving as the admin', () => {
+describe.concurrent('#8243 pin 1 — a bearer client that impersonates STOPS resolving as the admin', () => {
   it('the token the caller was holding no longer resolves to anyone', async () => {
     const { manager, adminId, targetId, adminBearer } = await arrangeAdminAndTarget();
 
@@ -366,7 +389,7 @@ describe('#8243 pin 1 — a bearer client that impersonates STOPS resolving as t
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-describe('#8243 pin 2 — `stop-impersonating` recovers the admin via bearer', () => {
+describe.concurrent('#8243 pin 2 — `stop-impersonating` recovers the admin via bearer', () => {
   it('the caller is the admin again, and the returned token proves it', async () => {
     const { manager, adminId, targetId, adminBearer } = await arrangeAdminAndTarget();
 
@@ -428,7 +451,7 @@ describe('#8243 pin 2 — `stop-impersonating` recovers the admin via bearer', (
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-describe('#8243 — the cookie lane is untouched', () => {
+describe.concurrent('#8243 — the cookie lane is untouched', () => {
   it('a cookie-authenticated impersonation does not rotate anything', async () => {
     // Rotation is scoped to the caller's BEARER, because a cookie caller has no
     // stale credential in hand — the route already replaced its session cookie.

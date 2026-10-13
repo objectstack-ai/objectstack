@@ -37,7 +37,7 @@
 // `AuthManager.handleRequest`, over a real better-auth instance carrying the
 // real `admin` and `@better-auth/sso` plugins.
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
 import { AuthManager } from './auth-manager';
 // ⚠️ Imported from a sibling TEST file on purpose — the same trade
@@ -49,6 +49,7 @@ import { AuthManager } from './auth-manager';
 // entirely (the gate discovers doubles by walking `*.test.ts` only).
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import { inviteForAudienceGate } from './audience-gate-test-support';
+import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const PASSWORD = 'S3cure!Passw0rd-10348';
@@ -274,10 +275,26 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
+/**
+ * [#23184] Every case signs up two users (two production-parameter scrypt
+ * derivations under fresh salts) and signs both in again (the same password
+ * against the same salt, answered by the memo from the bytes the sign-up
+ * produced: `__tests__/scrypt-memo.testkit.ts`). Each case builds its own
+ * engine, manager and users and reads no state another case writes, so the
+ * suites below run their cases concurrently and the fresh derivations overlap
+ * on the libuv pool. The one exception is the fail-closed floor, which stays
+ * sequential: its first case asserts a `vi.spyOn` spy saw NO call, and another
+ * case's `restoreAllMocks` lifting that spy mid-case would make the assertion
+ * pass on a dead spy. The console stubs above are the only other shared state;
+ * lifted early, they cost log output and no assertion.
+ */
+const scrypt = memoizeScrypt();
+afterAll(scrypt.restore);
+
 // ───────────────────────────────────────────────────────────────────────────
 // PIN 1 — the genuine ADR-0068 D2 platform admin is admitted at BOTH gates.
 // ───────────────────────────────────────────────────────────────────────────
-describe('a genuine platform admin (ADR-0068 D2 org-less admin_full_access) is ADMITTED', () => {
+describe.concurrent('a genuine platform admin (ADR-0068 D2 org-less admin_full_access) is ADMITTED', () => {
   it('/sso/register admits (and refuses the standing-less control on the same engine)', async () => {
     const { manager, callerBearer, targetBearer } = await arrange((e, id) => seedPlatformAdmin(e, id));
     const v = await ssoVerdict(manager, callerBearer);
@@ -302,7 +319,7 @@ describe('a genuine platform admin (ADR-0068 D2 org-less admin_full_access) is A
 // platform standing. Without this, a widened implementation scores green on
 // PIN 1 alone.
 // ───────────────────────────────────────────────────────────────────────────
-describe('an org owner / org admin / TENANT_ADMIN principal is NOT admitted', () => {
+describe.concurrent('an org owner / org admin / TENANT_ADMIN principal is NOT admitted', () => {
   const nearMisses: Array<[string, (e: any, id: string) => Promise<void>]> = [
     ['org owner (sys_member.role = owner)', (e, id) => seedOrgAdmin(e, id, 'owner')],
     ['org admin (sys_member.role = admin)', (e, id) => seedOrgAdmin(e, id, 'admin')],
@@ -382,7 +399,7 @@ describe('fail-closed floor', () => {
 // PIN 4 (#10949 axis ①) — a grant that has lapsed, and a catalogue row that has
 // been switched off, authorize NOTHING. Four distinct refusals.
 // ───────────────────────────────────────────────────────────────────────────
-describe('ADR-0091 validity window — an EXPIRED admin_full_access grant authorizes nothing', () => {
+describe.concurrent('ADR-0091 validity window — an EXPIRED admin_full_access grant authorizes nothing', () => {
   it('/sso/register refuses the expired grant', async () => {
     const { manager, callerBearer } = await arrange((e, id) => seedPlatformAdmin(e, id, { expiredGrant: true }));
     const v = await ssoVerdict(manager, callerBearer);
@@ -402,7 +419,7 @@ describe('ADR-0091 validity window — an EXPIRED admin_full_access grant author
   });
 });
 
-describe('ADR-0049 active flag — a DEACTIVATED admin_full_access row authorizes nothing', () => {
+describe.concurrent('ADR-0049 active flag — a DEACTIVATED admin_full_access row authorizes nothing', () => {
   it('/sso/register refuses while the catalogue row is switched off', async () => {
     const { manager, callerBearer } = await arrange((e, id) => seedPlatformAdmin(e, id, { deactivatedSet: true }));
     const v = await ssoVerdict(manager, callerBearer);
@@ -426,7 +443,7 @@ describe('ADR-0049 active flag — a DEACTIVATED admin_full_access row authorize
 // PIN 5 (#10949 axis ②) — the row is resolved by IDENTITY. A catalogue bigger
 // than any fixed page must not demote the platform admin.
 // ───────────────────────────────────────────────────────────────────────────
-describe('admin_full_access is resolved by identity, not by scanning a page of the catalogue', () => {
+describe.concurrent('admin_full_access is resolved by identity, not by scanning a page of the catalogue', () => {
   it(`/sso/register still admits with ${DECOY_PERMISSION_SETS} other permission sets ahead of it`, async () => {
     const { manager, callerBearer, targetBearer } = await arrange((e, id) =>
       seedPlatformAdmin(e, id, { decoySets: DECOY_PERMISSION_SETS }),
@@ -465,7 +482,7 @@ describe('admin_full_access is resolved by identity, not by scanning a page of t
 // `positions[]` / `isPlatformAdmin` from the same question, and the answer for
 // every shape above must be the SAME answer the gates give.
 // ───────────────────────────────────────────────────────────────────────────
-describe('the session payload agrees with the gates, shape for shape', () => {
+describe.concurrent('the session payload agrees with the gates, shape for shape', () => {
   const payloadFor = async (manager: AuthManager, bearer: string) => {
     const auth: any = await manager.getAuthInstance();
     const session = await auth.api
