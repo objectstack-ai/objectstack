@@ -64,7 +64,7 @@ const ProseSchema = z.string().min(1).regex(/\S/);
 export const OrganizationOwnershipFateSchema = lazySchema(() => z
   .enum(['column-drop', 'mirror-deletion', 'attribution', 'report'])
   .describe('ADR-0131 D10 fate: column-drop, mirror-deletion, attribution or report'));
-export type OrganizationOwnershipFate = z.infer<typeof OrganizationOwnershipFateSchema>;
+export type OrganizationOwnershipFate = z.input<typeof OrganizationOwnershipFateSchema>;
 
 /**
  * One condition on a row. A predicate ANDs them. Data, never SQL text: the
@@ -109,7 +109,7 @@ export const OrganizationOwnershipRowConditionSchema = lazySchema(() => z
     ),
   ])
   .describe('One condition on a row: equals, in, notIn, isNull or notTrue on one column'));
-export type OrganizationOwnershipRowCondition = z.infer<typeof OrganizationOwnershipRowConditionSchema>;
+export type OrganizationOwnershipRowCondition = z.input<typeof OrganizationOwnershipRowConditionSchema>;
 
 const RowPredicateSchema = z.array(OrganizationOwnershipRowConditionSchema);
 
@@ -145,7 +145,7 @@ export const OrganizationOwnershipAnchorSchema = lazySchema(() => z
     ),
   ])
   .describe('Fate 3 anchor: parent, subject or holder'));
-export type OrganizationOwnershipAnchor = z.infer<typeof OrganizationOwnershipAnchorSchema>;
+export type OrganizationOwnershipAnchor = z.input<typeof OrganizationOwnershipAnchorSchema>;
 
 /** A named row population the ceremony counts on the table. */
 export const OrganizationOwnershipCategorySchema = lazySchema(() => strictObject(
@@ -165,7 +165,7 @@ export const OrganizationOwnershipCategorySchema = lazySchema(() => strictObject
     ).optional().describe('Count groups holding more than one row instead of rows'),
   },
 ).describe('A named row population the ceremony counts on the table'));
-export type OrganizationOwnershipCategory = z.infer<typeof OrganizationOwnershipCategorySchema>;
+export type OrganizationOwnershipCategory = z.input<typeof OrganizationOwnershipCategorySchema>;
 
 /** Rows that leave the table by another step before its NOT NULL gate is read. */
 export const OrganizationOwnershipDepartureSchema = lazySchema(() => strictObject(
@@ -178,7 +178,7 @@ export const OrganizationOwnershipDepartureSchema = lazySchema(() => strictObjec
     where: RowPredicateSchema.describe('The rows that leave'),
   },
 ).describe('Rows that leave the table before the NOT NULL gate: neither attributed nor reported'));
-export type OrganizationOwnershipDeparture = z.infer<typeof OrganizationOwnershipDepartureSchema>;
+export type OrganizationOwnershipDeparture = z.input<typeof OrganizationOwnershipDepartureSchema>;
 
 /** The keys every fate admits. */
 const commonShape = () => ({
@@ -224,7 +224,7 @@ export const OrganizationOwnershipSupplementEntrySchema = lazySchema(() => z
     }),
   ])
   .describe('The fate of one object the host provides (ADR-0131 D10)'));
-export type OrganizationOwnershipSupplementEntry = z.infer<typeof OrganizationOwnershipSupplementEntrySchema>;
+export type OrganizationOwnershipSupplementEntry = z.input<typeof OrganizationOwnershipSupplementEntrySchema>;
 
 /**
  * The host fate supplement file: a JSON array of rows, one per object the
@@ -234,4 +234,4 @@ export type OrganizationOwnershipSupplementEntry = z.infer<typeof OrganizationOw
 export const OrganizationOwnershipSupplementSchema = lazySchema(() => z
   .array(OrganizationOwnershipSupplementEntrySchema)
   .describe('The host fate supplement: the ADR-0131 D10 fates of the objects a host provides, one row per object'));
-export type OrganizationOwnershipSupplement = z.infer<typeof OrganizationOwnershipSupplementSchema>;
+export type OrganizationOwnershipSupplement = z.input<typeof OrganizationOwnershipSupplementSchema>;
