@@ -16,7 +16,8 @@
  * server, so the two entry points can never drift on authorization again.
  *
  * Resolves for every request it can ANSWER — anonymous requests yield the
- * guest envelope (`{ isSystem: false, positions: [], permissions: [] }`) —
+ * guest envelope (`principalKind: 'guest'`, `positions: ['guest']`,
+ * `isSystem: false`, carrying the `guest` anchor's sets, ADR-0138 D3) —
  * and throws `AuthzStoreUnavailableError` (503) for the one class of fault
  * that leaves the answer undetermined: an authorization INPUT that exists and
  * could not be read (a permission-store read that failed, commit 6a180e42d; a `tenancy`
@@ -224,6 +225,10 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
     headers,
     getSession: getSessionForProvenance,
     tenancyPosture,
+    // [ADR-0138 D3/D4] This face takes the explicit guest entry below, so a
+    // request that resolves no principal is served the guest's grants: the
+    // sets bound to the `guest` anchor, in the organization D4 derives.
+    guestEntry: true,
   });
 
   // [commit f586f1a89 — maintainer ruling 2026-08-08, Option A] The ExecutionContext

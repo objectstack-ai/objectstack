@@ -105,6 +105,11 @@
 
 import type { TenancyPosture } from '@objectstack/spec/security';
 import { SystemObjectName } from '@objectstack/spec/system';
+import {
+  resolveSystemWriteOrganization,
+  type SystemWriteOrganizationDecision,
+  type SystemWriteRefusalReason,
+} from '@objectstack/core';
 
 /**
  * The table the "how many organizations does this install have?" probe counts —
@@ -221,95 +226,24 @@ export function carriesOrganization(value: unknown): boolean {
 }
 
 /**
- * What a system-context write's organization resolves to.
+ * [ADR-0138 D4] The decision — what a system-context write's organization
+ * resolves to — is `@objectstack/core`'s `resolveSystemWriteOrganization`,
+ * re-exported here as the SAME binding, never a wrapper or a copy.
  *
- * `refuse` is a decision, not a throw: the caller turns it into
- * {@link SystemWriteOrganizationRequiredError} so the decision stays a pure,
+ * It moved down one layer because it has a second asker: the guest entry's
+ * organization step (`resolveGuestOrganization`, `@objectstack/core`), which
+ * ADR-0138 D4 item 2 binds to this very predicate, "never a second spelling of
+ * it" — and `@objectstack/core` cannot import this package (the dependency runs
+ * the other way). Every existing import of the predicate and its two types from
+ * this module or from the package barrel keeps resolving to the one function;
+ * the identity is pinned in `system-write-organization.test.ts`.
+ *
+ * `refuse` is a decision, not a throw: the engine turns it into
+ * {@link SystemWriteOrganizationRequiredError}, so the decision stays a pure,
  * directly-testable function of the facts.
  */
-export type SystemWriteOrganizationDecision =
-  /**
-   * Nothing to resolve — this COMPOSITION registers no organization object at
-   * all (a lean embedding, a bare-kernel test), so no organization can exist
-   * and there is nothing to stamp or to refuse in the name of. The write lands
-   * as it always has.
-   *
-   * ⚠️ Deliberately NOT "the install has no organization yet". That reading
-   * used to share this kind, and it was the normal state of a fresh `single`
-   * boot while the Default Organization arrived only with the first sign-up.
-   * ADR-0131 D3 made that organization load-bearing — it exists before the
-   * application seeds and before the listener — so a `single` install that
-   * registers `sys_organization` and holds none of it is the boot invariant
-   * broken, and is refused (`no-organization`) like every other topology with
-   * no derivable owner (D9). Only the composition with no organization object
-   * keeps this branch; whether D9's refusal also reaches it is ADR-0131 C8's
-   * question, not this one's.
-   */
-  | { kind: 'no-organization-object' }
-  /** Binding point 1: exactly one organization, so the answer is derivable. */
-  | { kind: 'derived'; organizationId: string }
-  /** Binding point 2: refuse loudly rather than default to `__global__`. */
-  | { kind: 'refuse'; reason: SystemWriteRefusalReason; organizationCount?: number };
-
-export type SystemWriteRefusalReason =
-  /**
-   * A walled posture (`group` / `isolated`). Organizations are a real boundary
-   * here, so "the install's organization" is not a thing that exists.
-   */
-  | 'walled-posture'
-  /**
-   * The posture says `single` but the data holds several organizations. The
-   * posture is what the deployment ASKED for; the count is what the data
-   * actually is, and where they disagree there is no unambiguous answer — the
-   * topology falls under binding point 2 rather than getting a guessed default.
-   * #8686's backfill draws the same line (`skipped-ambiguous-organization`).
-   */
-  | 'ambiguous-organization'
-  /**
-   * The posture says `single`, the composition registers the organization
-   * object, and it holds NO organization. Under ADR-0131 D3 the Default
-   * Organization exists before anything writes (plugin-auth creates it at
-   * boot, and a failure to is a boot error), so this is the boot invariant
-   * broken — and there is no owner to derive, which D9 refuses rather than
-   * writing a row nobody owns.
-   */
-  | 'no-organization';
-
-/**
- * Resolve the organization a system-context write should carry (ADR-0131 D9):
- * derived at exactly one organization under `single`, refused at zero, at
- * several, and under a wall.
- *
- * `probeOrganizations` is called ONLY on the single-tenant branch — a walled
- * posture is refused without asking the database anything, because the answer
- * could not change the verdict.
- *
- * `organizationObjectRegistered` separates the two facts an empty probe can
- * mean: an install with the organization object and none of its rows (refused,
- * `no-organization`) and a composition with no organization object at all
- * (`no-organization-object`, unchanged). It is a required input, not a
- * defaulted one: a caller that does not know the answer must not be handed the
- * permissive reading by omission.
- */
-export async function resolveSystemWriteOrganization(args: {
-  posture: TenancyPosture;
-  /** Organization ids, capped at 2 by the caller — only "0 / 1 / several" matters. */
-  probeOrganizations: () => Promise<readonly string[]>;
-  /** Does this composition register the organization object ({@link ORGANIZATION_OBJECT}) at all? */
-  organizationObjectRegistered: boolean;
-}): Promise<SystemWriteOrganizationDecision> {
-  if (args.posture !== 'single') {
-    return { kind: 'refuse', reason: 'walled-posture' };
-  }
-  const ids = await args.probeOrganizations();
-  if (ids.length === 0) {
-    return args.organizationObjectRegistered
-      ? { kind: 'refuse', reason: 'no-organization', organizationCount: 0 }
-      : { kind: 'no-organization-object' };
-  }
-  if (ids.length === 1) return { kind: 'derived', organizationId: ids[0] };
-  return { kind: 'refuse', reason: 'ambiguous-organization', organizationCount: ids.length };
-}
+export { resolveSystemWriteOrganization };
+export type { SystemWriteOrganizationDecision, SystemWriteRefusalReason };
 
 /**
  * Compose the refusal message.
