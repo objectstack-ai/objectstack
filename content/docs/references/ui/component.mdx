@@ -31,7 +31,7 @@ const result = ActionButtonPropsSchema.parse(data);
 | **name** | `string` | optional | Action name, forwarded to the action runner. Optional: an inline page button is not a registered object action, and without a name the runner dispatches on `actionType` alone |
 | **label** | `string` | optional | Button text. A literal string, placed as-is — localize through the translation bundle entry for this component id, not an inline locale map |
 | **icon** | `string` | optional | Lucide icon name drawn left of the label, resolved through the shared action-icon resolver (an unknown name draws no icon) |
-| **actionType** | `string` | optional | Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. Write it here, not as `type`: on a page component `type` is the component itself |
+| **actionType** | `string` | optional | Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. `navigation`, the runner's alias of `url`, is refused: write `url`. Write it here, not as `type`: on a page component `type` is the component itself |
 | **variant** | `Enum<'default' \| 'destructive' \| 'outline' \| 'secondary' \| 'ghost' \| 'link' \| 'primary'>` | optional | Button variant — the Button primitive's vocabulary, plus `primary`, which renders as `default` (renderer default: `default`) |
 | **size** | `Enum<'default' \| 'sm' \| 'lg' \| 'icon' \| 'md'>` | optional | Button size — the Button primitive's vocabulary, plus `md`, which renders as `default` (renderer default: `default`) |
 | **visible** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate — a boolean, a CEL string, or a `{ dialect, source }` envelope, evaluated against the row the host binds; the button is not rendered when it is FALSE, and a predicate that fails to evaluate hides it. Omit for always-visible |
@@ -54,8 +54,15 @@ const result = ActionButtonPropsSchema.parse(data);
 | **locations** | `Enum<'list_toolbar' \| 'list_item' \| 'record_header' \| 'record_more' \| 'record_related' \| 'record_section'>[]` | optional | Action locations, forwarded to the runner — the console uses them to tell a record-scoped action from an object-level one |
 | **toast** | `any` | optional | Toast behaviour, forwarded to the runner |
 | **resultDialog** | `any` | optional | One-shot result dialog for a value the response shows exactly once, forwarded to the runner |
-| **onSuccess** | `any` | optional | Declared post-success navigation, forwarded to the runner |
+| **onSuccess** | `{ navigate: string; openIn?: Enum<'self' \| 'newTab'> }` | optional | Post-success navigation, forwarded to the runner: `ActionSchema`'s own `{ navigate, openIn }` block. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with $&#123;, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab` |
 | **objectName** | `string` | optional | Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page's object. Omit to act on the page's object |
+
+### Nested Shape: `ActionButtonProps.onSuccess`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **navigate** | `string` | ✅ | Route/URL template navigated to after the action succeeds. Interpolates $`{param.*}` (params-dialog values), $`{ctx.*}` (origin/apiBase/user/org/recordId/selection) and $`{result.*}` (the action's server response payload — NEW with this key, e.g. $`{result.id}`). An http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ (an SPA route hop); a template that opens with $&#123; is judged after interpolation. Every other scheme and a protocol-relative //host are refused. Renderers MUST encodeURIComponent values in query positions. |
+| **openIn** | `Enum<'self' \| 'newTab'>` | optional (default: `"self"`) | Where to perform the post-success navigation: 'self' (default — in-place SPA navigation, immune to popup blocking) or 'newTab'. Closed enum — no general navigation DSL. |
 
 
 ---
@@ -82,7 +89,7 @@ const result = ActionButtonPropsSchema.parse(data);
 | **name** | `string` | optional | Action name, forwarded to the action runner, and the item's text when there is no `label`. Optional: a member is not a registered object action, and the runner dispatches a nameless one on its `type` |
 | **label** | `string` | optional | The item's text. A literal string, placed as-is — localize through the translation bundle entry for this component id |
 | **icon** | `string` | optional | Lucide icon name drawn before the label, resolved through the shared action-icon resolver (an unknown name draws no icon) |
-| **type** | `string` | optional | Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. A member is an action entry, so its executor is `type` (on an `action:button` node it is `actionType`) |
+| **type** | `string` | optional | Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. `navigation`, the runner's alias of `url`, is refused: write `url`. A member is an action entry, so its executor is `type` (on an `action:button` node it is `actionType`) |
 | **variant** | `Enum<'default' \| 'destructive' \| 'outline' \| 'secondary' \| 'ghost' \| 'link' \| 'primary'>` | optional | Item variant — the Button primitive's vocabulary, plus `primary` (drawn as `default`). An inline `action:group` button draws it (falling back to the group's `variant`); a dropdown or `action:menu` item draws `destructive` red and every other variant plainly |
 | **visible** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate — a boolean, a CEL string, or a `{ dialect, source }` envelope, evaluated against the row the host binds; the item is not drawn when it is FALSE, and a predicate that fails to evaluate hides it. Omit for always-visible |
 | **disabled** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Disabled predicate — a boolean, a CEL string, or a `{ dialect, source }` envelope; the item is drawn but cannot be pressed while it is TRUE, and a predicate that fails to evaluate disables it. Omit for never-disabled |
@@ -103,7 +110,7 @@ const result = ActionButtonPropsSchema.parse(data);
 | **locations** | `Enum<'list_toolbar' \| 'list_item' \| 'record_header' \| 'record_more' \| …>[]` | optional | Action locations, forwarded to the runner — an `action:group` with a `location` draws only the members that list it, and the console uses them to tell a record-scoped action from an object-level one |
 | **toast** | `any` | optional | Toast behaviour, forwarded to the runner |
 | **resultDialog** | `any` | optional | One-shot result dialog for a value the response shows exactly once, forwarded to the runner |
-| **onSuccess** | `any` | optional | Declared post-success navigation, forwarded to the runner |
+| **onSuccess** | `{ navigate: string; openIn?: Enum<'self' \| 'newTab'> }` | optional | Post-success navigation, forwarded to the runner: `ActionSchema`'s own `{ navigate, openIn }` block. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with $&#123;, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab` |
 | **objectName** | `string` | optional | Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page's object. Omit to act on the page's object |
 | **size** | `Enum<'default' \| 'sm' \| 'lg' \| 'icon' \| 'md'>` | optional | Inline button size — the Button primitive's vocabulary, plus `md` (drawn as `default`), falling back to the group's `size`. A dropdown item reads no size |
 
@@ -119,7 +126,7 @@ const result = ActionButtonPropsSchema.parse(data);
 | **name** | `string` | optional | Action name, forwarded to the action runner; also the `aria-label` when there is no `label`. Optional, as for `action:button` |
 | **label** | `string` | optional | Accessible label and tooltip text (and its first letter stands in when no icon resolves). A literal string — localize through the translation bundle entry for this component id |
 | **icon** | `string` | optional | Lucide icon name, resolved through the shared action-icon resolver (renderer registration default `play`) |
-| **actionType** | `string` | optional | Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. Write it here, not as `type` |
+| **actionType** | `string` | optional | Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. `navigation`, the runner's alias of `url`, is refused: write `url`. Write it here, not as `type` |
 | **variant** | `Enum<'default' \| 'destructive' \| 'outline' \| 'secondary' \| 'ghost' \| 'link' \| 'primary'>` | optional | Button variant — the Button primitive's vocabulary, plus `primary`, which renders as `default` (renderer default: `ghost`) |
 | **visible** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate — a boolean, a CEL string, or a `{ dialect, source }` envelope, evaluated against the row the host binds; the icon is not rendered when it is FALSE. Omit for always-visible |
 | **disabled** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Disabled predicate — a boolean, a CEL string, or a `{ dialect, source }` envelope; the icon is shown but cannot be pressed while it is TRUE. Omit for never-disabled |
@@ -139,8 +146,15 @@ const result = ActionButtonPropsSchema.parse(data);
 | **locations** | `Enum<'list_toolbar' \| 'list_item' \| 'record_header' \| 'record_more' \| 'record_related' \| 'record_section'>[]` | optional | Action locations, forwarded to the runner — the console uses them to tell a record-scoped action from an object-level one |
 | **toast** | `any` | optional | Toast behaviour, forwarded to the runner |
 | **resultDialog** | `any` | optional | One-shot result dialog for a value the response shows exactly once, forwarded to the runner |
-| **onSuccess** | `any` | optional | Declared post-success navigation, forwarded to the runner |
+| **onSuccess** | `{ navigate: string; openIn?: Enum<'self' \| 'newTab'> }` | optional | Post-success navigation, forwarded to the runner: `ActionSchema`'s own `{ navigate, openIn }` block. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with $&#123;, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab` |
 | **objectName** | `string` | optional | Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page's object. Omit to act on the page's object |
+
+### Nested Shape: `ActionIconProps.onSuccess`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **navigate** | `string` | ✅ | Route/URL template navigated to after the action succeeds. Interpolates $`{param.*}` (params-dialog values), $`{ctx.*}` (origin/apiBase/user/org/recordId/selection) and $`{result.*}` (the action's server response payload — NEW with this key, e.g. $`{result.id}`). An http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ (an SPA route hop); a template that opens with $&#123; is judged after interpolation. Every other scheme and a protocol-relative //host are refused. Renderers MUST encodeURIComponent values in query positions. |
+| **openIn** | `Enum<'self' \| 'newTab'>` | optional (default: `"self"`) | Where to perform the post-success navigation: 'self' (default — in-place SPA navigation, immune to popup blocking) or 'newTab'. Closed enum — no general navigation DSL. |
 
 
 ---
@@ -165,7 +179,7 @@ const result = ActionButtonPropsSchema.parse(data);
 | **name** | `string` | optional | Action name, forwarded to the action runner, and the item's text when there is no `label`. Optional: a member is not a registered object action, and the runner dispatches a nameless one on its `type` |
 | **label** | `string` | optional | The item's text. A literal string, placed as-is — localize through the translation bundle entry for this component id |
 | **icon** | `string` | optional | Lucide icon name drawn before the label, resolved through the shared action-icon resolver (an unknown name draws no icon) |
-| **type** | `string` | optional | Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. A member is an action entry, so its executor is `type` (on an `action:button` node it is `actionType`) |
+| **type** | `string` | optional | Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. `navigation`, the runner's alias of `url`, is refused: write `url`. A member is an action entry, so its executor is `type` (on an `action:button` node it is `actionType`) |
 | **variant** | `Enum<'default' \| 'destructive' \| 'outline' \| 'secondary' \| 'ghost' \| 'link' \| 'primary'>` | optional | Item variant — the Button primitive's vocabulary, plus `primary` (drawn as `default`). An inline `action:group` button draws it (falling back to the group's `variant`); a dropdown or `action:menu` item draws `destructive` red and every other variant plainly |
 | **visible** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate — a boolean, a CEL string, or a `{ dialect, source }` envelope, evaluated against the row the host binds; the item is not drawn when it is FALSE, and a predicate that fails to evaluate hides it. Omit for always-visible |
 | **disabled** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Disabled predicate — a boolean, a CEL string, or a `{ dialect, source }` envelope; the item is drawn but cannot be pressed while it is TRUE, and a predicate that fails to evaluate disables it. Omit for never-disabled |
@@ -186,7 +200,7 @@ const result = ActionButtonPropsSchema.parse(data);
 | **locations** | `Enum<'list_toolbar' \| 'list_item' \| 'record_header' \| 'record_more' \| …>[]` | optional | Action locations, forwarded to the runner — an `action:group` with a `location` draws only the members that list it, and the console uses them to tell a record-scoped action from an object-level one |
 | **toast** | `any` | optional | Toast behaviour, forwarded to the runner |
 | **resultDialog** | `any` | optional | One-shot result dialog for a value the response shows exactly once, forwarded to the runner |
-| **onSuccess** | `any` | optional | Declared post-success navigation, forwarded to the runner |
+| **onSuccess** | `{ navigate: string; openIn?: Enum<'self' \| 'newTab'> }` | optional | Post-success navigation, forwarded to the runner: `ActionSchema`'s own `{ navigate, openIn }` block. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with $&#123;, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab` |
 | **objectName** | `string` | optional | Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page's object. Omit to act on the page's object |
 
 
@@ -661,7 +675,7 @@ Sort field and direction pair
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **objectName** | `string` | optional | Object this gantt binds to — the THIRD record source `resolveRecordSourceConfig` resolves, after `data` and `staticData`. Optional because the component-level `dataSource` binding can supply the object instead |
-| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source binding (ViewDataSchema — discriminated on `provider`: object \| api \| value \| schema), read FIRST by `resolveRecordSourceConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source binding (ViewDataSchema — discriminated on `provider`: object \| value \| schema), read FIRST by `resolveRecordSourceConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused |
 | **staticData** | `any[]` | optional | Inline records — read SECOND by `resolveRecordSourceConfig`, wrapped into a `{ provider: 'value' }` config |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Task order for the fetched bars — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array` |
@@ -684,14 +698,6 @@ Sort field and direction pair
 | :--- | :--- | :--- | :--- |
 | **provider** | `'object'` | ✅ |  |
 | **object** | `string` | ✅ | Target object name |
-
-### Nested Shape: `ObjectGanttProps.data[provider='api']`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **provider** | `'api'` | ✅ |  |
-| **read** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
-| **write** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
 
 ### Nested Shape: `ObjectGanttProps.data[provider='value']`
 
@@ -752,7 +758,7 @@ Sort field and direction pair
 | **viewMode** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional | Timeline granularity — one column per day/week/month/quarter/year (also the resource-view column granularity; renderer default 'day') |
 | **borderColorField** | `string` | optional | Field carrying a per-task alert stroke color — any CSS color or semantic palette name (red, orange, …): the bar keeps its fill and gains an outline plus halo in that color (e.g. red for overdue, orange for due-soon; typically a server-computed alert field). Empty or null means no stroke |
 | **lockField** | `string` | optional | Field marking a row view-only (truthy means locked): a locked bar cannot be dragged or resized, its progress cannot be dragged, no dependency can be drawn from it and its inline-edit and edit/delete menu entries are hidden — clicking it (open drawer, jump) still works. Independent of the global readOnly; freezes individual levels while siblings stay editable |
-| **objectField** | `string` | optional | Field carrying the row's OWN object API name, for mixed-object trees (an api provider composing parent-object rows with child-object rows): the detail drawer and its full-page link follow each row's real object instead of the view's bound object. Empty or missing falls back to the bound object |
+| **objectField** | `string` | optional | Field carrying the row's OWN object API name, for mixed-object trees (a row set composing parent-object rows with child-object rows): the detail drawer and its full-page link follow each row's real object instead of the view's bound object. Empty or missing falls back to the bound object |
 | **summaryExtent** | `Enum<'children' \| 'self'>` | optional | How a summary bar's span is computed. 'children' (renderer default) rolls the bar up from its children — min start, max end, duration-weighted progress — and ignores the record's own dates; 'self' renders the record's OWN start, end and progress and falls back to rollup only for records without dates (use it when the parent's schedule is authoritative, e.g. a shift plan whose work-order children are locked history) |
 | **defaultCollapsedDepth** | `integer` | optional | Auto-collapse tree nodes at or below this 0-indexed depth on first render (roots are depth 0): every node at that depth or deeper that has children starts folded; the user can still expand them. Omit to start fully expanded |
 | **dependencyTypes** | `boolean` | optional | Whether the backing store persists dependency link TYPES (fs, ss, ff, sf); renderer default true. Set false when dependencies are bare predecessor ids: the link menu hides the type switcher (a switch would be silently reverted on refetch) and drag-created links are always finish-to-start |
@@ -827,7 +833,7 @@ Sort field and direction pair
 | **showColumnTypeIcons** | `boolean` | optional | Show field-type icons in column headers |
 | **exportOptions** | `{ formats?: Enum<'csv' \| 'xlsx' \| 'json'>[]; maxRecords?: integer; includeHeaders?: boolean; fileNamePrefix?: string; … }` | optional | Export config — the object `{ formats?, maxRecords?, includeHeaders?, fileNamePrefix?, streaming? }`, the same block a list view's `exportOptions` declares, with `formats` drawn from `csv`, `xlsx` and `json`. A bare format array is refused: the grid reads `exportOptions.formats`, so write `{ formats: ['csv', 'xlsx'] }` |
 | **operations** | `{ create?: boolean; update?: boolean; delete?: boolean; export?: boolean }` | optional | Built-in affordance toggles `{ create?, update?, delete?, export? }` (booleans). A declared block replaces the grid's default: `update` / `delete` not named are withheld from the row menu, `create` enables the add-row affordance, and `export: false` hides the export menu |
-| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source binding (ViewDataSchema — discriminated on `provider`: object \| api \| value \| schema). Static inline rows live at `{ provider: 'value', items: [...] }`; the bare-array shortcut is refused — see migration `object-grid-data-view-data-converged` |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source binding (ViewDataSchema — discriminated on `provider`: object \| value \| schema). Static inline rows live at `{ provider: 'value', items: [...] }`; the bare-array shortcut is refused — see migration `object-grid-data-view-data-converged` |
 | **staticData** | `any[]` | optional | Deprecated bare-array static-rows shortcut the renderer still reads. Prefer `data: { provider: 'value', items: [...] }` |
 
 ### Nested Shape: `ObjectGridProps.emptyState`
@@ -966,14 +972,6 @@ Sort field and direction pair
 | **provider** | `'object'` | ✅ |  |
 | **object** | `string` | ✅ | Target object name |
 
-### Nested Shape: `ObjectGridProps.data[provider='api']`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **provider** | `'api'` | ✅ |  |
-| **read** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
-| **write** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
-
 ### Nested Shape: `ObjectGridProps.data[provider='value']`
 
 | Property | Type | Required | Description |
@@ -1069,7 +1067,7 @@ View filter rule
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **objectName** | `string` | optional | Object this map binds to — the THIRD record source `getDataConfig` resolves, after `data` and `staticData`. Optional because the component-level `dataSource` binding can supply the object instead |
-| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source binding (ViewDataSchema — discriminated on `provider`: object \| api \| value \| schema), read FIRST by `getDataConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source binding (ViewDataSchema — discriminated on `provider`: object \| value \| schema), read FIRST by `getDataConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused |
 | **staticData** | `any[]` | optional | Inline records — read SECOND by `getDataConfig`, wrapped into a `{ provider: 'value' }` config |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Marker order for the fetched records — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array` |
@@ -1084,14 +1082,6 @@ View filter rule
 | :--- | :--- | :--- | :--- |
 | **provider** | `'object'` | ✅ |  |
 | **object** | `string` | ✅ | Target object name |
-
-### Nested Shape: `ObjectMapProps.data[provider='api']`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **provider** | `'api'` | ✅ |  |
-| **read** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
-| **write** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
 
 ### Nested Shape: `ObjectMapProps.data[provider='value']`
 
@@ -1377,7 +1367,7 @@ Sort field and direction pair
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **objectName** | `string` | optional | Object this tree binds to — the THIRD record source `resolveRecordSourceConfig` resolves, after `data` and `staticData`. Optional because either of the first two rungs resolves the source without it: `data` can name the object itself (`{ provider: 'object', object }`) and `staticData` needs none. ⚠️ NOT supplied by the component-level `dataSource` binding the sibling blocks name — this renderer registers no such gate |
-| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source binding (ViewDataSchema — discriminated on `provider`: object \| api \| value \| schema), read FIRST by `resolveRecordSourceConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source binding (ViewDataSchema — discriminated on `provider`: object \| value \| schema), read FIRST by `resolveRecordSourceConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused |
 | **staticData** | `any[]` | optional | Inline records — read SECOND by `resolveRecordSourceConfig`, wrapped into a `{ provider: 'value' }` config |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer }` | optional | Tree/hierarchy configuration, the author face — the same block `ListViewSchema.tree` declares: `{ parentField?, labelField?, fields?, defaultExpandedDepth? }`. `parentField` auto-detects from the object schema when omitted |
@@ -1389,14 +1379,6 @@ Sort field and direction pair
 | :--- | :--- | :--- | :--- |
 | **provider** | `'object'` | ✅ |  |
 | **object** | `string` | ✅ | Target object name |
-
-### Nested Shape: `ObjectTreeProps.data[provider='api']`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **provider** | `'api'` | ✅ |  |
-| **read** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
-| **write** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
 
 ### Nested Shape: `ObjectTreeProps.data[provider='value']`
 
@@ -1561,7 +1543,7 @@ View filter rule
 | :--- | :--- | :--- | :--- |
 | **label** | `string \| Record<string, string>` | ✅ | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **icon** | `string` | optional | Lucide icon name rendered in the tab trigger, left of the label. Read on this component — the renderer draws it via `LazyIcon`; contrast the item `key` beside it, which no read point takes and which the alias table answers with `value`. |
-| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — the whole tab (header + panel) is omitted when FALSE; the renderer falls back to the first visible tab when the active one is hidden. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user`), `page.<var>`. ⚠️ NOT the same environment as page-component `visibleWhen`: this surface's own evaluator binds `data` to the record ROW (not the data-source adapter) and also spreads the row's bare fields — renderer behaviour, NOT contract-guaranteed. ADR-0089 canonical name — `visible`/`showWhen`/`visibility`/`visibleOn` are all rejected here (not folded in), each with a pointer at this key. |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — the whole tab (header + panel) is omitted when FALSE; the renderer falls back to the first visible tab when the active one is hidden. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user`), `page.<var>`. ⚠️ NOT the same environment as page-component `visibleWhen`: this surface's own evaluator binds `data` to the record ROW (the component-node evaluator mounts no `data` root) and also spreads the row's bare fields — renderer behaviour, NOT contract-guaranteed. ADR-0089 canonical name — `visible`/`showWhen`/`visibility`/`visibleOn` are all rejected here (not folded in), each with a pointer at this key. |
 | **value** | `string` | optional | Stable `?tab=` URL token for this tab (default: index-derived `tab-<i>`, which is not durable across item-list changes) |
 | **count** | `integer` | optional | Badge count shown next to the tab label (default: derived from `record:related_list` descendants) |
 | **children** | `any[]` | ✅ | Child components |
@@ -1956,6 +1938,7 @@ Sort field and direction pair
 | **objectName** | `string` | ✅ | Related object name (e.g., "task", "opportunity") |
 | **relationshipField** | `string` | ✅ | Field on related object that points to this record (e.g., "account_id") |
 | **relationshipValueField** | `string` | optional (default: `"id"`) | Parent-record field whose value relationshipField stores (default 'id'; e.g. 'name' for name-keyed junctions). |
+| **parentDataSource** | `{ object: string; view?: string; filter?: object[]; sort?: object[]; … }` | optional | [PLANNED — not yet rendered] The PARENT record this related list hangs off, bound by a query of its own: an object binding `{ object, view?, filter?, sort?, limit? }`, the shape `dataSource` takes. Read by the single-record rule: the FIRST row of the bound set by its `sort` is the parent (declare `limit: 1` to say one row is meant), and when no row answers, the block renders a loud absence, never an empty list, which would read as "this record has no related records". `relationshipValueField` is read on that row. When this key is absent, the record page's record context remains the parent. The node-level `dataSource` on this block keeps its published meaning, the CHILD rows the list draws (it fills `objectName`, `columns`, `filter`, `sort` and `limit`), and is never read as the parent. |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | optional | Fields to display in the related list — either plain field-name strings, or the same per-column entries a saved list view declares (`ListColumn`: `field`, plus `label`, `width`, `align`, `hidden`, `sortable`, `summary`, …). A view-supplied list may arrive in the `ListColumn` spelling: objectui composes a saved view's `columns` onto this block verbatim, and this key declares the SAME union as `listViews[].columns`. One spelling per list — the two arms are exclusive, so an array mixing strings and column objects is refused. Optional: when omitted, columns derive from the related object's highlightFields / default list columns (a related list is just another surface that lists that object). Override chain: child highlightFields → field-level relatedListColumns (field-name strings only) → this inline list. |
 | **sort** | `string \| { field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sort order for related records |
 | **limit** | `integer` | optional (default: `5`) | Number of records to display initially |
@@ -1968,6 +1951,16 @@ Sort field and direction pair
 | **redactFields** | `string[]` | optional | Field names this list never renders, whatever the permission answer (renderer default: render every column authored or derived). Applies to the authored `columns` AND to the columns the list derives for itself when none are authored. Presentation only, evaluated in the browser after the rows are fetched — the values are still in the page, so this is NOT a data-access control and NOT the object's `publicSharing.redactFields`, which removes them server-side. To keep a value from the caller, gate the field itself (`requiredPermissions` / `maskingRule`, ADR-0066 D3) or the permission set. |
 | **requiredPermissions** | `string[]` | optional | [ADR-0066] Capabilities the user must ALL hold — names that permission sets grant through `systemPermissions`, not object actions: `read` or `update` here is an ordinary capability name, not the object's read or edit permission. When the client has resolved the user's capabilities and any of these is missing, this block does not render its content; wherever it would otherwise render, an insufficient-permissions notice takes its place. Presentation only: it authorises nothing, and the data API still serves the same data to the same user. A client that cannot resolve the user's capabilities (no permission provider, or one that does not report `systemPermissions`) renders this block as if they were held — it fails open. |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+
+### Nested Shape: `RecordRelatedListProps.parentDataSource`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object to query |
+| **view** | `string` | optional | Named view to apply |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Additional filter criteria — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in ComponentPropsMap shares; AND-combined with the filter of the named view. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
+| **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sort order |
+| **limit** | `integer` | optional | Max records to display |
 
 ### Nested Shape: `RecordRelatedListProps.columns[number]`
 
