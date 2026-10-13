@@ -76,7 +76,6 @@ import {
   serializePlatformAdminStandingSnapshot,
 } from './platform-admin-standing-audit.js';
 import { GRANT_SET_NAME_FIELD, grantSetNameOf } from './grant-permission-set-name.js';
-import { reportThroughSink } from './seed-refusal-sink.js';
 
 /**
  * The order the standing-audit read states TO THE DRIVER.
@@ -450,6 +449,12 @@ export function shouldReplayBootstrapFor(opCtx: {
  */
 const PLATFORM_ADMIN_PERMISSION_SET_NAME = 'admin_full_access';
 
+/** Whether a grant still carries the legacy id a release before the name column wrote (ADR-0131 D10). */
+function hasLegacySetId(row: any): boolean {
+  const id = row?.permission_set_id;
+  return id !== undefined && id !== null && String(id) !== '';
+}
+
 /**
  * Who ALREADY holds the unscoped platform-admin grant (commit 1c83ca226) — the
  * one rule both {@link bootstrapPlatformAdmin}'s `already_have_admin` guard and
@@ -528,20 +533,26 @@ const PLATFORM_ADMIN_PERMISSION_SET_NAME = 'admin_full_access';
  * nothing yet, and a by-name scan alone would answer "nobody", promote the
  * oldest user and hand them the seeded records: the second grant this function
  * exists to refuse. So leg C, only when A and B found nobody, reaches the
- * grants that name NOTHING through the set row's id, and an unscoped human one
- * comes back as `unnamedHolder`. It only ever RESTRICTS: the bootstrap
- * withholds the promotion on it, and it is never a holder — never an
- * `adminUserId`, never a claim target ({@link findExistingPlatformAdmin}).
- * Leg C runs only when the deployment still carries a legacy `admin_full_access`
- * row (`adminPsId`): a database with no such row has no grant written before
- * the name column existed, and the by-name legs answer alone.
+ * unscoped human grants that name NOTHING and still carry a legacy
+ * `permission_set_id`, and one comes back as `unnamedHolder`. It only ever
+ * RESTRICTS: the bootstrap withholds the promotion on it, and it is never a
+ * holder — never an `adminUserId`, never a claim target
+ * ({@link findExistingPlatformAdmin}).
+ *
+ * [C3 stage 8] Leg C asks for ANY such grant, not for grants of the admin set's
+ * row: the catalog row object is retired, so no read can say which set a legacy
+ * id pointed at. An unnamed grant of another set therefore withholds the
+ * promotion too, until the organization-ownership migration's verified
+ * id-to-name rewrite (ADR-0131 D10) names it — the stricter reading, since the
+ * one it cannot tell apart may be the administrator's. A database that holds no
+ * unnamed grant (every fresh one) answers by name alone.
  */
 async function findPlatformAdminGrantHolder(
   ql: any,
-  adminPsId: string | undefined,
+  reachUnnamed: boolean,
 ): Promise<{
   holder: any | undefined;
-  /** Leg C: an unscoped human grant of the admin set row that names no set yet (restricts only). */
+  /** Leg C: an unscoped human grant that names no set yet and carries a legacy id (restricts only). */
   unnamedHolder: any | undefined;
   adminGrantRowsExamined: number;
   truncated: boolean;
@@ -599,13 +610,13 @@ async function findPlatformAdminGrantHolder(
     holder = await scan({ [GRANT_SET_NAME_FIELD]: PLATFORM_ADMIN_PERMISSION_SET_NAME }, isUnscopedHumanHolder);
   }
 
-  // Leg C — the grants that name nothing yet, through the set row's id; it
+  // Leg C — the grants that name nothing yet and carry a legacy id; it
   // restricts only (see the function note).
   let unnamedHolder: any | undefined;
-  if (!holder && adminPsId) {
+  if (!holder && reachUnnamed) {
     unnamedHolder = await scan(
-      { permission_set_id: adminPsId },
-      (r) => grantSetNameOf(r) === undefined && isUnscopedHumanHolder(r),
+      { [GRANT_SET_NAME_FIELD]: null },
+      (r) => grantSetNameOf(r) === undefined && hasLegacySetId(r) && isUnscopedHumanHolder(r),
     );
   }
 
@@ -650,7 +661,7 @@ export async function findExistingPlatformAdmin(
   }
   // [ADR-0131 D4] By name alone: leg C (the legacy id reach) only restricts
   // and never names a holder, so this question needs no catalog row.
-  const { holder } = await findPlatformAdminGrantHolder(ql, undefined);
+  const { holder } = await findPlatformAdminGrantHolder(ql, false);
   return holder?.user_id ? String(holder.user_id) : undefined;
 }
 
@@ -709,19 +720,12 @@ export async function bootstrapPlatformAdmin(
     return { adminPromoted: false, reason: 'objectql_unavailable' };
   }
 
-  // 1. [ADR-0131 D3/D4] No catalog row is written: the platform's default
-  //    sets are definitions this plugin ships on its manifest, served from
-  //    the registry, and a grant names its set. The one read left is the
-  //    LEGACY `admin_full_access` row an older release seeded, whose id is how
-  //    leg C of {@link findPlatformAdminGrantHolder} reaches a grant written
-  //    before the name column existed. ⛔ "Refused" is not "absent": a read
-  //    that did not answer cannot say no such grant exists, so the promotion
-  //    is withheld below rather than risk minting a second administrator.
-  let legacyAdminRowUnreadable = false;
-  const legacyAdminRows = await tryFind(
-    ql, 'sys_permission_set', { name: PLATFORM_ADMIN_PERMISSION_SET_NAME }, 1, undefined, undefined,
-    () => { legacyAdminRowUnreadable = true; },
-  );
+  // 1. [ADR-0131 D3/D4] No catalog row is written or read: the platform's
+  //    default sets are definitions this plugin ships on its manifest, served
+  //    from the registry, and a grant names its set. [C3 stage 8] The catalog
+  //    row object is retired, so a grant written before the name column
+  //    existed is reached by leg C of {@link findPlatformAdminGrantHolder}
+  //    through the grant table alone.
 
   // 2. The platform-admin question, POSTURE-KEYED (#11184 ruling 2026-08-23,
   //    verbatim: 「1509 选择 env 指定 owner 邮箱」; re-anchored by #11663 L4):
@@ -749,23 +753,6 @@ export async function bootstrapPlatformAdmin(
   if (!bootstrapPermissionSets.some((ps) => ps.name === PLATFORM_ADMIN_PERMISSION_SET_NAME)) {
     return { adminPromoted: false, reason: 'admin_permission_set_missing' };
   }
-  if (legacyAdminRowUnreadable) {
-    // [#22169] The set's row table did not answer, so the legacy leg cannot ask
-    // whether an unnamed grant already makes someone the administrator; no
-    // promotion is made on a question this pass could not ask. Said through
-    // the sink derivation, so it is heard with no logger injected.
-    reportThroughSink(
-      logger,
-      '[security] platform-admin promotion WITHHELD: the legacy admin_full_access sys_permission_set row ' +
-        'could not be read, so this pass cannot ask whether a grant written before the name column existed ' +
-        'already makes someone the platform administrator. Nothing was written; the next pass whose read ' +
-        'answers decides.',
-      { name: PLATFORM_ADMIN_PERMISSION_SET_NAME },
-    );
-    return { adminPromoted: false, reason: 'admin_permission_set_unreadable' };
-  }
-  const adminPsId: string | undefined =
-    typeof legacyAdminRows[0]?.id === 'string' && legacyAdminRows[0].id !== '' ? legacyAdminRows[0].id : undefined;
 
   // ── Does this deployment ALREADY have a platform admin? (commit 1c83ca226) ─
   //
@@ -778,7 +765,7 @@ export async function bootstrapPlatformAdmin(
     unnamedHolder,
     adminGrantRowsExamined,
     truncated: adminGrantScanTruncated,
-  } = await findPlatformAdminGrantHolder(ql, adminPsId);
+  } = await findPlatformAdminGrantHolder(ql, true);
 
   // ⛔ The truncation is never silent (commit 1c83ca226). Reaching the ceiling is the one
   // way this scan still answers "no platform admin yet" while one exists, and
@@ -821,20 +808,20 @@ export async function bootstrapPlatformAdmin(
     };
   }
 
-  // [ADR-0131 D4] An unscoped grant of the admin set row that names no set yet
-  // — on an upgraded deployment's first boot, its platform administrator's
-  // grant, which the name backfill reaches only at `kernel:bootstrapped`. It is
-  // read as an administrator who may already exist: promoting now would mint
-  // the second grant {@link findPlatformAdminGrantHolder} exists to refuse. It
-  // names no `adminUserId` — it restricts, it confers nothing — so the seed
-  // claim waits for a boot that reads the grant by its name.
+  // [ADR-0131 D4] An unscoped grant that names no set yet — on an upgraded
+  // deployment, possibly its platform administrator's grant, written before
+  // the name column existed. It is read as an administrator who may already
+  // exist: promoting now could mint the second grant
+  // {@link findPlatformAdminGrantHolder} exists to refuse. It names no
+  // `adminUserId` — it restricts, it confers nothing — so the seed claim waits
+  // for a boot that reads the grant by its name.
   if (!walled && unnamedHolder) {
     const withheld =
-      '[security] platform-admin promotion WITHHELD: an unscoped admin_full_access grant exists whose '
-      + 'permission-set name (sys_user_permission_set.permission_set) is not written yet, so this pass '
-      + 'cannot read it as the holder and will not mint a second one. The one-time grant-name backfill '
-      + 'names it at kernel:bootstrapped; the next pass reads it by name. If it stays unnamed, the '
-      + 'backfill\'s own report says why.';
+      '[security] platform-admin promotion WITHHELD: an unscoped grant exists whose permission-set name '
+      + '(sys_user_permission_set.permission_set) was never written — a grant from a release before that '
+      + 'column existed. Which set it holds can no longer be read, and it may be the platform administrator\'s, '
+      + 'so this pass will not mint a second one. The organization-ownership migration\'s id-to-name rewrite '
+      + '(ADR-0131 D10) names it; the next pass after that reads it by name.';
     if (logger?.warn) logger.warn(withheld);
     else logger?.info?.(withheld);
     return {

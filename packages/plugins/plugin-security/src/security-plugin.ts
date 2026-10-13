@@ -41,9 +41,6 @@ import {
   unregisterGrantPermissionSetNameHooks,
 } from './grant-permission-set-name.js';
 import { runOneTimeGrantPermissionSetNameBackfill } from './grant-permission-set-name-backfill.js';
-import { createPositionWriteThrough } from './position-write-through.js';
-import { createWalledCatalogDataDoorRefusal, WALLED_CATALOG_OBJECT_TYPES } from './walled-catalog-data-door.js';
-import { runOneTimePositionEnvironmentBackfill } from './position-environment-backfill.js';
 import { reportCatalogReferences } from './catalog-reference-report.js';
 import {
   explainAccessForAsker,
@@ -59,11 +56,6 @@ import type { ExplainDecision, ExplainOperation } from '@objectstack/spec/securi
 import type { II18nService, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
 
 import { applyManagedWriteDenies } from './managed-object-write-denies.js';
-import {
-  createPermissionSetWriteThrough,
-  registerPermissionSetProjection,
-  reconcilePermissionSetProjection,
-} from './permission-set-projection.js';
 import { reportPackagedPermissionSetOverlays } from './packaged-permission-set-overlay-detection.js';
 import { registerObjectPostureGate } from './object-posture-gate.js';
 import { registerPackagedPermissionSetLockGate } from './packaged-permission-set-lock-gate.js';
@@ -159,7 +151,6 @@ import {
   readDeploymentOrgScopingEntitlement,
   type DeploymentOrgScopingEntitlementReading,
 } from '@objectstack/core';
-import { SysPositionDetailPage } from '@objectstack/platform-objects/pages';
 import {
   securityObjects,
   securityDefaultPermissionSets,
@@ -1534,26 +1525,24 @@ export class SecurityPlugin implements Plugin {
     ctx.getService<{ register(m: any): void }>('manifest').register({
       ...securityPluginManifestHeader,
       objects: securityObjects,
-      // [ADR-0090] SDUI detail page for sys_position — Holders (assignments,
-      // name-keyed junction) + Permission Sets (bindings) as pure
-      // record:related_list declarations; no bespoke UI.
-      pages: [SysPositionDetailPage],
       // Permission sets ride along on the manifest so the metadata service
       // can resolve them by name when SecurityPlugin middleware queries
       // `metadata.list('permissions')`.
       permissions: this.bootstrapPermissionSets,
       // ADR-0029 D7 — contribute the RBAC entries into the Setup app's
-      // `group_access_control` slot. This plugin owns these objects (K2), so it
-      // ships their menu too; when the plugin is absent the entries don't appear.
+      // `group_access_control` slot. This plugin owns the security catalog, so
+      // it ships its menu too; when the plugin is absent the entries don't
+      // appear. [ADR-0131 D3/D7] Each entry opens Setup's list of the registry
+      // type in its environment scope — the catalog has no object behind it.
       navigationContributions: [
         {
           app: 'setup',
           group: 'group_access_control',
           priority: 100,
           items: [
-            { id: 'nav_positions', type: 'object', label: 'Positions', objectName: 'sys_position', icon: 'shield-check' },
-            { id: 'nav_capabilities', type: 'object', label: 'Capabilities', objectName: 'sys_capability', icon: 'badge-check' },
-            { id: 'nav_permission_sets', type: 'object', label: 'Permission Sets', objectName: 'sys_permission_set', icon: 'lock' },
+            { id: 'nav_positions', type: 'url', label: 'Positions', url: '/apps/setup/metadata/position?scope=environment', icon: 'shield-check' },
+            { id: 'nav_capabilities', type: 'url', label: 'Capabilities', url: '/apps/setup/metadata/capability?scope=environment', icon: 'badge-check' },
+            { id: 'nav_permission_sets', type: 'url', label: 'Permission Sets', url: '/apps/setup/metadata/permission?scope=environment', icon: 'lock' },
           ],
         },
       ],
@@ -4355,75 +4344,13 @@ export class SecurityPlugin implements Plugin {
       );
     }
 
-    // [ADR-0131 D3] Under a wall the security catalog is the platform
-    // operator's: a non-system write on `sys_position`, `sys_permission_set` or
-    // `sys_capability` by anyone below the `PLATFORM_ADMIN` rung is refused
-    // `403 PERMISSION_DENIED`, with the metadata door's own verdict and
-    // sentence. Registered AFTER the security middleware (a caller who may not
-    // write the table keeps its CRUD refusal) and BEFORE the permission-set
-    // write-through below (a refused write is never translated into a metadata
-    // save). Inert under `single`. See `walled-catalog-data-door.ts`.
-    {
-      const walledCatalogDataDoor = createWalledCatalogDataDoorRefusal({ getPosture: () => this.tenancyPosture });
-      for (const object of Object.keys(WALLED_CATALOG_OBJECT_TYPES)) {
-        ql.registerMiddleware(walledCatalogDataDoor, { object });
-      }
-    }
-
-    // [ADR-0094] Data-door write-through: every non-system CRUD write on
-    // `sys_permission_set` is redirected into the metadata store (the ONE
-    // authoritative store for definitions); the record is projector-owned.
-    // Registered AFTER the security middleware, so it runs INSIDE it — the
-    // two-doors gate, the delegated-admin gate, and the CRUD/FLS checks have
-    // all passed before a write is translated. Kernels without a capable
-    // metadata protocol pass through to the legacy direct write (single
-    // store — no split brain to prevent).
-    //
-    // [#20013] Wrapped so the security middleware can tell a write the door
-    // executed itself from one it passed on: the wrapper hands the door a
-    // `next` that records the pass-on, and a write that returns without it is
-    // recorded in `writesExecutedByDataDoor`. Observed, not declared — the
-    // door's own code is unchanged.
-    const permissionSetWriteThrough = createPermissionSetWriteThrough({
-      ql,
-      metadata,
-      getProtocol: () => {
-        try { return (ctx as any).getService?.('protocol') ?? null; } catch { return null; }
-      },
-      logger: ctx.logger,
-    });
-    ql.registerMiddleware(
-      async (opCtx: any, next: () => Promise<void>) => {
-        let passedOn = false;
-        await permissionSetWriteThrough(opCtx, async () => {
-          passedOn = true;
-          await next();
-        });
-        if (!passedOn && opCtx && typeof opCtx === 'object') writesExecutedByDataDoor.add(opCtx);
-      },
-      { object: 'sys_permission_set' },
-    );
-
-    // [ADR-0131 D3, C2 stage S7] Under `single`, a non-system create, edit,
-    // rename or delete of a position also writes its DEFINITION through the
-    // metadata door at environment scope — the row first, then the
-    // definition; a refused definition undoes the row. Registered AFTER the
-    // security middleware, so it runs INSIDE it. A create or a rename into a
-    // name a package or built-in holds answers the metadata door's own
-    // refusal (C2 stage S10). Stands down for a walled posture, an edit that
-    // keeps or a delete of such a name, and a kernel without a capable
-    // metadata protocol. See `position-write-through.ts`.
-    ql.registerMiddleware(
-      createPositionWriteThrough({
-        ql,
-        getProtocol: () => {
-          try { return (ctx as any).getService?.('protocol') ?? null; } catch { return null; }
-        },
-        getPosture: () => this.tenancyPosture,
-        logger: ctx.logger,
-      }),
-      { object: 'sys_position' },
-    );
+    // [ADR-0131 D3, C3 stage 8] No data-door write-through and no walled
+    // catalog data-door refusal is registered: the catalog objects are
+    // retired, so no `sys_position`, `sys_permission_set` or `sys_capability`
+    // write reaches the engine at all. A position, permission set or
+    // capability is written through the metadata door alone, which registers
+    // it in the security catalog itself and, under a wall, refuses a tenant
+    // with the same verdict (`walledCatalogWriteVerdict`).
 
     // Defer platform admin bootstrap until all plugins finish starting —
     // sys_user / sys_user_permission_set objects must be registered (by
@@ -4432,12 +4359,6 @@ export class SecurityPlugin implements Plugin {
     // kernel does not expose `hook` (test stubs).
     let bootstrapRanOnce = false;
     const readSeedSettlement = (): SeedSettlementSnapshot | undefined => readSeedSettlementSnapshot(ctx);
-    // [ADR-0094] Guard so the env-projection wiring runs exactly once even
-    // though runBootstrap re-runs (e.g. after the first user insert) —
-    // registerMutationProjector replaces idempotently, but the legacy
-    // onMetadataMutation fallback appends listeners, and re-wiring that would
-    // project each save N times.
-    let envProjectionWired = false;
     // [#22801 → A] Same once-guard for the `permission` mutation listener
     // that re-derives `everyone` (registered in `runBootstrap`).
     let everyoneMutationWired = false;
@@ -4520,24 +4441,14 @@ export class SecurityPlugin implements Plugin {
                 await this.declareEveryone(ctx.logger);
                 return {
                   success: true,
-                  removed: r.sets + r.positionBindings + r.userGrants + r.suggestions,
+                  removed: r.userGrants + r.suggestions,
                 };
               },
             );
           }
-          // [ADR-0094] Environment door — the `permission` mutation projector.
-          // The protocol AWAITS it inside saveMetaItem / publishMetaItem /
-          // deleteMetaItem, so the sys_permission_set record (and the metadata
-          // manager's in-memory entry, which the evaluator's registry-first
-          // list('permission') resolution reads) already reflects a Studio
-          // save when it returns — no projection race. Falls back to the
-          // fire-and-forget onMetadataMutation subscription (#2857/#2867) on
-          // protocols that predate registerMutationProjector.
-          if (!envProjectionWired) {
-            envProjectionWired = registerPermissionSetProjection(protocol, {
-              ql, metadata: this.metadata, logger: ctx.logger,
-            });
-          }
+          // [ADR-0131 D3, C3 stage 8] No `permission` mutation projector: the
+          // metadata door's own registry write-through puts a saved set in the
+          // security catalog, and no row mirrors it.
           // [#3050] OWD posture authoring gate — pre-persistence veto on
           // runtime-authored `object` bodies: env-tighten-only over packaged
           // declarations (ADR-0086 D1) + external ≤ internal (ADR-0090 D11).
@@ -4555,17 +4466,6 @@ export class SecurityPlugin implements Plugin {
           // non-packaged names keep the documented hatch behavior. One
           // spelling of "package-declared", two doors, one refusal.
           registerPackagedPermissionSetLockGate(protocol, ql);
-          // [ADR-0094 D4] Converge record ↔ metadata: project env overlays
-          // onto records (creating missing ones), backfill legacy data-door
-          // creations into the metadata store once, and heal drifted records
-          // from the effective body (metadata wins). Idempotent per boot.
-          try {
-            await reconcilePermissionSetProjection(protocol, {
-              ql, metadata: this.metadata, logger: ctx.logger,
-            });
-          } catch (e) {
-            ctx.logger.warn('[security] permission-set projection reconciliation failed (ADR-0094)', { error: (e as Error).message });
-          }
           // [maintainer ruling 2026-08-24 — 「同意 第一步(创业阶段,Salesforce
           // 式)」, item 3] The DETECTION READING for sets that were already
           // silently forked before the save door was locked: count + NAMES,
@@ -4638,52 +4538,18 @@ export class SecurityPlugin implements Plugin {
       void runGrantNameBackfill();
     }
 
-    // [ADR-0131 D3, C2 stage S7] Give every row-only position — written in
-    // Setup before the write-through above existed — its environment
-    // definition, once per `single` deployment, recorded in `sys_migration`.
-    // At `kernel:bootstrapped` for the reason the grant-name backfill gives,
-    // and one more: an environment definition minted ahead of a package's
-    // declaration of the same name would refuse that package. See
-    // `position-environment-backfill.ts`.
-    const runPositionBackfill = async (): Promise<void> => {
-      try {
-        let door: unknown = null;
-        try { door = (ctx as any).getService?.('protocol') ?? null; } catch { door = null; }
-        await runOneTimePositionEnvironmentBackfill(ql as any, {
-          posture: this.tenancyPosture,
-          catalog: createSecurityCatalogReader({ registry: (ql as any).registry, metadata: this.metadata }),
-          door,
-          logger: ctx.logger,
-        });
-      } catch (e) {
-        ctx.logger.warn(
-          '[security] the row-only position backfill did not run — positions created in Setup before the ' +
-            'environment write-through keep no environment definition until a later boot runs it',
-          { error: (e as Error)?.message },
-        );
-      }
-    };
-    if (typeof (ctx as any).hook === 'function') {
-      (ctx as any).hook('kernel:bootstrapped', runPositionBackfill);
-    } else {
-      void runPositionBackfill();
-    }
-
     // [ADR-0131 D3/D4] The catalog reference report: per organization, every
     // assignment and grant whose name the security catalog does not resolve,
-    // every grant that names nothing, every position row with no definition
-    // (by name and organization), and under `single` every position name more
-    // than one row carries. A reference that resolves nowhere confers nothing;
-    // this is what makes that loud. Registered AFTER the two backfills above,
-    // so it runs after them (handlers run in registration order) and does not
-    // report a name either one resolved this boot. It writes nothing. Only at
-    // `kernel:bootstrapped`: run any earlier, it would judge a catalog that is
-    // still being filled. See `catalog-reference-report.ts`.
+    // and every grant that names nothing. A reference that resolves nowhere
+    // confers nothing; this is what makes that loud. Registered AFTER the
+    // grant-name backfill above, so it runs after it (handlers run in
+    // registration order) and does not report a name it resolved this boot.
+    // It writes nothing. Only at `kernel:bootstrapped`: run any earlier, it
+    // would judge a catalog that is still being filled. See `catalog-reference-report.ts`.
     if (typeof (ctx as any).hook === 'function') {
       (ctx as any).hook('kernel:bootstrapped', async (): Promise<void> => {
         try {
           await reportCatalogReferences(ql as any, {
-            posture: this.tenancyPosture,
             catalog: createSecurityCatalogReader({ registry: (ql as any).registry, metadata: this.metadata }),
             logger: ctx.logger,
           });

@@ -165,7 +165,7 @@ export const KIND_COVERAGE: Record<MetadataType, KindCoverage> = {
     status: 'demonstrated',
     files: ['src/security/capabilities.ts'],
     notes:
-      'Package-declared authorization capabilities (`capabilities: allCapabilities` in objectstack.config.ts), seeded into sys_capability at publish. Code-only kind: runtime creation answers 403 not_creatable, which protocol.capability-write-door.test.ts pins.',
+      'Package-declared authorization capabilities (`capabilities: allCapabilities` in objectstack.config.ts), served from the security catalog under the package (ADR-0131 D3). Code-only kind: runtime creation answers 403 not_creatable, which protocol.capability-write-door.test.ts pins.',
   },
 
   // ── ai ──

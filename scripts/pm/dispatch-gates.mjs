@@ -8471,6 +8471,43 @@ const PATH_JOINER_CALL = /^(?:(?:path|node:path)\.)?(?:join|resolve)\s*\(/;
 const PATH_DIRNAME_CALL = /^(?:(?:path|node:path)\.)?dirname\s*\(/;
 const MKDTEMP_CALL = /^(?:fs\.)?mkdtempSync\s*\(/;
 const SCRATCH_CALL = /\b(?:fs\.)?(mkdtempSync|mkdirSync)\s*\(/g;
+
+/**
+ * ── A DECLARATION is not a directory-creating site (#23294) ─────────────────
+ *
+ * `SCRATCH_CALL` matches a name and an opening paren, and a type declaration
+ * spells exactly that: a module shim's `export function mkdtempSync(prefix:
+ * string): string;`. Read as a call, its "base" is `prefix: string`, which no
+ * resolver can read, so a correct declaration came back UNRESOLVED and redded
+ * the whole-tree case — the reader was wrong, not the declaration. Two shapes
+ * are declarations, both read from the source text as the rest of this scan is:
+ *
+ *   - a declaration FILE. TypeScript admits no statement in an ambient context,
+ *     so nothing in one can run, let alone create a directory: every match in
+ *     it is a signature. `DECLARATION_FILE` names the extensions TypeScript
+ *     reads as declaration files.
+ *   - the `function` keyword's own parameter list, in any source — `declare
+ *     function`, `export function`, an overload, or the head of a same-file
+ *     wrapper. What follows the name there is a parameter list being DECLARED,
+ *     not an argument being passed; `singleCallSiteParameters` already skips
+ *     its own declarations with the same test. A wrapper's BODY is unaffected:
+ *     the calls inside it are calls, and are judged.
+ *
+ * Measured at bae5841bce: of 1764 raw matches across the tracked sources,
+ * exactly two were declarations, and both rules agree on both — the `node:fs`
+ * shim in the showcase example, one `mkdtempSync` and one `mkdirSync` line.
+ * No other declaration shape matched anywhere: no interface method signature,
+ * no object-literal method, no class method named for either call.
+ *
+ * ⛔ Narrow on purpose. Those other shapes, written in an ordinary source, are
+ * still read as sites. This scan's bias is toward reporting a site rather than
+ * clearing it, and the text that would clear a method signature — a name, an
+ * argument list, then `:` — is also the text of a ternary's call. A shape this
+ * rule does not clear fails LOUD (UNRESOLVED, with its file and line), which is
+ * the honest direction; one it wrongly cleared would be silence over a site.
+ */
+const DECLARATION_FILE = /\.d\.[cm]?ts$/;
+const DECLARED_BY_FUNCTION_KEYWORD = /\bfunction\s+$/;
 const QUOTED_LITERAL = /^(['"`])([\s\S]*)\1$/;
 const PLAIN_IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
 
@@ -8898,6 +8935,8 @@ function combineReadings(readings, name) {
  * own repo-relative path — the anchor spellings resolve against it.
  */
 export function scratchDirSitesInSource(rel, source) {
+  // A declaration file holds signatures only (`DECLARATION_FILE` above).
+  if (DECLARATION_FILE.test(rel)) return { inTree: [], unresolved: [], scanned: 0 };
   const masked = maskedComments(String(source));
   // A call spelled inside a STRING is a fixture, not a call — this module's own
   // self-test plants fixture sources as string literals, and read as code they
@@ -8920,6 +8959,8 @@ export function scratchDirSitesInSource(rel, source) {
   let scanned = 0;
   for (const m of masked.matchAll(SCRATCH_CALL)) {
     if (literal[m.index]) continue;
+    // The `function` keyword's parameter list is declared, not passed.
+    if (DECLARED_BY_FUNCTION_KEYWORD.test(masked.slice(Math.max(0, m.index - 64), m.index))) continue;
     const { text } = balancedArgText(masked, m.index + m[0].length);
     const expr = (splitArgList(text)[0] ?? '').trim();
     ctx.seen.clear();

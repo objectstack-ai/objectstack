@@ -26,7 +26,7 @@
 // seam the framework's data routes use — `auth.api.getSession({ headers })`,
 // literally what `runtime/src/security/resolve-session-principal.ts` calls.
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
 import { AuthManager } from './auth-manager';
 // ⚠️ Imported from a sibling TEST file on purpose, and the cost is measured, not
@@ -45,6 +45,26 @@ import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import { ADMIN_SESSION_RECOVERY_RESPONSE_HEADER } from './impersonation-bearer-rotation';
 import { USER_NOT_FOUND } from './admin-impersonate-endpoint';
 import { inviteForAudienceGate } from './audience-gate-test-support';
+import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
+// [#23184] better-auth's first module load is paid HERE, at module load, and
+// not inside the first clocked case: clocked windows measure behaviour, never
+// loading (AGENTS.md, Build & Test). `AuthManager` reaches every vendor module
+// through a lazy `await import()` (the package root stays light on purpose), so
+// without these lines the file's first case paid about half a second of vendor
+// module evaluation on a dev container. The list is what the managers in this
+// file (and the bearer-rotation cases it imports) boot through; a module it
+// misses is still loaded in the first case, as before. The module cache hands
+// `AuthManager` these same instances, and this file changes no environment the
+// vendor reads at load (better-auth captures `NODE_ENV` when its env module is
+// first evaluated), so nothing a case runs is different.
+import 'better-auth';
+import 'better-auth/api';
+import 'better-auth/plugins';
+import 'better-auth/plugins/bearer';
+import '@better-auth/oauth-provider';
+import '@better-auth/core/context';
+import '@better-auth/core/error';
+import 'better-auth/plugins/admin';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const PASSWORD = 'S3cure!Passw0rd-9968';
@@ -139,16 +159,38 @@ const principalFor = async (manager: AuthManager, bearer: string): Promise<strin
 };
 
 /**
+ * [#23184] The three sign-ups `arrange` starts from, made ONCE per file through
+ * the real `/sign-up/email` route, on an engine and manager of their own.
+ *
+ * A sign-up is the costly step here (one production-parameter scrypt
+ * derivation under a fresh salt), and no case is about it: each case is about
+ * what `/admin/impersonate-user` answers for a standing granted AFTER the
+ * users exist and BEFORE they sign in. So `arrange` starts each case from a
+ * deep copy of the tables these sign-ups wrote, on the case's own engine and
+ * its own manager, and every step from the grant on runs per case as before.
+ * The copy is `structuredClone`, so no case's write reaches the template or
+ * another case, and the sign-ins verify the password against the very hash
+ * the sign-up stored (a memo hit, not a derivation).
+ */
+let signedUpTables: Promise<Map<string, any[]>> | undefined;
+const signedUpOnce = (): Promise<Map<string, any[]>> =>
+  (signedUpTables ??= (async () => {
+    const template = createMemoryEngine();
+    const templateManager = makeManager(template);
+    await signUp(templateManager, 'padmin@example.com', 'Platform Admin');
+    await signUp(templateManager, 'member@example.com', 'Plain Member');
+    await signUp(templateManager, 'target@example.com', 'Impersonation Target');
+    return template.tables as Map<string, any[]>;
+  })());
+
+/**
  * An ObjectStack platform admin (ADR-0068 grant, legacy scalar untouched), a
  * plain member, and a target — plus a bearer for each signed-in caller.
  */
 const arrange = async () => {
   const engine = createMemoryEngine();
+  for (const [name, rows] of await signedUpOnce()) engine.tables.set(name, structuredClone(rows));
   const manager = makeManager(engine);
-
-  await signUp(manager, 'padmin@example.com', 'Platform Admin');
-  await signUp(manager, 'member@example.com', 'Plain Member');
-  await signUp(manager, 'target@example.com', 'Impersonation Target');
 
   const adminId = userIdFor(engine, 'padmin@example.com');
   const memberId = userIdFor(engine, 'member@example.com');
@@ -175,8 +217,23 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
+/**
+ * [#23184] Every case's two sign-ins verify the password against the hash the
+ * shared sign-ups stored (`signedUpOnce` above): the same password against the
+ * same salt, which the memo answers from the bytes the sign-up's derivation
+ * produced (`__tests__/scrypt-memo.testkit.ts`). Each case has its own engine
+ * and manager and reads no state another case writes, so the suites below run
+ * their cases concurrently. The one exception is the last suite, which stays
+ * sequential: it reads what `console.error` received while its own manager
+ * booted, and a concurrent case could both write to that spy and lift it
+ * mid-case. The console stubs above are the only other shared state; lifted
+ * early, they cost log output and no assertion.
+ */
+const scrypt = memoizeScrypt();
+afterAll(scrypt.restore);
+
 // ───────────────────────────────────────────────────────────────────────────
-describe('ADR-0068 D2 — /admin/impersonate-user admits the ObjectStack platform admin', () => {
+describe.concurrent('ADR-0068 D2 — /admin/impersonate-user admits the ObjectStack platform admin', () => {
   it('a platform admin granted via admin_full_access is ADMITTED (not the legacy scalar)', async () => {
     const { manager, adminBearer, targetId } = await arrange();
 
@@ -218,7 +275,7 @@ describe('ADR-0068 D2 — /admin/impersonate-user admits the ObjectStack platfor
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-describe('the other direction — a non-entitled caller is still refused', () => {
+describe.concurrent('the other direction — a non-entitled caller is still refused', () => {
   it('a signed-in plain member is refused 403 YOU_ARE_NOT_ALLOWED_TO_IMPERSONATE_USERS', async () => {
     const { manager, memberBearer, targetId } = await arrange();
 
@@ -286,7 +343,7 @@ describe('the other direction — a non-entitled caller is still refused', () =>
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-describe('the target guard means something again after ADR-0068 D2', () => {
+describe.concurrent('the target guard means something again after ADR-0068 D2', () => {
   it('a platform-admin TARGET cannot be impersonated — 403 YOU_CANNOT_IMPERSONATE_ADMINS', async () => {
     const { engine, manager, adminBearer, targetId } = await arrange();
     // The vendor guards this by reading `targetUser.role` against
@@ -311,7 +368,7 @@ describe('the target guard means something again after ADR-0068 D2', () => {
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-describe('#8243 — the rotation hook is STILL ATTACHED after the re-authorization', () => {
+describe.concurrent('#8243 — the rotation hook is STILL ATTACHED after the re-authorization', () => {
   // This is the guard against the forbidden shape creeping back. A raw Hono
   // mount shadowing `/admin/impersonate-user` detaches the path-keyed global
   // `hooks.after`, and every assertion in the two suites above would still
@@ -355,7 +412,7 @@ describe('#8243 — the rotation hook is STILL ATTACHED after the re-authorizati
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-describe('the restated vendor constant cannot drift', () => {
+describe.concurrent('the restated vendor constant cannot drift', () => {
   it('USER_NOT_FOUND still equals better-auth\'s own BASE_ERROR_CODES entry', async () => {
     // `admin-impersonate-endpoint.ts` restates this constant instead of
     // importing the `better-auth` ROOT entry, because pulling the root in there

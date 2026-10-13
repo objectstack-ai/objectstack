@@ -272,8 +272,8 @@ export default defineStack({
   // Security
   positions: allPositions,
   permissions: allPermissionSets,
-  // [ADR-0066 D1] Package-declared authorization capabilities — seeded into
-  // sys_capability with package provenance (managed_by:'package').
+  // [ADR-0066 D1] Package-declared authorization capabilities — served from
+  // the security catalog under this package (ADR-0131 D3).
   capabilities: allCapabilities,
   sharingRules: allSharingRules,
 

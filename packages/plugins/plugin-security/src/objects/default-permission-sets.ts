@@ -472,9 +472,6 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // accept, remove-member, transfer, …) rather than raw CRUD.
       ...denyWritesOnManagedObjects(),
       // RBAC tables — read-only to prevent privilege escalation.
-      sys_position: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
-      sys_permission_set: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
-      sys_position_permission_set: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
       sys_user_permission_set: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
       sys_user_position: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
       // [ADR-0131 D7] The compliance ledger, WITHOUT the superuser bits: the

@@ -168,8 +168,12 @@ describe('[#21839] a throw outside the body try still carries the public headers
   });
 
   it('an authenticated route still propagates the throw unchanged', async () => {
+    // Signed in: an anonymous caller is refused 401 by the domain's anonymous
+    // baseline before any service is resolved (ADR-0138 D2), so the throw is
+    // only reachable for a caller the baseline admits.
+    const signedIn = { executionContext: { userId: 'usr_21839', isSystem: false } } as unknown as HttpProtocolContext;
     await expect(
-      handleShareLinksRequest(throwingDeps(), '', 'GET', undefined, {}, {} as HttpProtocolContext),
+      handleShareLinksRequest(throwingDeps(), '', 'GET', undefined, {}, signedIn),
     ).rejects.toThrow('service registry unavailable');
   });
 });
