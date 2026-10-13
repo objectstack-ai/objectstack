@@ -1747,7 +1747,7 @@
       "title": "Marketplace install-local: the wiring matrix mounts the right arms per OS_CLOUD_URL, the air-gapped inline install works with NO control plane, reseed/purge touch exactly the sample rows, every mutating door is manage_metadata-gated both sides, and the listing projects installedBy/storageDir per principal",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1760,7 +1760,7 @@
         "app": "showcase",
         "requires": [
           "TWO isolated boots of the same app: boot A = plain `objectstack dev` with NO OS_CLOUD_URL (resolveCloudUrl() falls back to DEFAULT_CLOUD_URL — truthy — so the CLOUD arm mounts: proxy + install-local + cloud-connection + runtime-config); boot B = the same line with OS_CLOUD_URL=off exported (the offline arm: install-local pinned to the 'off' control plane + runtime-config ONLY — nothing that dials out mounts). The matrix is decided by Serve.planMarketplaceWiring, pure and testable (packages/cli/src/commands/serve.ts)",
-          "a compiled package artifact for the inline install: pnpm -C examples/app-crm build → dist/objectstack.json (the air-gapped path the #8343 fix exists for — `handleInstall`'s inline branch never reads the cloud URL)",
+          "a compiled package artifact for the inline install: pnpm -C examples/app-crm build → dist/objectstack.json (the air-gapped path the #8343 fix exists for — `handleInstall`'s inline branch never reads the cloud URL). Both boots that install run from a SCRATCH COPY of the app, never the shared tree: install-local caches the manifest under the working directory's .objectstack/installed-packages (packages/cloud-connection/src/local-manifest-source.ts#DEFAULT_INSTALLED_PACKAGES_DIR, resolved against process.cwd()), which a per-boot OS_HOME / OS_STORAGE_LOCAL_ROOT does not redirect (RUNNER.md environment facts)",
           "admin credentials passed to the CLI door (--email/--password or OS_RUNTIME_EMAIL/OS_RUNTIME_PASSWORD) — the runtime refuses an unauthenticated install with a 401 that names exactly that remedy (packages/cli/src/commands/package/install.ts)"
         ],
         "knownGaps": [
@@ -1852,6 +1852,12 @@
           "date": "2026-10-04",
           "change": "A7 and its step re-pointed: the install-local DELETE now withdraws the package from the running kernel through SchemaRegistry.uninstallPackage — no restart is needed; the object 404s and the app leaves /meta/app at once, and the response note says so (marketplace-install-local-plugin.ts handleUninstall and withdrawFromRunningKernel). The restart-required wording was right when written. Stale clause. Source 901e7cf13 (#21581)",
           "ref": "#21735"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-13",
+          "change": "fixtures.requires[1] gained the scratch-copy rule (setup recipe gap, #23104; recorded on platform-core.marketplace-console-honesty, which names this item, and carried by #23169). install-local caches the installed manifest relative to the server's working directory (local-manifest-source.ts DEFAULT_INSTALLED_PACKAGES_DIR under process.cwd()), and a per-boot OS_HOME / OS_STORAGE_LOCAL_ROOT does not redirect it, so an install from a boot started in the shared tree lands in examples/app-showcase/.objectstack/installed-packages (QA run #23163, 25 s, removed through the API). No clause changed",
+          "ref": "#23169"
         }
       ]
     },
@@ -1860,7 +1866,7 @@
       "title": "Marketplace console honesty: nav entries live and die with their capability, the disabled state renders the configuration conclusion (never a red 'failed to load') for every viewer ahead of the admin guard, Installed Apps drives the real same-origin lifecycle, and an enabled runtime turns a non-admin away with access-denied",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -1871,7 +1877,8 @@
         "app": "showcase",
         "requires": [
           "the same two boots as platform-core.marketplace-install-local-lifecycle (boot A default cloud arm, boot B OS_CLOUD_URL=off offline arm) — reuse them and its installed CRM artifact for the Installed Apps content",
-          "the marketplace routes are registered by DefaultAppContent in @object-ui/app-shell (system/marketplace, system/marketplace/:packageId), so they exist for every host console"
+          "the marketplace routes are registered by DefaultAppContent in @object-ui/app-shell (system/marketplace, system/marketplace/:packageId), so they exist for every host console",
+          "boot B's Installed Apps content comes from an install, and install-local caches the manifest under the WORKING DIRECTORY's .objectstack/installed-packages (packages/cloud-connection/src/local-manifest-source.ts#DEFAULT_INSTALLED_PACKAGES_DIR, resolved against process.cwd(); the CLI constructs the plugin with no storageDir). A per-boot OS_HOME and OS_STORAGE_LOCAL_ROOT do NOT redirect it, so a boot started from the shared tree writes examples/app-showcase/.objectstack/installed-packages/ into it. Boot every leg that installs a package from a scratch copy of the app, never from the tree (RUNNER.md environment facts)"
         ],
         "knownGaps": [
           "rendering the browse CATALOG (boot A) needs the public control plane reachable — on an egress-blocked runner the catalog leg is blocked(environment). The environment it needs is a boot whose process reaches the control plane: the default packages/cloud-connection/src/cloud-url.ts#DEFAULT_CLOUD_URL (https://cloud.objectos.ai), or an OS_CLOUD_URL that answers. No CI job drives this item, and the QA sandbox's egress proxy denies the host (QA run #21782, parked on #22017 row 10); the DISABLED state (boot B) is the leg this item can always prove, and it is the one #5504 was about"
@@ -1949,6 +1956,12 @@
           "date": "2026-10-06",
           "change": "partial-coverage gap of QA run #21782 parked on #22017 (row 10). Boot A's catalog content was blocked(environment): egress to the catalog was denied. Disposition: recorded knownGap. The knownGap now names the environment the leg needs (a boot that reaches DEFAULT_CLOUD_URL or a reachable OS_CLOUD_URL) and that no CI job drives it. No clause changed",
           "ref": "#22017"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-13",
+          "change": "fixtures.requires[2] (new) carries the scratch-copy rule for any boot that installs a package (setup recipe gap, #23104; parked on #23121, carried by #23169). install-local caches its manifest under the working directory's .objectstack/installed-packages (local-manifest-source.ts DEFAULT_INSTALLED_PACKAGES_DIR, resolved against process.cwd()), and per-boot OS_HOME / OS_STORAGE_LOCAL_ROOT do not redirect it. In QA run #23163 a boot started from the shared tree wrote a CRM manifest into examples/app-showcase/.objectstack/installed-packages for 25 s before it was removed through the API. RUNNER.md's environment facts carry the same rule. No clause changed",
+          "ref": "#23169"
         }
       ]
     },
@@ -2216,31 +2229,31 @@
     },
     {
       "id": "platform-core.keyboard-shortcut-surface",
-      "title": "Keyboard shortcut surface: `?` and ?shortcuts=1 open the dialog and Esc closes it, typing in an input never triggers it, the WIRED accelerators fire (⌘K, ⌘/Ctrl+B, ⌘⇧I where AI is present) — and the five advertised-but-DEAD accelerators (⌘/, N, R, ⌘E, ⌘D) plus the B-vs-⌘B display mismatch are EXPECTED-FAIL probes, never ticked green",
+      "title": "Keyboard shortcut surface: `?` and ?shortcuts=1 open the dialog and Esc closes it, typing in an input never triggers it, the dialog lists exactly the shortcuts whose handler is mounted and every listed one fires (⌘K, ⌘/Ctrl+B shown as ⌘B, Esc, ?), the five formerly advertised dead accelerators (⌘/, N, R, ⌘E, ⌘D) are neither listed nor bound, and the AI-chat pair ⌘⇧O / ⌘⇧S is listed only on the page that handles it (objectui#11674)",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "any stock boot with the console; an object list open for the dead-accelerator probes (N/R/⌘E claim record actions, so probe them where a record surface could plausibly respond)"
+          "any stock boot with the console; an object list open for the unlisted-key probes (N/R/⌘E were once advertised as record actions, so probe them where a record surface could plausibly respond)"
         ],
         "knownGaps": [
           "⌘⇧I (chat dock) is wired but the dock only exists when the AI surface is present — on a stock open boot the agent catalog is empty, the listener is not armed and ⌘⇧I is deliberately inert; that WHOLE cell (inert-when-gated AND armed-when-entitled) is scored by ai.console-ai-surface-gating — here record only that the accelerator's handler exists and is gated, never a second verdict",
-          "⌘⇧O / ⌘⇧S are advertised in the dialog's 'AI assistant' group but their handlers are PAGE-SCOPED to the AI chat page (matchAiChatShortcut in AiChatPage) — on a stock open boot that page is unreachable, so these two cells cannot be reached on stock. That is an ENVIRONMENT gap (QA run #21782, parked on #22017 row 9): the AI chat page is reachable only where the access-filtered agent catalog serves at least one agent, i.e. a deployment running the Cloud/Enterprise @objectstack/service-ai, or a console rebuilt with VITE_AI_BASE_URL pointing at such a server (ai.console-ai-surface-gating knownGaps). The open framework ships no agent server by design and CI has no such deployment, so score them blocked(environment). objectui unit-pins only the key-to-intent mapping (packages/app-shell/src/console/ai/__tests__/matchAiChatShortcut.test.ts), which does not score the page-scope clause; on an AI-enabled deployment probe them ON the chat page and record the page-scope honestly"
+          "⌘⇧O / ⌘⇧S are advertised by the AI chat page itself, beside its handler (AiChatPage's useAdvertiseShortcut(NEW_CHAT_SHORTCUT / TOGGLE_CHATS_LIST_SHORTCUT) next to matchAiChatShortcut, objectui#11674), so the dialog lists them ONLY while that page is mounted. The off-page half is scorable on every stock boot: the dialog shows no AI-chat group and neither chord does anything. The on-page half needs the AI chat page, which is reachable only where the access-filtered agent catalog serves at least one agent, i.e. a deployment running the Cloud/Enterprise @objectstack/service-ai, or a console rebuilt with VITE_AI_BASE_URL pointing at such a server (ai.console-ai-surface-gating knownGaps). The open framework ships no agent server by design and CI has no such deployment, so that half scores blocked(environment) (QA run #21782, parked on #22017 row 9). objectui pins that the page's advertisements carry chords its matcher answers (KeyboardShortcutsDialog.wiredOnly-11674.test.tsx, the AI chat page describe) and the key-to-intent mapping (packages/app-shell/src/console/ai/__tests__/matchAiChatShortcut.test.ts); neither is a live on-page run"
         ]
       },
       "steps": [
         "press `?` on a settled console page (focus NOT in an input) — the shortcuts dialog opens (overlay data-testid overlay:keyboard-shortcuts) and the URL carries ?shortcuts=1; press Esc — it closes and the param clears",
         "deep-link: open <any-route>?shortcuts=1 cold — the dialog is open on load (URL-addressable, ADR-0054)",
         "input guard: focus a text input (e.g. a list filter), type `?` — the character lands in the input and NO dialog opens (the handler returns early for INPUT/TEXTAREA/contentEditable)",
-        "inventory the dialog: capture every advertised accelerator. At head the groups list: ⌘K palette / ? / Esc; B sidebar + ⌘/ focus-search; N create + R refresh + ⌘E edit; ⌘⇧O new chat + ⌘⇧S conversations; ⌘D dark mode",
+        "inventory the dialog: capture every listed accelerator. The rows are derived from the handlers mounted at that moment (advertisedShortcuts.ts, objectui#11674), so on a stock page at objectui 1fb1ced36243 the dialog lists exactly: General — Close dialog/panel `Esc`, Open command palette `⌘ K`, Show keyboard shortcuts `?`; Navigation — Toggle sidebar `⌘ B`. No AI-chat group appears off the chat page, and nothing else is listed",
         "fire the WIRED set: ⌘K (or Ctrl+K) opens the command palette (depth of the palette itself belongs to search.console-global-search — here only that the accelerator fires); ⌘/Ctrl+B toggles the sidebar; ⌘⇧I is NOT probed here — its gated/entitled matrix belongs to ai.console-ai-surface-gating",
-        "display-mismatch probe: the dialog advertises bare `B` for the sidebar — press bare B (no modifier) outside any input: NOTHING happens (the handler requires metaKey||ctrlKey); press ⌘/Ctrl+B: the sidebar toggles. Record the mismatch as expected-fail",
-        "EXPECTED-FAIL probes, one by one on the object list, focus on the page body: ⌘/ (advertised focus-search), N (create record), R (refresh data), ⌘E (edit record), ⌘D (toggle dark mode) — for each, capture that NO corresponding effect occurs (no focused search box, no create overlay, no refetch on the wire, no edit mode, no theme class change). A repo grep across app-shell/console/components finds no handler for any of the five; these clauses record the actual behavior and MUST NOT tick green while the defect stands (defect K1 — filed by the sweep, not per run)",
+        "display-equals-binding probe for the sidebar: the dialog shows `⌘ B` (a mod chord), never bare B — press bare B (no modifier) outside any input: NOTHING happens (the handler requires metaKey||ctrlKey); press ⌘B and Ctrl+B: the sidebar toggles each time. Display and binding agree",
+        "unlisted-key probes, one by one on the object list, focus on the page body: ⌘/ (once advertised as focus-search), N (create record), R (refresh data), ⌘E (edit record), ⌘D (toggle dark mode). First confirm none of the five is listed in the dialog; then, for each, capture that NO corresponding effect occurs (no focused search box, no create overlay, no refetch on the wire, no edit mode, no theme class change). None of the five has a handler, and since objectui#11674 none is advertised: the advertised set equals the wired set. A key here that now ACTS while unlisted, or one that is listed again with no effect, breaks that equality",
         "Esc closes the dialog from every open path; re-run `?` after the probes to confirm the dialog itself still works"
       ],
       "acceptance": [
@@ -2257,38 +2270,38 @@
           "evidence": "the per-accelerator screenshot pairs"
         },
         {
-          "clause": "EXPECTED FAIL (defect K1a): the dialog advertises bare `B` for the sidebar while the only handler requires ⌘/Ctrl — bare B does nothing, ⌘/Ctrl+B works. The run records the mismatch; ticking this clause green requires the DISPLAY to be fixed to match the binding (or a bare-B handler to exist), at which point this item needs a revision",
+          "clause": "the sidebar's displayed chord equals its binding: the dialog lists Toggle sidebar as `⌘ B` and lists no bare B; bare B does nothing and ⌘B / Ctrl+B toggle the sidebar. This was expected-fail K1a until objectui#11674 derived the dialog's rows from the mounted handlers",
           "oracle": "dom",
-          "verify": "bare-B keypress leaves the sidebar state unchanged (read the sidebar's data-state), ⌘/Ctrl+B flips it; the dialog's Navigation group still lists bare B",
+          "verify": "the dialog's Navigation group reads `⌘ B` for Toggle sidebar and carries no bare-B row; a bare-B keypress leaves the sidebar state unchanged (read the sidebar's data-state), and ⌘B and Ctrl+B each flip it. objectui pins the same pair in packages/app-shell/src/chrome/KeyboardShortcutsDialog.wiredOnly-11674.test.tsx ('a listed row whose chord does nothing is caught: a bare B leaves the sidebar alone'); run it from an objectui checkout at the .objectui-sha revision to cite it beside the live read",
           "evidence": "the sidebar state trace + the dialog screenshot"
         },
         {
-          "clause": "EXPECTED FAIL (defect K1b): each of the five advertised accelerators ⌘/ (focus search), N (create), R (refresh), ⌘E (edit), ⌘D (dark mode) produces NO effect — no handler exists in the tree. Each probe is its own record: effect-absence proven against the specific advertised effect (focus, overlay, network refetch, edit surface, root theme class). A run must NOT tick these green while the shortcuts stay dead; when handlers land, flip the clauses to positive assertions in a revision",
+          "clause": "the advertised set equals the wired set: every row the dialog lists fires its own handler, and none of the five formerly advertised accelerators ⌘/ (focus search), N (create), R (refresh), ⌘E (edit), ⌘D (dark mode) is listed; each of the five still produces NO effect. Each probe is its own record: effect-absence proven against the specific once-advertised effect (focus, overlay, network refetch, edit surface, root theme class). This was expected-fail K1b until objectui#11674 made the dialog list only shortcuts whose handler is mounted",
           "oracle": "network",
-          "verify": "per-key: the advertised effect's own oracle stays silent (no focus change via document.activeElement, no ?form=new push, no list refetch on the wire, no edit route, documentElement class list unchanged); reproduce twice on fresh loads per RUNNER rule 2",
+          "verify": "the step-3 inventory lists none of the five; per key, the once-advertised effect's own oracle stays silent (no focus change via document.activeElement, no ?form=new push, no list refetch on the wire, no edit route, documentElement class list unchanged); reproduce twice on fresh loads per RUNNER rule 2. objectui pins the listed half in KeyboardShortcutsDialog.wiredOnly-11674.test.tsx ('every row the console dialog lists fires its real handler, with ⌘ and with Ctrl')",
           "evidence": "the five per-key traces/DOM reads"
         },
         {
-          "clause": "the advertised-but-page-scoped pair is recorded honestly: ⌘⇧O/⌘⇧S are listed globally but handled only on the AI chat page — on stock open boots blocked(environment); on AI-enabled deployments they fire ON that page and do nothing elsewhere",
+          "clause": "the page-scoped pair is listed only where it is handled: off the AI chat page the dialog lists neither ⌘⇧O nor ⌘⇧S and neither chord does anything (scorable on stock); on the AI chat page both are listed and fire. The on-page half is blocked(environment) on stock open boots (knownGaps)",
           "oracle": "dom",
-          "verify": "keypress outside the chat page: no effect; on the chat page (where reachable): new-chat/list-toggle occur (matchAiChatShortcut)",
+          "verify": "outside the chat page: the dialog inventory has no AI-chat group, and each keypress has no effect; on the chat page (where reachable): the dialog lists both, and new-chat/list-toggle occur (matchAiChatShortcut)",
           "evidence": "both contexts' traces, or the blocked(environment) record on stock"
         }
       ],
       "negative": [
         "ticking any advertised accelerator green off its LISTING in the dialog is the exact ticking-on-a-label failure this item exists to prevent — every accelerator is proven by firing it",
         "a dead wired shortcut (⌘K or ⌘/Ctrl+B not responding) is a REAL fail, not an expected one — but rule out automation-input first: a synthetic event that does not reach the window/document listener fakes exactly this",
-        "if a future run finds the five dead shortcuts now WORKING, that is not a silent pass — the expected-fail clauses are stale and the item needs a revision flipping them to positive assertions (cite the fixing PR)",
+        "a listed row that does nothing is a REAL fail since objectui#11674 — the dialog is derived from mounted handlers, so a listed dead key means an advertiser outlived its handler. If one of the five formerly dead keys starts to ACT, the clause is stale (the advertised set no longer equals the wired set), and the item needs a revision naming the new handler",
         "the `?` handler firing while an input is focused (swallowing typed text) would be a regression of the guard — probe it, it is cheap"
       ],
       "traps": ["automation-input", "stale-console-bundle", "absence-inference"],
       "source": [
-        "objectui packages/app-shell/src/chrome/KeyboardShortcutsDialog.tsx (the advertised groups — the full inventory this item probes), (the `?` handler with the input/textarea/contentEditable guard; `?` is the ONLY key it handles), (?shortcuts=1 via useUrlOverlay)",
+        "objectui packages/app-shell/src/chrome/KeyboardShortcutsDialog.tsx (rows derived from the advertised shortcuts, never a list of its own — objectui#11674), (the `?` handler with the input/textarea/contentEditable guard; `?` is the ONLY key it handles), (?shortcuts=1 via useUrlOverlay) + advertisedShortcuts.ts (useAdvertiseShortcut / useAdvertisedShortcuts: a shortcut is listed for exactly as long as its handler is mounted) + KeyboardShortcutsDialog.wiredOnly-11674.test.tsx (the pin: every listed row fires its real handler; a listed bare B is caught)",
         "objectui packages/app-shell/src/context/CommandPaletteProvider.tsx (⌘/Ctrl+K — wired)",
-        "objectui packages/components/src/ui/sidebar.tsx (SIDEBAR_KEYBOARD_SHORTCUT = 'b'), (the handler requires metaKey||ctrlKey — the source of the B-vs-⌘B display mismatch)",
+        "objectui packages/components/src/ui/sidebar.tsx (SIDEBAR_KEYBOARD_SHORTCUT = 'b'), (the handler requires metaKey||ctrlKey) + packages/app-shell/src/layout/ConsoleLayout.tsx (advertises TOGGLE_SIDEBAR_SHORTCUT as a mod chord beside that listener, so the dialog shows ⌘B)",
         "objectui packages/app-shell/src/layout/chatDockState.ts (matchChatDockShortcut — ⌘/Ctrl+Shift+I, composer-safe)",
-        "objectui packages/app-shell/src/console/ai/AiChatPage.tsx (matchAiChatShortcut — ⌘⇧O/⌘⇧S, PAGE-scoped)",
-        "repo-grep evidence for the five dead accelerators: no handler for ⌘/ / N / R / ⌘E / ⌘D anywhere in app-shell, console or components (the only near-misses are page-scoped: ApprovalsInboxPage's plain `r` quick-decide and useDebugMode's Ctrl+Shift+D — neither matches an advertised accelerator)"
+        "objectui packages/app-shell/src/console/ai/AiChatPage.tsx (matchAiChatShortcut — ⌘⇧O/⌘⇧S, PAGE-scoped; NEW_CHAT_SHORTCUT / TOGGLE_CHATS_LIST_SHORTCUT advertised by the page, so listed only while it is mounted)",
+        "repo-grep evidence for the five formerly advertised accelerators: no handler for ⌘/ / N / R / ⌘E / ⌘D anywhere in app-shell, console or components, and since objectui#11674 no advertiser for them either (the only near-misses are page-scoped: ApprovalsInboxPage's plain `r` quick-decide and useDebugMode's Ctrl+Shift+D — neither is advertised)"
       ],
       "history": [
         {
@@ -2302,6 +2315,12 @@
           "date": "2026-10-06",
           "change": "partial-coverage gap of QA run #21782 parked on #22017 (row 9). A5 was blocked(fixture) as the clause prescribed. Disposition: recorded knownGap. The leg cannot be reached in the open framework by design: ⌘⇧O / ⌘⇧S are handled only on the AI chat page, which exists only where an agent catalog serves an agent (Cloud/Enterprise service-ai). The knownGap names that environment, says CI lacks it, and reclassifies the verdict blocked(environment); A5's clause and evidence follow",
           "ref": "#22017"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-13",
+          "change": "acceptance[2], [3] and [4] (#23104 C2, C3, C4) flipped from expected-fail probes to positive assertions, with the title, fixtures.requires[0], knownGaps[1], steps[3], [5] and [6], negative[2] and four source notes (stale spec; rows from #23104 parked on #23121, carried by #23169). objectui#11674 derived the shortcuts dialog's rows from the handlers mounted at that moment (advertisedShortcuts.ts), so the five dead accelerators (⌘/, N, R, ⌘E, ⌘D) are no longer listed, Toggle sidebar is listed as ⌘B rather than bare B, and the AI-chat pair ⌘⇧O / ⌘⇧S is advertised by AiChatPage and listed only while that page is mounted. QA run #23163 (objectstack 36b2889c, objectui 1fb1ced36243) read the stock inventory as General: Esc, ⌘K, ?; Navigation: ⌘B, with bare B inert, Ctrl+B toggling and each of the five keys without effect. Re-read from objectui source at the same pin, which is still this repo's .objectui-sha: KeyboardShortcutsDialog.tsx, advertisedShortcuts.ts, ConsoleLayout.tsx, AiChatPage.tsx and the pin KeyboardShortcutsDialog.wiredOnly-11674.test.tsx. The on-page half of acceptance[4] stays blocked(environment) on stock",
+          "ref": "#23169"
         }
       ]
     },
@@ -2399,7 +2418,7 @@
       "title": "ADR-0057 lifecycle sweep: backdated telemetry rows past retention are reaped BOUNDED under a system context on the hourly sweep, onlyWhen scoping spares live rows, an archive-declaring object is NEVER hot-deleted unarchived (retained + reported archive-pending when no archive datasource exists), the transient class stays on the primary, and OS_LIFECYCLE_DISABLED=1 disarms the sweep",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["operator (local shell + direct sqlite access)", "seeded admin (API reads)"],
@@ -2413,16 +2432,17 @@
         "knownGaps": [
           "the ARCHIVE-SUCCESS leg (rows copied to the archive datasource, then hot-deleted) needs a registered 'archive' datasource, which no stock boot has — that leg rides the unit pin (lifecycle-service.test.ts) and stays blocked(fixture) live; what IS live on stock is the SAFETY side: sys_audit_log rows older than 90d are RETAINED and the sweep reports the object skipped archive-pending",
           "class-routing to a dedicated 'telemetry' datasource (ADR-0057 §3.6) engages only when a telemetry datasource is registered — absent on stock, so the routing leg is asserted at the unit/source level (engine.ts getDriver priority + SYSTEM_LEDGER_LIFECYCLE_CLASSES), not live",
-          "the ≤ REAP_BATCH_SIZE × REAP_MAX_BATCHES_PER_SWEEP bound (500×20 per object per sweep) is proven by the unit suite; staging >10k backdated rows live is not required — the live clause asserts the reap happened via the bounded per-id path (the aggregate log line), not the bound's edge"
+          "the ≤ REAP_BATCH_SIZE × REAP_MAX_BATCHES_PER_SWEEP bound (500×20 per object per sweep) is proven by the unit suite; staging >10k backdated rows live is not required — the live clause asserts the reap happened via the bounded per-id path (the aggregate log line), not the bound's edge",
+          "RULING OWED on the idle-proof step, steps[4] (QA run #23166 C1, parked on #23121, carried by #23169): an idle sweep on a clean DB still logs '[lifecycle] sweep: 18 policy(ies) applied, ~0 rows reaped, …' at objectstack 36b2889c, and the source at 6d7f4df3c reads the same. The print gate tests report.swept.length, and the reaper pushes a report.swept entry for every policy it applies, deleted 0 included (lifecycle-service.ts; the LifecycleSweepReport.swept docblock reads 'Policies applied, one entry per (object, policy)'). So steps[4]'s 'an idle sweep logs nothing' is either a stale step (one line per sweep is the design) or a product defect (the line should print only when rows moved). Until the maintainer rules, a run records the line verbatim and scores steps[4] neither pass nor fail. No acceptance clause rests on it"
         ]
       },
       "steps": [
         "boot once on the file DB so schema exists; stop the server",
         "hand-seed via sqlite: (a) N sys_automation_run rows with created_at 40 days ago, status 'completed' (past the 30d window, terminal); (b) 2 rows created_at 40 days ago with status 'paused'/'running' (past the window but NOT terminal); (c) 1 sys_audit_log row created_at 100 days ago (past archive.after 90d); (d) 1 sys_inbox_message row (transient class). Record exact counts and ids",
-        "boot again (control boot, no env flag); wait ≥90s; grep the log for the aggregate sweep line '[lifecycle] sweep: … policy(ies) applied, ~… rows reaped …' (the ONE trace a sweep leaves — cleanup must not re-feed the tables it drains)",
+        "boot again (control boot, no lifecycle flag) with OS_LOG_LEVEL=info exported (or `--log-level info`): the aggregate sweep line is logged at INFO, and `os dev` defaults the kernel logger to warn, so a default-level boot never prints it; wait ≥90s; grep the log for '[lifecycle] sweep: … policy(ies) applied, ~… rows reaped …' (the ONE trace a sweep leaves — cleanup must not re-feed the tables it drains)",
         "re-read via API/sqlite: the terminal 40d-old automation rows are GONE; the paused/running 40d-old rows SURVIVE (onlyWhen scoping); the 100d-old audit row SURVIVES and the sweep report lists sys_audit_log skipped archive-pending (no 'archive' datasource registered → retained, never dropped unarchived); the inbox row's fate follows its own declared policy only — the transient class got no cross-class treatment",
         "idle proof: a second sweep interval later (or a fresh boot on the now-clean DB + 90s), the log carries NO sweep line — an idle sweep logs nothing (the line only prints when something was swept/errored/alerted)",
-        "kill switch: re-seed one terminal 40d-old automation row; boot with OS_LIFECYCLE_DISABLED=1; wait ≥90s; the row SURVIVES and no sweep line appears — and this absence is meaningful only because step 2 proved the sweep active on the same composition (absence-inference guarded)",
+        "kill switch: re-seed one terminal 40d-old automation row; boot with OS_LIFECYCLE_DISABLED=1 AND OS_LOG_LEVEL=info (the same level as the control boot, or the missing line proves nothing); wait ≥90s; the row SURVIVES and no sweep line appears — and this absence is meaningful only because step 2 proved the sweep active on the same composition and log level (absence-inference guarded)",
         "run the unit pin for the legs live cannot stage: pnpm --filter @objectstack/objectql exec vitest run src/lifecycle/lifecycle-service.test.ts — the archive-declared skip ('skips hot deletion entirely while an archive is declared (retain → archive → delete)', report.skipped == [{object, reason: 'archive-pending'}]), the bounded-reap cases, and the rotation fallback"
       ],
       "acceptance": [
@@ -2501,6 +2521,12 @@
           "date": "2026-08-30",
           "change": "new — authored in the 2026-08-30 sweep (spec-enums angle): the ADR-0057 lifecycle vocabulary had items nowhere though stock objects declare all the interesting shapes. Grounding sharpened the register on three points: (1) sys_audit_log stock-declares archive 90d, so the never-hot-delete SAFETY side is live-stageable (the success side stays unit-pinned); (2) the sweep has NO on-demand door — first fire is 60s after engine start, so every probe brackets that delay and the kill-switch clause requires an armed control boot; (3) the enum pin is LifecycleClassSchema expect 5, verified by member count at object.zod.ts",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-13",
+          "change": "steps[2] (the control boot) and steps[5] (the kill-switch boot) now boot with OS_LOG_LEVEL=info, and a knownGap records the open ruling on steps[4], the idle proof (stale step + ruling owed, #23166 C1; parked on #23121, carried by #23169). The '[lifecycle] sweep:' line is logged at INFO, and `os dev` defaults the kernel logger to warn (packages/cli/src/commands/dev.ts --log-level, serve.ts), so the grep in steps[2] could never match on a default boot, and the kill-switch boot must match its level for its missing line to mean anything. steps[4] is not rewritten: an idle sweep still logs 'N policy(ies) applied, ~0 rows reaped', because report.swept carries one entry per applied policy and the print gate tests its length. Whether that is the design or a defect is the maintainer's call; the knownGap says how a run scores it meanwhile. No acceptance clause changed",
+          "ref": "#23169"
         }
       ]
     },
@@ -2611,10 +2637,10 @@
     },
     {
       "id": "platform-core.theme-mode-persistence",
-      "title": "Theme mode: dark/light apply the root class immediately and survive reload via localStorage (vite-ui-theme); system/auto resolves the OS preference at evaluation time (#2942 — never a dead 'auto' class); no half-themed surface after a toggle",
+      "title": "Theme mode: dark/light apply the root class immediately and survive reload via localStorage (object-ui-theme, the console shell's storage key); system/auto resolves the OS preference at evaluation time (#2942 — never a dead 'auto' class); no half-themed surface after a toggle",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -2623,16 +2649,16 @@
         "requires": ["any stock console boot; a driver that can emulate the OS color-scheme preference (CDP prefers-color-scheme override) for the system-mode cells"]
       },
       "steps": [
-        "open the console; locate the ModeToggle in the AppHeader; read the initial documentElement class and localStorage['vite-ui-theme']",
+        "open the console; open the avatar menu in the AppHeader and find Theme under its Preferences group (the ModeToggle lives in that dropdown, not as a standalone top-bar button); read the initial documentElement class and localStorage['object-ui-theme']",
         "pick Dark: documentElement gains class 'dark' IMMEDIATELY (no reload); the toggle shows the checkmark on Dark; screenshot a data-dense surface (list + header + sidebar) and confirm no half-themed region (a light-styled panel inside the dark shell)",
         "reload: the dark class is present on load (localStorage read at provider init); localStorage carries 'dark'",
         "pick Light: class flips to 'light' immediately; reload-persists the same way",
         "pick System with the browser's emulated preference set to dark: the resolved class is 'dark' and localStorage stores 'system'; flip the emulated preference and RELOAD: the class follows the new preference (resolution happens at provider evaluation — the provider attaches NO matchMedia listener, so a live OS flip without reload updating the class is NOT asserted; assert resolution at load, and record live-tracking as not-implemented if probed)",
-        "regression probe (#2942): with a stored value of 'auto' (write it into localStorage by hand — the spec's ThemeModeSchema spelling), reload: the class resolves to the OS preference, never a literal 'auto' class locking light styling"
+        "regression probe (#2942): with a stored value of 'auto' (write it into localStorage['object-ui-theme'] by hand — the spec's ThemeModeSchema spelling), reload: the class resolves to the OS preference, never a literal 'auto' class locking light styling"
       ],
       "acceptance": [
         {
-          "clause": "explicit dark/light apply the root class synchronously on selection and persist across reload via localStorage vite-ui-theme",
+          "clause": "explicit dark/light apply the root class synchronously on selection and persist across reload via localStorage object-ui-theme",
           "oracle": "dom",
           "verify": "documentElement.classList before/after each pick and after reload; localStorage value at each step",
           "evidence": "the class/storage trace"
@@ -2657,8 +2683,8 @@
       ],
       "traps": ["shared-browser-tab", "hydration-race"],
       "source": [
-        "objectui packages/app-shell/src/chrome/ThemeProvider.tsx (storageKey 'vite-ui-theme', initial read), (the class effect — 'auto'/'system' resolve matchMedia ONCE per evaluation; the #2942 note: branching on 'system' alone sent 'auto' into classList.add('auto'), a class no Tailwind variant matches), (setTheme persists then applies)",
-        "objectui packages/app-shell/src/layout/ModeToggle.tsx (the three-way menu with checkmarks) + AppHeader.tsx (mounted in the header)",
+        "objectui packages/app-shell/src/chrome/ThemeProvider.tsx (the storageKey PROP, whose default 'vite-ui-theme' the console overrides; initial read), (the class effect — 'auto'/'system' resolve matchMedia ONCE per evaluation; the #2942 note: branching on 'system' alone sent 'auto' into classList.add('auto'), a class no Tailwind variant matches), (setTheme persists then applies) + packages/app-shell/src/console/ConsoleShell.tsx (mounts ThemeProvider with storageKey=\"object-ui-theme\": the key this item reads)",
+        "objectui packages/app-shell/src/layout/ModeToggle.tsx (the three-way menu with checkmarks) + AppHeader.tsx (mounted inside the avatar dropdown's Preferences group, beside the language switcher)",
         "objectui#2942 (the auto-class regression this item's last step re-probes)"
       ],
       "history": [
@@ -2667,6 +2693,12 @@
           "date": "2026-08-30",
           "change": "new — authored in the 2026-08-30 sweep (console-UI angle, optional-P2 register row). Grounding tightened one claim: the provider attaches NO matchMedia change listener, so 'system tracks the OS preference' holds at evaluation time only — the item asserts resolution on selection/reload and explicitly forbids failing the product for live-flip tracking it never implemented",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-13",
+          "change": "the storage key and the toggle's location corrected in the title, steps[0] and [5], acceptance[0] and source[0] and [1] (stale step text, #23104 C0; parked on #23121, carried by #23169; also reported on #21782's closeout). The console's ThemeProvider is mounted by ConsoleShell.tsx with storageKey=\"object-ui-theme\"; 'vite-ui-theme' is only the provider's default prop, which the console overrides. ModeToggle lives under the AppHeader's avatar menu, in its Preferences group. QA run #23163 read the key object-ui-theme live (objectstack 36b2889c, objectui 1fb1ced36243). Re-read from objectui source at that pin, still this repo's .objectui-sha: ConsoleShell.tsx, ThemeProvider.tsx, AppHeader.tsx. No clause's verdict logic changed",
+          "ref": "#23169"
         }
       ]
     },
