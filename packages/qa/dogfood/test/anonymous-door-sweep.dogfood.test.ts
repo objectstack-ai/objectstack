@@ -78,11 +78,31 @@
 // an outside family only by an amendment of ADR-0138, and the classification
 // is edited after that amendment, never instead of it.
 //
-// ## Disclosure
+// ## Disclosure: what a red run prints, and the one local switch
 //
-// Classes, positions and functions only (#22146). The assertions are
-// class-level; a failure names the route pattern and the status it answered,
-// which is what fixing it needs, and never a body.
+// Classes, positions and functions only (#22146; ruling 6134095444: "no
+// route-level readings go on GitHub"). This suite runs on `main` with the
+// dogfood battery, so whatever a red case prints lands in a public CI log.
+// So a red sweep case prints, BY DEFAULT, one line per class and mount family:
+// the class (a door class, an outside family or the everything-else class),
+// the mount family the route table names (the pattern's leading segments; the
+// table records patterns, not registrars), the source, and the COUNT of red
+// routes in it. ⛔ It never pairs a route with the answer it got, and it never
+// prints a body. The judgement is unchanged: the same routes are judged, and a
+// case is red exactly when one of them misses its class.
+//
+// Route-level detail (each red route's pattern and why it missed its class) is
+// for a developer's own machine only, behind `OS_TEST_ANON_SWEEP_ROUTE_DETAIL`,
+// which is off by default:
+//
+//   OS_TEST_ANON_SWEEP_ROUTE_DETAIL=1 pnpm --filter @objectstack/dogfood \
+//     exec vitest run test/anonymous-door-sweep.dogfood.test.ts
+//
+// ⛔ Never set it in CI or in a workflow. Two belts keep it local: through
+// `turbo run test` (the path CI takes) the variable is never forwarded,
+// because turbo's strict env mode hands a task only what its `env` declares
+// and `@objectstack/dogfood#test` declares `OS_TEST_TIERS` and `OS_TEST_SHARD`
+// alone; and the switch is ignored whenever `CI` is set.
 //
 // Not eligible for the shared showcase project: it boots a derived
 // configuration with its own plugins.
@@ -193,7 +213,11 @@ async function send(stack: VerifyStack, method: string, path: string, init: Requ
   const withBody = method !== 'GET' && method !== 'HEAD';
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${method} ${path} did not answer within 15s`)), 15_000);
+    // Path-free unless the local switch is on: a hang is an answer too (header, Disclosure).
+    timer = setTimeout(
+      () => reject(new Error(`a request did not answer within 15s${ROUTE_DETAIL ? `: ${method} ${path}` : ''}`)),
+      15_000,
+    );
   });
   try {
     const res = await Promise.race([
@@ -222,6 +246,31 @@ async function send(stack: VerifyStack, method: string, path: string, init: Requ
 }
 
 const keyOf = (r: { method: string; pattern: string }) => `${r.method} ${r.pattern}`;
+
+/**
+ * The local-only switch for route-level failure detail (header, Disclosure).
+ * Off by default, and ignored whenever `CI` is set.
+ */
+const ROUTE_DETAIL = process.env.OS_TEST_ANON_SWEEP_ROUTE_DETAIL === '1' && !process.env.CI;
+
+/**
+ * The mount family a route belongs to: the pattern's leading segments past the
+ * API base, which is as much as the route table can say about who registered
+ * it. A declared endpoint is in no route table, so its family is its kind.
+ */
+function mountFamilyOf(route: SweptRoute): string {
+  if (route.source === 'declared') {
+    return `declared ${route.endpoint?.type ?? 'unknown-type'} endpoints (authRequired: ${String(route.endpoint?.authRequired)})`;
+  }
+  const segs = route.pattern.split('/').filter((x) => x !== '');
+  const base = segs[0] === 'api' ? (segs[1] === 'v1' ? 2 : 1) : 0;
+  const head = segs[base];
+  const kept = head === undefined || head.startsWith(':') || head === '*' ? segs.slice(0, base) : segs.slice(0, base + 1);
+  return `/${kept.join('/')}`;
+}
+
+const classLabelOf = (cls: SweepClass): string =>
+  cls.kind === 'door' ? `door class ${cls.door.id}` : cls.kind === 'outside' ? `outside family ${cls.family.id}` : cls.kind;
 
 interface Swept {
   readonly route: SweptRoute;
@@ -533,18 +582,42 @@ describe('ADR-0138 D2 anonymous sweep: one unauthenticated request per registere
     const order = (p: Swept) => (p.cls.kind === 'outside' && p.cls.family.id === 'dev-metadata-hmr' ? 1 : 0);
     for (const p of [...population].sort((a, b) => order(a) - order(b))) {
       if (p.cls.kind === 'middleware') continue;
-      p.answer = await send(stack, p.route.method === 'ALL' ? 'GET' : p.route.method, p.probePath);
+      try {
+        p.answer = await send(stack, p.route.method === 'ALL' ? 'GET' : p.route.method, p.probePath);
+      } catch {
+        // No answer is recorded as status 0: it misses every class and is
+        // counted, never thrown with its route (header, Disclosure).
+        p.answer = { status: 0, contentType: '' };
+      }
     }
   }, 300_000);
 
-  const failures = (pick: (p: Swept) => string | undefined): string[] =>
-    population.flatMap((p) => {
+  /**
+   * The red routes of one case, as that case prints them. By default one line
+   * per class and mount family with the COUNT of red routes in it; with the
+   * local switch, one line per route. Non-empty exactly when a route is red,
+   * so the switch changes what is printed and never what is judged.
+   */
+  const failures = (pick: (p: Swept) => string | undefined): string[] => {
+    const red = population.flatMap((p) => {
       const why = pick(p);
-      return why ? [`${keyOf(p.route)} (${p.route.source}) — ${why}`] : [];
+      return why ? [{ p, why }] : [];
     });
+    if (ROUTE_DETAIL) return red.map(({ p, why }) => `${keyOf(p.route)} (${p.route.source}) — ${why}`);
+    const counts = new Map<string, number>();
+    for (const { p } of red) {
+      const group = `${classLabelOf(p.cls)} · ${mountFamilyOf(p.route)} (${p.route.source})`;
+      counts.set(group, (counts.get(group) ?? 0) + 1);
+    }
+    return [...counts].sort(([a], [b]) => a.localeCompare(b)).map(([group, n]) => `${group}: ${n} route(s) red`);
+  };
+
+  const DETAIL_HINT = ROUTE_DETAIL
+    ? ''
+    : 'Route-level detail is local only: set OS_TEST_ANON_SWEEP_ROUTE_DETAIL=1 and run this file directly (see its header).';
 
   it('every route but middleware got exactly one answer', () => {
-    const unanswered = population.filter((p) => p.cls.kind !== 'middleware' && p.answer === undefined);
+    const unanswered = population.filter((p) => p.cls.kind !== 'middleware' && !(p.answer && p.answer.status > 0));
     expect(unanswered.map((p) => keyOf(p.route))).toEqual([]);
   });
 
@@ -552,17 +625,20 @@ describe('ADR-0138 D2 anonymous sweep: one unauthenticated request per registere
     const swept = population.filter((p) => p.cls.kind === 'everything-else');
     expect(swept.length, 'the everything-else class is the bulk of the table').toBeGreaterThan(100);
     const red = failures((p) => (p.cls.kind === 'everything-else' ? EVERYTHING_ELSE(p.answer!) : undefined));
-    expect(red, `\nRoutes in no door class and outside no family, which ADR-0138 D2 says answer 401:\n${red.join('\n')}\n`).toEqual([]);
+    expect(
+      red,
+      `\nADR-0138 D2: the everything-else class (no door class, no outside family) answers 401.\n${red.join('\n')}\n${DETAIL_HINT}\n`,
+    ).toEqual([]);
   });
 
   it('every door-class route answers its class, asked about no declared subject', () => {
     const red = failures((p) => (p.cls.kind === 'door' && p.cls.door.expect ? p.cls.door.expect(p.answer!) : undefined));
-    expect(red, `\n${red.join('\n')}\n`).toEqual([]);
+    expect(red, `\nADR-0138 D2: a door-class route asked about no declared subject answers its class.\n${red.join('\n')}\n${DETAIL_HINT}\n`).toEqual([]);
   });
 
   it('the outside families answer as D2 states, where it states an answer', () => {
     const red = failures((p) => (p.cls.kind === 'outside' && p.cls.family.expect ? p.cls.family.expect(p.answer!) : undefined));
-    expect(red, `\n${red.join('\n')}\n`).toEqual([]);
+    expect(red, `\nADR-0138 D2: an outside family answers as D2 states, where it states an answer.\n${red.join('\n')}\n${DETAIL_HINT}\n`).toEqual([]);
   });
 
   it('every row of the classification claims a route on this boot: none is stale', () => {
