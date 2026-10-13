@@ -1046,7 +1046,7 @@ describe('[ADR-0111 D7] no inert grants', () => {
   it('refuses non-user recipient types instead of persisting rows no gate reads', async () => {
     // Every non-`user` member of RecordShareRecipientType — no `as any`
     // needed since #4539 aligned the contract type to the storage select.
-    for (const recipientType of ['group', 'position', 'unit_and_subordinates', 'guest'] as const) {
+    for (const recipientType of ['group', 'position', 'unit_and_subordinates'] as const) {
       await expect(
         svc.grant(
           { object: 'account', recordId: 'a1', recipientId: 'g1', recipientType },
@@ -1054,6 +1054,26 @@ describe('[ADR-0111 D7] no inert grants', () => {
         ),
       ).rejects.toThrow(/VALIDATION_FAILED/);
     }
+    expect(engine._tables.sys_record_share ?? []).toHaveLength(0);
+  });
+
+  it("[ADR-0138 D8] refuses the retired 'guest' recipient with its prescription, never the sharing-rule route", async () => {
+    // `guest` left RecordShareRecipientType, so only an untyped caller (a REST
+    // body) can still send it. The grant's one error channel is the message
+    // prefix (`rest-server.ts`'s `respondSharingError` maps it to a 400); the
+    // pin asserts that prefix, the prescription, and that nothing was written.
+    // A sharing rule cannot deliver a guest either, so the generic sentence
+    // ("delivered via sharing rules") would misdirect the caller.
+    const refusal = await svc.grant(
+      { object: 'account', recordId: 'a1', recipientId: 'anyone', recipientType: 'guest' as never },
+      { userId: 'alice' },
+    ).then(() => null, (e: unknown) => e);
+    expect(refusal).toBeInstanceOf(Error);
+    const message = (refusal as Error).message;
+    expect(message.startsWith("VALIDATION_FAILED: recipientType 'guest' was removed (ADR-0138 D8)")).toBe(true);
+    expect(message).toMatch(/guest access flows through the guest position and share links \(ADR-0090 D11\)/);
+    expect(message).toMatch(/Expose the record through a public form or a share link instead\.$/);
+    expect(message).not.toMatch(/sharing rules/);
     expect(engine._tables.sys_record_share ?? []).toHaveLength(0);
   });
 
