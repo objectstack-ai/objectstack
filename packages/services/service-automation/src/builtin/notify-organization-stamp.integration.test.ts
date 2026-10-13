@@ -60,19 +60,6 @@ function silentLogger(): any {
     return l;
 }
 
-/** A logger that records every warning line, for the fail-loud pin. */
-function recordingLogger(): { logger: any; warnings: string[] } {
-    const warnings: string[] = [];
-    const l: any = {
-        info: () => {},
-        warn: (...args: unknown[]) => { warnings.push(args.map(String).join(' ')); },
-        error: () => {},
-        debug: () => {},
-    };
-    l.child = () => l;
-    return { logger: l, warnings };
-}
-
 /** Every row this stack wrote, in insertion order, with the object it landed in. */
 interface WrittenRow { object: string; row: Record<string, unknown> }
 
