@@ -1178,8 +1178,20 @@ export function extractTriggerPaths(workflowText) {
  * is refused whole. `!cancelled()` is the one term stripped, because it is a
  * status function that discriminates no path — THE FILTER CONTRACT on ci.yml's
  * `filter` job is why every one of these `if:`s carries it.
+ *
+ * ⭐ The FULL-BATTERY clause is stripped too, exactly as spelled and only as the
+ * expression's LAST conjunct (#22998, ci.yml's THE TWO SPEEDS): `&& github.
+ * event_name != 'pull_request' && github.event_name != 'merge_group'`. It
+ * discriminates EVENTS, never paths — the job still judges exactly the paths its
+ * filter output names, on `main`'s push and hourly runs — and since a PR no
+ * longer runs such a job, this derivation is the only place a card's dev hears
+ * of it before the red lands on `main`. Refusing it would drop the console and
+ * dogfood leads this function exists to give. Any other event term, a reordered
+ * clause or one event alone is still refused whole.
  */
 const JOB_IF_STATUS_TERM = /(?:^|\s)!\s*cancelled\(\)\s*&&\s*/g;
+const JOB_IF_FULL_BATTERY_TERM =
+  /\s*&&\s*github\.event_name\s*!=\s*'pull_request'\s*&&\s*github\.event_name\s*!=\s*'merge_group'\s*$/;
 const JOB_FILTER_OUTPUT_TERM =
   /^needs\.([A-Za-z_][\w-]*)\.outputs\.([A-Za-z_][\w-]*)\s*(?:!=\s*(['"])false\3|==\s*(['"])true\4)$/;
 
@@ -1195,6 +1207,7 @@ export function jobFilterOutputRefs(ifExpression) {
   const wrapped = /^\$\{\{([\s\S]*)\}\}$/.exec(expr);
   if (wrapped) expr = wrapped[1].trim();
   expr = expr.replace(JOB_IF_STATUS_TERM, ' ').trim();
+  expr = expr.replace(JOB_IF_FULL_BATTERY_TERM, '').trim();
   // One balanced outer paren pair at a time — `(A || B)` is the live spelling.
   for (;;) {
     if (!expr.startsWith('(') || !expr.endsWith(')')) break;

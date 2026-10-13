@@ -74,7 +74,7 @@ interface Block {
     firstLine: string;
 }
 
-function collectBlocks(lines: string[]): Block[] {
+function collectBlocks(lines: string[], file: string = FILE): Block[] {
     const blocks: Block[] = [];
     for (let i = 0; i < lines.length; i++) {
         if (!lines[i].trimStart().startsWith('/**')) continue;
@@ -82,7 +82,7 @@ function collectBlocks(lines: string[]): Block[] {
         // A one-line block closes on its own line; otherwise walk to the close.
         if (!lines[i].trimStart().slice(3).includes('*/')) {
             while (j < lines.length && !lines[j].includes('*/')) j++;
-            if (j >= lines.length) throw new Error(`${FILE}: unterminated TSDoc block opened at line ${i + 1}`);
+            if (j >= lines.length) throw new Error(`${file}: unterminated TSDoc block opened at line ${i + 1}`);
         }
         blocks.push({ start: i + 1, end: j + 1, firstLine: lines[i].trim() });
         i = j;
@@ -93,9 +93,9 @@ function collectBlocks(lines: string[]): Block[] {
 const BLOCKS = collectBlocks(LINES);
 
 /** True when only blank lines separate `a`'s close from `b`'s open. */
-function stacked(a: Block, b: Block): boolean {
+function stacked(a: Block, b: Block, lines: string[] = LINES): boolean {
     for (let n = a.end + 1; n < b.start; n++) {
-        if (LINES[n - 1].trim() !== '') return false;
+        if (lines[n - 1].trim() !== '') return false;
     }
     return b.start > a.end;
 }
@@ -126,3 +126,32 @@ describe('rest-server.ts docblock position', () => {
         ).toBe('');
     });
 });
+
+/**
+ * [#23050 slice 1] The module `registerDataActionEndpoints`' body moved to. It
+ * took one of this file's blocks with it (the `ServerScopedDataRequest`
+ * docblock), so it is read under the same rule rather than leaving that block
+ * outside every pin. Its floor is its own measured count: the module header,
+ * the moved alias's block, the host interface's and the function's.
+ */
+const MOVED_FILES: ReadonlyArray<{ file: string; minBlocks: number }> = [
+    { file: 'data-action-routes.ts', minBlocks: 4 },
+];
+
+for (const { file, minBlocks } of MOVED_FILES) {
+    describe(`${file} docblock position (moved out of ${FILE})`, () => {
+        const lines = readFileSync(new URL(`./${file}`, import.meta.url), 'utf8').split('\n');
+        const blocks = collectBlocks(lines, file);
+
+        it(`finds at least ${minBlocks} TSDoc blocks to judge (anti-vacuity floor)`, () => {
+            expect(blocks.length).toBeGreaterThanOrEqual(minBlocks);
+        });
+
+        it('binds every TSDoc block to a declaration — none is stacked above another', () => {
+            const orphans = blocks.slice(0, -1)
+                .filter((block, index) => stacked(block, blocks[index + 1], lines))
+                .map((block) => `  L${block.start}-${block.end}: ${block.firstLine}`);
+            expect(orphans.join('\n')).toBe('');
+        });
+    });
+}

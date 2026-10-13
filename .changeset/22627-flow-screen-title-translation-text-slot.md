@@ -10,7 +10,7 @@ Clause-②: no (narrowing)
 
 **BREAKING**: an accept-set narrowing on a published authoring surface, shipped as `minor` under the launch-window convention for accept-set narrowings.
 
-**Why.** The flow engine picks three translated templates in the run's locale and renders each through the one text-slot renderer, the `{{ }}` dialect: a screen's heading (`title`), its body text (`description`) and a refusing `end` node's `message`. The body text and the message refused a single-brace token. The heading accepted it and drew it as literal text, so `title: 'Welcome, {name}'` showed `Welcome, {name}`, and nothing was reported when the bundle was validated, saved or parsed. An earlier entry in this release says a translated screen `title` is not judged by the text-slot rule yet; that describes the face before this change.
+**Why.** The flow engine picks three translated templates in the run's locale and renders each through the one text-slot renderer, the `{{ }}` dialect: a screen's heading (`title`), its body text (`description`) and a refusing `end` node's `message`. The body text and the message refused a single-brace token. The heading accepted it and drew it as literal text, so `title: 'Welcome, {name}'` showed `Welcome, {name}`, and nothing was reported when the bundle was validated, saved or parsed.
 
 **What is refused.** A translated screen heading that the text-slot judge (`textSlotTemplateRefusal`) refuses: a single-brace `{token}`, and a `{{ }}` hole over a `$` name the flow engine does not bind. `TranslationDataSchema` and the `translation` metadata item refuse it at the key's path, with the words the source heading gets from `ScreenConfigSchema`.
 

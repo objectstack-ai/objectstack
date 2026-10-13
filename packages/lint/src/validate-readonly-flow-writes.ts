@@ -320,15 +320,14 @@ export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFind
             message:
               `writes readonly field '${fieldName}' of object '${objectName}', which a runAs:'${runAs}' ` +
               (isCreate ? `INSERT silently strips, ${READONLY_INSERT_STRIP_OUTCOME}` : 'UPDATE silently strips'),
+            // [#22161] One remedy line per verb. Why runAs:'system' is the
+            // intended channel, and why a beforeInsert stamp survives the strip,
+            // are `os explain flow-update-readonly-field`.
             hint: isCreate
-              ? `Seeding a readonly column at create time is a SYSTEM act: declare the flow runAs:'system' ` +
-                `(the intended channel — readonly governs the end-user/API surface, not trusted system ` +
-                `writers). Otherwise remove '${fieldName}' from this create_record node, or stamp it in a ` +
-                `beforeInsert hook on '${objectName}' — a hook-assigned key is the hook's write, not a ` +
-                `caller-supplied one, and survives the strip.`
-              : `If automation is meant to maintain this field, declare the flow runAs:'system' (the intended ` +
-                `channel — readonly governs the end-user/API surface, not trusted system writers). Otherwise ` +
-                `remove '${fieldName}' from this update_record node.`,
+              ? `Declare the flow runAs:'system', stamp '${fieldName}' in a beforeInsert hook on '${objectName}', ` +
+                `or remove it from this create_record node`
+              : `Declare the flow runAs:'system' if automation maintains '${fieldName}', or remove it from this ` +
+                `update_record node`,
           });
         } else if (meta.readonlyWhen && !isCreate) {
           // `!isCreate`: the conditional lock has no prior record to evaluate on
@@ -347,13 +346,13 @@ export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFind
             message:
               `writes readonlyWhen field '${fieldName}' of object '${objectName}', which a runAs:'${runAs}' ` +
               `UPDATE silently strips ${READONLY_WHEN_STRIP_SCOPE}`,
+            // [#22161] One remedy line: the two routes, and the refusal of
+            // elevation. Why a hook-derived value lands on a locked record, the
+            // drop-the-field alternative and that the warning never blocks a
+            // build are `os explain flow-update-readonly-when-field`.
             hint:
-              `Elevation is not a workaround here: unlike the static readonly strip, the conditional lock ` +
-              `is NOT waived by a system context, so runAs:'system' strips this field on a locked record ` +
-              `exactly as this run does. Either confirm this node only targets records whose readonlyWhen ` +
-              `predicate is FALSE, or derive '${fieldName}' in a beforeUpdate hook on '${objectName}' - a ` +
-              `hook-derived value is not caller-supplied and does land, even on a locked record. Otherwise ` +
-              `remove '${fieldName}' from this update_record node. This warning never blocks a build.`,
+              `Derive '${fieldName}' in a beforeUpdate hook on '${objectName}', or target only records whose ` +
+              `readonlyWhen predicate is FALSE; the lock is NOT waived by a system context`,
           });
         }
       }

@@ -344,7 +344,7 @@ business logic as **AI-exposed Actions**, wire domain knowledge through
 ## Platform agents — reference only ☁️
 
 The `agent` type is **closed** to third parties (`allowRuntimeCreate:false`,
-`allowOrgOverride:false`; ADR-0063 §2) and `os g agent` is retired: a
+`allowEnvironmentOverlay:false`; ADR-0063 §2) and `os g agent` is retired: a
 stack-authored agent is filtered out of `listAgents()`, refused outright by
 `loadAgent()`, and 404s on chat. You extend the platform with **skills**, never
 by adding an agent. `AgentSchema`'s full field list is in

@@ -70,6 +70,40 @@ import { RestServer } from './rest-server.js';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SOURCE = readFileSync(resolve(HERE, 'rest-server.ts'), 'utf8');
 
+/**
+ * [#23050 slice 1] The files this census reads. `RestServer#registerDataActionEndpoints`'
+ * body moved, unedited, to `data-action-routes.ts`, and its nine sites with it: they
+ * are still `this.resolveExecCtx(environmentId, req)` on a `RestServer` route, so
+ * they are still this census's population. A site is therefore identified by
+ * `file:line`, never by a line alone.
+ */
+const SITE_FILES = ['rest-server.ts', 'data-action-routes.ts'] as const;
+const SOURCES = new Map<string, string>(SITE_FILES.map((file) => [
+    file, file === 'rest-server.ts' ? SOURCE : readFileSync(resolve(HERE, file), 'utf8'),
+]));
+const siteKey = (file: string, line: number) => `${file}:${line}`;
+
+/**
+ * The one frame in `rest-server.ts` that is NOT a consumer: the host literal
+ * `registerDataActionEndpoints` hands the moved body forwards each member to the
+ * server with `(...a) => this.<member>(...a)`, so a moved site's stack shows that
+ * forwarder above the site itself. The site is the first censused frame that is
+ * not it. Found by its spelling, so a respelt forwarder is a control failure in
+ * §2 rather than every moved site silently attributed to it.
+ */
+const FORWARDER_LINE = SOURCE.split('\n').findIndex((l) =>
+    l.includes('resolveExecCtx: (...a) => this.resolveExecCtx(...a),')) + 1;
+const FORWARDER = siteKey('rest-server.ts', FORWARDER_LINE);
+
+/** The census site a `resolveExecCtx` call came from, read off its stack. */
+function siteOfStack(stack: string): string | undefined {
+    for (const m of stack.matchAll(/(rest-server|data-action-routes)\.ts:(\d+):\d+/g)) {
+        const key = siteKey(`${m[1]}.ts`, Number(m[2]));
+        if (key !== FORWARDER) return key;
+    }
+    return undefined;
+}
+
 const BASE = '/api/v1';
 type Handler = (req: any, res: any) => any;
 
@@ -110,15 +144,17 @@ type Handler = (req: any, res: any) => any;
  * the whole file, so it cannot see a PARTIAL conversion and no pin there failed
  * while those four sites stood. §7 is what closes that gap for this file.
  */
-function siteTable(): { line: number; caught: boolean; nextLine: string }[] {
-    const lines = SOURCE.split('\n');
-    const out: { line: number; caught: boolean; nextLine: string }[] = [];
-    lines.forEach((text, i) => {
-        if (!text.includes('this.resolveExecCtx(environmentId, req)')) return;
-        const caught = text.includes('.catch(') || (lines[i + 1] ?? '').trim().startsWith('.catch(');
-        const nextLine = (lines[i + (caught && !text.includes('.catch(') ? 2 : 1)] ?? '').trim();
-        out.push({ line: i + 1, caught, nextLine });
-    });
+function siteTable(): { key: string; file: string; line: number; caught: boolean; nextLine: string }[] {
+    const out: { key: string; file: string; line: number; caught: boolean; nextLine: string }[] = [];
+    for (const [file, source] of SOURCES) {
+        const lines = source.split('\n');
+        lines.forEach((text, i) => {
+            if (!text.includes('this.resolveExecCtx(environmentId, req)')) return;
+            const caught = text.includes('.catch(') || (lines[i + 1] ?? '').trim().startsWith('.catch(');
+            const nextLine = (lines[i + (caught && !text.includes('.catch(') ? 2 : 1)] ?? '').trim();
+            out.push({ key: siteKey(file, i + 1), file, line: i + 1, caught, nextLine });
+        });
+    }
     return out;
 }
 
@@ -213,13 +249,13 @@ function makeServer(protocol: any) {
 function instrument(ctxValue: any) {
     const proto: any = (RestServer as any).prototype;
     const original = proto.resolveExecCtx;
-    const hits = new Map<string, Set<number>>();
+    const hits = new Map<string, Set<string>>();
     const state = { route: '' };
     proto.resolveExecCtx = async function () {
-        const m = (new Error().stack ?? '').match(/rest-server\.ts:(\d+):\d+/);
-        if (m) {
+        const site = siteOfStack(new Error().stack ?? '');
+        if (site) {
             if (!hits.has(state.route)) hits.set(state.route, new Set());
-            hits.get(state.route)!.add(Number(m[1]));
+            hits.get(state.route)!.add(site);
         }
         return ctxValue === undefined ? undefined : { ...ctxValue };
     };
@@ -256,7 +292,7 @@ function paramsFor(pattern: string, type: string, name: string) {
     return params;
 }
 
-type Row = { route: string; sites: number[] } & Observed;
+type Row = { route: string; sites: string[] } & Observed;
 
 /**
  * Drive every mounted route once.
@@ -276,7 +312,7 @@ async function sweep(ctxValue: any, mount: 'FULL' | 'ISOLATED', doc: any = OBJEC
         probe.state.route = key;
         const [method, pattern] = key.split(' ');
         const observed = await call(handler, method, pattern, paramsFor(pattern, type, doc.name));
-        rows.push({ route: key, sites: [...(probe.hits.get(key) ?? [])].sort((a, b) => a - b), ...observed });
+        rows.push({ route: key, sites: [...(probe.hits.get(key) ?? [])].sort(), ...observed });
     }
     probe.restore();
     return rows;
@@ -486,8 +522,21 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // naming the seam is the point of the sentence — and the sentence
         // moving only the mention count is this control working: a site was not
         // added, and the number that tracks sites did not move.
+        //
+        // [#23050 slice 1] 62 sites UNCHANGED / 77 → 81 mentions — a MOVE, and
+        // the seam that carries it. `registerDataActionEndpoints`' body left
+        // `rest-server.ts` for `data-action-routes.ts` with its nine BARE sites
+        // (and the `ServerScopedDataRequest` docblock's one prose mention), so
+        // this census now reads both files: 53 + 9 = 62 sites. The four new
+        // mentions are the seam itself, none of them a consumer — the host
+        // literal's forwarder (`resolveExecCtx: (...a) => this.resolveExecCtx(...a)`,
+        // two) and the host interface's member (`resolveExecCtx:
+        // RestServer['resolveExecCtx']`, two). The forwarder is the one
+        // `rest-server.ts` frame `siteOfStack` steps over; the control below
+        // proves it is still where that spelling says it is.
         expect(SITES.length).toBe(62);
-        expect(SOURCE.split('resolveExecCtx').length - 1).toBe(77);
+        expect([...SOURCES.values()].reduce((n, text) => n + text.split('resolveExecCtx').length - 1, 0)).toBe(81);
+        expect(FORWARDER_LINE, 'the host literal\'s resolveExecCtx forwarder was respelt or removed').toBeGreaterThan(0);
     });
 
     it('the split is 16 locally caught / 46 bare — NOT 12 / 46, which does not add to 62', () => {
@@ -501,7 +550,7 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // [commit cc837dbfe] The new site is BARE, and that is a decision the next case
         // enforces: a locally-caught site sitting behind the shared floor would
         // be the first of its kind and would break the structural claim below.
-        const sameLine = CAUGHT.filter((s) => SOURCE.split('\n')[s.line - 1].includes('.catch('));
+        const sameLine = CAUGHT.filter((s) => SOURCES.get(s.file)!.split('\n')[s.line - 1].includes('.catch('));
         expect(sameLine.length).toBe(12);
         expect(CAUGHT.length).toBe(16);
         expect(BARE.length).toBe(46);
@@ -526,7 +575,7 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
 describe('[#13160] §3 the 46 bare sites — driven, every one of them', () => {
     it('all 46 are reached by the mounted route table, so none is classified by inference', async () => {
         const reached = sitesOf(await sweep(undefined, 'FULL'));
-        const unreached = BARE.map((s) => s.line).filter((l) => !reached.has(l));
+        const unreached = BARE.map((s) => s.key).filter((k) => !reached.has(k));
         // ⛔ A bare site that stopped being reachable must show up as a
         // shrinking census, never as a row silently inherited from a neighbour.
         expect(unreached).toEqual([]);
@@ -535,7 +584,7 @@ describe('[#13160] §3 the 46 bare sites — driven, every one of them', () => {
     it('an absent context is the ANONYMOUS SUBJECT at all 46: 401 UNAUTHENTICATED, and the same instrument serves an entitled caller', async () => {
         const fault = await sweep(undefined, 'FULL');
         const control = await sweep(ENTITLED, 'FULL');
-        const bareLines = new Set(BARE.map((s) => s.line));
+        const bareLines = new Set(BARE.map((s) => s.key));
         const controlByRoute = new Map(control.map((r) => [r.route, r]));
 
         const rows = fault.filter((r) => r.sites.some((l) => bareLines.has(l)));
@@ -557,7 +606,7 @@ describe('[#13160] §3 the 46 bare sites — driven, every one of them', () => {
 
     it('and the control leg really can serve a 2xx — not merely "a different refusal"', async () => {
         const control = await sweep(ENTITLED, 'FULL');
-        const bareLines = new Set(BARE.map((s) => s.line));
+        const bareLines = new Set(BARE.map((s) => s.key));
         const served = control.filter((r) => r.sites.some((l) => bareLines.has(l)) && r.status >= 200 && r.status < 300);
         expect(served.length).toBeGreaterThanOrEqual(30);
     }, 120_000);
@@ -737,7 +786,7 @@ describe('[#13160] §6 the boundary of this census', () => {
         const wrapper = SOURCE.split('\n').findIndex((l) =>
             l.includes('return this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);'));
         expect(wrapper).toBeGreaterThan(0);
-        expect(SITES.some((s) => s.line === wrapper + 1)).toBe(true);
+        expect(SITES.some((s) => s.key === siteKey('rest-server.ts', wrapper + 1))).toBe(true);
     });
 });
 
@@ -756,20 +805,23 @@ describe('[#13160] §6 the boundary of this census', () => {
 // ---------------------------------------------------------------------------
 
 /** The catch argument at each caught site, read from source, both layouts. */
-function catchArguments(): { line: number; arg: string; layout: 'inline' | 'continuation' }[] {
-    const lines = SOURCE.split('\n');
-    const out: { line: number; arg: string; layout: 'inline' | 'continuation' }[] = [];
-    lines.forEach((text, i) => {
-        if (!text.includes('this.resolveExecCtx(environmentId, req)')) return;
-        const inline = /\.catch\(([^)]*(?:\)[^)]*)*)\);?\s*$/.exec(text);
-        if (text.includes('.catch(') && inline) {
-            out.push({ line: i + 1, arg: inline[1].trim(), layout: 'inline' });
-            return;
-        }
-        const next = (lines[i + 1] ?? '').trim();
-        const cont = /^\.catch\((.*)\);$/.exec(next);
-        if (cont) out.push({ line: i + 1, arg: cont[1].trim(), layout: 'continuation' });
-    });
+function catchArguments(): { line: string; arg: string; layout: 'inline' | 'continuation' }[] {
+    // [#23050 slice 1] `line` is the site's `file:line` key, over every censused file.
+    const out: { line: string; arg: string; layout: 'inline' | 'continuation' }[] = [];
+    for (const [file, source] of SOURCES) {
+        const lines = source.split('\n');
+        lines.forEach((text, i) => {
+            if (!text.includes('this.resolveExecCtx(environmentId, req)')) return;
+            const inline = /\.catch\(([^)]*(?:\)[^)]*)*)\);?\s*$/.exec(text);
+            if (text.includes('.catch(') && inline) {
+                out.push({ line: siteKey(file, i + 1), arg: inline[1].trim(), layout: 'inline' });
+                return;
+            }
+            const next = (lines[i + 1] ?? '').trim();
+            const cont = /^\.catch\((.*)\);$/.exec(next);
+            if (cont) out.push({ line: siteKey(file, i + 1), arg: cont[1].trim(), layout: 'continuation' });
+        });
+    }
     return out;
 }
 
@@ -855,13 +907,13 @@ describe('[#13279] §7 every caught resolveExecCtx site re-raises the outage', (
 function instrumentRejecting(err: unknown) {
     const proto: any = (RestServer as any).prototype;
     const original = proto.resolveExecCtx;
-    const hits = new Map<string, Set<number>>();
+    const hits = new Map<string, Set<string>>();
     const state = { route: '' };
     proto.resolveExecCtx = async function () {
-        const m = (new Error().stack ?? '').match(/rest-server\.ts:(\d+):\d+/);
-        if (m) {
+        const site = siteOfStack(new Error().stack ?? '');
+        if (site) {
             if (!hits.has(state.route)) hits.set(state.route, new Set());
-            hits.get(state.route)!.add(Number(m[1]));
+            hits.get(state.route)!.add(site);
         }
         throw err;
     };
@@ -877,7 +929,7 @@ async function sweepRejecting(err: unknown, mount: 'FULL' | 'ISOLATED'): Promise
         probe.state.route = key;
         const [method, pattern] = key.split(' ');
         const observed = await call(handler, method, pattern, paramsFor(pattern, 'object', OBJECT_DOC.name));
-        rows.push({ route: key, sites: [...(probe.hits.get(key) ?? [])].sort((a, b) => a - b), ...observed });
+        rows.push({ route: key, sites: [...(probe.hits.get(key) ?? [])].sort(), ...observed });
     }
     probe.restore();
     return rows;
@@ -1000,13 +1052,13 @@ describe('[#13279] §8 an outage at the four continuation sites is not served as
 function instrumentSelective(err: unknown, ctxValue: any, failOrdinal: number) {
     const proto: any = (RestServer as any).prototype;
     const original = proto.resolveExecCtx;
-    const hits = new Map<string, Set<number>>();
+    const hits = new Map<string, Set<string>>();
     const state = { route: '', reads: 0 };
     proto.resolveExecCtx = async function () {
-        const m = (new Error().stack ?? '').match(/rest-server\.ts:(\d+):\d+/);
-        if (m) {
+        const site = siteOfStack(new Error().stack ?? '');
+        if (site) {
             if (!hits.has(state.route)) hits.set(state.route, new Set());
-            hits.get(state.route)!.add(Number(m[1]));
+            hits.get(state.route)!.add(site);
         }
         state.reads += 1;
         if (state.reads === failOrdinal) throw err;
@@ -1049,7 +1101,7 @@ async function sweepSelective(failOrdinal: number, doc: any, type: string) {
         probe.state.reads = 0;
         const [method, pattern] = key.split(' ');
         const observed = await call(handler, method, pattern, paramsFor(pattern, type, doc.name));
-        rows.push({ route: key, sites: [...(probe.hits.get(key) ?? [])].sort((a, b) => a - b), ...observed });
+        rows.push({ route: key, sites: [...(probe.hits.get(key) ?? [])].sort(), ...observed });
     }
     probe.restore();
     return { rows, reads };
@@ -1059,18 +1111,19 @@ async function sweepSelective(failOrdinal: number, doc: any, type: string) {
 const listRow = (rows: Row[]) =>
     rows.find((r) => r.route.startsWith('GET ') && r.route.endsWith('/meta/:type'));
 
-// An ORG-OVERRIDABLE type, so the org-scope question is not vacuous — asserted
-// against the registry in the first CONTROL rather than trusted here.
+// One of the five overlay-enabled types — the set an organization reached a
+// read for before ADR-0131 D6 — so the org-scope question is not vacuous;
+// asserted against the registry in the first CONTROL rather than trusted here.
 const ORG_SCOPED_TYPE = 'dashboard';
 const ORG_SCOPED_DOC = { name: 'ops', type: 'dashboard', widgets: [] };
 
 describe('[#13538] §9 a PARTIAL outage is not served as an org-unscoped 200', () => {
-    it('CONTROL: this section drives an ORG-OVERRIDABLE type; the type §8 drives is env-wide BY DESIGN', () => {
+    it('CONTROL: this section drives an overlay-enabled type (org-scoped before D6); the type §8 drives is env-wide BY DESIGN', () => {
         // The second half is why §8's green is not coverage of this card: on
         // `object` no organization was ever read, so no fault model whatsoever
         // could make §8 observe an org-scope difference on the type it sweeps.
         const declares = (type: string) =>
-            DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === type)?.allowOrgOverride === true;
+            DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === type)?.allowEnvironmentOverlay === true;
         expect({ driven: declares(ORG_SCOPED_TYPE), section8: declares(OBJECT_DOC.type) })
             .toEqual({ driven: true, section8: false });
     });

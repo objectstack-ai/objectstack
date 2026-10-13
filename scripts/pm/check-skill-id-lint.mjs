@@ -20,13 +20,43 @@
  *
  * ## What it scans
  *
- * Every .md file under .claude/skills/pm-dispatch/ (the PM operating protocol,
- * including its references/), plus .claude/agents/os-dev.md (the dev-side twin)
- * and AGENTS.md (the repo-wide agent instruction file, rewritten to the same
- * principles-only standard). The pattern is /#[0-9]{3,}/ — real issue/PR numbers
- * in this repo are 3+ digits, while placeholders (`#<n>`, `#N`, `epic:#<n>`),
- * Prime-Directive cross-references (`#14`) and small literals (`#12 #34` in the
+ * Two roots and two files. The internal corpus: every .md file under
+ * .claude/skills/pm-dispatch/ (the PM operating protocol, including its
+ * references/), plus .claude/agents/os-dev.md (the dev-side twin) and AGENTS.md
+ * (the repo-wide agent instruction file, rewritten to the same principles-only
+ * standard). The published catalog: every .md file under skills/ — the text
+ * `npx skills add` and `@objectstack/skills` ship into customer projects. The
+ * ruling above applies there a fortiori: that reader is a customer's agent, with
+ * no tool that resolves an issue number into this repository's tracker, so a
+ * citation is a lookup it cannot even attempt, in the one text it was handed to
+ * act on. The maintainer added it on 2026-10-12 as a widening of THIS gate's
+ * scan set, not as a new gate.
+ *
+ * The pattern is /#[0-9]{3,}/ — real issue/PR numbers in this repo are 3+
+ * digits, while placeholders (`#<n>`, `#N`, `epic:#<n>`), Prime-Directive
+ * cross-references (`#14`) and small literals (`#12 #34` in the
  * argument-syntax example) stay legal.
+ *
+ * ## The hex-colour boundary — published root only
+ *
+ * The pattern cannot tell a citation from a CSS hex colour whose first three
+ * characters are digits, and the published catalog teaches colours. On the tree
+ * that widened the scan set it carried two, and no citation at all:
+ * `color: '#3498db'` (a select option, skills/objectstack-data) and
+ * `primaryColor: '#4169E1'` (branding, skills/objectstack-ui). The bare pattern
+ * would have landed the widening red on both.
+ *
+ * So under skills/ ONLY, a match whose digit run continues straight into a
+ * letter or an underscore is not counted (`NOT_A_CITATION_TAIL`): the digits
+ * are the head of a longer word and name no number. A citation keeps a
+ * non-word neighbour (`#1234.`, `(#1234)`, `#1234,`, end of line) and stays
+ * red. The internal corpus keeps the bare pattern — it teaches no colours, and
+ * its semantics are not this widening's to change.
+ *
+ * ⚠️ The boundary that remains, named rather than excluded: a colour whose hex
+ * digits are ALL decimal (`#000000`, `#333`) is byte-for-byte a citation and
+ * stays red. The first real one in a published skill is the moment to decide
+ * how to treat that shape, with the hit in hand. The self-test pins it red.
  *
  * ## The legacy-waiver mechanism (LEGACY_EXACT), currently unused
  *
@@ -40,12 +70,13 @@
  * its scan-set addition travel in the same PR. The mechanism stays for the next
  * split rewrite; the self-test exercises it with a synthetic entry.
  *
- * Missing file or empty read is RED, never a pass — a gate that cannot find its
- * input must fail, not skip.
+ * Missing file, unreadable root or empty read is RED, never a pass — a gate
+ * that cannot find its input must fail, not skip. Both roots are held to it.
  */
 
-import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 import { isEntrypoint } from '../invoked-as.mjs';
@@ -53,8 +84,30 @@ import { isEntrypoint } from '../invoked-as.mjs';
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..');
 
 export const SCAN_ROOT = '.claude/skills/pm-dispatch';
+// The published catalog (see "What it scans"). Walked with the same walker.
+export const PUBLISHED_SCAN_ROOT = 'skills';
 export const EXTRA_FILES = ['.claude/agents/os-dev.md', 'AGENTS.md'];
 export const ID_PATTERN = /#[0-9]{3,}/g;
+// Under PUBLISHED_SCAN_ROOT only: the character right after a match that makes
+// it the head of a longer word (a hex colour), not a citation. See the header.
+export const NOT_A_CITATION_TAIL = /^[A-Za-z_]$/;
+
+/**
+ * The published root, declared for `scripts/pm/dispatch-gates.mjs`.
+ *
+ * That tool derives a card's gate list from the path literals in each gate's
+ * own source, and refuses a literal with no separator as too generic to match
+ * with — so `PUBLISHED_SCAN_ROOT` above, a bare top-level word, reaches no card
+ * at all. A declared subtree is the form that does, and this one names exactly
+ * the population `run` reads: .md files under skills/, at any depth (the
+ * catalog's README.md at its top included), and not the catalog's .json.
+ *
+ * ⚠️ Provenance, NOT a lookup key: nothing reads this array to walk; the glob
+ * form handed to the walker would name a directory that does not exist. The
+ * literal is written out because a computed one is invisible to the text scan
+ * it exists for. The self-test pins both halves.
+ */
+export const ROOT_DIR_WATCH_HINTS = ['skills/**/*.md'];
 
 /**
  * The repo-ROOT files above, declared for `scripts/pm/dispatch-gates.mjs`
@@ -115,53 +168,70 @@ export function verdictFor(rel, matchCount) {
   return { ok: true };
 }
 
-function run() {
-  const targets = [];
-  try {
-    targets.push(...mdFilesUnder(join(REPO_ROOT, SCAN_ROOT)));
-  } catch {
-    console.error(`✗ check-skill-id-lint: cannot read ${SCAN_ROOT} — red, not a skip.`);
-    process.exit(1);
+// The citations in `text`, a file (or one line of a file) at repo path `rel`.
+// The hex-colour boundary applies under the published root and nowhere else.
+export function citationCount(text, rel) {
+  const published = rel.startsWith(`${PUBLISHED_SCAN_ROOT}/`);
+  let count = 0;
+  for (const m of text.matchAll(ID_PATTERN)) {
+    if (published && NOT_A_CITATION_TAIL.test(text.charAt(m.index + m[0].length))) continue;
+    count++;
   }
-  for (const extra of EXTRA_FILES) targets.push(join(REPO_ROOT, extra));
+  return count;
+}
 
-  let failed = 0;
-  let scanned = 0;
+// The scan over any tree laid out like this repository: `run` hands it the
+// repo root, the self-test a fixture tree — so the self-test drives the walk of
+// each root, not only the per-file verdict.
+export function lintTree(root) {
+  const failures = []; // { msg, lines } — `lines` names the offending lines
+  const scanned = [];
+  const targets = [];
+  for (const dir of [SCAN_ROOT, PUBLISHED_SCAN_ROOT]) {
+    try {
+      targets.push(...mdFilesUnder(join(root, dir)));
+    } catch {
+      failures.push({ msg: `cannot read ${dir} — red, not a skip.`, lines: [] });
+    }
+  }
+  for (const extra of EXTRA_FILES) targets.push(join(root, extra));
+
   for (const abs of targets) {
-    const rel = relative(REPO_ROOT, abs).replace(/\\/g, '/');
+    const rel = relative(root, abs).replace(/\\/g, '/');
     let text;
     try {
       text = readFileSync(abs, 'utf8');
     } catch {
-      console.error(`✗ check-skill-id-lint: cannot read ${rel} — red, not a skip.`);
-      failed++;
+      failures.push({ msg: `cannot read ${rel} — red, not a skip.`, lines: [] });
       continue;
     }
     if (text.length === 0) {
-      console.error(`✗ check-skill-id-lint: ${rel} read as empty — red, not a skip.`);
-      failed++;
+      failures.push({ msg: `${rel} read as empty — red, not a skip.`, lines: [] });
       continue;
     }
-    scanned++;
-    const count = (text.match(ID_PATTERN) ?? []).length;
-    const v = verdictFor(rel, count);
+    scanned.push(rel);
+    const v = verdictFor(rel, citationCount(text, rel));
     if (!v.ok) {
-      failed++;
-      console.error(`✗ check-skill-id-lint: ${v.msg}`);
       // name the first few offending lines so the fix needs no second scan
-      let shown = 0;
-      const lines = text.split('\n');
-      for (let i = 0; i < lines.length && shown < 5; i++) {
-        if (ID_PATTERN.test(lines[i])) {
-          console.error(`    ${rel}:${i + 1}: ${lines[i].trim().slice(0, 120)}`);
-          shown++;
-        }
-        ID_PATTERN.lastIndex = 0;
+      const lines = [];
+      const all = text.split('\n');
+      for (let i = 0; i < all.length && lines.length < 5; i++) {
+        if (citationCount(all[i], rel) > 0) lines.push(`${rel}:${i + 1}: ${all[i].trim().slice(0, 120)}`);
       }
+      failures.push({ msg: v.msg, lines });
     }
   }
-  if (failed) process.exit(1);
-  console.log(`✓ check-skill-id-lint: ${scanned} file(s) clean (pattern ${ID_PATTERN}).`);
+  return { failures, scanned };
+}
+
+function run() {
+  const { failures, scanned } = lintTree(REPO_ROOT);
+  for (const f of failures) {
+    console.error(`✗ check-skill-id-lint: ${f.msg}`);
+    for (const line of f.lines) console.error(`    ${line}`);
+  }
+  if (failures.length) process.exit(1);
+  console.log(`✓ check-skill-id-lint: ${scanned.length} file(s) clean (pattern ${ID_PATTERN}).`);
 }
 
 // Returned by `selfTest()` only after its verdict is printed. The dispatch
@@ -211,6 +281,15 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'and the declaration names no file this gate does not scan': 1,
   'AGENTS.md is the root file it declares': 1,
   'the declared form is NOT an EXTRA_FILES entry': 1,
+  'published root: a .md carrying #1234 -> red': 1,
+  'published root: a .md carrying none -> green, and walked': 1,
+  'published root: a colour whose digits run into a letter -> green': 1,
+  'published root: an all-decimal colour stays red (the named boundary)': 1,
+  'internal corpus keeps the bare pattern: the same colour -> red': 1,
+  'published root missing -> red, not a skip': 1,
+  'the published root declares a root-dir watch hint': 1,
+  'and that declaration names no root this gate does not walk': 1,
+  'the declared form is NOT the walk root itself': 1,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -219,9 +298,40 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // the literal above, so the roster falls below this number; the table
 // cross-check in the floor block is the other half, and names WHICH label
 // collided.
-const SELF_TEST_BATTERY_FLOOR = 14;
+const SELF_TEST_BATTERY_FLOOR = 23;
 
 function selfTest() {
+  // The walk over each root, driven through `lintTree` on throwaway trees: a
+  // verdict on a bare count cannot show that skills/ is walked at all.
+  const lintFixture = (files) => {
+    const root = mkdtempSync(join(tmpdir(), 'skill-id-lint-'));
+    try {
+      for (const [rel, text] of Object.entries(files)) {
+        mkdirSync(dirname(join(root, rel)), { recursive: true });
+        writeFileSync(join(root, rel), text);
+      }
+      return lintTree(root);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  };
+  const internal = {
+    '.claude/skills/pm-dispatch/SKILL.md': 'the protocol\n',
+    '.claude/agents/os-dev.md': 'the dev twin\n',
+    'AGENTS.md': 'the repo rules\n',
+  };
+  const redFor = (result, rel) => result.failures.some((f) => f.msg.startsWith(`${rel}:`));
+  const cited = lintFixture({ ...internal, 'skills/demo/SKILL.md': 'clean\n', 'skills/demo/rules/x.md': 'fixed in #1234.\n' });
+  const clean = lintFixture({ ...internal, 'skills/demo/rules/x.md': 'the lesson, self-contained\n' });
+  const colour = lintFixture({ ...internal, 'skills/demo/SKILL.md': "color: '#3498db', primaryColor: '#4169E1'\n" });
+  const decimal = lintFixture({ ...internal, 'skills/demo/SKILL.md': "color: '#000000'\n" });
+  const internalColour = lintFixture({
+    ...internal,
+    '.claude/skills/pm-dispatch/SKILL.md': "color: '#3498db'\n",
+    'skills/demo/SKILL.md': 'clean\n',
+  });
+  const missing = lintFixture(internal);
+
   // The waiver mechanism is tested with a synthetic entry so it stays covered
   // while LEGACY_EXACT is empty (see header).
   LEGACY_EXACT.set('synthetic-legacy.md', 81);
@@ -247,6 +357,20 @@ function selfTest() {
     // the glob form appearing there would make this gate read a path that does
     // not exist — red on a missing input, for a file that is fine.
     ['the declared form is NOT an EXTRA_FILES entry', EXTRA_FILES.some((f) => ROOT_FILE_WATCH_HINTS.includes(f)), false],
+    // The published root, walked for real. The red row names the file, so a
+    // red raised by some other fixture file cannot stand in for it.
+    ['published root: a .md carrying #1234 -> red', redFor(cited, 'skills/demo/rules/x.md') && cited.failures.length === 1, true],
+    ['published root: a .md carrying none -> green, and walked', clean.failures.length === 0 && clean.scanned.includes('skills/demo/rules/x.md') && clean.scanned.length === 4, true],
+    ['published root: a colour whose digits run into a letter -> green', colour.failures.length === 0 && colour.scanned.includes('skills/demo/SKILL.md'), true],
+    ['published root: an all-decimal colour stays red (the named boundary)', redFor(decimal, 'skills/demo/SKILL.md'), true],
+    ['internal corpus keeps the bare pattern: the same colour -> red', redFor(internalColour, '.claude/skills/pm-dispatch/SKILL.md') && internalColour.failures.length === 1, true],
+    ['published root missing -> red, not a skip', missing.failures.some((f) => f.msg === `cannot read ${PUBLISHED_SCAN_ROOT} — red, not a skip.`), true],
+    // The dispatch-gates declaration for the published root. Read by another
+    // tool entirely, so a wrong one runs green here and shows up only as a
+    // skills/ card dispatched with this gate absent from the brief.
+    ['the published root declares a root-dir watch hint', ROOT_DIR_WATCH_HINTS.includes(`${PUBLISHED_SCAN_ROOT}/**/*.md`), true],
+    ['and that declaration names no root this gate does not walk', ROOT_DIR_WATCH_HINTS.every((h) => h.startsWith(`${PUBLISHED_SCAN_ROOT}/`)), true],
+    ['the declared form is NOT the walk root itself', ROOT_DIR_WATCH_HINTS.includes(PUBLISHED_SCAN_ROOT), false],
   ];
   // The ledger this self-test's floor is evaluated against (#13489).
   const batterySeen = new Map();

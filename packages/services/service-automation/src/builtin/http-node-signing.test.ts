@@ -32,10 +32,14 @@ import { registerHttpNodes } from './http-nodes.js';
  * real receiving endpoint makes. A mocked `fetch` would pin what the node
  * INTENDED to send; the receiver pins what arrived.
  *
- * The refusal cases pin the other half: a secret the author set that did not
- * resolve at run time must stop the call, never let it leave unsigned. An
- * explicitly empty `signingSecret: ''` is NOT that case — it is the documented
- * way to send unsigned on purpose, and it behaves the same on every arm.
+ * The refusal cases pin the other half: a secret the author wrote as a 17.x
+ * template must stop the call, never let it leave signed with the braces or
+ * unsigned. Since #19939 `signingSecret` is a literal, read as written (after
+ * the credential channel), so a `{…}` token in it is refused by the contract
+ * parse at the run — the build doors leave this key to the run, whose
+ * credential store may hold the secret. An explicitly empty
+ * `signingSecret: ''` is the documented way to send unsigned on purpose, and it
+ * behaves the same on every arm.
  */
 
 const SECRET = 'flow-hook-secret';
@@ -202,15 +206,21 @@ describe.each(INLINE_ARMS)('http node signing — $arm arm', ({ durable, messagi
         expectVerifies(req, SECRET);
     });
 
-    it('signs with a secret that arrives through a template', async () => {
+    it('REFUSES, and sends nothing, for a secret written as a template — even with the variable bound', async () => {
+        // [#19939] Until then the template resolved from the flow variable and
+        // signed with it. `signingSecret` is read as written now: the token is
+        // refused, never sent as the secret with its braces.
         const result = await run(
             engineWith(messaging()),
             { ...base(), method: 'POST', signingSecret: '{signing_key}', body: { a: 1 } },
             { signing_key: SECRET },
         );
 
-        expect(result.success).toBe(true);
-        expectVerifies(only(), SECRET);
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('config.signingSecret');
+        expect(result.error).toContain('a single-brace `{…}` token is not resolved here');
+        expect(result.error).not.toContain(SECRET);
+        expect(received).toHaveLength(0);
     });
 
     it('sends NO signature header when the node sets no signingSecret', async () => {
@@ -232,33 +242,28 @@ describe.each(INLINE_ARMS)('http node signing — $arm arm', ({ durable, messagi
         expect(only().headers[SIGNATURE_HEADER_LC]).toBeUndefined();
     });
 
-    it('REFUSES, and sends nothing, when a templated secret resolves to nothing', async () => {
-        // `signing_key` is declared but not supplied: the whole-token template
-        // resolves to no value at all.
-        const result = await run(engineWith(messaging()), {
-            ...base(),
-            method: 'POST',
-            signingSecret: '{signing_key}',
-            body: { a: 1 },
-        });
-
-        expect(result.success).toBe(false);
-        expect(result.error).toContain('signingSecret');
+    it('REFUSES, and sends nothing, for a templated secret whose variable is unbound or empty', async () => {
+        // The 17.x "resolved to nothing" refusals: the token is refused before
+        // any resolution is attempted, so a secret never leaves unsigned.
+        for (const params of [undefined, { signing_key: '' }]) {
+            const result = await run(
+                engineWith(messaging()),
+                { ...base(), method: 'POST', signingSecret: '{signing_key}', body: { a: 1 } },
+                params,
+            );
+            expect(result.success, JSON.stringify(params)).toBe(false);
+            expect(result.error).toContain('config.signingSecret');
+        }
         expect(received).toHaveLength(0);
     });
 
-    it('REFUSES, and sends nothing, when a templated secret resolves to the empty string', async () => {
-        // Only an AUTHORED '' means "unsigned on purpose". A template that
-        // happens to render '' is a secret that did not resolve.
-        const result = await run(
-            engineWith(messaging()),
-            { ...base(), method: 'POST', signingSecret: '{signing_key}', body: { a: 1 } },
-            { signing_key: '' },
-        );
+    it('signs with a literal secret that carries braces in no token position — read as written', async () => {
+        // CONTROL: a literal secret is used byte for byte (only a `{…}` token is refused).
+        const literal = 'pre}fix-{';
+        const result = await run(engineWith(messaging()), { ...base(), method: 'POST', signingSecret: literal, body: { a: 1 } });
 
-        expect(result.success).toBe(false);
-        expect(result.error).toContain('signingSecret');
-        expect(received).toHaveLength(0);
+        expect(result.success).toBe(true);
+        expectVerifies(only(), literal);
     });
 });
 
@@ -301,7 +306,7 @@ describe('http node signing — durable arm with the outbox wired', () => {
         expect(only().headers[SIGNATURE_HEADER_LC]).toBeUndefined();
     });
 
-    it('REFUSES, and enqueues nothing, when a templated secret resolves to nothing', async () => {
+    it('REFUSES, and enqueues nothing, for a secret written as a template', async () => {
         const { outbox, dispatcher, engine } = outboxStack();
         const result = await run(engine, {
             url: `${baseUrl}/hook`,

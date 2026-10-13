@@ -16,7 +16,7 @@ import { explainRule } from './rule-explanations.js';
 // verdict to one line of at most 200 characters — every firing variant this
 // suite exercises, not a chosen few. Run the whole file: those cases read what
 // the cases above fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateFlowFilterTokens: typeof validateFlowFilterTokensUnrecorded = (...args) => {
   const findings = validateFlowFilterTokensUnrecorded(...args);
   fired.push(...findings);
@@ -234,6 +234,38 @@ describe('[#22161] one-line verdicts — flow-filter-token-unknown', () => {
     for (const f of converted) {
       expect(f.message, f.rule).not.toContain('\n');
       expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+});
+
+// [#22161] Slice 14: the `fix:` line. It names the value functions and the
+// placeholder alternative in one line (the run-time refusal names the same
+// functions); the two vocabularies in full are the explanation's, held to the
+// grammar's constants above.
+describe('[#22161] one-line fixes — flow-filter-token-unknown', () => {
+  it('every `fix:` line the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === FLOW_FILTER_TOKEN_UNKNOWN);
+    // Coverage control: the date-function arm, an arm with no suggestion, and
+    // the suggestion arm with and without the method-call note.
+    expect(converted.some((f) => f.hint.includes('is supported only as the whole token'))).toBe(true);
+    expect(converted.some((f) => f.hint.startsWith('Call a flow value function') && !f.hint.includes('Did you mean'))).toBe(true);
+    expect(converted.some((f) => f.hint.includes('Did you mean') && !f.hint.includes('Method/namespace'))).toBe(true);
+    expect(converted.some((f) => f.hint.includes('Method/namespace call syntax is not supported'))).toBe(true);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('the line names the value functions the grammar defines', () => {
+    const [f] = validateFlowFilterTokens(flowStack('{TOMORROW()}'));
+    expect(f.hint).toContain(`(${FLOW_TEMPLATE_VALUE_FUNCTIONS.join(', ')})`);
+  });
+
+  it('`os explain` carries what the `fix:` line no longer says', () => {
+    const text = explainRule(FLOW_FILTER_TOKEN_UNKNOWN)!.paragraphs.join('\n');
+    for (const fact of ['`{$User.Id}`', '`{record.<field>}`', '`{current_user_id}`', 'handed on to ObjectQL']) {
+      expect(text, `explanation names ${fact}`).toContain(fact);
     }
   });
 });

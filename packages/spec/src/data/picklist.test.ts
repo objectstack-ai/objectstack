@@ -200,7 +200,7 @@ describe('picklist — a registered kind and a stack collection', () => {
 
   it('is package-owned: no runtime create, no per-org overlay; `*.picklist.ts` is the prescription', () => {
     expect(entry!.allowRuntimeCreate).toBe(false);
-    expect(entry!.allowOrgOverride).toBe(false);
+    expect(entry!.allowEnvironmentOverlay).toBe(false);
     expect(entry!.filePatterns[0]).toBe('**/*.picklist.ts');
   });
 

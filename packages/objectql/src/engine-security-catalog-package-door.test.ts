@@ -2,7 +2,7 @@
 
 /**
  * [#22203] Every package-declared item of a `security`-domain type that the
- * type registry declares `allowOrgOverride: false` is refused at the metadata
+ * type registry declares `allowEnvironmentOverlay: false` is refused at the metadata
  * save door — and the refusal is the type-level one, fed by the provenance
  * seam, not a lock written for one type.
  *
@@ -12,7 +12,7 @@
  * onto an item a code package ships when the type has no overlay channel
  * (`refusePackagedBaseOverride` in `saveMetaItem` on an environment-scoped
  * kernel, `SysMetadataRepository.assertAllowed`'s `override-artifact` intent on
- * a host-config one), and both read `allowOrgOverride` off
+ * a host-config one), and both read `allowEnvironmentOverlay` off
  * `DEFAULT_METADATA_TYPE_REGISTRY`. What decides "a code package ships it" is
  * `isArtifactBacked`, which asks this engine's SchemaRegistry for an entry a
  * package registered (`getArtifactItem`, `_packageId` provenance).
@@ -31,7 +31,7 @@
  * ## What this file pins
  *
  * The set under test is ENUMERATED FROM THE REGISTRY, not written out: every
- * `domain: 'security'` row with `allowOrgOverride: false`. For each, a real
+ * `domain: 'security'` row with `allowEnvironmentOverlay: false`. For each, a real
  * `ObjectQL` registers a manifest that declares one item through the type's
  * stack collection, and a real `ObjectStackProtocolImplementation` over that
  * engine is asked to save over it — on both topologies, because the two answer
@@ -44,7 +44,7 @@
  *
  * Controls, so the refusals cannot pass for the wrong reason: a position no
  * package declares still saves (the `allowRuntimeCreate` tier is untouched); an
- * `allowOrgOverride: true` type still saves over its packaged item; and the
+ * `allowEnvironmentOverlay: true` type still saves over its packaged item; and the
  * by-name read after a refusal still serves the package's declaration.
  */
 
@@ -61,7 +61,7 @@ const NAME = 'probe_item';
 
 /** The pin's population, read off the registry: every non-overridable `security` type. */
 const SECURITY_NON_OVERRIDABLE = DEFAULT_METADATA_TYPE_REGISTRY
-    .filter((entry) => entry.domain === 'security' && entry.allowOrgOverride === false)
+    .filter((entry) => entry.domain === 'security' && entry.allowEnvironmentOverlay === false)
     .map((entry) => entry.type);
 
 /**
@@ -74,7 +74,7 @@ const BODIES: Record<string, Record<string, unknown>> = {
     capability: { name: NAME, label: 'Probe' },
 };
 
-/** The overlayable control: `allowOrgOverride: true`, declared through a stack collection. */
+/** The overlayable control: `allowEnvironmentOverlay: true`, declared through a stack collection. */
 const OVERLAYABLE_TYPE = 'email_template';
 const OVERLAYABLE_BODY = { name: NAME, label: 'Probe', subject: 'Probe', bodyHtml: '<p>Probe</p>' };
 
@@ -87,6 +87,9 @@ const sysMetadataObject: ServiceObject = {
         name: { name: 'name', label: 'Name', type: 'text' as const, required: true },
         organization_id: { name: 'organization_id', label: 'Org', type: 'text' as const },
         package_id: { name: 'package_id', label: 'Package', type: 'text' as const },
+        // The bundled type's member (#22877) — `sys-metadata.object.ts` declares
+        // it, and an `email_template` write keys its row by it.
+        bundle_member: { name: 'bundle_member', label: 'Bundle Member', type: 'text' as const, maxLength: 100 },
         metadata: { name: 'metadata', label: 'Body', type: 'textarea' as const },
         checksum: { name: 'checksum', label: 'Checksum', type: 'text' as const, maxLength: 71 },
         state: { name: 'state', label: 'State', type: 'text' as const },
@@ -204,7 +207,7 @@ async function boot(topology: Topology) {
     return { engine, protocol, storedRows };
 }
 
-describe('[#22203] security-domain allowOrgOverride:false — the package door is type-level', () => {
+describe('[#22203] security-domain allowEnvironmentOverlay:false — the package door is type-level', () => {
     it('the population is read from the registry, and every member has a fixture', () => {
         // The three the registry declares today. Asserted as a superset so a
         // fourth `security` type joins the pin instead of breaking it — and the
@@ -259,9 +262,9 @@ describe('[#22203] security-domain allowOrgOverride:false — the package door i
         expect(storedRows().map((r: any) => `${r.type}/${r.name}`)).toEqual(['position/env_only_position']);
     });
 
-    it.each(TOPOLOGIES)(`%s: an allowOrgOverride:true type (${OVERLAYABLE_TYPE}) still saves over its packaged item`, async (topology) => {
+    it.each(TOPOLOGIES)(`%s: an allowEnvironmentOverlay:true type (${OVERLAYABLE_TYPE}) still saves over its packaged item`, async (topology) => {
         const entry = DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === OVERLAYABLE_TYPE);
-        expect(entry?.allowOrgOverride).toBe(true);
+        expect(entry?.allowEnvironmentOverlay).toBe(true);
         const { engine, protocol, storedRows } = await boot(topology);
         // The control is only a control if its item is package-declared too.
         expect(engine.registry.getArtifactItem<any>(OVERLAYABLE_TYPE, NAME)?._packageId).toBe(PKG);

@@ -952,7 +952,7 @@ export const AppBrandingSchema = lazySchema(() => strictObject(
   {
   primaryColor: z.string().optional().describe('Primary theme color hex code'),
   accentColor: z.string().optional().describe('Accent color hex code (highlights, active states). Declared to match the objectui ConsoleLayout read of branding.accentColor (inverse-drift fix, liveness audit /).'),
-  logo: z.string().optional().describe('Custom logo URL for this app'),
+  logo: z.string().optional().describe("Custom logo URL for this app: a 1:1 square app icon, SVG preferred, at least 64 px. It is the app's one logo asset — each surface scales it to the size it needs, and there is no second size or wordmark slot."),
   favicon: z.string().optional().describe('Custom favicon URL for this app'),
 }));
 
@@ -1713,9 +1713,11 @@ export const AppSchema = lazySchema(() => strictObject(
 
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package
-   * authors declare lock policy here; the loader translates it
-   * into the private `_lock` envelope at registration time and
-   * strips this block before persistence. See
+   * authors declare lock policy here, in a code package's source;
+   * the loader translates it into the private `_lock` envelope at
+   * registration time and strips this block. The metadata API's
+   * save door does not translate it and refuses it (`400
+   * VALIDATION_ERROR`), so that door never stores it. See
    * `shared/protection.zod.ts`.
    */
   protection: ProtectionSchema.optional().describe(

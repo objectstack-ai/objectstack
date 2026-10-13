@@ -4,6 +4,7 @@ import { afterAll, describe, it, expect } from 'vitest';
 import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { EmailTemplateDefinitionSchema } from '@objectstack/spec/system';
 import { ViewSchema } from '@objectstack/spec/ui';
 import {
   authorWarnedProperties,
@@ -403,25 +404,45 @@ describe('lintLivenessProperties', () => {
   // (webhook sits there the same way) — so that a future regression that
   // re-deadens a prop starts warning again on its own.
   //
-  // That is what happened, by design: ADR-0131 D6/D10 retired the
+  // That happened once, by design: ADR-0131 D6/D10 retired the
   // `sys_email_template` row projection, the only reader of `category` and
-  // `isSystem`, and the ledger grades both `dead`. A template that sets neither
-  // still warns about nothing; each one it sets draws one dead-property
-  // advisory (a boolean only when truthy). #22876 retires both keys in the next
-  // enforce-or-remove batch, which removes these advisories with them.
-  it('warns on an email_template only for the keys the ledger grades dead — `category`, and `isSystem` when truthy (#22876)', () => {
+  // `isSystem`, and the ledger graded both `dead`. Because `category` carried a
+  // schema default, every PARSED template carried it, so the dead-property
+  // advisory fired on every template and no author could clear it.
+  //
+  // #22876 retired both keys (ADR-0049 enforce-or-remove): `retiredKey()`
+  // tombstones, so the parse refuses either with the prescription and a parsed
+  // template carries neither. Their ledger rows stay `dead` (a tombstone keeps
+  // the key in the walked shape), so this lint would still warn on a RAW body
+  // that writes one — but the strict parse refuses that body first, which is
+  // the channel that reaches the author. What this pins is the advisory leaving
+  // the template a parse emits.
+  it('is silent on a parsed email_template — the retired `category` / `isSystem` never reach it (#22876)', () => {
     const base = { name: 'crm.welcome', label: 'Welcome', subject: 'Hi {{user.name}}', bodyHtml: '<p>Welcome</p>' };
 
     expect(lintLivenessProperties({ emailTemplates: [base] })).toEqual([]);
-    expect(lintLivenessProperties({ emailTemplates: [{ ...base, isSystem: false }] })).toEqual([]);
 
-    const withCategory = lintLivenessProperties({ emailTemplates: [{ ...base, category: 'auth' }] });
-    expect(withCategory).toHaveLength(1);
-    expect(ruleOf(withCategory, 'category')).toBe(LIVENESS_DEAD_PROPERTY);
+    // The template a parse emits: every live default materialized, neither
+    // retired key. Before the retirement this same object carried
+    // `category: 'custom'` and drew the advisory.
+    const parsed = EmailTemplateDefinitionSchema.parse(base) as Record<string, unknown>;
+    expect(parsed).not.toHaveProperty('category');
+    expect(parsed).not.toHaveProperty('isSystem');
+    // CONTROL: the parse did materialize the live defaults, so the absence
+    // above is the retirement and not a parse that emitted nothing.
+    expect(parsed.locale).toBe('en-US');
+    expect(parsed.active).toBe(true);
+    expect(lintLivenessProperties({ emailTemplates: [parsed] })).toEqual([]);
 
-    const withSystem = lintLivenessProperties({ emailTemplates: [{ ...base, isSystem: true }] });
-    expect(withSystem).toHaveLength(1);
-    expect(ruleOf(withSystem, 'isSystem')).toBe(LIVENESS_DEAD_PROPERTY);
+    // The parse owns an authored value now: refused, with the prescription.
+    for (const [key, value] of [['category', 'auth'], ['isSystem', true]] as const) {
+      const refused = EmailTemplateDefinitionSchema.safeParse({ ...base, [key]: value });
+      expect(refused.success, key).toBe(false);
+      expect(refused.error?.issues[0]?.path, key).toEqual([key]);
+      expect(refused.error?.issues[0]?.message, key).toMatch(
+        new RegExp(`^\`email_template\\.${key}\` was removed in @objectstack/spec 17`),
+      );
+    }
   });
 
   // The advisory lint's job is the keys the PARSE still accepts. #4667 retired
@@ -1611,17 +1632,22 @@ const fieldLedgerDir = () => ledgerDirWith((dir) => writeLedger(dir, 'field', SY
 
 describe('the object/field walk, against a synthetic ledger directory (#19268)', () => {
   // The state that makes this block necessary, asserted rather than recalled.
-  // If `field.json` ever warns again these two flip, and the block above
-  // ("field walk: a malformed `fields` array …") can take its real subject back
-  // — but this block keeps working either way, which is the point.
+  // If `field.json` ever warns on a STABLE subject again, the first assertion
+  // below names it, and the block above ("field walk: a malformed `fields`
+  // array …") can take its real subject back — but this block keeps working
+  // either way, which is the point.
   it('the SHIPPED field ledger warns on no stable subject — which is why the walk needs a subject of its own', () => {
     // `picklist` was the last opted-in row (`planned` + `authorWarn`) and left
     // when the server began resolving picklist references (`live`). What is
     // left is `conditionalRequired`, a `retiredKey` tombstone whose `dead` row
     // warns on its own since #16094 — but a parse refuses it first, so it is no
-    // subject for #11385 either. The synthetic slot below is warned by nothing
-    // shipped.
-    expect([...authorWarnedProperties('field')]).toEqual(['conditionalRequired']);
+    // subject for #11385 either. `mailAssociation` (#22870) opted in as
+    // `planned` + `authorWarn` — the inbound-mail correspondent flag on an email
+    // field, declared ahead of the mailbox ingest that reads it — and it leaves
+    // this set when that reader lands and the row flips `live`: a verdict
+    // scheduled to move, so no stable subject either. The synthetic slot below
+    // is warned by nothing shipped.
+    expect([...authorWarnedProperties('field')]).toEqual(['conditionalRequired', 'mailAssociation']);
     expect(
       lintLivenessProperties({
         objects: [{ name: 'widget', fields: [{ name: 'a', synthWarnedSlot: true }] }],

@@ -35,6 +35,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { aiJsonSchemaSlot } from '../shared/ai-json-schema-slot';
 import { ACTION_TARGET_ALIASES } from './action-target-aliases';
+import { navigationTargetRefusal } from './navigation-target';
 
 /**
  * Semantic near-misses — a different **word** for the same intent, usually
@@ -1036,8 +1037,16 @@ const actionObject = () => strictObject({
    *   (window.origin), `ctx.recordId`, `ctx.user.id`, `ctx.org.id`, etc.
    * Renderers MUST `encodeURIComponent` interpolated values before
    * substituting them into URL query positions.
+   *
+   * **The url scheme set** (`type: 'url'` only): `target` is an `http://` or
+   * `https://` URL, a `mailto:` address, an in-app path that starts with `/`
+   * or `./`, or a template that opens with `${` (judged after interpolation,
+   * at the click). Every other scheme, a protocol-relative `//host`, a `/`
+   * followed by a backslash, a tab / line feed / carriage return anywhere, and
+   * a bare relative target are refused at parse — the same set the console's
+   * action runner opens (`navigation-target.ts`).
    */
-  target: z.string().optional().describe('URL, Script Name, Flow ID, or API Endpoint. Supports ${param.X} and ${ctx.X} interpolation.'),
+  target: z.string().optional().describe("URL, Script Name, Flow ID, or API Endpoint. Supports ${param.X} and ${ctx.X} interpolation. For type:'url': an http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ — every other scheme and a protocol-relative //host are refused."),
 
   /**
    * For `type:'url'` — where to open `target`. A simple, declarative new-tab
@@ -1364,6 +1373,24 @@ const actionObject = () => strictObject({
    *
    * Liveness: the ledger row was `planned` until the console reader landed,
    * and it is `live` from the pin this repo builds against (`.objectui-sha` =
+   * `1fb1ced36`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+   * `7578323a5`, re-read there 2026-10-12:
+   * `ActionRunner.composeSuccessMessage`, in `core/src/actions/ActionRunner.ts`, is
+   * byte-identical in body to `9646e2ed2` and MOVED down by 11, `1498` -> `1509`
+   * (objectui#12191, objectui `334f0cff9`: the runner admits `mailto:` through one
+   * navigation-target answer, its eleven import lines added above it; every other
+   * hunk lies below the reader), and the four action renderers
+   * are byte-identical (`git diff --quiet`). At `9646e2ed2`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+   * `088e0f705`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
+   * `e5311165a`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `499799502` (`git diff --quiet`), so every anchor held unmoved. At
    * `499799502`, re-read there 2026-10-11:
    * every objectui file this record cites is byte-identical across the hop from
    * `0df67f237` (`git diff --quiet`), so every anchor held unmoved. At
@@ -1395,7 +1422,7 @@ const actionObject = () => strictObject({
    * `ab1879721`, where it was read 2026-10-03, so the anchor below held
    * unmoved). The reader is objectui#11344 (objectui
    * `c476be0e0`): `ActionRunner.composeSuccessMessage`
-   * (`core/src/actions/ActionRunner.ts:1498`) picks `outcomeMessages[outcome]`
+   * (`core/src/actions/ActionRunner.ts:1509`) picks `outcomeMessages[outcome]`
    * off the handler's return value, falls back to `successMessage` and then to
    * the runner's default text, and fills `${result.*}` in whichever it shows.
    * The four action renderers forward the key to the runner (`action:bar`
@@ -1701,6 +1728,17 @@ const actionObject = () => strictObject({
    * hop (no full page load, immune to popup blocking); an absolute URL is a
    * document navigation.
    *
+   * **The scheme set** is a `type: 'url'` target's (`navigation-target.ts`,
+   * ruling A+ on objectstack-ai/objectui#12191): `navigate` is an `http://` or
+   * `https://` URL, a `mailto:` address, an in-app path that starts with `/`
+   * or `./`, or a template that opens with `${` — which the runner judges
+   * after interpolation, so `${result.redirectUrl}` is left alone here. Every
+   * other scheme, a protocol-relative `//host`, a `/` followed by a backslash,
+   * a tab / line feed / carriage return anywhere, and a bare relative template
+   * (`tasks/${result.id}`) are refused at parse: the runner
+   * (`navigateOnSuccess`) classifies the interpolated URL with the same set
+   * and performs no navigation for any of them.
+   *
    * **`openIn`** is a CLOSED two-member enum — `'self'` (default: navigate in
    * place) or `'newTab'` — deliberately not a general navigation DSL.
    * The default is MATERIALIZED (`.default('self')`, the file's convention —
@@ -1758,7 +1796,7 @@ const actionObject = () => strictObject({
         "the tab choice is the closed enum `openIn: 'self' | 'newTab'` — write `openIn: 'newTab'`.",
     },
   }, {
-    navigate: z.string().describe("Route/URL template navigated to after the action succeeds. Interpolates ${param.*} (params-dialog values), ${ctx.*} (origin/apiBase/user/org/recordId/selection) and ${result.*} (the action's server response payload — NEW with this key, e.g. ${result.id}). Relative = SPA route hop; renderers MUST encodeURIComponent values in query positions."),
+    navigate: z.string().describe("Route/URL template navigated to after the action succeeds. Interpolates ${param.*} (params-dialog values), ${ctx.*} (origin/apiBase/user/org/recordId/selection) and ${result.*} (the action's server response payload — NEW with this key, e.g. ${result.id}). An http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ (an SPA route hop); a template that opens with ${ is judged after interpolation. Every other scheme and a protocol-relative //host are refused. Renderers MUST encodeURIComponent values in query positions."),
     openIn: z.enum(['self', 'newTab'], {
       error: (issue) => (issue.input === 'new-tab'
         ? "`onSuccess.openIn` spells the new-tab member `'newTab'` (matching the handler-return "
@@ -1766,7 +1804,7 @@ const actionObject = () => strictObject({
           + "to the top-level `openIn` key for `type:'url'` actions. Write `openIn: 'newTab'`."
         : undefined),
     }).default('self').describe("Where to perform the post-success navigation: 'self' (default — in-place SPA navigation, immune to popup blocking) or 'newTab'. Closed enum — no general navigation DSL."),
-  }).optional().describe("Post-success navigation for type:'api' and type:'script' actions. `navigate` is a route/URL template interpolating ${param.*}, ${ctx.*} and ${result.*} (the server response); `openIn` defaults 'self'. The handler-return convention ({ redirectUrl } without openIn) keeps its 17.0.0 new-tab behavior."),
+  }).superRefine(refuseUnopenableOnSuccessNavigate).optional().describe("Post-success navigation for type:'api' and type:'script' actions. `navigate` is a route/URL template interpolating ${param.*}, ${ctx.*} and ${result.*} (the server response); `openIn` defaults 'self'. The handler-return convention ({ redirectUrl } without openIn) keeps its 17.0.0 new-tab behavior."),
 
   // `aria` REMOVED (ADR-0049 enforce-or-remove; the triage record on the card,
   // comment 5860351140 on #20323, follows the `ChartConfig.aria` retirement
@@ -2004,6 +2042,42 @@ function refuseInertOutcomeMessages(
   }
 }
 
+/**
+ * The scheme set of a `type: 'url'` action's `target`, enforced at both
+ * url-action doors — {@link ActionSchema} and {@link InlineActionSchema}, where
+ * the legacy `to` / `type: 'navigation'` spellings have already been folded onto
+ * `target` / `url`. The grammar is `navigation-target.ts`'s, the one the
+ * console's action runner applies at the click; this only scopes it to the url
+ * route. `target` on every other type names a script, flow, page, endpoint or
+ * form and is not a navigation target, so it is untouched. An empty `target` is
+ * left to the target-required rule, which already names it.
+ */
+function refuseUnopenableUrlTarget(subject: string) {
+  return (data: { type?: string; target?: string }, ctx: z.core.$RefinementCtx): void => {
+    if (data.type !== 'url' || typeof data.target !== 'string' || data.target === '') return;
+    const refusal = navigationTargetRefusal(data.target, subject);
+    if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: ['target'], message: refusal });
+  };
+}
+
+/**
+ * The scheme set of `onSuccess.navigate`, the post-success hop. The grammar is
+ * `navigation-target.ts`'s, unscoped: unlike `target`, `navigate` has no other
+ * meaning to protect — on both types that may declare it (`api`, `script`) it
+ * is only ever a URL the runner navigates to after interpolation. A template
+ * that opens with `${` keeps the predicate's own rule (judged at the hop, after
+ * interpolation); an empty value is judged like any other and refused, since
+ * the runner's shape guard (`readOnSuccessNavigation`) drops an empty
+ * `navigate` and no hop happens.
+ */
+function refuseUnopenableOnSuccessNavigate(
+  data: { navigate: string },
+  ctx: z.core.$RefinementCtx,
+): void {
+  const refusal = navigationTargetRefusal(data.navigate, "An action's `onSuccess.navigate`");
+  if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: ['navigate'], message: refusal });
+}
+
 export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
   // Require `target` for types that reference an external resource
   if (TARGET_REQUIRED_TYPES.has(data.type) && !data.target) {
@@ -2013,7 +2087,7 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
 }, {
   message: "Action 'target' is required when type is 'url', 'flow', 'modal', 'api', or 'form'.",
   path: ['target'],
-}).refine((data) => {
+}).superRefine(refuseUnopenableUrlTarget("A `type: 'url'` action's `target`")).refine((data) => {
   // A `script` action must be *executable*: it needs either an inline `body`
   // (the runtime invokes it in the sandbox) or a `target` naming a registered
   // bundle function. With neither, AppPlugin registers no engine handler and
@@ -2368,7 +2442,9 @@ export const InlineActionSchema = lazySchema(() => z.preprocess(
   }, {
     message: "Inline action 'target' is required when type is 'url', 'flow', 'modal', 'api', or 'form' (`to` is accepted as a legacy spelling).",
     path: ['target'],
-  }),
+  }).superRefine(refuseUnopenableUrlTarget(
+    "An inline `type: 'url'` action's `target` (or its legacy spelling `to`)",
+  )),
 ));
 
 /**

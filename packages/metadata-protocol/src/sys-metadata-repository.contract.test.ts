@@ -38,7 +38,7 @@
  * the other two implementations — has a write-authorization door keyed on the
  * type: `assertAllowed()` refuses `'object'` under the default
  * `override-artifact` intent because its registry entry is
- * `allowOrgOverride: false`. So `ContractSuiteOptions` grew `primaryType` /
+ * `allowEnvironmentOverlay: false`. So `ContractSuiteOptions` grew `primaryType` /
  * `secondaryType`, defaulting to today's values, and this call site names two
  * types the door admits. That keeps ONE invariant table; the alternative —
  * wrapping the repository in an adapter that injects `intent: 'runtime-only'` —
@@ -179,7 +179,7 @@ function makeRepo(): SysMetadataRepository {
 
 runRepositoryContractTests('SysMetadataRepository', makeRepo, {
   // Both types must clear `assertAllowed()` under the suite's default
-  // `override-artifact` intent, i.e. both are `allowOrgOverride: true` in
+  // `override-artifact` intent, i.e. both are `allowEnvironmentOverlay: true` in
   // `DEFAULT_METADATA_TYPE_REGISTRY`. `'object'` — the suite's default second
   // type — is not, on purpose (packaged objects are locked); `'dashboard'` is.
   primaryType: 'view',
@@ -600,7 +600,7 @@ describe('SysMetadataRepository — close() terminates every live watcher (#1102
  */
 describe('SysMetadataRepository — a declared ordered map: object `fields` (#21790)', () => {
   const ref = { org: 'system', type: 'object' as const, name: 'invoice' };
-  // `object` is `allowRuntimeCreate`, not `allowOrgOverride`: the runtime door.
+  // `object` is `allowRuntimeCreate`, not `allowEnvironmentOverlay`: the runtime door.
   const intent = 'runtime-only' as const;
   const FIELDS: Record<string, { type: string; label: string }> = {
     title: { type: 'text', label: 'Title' },

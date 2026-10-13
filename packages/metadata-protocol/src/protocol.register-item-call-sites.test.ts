@@ -95,7 +95,7 @@ const SITES: ReadonlyArray<Site & {
             + 'and a row bound to another package is refused (D9.9, OBJECT_OVERLAY_PACKAGE_MISMATCH)',
     },
     {
-        member: 'hydrateOverlayIntoRegistry', args: 'type, mergeArtifactProtection(stateTenantAuthorship(data), envelope), \'name\' as any',
+        member: 'hydrateOverlayIntoRegistry', args: 'type, mergeArtifactProtection(type, stateTenantAuthorship(data), envelope), \'name\' as any',
         disposition: 'yes, view only: skips a name another package ships',
         path: 'the list\'s hydration and the write-through on an unscoped kernel; the boot\'s loadMetaFromDb on every kernel',
         why: 'a stored row: a view row bound to a package is not registered where another package ships its name, and the '

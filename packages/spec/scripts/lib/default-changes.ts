@@ -22,8 +22,9 @@
  *   - `to` must equal what the build EMITS. The moment the default moves again,
  *     or is reverted, this entry stops matching and the gate goes red naming
  *     it. An entry cannot outlive the fact it describes;
- *   - only entries at the CURRENT protocol major authorise anything. Older
- *     majors' rows are the historical record;
+ *   - only entries at a major the BASELINE has not rolled past authorise
+ *     anything — the baseline's own major up to this build's
+ *     (`authorisingMajors`). Older majors' rows are the historical record;
  *   - `reason` is printed in full by every build that consumes the entry, so an
  *     acknowledged default flip announces itself in the log rather than passing
  *     in silence (#4690: a gate that quietly exits 0 is worse than no gate).

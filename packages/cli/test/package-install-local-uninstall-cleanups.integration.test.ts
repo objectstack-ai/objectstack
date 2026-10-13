@@ -22,6 +22,17 @@
  * `security.package-permissions` is the one that removes package-owned sets with
  * their position and user bindings. This door never ran that registry.
  *
+ * ## Since ADR-0131 C3 stage 6b-2
+ *
+ * No door writes a `sys_permission_set` row any more: the package's set is
+ * served by the security catalog from the registry (`GET /meta/permission/…`),
+ * and the grant names it. So the cleanup can no longer find the grants through
+ * a row. The door captures the set names the package held just before it
+ * withdraws the package, and the cleanup revokes the grants naming them
+ * (ADR-0090 D5, maintainer ruling on #15204: option 1). A grant naming the
+ * set would otherwise survive the uninstall, inert, and be live again the
+ * moment the package is reinstalled; the reinstall order pins that it is not.
+ *
  * ## What each `it` reads
  *
  * One fixture, two orders of events, each probed through the data route a user
@@ -241,17 +252,21 @@ function rowsOf(answer: Answer): any[] {
 
 const recordOf = (a: Answer) => a.body?.data ?? a.body?.record ?? a.body;
 
-/** What the data route answers about the package's grants at one moment. */
+/** What the routes answer about the package's set and its grants at one moment. */
 interface Grants {
-  /** `GET /data/sys_permission_set?name=…` — the projection the admin surface grants from. */
+  /** `GET /meta/permission/…` — the set as the security catalog serves it (ADR-0131 D3). */
   sets: Answer;
   /** `GET /data/sys_user_permission_set?permission_set=…` — the user grant made before the uninstall, by the set's name (ADR-0131 D4). */
   bindings: Answer;
 }
 
-async function readGrants(live: LiveStart, token: string, _setId: string): Promise<Grants> {
+/** The name the catalog serves for {@link PERMISSION_SET}, or `undefined` when it serves none. */
+const servedName = (a: Answer): string | undefined =>
+  a.status === 200 ? (a.body?.item ?? a.body?.data?.item)?.name : undefined;
+
+async function readGrants(live: LiveStart, token: string): Promise<Grants> {
   return {
-    sets: await http(live, 'GET', `/api/v1/data/sys_permission_set?name=${PERMISSION_SET}`, token),
+    sets: await http(live, 'GET', `/api/v1/meta/permission/${PERMISSION_SET}`, token),
     bindings: await http(live, 'GET', `/api/v1/data/sys_user_permission_set?permission_set=${PERMISSION_SET}`, token),
   };
 }
@@ -263,7 +278,6 @@ interface Run {
   before?: Grants;
   /** `POST /data/sys_user_permission_set` — the grant whose survival is the defect's second half. */
   granted?: Answer;
-  setId?: string;
   uninstall?: Answer;
   /** Same process, right after the DELETE answered. */
   after?: Grants;
@@ -281,8 +295,8 @@ interface Run {
   afterOtherInstall?: Grants;
   /** Reinstall order only: the same package installed again, in the same process, after its DELETE. */
   reinstall?: { exit: number | null; output: string };
-  /** Reinstall order only: the object and the set right after that reinstall. */
-  afterReinstall?: { object: Answer; sets: Answer };
+  /** Reinstall order only: the object, the set and the grant right after that reinstall. */
+  afterReinstall?: { object: Answer; sets: Answer; bindings: Answer };
 }
 
 /**
@@ -291,26 +305,24 @@ interface Run {
  * the same act on both orders of events.
  */
 async function grantThenUninstall(live: LiveStart, session: Session, run: Run): Promise<void> {
-  const sets = await http(live, 'GET', `/api/v1/data/sys_permission_set?name=${PERMISSION_SET}`, session.token);
-  const setId = rowsOf(sets)[0]?.id;
-  if (typeof setId !== 'string') {
-    throw new Error(`precondition: no ${PERMISSION_SET} row to grant — ${sets.status} ${JSON.stringify(sets.body)}\n--- output ---\n${live.output().slice(-3000)}`);
+  const sets = await http(live, 'GET', `/api/v1/meta/permission/${PERMISSION_SET}`, session.token);
+  if (servedName(sets) !== PERMISSION_SET) {
+    throw new Error(`precondition: the catalog serves no ${PERMISSION_SET} to grant — ${sets.status} ${JSON.stringify(sets.body)}\n--- output ---\n${live.output().slice(-3000)}`);
   }
-  run.setId = setId;
   run.granted = await http(live, 'POST', '/api/v1/data/sys_user_permission_set', session.token, {
     user_id: session.userId,
     permission_set: PERMISSION_SET,
   });
-  run.before = await readGrants(live, session.token, setId);
+  run.before = await readGrants(live, session.token);
   run.objectBefore = await http(live, 'GET', `/api/v1/data/${TASK}`, session.token);
   run.uninstall = await http(live, 'DELETE', UNINSTALL, session.token);
-  run.after = await readGrants(live, session.token, setId);
+  run.after = await readGrants(live, session.token);
   run.objectAfter = await http(live, 'GET', `/api/v1/data/${TASK}`, session.token);
 }
 
 async function readAfterRestart(live: LiveStart, run: Run): Promise<void> {
   const { token } = await authenticate(live);
-  run.restarted = await readGrants(live, token, run.setId!);
+  run.restarted = await readGrants(live, token);
   run.object = await http(live, 'GET', `/api/v1/data/${TASK}`, token);
 }
 
@@ -369,7 +381,7 @@ beforeAll(async () => {
   runs.reseed.install = await packageInstall(appDir, f);
   await grantThenUninstall(f, fSession, runs.reseed);
   runs.reseed.otherInstall = await packageInstall(otherAppDir, f);
-  runs.reseed.afterOtherInstall = await readGrants(f, fSession.token, runs.reseed.setId!);
+  runs.reseed.afterOtherInstall = await readGrants(f, fSession.token);
   await stopGroup(f.child);
   const g = await bootStart(reseedDir, reseedHome, port);
   await readAfterRestart(g, runs.reseed);
@@ -387,7 +399,7 @@ beforeAll(async () => {
   runs.reinstall.reinstall = await packageInstall(appDir, h);
   runs.reinstall.afterReinstall = {
     object: await http(h, 'GET', `/api/v1/data/${TASK}`, hSession.token),
-    sets: await http(h, 'GET', `/api/v1/data/sys_permission_set?name=${PERMISSION_SET}`, hSession.token),
+    ...await readGrants(h, hSession.token),
   };
   await stopGroup(h.child);
 }, 9 * BOOT_TIMEOUT_MS);
@@ -404,8 +416,7 @@ describe('#21490: an install-local uninstall runs the registered uninstall clean
         const run = runs[name];
         expect(run.install?.exit, run.install?.output).toBe(0);
         expect(run.granted?.status, JSON.stringify(run.granted?.body)).toBe(201);
-        expect(rowsOf(run.before!.sets).map((r) => [r?.name, r?.managed_by, r?.package_id]))
-          .toEqual([[PERMISSION_SET, 'package', APP_ID]]);
+        expect(servedName(run.before!.sets), JSON.stringify(run.before!.sets.body)).toBe(PERMISSION_SET);
         expect(rowsOf(run.before!.bindings).map((r) => r?.id)).toEqual([recordOf(run.granted!)?.id]);
       });
 
@@ -417,10 +428,9 @@ describe('#21490: an install-local uninstall runs the registered uninstall clean
         expect(security, JSON.stringify(run.uninstall?.body)).toMatchObject({ success: true });
       });
 
-      it('right after the DELETE: no package-managed set, no grant of it', () => {
+      it('right after the DELETE: the catalog serves no such set, and no grant of it remains', () => {
         const run = runs[name];
-        expect(run.after!.sets.status).toBe(200);
-        expect(rowsOf(run.after!.sets), JSON.stringify(run.after!.sets.body)).toEqual([]);
+        expect(servedName(run.after!.sets), JSON.stringify(run.after!.sets.body)).toBeUndefined();
         expect(run.after!.bindings.status).toBe(200);
         expect(rowsOf(run.after!.bindings), JSON.stringify(run.after!.bindings.body)).toEqual([]);
       });
@@ -438,8 +448,7 @@ describe('#21490: an install-local uninstall runs the registered uninstall clean
       it('after a restart: still no set and no grant, and the package object is gone', () => {
         const run = runs[name];
         expect(run.object?.status, JSON.stringify(run.object?.body)).toBe(404);
-        expect(run.restarted!.sets.status).toBe(200);
-        expect(rowsOf(run.restarted!.sets), JSON.stringify(run.restarted!.sets.body)).toEqual([]);
+        expect(servedName(run.restarted!.sets), JSON.stringify(run.restarted!.sets.body)).toBeUndefined();
         expect(run.restarted!.bindings.status).toBe(200);
         expect(rowsOf(run.restarted!.bindings), JSON.stringify(run.restarted!.bindings.body)).toEqual([]);
       });
@@ -465,16 +474,15 @@ describe('#21490: an install-local uninstall runs the registered uninstall clean
       expect(run.install?.exit, run.install?.output).toBe(0);
       expect(run.otherInstall?.exit, run.otherInstall?.output).toBe(0);
       expect(run.granted?.status, JSON.stringify(run.granted?.body)).toBe(201);
-      expect(rowsOf(run.before!.sets).map((r) => [r?.name, r?.managed_by, r?.package_id]))
-        .toEqual([[PERMISSION_SET, 'package', APP_ID]]);
+      expect(servedName(run.before!.sets), JSON.stringify(run.before!.sets.body)).toBe(PERMISSION_SET);
       expect(run.uninstall?.status, JSON.stringify(run.uninstall?.body)).toBe(200);
-      expect(rowsOf(run.after!.sets), JSON.stringify(run.after!.sets.body)).toEqual([]);
+      expect(servedName(run.after!.sets), JSON.stringify(run.after!.sets.body)).toBeUndefined();
       expect(rowsOf(run.after!.bindings), JSON.stringify(run.after!.bindings.body)).toEqual([]);
     });
 
     it('the grant stays revoked through the other install and the restart, and the package object is gone', () => {
       const run = runs.reseed;
-      for (const answer of [run.afterOtherInstall!.sets, run.afterOtherInstall!.bindings, run.restarted!.sets, run.restarted!.bindings]) {
+      for (const answer of [run.afterOtherInstall!.bindings, run.restarted!.bindings]) {
         expect(answer.status, JSON.stringify(answer.body)).toBe(200);
       }
       expect(rowsOf(run.afterOtherInstall!.bindings), JSON.stringify(run.afterOtherInstall!.bindings.body)).toEqual([]);
@@ -482,14 +490,14 @@ describe('#21490: an install-local uninstall runs the registered uninstall clean
       expect(run.object?.status, JSON.stringify(run.object?.body)).toBe(404);
     });
 
-    it('the other package\'s hot install does not re-project the uninstalled package\'s set', () => {
+    it('the other package\'s hot install does not bring the uninstalled package\'s set back', () => {
       const run = runs.reseed;
-      expect(rowsOf(run.afterOtherInstall!.sets), JSON.stringify(run.afterOtherInstall!.sets.body)).toEqual([]);
+      expect(servedName(run.afterOtherInstall!.sets), JSON.stringify(run.afterOtherInstall!.sets.body)).toBeUndefined();
     });
 
-    it('after the restart there is no package-managed set for the uninstalled package — no orphan row', () => {
+    it('after the restart the catalog still serves no set for the uninstalled package', () => {
       const run = runs.reseed;
-      expect(rowsOf(run.restarted!.sets), JSON.stringify(run.restarted!.sets.body)).toEqual([]);
+      expect(servedName(run.restarted!.sets), JSON.stringify(run.restarted!.sets.body)).toBeUndefined();
     });
   });
 
@@ -506,16 +514,23 @@ describe('#21490: an install-local uninstall runs the registered uninstall clean
       expect(run.uninstall?.status, JSON.stringify(run.uninstall?.body)).toBe(200);
       expect(run.objectBefore?.status, JSON.stringify(run.objectBefore?.body)).toBe(200);
       expect(run.objectAfter?.status, JSON.stringify(run.objectAfter?.body)).toBe(404);
-      expect(rowsOf(run.after!.sets), JSON.stringify(run.after!.sets.body)).toEqual([]);
+      expect(servedName(run.after!.sets), JSON.stringify(run.after!.sets.body)).toBeUndefined();
+      expect(rowsOf(run.after!.bindings), JSON.stringify(run.after!.bindings.body)).toEqual([]);
     });
 
-    it('the reinstall registers the package again: its object answers, and its set is projected once', () => {
+    it('the reinstall registers the package again: its object answers, and the catalog serves its set again', () => {
       const run = runs.reinstall;
       expect(run.reinstall?.exit, run.reinstall?.output).toBe(0);
       expect(run.afterReinstall!.object.status, JSON.stringify(run.afterReinstall!.object.body)).toBe(200);
-      expect(run.afterReinstall!.sets.status).toBe(200);
-      expect(rowsOf(run.afterReinstall!.sets).map((r) => [r?.name, r?.managed_by, r?.package_id]), JSON.stringify(run.afterReinstall!.sets.body))
-        .toEqual([[PERMISSION_SET, 'package', APP_ID]]);
+      expect(servedName(run.afterReinstall!.sets), JSON.stringify(run.afterReinstall!.sets.body)).toBe(PERMISSION_SET);
+    });
+
+    // [ADR-0090 D5] The grant the uninstall revoked is not live again: the set
+    // is back under the same name, and nothing names it.
+    it('the grant revoked by the DELETE does not come back with the set', () => {
+      const run = runs.reinstall;
+      expect(run.afterReinstall!.bindings.status, JSON.stringify(run.afterReinstall!.bindings.body)).toBe(200);
+      expect(rowsOf(run.afterReinstall!.bindings), JSON.stringify(run.afterReinstall!.bindings.body)).toEqual([]);
     });
   });
 });

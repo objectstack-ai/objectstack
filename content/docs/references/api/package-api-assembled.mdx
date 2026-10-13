@@ -89,6 +89,7 @@ Installed package row whose manifest is the assembled package body
 | **version** | `string` | ✅ | Package version (SemVer 2.0.0 — e.g. 1.2.3, 2.0.0-beta.1, 1.0.0+20230101) |
 | **type** | `Enum<'plugin' \| 'ui' \| 'driver' \| 'server' \| 'app' \| 'theme' \| 'agent' \| 'objectql' \| …>` | ✅ | Type of package |
 | **scope** | `Enum<'cloud' \| 'system' \| 'project'>` | optional (default: `"project"`) | Deployment scope: cloud \| system \| project |
+| **installModes** | `Enum<'managed' \| 'unmanaged'>[]` | optional | Install modes this package permits (ADR-0131 D6): managed \| unmanaged. Absent means ['managed']. |
 | **name** | `string` | ✅ | Human-readable package name |
 | **description** | `string` | optional | Package description |
 | **permissions** | `{ name: string; label?: string; description?: string; packageId?: string; … }[]` | optional | Permission Sets — the ADR-0090 collection half of `permissions`; at the manifest/authoring stage the same key is the ADR-0025 capability grant instead (`ManifestSchema.permissions`) |
@@ -124,7 +125,7 @@ Installed package row whose manifest is the assembled package body
 | **actions** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; objectName?: string; … }[]` | optional | Global and Object Actions. Unique per scope, not per stack: the runtime keys every action by its owning object's name (or 'global' when object-less), a colon, then the action name, and defineStack refuses two declarations that resolve to one key — both here, both on one object's actions, or one in each position, identical twins included (an embedded action is keyed by the object it is written on, not by its own objectName). One global and one object-bound action may share a name; on that object's route the object's own actions take precedence for by-name readers. composeStacks runs the same key rule across its input stacks (counting distinct stacks, not sites) and names both source stacks on a collision. |
 | **flows** | `{ name: string; label: string; description?: string; successMessage?: string; … }[]` | optional | Screen Flows |
 | **jobs** | `{ name: string; label?: string; description?: string; schedule: object \| object \| object; … }[]` | optional | Background / Scheduled Jobs (run by IJobService on cron/interval/once schedules) |
-| **emailTemplates** | `{ name: string; label: string; category?: Enum<'auth' \| 'notification' \| 'workflow' \| 'marketing' \| 'custom'>; locale?: string; … }[]` | optional | Email Templates resolved by IEmailService.sendTemplate(`{ template, locale }`) |
+| **emailTemplates** | `{ name: string; label: string; locale?: string; subject: string; … }[]` | optional | Email Templates resolved by IEmailService.sendTemplate(`{ template, locale }`) |
 | **docs** | `{ name: string; label?: string; description?: string; content: string; … }[]` | optional | Package documentation — flat Markdown items compiled from src/docs/*.md (ADR-0046) |
 | **books** | `{ name: string; label?: string; description?: string; slug?: string; … }[]` | optional | Documentation navigation spines — ordered groups with derived membership (ADR-0046 §6) |
 | **positions** | `{ name: string; label: string; description?: string; permissionSets?: string[]; … }[]` | optional | Positions — flat capability-distribution groups (ADR-0090 D3) |
@@ -270,6 +271,7 @@ Installed package with runtime lifecycle state
 | **version** | `string` | ✅ | Package version (SemVer 2.0.0 — e.g. 1.2.3, 2.0.0-beta.1, 1.0.0+20230101) |
 | **type** | `Enum<'plugin' \| 'ui' \| 'driver' \| 'server' \| 'app' \| 'theme' \| 'agent' \| 'objectql' \| …>` | ✅ | Type of package |
 | **scope** | `Enum<'cloud' \| 'system' \| 'project'>` | optional (default: `"project"`) | Deployment scope: cloud \| system \| project |
+| **installModes** | `Enum<'managed' \| 'unmanaged'>[]` | optional | Install modes this package permits (ADR-0131 D6): managed \| unmanaged. Absent means ['managed']. |
 | **name** | `string` | ✅ | Human-readable package name |
 | **description** | `string` | optional | Package description |
 | **permissions** | `{ services?: string[]; hooks?: string[]; network?: string[]; fs?: string[] }` | optional | Required permissions at the AUTHORING stage: the structured plugin block `{ services, hooks, network, fs }` (ADR-0025 §3.2) — the legacy flat string list is retired — and at the assembled stage the same key is the ADR-0090 `PermissionSet[]` collection instead (`AssembledPackageBodySchema`) |
@@ -333,6 +335,7 @@ Installed package row whose manifest is the assembled package body
 | **version** | `string` | ✅ | Package version (SemVer 2.0.0 — e.g. 1.2.3, 2.0.0-beta.1, 1.0.0+20230101) |
 | **type** | `Enum<'plugin' \| 'ui' \| 'driver' \| 'server' \| 'app' \| 'theme' \| 'agent' \| 'objectql' \| …>` | ✅ | Type of package |
 | **scope** | `Enum<'cloud' \| 'system' \| 'project'>` | optional (default: `"project"`) | Deployment scope: cloud \| system \| project |
+| **installModes** | `Enum<'managed' \| 'unmanaged'>[]` | optional | Install modes this package permits (ADR-0131 D6): managed \| unmanaged. Absent means ['managed']. |
 | **name** | `string` | ✅ | Human-readable package name |
 | **description** | `string` | optional | Package description |
 | **permissions** | `{ name: string; label?: string; description?: string; packageId?: string; … }[]` | optional | Permission Sets — the ADR-0090 collection half of `permissions`; at the manifest/authoring stage the same key is the ADR-0025 capability grant instead (`ManifestSchema.permissions`) |
@@ -368,7 +371,7 @@ Installed package row whose manifest is the assembled package body
 | **actions** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; objectName?: string; … }[]` | optional | Global and Object Actions. Unique per scope, not per stack: the runtime keys every action by its owning object's name (or 'global' when object-less), a colon, then the action name, and defineStack refuses two declarations that resolve to one key — both here, both on one object's actions, or one in each position, identical twins included (an embedded action is keyed by the object it is written on, not by its own objectName). One global and one object-bound action may share a name; on that object's route the object's own actions take precedence for by-name readers. composeStacks runs the same key rule across its input stacks (counting distinct stacks, not sites) and names both source stacks on a collision. |
 | **flows** | `{ name: string; label: string; description?: string; successMessage?: string; … }[]` | optional | Screen Flows |
 | **jobs** | `{ name: string; label?: string; description?: string; schedule: object \| object \| object; … }[]` | optional | Background / Scheduled Jobs (run by IJobService on cron/interval/once schedules) |
-| **emailTemplates** | `{ name: string; label: string; category?: Enum<'auth' \| 'notification' \| 'workflow' \| 'marketing' \| 'custom'>; locale?: string; … }[]` | optional | Email Templates resolved by IEmailService.sendTemplate(`{ template, locale }`) |
+| **emailTemplates** | `{ name: string; label: string; locale?: string; subject: string; … }[]` | optional | Email Templates resolved by IEmailService.sendTemplate(`{ template, locale }`) |
 | **docs** | `{ name: string; label?: string; description?: string; content: string; … }[]` | optional | Package documentation — flat Markdown items compiled from src/docs/*.md (ADR-0046) |
 | **books** | `{ name: string; label?: string; description?: string; slug?: string; … }[]` | optional | Documentation navigation spines — ordered groups with derived membership (ADR-0046 §6) |
 | **positions** | `{ name: string; label: string; description?: string; permissionSets?: string[]; … }[]` | optional | Positions — flat capability-distribution groups (ADR-0090 D3) |

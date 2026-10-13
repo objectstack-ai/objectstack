@@ -189,11 +189,14 @@ export const SysUserDetailPage: Page = {
             icon: 'shield-check',
             children: [
               {
-                // [ADR-0090 D3] Position assignments (岗位分派) — pure SDUI:
-                // the Add picker creates sys_user_position rows storing the
-                // position's MACHINE NAME (valueField: 'name'), and every
-                // server-side rule (the D12 delegated-admin gate, audience-
-                // anchor rejection) surfaces its error in the dialog.
+                // [ADR-0090 D3] Position assignments (岗位分派) — pure SDUI.
+                // [ADR-0131 D4, #15204 B2] No `add` picker: it could list
+                // `sys_position` ROWS only, and positions live in the security
+                // catalog. "New" opens the assignment form, whose `position`
+                // field picks a catalog position by name (`widget:
+                // 'position-ref'` on the object); Remove is the host's row
+                // delete. Every server-side rule (the D12 delegated-admin gate,
+                // audience-anchor rejection) surfaces its error in the form.
                 type: 'record:related_list',
                 properties: {
                   objectName: 'sys_user_position',
@@ -203,20 +206,6 @@ export const SysUserDetailPage: Page = {
                   limit: 25,
                   showViewAll: true,
                   title: { en: 'Positions', 'zh-CN': '岗位', 'ja-JP': 'ポジション', 'es-ES': 'Puestos' },
-                  add: {
-                    picker: {
-                      object: 'sys_position',
-                      valueField: 'name',
-                      labelField: 'label',
-                    },
-                    linkField: 'position',
-                    label: {
-                      en: 'Assign position',
-                      'zh-CN': '分配岗位',
-                      'ja-JP': 'ポジションを割り当て',
-                      'es-ES': 'Asignar puesto',
-                    },
-                  },
                 },
               },
             ],
@@ -224,21 +213,20 @@ export const SysUserDetailPage: Page = {
           {
             // [ADR-0091 D1] Direct permission-set grants (直接授权) — pure SDUI.
             // The list keys on `relationshipField: 'user_id'` (a lookup keyed by
-            // record id, no relationshipValueField). [ADR-0131 D4] A grant names
-            // its set BY NAME, so the Add picker stores the set's MACHINE NAME
-            // (valueField: 'name', linkField: 'permission_set'), exactly as the
-            // position picker above does; server-side gates (the catalog name
-            // refusal, delegated-admin D12) surface their reason in the dialog.
-            // The picker still lists `sys_permission_set` rows: the related
-            // list's Add picker reads object records only, and listing the
-            // security catalog itself is an objectui change.
+            // record id, no relationshipValueField). [ADR-0131 D4, #15204 B2] A
+            // grant names its set BY NAME, and the set lives in the security
+            // catalog, not in a `sys_permission_set` row, so there is no `add`
+            // picker (it could list object rows only). "New" opens the grant
+            // form, whose `permission_set` field picks a catalog set by name
+            // (`widget: 'permission-ref'` on the object); Remove is the host's
+            // row delete. Server-side gates (the catalog name refusal,
+            // delegated-admin D12) surface their reason in the form.
             //
             // [ADR-0091 D1/D2] `valid_from` / `valid_until` are listed because
             // they decide whether the grant confers anything: the resolver drops
             // an assignment outside its half-open window at every evaluation, so
             // a row showing only the set would read as a live grant when it is
-            // not. The Add affordance writes the two link keys alone; the window
-            // is set by editing the assignment row, whose object refuses a
+            // not. The same form sets the window, and the object refuses a
             // window whose end is not after its start.
             label: { en: 'Permission Sets', 'zh-CN': '权限集', 'ja-JP': '権限セット', 'es-ES': 'Conjuntos de permisos' },
             icon: 'lock',
@@ -253,20 +241,6 @@ export const SysUserDetailPage: Page = {
                   limit: 25,
                   showViewAll: true,
                   title: { en: 'Permission Sets', 'zh-CN': '权限集', 'ja-JP': '権限セット', 'es-ES': 'Conjuntos de permisos' },
-                  add: {
-                    picker: {
-                      object: 'sys_permission_set',
-                      valueField: 'name',
-                      labelField: 'label',
-                    },
-                    linkField: 'permission_set',
-                    label: {
-                      en: 'Grant permission set',
-                      'zh-CN': '授予权限集',
-                      'ja-JP': '権限セットを付与',
-                      'es-ES': 'Otorgar conjunto de permisos',
-                    },
-                  },
                 },
               },
             ],

@@ -21,7 +21,7 @@
  * is the ordinary-type control.
  *
  * ⛔ `earlyReturnFixtureIsStillEarlyReturn` below is the anti-vacuity arm and is
- * not decoration. If `field` ever gains `allowOrgOverride` or
+ * not decoration. If `field` ever gains `allowEnvironmentOverlay` or
  * `allowRuntimeCreate`, every other assertion here silently stops covering the
  * early-return case while staying green. That test going red is the signal to
  * re-pick the fixture from the registry, not to delete the assertion.

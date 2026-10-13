@@ -343,7 +343,17 @@ function cliFindings(): Array<{ rule: string; message: string; fix?: string }> {
 
 describe('the rule ids packages/cli produces — one verdict line, one fix, and an explanation (#22841)', () => {
   it('fires each from its producer, and they are exactly the explained ids no lint rule produces', () => {
-    const lintIds = new Set<string>([...exportedRuleIds(), ...FUNCTIONAL_COMPLETENESS_RULES]);
+    // `unconsumed-widget-option` is `@objectstack/sdui-parser`'s diagnostic code,
+    // which lint's `validateDashboardWidgetOptions` forwards unchanged — a lint
+    // rule produces it with no constant on lint's barrel, so it is fired from
+    // that producer here (this package does not depend on sdui-parser).
+    const forwarded = lint
+      .validateDashboardWidgetOptions({
+        dashboards: [{ name: 'd', widgets: [{ id: 'w', type: 'metric', dataset: 'ds', options: { unread: true } }] }],
+      })
+      .map((f) => f.rule);
+    expect(forwarded).toEqual(['unconsumed-widget-option']);
+    const lintIds = new Set<string>([...exportedRuleIds(), ...FUNCTIONAL_COMPLETENESS_RULES, ...forwarded]);
     const explainedElsewhere = Object.keys(RULE_EXPLANATIONS).filter((id) => !lintIds.has(id)).sort();
     const fired = [...new Set(cliFindings().map((f) => f.rule))].sort();
     expect(fired).toEqual([

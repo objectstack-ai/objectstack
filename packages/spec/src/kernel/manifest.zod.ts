@@ -398,6 +398,62 @@ export function manifestIdRefusal(key: string, input: unknown): string {
   return base;
 }
 
+/**
+ * [ADR-0131 D6] The two ways a package reaches a deployment — its INSTALL MODES.
+ *
+ *  - `managed`: the package is registered as code and stays the authority. It
+ *    upgrades, and no door edits what it ships; the customer customises BESIDE
+ *    it (an environment overlay, disable + clone, extend).
+ *  - `unmanaged`: every metadata item is copied ONCE into the environment
+ *    ledger, under a new writable base whose id differs from the package's.
+ *    From then on it is the environment's own metadata and the next save
+ *    edits it; it follows no upgrade. The package's protection lock is not
+ *    copied, in either spelling (`_lock`, ADR-0010 §3.3, or a `protection`
+ *    block, Phase 4.3): the import's answer names each lock it dropped, with
+ *    the package's reason (the ruling on the D6 lock fork, record
+ *    6119681934). A deployment whose tenancy posture walls organizations
+ *    (`group`, `isolated`) refuses it, whatever the package permits.
+ *
+ * The spelling is the maintainer's ruling B on the D6 execution card
+ * (2026-10-11): `managed` and `unmanaged` are the two states of one property,
+ * whether the package stays the authority — the names Salesforce and Power
+ * Platform give the same two states.
+ */
+export const INSTALL_MODES = ['managed', 'unmanaged'] as const;
+
+/** One install mode — see {@link INSTALL_MODES}. */
+export const InstallModeSchema = z.enum(INSTALL_MODES)
+  .describe('Install mode: managed (registered as code, upgradeable, sealed) | unmanaged (copied once into the environment as its own metadata, no upgrade)');
+
+export type InstallMode = z.input<typeof InstallModeSchema>;
+
+/**
+ * The install modes a package permits when its manifest declares none.
+ * Read through {@link resolveInstallModes} — ⛔ never restated at a reader.
+ */
+export const DEFAULT_INSTALL_MODES: readonly InstallMode[] = Object.freeze(['managed'] as const);
+
+/**
+ * [ADR-0131 D6] The install modes a package permits — THE one resolver of the
+ * manifest's `installModes` key.
+ *
+ * The key is optional and carries no parse-time default, so absence survives
+ * a parse as absence: a `.default()` would stamp the key into every parsed
+ * manifest and every stored package record, byte-changing every existing
+ * artifact for no change of meaning. Absence means {@link DEFAULT_INSTALL_MODES}
+ * — `['managed']` — and every reader asks this function for that answer, so
+ * the default has one spelling. The authoring refusal (`defineStack`) and the
+ * install door both read it.
+ *
+ * Takes a PARSED value: a door holding an untrusted manifest parses the key
+ * first (`ManifestSchema.shape.installModes`), then resolves.
+ */
+export function resolveInstallModes(
+  manifest: { installModes?: readonly InstallMode[] | undefined } | null | undefined,
+): readonly InstallMode[] {
+  return manifest?.installModes ?? DEFAULT_INSTALL_MODES;
+}
+
 export const ManifestSchema = strictObject({
   surface: 'this package manifest',
   history:
@@ -415,7 +471,7 @@ export const ManifestSchema = strictObject({
       '`specVersion` is not a package-manifest key. The protocol axis the runtime checks at '
       + `load is \`engines.protocol\` — declare \`engines: { protocol: '^${PROTOCOL_MAJOR}' }\` (the range the `
       + 'scaffold stamps); `specVersion` keeps its meaning only on the marketplace TEMPLATE '
-      + 'manifest (`cloud/template-manifest.zod.ts`), which is a different surface.',
+      + 'manifest (`marketplace/template-manifest.zod.ts`), which is a different surface.',
   },
 }, {
   /** 
@@ -551,6 +607,35 @@ export const ManifestSchema = strictObject({
    */
   scope: z.enum(['cloud', 'system', 'project']).default('project')
     .describe('Deployment scope: cloud | system | project'),
+
+  /**
+   * [ADR-0131 D6] The install modes this package permits — see
+   * {@link INSTALL_MODES} for what each one does.
+   *
+   * Optional, with NO parse-time default: absent means `['managed']` only, the
+   * answer {@link resolveInstallModes} gives — the one reader of it. Non-empty
+   * (omit the key instead of writing an empty list); naming a mode twice changes
+   * nothing, since a reader asks only whether a mode is listed. A package may permit
+   * `unmanaged` alone (a starter app a customer takes over wholesale); a
+   * deployment that walls organizations then refuses it outright.
+   *
+   * ⭐ Declared is enforced, at both ends:
+   *  - at AUTHORING: `defineStack` (so `os validate` and `os build`) refuses a
+   *    package that permits `unmanaged` while it carries what the copy cannot
+   *    write as environment metadata — an item of a type the metadata-type
+   *    registry declares runtime-uncreatable (`allowRuntimeCreate: false`),
+   *    code, an extension of another package's items — with
+   *    `UNMANAGED_INSTALL_UNCOPYABLE`;
+   *  - at INSTALL: `POST /api/v1/marketplace/install-local` (and so
+   *    `os package install --install-mode`) refuses a mode the package does not
+   *    permit, before anything is written.
+   *
+   * @example ['managed', 'unmanaged']
+   */
+  installModes: z.array(InstallModeSchema)
+    .min(1, '`installModes` lists at least one install mode — omit the key for the default, [\'managed\'].')
+    .optional()
+    .describe('Install modes this package permits (ADR-0131 D6): managed | unmanaged. Absent means [\'managed\'].'),
 
   /**
    * Human-readable name of the package.

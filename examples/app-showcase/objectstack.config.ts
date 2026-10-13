@@ -103,7 +103,10 @@ export default defineStack({
   //                   blueprint flow to auto-create a writable "app package" home
   //                   (ADR-0033 zero-package app building) and the Studio package
   //                   selector to list DB packages.
-  requires: ['ui', 'automation', 'approvals', 'messaging', 'triggers', 'job', 'marketplace', 'webhooks', 'realtime'],
+  //   • mailbox     — MailboxServicePlugin: the inbound-mail objects
+  //                   (`sys_mailbox`, `sys_mail_message`, `sys_mail_association`)
+  //                   and their read gates, served through the data API.
+  requires: ['ui', 'automation', 'approvals', 'messaging', 'triggers', 'job', 'marketplace', 'webhooks', 'realtime', 'mailbox'],
 
   // Concrete connectors for the `connector_action` node. The baseline engine
   // ships the dispatch node + an empty registry; these plugins populate it.

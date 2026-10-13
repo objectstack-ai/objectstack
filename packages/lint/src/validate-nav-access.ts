@@ -175,12 +175,12 @@ export function validateNavAccess(stack: AnyRec): NavAccessFinding[] {
         `navigation exposes object "${objectName}", but no permission set this stack ` +
         `declares grants read on it, so opening the entry fails permission-denied for ` +
         `everyone but a wildcard admin`,
+      // [#22161] One remedy line; why `requiredPermissions` / `visible` do not
+      // clear it, and when a grant from another package makes it moot, are
+      // `os explain nav-object-ungranted`.
       hint:
         `Add "${objectName}" to a permission set's \`objects\` with \`allowRead: true\` ` +
-        `(or \`viewAllRecords\`), or drop the entry. Gating it with \`requiredPermissions\`/` +
-        `\`visible\` does not clear this: those gate visibility, not the object grant, so a ` +
-        `holder can still open the entry and hit permission-denied. Ignore this if a ` +
-        `permission set from another installed package grants it.`,
+        `(or \`viewAllRecords\`), or drop the entry`,
     });
   }
 

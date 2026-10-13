@@ -223,14 +223,14 @@ withdrawing the **grant**.
 ## `capability` is code-only
 
 `capability` is a registered metadata kind, and its registry entry declares
-`allowRuntimeCreate: false` **and** `allowOrgOverride: false`. Together those
+`allowRuntimeCreate: false` **and** `allowEnvironmentOverlay: false`. Together those
 are the code-only declaration, so:
 
 ```
 PUT /api/v1/meta/capability/:name
   → 403  NOT_CREATABLE
     "Metadata type 'capability' is code-only: the metadata-type registry
-     declares allowRuntimeCreate=false and allowOrgOverride=false, so it
+     declares allowRuntimeCreate=false and allowEnvironmentOverlay=false, so it
      cannot be created through the runtime metadata API … on any kernel.
      Declare it in source (**/*.capability.ts) and redeploy."
 ```
@@ -241,6 +241,13 @@ three-way separation: an administrator minting a brand-new capability at runtime
 has no counterpart in it — nothing in code would ever *require* the name, so the
 result is an unreferenced grant target sitting in the live authorization
 namespace. `job` and `agent` carry the same pair for the same reason.
+
+Under a `group` or `isolated` tenancy posture, a caller below the platform
+operator reads a different refusal, with the same `403` status: the security
+catalog refusal (ADR-0131 D3), whose message names the posture, with the code
+`FORBIDDEN` on the REST door and `PERMISSION_DENIED` on the runtime dispatcher.
+It runs before the code-only refusal, so the block above is the answer the
+platform operator reads, and every caller under `single`.
 
 Two things this does **not** close:
 

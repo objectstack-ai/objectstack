@@ -41,7 +41,7 @@
  * fold. The subjects are the MANIFEST-ABSENT types, and the two of them behave
  * differently enough that both are needed:
  *
- *  - `translation` (`allowOrgOverride: true`) — the singular passes
+ *  - `translation` (`allowEnvironmentOverlay: true`) — the singular passes
  *    `historyMetaItem`'s gate and reads real rows. The plural did not fold, so
  *    it asked the repository for `type='translations'`, matched nothing, and
  *    answered `{ events: [] }` about an item with a full change log.
@@ -64,7 +64,7 @@ import { META_URL_TO_SINGULAR, PLURAL_TO_SINGULAR, metaUrlSpellingRefusal } from
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
-/** Manifest-ABSENT and `allowOrgOverride: true` — history reads REAL rows for it. */
+/** Manifest-ABSENT and `allowEnvironmentOverlay: true` — history reads REAL rows for it. */
 const OVERLAY_ABSENT_TYPE = 'translation';
 const OVERLAY_ABSENT_PLURAL = 'translations';
 /** Manifest-ABSENT and gated shut — the "plural is a door around the gate" case. */
@@ -387,7 +387,7 @@ describe('#9157 — historyMetaItem', () => {
     });
 
     it('THE OTHER PIN: the plural stops being a door AROUND the overlay gate', async () => {
-        // `field` declares neither `allowOrgOverride` nor `allowRuntimeCreate`,
+        // `field` declares neither `allowEnvironmentOverlay` nor `allowRuntimeCreate`,
         // so the canonical spelling is refused by the gate and never touches the
         // store. The unfolded plural took `isRuntimeCreateAllowed`'s
         // no-static-registry-entry arm — the PLUGIN path, permissive by

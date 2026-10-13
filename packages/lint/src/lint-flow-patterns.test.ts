@@ -1658,8 +1658,9 @@ describe('#5383 — the branch-routing family reads the region’s own edges', (
 describe('#5383 — a recursive config scan does not double-report the container', () => {
   it('moves a nested double-brace finding onto the node carrying it, still exactly once', () => {
     const fnds = lintFlowPatterns(loopBodyFlow({
-      // A single-brace position (`recipients`): the notify `title` reads
-      // `{{ }}` since #22110, so a doubled brace there is no finding.
+      // A value slot (`recipients`, since #19939), where a doubled brace is
+      // no hole: the notify `title` reads `{{ }}` since #22110, so a doubled
+      // brace there is no finding.
       nodes: [{ id: 'send_reminder', type: 'notify', config: { title: 'Reminder: {{ lead.name }}', recipients: ['{{lead.owner}}'] } }],
       edges: [],
     // Scoped to this rule: the body's `notify` also trips the #14394
@@ -2324,9 +2325,11 @@ describe('per-iteration containment (#13681 / #14394)', () => {
  * `try`, `catch`, `branches`), rather than from the slots the node in hand
  * actually owns. `body` is `loop`'s region slot AND the canonical request-payload
  * key on an `http` node (`HttpConfigSchema.body`), so `config.body` was deleted
- * from EVERY node's view before the scan read it — and the payload is the one
- * place an uninterpolated token reaches a real outbound request, because
- * `http-nodes.ts` interpolates the raw config wholesale.
+ * from EVERY node's view before the scan read it — and the payload is a
+ * place an unresolved reference reaches a real outbound request. (Since
+ * #19939 the body is a value slot: a literal there is sent as written, so a
+ * `{{ }}` or a bare `$ref.x` in it ships as literal text, and both hints name
+ * its CEL envelope.)
  *
  * Measured on the parent commit, both directions: every case in this block
  * returned ZERO findings for its rule before the call site passed
@@ -2394,9 +2397,13 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
    * would surface as an `unrecognized_key` rather than being dropped.
    */
   it('pins the fixture payload as an authorable `http` config', () => {
-    const parsed = HttpConfigSchema.safeParse(httpPushConfig({ text: 'Incident {{record.title}}' }));
-    expect(parsed.success ? [] : parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`)).toEqual([]);
-    expect(parsed.success).toBe(true);
+    // [#19939] The fixture's keys and shape are authorable; the wrong-syntax
+    // content these rules flag is refused by the body's own judge since the
+    // body became a value slot — the one issue, at the string that carries it.
+    const clean = HttpConfigSchema.safeParse(httpPushConfig({ text: 'Incident' }));
+    expect(clean.success ? [] : clean.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`)).toEqual([]);
+    const flagged = HttpConfigSchema.safeParse(httpPushConfig({ text: 'Incident {{record.title}}' }));
+    expect(flagged.success ? [] : flagged.error.issues.map((i) => i.path.join('.'))).toEqual(['body.text']);
   });
 
   it('pins the guarded fixture as an authorable `try_catch` config', () => {
@@ -2440,7 +2447,7 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
      * the finding, so this pin can fail.
      */
     describe('a notify slot refusal prescribes only spellings this rule passes', () => {
-      function notifyFlow(key: 'title' | 'message' | 'actionUrl', value: unknown) {
+      function notifyFlow(key: 'title' | 'message' | 'actionUrl' | 'sourceId', value: unknown) {
         return {
           flows: [{
             name: 'deal_won_notice',
@@ -2463,7 +2470,7 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         return [bare, envelope === undefined ? undefined : { dialect: 'template', source: envelope }];
       }
 
-      function doubleBraceFindings(key: 'title' | 'message' | 'actionUrl', value: unknown) {
+      function doubleBraceFindings(key: 'title' | 'message' | 'actionUrl' | 'sourceId', value: unknown) {
         return lintFlowPatterns(notifyFlow(key, value)).filter((f) => f.rule === FLOW_DOUBLE_BRACE_INTERP);
       }
 
@@ -2486,12 +2493,16 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         }
       });
 
-      it('control: the same prescribed hole draws the finding on the node\'s single-brace `actionUrl`', () => {
+      // [#19939] The control moved from `actionUrl`, a text slot since stage
+      // S4 (a `{{ }}` hole is its spelling, so it draws no finding there now),
+      // to `sourceId`, a value slot, where a doubled brace is no hole.
+      it('control: the same prescribed hole draws the finding on the node\'s value slot `sourceId`, and none on its text slot `actionUrl`', () => {
         for (const sentence of [TYPED_EXPRESSION_SOURCE_REQUIRED.template, TYPED_EXPRESSION_DIALECT_ONLY.template]) {
           const prescribed = prescribedIn(sentence);
           expect(prescribed.every((p) => p !== undefined), sentence).toBe(true);
           const bare = prescribed[0] as string;
-          expect(doubleBraceFindings('actionUrl', `/deals/${bare}`), bare).toHaveLength(1);
+          expect(doubleBraceFindings('sourceId', bare), bare).toHaveLength(1);
+          expect(doubleBraceFindings('actionUrl', `/deals/${bare}`), bare).toEqual([]);
           expect(doubleBraceFindings('title', bare), bare).toEqual([]);
         }
       });
@@ -2784,9 +2795,15 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
       });
 
       it('control: outside the value and text slots the single brace still resolves, and the hint still names it', () => {
-        const [f] = lintFlowPatterns(httpFlow({ ticket: '$source.id' })).filter((x) => x.rule === FLOW_BARE_DOLLAR_REF);
+        // [#19939] A CRUD `filter` value — the position S6 has not reached; an
+        // `http` body is a value slot since S5.
+        const filtered = (owner: string) => valueFlow('get_record', { objectName: 'task', filter: { owner } });
+        const [f] = bareDollar(filtered('$source.id'));
         expect(f!.hint).toContain('Wrap it and bind a variable: `{source.id}`');
-        expect(flowNodeValueTemplateRefusals('http', httpPushConfig({ ticket: '{source.id}' }))).toEqual([]);
+        expect(flowNodeValueTemplateRefusals('get_record', { objectName: 'task', filter: { owner: '{source.id}' } })).toEqual([]);
+        // …and the http body names its envelope now.
+        const [body] = lintFlowPatterns(httpFlow({ ticket: '$source.id' })).filter((x) => x.rule === FLOW_BARE_DOLLAR_REF);
+        expect(body!.hint).toContain('A value slot reads a CEL value envelope');
       });
     });
 
@@ -2886,16 +2903,23 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
       });
 
       it('control: outside the value and text slots the single brace still resolves, and the double-brace hint still names it', () => {
-        const [f] = lintFlowPatterns(httpFlow({ title: '{{ record.title }}' })).filter((x) => x.rule === FLOW_DOUBLE_BRACE_INTERP);
+        // [#19939] A CRUD `filter` value — the position S6 has not reached.
+        const [f] = doubleBrace(valueFlow('get_record', { objectName: 'task', filter: { title: '{{ record.title }}' } }));
         expect(f!.hint).toContain('Use `{var}` (e.g. `{record.title}`)');
+        // …and the http body, a value slot since S5, names its envelope.
+        const [body] = lintFlowPatterns(httpFlow({ title: '{{ record.title }}' })).filter((x) => x.rule === FLOW_DOUBLE_BRACE_INTERP);
+        expect(body!.hint).not.toContain('Use `{var}`');
       });
     });
   });
 
-  it('still raises nothing for a correct single-brace payload', () => {
+  it('raises neither finding for a single-brace token in a payload — the body\'s own judge refuses that one', () => {
     const fnds = lintFlowPatterns(httpFlow({ id: '{record.id}', owner: '{$User.Id}', note: 'Total $5' }))
       .filter((f) => f.rule === FLOW_DOUBLE_BRACE_INTERP || f.rule === FLOW_BARE_DOLLAR_REF);
     expect(fnds).toEqual([]);
+    // [#19939] Since the body became a value slot, the value-slot judge refuses each token at its string.
+    expect(flowNodeValueTemplateRefusals('http', httpPushConfig({ id: '{record.id}', owner: '{$User.Id}', note: 'Total $5' })).map((r) => r.path))
+      .toEqual(['body.id', 'body.owner']);
   });
 
   /**
@@ -3205,5 +3229,138 @@ describe('decision `mode` (#15429)', () => {
       expect(fnds).toHaveLength(1);
       expect(fnds[0].where).toContain("loop 'each'");
     });
+  });
+});
+
+/**
+ * [#19939, stage S4] A notify node's `sourceObject`, `actorId` and `payload`
+ * are literals the executor reads as written: no flow computed one, so no
+ * value slot is built there, and the contract refuses a `{…}` token in one.
+ * Neither brace dialect resolves there, so the two wrong-syntax hints name the
+ * value itself — never `{var}`, which the build would refuse there.
+ */
+describe('the notify literals: neither brace dialect resolves, and the hints say so (#19939)', () => {
+  function notifyFlow(config: Record<string, unknown>) {
+    return {
+      flows: [{
+        name: 'literal_notice',
+        label: 'Literal notice',
+        type: 'autolaunched',
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start' },
+          { id: 'tell', type: 'notify', label: 'Tell', config: { recipients: ['u1'], title: 'T', ...config } },
+          { id: 'done', type: 'end', label: 'Done' },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'tell' }, { id: 'e2', source: 'tell', target: 'done' }],
+      }],
+    };
+  }
+  const findingsOf = (config: Record<string, unknown>, rule: string) =>
+    lintFlowPatterns(notifyFlow(config)).filter((f) => f.rule === rule);
+
+  /** The keys the spec contract refuses a `{…}` token at with the literal's lead — asked of the contract, never listed. */
+  function contractLiteralKeys(): string[] {
+    const shape = (NotifyConfigSchema as unknown as { shape: Record<string, unknown> }).shape;
+    return Object.keys(shape).filter((key) => {
+      const value = key === 'payload' ? { k: '{x}' } : '{x}';
+      const parsed = NotifyConfigSchema.safeParse({ recipients: ['u1'], title: 'T', [key]: value });
+      return !parsed.success
+        && parsed.error.issues.some((i) => i.path[0] === key && i.message.includes('a literal the executor reads as written'));
+    });
+  }
+
+  it('the contract\'s literals are the keys this rule reads as literals — in step, both ways', () => {
+    expect(contractLiteralKeys()).toEqual(['sourceObject', 'actorId', 'payload']);
+    for (const [key, config] of [
+      ['sourceObject', { sourceObject: '{{ record.object }}' }],
+      ['actorId', { actorId: '{{ record.owner }}' }],
+      ['payload', { payload: { meta: { by: '{{ record.owner }}' } } }],
+    ] as const) {
+      const found = findingsOf(config, FLOW_DOUBLE_BRACE_INTERP);
+      expect(found, key).toHaveLength(1);
+      expect(found[0]!.message, key).toContain('is a literal, read as written.');
+      expect(found[0]!.hint, key).toContain('neither `{var}` nor `{{ }}` resolves there');
+      expect(found[0]!.hint, key).not.toContain('Use `{var}`');
+    }
+    expect(findingsOf({ payload: { meta: { by: '{{ x }}' } } }, FLOW_DOUBLE_BRACE_INTERP)[0]!.message)
+      .toContain('`payload.meta.by` is a literal');
+    // Control: a notify key outside the contract's literals does not take their hint.
+    const topic = findingsOf({ topic: '{{ record.kind }}' }, FLOW_DOUBLE_BRACE_INTERP);
+    expect(topic).toHaveLength(1);
+    expect(topic[0]!.hint).not.toContain('neither `{var}` nor `{{ }}` resolves there');
+  });
+
+  it('a bare `$ref.field` at a literal is named as read as written — no braces offered', () => {
+    const found = findingsOf({ actorId: '$source.id' }, FLOW_BARE_DOLLAR_REF);
+    expect(found).toHaveLength(1);
+    expect(found[0]!.message).toContain('at `actorId` is NOT resolved: it is read as written.');
+    expect(found[0]!.hint).toContain('Write the value itself.');
+    expect(found[0]!.hint).not.toContain('`{source.id}`');
+  });
+});
+
+/**
+ * [#19939, stage S5] An http node's `method`, `durable`, `timeoutMs` and
+ * `signingSecret` are literals the executor reads as written: no shipped flow
+ * computed one, so no value slot is built there, and the contract refuses a
+ * `{…}` token in one. Neither brace dialect resolves there, so the two
+ * wrong-syntax hints name the value itself — never `{var}`, which the build
+ * would refuse there. Its `url` and `headers` values are text slots, where a
+ * double brace is the spelling, and its `body` a value slot.
+ */
+describe('the http literals: neither brace dialect resolves, and the hints say so (#19939)', () => {
+  function httpFlow(config: Record<string, unknown>) {
+    return {
+      flows: [{
+        name: 'literal_call',
+        label: 'Literal call',
+        type: 'autolaunched',
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start' },
+          { id: 'call', type: 'http', label: 'Call', config: { url: 'https://x.test/hook', ...config } },
+          { id: 'done', type: 'end', label: 'Done' },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'call' }, { id: 'e2', source: 'call', target: 'done' }],
+      }],
+    };
+  }
+  const findingsOf = (config: Record<string, unknown>, rule: string) =>
+    lintFlowPatterns(httpFlow(config)).filter((f) => f.rule === rule);
+
+  /** The keys the spec contract refuses a `{…}` token at as a literal — asked of the contract, never listed. */
+  function contractLiteralKeys(): string[] {
+    const shape = (HttpConfigSchema as unknown as { shape: Record<string, unknown> }).shape;
+    return Object.keys(shape).filter((key) => {
+      const parsed = HttpConfigSchema.safeParse({ url: 'https://x.test/hook', [key]: 'pre-{x}' });
+      return !parsed.success
+        && parsed.error.issues.some((i) => i.path.length === 1 && i.path[0] === key && / as written[:,]/.test(i.message));
+    });
+  }
+
+  it('the contract\'s literals are the keys this rule reads as literals — in step, both ways', () => {
+    // `headers` refuses a token written as the whole map, read as written, but
+    // its values are text slots, where a double brace is the spelling: not a literal here.
+    expect(contractLiteralKeys()).toEqual(['method', 'headers', 'durable', 'timeoutMs', 'signingSecret']);
+    for (const key of ['method', 'durable', 'timeoutMs', 'signingSecret'] as const) {
+      const found = findingsOf({ [key]: '{{ record.x }}' }, FLOW_DOUBLE_BRACE_INTERP);
+      expect(found, key).toHaveLength(1);
+      expect(found[0]!.message, key).toContain(`\`${key}\` is a literal, read as written.`);
+      expect(found[0]!.hint, key).toContain('neither `{var}` nor `{{ }}` resolves there');
+      expect(found[0]!.hint, key).not.toContain('Use `{var}`');
+    }
+    // Controls: a double brace in a text slot is the spelling, and in the body it is a value slot's finding.
+    expect(findingsOf({ url: 'https://x.test/{{ id }}', headers: { 'X-Ref': '{{ id }}' } }, FLOW_DOUBLE_BRACE_INTERP)).toEqual([]);
+    const body = findingsOf({ body: { id: '{{ record.id }}' } }, FLOW_DOUBLE_BRACE_INTERP);
+    expect(body).toHaveLength(1);
+    expect(body[0]!.hint).not.toContain('neither `{var}` nor `{{ }}` resolves there');
+    expect(body[0]!.hint).toContain('A value slot reads a CEL value envelope');
+  });
+
+  it('a bare `$ref.field` at a literal is named as read as written — no braces offered', () => {
+    const found = findingsOf({ method: '$verb.name' }, FLOW_BARE_DOLLAR_REF);
+    expect(found).toHaveLength(1);
+    expect(found[0]!.message).toContain('at `method` is NOT resolved: it is read as written.');
+    expect(found[0]!.hint).toContain('Write the value itself.');
+    expect(found[0]!.hint).not.toContain('`{verb.name}`');
   });
 });

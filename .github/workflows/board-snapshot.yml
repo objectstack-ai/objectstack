@@ -217,11 +217,21 @@ jobs:
       # The archive branch is an ORPHAN: it shares no history with `main`, so a
       # checkout of it carries the archive and nothing else. First run creates it
       # locally; the push below is what publishes it.
+      #
+      # It is fetched with its WHOLE history but without file contents
+      # (`--filter=blob:none`), because the R2 step reads each record's
+      # last-change time out of that history; see "Only changed records are
+      # uploaded" there. The worktree checkout then fetches the tip's blobs in
+      # one batch, which is the same content a `--depth=1` fetch downloaded, so
+      # the history adds only commits and trees: ~7 MB for 127 commits over
+      # 41,047 files, measured 2026-10-12. ⛔ Do not put `--depth` back: a
+      # truncated history makes the R2 step re-upload every record older than
+      # the cut on every run (safe, but the cost that step exists to avoid).
       - name: Check out or create the archive branch
         if: github.event_name != 'pull_request'
         run: |
           set -euo pipefail
-          git fetch --depth=1 origin '+refs/heads/board-archive:refs/remotes/origin/board-archive' || true
+          git fetch --filter=blob:none origin '+refs/heads/board-archive:refs/remotes/origin/board-archive' || true
           if git rev-parse --verify --quiet refs/remotes/origin/board-archive > /dev/null; then
             git worktree add archive -b board-archive refs/remotes/origin/board-archive
             echo "archive branch exists; checked out at $(git -C archive rev-parse --short HEAD)"
@@ -319,6 +329,43 @@ jobs:
       # rather than by the clock, so a missed 02:07 run, a re-run and a
       # `workflow_dispatch` all converge on one tarball per day.
       #
+      # ## Only changed records are uploaded
+      #
+      # `aws s3 sync` uploads a file when its size differs from the object's,
+      # or when the file's mtime is newer than the object's LastModified
+      # (aws-cli `SizeAndLastModifiedSync`). A fresh checkout stamps every file
+      # with the checkout time, so each run re-PUT all ~41,000 objects:
+      # measured on the bucket, 1.2M PutObject in 11 days (~110k a day, ~$10 a
+      # month of R2 Class A operations against a 1M-a-month free tier).
+      #
+      # So before syncing, every file's mtime is set to the committer time of
+      # the last commit on the archive branch that changed it. That makes the
+      # comparison mean what sync assumes it means:
+      #
+      #   - an object's LastModified is the time it was last uploaded, and every
+      #     upload happens AFTER the commit whose content it carries (the commit
+      #     step runs before this one), so an object that is current has a
+      #     LastModified newer than its file's mtime and is skipped;
+      #   - a file changed by a commit made after its object was last uploaded
+      #     has the newer mtime and is uploaded. That covers this run's changes
+      #     AND anything an earlier run failed to upload, with no state kept
+      #     between runs;
+      #   - a file the archive no longer has is still removed by `--delete`.
+      #
+      # ⛔ Not `--size-only`: a record edit can keep its byte count (every
+      # `updated_at` move does, and so does a count gaining no digit), and a
+      # size-only comparison would leave the stale copy in R2 for good.
+      #
+      # This relies on two things being true. The archive branch is written
+      # only by this workflow, so its committer times follow real time. And
+      # nothing else writes under the mirror prefix: an out-of-band write
+      # with the same size and a newer LastModified would not be overwritten,
+      # where the old full re-upload replaced it within six hours. If the
+      # history cannot be read, the step does not guess. It leaves the
+      # checkout times in place, which re-uploads everything, and says so in
+      # a warning and in the run's R2 status line: more Class A operations,
+      # never a weaker copy.
+      #
       # ## Unset secrets are a notice, not a failure
       #
       # The bucket and its scoped API token are the maintainer's to create.
@@ -378,6 +425,59 @@ jobs:
           # No `.git` filter is needed here: `archive/` is a linked worktree,
           # so its `.git` is a FILE at `archive/.git`, which is outside this
           # source (filters match paths relative to the source directory).
+          #
+          # mtimes first: see "Only changed records are uploaded" above. The
+          # history is walked newest-first, so the first time a path appears
+          # is the last commit that touched it; a path whose newest commit
+          # deleted it has no file and is skipped. `-z` keeps every byte of a
+          # path intact. A truncated history errs in the safe direction only:
+          # its oldest commit looks like the one that created every file older
+          # than it, which stamps those files NEWER than their real last
+          # change, so they are uploaded again, and no stale object is ever
+          # skipped.
+          #
+          # The script is written to a file rather than fed through a heredoc
+          # inside the command substitution, which keeps bash's parser out of
+          # the backticks and quotes it contains.
+          cat > "$RUNNER_TEMP/archive-mtimes.cjs" <<'JS'
+          const { execFileSync } = require('node:child_process');
+          const { utimesSync } = require('node:fs');
+          const { join } = require('node:path');
+          const git = (...args) =>
+            execFileSync('git', ['-C', 'archive', ...args], { encoding: 'utf8', maxBuffer: 1 << 30 });
+          const log = git('log', '--no-renames', '--name-only', '-z', '--format=%x01%ct', 'HEAD', '--', 'board');
+          const seen = new Set();
+          let time = NaN;
+          let stamped = 0;
+          for (const token of log.split('\0')) {
+            if (token.startsWith('\x01')) { time = Number(token.slice(1)); continue; }
+            const path = token.replace(/^\n/, '');
+            if (!path || seen.has(path)) continue;
+            seen.add(path);
+            if (!Number.isInteger(time)) throw new Error(`no commit time read before ${path}`);
+            try {
+              utimesSync(join('archive', path), time, time);
+              stamped += 1;
+            } catch (e) {
+              if (e.code !== 'ENOENT') throw e;
+            }
+          }
+          const tracked = git('ls-files', '-z', '--', 'board').split('\0').filter(Boolean).length;
+          if (stamped !== tracked) throw new Error(`stamped ${stamped} file(s) but the archive tracks ${tracked}`);
+          const commits = git('rev-list', '--count', 'HEAD').trim();
+          console.log(`${stamped} file(s) stamped from ${commits} commit(s)`);
+          JS
+          if mtimes=$(node "$RUNNER_TEMP/archive-mtimes.cjs" 2>&1); then
+            # The last line only: the status line below goes into
+            # $GITHUB_OUTPUT, where a second line would break its format.
+            mtime_note="mtimes from history: ${mtimes##*$'\n'}"
+            echo "${mtime_note}"
+          else
+            printf '%s\n' "$mtimes" >&2
+            echo "::warning::Could not set the archive's mtimes from its git history (output above), so this sync re-uploads every object. The copy stays complete, but every file costs a Class A operation."
+            mtime_note="FULL re-upload, mtimes not restored"
+          fi
+
           # No pipe between the command and `$?` — see the snapshot step.
           set +e
           aws s3 sync archive/board/ "$mirror" \
@@ -392,9 +492,11 @@ jobs:
             echo "::error::aws s3 sync to R2 exited $code. This run IS archived on board-archive; the out-of-GitHub copy is now behind and every later run will stay behind until this is fixed."
             exit 1
           fi
-          # One line per object moved. The first configured run moves the whole
-          # board and every later run moves a handful, so the log is truncated
-          # here and the counts below are taken over all of it.
+          # One line per object moved. With the mtimes restored above, a run
+          # moves the records that changed since the last upload; a run that
+          # fell back (or the first one configured) moves the whole board, so
+          # the log is truncated here and the counts below are taken over all
+          # of it.
           transfers=$(wc -l < "$RUNNER_TEMP/r2-sync.log")
           head -n 50 "$RUNNER_TEMP/r2-sync.log"
           if [ "$transfers" -gt 50 ]; then
@@ -414,8 +516,8 @@ jobs:
             tarred="written for ${day}"
           fi
 
-          echo "status=synced ${uploaded} object(s), deleted ${deleted}; daily tarball ${tarred}" >> "$GITHUB_OUTPUT"
-          echo "R2: synced ${uploaded} object(s), deleted ${deleted}; daily tarball ${tarred}"
+          echo "status=synced ${uploaded} object(s), deleted ${deleted} (${mtime_note}); daily tarball ${tarred}" >> "$GITHUB_OUTPUT"
+          echo "R2: synced ${uploaded} object(s), deleted ${deleted} (${mtime_note}); daily tarball ${tarred}"
 
       - name: Publish the run to the summary
         if: always()

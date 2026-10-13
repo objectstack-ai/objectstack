@@ -203,7 +203,7 @@ describe('#8421 — the traffic that must keep working', () => {
     const ACCEPTED: Array<{ type: string; item: Record<string, unknown>; why: string }> = [
         {
             type: 'view',
-            why: 'declared, allowOrgOverride + allowRuntimeCreate',
+            why: 'declared, allowEnvironmentOverlay + allowRuntimeCreate',
             item: {
                 name: 'probe_item',
                 label: 'Probe',

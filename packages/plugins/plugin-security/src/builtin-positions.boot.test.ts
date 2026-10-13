@@ -534,12 +534,13 @@ for (const name of Object.keys(SCENARIOS) as ScenarioName[]) {
 }
 
 /**
- * The tenant position writes — the same in both postures. A name the security
+ * The tenant position writes. A name the security
  * catalog does not hold, a dangling one or a row with no definition alike, is
  * the position catalog refusal's envelope (`reference_not_found` at
  * `position`); a stack-declared position is assigned with no row; the two
  * built-in rows an existing database holds are refused on their `platform`
- * provenance.
+ * provenance. Under a wall the tenant's position create is refused as well
+ * ({@link refusalGoldenFor}).
  */
 const REFUSAL_GOLDEN: Record<string, WriteOutcome> = {
   'assign a position the security catalog does not hold': {
@@ -570,10 +571,19 @@ const REFUSAL_GOLDEN: Record<string, WriteOutcome> = {
   },
 };
 
-/** {@link REFUSAL_GOLDEN} for a scenario: the built-in row cases need an existing database's rows. */
+/**
+ * {@link REFUSAL_GOLDEN} for a scenario: the built-in row cases need an existing
+ * database's rows. [ADR-0131 D3] Under a wall the tenant's position CREATE is
+ * refused (`walled-catalog-data-door.ts`): the catalog is the platform
+ * operator's, and a tenant may only assign it. The assignment cases do not
+ * move, and the built-in row refusals keep their `403 PERMISSION_DENIED`.
+ */
 function refusalGoldenFor(scenario: Scenario): Record<string, WriteOutcome> {
-  if (scenario.existingRows) return REFUSAL_GOLDEN;
-  const { 'delete the everyone row': _d, 'relabel the platform_admin row': _r, ...fresh } = REFUSAL_GOLDEN;
+  const golden: Record<string, WriteOutcome> = scenario.posture === 'single'
+    ? REFUSAL_GOLDEN
+    : { ...REFUSAL_GOLDEN, 'control: create a position row': { ok: false, code: 'PERMISSION_DENIED', status: 403 } };
+  if (scenario.existingRows) return golden;
+  const { 'delete the everyone row': _d, 'relabel the platform_admin row': _r, ...fresh } = golden;
   return fresh;
 }
 
@@ -639,7 +649,7 @@ const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {
       permissions: ['mcp_agent_data_read'],
       positions: [],
       principalKind: 'agent',
-      systemPermissions: ['manage_org_users', 'setup.access', 'setup.write'],
+      systemPermissions: ['manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
     },
     member: {
       accessible_org_ids: ['org_eq'],
@@ -657,7 +667,7 @@ const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {
       permissions: ['field_default', 'member_default', 'organization_admin_no_bypass'],
       positions: ['everyone', 'org_owner'],
       posture: 'TENANT_ADMIN',
-      systemPermissions: ['manage_org_users', 'setup.access', 'setup.write'],
+      systemPermissions: ['manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
     },
     platformAdmin: {
       accessible_org_ids: [],
@@ -667,6 +677,7 @@ const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {
       positions: ['everyone', 'platform_admin'],
       posture: 'PLATFORM_ADMIN',
       systemPermissions: [
+        'manage_mailboxes',
         'manage_metadata',
         'manage_platform_settings',
         'manage_sharing',
@@ -687,7 +698,7 @@ const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {
       permissions: ['mcp_agent_data_read'],
       positions: [],
       principalKind: 'agent',
-      systemPermissions: ['manage_org_users', 'setup.access', 'setup.write'],
+      systemPermissions: ['manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
     },
     member: {
       accessible_org_ids: ['org_eq'],
@@ -705,7 +716,7 @@ const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {
       permissions: ['field_default', 'member_default', 'organization_admin'],
       positions: ['everyone', 'org_owner'],
       posture: 'TENANT_ADMIN',
-      systemPermissions: ['manage_org_users', 'setup.access', 'setup.write'],
+      systemPermissions: ['manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
     },
     platformAdmin: {
       accessible_org_ids: [],
@@ -715,6 +726,7 @@ const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {
       positions: ['everyone', 'platform_admin'],
       posture: 'PLATFORM_ADMIN',
       systemPermissions: [
+        'manage_mailboxes',
         'manage_metadata',
         'manage_platform_settings',
         'manage_sharing',

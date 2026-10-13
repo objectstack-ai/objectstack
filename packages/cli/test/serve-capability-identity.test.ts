@@ -123,6 +123,7 @@ const EXPECTED_PROVIDER_NAME: Record<string, string> = {
   // PackageServicePlugin registers, which the drift block below re-derives.
   'package-registry': 'package-service',
   email: 'com.objectstack.service.email',
+  mailbox: 'com.objectstack.service.mailbox',
   sms: 'com.objectstack.service.sms',
   sharing: 'com.objectstack.service.sharing',
   'pinyin-search': 'com.objectstack.plugin.pinyin-search',

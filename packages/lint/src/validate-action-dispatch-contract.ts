@@ -199,9 +199,13 @@ export function validateActionDispatchContract(stack: AnyRec): ActionDispatchCon
     const declared = declaredBy.get(name);
     if (declared === undefined || declared === wired) return;
 
+    // [#22161] One remedy line naming both ends: the declaration to match the
+    // wiring, or the wiring to match the declaration. Which one to pick (the
+    // contract the body is written for) and why two wanted wirings are two
+    // actions are `os explain action-dispatch-contract-mismatch`.
     const rewire = wired === 'perRecord'
-      ? `move the wiring to \`bulkActionDefs: [{ name: '${name}', operation: 'custom', execution: 'aggregate' }]\``
-      : `drop the def and name the action in the view's \`bulkActions: ['${name}']\` instead`;
+      ? `rewire it as \`bulkActionDefs: [{ name: '${name}', operation: 'custom', execution: 'aggregate' }]\``
+      : `drop the def and name it in the view's \`bulkActions: ['${name}']\``;
 
     findings.push({
       severity: 'error',
@@ -214,12 +218,7 @@ export function validateActionDispatchContract(stack: AnyRec): ActionDispatchCon
       message:
         `action "${name}" declares execution: '${declared}', wired as execution: '${wired}' `
         + `(${DELIVERS[wired]}), so ${MISFIRE[declared]}`,
-      hint:
-        `Pick the contract the body is actually written for and make both ends say it: either `
-        + `change the action's declaration to \`execution: '${wired}'\` (if the body was written `
-        + `for the wiring), or ${rewire} (if the body was written for the declaration). If the `
-        + `two wirings are both wanted, they are two actions — one call and N calls have `
-        + `different side effects, which is why the platform will not silently unify them.`,
+      hint: `Declare \`execution: '${wired}'\` on the action, or ${rewire}`,
     });
   };
 

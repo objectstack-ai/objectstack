@@ -2,8 +2,8 @@
   "description": "Shrink-only ledger of every PUBLISHED JSON Schema that is STILL WIDER than the Zod type it was generated from, because a rule written as `.refine()` reaches the runtime and not the file (#18670). `z.toJSONSchema()` has no arm for a `custom` check: a plain record, the same record with a `.refine()`, and the same record with an ABORTING `.refine()` all project byte-identically (measured on zod 4.4.3, the version packages/spec resolves). So a document one of these files ACCEPTS can still be refused at parse time, and an author -- or an AI -- validating against packages/spec/json-schema/** finds out a release later. Each `sites` path is a position under that schema at which a refinement is dropped; the same paths are written onto the artifact itself as `x-dropped-refinements`. Item 2 closed the first patterns: a refinement DECLARED through the closed list in src/shared/refinement-projection.ts is emitted into the published file, reads `projected` rather than `dropped`, and its row LEAVES this ledger in the same PR -- which is why the ledger shrinks and never grows on a repair. Every refinement outside that closed list stays here, and adding an arm to the list is a public-contract decision, not a refactor. Hand-edited on purpose and with no `gen:` script: a generator would let a new gap be admitted by running a command instead of by a decision, which is the silence this ledger exists to end. Adding, removing or moving a site fails packages/spec/scripts/build-schemas.ts until the line moves with it, and the failure prints the corrected entry in full. ⛔ Do not delete or weaken a refinement to shorten this file -- the runtime rule is correct; it is the projection that is silent, and the remedy is to teach the closed list a NAMED pattern, never to drop the rule.",
   "measured": {
     "zod": "4.4.3",
-    "publishedSchemasWithDroppedRefinements": 226,
-    "droppedRefinementSites": 708,
+    "publishedSchemasWithDroppedRefinements": 232,
+    "droppedRefinementSites": 752,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -63,12 +63,14 @@
       "sites": [
         "manifest.actions.element.in",
         "manifest.actions.element.in.ai.outputSchema",
+        "manifest.actions.element.in.onSuccess",
         "manifest.actions.element.in.params.element.in",
         "manifest.agents.element.memory",
         "manifest.agents.element.structuredOutput.schema",
         "manifest.analyticsCubes.element.measures.valueType",
         "manifest.connectors.element.out",
         "manifest.dashboards.element.globalFilters.element",
+        "manifest.dashboards.element.header.actions.element",
         "manifest.dashboards.element.widgets.element",
         "manifest.dashboards.element.widgets.element.filter",
         "manifest.datasets.element",
@@ -110,6 +112,7 @@
         "manifest.views.element.form.submitBehavior.options[1].url",
         "manifest.views.element.list",
         "manifest.views.element.list.bulkActionDefs.element",
+        "manifest.views.element.list.emptyState.link.url",
         "manifest.views.element.list.filter.element",
         "manifest.views.element.list.gantt.groupByField",
         "manifest.views.element.list.grouping.fields.element.field",
@@ -176,12 +179,14 @@
         "data.options[0].manifest.navigationContributions.element.items.element.lazy.options[0]",
         "data.options[1].manifest.actions.element.in",
         "data.options[1].manifest.actions.element.in.ai.outputSchema",
+        "data.options[1].manifest.actions.element.in.onSuccess",
         "data.options[1].manifest.actions.element.in.params.element.in",
         "data.options[1].manifest.agents.element.memory",
         "data.options[1].manifest.agents.element.structuredOutput.schema",
         "data.options[1].manifest.analyticsCubes.element.measures.valueType",
         "data.options[1].manifest.connectors.element.out",
         "data.options[1].manifest.dashboards.element.globalFilters.element",
+        "data.options[1].manifest.dashboards.element.header.actions.element",
         "data.options[1].manifest.dashboards.element.widgets.element",
         "data.options[1].manifest.dashboards.element.widgets.element.filter",
         "data.options[1].manifest.datasets.element",
@@ -219,6 +224,7 @@
         "data.options[1].manifest.views.element.form.submitBehavior.options[1].url",
         "data.options[1].manifest.views.element.list",
         "data.options[1].manifest.views.element.list.bulkActionDefs.element",
+        "data.options[1].manifest.views.element.list.emptyState.link.url",
         "data.options[1].manifest.views.element.list.filter.element",
         "data.options[1].manifest.views.element.list.gantt.groupByField",
         "data.options[1].manifest.views.element.list.grouping.fields.element.field",
@@ -251,6 +257,7 @@
         "form.submitBehavior.options[1].url",
         "list",
         "list.bulkActionDefs.element",
+        "list.emptyState.link.url",
         "list.filter.element",
         "list.gantt.groupByField",
         "list.grouping.fields.element.field",
@@ -278,12 +285,14 @@
         "options[0].manifest.navigationContributions.element.items.element.lazy.options[0]",
         "options[1].manifest.actions.element.in",
         "options[1].manifest.actions.element.in.ai.outputSchema",
+        "options[1].manifest.actions.element.in.onSuccess",
         "options[1].manifest.actions.element.in.params.element.in",
         "options[1].manifest.agents.element.memory",
         "options[1].manifest.agents.element.structuredOutput.schema",
         "options[1].manifest.analyticsCubes.element.measures.valueType",
         "options[1].manifest.connectors.element.out",
         "options[1].manifest.dashboards.element.globalFilters.element",
+        "options[1].manifest.dashboards.element.header.actions.element",
         "options[1].manifest.dashboards.element.widgets.element",
         "options[1].manifest.dashboards.element.widgets.element.filter",
         "options[1].manifest.datasets.element",
@@ -324,6 +333,7 @@
         "options[1].manifest.views.element.form.submitBehavior.options[1].url",
         "options[1].manifest.views.element.list",
         "options[1].manifest.views.element.list.bulkActionDefs.element",
+        "options[1].manifest.views.element.list.emptyState.link.url",
         "options[1].manifest.views.element.list.filter.element",
         "options[1].manifest.views.element.list.gantt.groupByField",
         "options[1].manifest.views.element.list.grouping.fields.element.field",
@@ -336,12 +346,14 @@
         "data.packages.element.options[0].manifest.navigationContributions.element.items.element.lazy.options[0]",
         "data.packages.element.options[1].manifest.actions.element.in",
         "data.packages.element.options[1].manifest.actions.element.in.ai.outputSchema",
+        "data.packages.element.options[1].manifest.actions.element.in.onSuccess",
         "data.packages.element.options[1].manifest.actions.element.in.params.element.in",
         "data.packages.element.options[1].manifest.agents.element.memory",
         "data.packages.element.options[1].manifest.agents.element.structuredOutput.schema",
         "data.packages.element.options[1].manifest.analyticsCubes.element.measures.valueType",
         "data.packages.element.options[1].manifest.connectors.element.out",
         "data.packages.element.options[1].manifest.dashboards.element.globalFilters.element",
+        "data.packages.element.options[1].manifest.dashboards.element.header.actions.element",
         "data.packages.element.options[1].manifest.dashboards.element.widgets.element",
         "data.packages.element.options[1].manifest.dashboards.element.widgets.element.filter",
         "data.packages.element.options[1].manifest.datasets.element",
@@ -393,6 +405,7 @@
       "sites": [
         "data.actions.element.in",
         "data.actions.element.in.ai.outputSchema",
+        "data.actions.element.in.onSuccess",
         "data.actions.element.in.params.element.in"
       ]
     },
@@ -401,6 +414,7 @@
         "data",
         "data.actions.element.in",
         "data.actions.element.in.ai.outputSchema",
+        "data.actions.element.in.onSuccess",
         "data.actions.element.in.params.element.in",
         "data.fieldGroups",
         "data.fields.out.valueType",
@@ -409,6 +423,7 @@
         "data.lifecycle",
         "data.listViews.valueType",
         "data.listViews.valueType.bulkActionDefs.element",
+        "data.listViews.valueType.emptyState.link.url",
         "data.listViews.valueType.filter.element",
         "data.listViews.valueType.gantt.groupByField",
         "data.listViews.valueType.grouping.fields.element.field",
@@ -516,6 +531,12 @@
         "definition.nodes.element.in.waitEventConfig"
       ]
     },
+    "automation/HttpConfig": {
+      "sites": [
+        "",
+        "body"
+      ]
+    },
     "automation/LoopConfig": {
       "sites": [
         "body.nodes.element.lazy.in.waitEventConfig"
@@ -528,7 +549,10 @@
     },
     "automation/NotifyConfig": {
       "sites": [
-        ""
+        "",
+        "recipients",
+        "sourceId",
+        "templateData.valueType"
       ]
     },
     "automation/ParallelBranch": {
@@ -827,6 +851,7 @@
         "",
         "actions.element.in",
         "actions.element.in.ai.outputSchema",
+        "actions.element.in.onSuccess",
         "actions.element.in.params.element.in",
         "fieldGroups",
         "fields.out.valueType",
@@ -835,6 +860,7 @@
         "lifecycle",
         "listViews.valueType",
         "listViews.valueType.bulkActionDefs.element",
+        "listViews.valueType.emptyState.link.url",
         "listViews.valueType.filter.element",
         "listViews.valueType.gantt.groupByField",
         "listViews.valueType.grouping.fields.element.field",
@@ -1006,6 +1032,7 @@
         "",
         "actions.element.in",
         "actions.element.in.ai.outputSchema",
+        "actions.element.in.onSuccess",
         "actions.element.in.params.element.in"
       ]
     },
@@ -1105,12 +1132,14 @@
         "operations.element.options[3].object",
         "operations.element.options[3].object.actions.element.in",
         "operations.element.options[3].object.actions.element.in.ai.outputSchema",
+        "operations.element.options[3].object.actions.element.in.onSuccess",
         "operations.element.options[3].object.actions.element.in.params.element.in",
         "operations.element.options[3].object.fieldGroups",
         "operations.element.options[3].object.fields.out.valueType",
         "operations.element.options[3].object.lifecycle",
         "operations.element.options[3].object.listViews.valueType",
         "operations.element.options[3].object.listViews.valueType.bulkActionDefs.element",
+        "operations.element.options[3].object.listViews.valueType.emptyState.link.url",
         "operations.element.options[3].object.listViews.valueType.filter.element",
         "operations.element.options[3].object.listViews.valueType.gantt.groupByField",
         "operations.element.options[3].object.listViews.valueType.grouping.fields.element.field",
@@ -1123,6 +1152,7 @@
         "object",
         "object.actions.element.in",
         "object.actions.element.in.ai.outputSchema",
+        "object.actions.element.in.onSuccess",
         "object.actions.element.in.params.element.in",
         "object.fieldGroups",
         "object.fields.out.valueType",
@@ -1131,6 +1161,7 @@
         "object.lifecycle",
         "object.listViews.valueType",
         "object.listViews.valueType.bulkActionDefs.element",
+        "object.listViews.valueType.emptyState.link.url",
         "object.listViews.valueType.filter.element",
         "object.listViews.valueType.gantt.groupByField",
         "object.listViews.valueType.grouping.fields.element.field",
@@ -1167,12 +1198,14 @@
         "options[3].object",
         "options[3].object.actions.element.in",
         "options[3].object.actions.element.in.ai.outputSchema",
+        "options[3].object.actions.element.in.onSuccess",
         "options[3].object.actions.element.in.params.element.in",
         "options[3].object.fieldGroups",
         "options[3].object.fields.out.valueType",
         "options[3].object.lifecycle",
         "options[3].object.listViews.valueType",
         "options[3].object.listViews.valueType.bulkActionDefs.element",
+        "options[3].object.listViews.valueType.emptyState.link.url",
         "options[3].object.listViews.valueType.filter.element",
         "options[3].object.listViews.valueType.gantt.groupByField",
         "options[3].object.listViews.valueType.grouping.fields.element.field",
@@ -1264,6 +1297,7 @@
       "sites": [
         "in",
         "in.ai.outputSchema",
+        "in.onSuccess",
         "in.params.element.in"
       ]
     },
@@ -1272,9 +1306,19 @@
         "outputSchema"
       ]
     },
+    "ui/ActionButtonProps": {
+      "sites": [
+        ""
+      ]
+    },
     "ui/ActionGroupProps": {
       "sites": [
         "actions.element"
+      ]
+    },
+    "ui/ActionIconProps": {
+      "sites": [
+        ""
       ]
     },
     "ui/ActionMenuProps": {
@@ -1305,9 +1349,20 @@
     "ui/Dashboard": {
       "sites": [
         "globalFilters.element",
+        "header.actions.element",
         "widgets.element",
         "widgets.element.filter",
         "widgets.element.filter.lazy"
+      ]
+    },
+    "ui/DashboardHeader": {
+      "sites": [
+        "actions.element"
+      ]
+    },
+    "ui/DashboardHeaderAction": {
+      "sites": [
+        ""
       ]
     },
     "ui/DashboardWidget": {
@@ -1343,6 +1398,11 @@
     "ui/ElementDataSource": {
       "sites": [
         "filter.element"
+      ]
+    },
+    "ui/EmptyState": {
+      "sites": [
+        "link.url"
       ]
     },
     "ui/FormSection": {
@@ -1392,6 +1452,7 @@
     },
     "ui/InterfacePageConfig": {
       "sites": [
+        "emptyState.link.url",
         "filterBy.element"
       ]
     },
@@ -1411,6 +1472,7 @@
       "sites": [
         "",
         "bulkActionDefs.element",
+        "emptyState.link.url",
         "filter.element",
         "gantt.groupByField",
         "grouping.fields.element.field",
@@ -1455,6 +1517,7 @@
     "ui/ObjectGridProps": {
       "sites": [
         "bulkActionDefs.element",
+        "emptyState.link.url",
         "filter.element",
         "grouping.fields.element.field"
       ]
@@ -1469,6 +1532,7 @@
       "sites": [
         "",
         "bulkActionDefs.element",
+        "emptyState.link.url",
         "filter.element",
         "gantt.groupByField",
         "grouping.fields.element.field",
@@ -1514,19 +1578,20 @@
     "ui/Page": {
       "sites": [
         "",
+        "interfaceConfig.emptyState.link.url",
         "interfaceConfig.filterBy.element",
         "slots.header.options[0].in.type"
       ]
     },
     "ui/PageComponent": {
       "sites": [
-        "in.dataSource.filter.element",
+        "in.dataSource.options[0].filter.element",
         "in.type"
       ]
     },
     "ui/PageRegion": {
       "sites": [
-        "components.element.lazy.in.dataSource.filter.element",
+        "components.element.lazy.in.dataSource.options[0].filter.element",
         "components.element.lazy.in.type"
       ]
     },
@@ -1573,6 +1638,7 @@
         "form.submitBehavior.options[1].url",
         "list",
         "list.bulkActionDefs.element",
+        "list.emptyState.link.url",
         "list.filter.element",
         "list.gantt.groupByField",
         "list.grouping.fields.element.field",
@@ -1589,6 +1655,7 @@
       "sites": [
         "options[0].config",
         "options[0].config.bulkActionDefs.element",
+        "options[0].config.emptyState.link.url",
         "options[0].config.filter.element",
         "options[0].config.gantt.groupByField",
         "options[0].config.grouping.fields.element.field",
@@ -1604,6 +1671,7 @@
       "sites": [
         "options[0].config",
         "options[0].config.bulkActionDefs.element",
+        "options[0].config.emptyState.link.url",
         "options[0].config.filter.element",
         "options[0].config.gantt.groupByField",
         "options[0].config.grouping.fields.element.field",

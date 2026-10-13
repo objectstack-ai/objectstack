@@ -25,13 +25,8 @@ export const emailTemplateForm = defineForm({
       fields: [
         { field: 'name', required: true, colSpan: 1, helpText: 'Dotted snake_case (e.g. auth.password_reset, crm.welcome)' },
         { field: 'label', required: true, colSpan: 1 },
-        { field: 'category', type: 'select', colSpan: 1, options: [
-          { label: 'Auth', value: 'auth' },
-          { label: 'Notification', value: 'notification' },
-          { label: 'Workflow', value: 'workflow' },
-          { label: 'Marketing', value: 'marketing' },
-          { label: 'Custom', value: 'custom' },
-        ]},
+        // No `category` input: the key is retired (#22876, ADR-0049) — nothing
+        // read it, and the schema now refuses it with a migration note.
         { field: 'locale', colSpan: 1, helpText: 'BCP-47 tag — e.g. en-US, zh-CN' },
         { field: 'description', widget: 'textarea', colSpan: 2 },
       ],
@@ -82,7 +77,8 @@ export const emailTemplateForm = defineForm({
       columns: 2,
       fields: [
         { field: 'active', type: 'boolean', colSpan: 1, helpText: 'When unchecked, sendTemplate() returns TEMPLATE_INACTIVE.' },
-        { field: 'isSystem', type: 'boolean', colSpan: 1, helpText: 'Built-in template; tenants may override but should not delete.' },
+        // No `isSystem` input: the key is retired (#22876, ADR-0049) — nothing
+        // enforced it, and the schema now refuses it with a migration note.
       ],
     },
   ],

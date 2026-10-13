@@ -250,7 +250,7 @@
       "title": "Every showcase nav surface renders without page errors, and failures surface the error boundary — never a blank page",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P0",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -271,7 +271,7 @@
       ],
       "acceptance": [
         {
-          "clause": "no surface throws a pageerror, renders an empty <main>, stays on the console's boot splash ('Initializing application…'), or leaks a 'no actions configured' placeholder; chart surfaces draw a real SVG whose box is measured by POLLING until non-null within a bounded budget — never by a fixed wall-clock wait followed by a single boundingBox read, which measures the layout window rather than the product",
+          "clause": "no surface throws a pageerror, renders an empty <main>, stays on the console's boot splash (its data-boot-splash marker is in the page, or <main> reads its English line 'Initializing application…' or 'Opening your console…'), or leaks a 'no actions configured' placeholder; chart surfaces draw a real SVG whose box is measured by POLLING until non-null within a bounded budget — never by a fixed wall-clock wait followed by a single boundingBox read, which measures the layout window rather than the product",
           "oracle": "test",
           "verify": "pnpm -C examples/app-showcase test:smoke (SURFACES array in e2e/showcase-smoke.spec.ts) — green; the main-content wait treats the boot splash as not-yet-rendered and the assertion refuses a surface still on it; the chart assertion polls boundingBox against a bounded deadline and keeps the last non-null sample, so a null-box failure and a collapsed-panel failure report as different assertions (#7569)",
           "evidence": "test run output + the failing assertion's message for any chart red"
@@ -297,7 +297,7 @@
       ],
       "negative": [
         "a surface that renders a blank <main> is a FAIL even with no console error — transitional emptiness must be ruled out by the screenshot-first protocol, then the persistent blank is the finding",
-        "the boot splash is NOT rendered content: 'Initializing application…' is text inside <main>, so a non-empty check passes on a surface that never rendered. QA run #21056 read it as the FIRST <main> text on 22 of 49 surfaces, and the suite's own non-chart check passed on it until revision 5. A hand walk waits past the splash before judging, exactly as the suite now does",
+        "the boot splash is NOT rendered content: it is text inside <main>, so a non-empty check passes on a surface that never rendered. QA run #21056 read it as the FIRST <main> text on 22 of 49 surfaces, and the suite's own non-chart check passed on it until revision 5. Recognise it by its language-independent data-boot-splash marker (objectui 54159d3 on), or by either English line: 'Initializing application…' before that commit, 'Opening your console…' from it. From that commit on the line follows the browser's language and is absent until that language's catalogue lands, so neither English line matches a non-English splash or an empty-line one, which shows only the product name; on a console pinned before that commit there is no marker. A hand walk waits past the splash before judging, exactly as the suite now does",
         "a bad route producing a white page (shell gone) is a FAIL of the error-boundary clause",
         "a chart red obtained from a SINGLE boundingBox read at a fixed instant is NOT a product finding and must not be filed as one — it measures the ResponsiveContainer layout window, and it cost a triage cycle every run until #7569 replaced that read with a bounded poll. Re-introducing any fixed sleep-then-read-once in this suite re-opens it. The converse holds both ways: a box that stays null through the WHOLE bounded poll, or a laid-out width ≤ 200 (the #2616 D collapsed-panel case), IS a FAIL"
       ],
@@ -319,6 +319,12 @@
           "date": "2026-10-01",
           "change": "the pin caught up with QA run #21056's three findings: SURFACES covered 31 of 49 served destinations, and the 18 the run hand-walked are now in it (Revenue Pulse and the Hours by Status chart report as chart surfaces); the non-chart check passed on the boot splash, and the wait and assertion now treat the splash as not rendered; the config hard-coded port 3000 and offered no browser override, and now reads SMOKE_API_URL for the server it boots and OS_TEST_CHROMIUM_EXECUTABLE_PATH for the browser. Measured on this branch: 49 passed on a free port with the container's chromium, and an instrumented run saw 29 of the 49 surfaces on the splash first",
           "ref": "#21060"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-12",
+          "change": "the boot-splash clause and negative named only the old English line 'Initializing application…'. objectui 54159d3 changed that line to 'Opening your console…', in the browser's language and absent until its catalogue lands, and put a language-independent data-boot-splash marker on the splash root. Both now name the two English lines and the marker, matching the suite: a surface is still on the splash when the marker is in the page or <main> reads either line. The line half is the one that holds on a pin older than 54159d3, which has no marker",
+          "ref": "#22992"
         }
       ]
     },
@@ -427,7 +433,7 @@
         "publish: POST /api/v1/packages/<id>/publish-drafts; then GET /api/v1/meta/view/os_qa_view_<runid>/published and capture it",
         "verify in the console that the published view is live for showcase_task (reload, open the view switcher)",
         "denied side A: attempt the same runtime create targeting the read-only CODE package; capture the refusal (expect writable_package_required — ADR-0070 D1)",
-        "denied side B: attempt a PUT overlay against a PACKAGED object item (type 'object' has allowOrgOverride: false); capture the refusal (expect HTTP 403 not_overridable)",
+        "denied side B: attempt a PUT overlay against a PACKAGED object item (type 'object' has allowEnvironmentOverlay: false); capture the refusal (expect HTTP 403 not_overridable)",
         "Studio browser half: create a new record page via Studio bound to an object and capture the PUT /api/v1/meta/page/... it issues"
       ],
       "acceptance": [
@@ -456,9 +462,9 @@
           "evidence": "the refusal response"
         },
         {
-          "clause": "DENY side of the overlay gate: a per-org overlay write against a type with allowOrgOverride unset (object/field) answers HTTP 403 not_overridable, while view/dashboard (the ADR-0005 Phase 1 opt-ins) accept",
+          "clause": "DENY side of the overlay gate: an overlay write against a type with allowEnvironmentOverlay unset (object/field) answers HTTP 403 not_overridable, while view/dashboard (the ADR-0005 Phase 1 opt-ins) accept",
           "oracle": "api",
-          "verify": "the object-targeting PUT returns 403 not_overridable (contract stated on allowOrgOverride in packages/spec/src/kernel/metadata-plugin.zod.ts); the view PUT from the happy path succeeded",
+          "verify": "the object-targeting PUT returns 403 not_overridable (contract stated on allowEnvironmentOverlay in packages/spec/src/kernel/metadata-plugin.zod.ts); the view PUT from the happy path succeeded",
           "evidence": "both responses side by side"
         },
         {
@@ -489,7 +495,7 @@
       },
       "source": [
         "packages/runtime/src/route-ledger.ts (PUT /meta/:type/:name, GET /meta/_drafts, GET /meta/:type/:name/published, POST /packages/:id/publish-drafts)",
-        "packages/spec/src/kernel/metadata-plugin.zod.ts#allowOrgOverride (allowOrgOverride 403 not_overridable contract; validateOnWrite; registry flags per type)",
+        "packages/spec/src/kernel/metadata-plugin.zod.ts#allowEnvironmentOverlay (allowEnvironmentOverlay 403 not_overridable contract; validateOnWrite; registry flags per type)",
         "ADR-0070 via packages/qa/dogfood/test/package-first-authoring.dogfood.test.ts#WRITABLE_PACKAGE_REQUIRED (the runtime create into a loaded code package refused, with its writable-base control beside it — re-pointed #18104: the lower-case spelling survives here only inside a test title and comments; the code this test actually pins is the SCREAMING_SNAKE one, ADR-0112)",
         "ADR-0033 (drafts / publish)"
       ],
@@ -1684,7 +1690,7 @@
       "steps": [
         "additive half — CROSS-REF, do not duplicate: platform-core.metadata-registry-serving owns the overlay steps (its steps 7-8 / clauses 5-6): the three AccountExtension fields present in the MERGED GET /api/v1/meta/object/showcase_account, rendering on the form, and a loyalty_tier + csat_score write round-tripping through /api/v1/data/showcase_account. Cite that item's verdicts when the same run scored them; otherwise drive exactly those steps here",
         "capture the BEFORE image for the refusal half: GET /api/v1/meta/object/showcase_account and keep the full served field inventory",
-        "in-place refusal, door 1 (org-overlay): PUT /api/v1/meta/object/showcase_account with the served body plus ONE added field qa_inplace_probe_<runid> and NO ?package= → expect 403 NOT_OVERRIDABLE (type 'object' is not in the ADR-0005 overlay opt-ins; the refusal names allowRuntimeCreate/allowOrgOverride and the OS_METADATA_WRITABLE escape hatch — packages/metadata-protocol/src/protocol.ts)",
+        "in-place refusal, door 1 (org-overlay): PUT /api/v1/meta/object/showcase_account with the served body plus ONE added field qa_inplace_probe_<runid> and NO ?package= → expect 403 NOT_OVERRIDABLE (type 'object' is not in the ADR-0005 overlay opt-ins; the refusal names allowRuntimeCreate/allowEnvironmentOverlay and the OS_METADATA_WRITABLE escape hatch — packages/metadata-protocol/src/protocol.ts)",
         "in-place refusal, door 2 (package write): repeat the same PUT with ?package=com.example.showcase (the showcase's read-only code package) → expect the read-only-base refusal (403 ITEM_LOCKED class — the same door access-security.owd-save-gate's control leg measured on stock, #9477); record WHICH door answered and the exact status + code, reading declaredCode where the wire code is a mapped generic",
         "after both refusals: re-GET /api/v1/meta/object/showcase_account and diff against step 2 — byte-identical; qa_inplace_probe_ absent, the three extension fields still present",
         "record the Regime E provenance posture: the extension arrived AS A PACKAGE — it registers as an 'extend' contributor (packages/objectql/src/engine.ts) folded over the base at resolution (mergeObjectDefinitions), the base package's authored definition is never edited, and package identity supplies provenance and upgrade isolation (ADR-0126 §3: 'the customization IS a package', install-grain not per-org)"

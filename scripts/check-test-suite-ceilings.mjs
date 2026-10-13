@@ -2,11 +2,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Per-package suite-duration ratchet (#16468): a run in which a package's test
- * suite took longer than its measured ceiling is RED, naming the package and
- * its slowest test files, and a ceiling rises only by a ruling.
+ * Per-package suite-duration ceilings (#16468): a run in which a package's test
+ * suite took longer than its measured ceiling is a WARNING, naming the package
+ * and its slowest test files, on every event and `schedule` included -- a
+ * reading, never a red (ruling E, below); and a ceiling rises only by a ruling.
  *
- *   node scripts/check-test-suite-ceilings.mjs --captures <dir> [--label <text>]
+ *   node scripts/check-test-suite-ceilings.mjs --captures <dir> --event <github.event_name> [--label <text>]
  *   node scripts/check-test-suite-ceilings.mjs --self-test
  *
  * ## Why it exists
@@ -38,6 +39,55 @@
  *   https://github.com/objectstack-ai/objectstack/issues/16468#issuecomment-6082629070
  * - A ceiling rises only by a ruling: RULED_CEILING_RAISES, each entry naming
  *   the ruling's comment URL. Nothing else in this file moves a ceiling.
+ *
+ * ## Report-only on every event, `schedule` included (ruling E, superseding C2)
+ *
+ * Ruling (#22949, letter E, item 1; the maintainer's word 「22949 同意」):
+ *   https://github.com/objectstack-ai/objectstack/issues/22949#issuecomment-6125775640
+ * It retires the `schedule`-only red that letter C2
+ * (https://github.com/objectstack-ai/objectstack/issues/22949#issuecomment-6119186511)
+ * left in place. The diagnosis, in two sentences. A wall-clock reading on a
+ * shared runner measures the run's load as much as the code: the same package
+ * reads 82 s on a quiet hour (most packages replayed) and 209 s on a busy one
+ * (the whole workspace executing), 2.56x, while the ceiling formula (window max
+ * x 1.25) allows 2.0x of weight. The ceilings come from a window that was mostly
+ * quiet-density and every event, `schedule` included, meets both densities, so
+ * busy hours red the same near-ceiling packages whatever their code does:
+ * density, not code.
+ *
+ * So `--event` is required, and the mode is timingGateMode's, shared with the
+ * drift step (partition-test-shards.mjs) and 'report' on every event:
+ *
+ *   every event   REPORT ONLY (schedule, merge_group, pull_request, push,
+ *                 workflow_dispatch): the table prints, each package over its
+ *                 ceiling is a `::warning::` annotation, and it exits 0
+ *
+ * A refusal -- a malformed raise record or ceiling table, or a missing
+ * `--event` -- is not a timing reading, does not vary with runner load, and
+ * exits 1 on every event. The table stays a reading: the formula, the floor and
+ * RULED_CEILING_RAISES are untouched, and regression detection for the wall
+ * moves to the dataset refresh's diff (the refresh lane, E2, #23059) and to the
+ * per-file budget, neither of which is this file's.
+ *
+ * ⚠ A run reads only the packages it EXECUTES: a turbo cache replay carries no
+ * window, so it is never read. A package the hourly run replays on every run
+ * (ci.yml's `timeout-minutes` note: "scheduled runs mostly replay the cache
+ * their commit's push run saved") is read on any run that does execute it;
+ * nothing here forces one to.
+ *
+ * ## The absolute floor: CEILING_FLOOR_SECONDS, 20 s
+ *
+ * Same ruling: "a package whose ceiling is below the floor is never red; it
+ * prints 'below floor'". The floor is read off the table's distribution by the
+ * `domain:devx` seat and is not below 20 s. The reading: on `1f312fdfa` the 72
+ * ceilings run 3.40, 3.69, 4.24, 5.18, 6.39, 9.10 and 16.23 s, then 22.71 s
+ * and up, and 20 s sits in the widest gap of the low band (16.23 -> 22.71). The
+ * seven packages under it then were knowledge-ragflow, service-cache,
+ * observability, sdui-parser, knowledge-memory, embedder-openai and
+ * client-react. A 3.4 s ceiling crossed by a 4.2 s run is noise, not a
+ * regression. The floor is compared with the EFFECTIVE ceiling, so a ruled
+ * raise to the floor or above grades the package again; the formula, its
+ * x 1.25 and RULED_CEILING_RAISES are unchanged.
  *
  * ## No table yet is NOT MEASURED, never red
  *
@@ -88,16 +138,17 @@
  * ratchet's ceilings. The ceilings are measured at the density the dataset's
  * own split runs at, which the live split holds under its density cap
  * (`densityCap()` in partition-test-shards.mjs). A future split that raises
- * the density will read red here on packages it did not touch; that red is
- * the split making suites slower, and the remedy is the split, not a raise.
+ * the density will read OVER here on packages it did not touch; that warning
+ * is the split making suites slower, and the remedy is the split, not a raise.
  *
  * ## Exit codes
  *
- *   0  OK, or NOT MEASURED (no table yet; nothing executed; no captures); a
- *      new package alone never makes it 1
- *   1  a package over its ceiling, or a refusal (a malformed ceiling table --
- *      a package the dataset knows that lost its row among them -- or raise
- *      record)
+ *   0  OK, NOT MEASURED (no table yet; nothing executed; no captures), or a
+ *      package over its ceiling (reported as a warning), on every event; a new
+ *      package or one below the floor never makes it 1
+ *   1  a refusal, on any event (a malformed ceiling table -- a package the
+ *      dataset knows that lost its row among them -- or raise record, or no
+ *      `--event`)
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -106,14 +157,21 @@ import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
 import { isEntrypoint } from './invoked-as.mjs';
-import { escapeWorkflowCommandMessage } from './partition-test-shards.mjs';
+import { escapeWorkflowCommandMessage, timingGateMode, timingModeNote } from './partition-test-shards.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DATASET_PATH = path.join(REPO_ROOT, 'scripts', 'test-shard-timings.json');
 const DATASET_REL = 'scripts/test-shard-timings.json';
 
-/** How many of a red package's slowest test files the verdict names. */
+/** How many of an over-ceiling package's slowest test files the verdict names. */
 export const SLOWEST_FILES_NAMED = 5;
+
+/**
+ * The absolute floor (C2 ruling): a package whose effective ceiling is below it
+ * is never red and prints "below floor". Its reading and ruling are in the
+ * header, "The absolute floor".
+ */
+export const CEILING_FLOOR_SECONDS = 20;
 
 // ── The ruled raises ──────────────────────────────────────────────────────
 //
@@ -241,8 +299,9 @@ export function readCeilingTable(dataset) {
  * Returns `{ table, rows, problems }`; each row is one executed package with a
  * `status`:
  *
- *   over         graded, over its effective ceiling          RED
+ *   over         graded, over its effective ceiling          a warning, on every event
  *   ok           graded, within its effective ceiling
+ *   below-floor  effective ceiling under CEILING_FLOOR_SECONDS  never red
  *   new          not in the dataset, and no ruled raise       no ceiling, not red
  *   provisional  in the dataset's `provisional` list          no ceiling, not red
  *   uncapped     `uncapped` with a reason (`carried`)         no ceiling, not red
@@ -297,6 +356,11 @@ export function gradeCeilings({ merged, dataset, raises = RULED_CEILING_RAISES }
       continue;
     }
     row.ceiling = Math.max(generated ?? 0, raise?.seconds ?? 0);
+    // The absolute floor: strict `<`, so a ceiling AT the floor is graded.
+    if (row.ceiling < CEILING_FLOOR_SECONDS) {
+      row.status = 'below-floor';
+      continue;
+    }
     // Strict `>`: a run AT its ceiling is within it, like the drift bound.
     row.status = seconds > row.ceiling ? 'over' : 'ok';
   }
@@ -306,9 +370,9 @@ export function gradeCeilings({ merged, dataset, raises = RULED_CEILING_RAISES }
 
 // ── Rendering ─────────────────────────────────────────────────────────────
 
-// A new package is not among them (ruling Q2 B): it is red only once a ceiling
-// exists for it and it runs over.
-const RED_STATUSES = new Set(['over']);
+// A new package is not among them (ruling Q2 B): it is reported only once a
+// ceiling exists for it and it runs over.
+const OVER_STATUSES = new Set(['over']);
 
 function sliceNote(row) {
   if (!row.slices) return '';
@@ -335,8 +399,13 @@ function ceilingText(row) {
  * The verdict a runner receives, rendered without printing it so the
  * self-test can read it: `out` is stdout (workflow-command annotations),
  * `err` the human log.
+ *
+ * `event` is the run's (`--event`, required) and is named in the mode line. On
+ * every event a package over its ceiling prints the table, is a `::warning::`
+ * annotation, and exits 0; a refusal exits 1 on every event.
  */
-export function renderCeilingVerdict(report, label) {
+export function renderCeilingVerdict(report, label, event) {
+  timingGateMode(event);
   const head = `suite-ceiling`;
   if (report.problems.length > 0) {
     return {
@@ -365,7 +434,7 @@ export function renderCeilingVerdict(report, label) {
   }
 
   const graded = report.rows.filter((r) => r.status === 'ok' || r.status === 'over');
-  const red = report.rows.filter((r) => RED_STATUSES.has(r.status));
+  const overs = report.rows.filter((r) => OVER_STATUSES.has(r.status));
   const lines = report.rows.map((r) => {
     switch (r.status) {
       case 'ok':
@@ -378,6 +447,12 @@ export function renderCeilingVerdict(report, label) {
         return `  --    ${r.name}: ${r.seconds.toFixed(2)}s -- no ceiling: provisional`;
       case 'uncapped':
         return `  --    ${r.name}: ${r.seconds.toFixed(2)}s -- no ceiling: ${r.reason}`;
+      case 'below-floor':
+        return (
+          `  --    ${r.name}: ${r.seconds.toFixed(2)}s against ${r.ceiling.toFixed(2)}s ` +
+          `(${(r.seconds / r.ceiling).toFixed(2)}x)${sliceNote(r)} -- below floor: a ceiling under ` +
+          `${CEILING_FLOOR_SECONDS}s is never red`
+        );
       case 'partial':
         return `  --    ${r.name}: NOT MEASURED -- a part of its suite is missing from this run${sliceNote(r)}; a part is never graded as the whole`;
       case 'new':
@@ -395,47 +470,54 @@ export function renderCeilingVerdict(report, label) {
   const basis =
     `ceilings from ${DATASET_REL}${report.table.measuredAt ? ` (refreshed ${report.table.measuredAt})` : ''}: ` +
     `each package's slowest executed run x ${report.table.headroom ?? '?'} when first set, held since`;
+  const belowFloor = report.rows.filter((r) => r.status === 'below-floor').length;
+  const floorNote = belowFloor ? `; ${belowFloor} below the ${CEILING_FLOOR_SECONDS}s floor, never red` : '';
+  const note = `\n  ${timingModeNote(event)}.`;
 
-  if (red.length === 0) {
+  if (overs.length === 0) {
     const verdict = graded.length === 0 ? 'NOT MEASURED' : 'OK';
     const summaryLine =
       graded.length === 0
-        ? `${head}: NOT MEASURED -- ${label}: no executed package carried a ceiling to grade against (${report.rows.length} executed).`
-        : `${head}: OK -- ${label}: ${graded.length} package(s) graded, every one within its ceiling.`;
+        ? `${head}: NOT MEASURED -- ${label}: no executed package carried a ceiling at or above the ` +
+          `${CEILING_FLOOR_SECONDS}s floor to grade against (${report.rows.length} executed${floorNote}).`
+        : `${head}: OK -- ${label}: ${graded.length} package(s) graded, every one within its ceiling${floorNote}.`;
     return {
       verdict,
       exitCode: 0,
       out: [],
-      err: [`${summaryLine}\n  ${basis}.${lines.length ? `\n${lines.join('\n')}` : ''}${stale}`],
+      err: [`${summaryLine}\n  ${basis}.${lines.length ? `\n${lines.join('\n')}` : ''}${stale}${note}`],
     };
   }
 
-  const detail = red
+  const detail = overs
     .map(
       (r) =>
         `  ${r.name}: ${r.seconds.toFixed(2)}s measured against its ${r.ceiling.toFixed(2)}s ceiling ` +
         `(${(r.seconds / r.ceiling).toFixed(2)}x; ${ceilingText(r)})${sliceNote(r)}. Its slowest test files:\n${filesText(r)}`
     )
     .join('\n');
+  const reading = (r) =>
+    `${r.name}: ${r.seconds.toFixed(2)}s, over its ${r.ceiling.toFixed(2)}s ceiling. Slowest file: ` +
+    `${r.files[0] ? `${r.files[0].file} ${(r.files[0].ms / 1000).toFixed(2)}s` : '(none captured)'}.`;
+  const text =
+    `${head}: OVER -- ${label}: ${overs.length} package(s) over their suite-duration ceiling.\n` +
+    `${detail}\n` +
+    `  ${basis}.\n` +
+    '  If this is a real slowdown, make the suite faster, or take the raise to a ruling: a ceiling rises only by an entry in\n' +
+    '  RULED_CEILING_RAISES (scripts/check-test-suite-ceilings.mjs) naming the ruling comment. ⛔ Never\n' +
+    `  hand-edit \`ceilings\` in ${DATASET_REL} -- it is generated, and the next refresh holds what it finds.\n` +
+    `  Every executed package this run:\n${lines.join('\n')}${stale}${note}`;
   return {
     verdict: 'OVER',
-    exitCode: 1,
-    out: red.map(
+    exitCode: 0,
+    out: overs.map(
       (r) =>
-        `::error title=Suite-duration ceiling::${escapeWorkflowCommandMessage(
-          `${r.name}: ${r.seconds.toFixed(2)}s, over its ${r.ceiling.toFixed(2)}s ceiling. Slowest file: ` +
-            `${r.files[0] ? `${r.files[0].file} ${(r.files[0].ms / 1000).toFixed(2)}s` : '(none captured)'}.`
+        `::warning title=Suite-duration ceiling::${escapeWorkflowCommandMessage(
+          `${reading(r)} Report only, on every event (this is a \`${event}\` run): a suite's wall on a shared ` +
+            "runner measures the run's load as much as the package, so this is a reading, not a failure."
         )}`
     ),
-    err: [
-      `${head}: OVER -- ${label}: ${red.length} package(s) over their suite-duration ceiling.\n` +
-        `${detail}\n` +
-        `  ${basis}.\n` +
-        '  Make the suite faster, or take the raise to a ruling: a ceiling rises only by an entry in\n' +
-        '  RULED_CEILING_RAISES (scripts/check-test-suite-ceilings.mjs) naming the ruling comment. ⛔ Never\n' +
-        `  hand-edit \`ceilings\` in ${DATASET_REL} -- it is generated, and the next refresh holds what it finds.\n` +
-        `  Every executed package this run:\n${lines.join('\n')}${stale}`,
-    ],
+    err: [text],
   };
 }
 
@@ -534,18 +616,20 @@ let selfTestReachedVerdict = false;
 // adding cases is ordinary work. A battery below its floor means cases stopped
 // running; the remedy is to find what stopped registering, never to lower it.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'over the ceiling is red, naming the package and its slowest files': 6,
+  'over the ceiling is a warning, naming the package and its slowest files': 6,
   'provisional prints "no ceiling: provisional" and is not red': 3,
   'a new package prints "no ceiling: new package" and is not red; a known one that lost its row is refused': 10,
   'no ceiling table yet is NOT MEASURED, never red': 5,
   'file-sliced packages are summed across shards': 6,
   'a ruled raise lifts a ceiling, and only a well-formed one does': 8,
   'a malformed ceiling table is refused, never read as a pass': 4,
+  'the absolute floor: a ceiling under CEILING_FLOOR_SECONDS is never red, and prints "below floor"': 8,
+  'on every event, `schedule` included, the gate reports and never reds (ruling E)': 8,
 });
 
 // Deleting an entry silences that battery's floor as effectively as zeroing
 // it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 7;
+const SELF_TEST_BATTERY_FLOOR = 9;
 
 const UNATTRIBUTED_BATTERY = '(no battery open)';
 
@@ -594,19 +678,21 @@ function selfTest() {
     provenance: { measuredAt: '2026-10-12', ceilingHeadroom: 1.25 },
     ...extra,
   });
-  const run = (captures, ds = dataset(), raises = {}) => {
+  // `event` defaults to `schedule`: every event reads the same, and `schedule` is
+  // the one that used to exit-grade, so the batteries render with the strictest case.
+  const run = (captures, ds = dataset(), raises = {}, event = 'schedule') => {
     const report = gradeCeilings({ merged: foldCaptures(captures), dataset: ds, raises });
-    return { report, ...renderCeilingVerdict(report, 'Test Core') };
+    return { report, ...renderCeilingVerdict(report, 'Test Core', event) };
   };
   const status = (r, name) => r.report.rows.find((row) => row.name === name)?.status;
   const raiseUrl = 'https://github.com/objectstack-ai/objectstack/issues/1#issuecomment-2';
 
-  battery('over the ceiling is red, naming the package and its slowest files');
+  battery('over the ceiling is a warning, naming the package and its slowest files');
   const over = run([
     capture('1/6', [['a', 151]], [file('a', 'fast.test.ts', 1_000), file('a', 'slow.test.ts', 90_000), file('a', 'mid.test.ts', 30_000)]),
   ]);
   check(() => {
-    if (over.exitCode !== 1 || over.verdict !== 'OVER') throw new Error(`over: exit ${over.exitCode}, verdict ${over.verdict}`);
+    if (over.exitCode !== 0 || over.verdict !== 'OVER') throw new Error(`over: exit ${over.exitCode}, verdict ${over.verdict}`);
   });
   check(() => {
     if (!over.err[0].includes('a: 151.00s measured against its 150.00s ceiling')) throw new Error(`over: the package is not named:\n${over.err[0]}`);
@@ -618,8 +704,8 @@ function selfTest() {
     if (!(i >= 0 && i < j && j < k)) throw new Error(`over: the slowest files are not named slowest first:\n${text}`);
   });
   check(() => {
-    if (!over.out.some((l) => l.startsWith('::error title=Suite-duration ceiling::a: 151.00s'))) {
-      throw new Error(`over: no error annotation names the package: ${JSON.stringify(over.out)}`);
+    if (over.out.length !== 1 || !over.out[0].startsWith('::warning title=Suite-duration ceiling::a: 151.00s')) {
+      throw new Error(`over: no single warning annotation names the package: ${JSON.stringify(over.out)}`);
     }
   });
   check(() => {
@@ -628,7 +714,7 @@ function selfTest() {
     if (at.exitCode !== 0 || at.verdict !== 'OK' || status(at, 'a') !== 'ok') throw new Error(`over: a run AT its ceiling read ${at.verdict}`);
   });
   check(() => {
-    // Only the files of the red package are named, at most SLOWEST_FILES_NAMED.
+    // Only the files of the over-ceiling package are named, at most SLOWEST_FILES_NAMED.
     const many = Array.from({ length: 9 }, (_, i) => file('a', `f${i}.test.ts`, 1000 * (i + 1)));
     const r = run([capture('1/6', [['a', 999], ['b', 1]], [...many, file('b', 'other.test.ts', 999_999)])]);
     const row = r.report.rows.find((x) => x.name === 'a');
@@ -664,15 +750,16 @@ function selfTest() {
     if (!fresh.err[0].includes('brand-new: 5.00s -- no ceiling: new package')) throw new Error(`new: the line is wrong:\n${fresh.err[0]}`);
   });
   check(() => {
-    // Beside a package over its ceiling, only that one is red and named.
+    // Beside a package over its ceiling, only that one is reported and named.
     const both = run([capture('2/6', [['brand-new', 9999], ['a', 151]])]);
     if (
-      both.exitCode !== 1 ||
+      both.exitCode !== 0 ||
+      both.verdict !== 'OVER' ||
       !both.err[0].includes('1 package(s) over their suite-duration ceiling') ||
       both.out.length !== 1 ||
       both.out.some((l) => l.includes('brand-new'))
     ) {
-      throw new Error(`new: a new package was counted red beside an over one:\n${both.err[0]}\n${JSON.stringify(both.out)}`);
+      throw new Error(`new: a new package was counted over beside an over one:\n${both.err[0]}\n${JSON.stringify(both.out)}`);
     }
   });
   check(() => {
@@ -765,10 +852,10 @@ function selfTest() {
     if (r.exitCode !== 0 || status(r, 'cli') !== 'ok') throw new Error(`slices: a skewed slice redded a suite within its ceiling (${r.verdict})`);
   });
   check(() => {
-    // The sum over the whole ceiling is red, said as a summed set.
+    // The sum over the whole ceiling is reported, said as a summed set.
     const r = run([capture('2/6', [['cli', 700, [1, 3]]]), capture('3/6', [['cli', 700, [2, 3]]]), capture('4/6', [['cli', 700, [3, 3]]])]);
-    if (r.exitCode !== 1 || !r.err[0].includes('cli: 2100.00s measured against its 2000.00s ceiling') || !r.err[0].includes('all 3 slices, summed across shards')) {
-      throw new Error(`slices: an over-ceiling sum was not red, or not said as a sum:\n${r.err[0]}`);
+    if (r.exitCode !== 0 || r.verdict !== 'OVER' || !r.err[0].includes('cli: 2100.00s measured against its 2000.00s ceiling') || !r.err[0].includes('all 3 slices, summed across shards')) {
+      throw new Error(`slices: an over-ceiling sum was not reported, or not said as a sum:\n${r.err[0]}`);
     }
   });
   check(() => {
@@ -798,7 +885,7 @@ function selfTest() {
   });
   check(() => {
     const r = run([capture('1/6', [['a', 201]])], dataset(), { a: { seconds: 200, ruling: raiseUrl } });
-    if (r.exitCode !== 1 || !r.err[0].includes(raiseUrl)) throw new Error(`raise: over the raise was not red, or the ruling not named:\n${r.err[0]}`);
+    if (r.exitCode !== 0 || r.verdict !== 'OVER' || !r.err[0].includes(raiseUrl)) throw new Error(`raise: over the raise was not reported, or the ruling not named:\n${r.err[0]}`);
   });
   check(() => {
     // A ruled ceiling for a new package grades it before the first refresh after it lands could.
@@ -808,14 +895,14 @@ function selfTest() {
   check(() => {
     // ...and one it can run over: a ruled ceiling is a ceiling, new package or not.
     const r = run([capture('1/6', [['brand-new', 31]])], dataset(), { 'brand-new': { seconds: 30, ruling: raiseUrl } });
-    if (r.exitCode !== 1 || status(r, 'brand-new') !== 'over' || !r.err[0].includes('brand-new: 31.00s measured against its 30.00s ceiling')) {
-      throw new Error(`raise: a new package over its ruled ceiling was not red (${status(r, 'brand-new')}):\n${r.err[0]}`);
+    if (r.exitCode !== 0 || status(r, 'brand-new') !== 'over' || !r.err[0].includes('brand-new: 31.00s measured against its 30.00s ceiling')) {
+      throw new Error(`raise: a new package over its ruled ceiling was not reported (${status(r, 'brand-new')}):\n${r.err[0]}`);
     }
   });
   check(() => {
     // A raise at or under the generated ceiling changes nothing, and says so.
     const r = run([capture('1/6', [['a', 151]])], dataset(), { a: { seconds: 120, ruling: raiseUrl } });
-    if (r.exitCode !== 1 || !r.err[0].includes('changing nothing')) throw new Error(`raise: a stale raise lowered or silently stayed:\n${r.err[0]}`);
+    if (r.exitCode !== 0 || r.verdict !== 'OVER' || !r.err[0].includes('changing nothing')) throw new Error(`raise: a stale raise lowered or silently stayed:\n${r.err[0]}`);
   });
   check(() => {
     // No ruling, no raise: the record is refused and the run is red.
@@ -847,6 +934,161 @@ function selfTest() {
   });
   check(() => {
     if (!threw(() => readCeilingTable({ ceilings: {} }))) throw new Error('table: a dataset with no `packages` was accepted');
+  });
+
+  battery('the absolute floor: a ceiling under CEILING_FLOOR_SECONDS is never red, and prints "below floor"');
+  // The ruling's two readings: a 3.40 s ceiling (knowledge-ragflow's) crossed
+  // at 4.2 s, and the lowest ceiling above the floor, 22.71 s, crossed at 25 s.
+  const floorSet = dataset({
+    packages: { ...dataset().packages, tiny: 2.72, small: 18.17, edge: 16 },
+    ceilings: { ...dataset().ceilings, tiny: 3.4, small: 22.71, edge: CEILING_FLOOR_SECONDS },
+  });
+  check(() => {
+    if (!(CEILING_FLOOR_SECONDS >= 20)) throw new Error(`floor: ${CEILING_FLOOR_SECONDS}s is below the ruled minimum of 20s`);
+  });
+  check(() => {
+    const r = run([capture('1/6', [['tiny', 4.2], ['a', 10]])], floorSet);
+    if (r.exitCode !== 0 || r.verdict !== 'OK' || status(r, 'tiny') !== 'below-floor' || r.out.length !== 0) {
+      throw new Error(`floor: a 3.40s ceiling run at 4.20s read ${status(r, 'tiny')} / ${r.verdict}, exit ${r.exitCode}`);
+    }
+  });
+  check(() => {
+    const r = run([capture('1/6', [['tiny', 4.2], ['a', 10]])], floorSet);
+    if (!r.err[0].includes('tiny: 4.20s against 3.40s (1.24x) -- below floor') || !r.err[0].includes('1 below the 20s floor')) {
+      throw new Error(`floor: the line does not say "below floor":\n${r.err[0]}`);
+    }
+  });
+  check(() => {
+    // On any event: below the floor is never a warning either.
+    const r = run([capture('1/6', [['tiny', 4.2], ['a', 10]])], floorSet, {}, 'merge_group');
+    if (r.exitCode !== 0 || status(r, 'tiny') !== 'below-floor' || r.out.length !== 0) {
+      throw new Error(`floor: a below-floor package annotated on merge_group: ${JSON.stringify(r.out)}`);
+    }
+  });
+  check(() => {
+    const r = run([capture('1/6', [['small', 25]])], floorSet);
+    if (r.exitCode !== 0 || r.verdict !== 'OVER' || !r.out.some((l) => l.startsWith('::warning title=Suite-duration ceiling::small: 25.00s, over its 22.71s ceiling'))) {
+      throw new Error(`floor: a 22.71s ceiling run at 25s on schedule was not a warning: ${r.verdict} ${JSON.stringify(r.out)}`);
+    }
+  });
+  check(() => {
+    // The same on every event: one warning, never an error, exit 0.
+    for (const event of ['schedule', 'merge_group', 'pull_request', 'push', 'workflow_dispatch']) {
+      const r = run([capture('1/6', [['small', 25]])], floorSet, {}, event);
+      const errors = r.out.filter((l) => l.startsWith('::error'));
+      if (r.exitCode !== 0 || errors.length || r.out.length !== 1 || !r.out[0].startsWith('::warning title=Suite-duration ceiling::small: 25.00s')) {
+        throw new Error(`floor: a 22.71s ceiling run at 25s on ${event} was not a warning alone: exit ${r.exitCode} ${JSON.stringify(r.out)}`);
+      }
+    }
+  });
+  check(() => {
+    // AT the floor is graded (strict `<`), and so is a below-floor ceiling a ruled raise lifts to it.
+    const at = run([capture('1/6', [['edge', CEILING_FLOOR_SECONDS + 1]])], floorSet);
+    const raised = run([capture('1/6', [['tiny', 26]])], floorSet, { tiny: { seconds: 25, ruling: raiseUrl } });
+    if (status(at, 'edge') !== 'over' || at.exitCode !== 0 || status(raised, 'tiny') !== 'over' || raised.exitCode !== 0) {
+      throw new Error(`floor: AT the floor read ${status(at, 'edge')}, a raised tiny read ${status(raised, 'tiny')}`);
+    }
+  });
+  check(() => {
+    // Alone, a below-floor package grades nothing: NOT MEASURED, naming the floor.
+    const r = run([capture('1/6', [['tiny', 400]])], floorSet);
+    if (r.exitCode !== 0 || r.verdict !== 'NOT MEASURED' || !r.err[0].includes('at or above the 20s floor')) {
+      throw new Error(`floor: a below-floor package alone read ${r.verdict}:\n${r.err[0]}`);
+    }
+  });
+
+  battery('on every event, `schedule` included, the gate reports and never reds (ruling E)');
+  const events = ['schedule', 'merge_group', 'pull_request', 'push', 'workflow_dispatch'];
+  const twoOver = [capture('1/6', [['a', 151], ['b', 90]], [file('a', 'slow.test.ts', 90_000)])];
+  check(() => {
+    // `schedule` is the case that used to exit 1: it is two warnings now, like the rest.
+    for (const event of events) {
+      const r = run(twoOver, dataset(), {}, event);
+      const warnings = r.out.filter((l) => l.startsWith('::warning title=Suite-duration ceiling::'));
+      if (r.exitCode !== 0 || r.verdict !== 'OVER' || warnings.length !== 2 || r.out.length !== 2) {
+        throw new Error(`ruling E: two packages over on ${event} read ${r.verdict}, exit ${r.exitCode}, ${JSON.stringify(r.out)}`);
+      }
+    }
+  });
+  check(() => {
+    // Each annotation is one line, names the event it was raised on, and is never an error.
+    for (const event of events) {
+      const r = run(twoOver, dataset(), {}, event);
+      if (r.out.some((l) => l.startsWith('::error')) || r.out.some((l) => l.includes('\n')) || !r.out.every((l) => l.includes(event))) {
+        throw new Error(`ruling E: a ${event} annotation is an error, spans lines, or does not name the event: ${JSON.stringify(r.out)}`);
+      }
+    }
+  });
+  check(() => {
+    // The sweep that would catch a grade creeping back in: no scenario, on no event, raises an error or exits non-zero.
+    const { ceilings: _x, uncapped: _y, ...noTable } = dataset();
+    const scenarios = [
+      [twoOver, dataset()],
+      [[capture('1/6', [['a', 10]])], dataset()],
+      [[capture('1/6', [['small', 25], ['tiny', 400]])], dataset({ packages: { ...dataset().packages, small: 18, tiny: 3 }, ceilings: { ...dataset().ceilings, small: 22.71, tiny: 3.4 } })],
+      [[capture('1/6', [['a', 9999]])], noTable],
+      [[capture('2/6', [['cli', 9999, [1, 3]]])], dataset()],
+    ];
+    const graded = [];
+    for (const [captures, ds] of scenarios) {
+      for (const event of events) {
+        const r = run(captures, ds, {}, event);
+        if (r.exitCode !== 0 || r.out.some((l) => l.startsWith('::error'))) graded.push(`${event}: ${r.verdict} exit ${r.exitCode}`);
+      }
+    }
+    if (graded.length) throw new Error(`ruling E: a timing reading graded: ${graded.join('; ')}`);
+  });
+  check(() => {
+    // The SAME table on every event: only the event the mode line names differs.
+    const body = (r) => r.err[0].split('\n').slice(0, -1).join('\n');
+    const first = run(twoOver, dataset(), {}, events[0]);
+    for (const event of events.slice(1)) {
+      const other = run(twoOver, dataset(), {}, event);
+      if (body(first) !== body(other) || !body(first).includes('Every executed package this run')) {
+        throw new Error(`ruling E: the ${event} table is not the ${events[0]} table:\n${first.err[0]}\n---\n${other.err[0]}`);
+      }
+    }
+    for (const event of events) {
+      const r = run(twoOver, dataset(), {}, event);
+      if (!r.err[0].endsWith(`report only on every event, this \`${event}\` run included: a wall-clock reading on a shared runner measures the run's load as much as the code, so a reading past its bound is a warning and the step exits 0.`)) {
+        throw new Error(`ruling E: the ${event} mode line is missing or reads graded:\n${r.err[0]}`);
+      }
+    }
+  });
+  check(() => {
+    // Within every ceiling: OK, no annotation, the mode said.
+    const r = run([capture('1/6', [['a', 10]])], dataset(), {}, 'push');
+    if (r.exitCode !== 0 || r.verdict !== 'OK' || r.out.length !== 0 || !r.err[0].includes('report only on every event, this `push` run included')) {
+      throw new Error(`ruling E: an OK push run read ${r.verdict}:\n${r.err[0]}`);
+    }
+  });
+  check(() => {
+    // A refusal is not a timing reading: red on every event, `schedule` among them.
+    for (const event of events) {
+      const r = run([capture('1/6', [['a', 180]])], dataset(), { a: { seconds: 200, ruling: 'no' } }, event);
+      if (r.exitCode !== 1 || r.verdict !== 'REFUSED') throw new Error(`ruling E: a malformed raise record on ${event} read ${r.verdict}, exit ${r.exitCode}`);
+    }
+  });
+  check(() => {
+    // No table yet is unchanged on any event: NOT MEASURED with its warning.
+    const { ceilings: _x, uncapped: _y, ...noTable } = dataset();
+    for (const event of events) {
+      const r = run([capture('1/6', [['a', 9999]])], noTable, {}, event);
+      if (r.exitCode !== 0 || r.verdict !== 'NOT MEASURED' || !r.out.some((l) => l.startsWith('::warning title=Suite-duration ceilings::NOT MEASURED'))) {
+        throw new Error(`ruling E: no table on ${event} read ${r.verdict}`);
+      }
+    }
+  });
+  check(() => {
+    // A missing event is refused, in the renderer and at the command line, never defaulted.
+    const report = gradeCeilings({ merged: foldCaptures([capture('1/6', [['a', 151]])]), dataset: dataset(), raises: {} });
+    if (!threw(() => renderCeilingVerdict(report, 'Test Core'))) throw new Error('ruling E: a render with no event was accepted');
+    if (!threw(() => parseCeilingArgs(['--captures', 'd']))) throw new Error('ruling E: --captures with no --event was accepted');
+    if (!threw(() => parseCeilingArgs(['--captures', 'd', '--event', '']))) throw new Error('ruling E: an empty --event was accepted');
+    const parsed = parseCeilingArgs(['--captures', 'd', '--label', 'L', '--event', 'merge_group']);
+    if (parsed.event !== 'merge_group' || parsed.capturesDir !== 'd' || parsed.label !== 'L') {
+      throw new Error(`ruling E: the arguments parsed as ${JSON.stringify(parsed)}`);
+    }
   });
 
   // The floor: every declared battery ran, and ran its cases.
@@ -883,6 +1125,26 @@ function selfTest() {
 
 // ── Entry point ───────────────────────────────────────────────────────────
 
+/**
+ * The grading run's arguments. `--event` is required: it is named in the mode
+ * line every verdict prints (no event changes the verdict: a package over its
+ * ceiling is a warning on all of them), and a missing one is refused by
+ * timingGateMode, never defaulted.
+ */
+export function parseCeilingArgs(argv) {
+  let capturesDir = null;
+  let label = 'Test Core';
+  let event = null;
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--captures') capturesDir = argv[++i];
+    else if (argv[i] === '--label') label = argv[++i];
+    else if (argv[i] === '--event') event = argv[++i];
+    else throw new Error(`unrecognized argument: ${argv[i]}`);
+  }
+  if (capturesDir) timingGateMode(event);
+  return { capturesDir, label, event };
+}
+
 function main() {
   const argv = process.argv.slice(2);
   if (argv.includes('--self-test')) {
@@ -898,15 +1160,9 @@ function main() {
     return;
   }
 
-  let capturesDir = null;
-  let label = 'Test Core';
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--captures') capturesDir = argv[++i];
-    else if (argv[i] === '--label') label = argv[++i];
-    else throw new Error(`unrecognized argument: ${argv[i]}`);
-  }
+  const { capturesDir, label, event } = parseCeilingArgs(argv);
   if (!capturesDir) {
-    console.error('usage: check-test-suite-ceilings.mjs --captures <dir> [--label <text>] | --self-test');
+    console.error('usage: check-test-suite-ceilings.mjs --captures <dir> --event <github.event_name> [--label <text>] | --self-test');
     process.exit(1);
   }
 
@@ -914,7 +1170,7 @@ function main() {
   const merged = foldCaptures(captures);
   const dataset = JSON.parse(readFileSync(DATASET_PATH, 'utf8'));
   const report = gradeCeilings({ merged, dataset });
-  const rendered = renderCeilingVerdict(report, label);
+  const rendered = renderCeilingVerdict(report, label, event);
   for (const line of rendered.out) console.log(line);
   for (const line of rendered.err) console.error(line);
   // Not a verdict of their own: a shard capture that could not be read leaves

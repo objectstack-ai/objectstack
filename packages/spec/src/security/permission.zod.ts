@@ -691,7 +691,7 @@ export const AdminScopeSchema = lazySchema(() => strictObject(
   /** May create/delete `sys_position_permission_set` bindings whose blast radius lies within the boundary. */
   manageBindings: z.boolean().default(false).describe('Manage position↔permission-set bindings within the subtree'),
   /** May author environment-owned permission sets (package-managed rows stay publish-only per ADR-0086). */
-  authorEnvironmentSets: z.boolean().default(false).describe('Author environment-owned permission sets'),
+  authorEnvironmentSets: z.boolean().default(false).describe('Author environment-owned permission sets (single posture only: under group or isolated the platform operator authors the catalog, ADR-0131 D3)'),
   /**
    * The anti-self-escalation core: permission-set NAMES the delegate may
    * assign/bind. Every set reached by a delegated write must be in this list;
@@ -945,10 +945,13 @@ export const PermissionSetSchema = lazySchema(() => strictObject(
     .describe('[ADR-0090 D12] Scoped delegated-administration grant (BU subtree + assignable-set allowlist)'),
 
   /**
-   * ADR-0010 §3.7 — Package-level protection envelope. Package authors declare
-   * lock policy here; the loader translates it into the private `_lock`
-   * envelope at registration time and strips this block before persistence.
-   * See `shared/protection.zod.ts`.
+   * ADR-0010 §3.7 — Package-level protection envelope. Package
+   * authors declare lock policy here, in a code package's source;
+   * the loader translates it into the private `_lock` envelope at
+   * registration time and strips this block. The metadata API's
+   * save door does not translate it and refuses it (`400
+   * VALIDATION_ERROR`), so that door never stores it. See
+   * `shared/protection.zod.ts`.
    */
   protection: ProtectionSchema.optional().describe(
     'Package author protection block — lock policy for this permission set.',

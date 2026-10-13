@@ -145,6 +145,21 @@ export type FlowNodeExpressionRole =
    * `collection` — again declared and evaluated in the same change. Its
    * literal is narrower than the other value slots': an inline array, iterated
    * as written; a string is no list, and is refused (`FlowCollectionSlotSchema`).
+   *
+   * And for a `notify` node's computed values — its `recipients` (each entry
+   * of a list, or the whole value), its `templateData` map and its
+   * `sourceId` — again declared and evaluated in the same change, before the
+   * notification is handed to the messaging service. Its `sourceObject`,
+   * `actorId` and `payload` are literals, read as written: no flow computed
+   * them, so no slot is built there, and a `{…}` token in one is refused by
+   * the contract (`NotifyConfigSchema`).
+   *
+   * And for an `http` node's `body` — the payload it sends, evaluated before
+   * either mode (the inline call and the durable outbox send the same one).
+   * Its `url` and `headers` values are text slots
+   * (`flow-text-slot-template.ts`), and its `method`, `durable`, `timeoutMs`
+   * and `signingSecret` are literals, read as written, whose `{…}` token the
+   * contract refuses (`HttpConfigSchema`).
    */
   | 'value';
 
@@ -202,6 +217,19 @@ export interface FlowNodeExpressionPath {
    * by a test.
    */
   readonly onlyWithKey?: string;
+  /**
+   * [#19939] The slot holds ONE value or a LIST of them, each a value slot of
+   * its own — today `notify`'s `recipients`: a recipient, a list of
+   * recipients each written as a string or a CEL value envelope, or one
+   * envelope evaluating to a recipient or a list. On an array, both walks
+   * ({@link resolveFlowNodeExpressions}, {@link resolveFlowNodeValueSlots})
+   * emit each ELEMENT at its own index (`recipients[1]`), so an envelope entry
+   * is validated and evaluated where it sits and a `{…}` token in a string
+   * entry is refused with the envelope that replaces it there; any other value
+   * is emitted at the slot's own path. ⛔ Not the `[]` path segment, which
+   * reads only arrays and so would never reach a single value.
+   */
+  readonly eachElement?: true;
 }
 
 /**
@@ -217,10 +245,10 @@ export interface FlowNodeExpressionPath {
  *
  * Also deliberately absent: the config values that still INTERPOLATE
  * `{token}` templates — the positions the #19939 retirement has not reached
- * yet (a `notify` `recipients` entry, an `http` body, a CRUD `filter` value,
- * and so on) — and the TEXT slots, which render `{{ }}`
- * holes since #22110 (a notify `title` / `message`, a screen `title` /
- * `description`, an `end` `message`; their one judge and list is
+ * yet (a CRUD `filter` value) — and the TEXT slots, which render `{{ }}`
+ * holes since #22110 (a notify `title` / `message` and, since #19939, its
+ * `actionUrl` and an http node's `url` and `headers` values, a screen
+ * `title` / `description`, an `end` `message`; their one judge and list is
  * `flow-text-slot-template.ts`). Those are text-with-holes,
  * the shape essentially every node config string has, already covered
  * generically (`validate-flow-template-paths`, the CLI flow linter's
@@ -266,6 +294,18 @@ export interface FlowNodeExpressionPath {
  * entry carries {@link FlowNodeExpressionPath.onlyWithKey} (`body`): a
  * body-less `loop` is the legacy flat-graph form, which reads `collection`
  * as a bare name and is judged nowhere.
+ *
+ * So are, since #19939, a `notify` node's computed values: `recipients`,
+ * `templateData.*` and `sourceId`, declared through the spec Zod channel (`NotifyConfigSchema` in
+ * `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`; the descriptor offers them with no
+ * marker). `recipients` carries {@link FlowNodeExpressionPath.eachElement}:
+ * it is one value or a list of them, and each element of a list is a value
+ * slot of its own.
+ *
+ * So is, since #19939, an `http` node's `body` — one value, the whole payload
+ * (a CEL map literal builds an object), declared through the spec Zod channel
+ * (`HttpConfigSchema` in `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`; the
+ * descriptor offers `body` with no marker).
  */
 export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
   {
@@ -429,6 +469,60 @@ export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
     role: 'value',
     label: 'screen record id',
   },
+  {
+    // [#19939] A `notify` node's computed values (#11182 ruling D; ADR-0032
+    // Decision 2), each evaluated by the executor in the run's scope before
+    // the notification is handed to the messaging service. Declared through
+    // the spec Zod channel (`NotifyConfigSchema`, carried to the ratchet by
+    // `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`): the descriptor offers these keys
+    // with no marker, the shape its Studio form renders. Its `actionUrl` is a
+    // TEXT slot, not one of these (`flow-text-slot-template.ts`), and its
+    // `sourceObject`, `actorId` and `payload` are literals.
+    //
+    // Who the notification goes to: a recipient, or a list of them, each a
+    // string or an envelope (`eachElement`), or one envelope evaluating to a
+    // recipient or a list. An entry that evaluates to a list adds each of its
+    // recipients.
+    nodeType: 'notify',
+    path: 'recipients',
+    role: 'value',
+    label: 'notify recipient',
+    eachElement: true,
+  },
+  {
+    // The render context of a `template` reference, keyed by the template's
+    // own `{{ }}` hole names.
+    nodeType: 'notify',
+    path: 'templateData.*',
+    role: 'value',
+    label: 'notify templateData value',
+  },
+  {
+    // The click-through target's record id. It must evaluate to a string;
+    // `null` drops the pair, as a half-specified target is dropped. Its
+    // object, `sourceObject`, is a literal, like `actorId` and `payload`: no
+    // flow computed them, so no slot is built there (#19939).
+    nodeType: 'notify',
+    path: 'sourceId',
+    role: 'value',
+    label: 'notify sourceId',
+  },
+  {
+    // [#19939] An `http` node's request body (#11182 ruling D; ADR-0032
+    // Decision 2): ONE value, the whole payload — a CEL value envelope the
+    // executor evaluates in the run's scope (a CEL map literal builds an
+    // object), or a literal sent as written. Evaluated once, before either
+    // mode, so the inline call and the durable outbox send the same payload.
+    // Declared through the spec Zod channel (`HttpConfigSchema`, carried to
+    // the ratchet by `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`): the descriptor
+    // offers `body` with no marker. Its `url` and `headers` values are TEXT
+    // slots (`flow-text-slot-template.ts`), and its `method`, `durable`,
+    // `timeoutMs` and `signingSecret` are literals.
+    nodeType: 'http',
+    path: 'body',
+    role: 'value',
+    label: 'http body',
+  },
 ];
 
 /** One resolved expression value found in a node's config. */
@@ -514,7 +608,8 @@ export function isExpressionEnvelopeShaped(value: unknown): value is { dialect: 
  *
  * An entry with {@link FlowNodeExpressionPath.onlyWithKey} is skipped on a
  * config that does not carry that key (#19939): its executor never reads the
- * slot there.
+ * slot there. An entry with {@link FlowNodeExpressionPath.eachElement} reads
+ * each element of an array as a value of its own, at its index (#19939).
  */
 export function resolveFlowNodeExpressions(
   nodeType: string,
@@ -524,7 +619,7 @@ export function resolveFlowNodeExpressions(
   const out: ResolvedFlowNodeExpression[] = [];
   for (const entry of FLOW_NODE_EXPRESSION_PATHS) {
     if (entry.nodeType !== nodeType || !readOn(entry, config)) continue;
-    walk(config as Record<string, unknown>, entry.path.split('.'), '', (path, value) => {
+    walk(config as Record<string, unknown>, entry.path.split('.'), '', slotEmitter(entry, (path, value) => {
       if (entry.role === 'value') {
         if (isExpressionEnvelopeShaped(value)) out.push({ entry, path, value });
       } else if (typeof value === 'string') {
@@ -538,7 +633,7 @@ export function resolveFlowNodeExpressions(
         // walk hands over `undefined` for a key an existing element lacks.
         out.push({ entry, path, value });
       }
-    });
+    }));
   }
   return out;
 }
@@ -555,7 +650,8 @@ export function resolveFlowNodeExpressions(
  * path walk, so it can never disagree with the ledger about which positions
  * are value slots.
  * An absent (`undefined`) value is skipped; everything else is handed over
- * verbatim, with its concrete path.
+ * verbatim, with its concrete path — on an {@link FlowNodeExpressionPath.eachElement}
+ * entry holding an array, each element at its own index.
  *
  * Pure path resolution, like its sibling — no judgement about what a value
  * says.
@@ -565,11 +661,31 @@ export function resolveFlowNodeValueSlots(nodeType: string, config: unknown): Re
   const out: ResolvedFlowNodeExpression[] = [];
   for (const entry of FLOW_NODE_EXPRESSION_PATHS) {
     if (entry.nodeType !== nodeType || entry.role !== 'value' || !readOn(entry, config)) continue;
-    walk(config as Record<string, unknown>, entry.path.split('.'), '', (path, value) => {
+    walk(config as Record<string, unknown>, entry.path.split('.'), '', slotEmitter(entry, (path, value) => {
       if (value !== undefined) out.push({ entry, path, value });
-    });
+    }));
   }
   return out;
+}
+
+/**
+ * The emitter a walk hands each value the entry's path reaches — `emit` itself,
+ * or for an {@link FlowNodeExpressionPath.eachElement} entry one that hands
+ * over each element of an array at its own index (`recipients[1]`) and any
+ * other value at the slot's own path.
+ */
+function slotEmitter(
+  entry: FlowNodeExpressionPath,
+  emit: (path: string, value: unknown) => void,
+): (path: string, value: unknown) => void {
+  if (!entry.eachElement) return emit;
+  return (path, value) => {
+    if (!Array.isArray(value)) {
+      emit(path, value);
+      return;
+    }
+    value.forEach((element, index) => emit(`${path}[${index}]`, element));
+  };
 }
 
 /**

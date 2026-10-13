@@ -10,8 +10,8 @@
 // whole in the same change (see `RETIRED_DEFS_BY_MAJOR[18]`) — was itself
 // unreachable from any served surface. ADR-0126 §6 wall 4 supersedes the
 // protocol on the record ("nothing may build against it"). What a
-// customization may touch is governed by ADR-0005's org overlay
-// (`allowOrgOverride`) and ADR-0126's packaged-metadata model.
+// customization may touch is governed by ADR-0005's environment overlay
+// (`allowEnvironmentOverlay`) and ADR-0126's packaged-metadata model.
 //
 // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
 // tombstone ships on the 17.x line (launch-window convention: accept-set

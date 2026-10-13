@@ -15,6 +15,279 @@
 import type { TranslationData } from '@objectstack/spec/system';
 
 export const enObjects: NonNullable<TranslationData['objects']> = {
+  sys_position: {
+    label: "Position",
+    pluralLabel: "Positions",
+    description: "Position definitions for capability distribution (ADR-0090)",
+    fields: {
+      label: {
+        label: "Display Name"
+      },
+      name: {
+        label: "API Name",
+        help: "Machine name for the position, unique per organization (e.g. sales_manager, hr_specialist)"
+      },
+      description: {
+        label: "Description"
+      },
+      active: {
+        label: "Active"
+      },
+      is_default: {
+        label: "Default Position",
+        help: "Automatically assigned to new users"
+      },
+      delegatable: {
+        label: "Delegatable",
+        help: "ADR-0091 D3: holders may self-service delegate this position, time-boxed."
+      },
+      managed_by: {
+        label: "Managed By",
+        help: "Record provenance, on the one platform / package / admin vocabulary that capabilities, permission sets and positions all share: platform = framework built-in (read-only) / package = stack/package-declared / admin = tenant-created. Legacy rows may carry system (== platform) / config (== package) / user (== admin).",
+        options: {
+          platform: "Platform",
+          package: "Package",
+          admin: "Admin"
+        }
+      },
+      id: {
+        label: "Position ID"
+      },
+      created_at: {
+        label: "Created At"
+      },
+      updated_at: {
+        label: "Updated At"
+      }
+    },
+    _views: {
+      active: {
+        label: "Active"
+      },
+      default_positions: {
+        label: "Default"
+      },
+      custom: {
+        label: "Custom"
+      },
+      all_positions: {
+        label: "All"
+      }
+    },
+    _actions: {
+      activate_position: {
+        label: "Activate Position",
+        successMessage: "Position activated"
+      },
+      deactivate_position: {
+        label: "Deactivate Position",
+        confirmText: "Deactivate this position? Users keep their assignment but the position stops granting permissions until re-activated.",
+        successMessage: "Position deactivated"
+      },
+      set_default_position: {
+        label: "Set as Default",
+        confirmText: "Make this the default position for new users? Existing users are unaffected.",
+        successMessage: "Default position updated"
+      },
+      clone_position: {
+        label: "Clone Position",
+        successMessage: "Position cloned",
+        params: {
+          label: {
+            label: "New Display Name"
+          },
+          name: {
+            label: "New API Name",
+            helpText: "snake_case machine name, unique per organization"
+          }
+        }
+      }
+    },
+    _validations: {
+      reserved_identity_name: {
+        message: "'name' cannot spell a framework-reserved built-in identity name (platform_admin, org_owner, org_admin, org_member). These names are ADR-0068 built-in identities: the platform projects them into current_user.positions from their own sources of truth, and a row spelling one is not an assignment of that identity. Choose a different name."
+      }
+    }
+  },
+  sys_capability: {
+    label: "Capability",
+    pluralLabel: "Capabilities",
+    description: "Authorization capability definitions (ADR-0066 D1). Referenced by name from permission-set systemPermissions and resource requiredPermissions.",
+    fields: {
+      label: {
+        label: "Display Name"
+      },
+      name: {
+        label: "API Name",
+        help: "Unique capability key referenced by systemPermissions / requiredPermissions (e.g. manage_users, setup.access)."
+      },
+      description: {
+        label: "Description"
+      },
+      scope: {
+        label: "Scope",
+        help: "platform = a platform-wide power; org = scoped to an organization.",
+        options: {
+          platform: "Platform",
+          org: "Organization"
+        }
+      },
+      managed_by: {
+        label: "Managed By",
+        help: "platform/package-owned capabilities are shipped and not user-deletable; admin-owned are created in Setup.",
+        options: {
+          platform: "Platform",
+          package: "Package",
+          admin: "Admin"
+        }
+      },
+      package_id: {
+        label: "Owning Package",
+        help: "Package that ships this capability (absent = platform-curated or admin-created)."
+      },
+      active: {
+        label: "Active",
+        help: "Catalogue/visibility flag for filtering and review. It has NO authorization effect: permission-set grants and resource requiredPermissions match capability names as strings and never read this row, so clearing it revokes nothing."
+      },
+      id: {
+        label: "Capability ID"
+      },
+      created_at: {
+        label: "Created At"
+      },
+      updated_at: {
+        label: "Updated At"
+      }
+    },
+    _views: {
+      platform: {
+        label: "Platform"
+      },
+      org: {
+        label: "Organization"
+      },
+      all_capabilities: {
+        label: "All"
+      }
+    },
+    _actions: {
+      activate_capability: {
+        label: "Activate",
+        successMessage: "Capability activated"
+      },
+      deactivate_capability: {
+        label: "Deactivate",
+        confirmText: "Deactivate this capability? This is a catalogue flag only: it marks the row inactive for filtering and review in Setup. Authorization is NOT affected — permission sets that grant this capability, and resources that require it, match it by name and keep resolving exactly as before.",
+        successMessage: "Capability deactivated"
+      }
+    }
+  },
+  sys_permission_set: {
+    label: "Permission Set",
+    pluralLabel: "Permission Sets",
+    description: "Named permission groupings for fine-grained access control",
+    fields: {
+      label: {
+        label: "Display Name"
+      },
+      name: {
+        label: "API Name",
+        help: "Machine name for the permission set, unique per organization. This is the set’s metadata identity (ADR-0094) and cannot be changed after creation — the data door rejects a rename; clone the set to a new name instead."
+      },
+      description: {
+        label: "Description"
+      },
+      object_permissions: {
+        label: "Object Permissions",
+        help: "JSON-serialized object-level CRUD permissions"
+      },
+      field_permissions: {
+        label: "Field Permissions",
+        help: "JSON-serialized field-level read/write permissions"
+      },
+      system_permissions: {
+        label: "System Permissions",
+        help: "JSON-serialized array of system capability names (e.g. [\"setup.access\",\"studio.access\",\"manage_users\"])"
+      },
+      row_level_security: {
+        label: "Row-Level Security",
+        help: "JSON-serialized array of row-level security policies (USING/CHECK clauses)"
+      },
+      tab_permissions: {
+        label: "Tab Permissions",
+        help: "JSON-serialized map of app tab visibility (visible | hidden | default_on | default_off)"
+      },
+      admin_scope: {
+        label: "Delegated Admin Scope",
+        help: "[ADR-0090 D12] JSON-serialized AdminScope: { businessUnit, includeSubtree, manageAssignments, manageBindings, authorEnvironmentSets, assignablePermissionSets[] }. Holding this set makes the user a SCOPED administrator within the declared business-unit subtree; enforced by the delegated-admin write gate."
+      },
+      active: {
+        label: "Active"
+      },
+      package_id: {
+        label: "Owning Package",
+        help: "Package that ships this permission set (absent = environment-authored). Set on rows an earlier release seeded for a package's set; no current writer sets it."
+      },
+      managed_by: {
+        label: "Managed By",
+        help: "Record provenance, on the one platform / package / admin vocabulary that capabilities, permission sets and positions all share: 'platform' = shipped by the platform; 'package' = a row an earlier release seeded for a package's set (read-mostly for admins); 'admin' = created/owned in this environment by an administrator (live-edited). Legacy rows may carry 'user' (== admin).",
+        options: {
+          platform: "Platform",
+          package: "Package",
+          admin: "Admin"
+        }
+      },
+      customized: {
+        label: "Customized",
+        help: "This packaged permission set has an environment customization overlay (ADR-0094). Reset it (delete through the data door) to return to the shipped baseline."
+      },
+      id: {
+        label: "Permission Set ID"
+      },
+      created_at: {
+        label: "Created At"
+      },
+      updated_at: {
+        label: "Updated At"
+      }
+    },
+    _views: {
+      active: {
+        label: "Active"
+      },
+      inactive: {
+        label: "Inactive"
+      },
+      all_permsets: {
+        label: "All"
+      }
+    },
+    _actions: {
+      activate_permission_set: {
+        label: "Activate",
+        successMessage: "Permission set activated"
+      },
+      deactivate_permission_set: {
+        label: "Deactivate",
+        confirmText: "Deactivate this permission set? Existing assignments stay in place but stop granting access until re-activated.",
+        successMessage: "Permission set deactivated"
+      },
+      clone_permission_set: {
+        label: "Clone",
+        description: "Copies this set's permissions into a new organization-owned set you can edit. Delegated-admin scope is not copied — grant it deliberately on the new set if it needs one.",
+        successMessage: "Permission set cloned",
+        params: {
+          label: {
+            label: "New Display Name"
+          },
+          name: {
+            label: "New API Name",
+            helpText: "snake_case machine name, unique per organization"
+          }
+        }
+      }
+    }
+  },
   sys_user_permission_set: {
     label: "User Permission Set",
     pluralLabel: "User Permission Sets",
@@ -34,7 +307,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       permission_set_id: {
         label: "Permission Set (legacy id)",
-        help: "[ADR-0131 D10] Legacy id of a retired permission-set catalog row, dropped with its data by a later stage. Not written and not read to grant anything: the grant names its set by permission_set."
+        help: "[ADR-0131 D10] Legacy id reference to a sys_permission_set row, dropped with its data by a later stage. Not written and not read to grant anything: the grant names its set by permission_set."
       },
       permission_set: {
         label: "Permission Set",
@@ -78,6 +351,35 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     _validations: {
       validity_window_order: {
         message: "Valid Until must be later than Valid From. The grant is active from Valid From up to, but not including, Valid Until, so a window that ends at or before it starts grants nothing. Leave either one empty for an open-ended window."
+      }
+    }
+  },
+  sys_position_permission_set: {
+    label: "Position Permission Set",
+    pluralLabel: "Position Permission Sets",
+    description: "Binds a permission set to a position.",
+    fields: {
+      id: {
+        label: "Binding ID",
+        help: "UUID of the position-permission-set binding."
+      },
+      display_title: {
+        label: "Title",
+        help: "Record title: the position and the permission set bound to it (computed on read)"
+      },
+      position_id: {
+        label: "Position",
+        help: "Foreign key to sys_position."
+      },
+      permission_set_id: {
+        label: "Permission Set",
+        help: "Foreign key to sys_permission_set."
+      },
+      created_at: {
+        label: "Created At"
+      },
+      updated_at: {
+        label: "Updated At"
       }
     }
   },

@@ -44,7 +44,7 @@ export const READ_ONLY_PACKAGE_SCOPES: readonly string[] = ['system', 'cloud'];
  *
  *   • **Booted code packages** — they register a manifest into the engine at
  *     startup (`registerApp` → `engine.manifests`); their items are code-shipped
- *     artifacts. Only `allowOrgOverride` overlays are allowed (ADR-0005), never
+ *     artifacts. Only `allowEnvironmentOverlay` overlays are allowed (ADR-0005), never
  *     fresh authored items.
  *   • **Installed / platform packages** — manifest `scope` is `system` or
  *     `cloud` (marketplace / platform-delivered).

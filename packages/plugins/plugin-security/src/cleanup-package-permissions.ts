@@ -12,14 +12,15 @@
  *
  * Scope:
  *  - [ADR-0131 D3/D4, C3 stage 8] The package's permission sets are the names
- *    it declared in the security catalog. The uninstalling door reads them off
- *    the package before it withdraws it (`declared` on the cleanup's
- *    arguments), and every grant naming one of them is revoked. No catalog row
- *    is read: the row objects are retired, and the package withdrawal already
- *    took the definitions themselves out of the catalog. A grant written
- *    before the name column existed names nothing, so it cannot be reached
- *    here; the organization-ownership migration's id-to-name rewrite
- *    (ADR-0131 D10) owns it.
+ *    it declared in the security catalog. The uninstalling door captures them
+ *    before it withdraws the package (`declared` on the cleanup's arguments,
+ *    `captureUninstallDeclared` in `@objectstack/metadata-protocol`), and every
+ *    grant naming one of them is revoked. No catalog row is read: the row
+ *    objects are retired, and the package withdrawal already took the
+ *    definitions themselves out of the catalog. A grant written before the
+ *    name column existed names nothing, so it cannot be reached here; the
+ *    organization-ownership migration's id-to-name rewrite (ADR-0131 D10)
+ *    owns it.
  *  - `sys_audience_binding_suggestion` rows for the package are removed in
  *    every status: with the sets gone, confirmed/dismissed history points at
  *    nothing, and a fresh reinstall should re-prompt (D5 — admin confirms).
@@ -111,8 +112,7 @@ export async function cleanupPackagePermissions(
   ql: any,
   packageId: string,
   logger?: { info?: (m: string, meta?: any) => void; warn?: (m: string, meta?: any) => void },
-  /** The permission-set names the package declared, read off it before its withdrawal. */
-  declaredSetNames: readonly string[] = [],
+  declared?: { permission?: readonly string[] },
 ): Promise<PackagePermissionCleanupOutcome> {
   const out: PackagePermissionCleanupOutcome = {
     sets: 0, positionBindings: 0, userGrants: 0, suggestions: 0, refused: 0,
@@ -125,10 +125,13 @@ export async function cleanupPackagePermissions(
   // consequence.
   const refusals = createSeedWriteRefusals();
 
-  // [ADR-0131 D4] A grant names its set BY NAME, so the grants of a set the
-  // package declared are the rows naming it.
-  const names = [...new Set(declaredSetNames.filter((n) => typeof n === 'string' && n !== ''))];
-  for (const name of names) {
+  // [ADR-0131 D3/D4, ADR-0090 D5] The package's sets are served from the
+  // registry, so no row stands for them: the grants naming them are reached by
+  // the names the uninstall door captured before it withdrew the package. A
+  // name belongs to one holder (the registry refuses a second at install), so
+  // every grant naming it was a grant of this package's set.
+  for (const name of new Set(declared?.permission ?? [])) {
+    if (typeof name !== 'string' || name === '') continue;
     out.userGrants += await deleteRows(
       ql, 'sys_user_permission_set',
       await tryFind(ql, 'sys_user_permission_set', { permission_set: name }),

@@ -651,10 +651,12 @@ describe('[#19837] the master-detail parent binding is scoped to the caller\'s o
     observed.length = 0;
     const global = await refusalOf(() => insertLine('gh_locked', 'pb_gline'));
     expect(envelopeOf(global)).toEqual({ status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'note', code: 'required' }] });
-    // Bound because the engine withheld the tenant for this master (ADR-0066).
+    // Bound because the engine withheld the tenant for this master (ADR-0066),
+    // on both of the write's header reads (#22519: the caller's read door, then
+    // the elevated read).
     const read = observed.filter((c) => c.object === 'pb_gheader' && c.method === 'find');
-    expect(read).toHaveLength(1);
-    expect(read[0].options?.tenantId).toBeUndefined();
+    expect(read).toHaveLength(2);
+    for (const r of read) expect(r.options?.tenantId).toBeUndefined();
   });
 
   it('`group` posture: a header inside the caller\'s membership set binds — the union reaches the header read', async () => {
@@ -669,9 +671,11 @@ describe('[#19837] the master-detail parent binding is scoped to the caller\'s o
       engine.insert('pb_line', { id: 'ln_grp', header: 'hy_locked' }, { context: GROUP_MEMBER } as any));
 
     expect(envelopeOf(inside)).toEqual({ status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'note', code: 'required' }] });
+    // Both of the write's header reads (#22519: the caller's read door, then
+    // the elevated read) reach the union.
     const read = observed.filter((c) => c.object === 'pb_header' && c.method === 'find');
-    expect(read).toHaveLength(1);
-    expect([...(read[0].options?.tenantIds ?? [])].sort()).toEqual([ORG_X, ORG_Y].sort());
+    expect(read).toHaveLength(2);
+    for (const r of read) expect([...(r.options?.tenantIds ?? [])].sort()).toEqual([ORG_X, ORG_Y].sort());
 
     // Lit control: a member whose set is org X alone cannot see the org-Y
     // header, so it binds absent and the write answers as an absent header does
@@ -683,7 +687,7 @@ describe('[#19837] the master-detail parent binding is scoped to the caller\'s o
     expect(envelopeOf(outside)).toEqual({ status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'note', code: 'rule_violation' }] });
   });
 
-  it('the header read runs ELEVATED and TENANT-SCOPED — the two halves of `{ ...context, isSystem: true }`', async () => {
+  it('the header read asks the caller\'s read door first, then runs ELEVATED and TENANT-SCOPED — the two halves of `{ ...context, isSystem: true }`', async () => {
     const reads: Array<{ operation: string; context: ExecutionContext }> = [];
     engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
       if (opCtx.object === 'pb_header') reads.push({ operation: opCtx.operation, context: opCtx.context });
@@ -691,19 +695,28 @@ describe('[#19837] the master-detail parent binding is scoped to the caller\'s o
     });
     storeFor('pb_line').set('ln_x', { id: 'ln_x', header: 'hx_open', note: 'n', organization_id: ORG_X });
 
-    // Insert: `resolveMasterDetailParents` is the batch `find`; the `findOne`
-    // behind it is #19808's reference probe (the payload names the header).
+    // [#22519] Every elevated header read is preceded by the caller's read
+    // door, a `find` under the caller's own context.
+    // Insert: `resolveMasterDetailParents` is the batch `find` pair; the
+    // `find` + `findOne` behind it is #19808's reference probe (the payload
+    // names the header).
     await insertLine('hx_open');
     // Update by id, header not in the payload: no reference probe, so the one
     // `findOne` is `resolveMasterDetailParent` reading the stored row's header.
     await engine.update('pb_line', { note: 'm' }, { where: { id: 'ln_x' }, context: MEMBER_X } as any);
 
-    expect(reads.map((r) => r.operation)).toEqual(['find', 'findOne', 'findOne']);
+    const shape = (r: { operation: string; context: ExecutionContext }) =>
+      `${r.operation}:${r.context?.isSystem === true ? 'elevated' : 'door'}`;
+    expect(reads.map(shape)).toEqual([
+      'find:door', 'find:elevated',
+      'find:door', 'findOne:elevated',
+      'find:door', 'findOne:elevated',
+    ]);
     for (const { context } of reads) {
-      expect(context).toMatchObject({ isSystem: true, tenantId: ORG_X, userId: 'u_x' });
+      expect(context).toMatchObject({ tenantId: ORG_X, userId: 'u_x' });
     }
     // …and the tenant reaches the driver on every one of them.
     const driverReads = observed.filter((c) => c.object === 'pb_header');
-    expect(driverReads.map((c) => c.options?.tenantId)).toEqual([ORG_X, ORG_X, ORG_X]);
+    expect(driverReads.map((c) => c.options?.tenantId)).toEqual([ORG_X, ORG_X, ORG_X, ORG_X, ORG_X, ORG_X]);
   });
 });

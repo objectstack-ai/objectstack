@@ -45,6 +45,32 @@
  *            `200` with `hotLoaded: false` and the register error's message as
  *            `hotLoadError` — in the ledger, loaded at the next restart.
  *
+ *          `installMode: 'managed' | 'unmanaged'` (ADR-0131 D6; absent means
+ *          `managed`, the key parsed against `InstallModeSchema`) chooses
+ *          HOW the package is installed, on either source:
+ *            - `managed`: everything above — registered as code, ledgered,
+ *              upgradeable. Refused `409 RESOURCE_CONFLICT` when a WRITABLE
+ *              base holds the package's namespace (an unmanaged copy of it),
+ *              naming the base, before any write.
+ *            - `unmanaged`: the package's metadata is copied ONCE into a new
+ *              writable base in the environment ledger
+ *              (`importUnmanagedPackage`): the environment's own metadata,
+ *              which the next save edits, followed by no upgrade. The
+ *              package's protection lock is not copied, in either spelling
+ *              (`_lock`, or a `protection` block on a type that declares
+ *              one): the answer's `strippedLocks` names each lock dropped,
+ *              with the package's reason (ADR-0010 §3.3 and Phase 4.3; the
+ *              ruling on the D6 lock fork, record 6119681934);
+ *              nothing is registered, ledgered or rehydrated under the
+ *              package's id, and its sample data is not loaded. Refused
+ *              `409 UNMANAGED_INSTALL_WALLED_POSTURE` on a deployment whose
+ *              REQUESTED tenancy posture walls organizations: after the
+ *              payload check, step 1b (package id), the ADR-0131 D3
+ *              walled-catalog refusal and step 1c (protocol handshake),
+ *              none of which writes, and before any write.
+ *          A mode the package's `installModes` does not permit answers
+ *          `422 INSTALL_MODE_NOT_PERMITTED`, before any write.
+ *
  *   GET    /api/v1/marketplace/install-local
  *          → lists currently installed marketplace packages. Requires an
  *            authenticated principal (anonymous → 401); `installedBy` and
@@ -108,7 +134,15 @@ import {
     inProcessSessionReadInput,
 } from '@objectstack/types';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
-import { ManifestSchema, manifestIdRefusal } from '@objectstack/spec/kernel';
+import {
+    ManifestSchema,
+    manifestIdRefusal,
+    InstallModeSchema,
+    resolveInstallModes,
+    deriveNamespaceFromPackageId,
+    unmanagedInstallValueCarries,
+    type InstallMode,
+} from '@objectstack/spec/kernel';
 // [#21762] ADR-0087 D1's protocol handshake, its brand predicate and the ONE
 // answer both package-install doors give its refusal. Imported from the
 // producer, never restated: `POST /api/v1/packages` answers through the same
@@ -121,7 +155,19 @@ import {
     protocolIncompatibleAnswer,
     ProtocolIncompatibleError,
     type ProtocolIncompatibleDiagnostic,
+    // [#15204 W2] ADR-0131 D3's one predicate, asked here per declared catalog
+    // type: the same sentence, the same rung, as every catalog write door.
+    walledCatalogWriteVerdict,
+    SECURITY_CATALOG_TYPES,
 } from '@objectstack/metadata-core';
+// [#15204 W2] The engine's own reading of what a manifest declares, and of
+// what the running registry holds under a package, so this door judges the
+// declarations the engine registers and not a second reading of them.
+import {
+    declaredSecurityCatalogNames,
+    findPackageHeldSecurityCatalogNames,
+    type DeclaredSecurityCatalogName,
+} from '@objectstack/objectql';
 import { resolveCloudUrl } from './cloud-url.js';
 import { resolveMarketplacePublicBaseUrl } from './marketplace-public-url.js';
 import { join } from 'node:path';
@@ -136,8 +182,20 @@ import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
 import { matchSeedRows, purgeSeedRows, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
 import type { IHttpServer, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
-import type { DeletePackageRequest, UninstallCleanupOutcome, UninstalledCatalogItem } from '@objectstack/metadata-protocol';
-import { declaredCatalogItemsOf } from '@objectstack/metadata-protocol';
+import type {
+    DeletePackageRequest,
+    UninstallCleanupOutcome,
+    UninstallDeclared,
+    ObjectStackProtocolImplementation,
+    PackageWritabilityEngine,
+} from '@objectstack/metadata-protocol';
+// [ADR-0131 D6] The `unmanaged` install mode's two shared judgements, imported
+// from their producer rather than restated: the walled-posture refusal the
+// import verb raises (answered here after the payload, id and handshake checks,
+// before any write), the read-only-package rule (a namespace held by a WRITABLE base is
+// this environment's own metadata), and the client-facing sentence rule.
+import { unmanagedInstallPostureRefusal, isWritablePackage, clientFacingFailureText, captureUninstallDeclared } from '@objectstack/metadata-protocol';
+import { resolveThrownHttpError } from '@objectstack/types';
 
 const ROUTE_BASE = '/api/v1/marketplace/install-local';
 
@@ -160,7 +218,7 @@ const ROUTE_BASE = '/api/v1/marketplace/install-local';
  */
 type UninstallCleanupRunner = {
     runUninstallCleanups?(
-        request: Pick<DeletePackageRequest, 'packageId' | 'actor'> & { declared?: ReadonlyArray<UninstalledCatalogItem> },
+        request: Pick<DeletePackageRequest, 'packageId' | 'actor'> & { declared?: UninstallDeclared },
     ): Promise<UninstallCleanupOutcome[]>;
 };
 
@@ -230,6 +288,76 @@ const INSTALL_LOCAL_CAPABILITY = 'manage_metadata';
  */
 const UNRUNNABLE_REFUSAL_CODE = 'VALIDATION_ERROR';
 const UNRUNNABLE_REFUSAL_STATUS = 422;
+
+/**
+ * [ADR-0131 D6] The refusal of an install mode the package does not permit:
+ * its manifest's `installModes` (read through `resolveInstallModes`, absent
+ * meaning `['managed']`) does not list the requested mode. 422 — the request
+ * is well formed and the package refuses that way of installing it; the
+ * remedy is a permitted mode, named in the message and in
+ * `details.permitted`. Its own code because a consumer's branch differs from
+ * every other refusal here: retrying with another mode helps, rewriting the
+ * package does not need to.
+ */
+const INSTALL_MODE_NOT_PERMITTED_CODE = 'INSTALL_MODE_NOT_PERMITTED';
+const INSTALL_MODE_NOT_PERMITTED_STATUS = 422;
+
+/**
+ * [ADR-0131 D6] The one verb the `unmanaged` install mode calls: the
+ * copy-once import. Typed from the producer's own method signature, the
+ * shape `PackagesDomainProtocol` gives its verbs in
+ * `packages/runtime/src/domains/packages.ts`, and asked as a capability
+ * question at the call site — a protocol from a build without the verb cannot
+ * install unmanaged, and the door says so instead of falling back.
+ */
+type UnmanagedImporter = {
+    importUnmanagedPackage?: ObjectStackProtocolImplementation['importUnmanagedPackage'];
+};
+
+/**
+ * [ADR-0131 D6] What the managed-after-unmanaged refusal reads off the
+ * `objectql` slot: who holds a namespace, and — through ADR-0070's one
+ * predicate, whose own structural contract this extends — whether a holder is
+ * a writable base. A narrow per-consumer interface, so the lookup carries a
+ * contract rather than erasing the slot.
+ */
+type NamespaceHoldingEngine = PackageWritabilityEngine & {
+    registry?: PackageWritabilityEngine['registry'] & {
+        getNamespaceOwners?(namespace: string): unknown;
+    };
+};
+
+/** A `{ … }` object — not an array, not null. */
+function isPlainObject(value: unknown): value is Record<string, any> {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * [ADR-0131 D6] The package manifest an install body DECLARES — where each of
+ * the two single-package shapes this door accepts carries it: a compiled
+ * artifact (`dist/objectstack.json`, what `os package install <file>` sends)
+ * nests it under `manifest:` beside the collections (ADR-0130 D4), and a
+ * flattened bundle carries its manifest fields at the top. Read for the keys
+ * an install decides by — `installModes`, `namespace` — never a second guess
+ * at either: each shape has exactly one place for them.
+ */
+function declaredPackageManifest(body: Record<string, any>): Record<string, any> {
+    return isPlainObject(body.manifest) ? body.manifest : body;
+}
+
+/**
+ * [ADR-0131 D6] ONE package body, flat — what the `unmanaged` import copies:
+ * a compiled artifact's manifest fields beside its collections, the
+ * collections winning a key both carry (the assembled stage's `permissions`
+ * is the permission-set collection, its `objects` the definitions — the
+ * flatten order `AssembledPackageBodySchema` records). A body already flat is
+ * returned as it is.
+ */
+function flattenPackageBody(body: Record<string, any>): Record<string, any> {
+    if (!isPlainObject(body.manifest)) return body;
+    const { manifest: meta, ...sections } = body;
+    return { ...meta, ...sections };
+}
 
 /** What this door cannot run in a package, as the runtime binder judges it. */
 interface UnrunnableCode {
@@ -400,6 +528,20 @@ function organizationWallActive(ctx: PluginContext): boolean {
  */
 const NO_ACTIVE_ORGANIZATION_CODE = 'PERMISSION_DENIED';
 const NO_ACTIVE_ORGANIZATION_STATUS = 403;
+
+/**
+ * [#15204 W2] What an admitted mutating request carries past
+ * `requireInstallCapability`: the acting user, plus the two inputs ADR-0131
+ * D3's refusal needs, both off the admission's single authorization read.
+ */
+interface InstallAdmission {
+    ok: true;
+    userId: string;
+    /** The caller's ADR-0095 posture rung. */
+    callerPosture: unknown;
+    /** The EFFECTIVE tenancy posture; `undefined` when no `tenancy` service is registered. */
+    tenancyPosture: TenancyPosture | undefined;
+}
 
 /** The sample-data doors that seed or purge under the caller's active organization. */
 type SampleDataDoor = 'install' | 'reseed' | 'purge';
@@ -944,6 +1086,27 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         let body: any = {};
         try { body = await c.req.json(); } catch { /* empty body */ }
 
+        // 0. [ADR-0131 D6] ⭐ THE REQUESTED INSTALL MODE, parsed against the
+        //    manifest key's own enum (`InstallModeSchema`, by reference — never
+        //    a copy of the two spellings). Absent means `managed`, the mode
+        //    every install took before the key existed. Answered before the
+        //    cloud round-trip: a request this door cannot read is refused
+        //    without fetching anything.
+        const requestedMode = body?.installMode === undefined
+            ? { success: true as const, data: 'managed' as InstallMode }
+            : InstallModeSchema.safeParse(body.installMode);
+        if (!requestedMode.success) {
+            return c.json({
+                success: false,
+                error: {
+                    code: 'INVALID_REQUEST',
+                    message: `\`installMode\` must be 'managed' or 'unmanaged', received ${JSON.stringify(body.installMode)}. `
+                        + 'Omit it for a managed install.',
+                },
+            }, 400);
+        }
+        const installMode: InstallMode = requestedMode.data;
+
         // ── Offline path: an inline manifest was supplied (file import). ──
         // Bypass the cloud-fetch entirely; no OS_CLOUD_URL required.
         const inlineManifest = body?.manifest && typeof body.manifest === 'object' ? body.manifest : null;
@@ -1116,6 +1279,19 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const manifestId = declaredId.data;
         if (inlineManifest) packageId = manifestId;
 
+        // [#15204 W2] ADR-0131 D3: under a wall, a package whose incoming or
+        // installed version carries a catalog item is the operator's to
+        // install, upgrade or replace. Asked before any later step of this
+        // install reads or writes anything.
+        {
+            const installed = this.ledger.read(manifestId).entry?.manifest;
+            const walled = this.refuseWalledCatalogPackage(
+                c, ctx, 'Installing', manifestId, admission,
+                installed === undefined ? [manifest] : [manifest, installed],
+            );
+            if (walled) return walled;
+        }
+
         // 1c. [#21762] ⭐ ADR-0087 D1'S PROTOCOL HANDSHAKE, before anything is
         //     registered, written or synced: the same `assertProtocolCompat`
         //     the other package-install door (`POST /api/v1/packages`) and the
@@ -1146,6 +1322,27 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 error: { code: refusal.code, message: refusal.message, details: refusal.details },
             }, refusal.status);
         }
+
+        // 1e. [ADR-0131 D6] ⭐ THE INSTALL MODE — after the payload, id, D3
+        //     walled-catalog and handshake checks and before every other
+        //     judgement of the package and any write, because nothing an
+        //     author changes in the package answers either refusal:
+        //       - the package must PERMIT the requested mode: its manifest's
+        //         `installModes`, parsed by reference
+        //         (`ManifestSchema.shape.installModes`) and read through the one
+        //         resolver, absent meaning `['managed']`;
+        //       - `unmanaged` is refused on a deployment whose REQUESTED tenancy
+        //         posture walls organizations (`group`, `isolated`, or an
+        //         unrecognised value, read fail-closed). Requested, never in
+        //         force (`classifyAdmissionTenancyPosture` answers `single` on a
+        //         degraded walled boot and would admit an editable shared copy
+        //         into a deployment its operator declared multi-tenant) — the
+        //         posture the D5e gate below reads too. The refusal is the
+        //         import verb's own, through the same function, so its code,
+        //         status and sentence are one.
+        //     Both on both branches, before any write.
+        const modeRefusal = this.judgeInstallMode(manifest, manifestId, installMode, inlineManifest ? 400 : 502);
+        if (modeRefusal) return c.json({ success: false, error: modeRefusal.error }, modeRefusal.status as any);
 
         // 1d. [#21489] ⭐ CODE THIS DOOR CANNOT RUN IS REFUSED, not installed.
         //     A job runs on a JSON door only through its sandboxed `body`; its
@@ -1190,6 +1387,54 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     message: describeUnrunnable(manifestId, unrunnable),
                 },
             }, UNRUNNABLE_REFUSAL_STATUS);
+        }
+
+        // ── [ADR-0131 D6] The `unmanaged` install: a copy, not a registration.
+        //    The package's metadata is copied ONCE into a new writable base in
+        //    the environment ledger by the import verb, and the steps below —
+        //    the conflict check, the D5e gate, `manifest.register`, the ledger
+        //    entry, the schema sync, the binder, `applySideEffects` — are the
+        //    MANAGED install's and never run for it: nothing is registered or
+        //    recorded under the package's own id, so nothing upgrades it and no
+        //    boot rehydrates it. Its items are the environment's own from here.
+        if (installMode === 'unmanaged') {
+            return this.installUnmanaged(c, ctx, {
+                manifest,
+                manifestId,
+                version,
+                versionId: resolvedVersionId,
+                userId,
+            });
+        }
+
+        // 1f. [ADR-0131 D6] ⭐ A MANAGED INSTALL NEVER TAKES OVER AN UNMANAGED
+        //     COPY, on BOTH branches, before any write. A copy keeps the
+        //     package's namespace under a writable base of its own, so a
+        //     WRITABLE package holding this package's namespace is this
+        //     environment's own metadata under the names the package ships.
+        //     Registering the package over it would hand the namespace to code:
+        //     on the inline branch the registry's namespace gate throws, but the
+        //     cloud-fetched branch registers LENIENTLY (the ledger entry is
+        //     written with `hotLoaded: false`), and at the next boot the
+        //     package's definitions win and the copied, customer-edited items
+        //     stop being served. So the door refuses first, naming the base.
+        //     ⛔ Only a WRITABLE holder: a namespace held by another code
+        //     package keeps the lenient branch's existing behaviour, whose fate
+        //     is a separate decision.
+        const copyBase = this.findEnvironmentBaseHoldingNamespace(ctx, manifest, manifestId);
+        if (copyBase) {
+            return c.json({
+                success: false,
+                error: {
+                    code: 'RESOURCE_CONFLICT',
+                    message: `Package '${manifestId}' cannot be installed managed: its namespace '${copyBase.namespace}' is held by `
+                        + `the environment base '${copyBase.base}' — an unmanaged install of this package, or a base authored `
+                        + 'in this environment — whose items are this environment\'s own metadata. A managed '
+                        + 'install would hand that namespace to the package and stop serving them. Keep the copy (it follows '
+                        + `no upgrade), or uninstall the base '${copyBase.base}' first; its items go with it.`,
+                    details: { namespace: copyBase.namespace, base: copyBase.base },
+                },
+            }, 409);
         }
 
         // 2. Conflict check — refuse to overwrite user-authored apps
@@ -1638,6 +1883,16 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         if (!this.ledger.has(manifestId)) {
             return c.json({ success: false, error: { code: 'RESOURCE_NOT_FOUND', message: `No marketplace install for ${manifestId}.` } }, 404);
         }
+        // [#15204 W2] ADR-0131 D3: under a wall, uninstalling a package that
+        // carries a catalog item is the operator's: it removes those items
+        // from every organization's catalog. Asked before the ledger is touched.
+        {
+            const walled = this.refuseWalledCatalogPackage(
+                c, ctx, 'Uninstalling', manifestId, admission,
+                [this.ledger.read(manifestId).entry?.manifest],
+            );
+            if (walled) return walled;
+        }
         try {
             this.ledger.remove(manifestId);
         } catch (err: any) {
@@ -1658,13 +1913,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // `metadata:reloaded` in that window would re-project the very sets
         // they had just selected and removed. The cleanups lose nothing by
         // going second: `deletePackage` already runs every registered cleanup
-        // after its withdrawal, and the one registered today
-        // (`security.package-permissions`) revokes by the names read above,
-        // never through the registry.
-        // [ADR-0131 D3, C3 stage 8] What the package declared in the security
-        // catalog, read before the withdrawal takes it out of the registry: the
-        // cleanups revoke the grants that name those items.
-        const declared = this.declaredCatalogItems(ctx, manifestId);
+        // after its withdrawal, and `security.package-permissions` reads no
+        // registry: it selects by package id in the store, and by the names
+        // handed to it. [ADR-0090 D5] Those names are captured just before the
+        // withdrawal releases them — synchronously, so still no `await` before
+        // it, at the same point and through the same helper as
+        // `deletePackage` — and the cleanup revokes the grants naming them.
+        let registry: unknown;
+        try { registry = ctx.getService<IObjectQLEngine>('objectql')?.registry; } catch { /* no data engine — nothing registered */ }
+        const declared = captureUninstallDeclared(registry, manifestId);
         const withdrawal = this.withdrawFromRunningKernel(ctx, manifestId);
         const cleanups = [
             ...(withdrawal ? [withdrawal] : []),
@@ -1791,21 +2048,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *     tell "nothing to revoke" from "the revocation never ran";
      *   - otherwise the runner's outcomes, verbatim.
      */
-    /** The security-catalog items a still-registered package declares (`declaredCatalogItemsOf`). */
-    private declaredCatalogItems = (ctx: PluginContext, manifestId: string): UninstalledCatalogItem[] => {
-        try {
-            const ql = ctx.getService<IObjectQLEngine>('objectql');
-            return declaredCatalogItemsOf((ql?.registry as any)?.getPackage?.(manifestId)?.manifest);
-        } catch {
-            return [];
-        }
-    };
-
     private runUninstallCleanups = async (
         ctx: PluginContext,
         manifestId: string,
         actor: string,
-        declared: ReadonlyArray<UninstalledCatalogItem> = [],
+        declared?: UninstallDeclared,
     ): Promise<UninstallCleanupOutcome[]> => {
         let protocol: UninstallCleanupRunner | undefined;
         try { protocol = ctx.getService<UninstallCleanupRunner>('protocol'); } catch { /* no protocol service */ }
@@ -1822,7 +2069,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             );
         } else {
             try {
-                outcomes = await protocol.runUninstallCleanups({ packageId: manifestId, actor, ...(declared.length > 0 ? { declared } : {}) });
+                outcomes = await protocol.runUninstallCleanups({ packageId: manifestId, actor, ...(declared ? { declared } : {}) });
             } catch (err: any) {
                 ctx.logger?.warn?.(`[MarketplaceInstallLocal] the uninstall cleanups of ${manifestId} could not be run: ${err?.message ?? err}`);
                 outcomes = notRun('the uninstall cleanups could not be run');
@@ -1913,6 +2160,223 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             pending: [],
             attestation: recordGlobalUniqueAttestation(carried, confirmedIds, posture, installerId),
         };
+    };
+
+    /**
+     * [ADR-0131 D6] Judge the requested install mode against the package and
+     * the deployment — step 1e of {@link handleInstall}. `null` admits it;
+     * otherwise the refusal to answer with, before anything is written.
+     *
+     * 1. The package's `installModes`, parsed through its declaration by
+     *    reference: a value the declaration refuses answers
+     *    `PLUGIN_MANIFEST_INVALID` with the declaration's own sentence, at the
+     *    status this door gives an invalid manifest (400 inline, 502 for a
+     *    cloud snapshot) — the id gate's split.
+     * 2. The requested mode must be one the package permits
+     *    ({@link resolveInstallModes}; absent means `['managed']`):
+     *    `INSTALL_MODE_NOT_PERMITTED` / 422, naming the permitted modes.
+     * 3. `unmanaged` on a deployment whose REQUESTED tenancy posture walls
+     *    organizations: the import verb's own refusal
+     *    (`UNMANAGED_INSTALL_WALLED_POSTURE` / 409), from the same function.
+     */
+    private judgeInstallMode = (
+        manifest: Record<string, any>,
+        manifestId: string,
+        installMode: InstallMode,
+        invalidManifestStatus: 400 | 502,
+    ): { status: number; error: { code: string; message: string; details?: Record<string, unknown> } } | null => {
+        const declared = ManifestSchema.shape.installModes.safeParse(declaredPackageManifest(manifest).installModes);
+        if (!declared.success) {
+            const [issue] = declared.error.issues;
+            return {
+                status: invalidManifestStatus,
+                error: {
+                    code: 'PLUGIN_MANIFEST_INVALID',
+                    message: `Package '${manifestId}' declares an invalid \`installModes\`: ${issue?.message ?? 'refused by its declaration'}`
+                        + `${issue && issue.path.length > 0 ? ` (at \`installModes.${issue.path.join('.')}\`)` : ''}.`,
+                },
+            };
+        }
+        const permitted = resolveInstallModes({ installModes: declared.data });
+        if (!permitted.includes(installMode)) {
+            const others = permitted.map((m) => `'${m}'`).join(' or ');
+            return {
+                status: INSTALL_MODE_NOT_PERMITTED_STATUS,
+                error: {
+                    code: INSTALL_MODE_NOT_PERMITTED_CODE,
+                    message: `Package '${manifestId}' cannot be installed ${installMode}: it permits only ${others} `
+                        + `(its manifest's \`installModes\`${declared.data === undefined ? ', absent, which means [\'managed\']' : ''}). `
+                        + `Install it ${permitted.length === 1 ? permitted[0] : `with \`installMode\` ${others}`} instead.`,
+                    details: { installMode, permitted: [...permitted] },
+                },
+            };
+        }
+        if (installMode === 'unmanaged') {
+            const walled = unmanagedInstallPostureRefusal(manifestId) as (Error & { code?: string; status?: number; details?: Record<string, unknown> }) | null;
+            if (walled) {
+                return {
+                    status: walled.status ?? 409,
+                    error: {
+                        code: String(walled.code),
+                        message: walled.message,
+                        ...(walled.details ? { details: walled.details } : {}),
+                    },
+                };
+            }
+        }
+        return null;
+    };
+
+    /**
+     * [ADR-0131 D6] The WRITABLE package holding this package's namespace, if
+     * any — step 1f of {@link handleInstall}, the managed-after-unmanaged
+     * refusal. An `unmanaged` install keeps the package's namespace under a
+     * new writable base, so a writable holder is environment metadata under
+     * the names the package ships. Read-only, so it is asked before any write.
+     *
+     * The namespace is the one the package DECLARES ({@link declaredPackageManifest}),
+     * or the one derived from its id when it declares none — the derivation
+     * the copy took. A shareable platform namespace (`base`, `system`, `sys`)
+     * is never one package's. "Writable" is ADR-0070's one predicate
+     * ({@link isWritablePackage}), the rule the authoring path enforces.
+     */
+    private findEnvironmentBaseHoldingNamespace = (
+        ctx: PluginContext,
+        manifest: Record<string, any>,
+        manifestId: string,
+    ): { base: string; namespace: string } | null => {
+        const declared = declaredPackageManifest(manifest).namespace;
+        const namespace = typeof declared === 'string' && declared !== ''
+            ? declared
+            : deriveNamespaceFromPackageId(manifestId);
+        if (!namespace || namespace === 'base' || namespace === 'system' || namespace === 'sys') return null;
+        let ql: NamespaceHoldingEngine | undefined;
+        try { ql = ctx.getService<NamespaceHoldingEngine>('objectql'); } catch { return null; /* no data engine — nothing is held */ }
+        const owners: unknown = ql?.registry?.getNamespaceOwners?.(namespace);
+        if (!Array.isArray(owners)) return null;
+        for (const owner of owners) {
+            if (typeof owner !== 'string' || owner === manifestId) continue;
+            if (isWritablePackage(ql, owner)) return { base: owner, namespace };
+        }
+        return null;
+    };
+
+    /**
+     * [ADR-0131 D6] The `unmanaged` install: the package's metadata copied
+     * ONCE into a new writable base by the protocol's
+     * `importUnmanagedPackage` — every item through the save door a Studio
+     * edit takes, `organization_id` NULL, the environment's own metadata from
+     * its first byte, and
+     * all or nothing (a write failure deletes the base).
+     *
+     * What this door does around the verb, and why:
+     *  - it hands the verb ONE flat package body ({@link flattenPackageBody});
+     *  - the verb owns every refusal it can judge before the base exists
+     *    (uncopyable content, collisions, an owned namespace, an existing
+     *    target) and this door answers each with the verb's own code and
+     *    status, the message when the verb declared it a refusal, and
+     *    `details`; a 5xx's message is withheld and logged;
+     *  - translation bundles are COPIED by the verb as `translation` items, so
+     *    they reload at every boot with the environment's translations — this
+     *    install writes no ledger entry for a rehydrate to replay;
+     *  - seed data is NOT loaded: it is data, not metadata, and the
+     *    reseed / purge doors act on ledger entries this install never
+     *    writes, so seeded rows would be rows nothing here could clear. The
+     *    answer says so (`seeded.mode: 'skipped'`) when the package declares any;
+     *  - `installedFrom` — the source package id and version, for information
+     *    only (ADR-0131 D6: "provenance recorded for information only") — is
+     *    on the answer and on the operator log line, at `info`;
+     *  - `strippedLocks` — every protection lock the package shipped, in
+     *    either spelling, and the copy does not keep, with the package's
+     *    reason — is the verb's own
+     *    list, relayed as the verb states it, so the installer reads why the
+     *    vendor locked an item before editing it.
+     */
+    private installUnmanaged = async (
+        c: any,
+        ctx: PluginContext,
+        args: { manifest: Record<string, any>; manifestId: string; version: string; versionId: string; userId: string | null },
+    ): Promise<Response> => {
+        const { manifest, manifestId, version, versionId, userId } = args;
+        let protocol: UnmanagedImporter | undefined;
+        try { protocol = ctx.getService<UnmanagedImporter>('protocol'); } catch { /* no protocol service */ }
+        if (!protocol || typeof protocol.importUnmanagedPackage !== 'function') {
+            return c.json({
+                success: false,
+                error: {
+                    code: 'SERVICE_UNAVAILABLE',
+                    message: `Package '${manifestId}' cannot be installed unmanaged on this runtime: its metadata protocol `
+                        + 'has no copy-once import. Install it managed, or upgrade @objectstack/metadata-protocol alongside '
+                        + '@objectstack/cloud-connection.',
+                },
+            }, 503);
+        }
+
+        const packageBody = flattenPackageBody(manifest);
+        let result: Awaited<ReturnType<NonNullable<UnmanagedImporter['importUnmanagedPackage']>>>;
+        try {
+            result = await protocol.importUnmanagedPackage({
+                manifest: packageBody,
+                ...(userId ? { actor: userId } : {}),
+            } as Parameters<NonNullable<UnmanagedImporter['importUnmanagedPackage']>>[0]);
+        } catch (err: any) {
+            const resolved = resolveThrownHttpError(err, 500);
+            if (resolved.status >= 500) {
+                ctx.logger?.warn?.(
+                    `[MarketplaceInstallLocal] the unmanaged install of ${manifestId} failed: ${err?.message ?? err}`,
+                );
+            }
+            const details = isPlainObject(err?.details) ? err.details : undefined;
+            return c.json({
+                success: false,
+                error: {
+                    code: resolved.code,
+                    message: clientFacingFailureText(
+                        err,
+                        `The unmanaged install of '${manifestId}' failed; the reason is in the server log.`,
+                    ),
+                    ...(details ? { details } : {}),
+                },
+            }, resolved.status as any);
+        }
+
+        const installedFrom = {
+            packageId: result.sourcePackageId,
+            ...(result.sourceVersion !== undefined ? { version: result.sourceVersion } : {}),
+        };
+        ctx.logger?.info?.(
+            `[MarketplaceInstallLocal] installed ${manifestId} unmanaged: ${result.copiedCount} item(s) copied into the `
+            + `environment base '${result.targetPackageId}' (namespace '${result.namespace}'), installed from `
+            + `${installedFrom.packageId}${installedFrom.version ? `@${installedFrom.version}` : ''}`
+            + `${userId ? ` by ${userId}` : ''}. Nothing is registered under '${manifestId}'; the copy follows no upgrade.`,
+        );
+        const declaresSeeds = unmanagedInstallValueCarries(packageBody.data);
+        return c.json({
+            success: true,
+            data: {
+                manifestId,
+                version,
+                versionId,
+                installMode: 'unmanaged',
+                installedAt: new Date().toISOString(),
+                installedFrom,
+                targetPackageId: result.targetPackageId,
+                namespace: result.namespace,
+                copiedCount: result.copiedCount,
+                copied: result.copied,
+                strippedLocks: result.strippedLocks,
+                ...(declaresSeeds
+                    ? {
+                        seeded: {
+                            mode: 'skipped',
+                            reason: 'an unmanaged install copies metadata, not data: the package\'s sample data was not loaded',
+                        },
+                    }
+                    : {}),
+                note: `The package's metadata is now this environment's own, in the base '${result.targetPackageId}', `
+                    + 'and it follows no upgrade. Refresh the console to see it.',
+            },
+        }, 200);
     };
 
     /**
@@ -2391,10 +2855,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *   - `service-automation` re-syncs its flows from the protocol
      *     (`resyncFlowsFromProtocol`, the `kernel:ready` bind's own
      *     `registerFlow`), so the package's record-change flows fire;
-     *   - `plugin-security` re-runs its declared-permission seeding (the
-     *     `kernel:ready` pass's own `bootstrapDeclaredPermissions`), so the
-     *     package's permission sets are projected into `sys_permission_set`
-     *     and can be granted.
+     *   - `plugin-security` re-ran its declared-permission seeding here until
+     *     ADR-0131 C3 stage 6b-2 retired it. A package's permission sets are
+     *     now served by the security catalog from the registry as soon as the
+     *     install registers them, so nothing re-runs for them.
      *
      * Before this, a hot install left both until the next restart: the
      * restart's rehydrate registers the package ahead of those sweeps, a hot
@@ -2414,7 +2878,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         if (typeof ctx.trigger !== 'function') {
             ctx.logger?.warn?.(
                 `[MarketplaceInstallLocal] this kernel context cannot announce metadata:reloaded — the record-change flows `
-                + `and permission sets of ${manifestId} take effect only after a restart.`,
+                + `of ${manifestId} take effect only after a restart.`,
             );
             return;
         }
@@ -2816,7 +3280,14 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     private resolveInstallPrincipal = async (
         c: any,
         ctx: PluginContext,
-    ): Promise<{ userId: string; systemPermissions: string[] } | null> => {
+    ): Promise<{
+        userId: string;
+        systemPermissions: string[];
+        /** [#15204 W2] The ADR-0095 posture rung the resolver derived. */
+        posture?: unknown;
+        /** [#15204 W2] The EFFECTIVE tenancy posture this admission resolved. */
+        tenancyPosture?: TenancyPosture;
+    } | null> => {
         const headers = c?.req?.raw?.headers;
         if (!headers) return null;
         try {
@@ -2857,6 +3328,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             return {
                 userId: String(authz.userId),
                 systemPermissions: Array.isArray(authz.systemPermissions) ? authz.systemPermissions : [],
+                posture: authz.posture,
+                tenancyPosture,
             };
         } catch (err) {
             // [commit 6a180e42d] `null` here means "nobody is authenticated", which is
@@ -2905,7 +3378,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         c: any,
         ctx: PluginContext,
         action: string,
-    ): Promise<{ ok: true; userId: string } | { ok: false; response: Response }> => {
+    ): Promise<InstallAdmission | { ok: false; response: Response }> => {
         const principal = await this.resolveInstallPrincipal(c, ctx);
         if (!principal) return { ok: false, response: this.refuseUnauthenticated(c) };
         if (!principal.systemPermissions.includes(INSTALL_LOCAL_CAPABILITY)) {
@@ -2924,7 +3397,101 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 }, 403),
             };
         }
-        return { ok: true, userId: principal.userId };
+        return {
+            ok: true,
+            userId: principal.userId,
+            callerPosture: principal.posture,
+            tenancyPosture: principal.tenancyPosture,
+        };
+    };
+
+    /**
+     * [#15204 W2] ADR-0131 D3 at the package door: under a wall the security
+     * catalog is the platform operator's, and a package that declares a
+     * position, a permission set or a capability is the operator's instrument.
+     *
+     * Measured on `main` before this refusal: an organization's
+     * `manage_metadata` holder (rung `TENANT_ADMIN`) upgraded an
+     * operator-installed package at a new version, adding `manage_users` to a
+     * permission set another organization's member held, and that member
+     * resolved `manage_users` next; the same holder's uninstall took the set
+     * away from them. `refuseSecurityCatalogNameConflicts` refuses only a
+     * SHADOW of a name another holder has, never a write by the package that
+     * holds it.
+     *
+     * So the WHOLE package is refused, before any write, when any of
+     * `manifests` (the incoming version, the installed one, or both) declares
+     * a catalog item, or the running registry holds one under `manifestId`.
+     * A partial install is not well-formed: a package is registered whole.
+     * The decision is {@link walledCatalogWriteVerdict}'s, never restated. It
+     * is asked FIRST, for the first catalog type: its answer does not vary
+     * across catalog types, so when it admits this caller (under `single`,
+     * with no `tenancy` service, or for the `PLATFORM_ADMIN` rung) nothing is
+     * read and the door behaves exactly as before. Only a refused caller's
+     * package is read, and the refusal names the first type it declares. A
+     * package with no catalog item is admitted. The answer is the sibling
+     * refusals' envelope, `403 FORBIDDEN`.
+     */
+    private refuseWalledCatalogPackage = (
+        c: any,
+        ctx: PluginContext,
+        action: string,
+        manifestId: string,
+        admission: InstallAdmission,
+        manifests: readonly unknown[],
+    ): Response | null => {
+        const verdictFor = (type: string) => walledCatalogWriteVerdict({
+            type,
+            tenancyPosture: admission.tenancyPosture,
+            callerPosture: admission.callerPosture,
+        });
+        if (verdictFor(SECURITY_CATALOG_TYPES[0]!).allowed) return null;
+        const declared = this.catalogItemsOf(ctx, manifestId, manifests);
+        if (declared.length === 0) return null;
+        for (const type of SECURITY_CATALOG_TYPES) {
+            if (!declared.some((item) => item.type === type)) continue;
+            const verdict = verdictFor(type);
+            if (verdict.allowed) continue;
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] refused ${action} ${manifestId} for ${admission.userId}: `
+                + `the package carries security catalog items under the '${admission.tenancyPosture}' posture (ADR-0131 D3)`,
+            );
+            return c.json({
+                success: false,
+                error: {
+                    code: 'FORBIDDEN',
+                    message: `${action} "${manifestId}" is refused: the package carries security catalog items. ${verdict.message}`,
+                    details: { manifestId, catalogItems: declared },
+                },
+            }, 403);
+        }
+        return null;
+    };
+
+    /**
+     * [#15204 W2] Every catalog item `manifests` declare, plus every position
+     * and permission-set name the running registry holds under `manifestId`
+     * (a package the registry holds outside this door's ledger, such as a
+     * writable runtime package an operator authored items into). Read-only.
+     */
+    private catalogItemsOf = (
+        ctx: PluginContext,
+        manifestId: string,
+        manifests: readonly unknown[],
+    ): DeclaredSecurityCatalogName[] => {
+        const out = new Map<string, DeclaredSecurityCatalogName>();
+        const add = (item: DeclaredSecurityCatalogName) => out.set(`${item.type}:${item.name}`, item);
+        for (const manifest of manifests) for (const item of declaredSecurityCatalogNames(manifest)) add(item);
+        let registry: Parameters<typeof findPackageHeldSecurityCatalogNames>[0] | undefined;
+        try {
+            registry = (ctx.getService('objectql') as { registry?: typeof registry } | undefined)?.registry;
+        } catch { /* no data engine: the manifests are the whole reading */ }
+        if (registry) {
+            for (const held of findPackageHeldSecurityCatalogNames(registry)) {
+                if (held.packageIds.includes(manifestId)) add({ type: held.catalogType, name: held.name });
+            }
+        }
+        return [...out.values()];
     };
 
     /**

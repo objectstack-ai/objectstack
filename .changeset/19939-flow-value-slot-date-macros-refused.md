@@ -24,7 +24,7 @@ Clause-②: no (narrowing)
 
 **Where an envelope is literal data, the remedy names none there.** The refusal used to prescribe an envelope at whatever position it refused a token. Inside an object or list value, and in the legacy `assignment` shapes, the executor reads an envelope as data: the prescribed metadata registered and stored the envelope object. The refusal there now names what evaluates — the whole value built as one CEL map or list literal (mixed values each wrapped in `dyn(…)`), or the assignment moved into the `assignments` map. This holds for every token, not only the date macros. An envelope-shaped object in those positions is still data, unchanged.
 
-**The `has()` guard a refusal names now holds for an absent variable.** For a path that may be absent, the refusal named a guard on its last key, `has(source.id) ? source.id : null`. `has()` evaluates everything but its last selection, so where the variable itself was never bound — an `isInput` variable the caller left out, with no default — that guard failed the run (`Unknown variable: source`). The guard now tests each step off `vars`, which holds only the variables the run has bound: `has(vars.source) && has(vars.source.id) ? vars.source.id : null` answers `null` there, and where a key on the way is absent or `null`. `flow-bare-dollar-reference`'s value-slot hint carries the same guard. The value-slot retirement's earlier entry on this line prints the last-key guard; this entry supersedes it.
+**The `has()` guard a refusal names now holds for an absent variable.** For a path that may be absent, the refusal named a guard on its last key, `has(source.id) ? source.id : null`. `has()` evaluates everything but its last selection, so where the variable itself was never bound — an `isInput` variable the caller left out, with no default — that guard failed the run (`Unknown variable: source`). The guard now tests each step off `vars`, which holds only the variables the run has bound: `has(vars.source) && has(vars.source.id) ? vars.source.id : null` answers `null` there, and where a key on the way is absent or `null`. `flow-bare-dollar-reference`'s value-slot hint carries the same guard.
 
 ## FROM → TO
 
@@ -38,13 +38,13 @@ Clause-②: no (narrowing)
 | `'Due {TODAY()} by {$User.Id}'` | `{ dialect: 'cel', source: "'Due ' + isoDate(today()) + ' by ' + current_user.id" }` | guard the run user where a flow can run without one |
 | `payload: { due: '{TODAY()}' }` (a string inside an object value) | `payload: { dialect: 'cel', source: "{'due': isoDate(today())}" }` | an envelope written at `payload.due` would be stored as an object |
 | the guard an earlier refusal named, `has(source.id) ? source.id : null` | `has(vars.source) && has(vars.source.id) ? vars.source.id : null` | `null` where `source` was never bound, where the last-key guard failed the run |
-| a text slot's `assignments: { due: '{TODAY() + 7}' }`, then `'Due {{ due }}'` | `assignments: { due: { dialect: 'cel', source: 'isoDate(daysFromNow(7))' } }`, then `'Due {{ due }}'` | the text-slot remedy published earlier on this line computed the date through the value-slot spelling this change refuses |
+| a text slot's `assignments: { due: '{TODAY() + 7}' }`, then `'Due {{ due }}'` | `assignments: { due: { dialect: 'cel', source: 'isoDate(daysFromNow(7))' } }`, then `'Due {{ due }}'` | nothing for a whole number of days |
 
 **The one-line fix: write a date macro as `isoDate(…)` / `isoDatetime(…)` in a CEL envelope, with a whole number of days.**
 
 **Who is affected, measured.** This repository's examples carry no date macro in a value slot; its own test fixtures and docs that did are migrated in this change. The census taken for this retirement's first change measured 15 date-macro value-slot sites in hotcrm at `c529de2` (8 `{NOW()}`, 3 `{TODAY()}`, 3 `{TODAY() + N}`, 1 `{TODAY() + var}`); they migrate there. Deployed metadata and other repositories were not measured here.
 
-**Still accepted, unchanged.** A CEL value envelope and every literal. The single-brace dialect, date macros included, keeps resolving where it still lives — a `filter` value, a `notify` `recipients` entry, an `http` body, a `subflow` input. The value-slot retirement's earlier entries on this line list the date macros as still accepted, and the text-slot entry computes a date through them; this entry supersedes those lines.
+**Still accepted, unchanged.** A CEL value envelope and every literal. The single-brace dialect, date macros included, keeps resolving where it still lives, a CRUD `filter` value.
 
 ### The kit
 

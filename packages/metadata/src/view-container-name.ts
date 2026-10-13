@@ -97,11 +97,11 @@
  *
  * `@objectstack/metadata` is the one layer every door already depends on
  * (`@objectstack/objectql` and `@objectstack/metadata-protocol` list it, and
- * the artifact door lives in it); `@objectstack/core` cannot host it, because
- * `@objectstack/metadata` lists core and the judge needs the derivation that
- * lives here. It is NOT on the `./view-container` leaf: that entry imports
- * nothing at all (its header measures why), and this one needs
- * `isAggregatedViewContainer` from `@objectstack/spec`. Nor on the ROOT entry,
+ * the artifact door lives in it); `@objectstack/core` could not host it when
+ * it landed, because `@objectstack/metadata` lists core and the derivation the
+ * judge needs lived here (it now lives in `@objectstack/spec`, #22934). It is
+ * NOT folded into the `./view-container` entry, which promises the one
+ * derivation and nothing else (its header says why). Nor on the ROOT entry,
  * which loads the manager and the filesystem machinery that objectql's
  * ADR-0076 lean entry must not reach.
  */

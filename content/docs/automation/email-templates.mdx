@@ -21,7 +21,6 @@ import { defineEmailTemplateDefinition } from '@objectstack/spec';
 export const TaskDoneEmail = defineEmailTemplateDefinition({
   name: 'crm.task_done',
   label: 'Task Done Notification',
-  category: 'workflow',
   locale: 'en-US',
   subject: 'Task done: {{task.title}}',
   bodyHtml: '<p>The task <strong>{{task.title}}</strong> on {{project.name}} was marked done.</p>',
@@ -56,10 +55,14 @@ enforces dotted snake_case (`auth.password_reset`, `crm.large_deal_won`).
 Prefix it with your app or domain — the namespace is what keeps a tenant's
 templates from colliding with the built-in authentication mail.
 
-`category` (`auth` | `notification` | `workflow` | `marketing` | `custom`,
-default `custom`) is a filter facet in Studio listings, not a delivery
-behaviour. `active: false` makes `sendTemplate` return `TEMPLATE_INACTIVE`
-rather than silently sending nothing.
+The namespace is also how you group templates: there is no separate category
+key. `category` and `isSystem` were removed (ADR-0049 enforce-or-remove) because
+nothing read either one, and the schema now refuses both with a migration note.
+A built-in template is the email plugin's declaration, which a Studio save
+overrides for the environment and discarding that save restores.
+
+`active: false` makes `sendTemplate` return `TEMPLATE_INACTIVE` rather than
+silently sending nothing.
 
 ## Placeholders
 
@@ -113,7 +116,6 @@ import { defineEmailTemplateDefinition } from '@objectstack/spec';
 export const passwordResetEn = defineEmailTemplateDefinition({
   name: 'auth.password_reset',
   label: 'Password Reset',
-  category: 'auth',
   locale: 'en-US',
   subject: 'Reset your password',
   bodyHtml: '<p>Use {{{reset_url}}} within {{ttl_minutes}} minutes.</p>',
@@ -122,7 +124,6 @@ export const passwordResetEn = defineEmailTemplateDefinition({
 export const passwordResetZh = defineEmailTemplateDefinition({
   name: 'auth.password_reset',
   label: 'Password Reset',
-  category: 'auth',
   locale: 'zh-CN',
   subject: '重置您的密码',
   bodyHtml: '<p>请在 {{ttl_minutes}} 分钟内使用 {{{reset_url}}}。</p>',
@@ -160,9 +161,9 @@ the localizable path:
   type: 'notify',
   label: 'Notify Owner',
   config: {
-    recipients: '{record.owner_id}',
+    recipients: { dialect: 'cel', source: 'record.owner_id' },
     template: 'crm.task_done',
-    templateData: { 'task.title': '{record.title}' },
+    templateData: { 'task.title': { dialect: 'cel', source: 'record.title' } },
   },
 }
 ```
@@ -184,9 +185,12 @@ the localizable path:
   to every recipient verbatim. The two paths cannot be combined on one node —
   the schema refuses the ambiguous shape rather than letting a runtime
   precedence rule silently drop one.
-- `templateData` **values** are interpolated per run, so `{record.x}` works in
-  them. `template` itself is read **raw** — it is a static metadata
-  cross-reference, and a `{token}` there is forwarded verbatim, never resolved.
+- `templateData` **values** are value slots: a CEL value envelope —
+  `{ dialect: 'cel', source: 'record.title' }` — is evaluated per run and its
+  value handed to the template, and any other value is handed on as written. A
+  single-brace `{record.x}` token is refused there. `template` itself is read
+  **raw** — it is a static metadata cross-reference, and a `{token}` there is
+  forwarded verbatim, never resolved.
 
 ### From code
 

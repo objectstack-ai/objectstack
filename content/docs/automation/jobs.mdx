@@ -42,7 +42,7 @@ writes carry*:
 | | `job` | `schedule`-type flow |
 |:---|:---|:---|
 | What runs | a sandboxed `body`, a mapping `pull`, or (deprecated) one TypeScript function from `defineStack({ functions })` | a node graph — record operations, `notify`, `http`, approvals, subflows |
-| Changeable after deploy | **No.** `job` is `allowRuntimeCreate: false` and `allowOrgOverride: false` — there is no "create job" in Studio and no per-tenant fork | Yes — a new flow can be authored through Studio / `PUT /meta` (`allowRuntimeCreate: true`) |
+| Changeable after deploy | **No.** `job` is `allowRuntimeCreate: false` and `allowEnvironmentOverlay: false` — there is no "create job" in Studio and no per-tenant fork | Yes — a new flow can be authored through Studio / `PUT /meta` (`allowRuntimeCreate: true`) |
 | Identity of its data writes | system, in the job's declared [`organization`](#the-organization-a-job-runs-as) | declared by [`runAs`](/docs/automation/flows) — and a `user` run that resolves no trigger user has its data operations **refused**, so a scheduled flow normally declares `runAs: 'system'` |
 | Retry / time limit | `retryPolicy` + `timeoutMs` on the job, honoured by the job adapter | the flow's own error handling |
 | Run history | `sys_job` + `sys_job_run` | `sys_automation_run` |

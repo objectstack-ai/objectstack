@@ -13,7 +13,8 @@ to render outbound mail. Read from the metadata registry by
 `(name, locale)` — the environment's item over each code package's
 declaration, the built-in auth templates included — so administrators can
 author/edit/translate templates in Studio without shipping code, and a
-Studio save overrides a built-in default at environment level. No
+Studio save overrides a built-in default at environment level
+(`allowEnvironmentOverlay: true` in the metadata registry). No
 `sys_email_template` row is read or written on the way.
 
 Aligned with Salesforce `EmailTemplate` and ServiceNow
@@ -29,8 +30,8 @@ resolved by `(name, locale)`; subject/body strings carry simple
 ## TypeScript Usage
 
 ```typescript
-import { EmailTemplateDefinitionSchema, EmailTemplateDefinitionCategorySchema, EmailTemplateDefinitionVariableSchema } from '@objectstack/spec/system';
-import type { EmailTemplateDefinition, EmailTemplateDefinitionCategory, EmailTemplateDefinitionVariable } from '@objectstack/spec/system';
+import { EmailTemplateDefinitionSchema, EmailTemplateDefinitionVariableSchema } from '@objectstack/spec/system';
+import type { EmailTemplateDefinition, EmailTemplateDefinitionVariable } from '@objectstack/spec/system';
 
 // Validate data
 const result = EmailTemplateDefinitionSchema.parse(data);
@@ -46,7 +47,7 @@ const result = EmailTemplateDefinitionSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Template identifier (dotted snake_case) |
 | **label** | `string` | ✅ | Display label |
-| **category** | `Enum<'auth' \| 'notification' \| 'workflow' \| 'marketing' \| 'custom'>` | optional (default: `"custom"`) |  |
+| **category** | `never` | optional | [REMOVED] `email_template.category` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing read it: the Studio listing never offered the filter facet it promised, and delivery never depended on it. Delete the key. A template is found by its `name`, so group templates with a dotted namespace prefix instead (`auth.password_reset`, `crm.welcome`). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **locale** | `string` | optional (default: `"en-US"`) | BCP-47 locale (e.g. en-US, zh-CN) — the bundle key the resolver matches EXACTLY. A call that NAMES a locale gets exactly one retry rung, the literal `en-US`, with no language-subtag folding: `en` and `en-US` are different ROWS of one bundle and neither reaches the other, so a bundle with no `en-US` row has no fallback floor for those calls and every recipient locale it does not carry a row for raises TEMPLATE_NOT_FOUND, which is permanent — the delivery dead-letters with no retry. A call naming NO locale is the other case and does not dead-letter: it drops to the bundle's lowest locale tag and renders that silently. Your stack's own `i18n.defaultLocale` is the wrong tag here unless it is spelled `en-US`. |
 | **subject** | `string` | ✅ | Subject template |
 | **bodyHtml** | `string` | ✅ | HTML body template |
@@ -55,7 +56,7 @@ const result = EmailTemplateDefinitionSchema.parse(data);
 | **fromOverride** | `{ name?: string; address: string }` | optional |  |
 | **replyTo** | `string` | optional |  |
 | **active** | `boolean` | optional (default: `true`) |  |
-| **isSystem** | `boolean` | optional (default: `false`) |  |
+| **isSystem** | `never` | optional | [REMOVED] `email_template.isSystem` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing enforced it: no door refused deleting a template that set it. Delete the key. A built-in template is a code package's declaration: a Studio save overrides it for the environment, and discarding that save restores the package's copy. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **description** | `string` | optional |  |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this email template. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
@@ -82,19 +83,6 @@ const result = EmailTemplateDefinitionSchema.parse(data);
 | **lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | ✅ | Lock policy — none \| no-overlay \| no-delete \| full. |
 | **reason** | `string` | ✅ | User-visible reason shown when the lock blocks an action. |
 | **docsUrl** | `string` | optional | Optional URL the Studio banner links to for more context. |
-
-
----
-
-## EmailTemplateDefinitionCategory
-
-### Allowed Values
-
-* `auth`
-* `notification`
-* `workflow`
-* `marketing`
-* `custom`
 
 
 ---

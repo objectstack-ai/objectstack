@@ -20,7 +20,7 @@ import { explainRule } from './rule-explanations.js';
 // 200 characters — so the pin covers every firing variant this suite exercises,
 // not a chosen few. Run the whole file: those cases read what the cases above
 // fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateActionDispatchContract: typeof validateActionDispatchContractUnrecorded = (...args) => {
   const findings = validateActionDispatchContractUnrecorded(...args);
   fired.push(...findings);
@@ -344,5 +344,46 @@ describe('[#22161] one-line verdicts — action-dispatch-contract-mismatch', () 
     ]) {
       expect(text, `explanation names ${fact}`).toContain(fact);
     }
+  });
+});
+
+// [#22161] Slice 13: the `fix:` line names both ends in one line: the
+// declaration to match the wiring, or the wiring to match the declaration.
+// Which one to pick, and why two wanted wirings are two actions, are the
+// explanation's.
+describe('[#22161] one-line fixes — action-dispatch-contract-mismatch', () => {
+  it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {
+    // Coverage control: both directions fired (each names the other contract).
+    for (const declare of ["Declare `execution: 'perRecord'`", "Declare `execution: 'aggregate'`"]) {
+      expect(fired.some((f) => f.hint.startsWith(declare)), declare).toBe(true);
+    }
+    for (const f of fired) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('names both ends of the fix in both directions', () => {
+    const [toPerRow] = validateActionDispatchContract(stack([AGGREGATE], { bulkActions: ['recalc_selection'] }));
+    expect(toPerRow!.hint).toBe(
+      "Declare `execution: 'perRecord'` on the action, or rewire it as " +
+        "`bulkActionDefs: [{ name: 'recalc_selection', operation: 'custom', execution: 'aggregate' }]`",
+    );
+    const [toAggregate] = validateActionDispatchContract(
+      stack([PER_RECORD], {
+        bulkActionDefs: [{ name: 'recalc_estimate', operation: 'custom', execution: 'aggregate' }],
+      }),
+    );
+    expect(toAggregate!.hint).toBe(
+      "Declare `execution: 'aggregate'` on the action, or drop the def and name it in the view's " +
+        "`bulkActions: ['recalc_estimate']`",
+    );
+  });
+
+  it('`os explain` carries what the `fix:` line no longer says', () => {
+    const text = explainRule(ACTION_DISPATCH_CONTRACT_MISMATCH)!.paragraphs.join('\n');
+    expect(text).toContain('pick the contract the body is actually written for');
+    expect(text).toContain('they are two actions');
+    expect(text).toContain('will not silently unify them');
   });
 });

@@ -1433,12 +1433,17 @@ export const FieldSchema = lazySchema(() => {
    * judge it — a field does not know which object declares it — so the
    * refusal of any other target lives on `ObjectSchema` / `ObjectExtensionSchema`
    * (`object.zod.ts`, `refuseForeignTreeReference`), where the own name is known.
+   * Absent, it is written there too (#23065, `materializeTreeSelfReferences`):
+   * the object's parse gives the field its own object's name, and so does the
+   * engine's object registry for a definition that reaches it unparsed, so every
+   * reader of the target — the delete walk that honours `deleteBehavior`,
+   * `$expand`, the write-time reference check — sees an ordinary self-reference.
    */
   reference: z.string().optional().describe(
     'Target object name (snake_case) for lookup/master_detail fields. '
     + 'Required for relationship types. Used by $expand to resolve foreign key IDs into full objects. '
     + 'On a `tree` field it is optional and, if given, must be the declaring object\'s own name — '
-    + 'the object schema refuses any other target.'
+    + 'the object schema refuses any other target, and writes the own name when it is left out.'
   ),
   /**
    * Polymorphic pointer declaration (ADR-0052 §5 — the ActivityPointer model).
@@ -1467,6 +1472,44 @@ export const FieldSchema = lazySchema(() => {
     + 'natural key against the object the sibling column names, and an unresolvable pointer is refused '
     + 'loudly instead of stored verbatim. Adds no referential integrity or $expand behavior.'
   ),
+  /**
+   * Inbound mail association — `email` fields only (#22870; ruling
+   * `6116489638`, Q1 → A, under the inbound-mail design record on #8998).
+   *
+   * Marks this email field as identifying a message correspondent. The one
+   * closed extension point of inbound mail — "given these participant
+   * addresses, which record(s) does this message belong to?" — is answered by
+   * this declaration, never by app code:
+   *
+   * - **Input:** the participant set — the normalised addr-specs of From,
+   *   Sender, Reply-To, To and Cc, plus those of a forwarded message the mail
+   *   carries, minus the receiving mailbox's own addresses — scoped to the
+   *   mailbox's organization.
+   * - **Output:** one association per match, naming the object, the record id,
+   *   this field and the matched address. An empty set leaves the message in
+   *   the mailbox's unassociated pool.
+   *
+   * The platform learns which fields carry a correspondent's address, the same
+   * kind of fact as `searchable`, and never what a contact is: every object
+   * that flags a field is treated alike. No resolver contract is published.
+   *
+   * Declared = enforced (ADR-0049). The parse seam refuses it on every type
+   * but `email` (the superRefine below, beside the `referenceVia` checks): no
+   * other type stores an address to match. The runtime reader is the mailbox
+   * service's ingest and re-match, which lands with the ingest card; until it
+   * does, the liveness ledger row is `planned` with `authorWarn`, so an author
+   * who sets it is told it takes no effect yet. No default: `undefined` always
+   * means "not authored".
+   */
+  mailAssociation: z.boolean().optional().describe(
+    'Inbound mail association (`email` fields only): TRUE marks this field as identifying a correspondent. '
+    + 'When a mailbox service ingests a message, it associates the message with every record of this object '
+    + "whose value in this field equals one of the message's participant addresses (From, Sender, Reply-To, To "
+    + 'and Cc, plus those of a forwarded message it carries; ASCII case-insensitive; the receiving mailbox\'s '
+    + "own addresses excluded; only within the mailbox's organization). A message no record matches waits in "
+    + "the mailbox's unassociated pool. Refused on any other type. Takes effect only where a mailbox service "
+    + 'is composed.'
+  ),
   // `referenceFilters` (string[]) removed in the 16.x line (#2377, ADR-0049):
   // the lookup picker reads the structured `lookupFilters` ({field,operator,value}),
   // never this string[] form — as authored it filtered nothing. Use `lookupFilters`.
@@ -1491,9 +1534,12 @@ export const FieldSchema = lazySchema(() => {
    * #9784 — the `.overwrite` materializes the default ONLY on the reference
    * types where the key has meaning (`lookup` / `tree`; `master_detail` omits
    * it per the #9689 idempotent-materialization ruling). On every other type
-   * the key was inert by construction — the engine reads it exclusively
-   * behind a `master_detail`/`lookup` + `reference` guard — yet the
-   * materialized value shipped in every built artifact as an apparent
+   * the key was inert by construction — the engine's referential delete walk
+   * reads it only on a `master_detail`, `lookup` or `tree` field that carries a
+   * `reference` (the family predicate `statesDeleteSemantics` in
+   * `packages/objectql/src/engine.ts`; a `tree`'s `reference` is its own
+   * object, written by the object's parse when the author leaves it out) — yet
+   * the materialized value shipped in every built artifact as an apparent
    * explicit declaration (the #4447 shadowing mechanism). A bare `text` /
    * `datetime` / `number` field now parses to output WITHOUT the key; an
    * authored value on any type is preserved verbatim (accept-set unchanged).
@@ -2197,6 +2243,24 @@ export const FieldSchema = lazySchema(() => {
         'lookup/master_detail field) for a fixed relationship.',
     });
   }
+  // [#22870] `mailAssociation` marks a field as holding a correspondent's
+  // address, matched against the participant addresses of inbound mail — and
+  // only an `email` column stores an address to match. On any other type the
+  // flag would parse and match nothing, so it is refused at the authoring
+  // seam, in the `referenceVia` refusal's shape (the offending type named, the
+  // remedy one keystroke away). An authored `false` off-type is refused too:
+  // the key describes nothing on that type.
+  if (field.mailAssociation !== undefined && field.type !== 'email') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['mailAssociation'],
+      message:
+        `\`mailAssociation\` is only valid on \`type: 'email'\` (this field is \`${field.type}\`): it marks ` +
+        "a field as holding a correspondent's address, matched against the participant addresses of " +
+        'inbound mail, and only an `email` field stores an address to match. Change the field to ' +
+        "`type: 'email'` if it holds an email address, or drop the key.",
+    });
+  }
 
   // [#13632] (ADR-0049 declared = enforced): the `reference` TSDoc above has
   // always called the key REQUIRED on the relationship types, but the schema
@@ -2743,9 +2807,12 @@ export const FieldSchema = lazySchema(() => {
     //
     // #9784 — materialize the default ONLY on reference types. `deleteBehavior`
     // has no meaning on a non-reference field: the engine's
-    // `cascadeDeleteRelations` reaches the key exclusively on
-    // `master_detail`/`lookup` fields carrying a `reference`
-    // (`packages/objectql/src/engine.ts`, the type + `fdef.reference` guards),
+    // `cascadeDeleteRelations` reaches the key only on `master_detail`,
+    // `lookup` and `tree` fields carrying a `reference`
+    // (`packages/objectql/src/engine.ts`: the family predicate
+    // `statesDeleteSemantics` + the carrier guard; a `tree` with no
+    // `reference` carries its own object's name once the object's parse or the
+    // engine's object registry has written it, #23065),
     // so on a `text`/`datetime`/`number` field the materialized value was
     // inert by construction — yet it shipped in every built app artifact,
     // where a default materialized at parse becomes an EXPLICIT declaration
@@ -2757,10 +2824,10 @@ export const FieldSchema = lazySchema(() => {
     // `=== undefined` guard), so stored artifacts from the materializing era
     // stay legal. `tree` (hierarchical reference) keeps materializing with
     // `lookup`: it is in the relational family, where the key states delete
-    // semantics — the conservative byte-identity side of the line. `user` is
-    // stored identically to `lookup` but sits outside today's cascade guard
-    // exactly like `text` does, so it takes the non-reference side; an
-    // authored value there still round-trips.
+    // semantics, and the delete walk reads it there (#22957). `user` is
+    // stored identically to `lookup` but sits outside the delete walk's family
+    // (`master_detail`, `lookup`, `tree`) exactly like `text` does, so it takes
+    // the non-reference side; an authored value there still round-trips.
     if (field.deleteBehavior === undefined && (field.type === 'lookup' || field.type === 'tree')) {
       patch.deleteBehavior = 'set_null';
     }

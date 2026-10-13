@@ -44,7 +44,7 @@ const WELL_FORMED_FLOW = {
     type: 'autolaunched',
     // `recipients` and `title` are the keys the notify executor contract
     // requires; the flow parse refuses a notify node that leaves them out.
-    nodes: [{ id: 'n', type: 'notify', label: 'Notify', config: { recipients: ['{record.owner}'], title: 'Welcome', message: 'hi' } }],
+    nodes: [{ id: 'n', type: 'notify', label: 'Notify', config: { recipients: [{ dialect: 'cel', source: 'record.owner' }], title: 'Welcome', message: 'hi' } }],
     edges: [],
 };
 

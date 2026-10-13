@@ -29,7 +29,7 @@ Clause-②: no (narrowing)
 
 **Who is affected, measured.** In this repository: 5 values in 3 nodes of the showcase example (`showcase_task_completed`'s `script`, and the `subflow` nodes of `showcase_task_done_notify_owner` and `showcase_project_closure`), 3 values in the todo example's `task_completion` `script`, 2 docs pages, the service-automation README, 2 dogfood fixtures and the test fixtures; all are migrated in this change. hotcrm's sites at these positions were not measured.
 
-**Still accepted, unchanged.** A CEL value envelope and every literal. The single-brace dialect keeps resolving where it still lives: a `map` or `loop` `collection`, a `filter` value, a `notify` `recipients` entry, an `http` body, a screen's `defaults`. The value-slot retirement's earlier changesets on this line list `subflow.input` among those positions; this one supersedes that line.
+**Still accepted, unchanged.** A CEL value envelope and every literal. The single-brace dialect keeps resolving where it still lives, a CRUD `filter` value.
 
 ### The kit
 

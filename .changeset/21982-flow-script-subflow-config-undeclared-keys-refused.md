@@ -27,7 +27,7 @@ Clause-②: no (narrowing)
 | you wrote | write instead |
 |:--|:--|
 | a typo of a declared key (`funtion`, `outputVariabel`) | the declared key: `function`, `inputs`, `outputVariable` on a `script`; `flowName`, `input`, `outputVariable` on a `subflow` |
-| a value the function or child flow should receive, as its own config key (`config: { function: 'f', taskId: '{record.id}' }`) | inside the input map: `config: { function: 'f', inputs: { taskId: '{record.id}' } }` (`input` on a `subflow`) |
+| a value the function or child flow should receive, as its own config key (`config: { function: 'f', taskId: '{record.id}' }`) | inside the input map: `config: { function: 'f', inputs: { taskId: { dialect: 'cel', source: 'record.id' } } }` (`input` on a `subflow`) |
 | a `subflow` `config.timeoutMs` | on the node: `{ id, type: 'subflow', timeoutMs: 30000, config: { … } }` |
 | a key nothing reads | delete it |
 

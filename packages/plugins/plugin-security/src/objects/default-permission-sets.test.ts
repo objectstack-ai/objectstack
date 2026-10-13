@@ -391,6 +391,9 @@ describe('sys_comment_reaction delete is ownership-shaped (#22566)', () => {
  * #21175 — platform administrators hold the compliance ledger's audit
  * capability by default). And one more, on #21237: the `fields` block keeping the
  * identity object's `Admin` field group, which the `everyone` baseline withholds.
+ * And `manage_mailboxes` (ruling 6116489638, Q4 → A on the inbound-mail record —
+ * platform and organization administrators hold the mailbox administrator
+ * capability by default).
  */
 describe('admin_full_access imports the kernel capability declaration unchanged (#11965)', () => {
   it('parsed declaration deep-equals the pre-#11965 inline literal', () => {
@@ -418,6 +421,8 @@ describe('admin_full_access imports the kernel capability declaration unchanged 
         'studio.access',
         // [#21260] added on purpose — see the docblock above.
         'view_all_audit_log',
+        // added on purpose — see the docblock above.
+        'manage_mailboxes',
       ],
       // [#21237] added on purpose — see the docblock above. The group is read off
       // the identity object's declaration, never listed here.

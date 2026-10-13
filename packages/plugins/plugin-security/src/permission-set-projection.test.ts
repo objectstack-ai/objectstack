@@ -8,7 +8,7 @@
  * bootstrap-declared-permissions.test.ts.
  *
  * [#6858 / ADR-0094 D5-R] `makeProtocol` models ADR-0005's TIER GATE, which
- * this suite used to be blind to: `permission` is `allowOrgOverride: false`
+ * this suite used to be blind to: `permission` is `allowEnvironmentOverlay: false`
  * since commit ee58392e1, so a metadata write whose (type, name) is backed by
  * a code ARTIFACT is refused 403 `NOT_OVERRIDABLE`, while an artifact-free
  * name rides `allowRuntimeCreate: true` and still lands. Commit ee58392e1 records the
@@ -152,8 +152,10 @@ function makeProtocol(ql: any, declared: Record<string, any> = {}) {
       // and packages/qa/dogfood/test/two-doors-permission.dogfood.test.ts).
       if (declared[req.name] !== undefined) {
         const err: any = new Error(
-          `[not_overridable] Metadata item 'permission/${req.name}' is provided by a code package `
-          + 'and the type has not opted into per-org overlay writes (allowOrgOverride=false).',
+          `Metadata item 'permission/${req.name}' is provided by a managed package and is sealed `
+          + 'against in-place edits. Clone it under a new name to customize it (the "Clone" action on '
+          + 'the permission set, or POST /api/v1/data/sys_permission_set with a new name). '
+          + 'See docs/adr/0126-packaged-metadata-customization-model.md.',
         );
         err.code = 'NOT_OVERRIDABLE';
         err.status = 403;
@@ -555,7 +557,7 @@ describe('package-owned set customization lifecycle (ADR-0094 D5-R)', () => {
   it('an env-scope save on an ARTIFACT-BACKED package name is REFUSED (403 NOT_OVERRIDABLE) — no overlay, record untouched', async () => {
     // Was: "a Studio env-scope save on a PACKAGE name customizes the record
     // and keeps provenance" — the 2026-07-14 direction. Commit ee58392e1 rolled
-    // `permission` back to `allowOrgOverride: false` and ADR-0094 D5-R's ruling A
+    // `permission` back to `allowEnvironmentOverlay: false` and ADR-0094 D5-R's ruling A
     // accepted the tightening, so the write this case used to assert is the
     // write production now refuses. Rejection-class: the ENVELOPE is the
     // claim (`code` AND `status`), because a bare "it threw" would stay green

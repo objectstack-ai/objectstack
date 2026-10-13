@@ -32,6 +32,11 @@ import {
 // `OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES` — same value it read before,
 // no re-ruling of the package cohort as a side effect of #7020.
 import { OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES } from '@objectstack/metadata-core';
+// [#15204 W2] ADR-0131 D3's one predicate, asked by the package delete below
+// per stored catalog type, never restated here.
+import { SECURITY_CATALOG_TYPES, isSecurityCatalogType, walledCatalogWriteVerdict } from '@objectstack/metadata-core';
+import { readEffectiveTenancyPosture } from './activation-gate.js';
+import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 // [#21727] ADR-0087 D1's protocol handshake and the brand predicate for its
 // refusal. The install branch asks the predicate ahead of its generic catch,
 // and its no-protocol fallback runs the same handshake.
@@ -381,14 +386,20 @@ function requireReadCapability(deps: DomainHandlerDeps, context: HttpProtocolCon
  * (ADR-0070 D2). Revert asks it only after the protocol's stored-row answer, so
  * a `sys_metadata` row bound to the package keeps its own answer.
  *
- * [#14451] The remedy it names is ADR-0005 org overlay, and it used to name
- * `POST /packages/:id/duplicate` instead. That sentence sent a caller holding a
- * read-only package at a route which — for exactly the packages this refusal
- * fires on — cannot help: duplicate clones a base's `sys_metadata` rows, a code
- * package owns none, and until {@link requireDuplicableSource} the trip ended
- * in a 200 reporting `copiedCount: 0` (the #14451 measurement). A refusal that
- * prescribes a dead end is worse than one that prescribes nothing, so the two
- * doors now agree: overlay is how a code package is customised.
+ * [#14451] It used to name `POST /packages/:id/duplicate` as the remedy. That
+ * sentence sent a caller holding a read-only package at a route which — for
+ * exactly the packages this refusal fires on — cannot help: duplicate clones a
+ * base's `sys_metadata` rows, a code package owns none, and until {@link
+ * requireDuplicableSource} the trip ended in a 200 reporting `copiedCount: 0`
+ * (the #14451 measurement). A refusal that prescribes a dead end is worse than
+ * one that prescribes nothing.
+ *
+ * [ADR-0131 D6] For the same reason it no longer names the ADR-0005
+ * organization overlay, its remedy after that: the per-organization overlay
+ * axis is retired, and a write naming an organization answers `403
+ * NOT_OVERRIDABLE`. What a managed package provides is customised BESIDE it,
+ * as environment-level state, and the two doors name that remedy in one
+ * clause ({@link CUSTOMISE_BESIDE_REMEDY}).
  *
  * ⛔ Deliberately NOT caller-sensitive — there is no `isSystem` bypass, unlike
  * {@link requireManageMetadata}. Read-only is a property of the PACKAGE. Engine
@@ -404,6 +415,136 @@ function requireReadCapability(deps: DomainHandlerDeps, context: HttpProtocolCon
  * id still falls through to the route's own 404 rather than being re-labelled
  * 422 (and so this gate never becomes an existence oracle of its own).
  */
+/**
+ * [#15204 W2 · W3] ADR-0131 D3 at the `/packages` write doors: under a wall the
+ * security catalog is the platform operator's, so a package write that
+ * creates, changes, restores or removes a position or a permission set is the
+ * operator's too.
+ *
+ * Measured before these refusals, under `isolated` and `group`. An
+ * organization's `manage_metadata` holder (rung `TENANT_ADMIN`) acted on a
+ * writable runtime package the operator had saved a permission set into, and
+ * another organization's member held that set:
+ *  - `DELETE /packages/:id` answered `200`; the set left the catalog and the
+ *    member's grants (W2);
+ *  - `publish-drafts` published the operator's pending draft adding
+ *    `manage_users`, and the member gained it;
+ *  - `rollback` and `commits/:commitId/revert` undid the operator's published
+ *    change, and the member lost it;
+ *  - `duplicate` copied the set, under the same name, into the holder's own
+ *    package, and `GET /meta` then served that copy;
+ *  - `revert` discarded the operator's pending catalog draft;
+ *  - `adopt-orphans` moved environment catalog rows, the operator's included,
+ *    into the holder's own package.
+ * The capability gate before each of them checks no rung.
+ *
+ * Each door passes `readTypes`: the metadata types of the items its verb acts
+ * on, read where the verb reads them (stored `sys_metadata` rows, or a
+ * commit's items; the running registry holds neither under the package). The
+ * decision is {@link walledCatalogWriteVerdict}'s, never restated. It is asked
+ * FIRST, for the first catalog type: its answer does not vary across catalog
+ * types, so when it admits this caller (under `single`, with no `tenancy`
+ * service, for `isSystem` or for the `PLATFORM_ADMIN` rung) `readTypes` is
+ * never called and the door behaves exactly as before. A write that touches no
+ * catalog item is admitted. The answer is this domain's `403`
+ * (`PERMISSION_DENIED`).
+ */
+async function refuseWalledCatalogPackageWrite(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    /** The refused write, as the message names it, e.g. `Deleting package "x"`. */
+    action: string,
+    readTypes: () => Promise<Iterable<unknown>>,
+): Promise<HttpDispatcherResult | null> {
+    const ec: any = context?.executionContext;
+    const tenancyPosture = await readEffectiveTenancyPosture(deps, context);
+    const verdictFor = (type: string) => walledCatalogWriteVerdict({
+        type,
+        tenancyPosture,
+        isSystem: ec?.isSystem === true,
+        callerPosture: ec?.posture,
+    });
+    if (verdictFor(SECURITY_CATALOG_TYPES[0]!).allowed) return null;
+    let types: Iterable<unknown>;
+    try {
+        types = await readTypes();
+    } catch (e) {
+        return { handled: true, response: deps.errorFromThrown(e, 500) };
+    }
+    for (const type of types) {
+        if (typeof type !== 'string' || !isSecurityCatalogType(type)) continue;
+        const verdict = verdictFor(type);
+        if (!verdict.allowed) {
+            return {
+                handled: true,
+                response: deps.error(`${action} is refused: it touches security catalog items. ${verdict.message}`, 403),
+            };
+        }
+    }
+    return null;
+}
+
+/**
+ * [#15204 W3] The metadata types of the `sys_metadata` rows `where` selects,
+ * read with the system context the package verbs read them with. Empty when
+ * no data engine is reachable: the verb then has nothing to act on either.
+ */
+function storedRowTypes(
+    qlService: Pick<IObjectQLEngine, 'find'> | null | undefined,
+    where: Record<string, unknown>,
+    keep: (row: Record<string, unknown>) => boolean = () => true,
+): () => Promise<unknown[]> {
+    return async () => {
+        if (typeof qlService?.find !== 'function') return [];
+        const rows = await qlService.find('sys_metadata', { where, context: { isSystem: true } });
+        return (Array.isArray(rows) ? rows : [])
+            .filter((row) => row && typeof row === 'object' && keep(row as Record<string, unknown>))
+            .map((row) => (row as { type?: unknown }).type);
+    };
+}
+
+/**
+ * [#15204 W3] The `sys_metadata_commit` row `commitId` names, or `undefined`.
+ * Read directly because `revertCommit` and `rollbackToPackageCommit` take the
+ * commit id alone: the URL's package segment is not what they act on.
+ */
+async function readCommitRow(
+    qlService: Pick<IObjectQLEngine, 'find'> | null | undefined,
+    commitId: string,
+): Promise<Record<string, unknown> | undefined> {
+    if (typeof qlService?.find !== 'function') return undefined;
+    const rows = await qlService.find('sys_metadata_commit', { where: { id: commitId }, context: { isSystem: true } });
+    const row = Array.isArray(rows) ? rows[0] : undefined;
+    return row && typeof row === 'object' ? (row as Record<string, unknown>) : undefined;
+}
+
+/** [#15204 W3] The metadata types a commit's `items` name (stored as JSON text, or already parsed). */
+function commitItemTypes(items: unknown): unknown[] {
+    let list: unknown = items;
+    if (typeof list === 'string') {
+        try { list = JSON.parse(list); } catch { return []; }
+    }
+    return Array.isArray(list) ? list.map((item) => (item as { type?: unknown } | null)?.type) : [];
+}
+
+/**
+ * [ADR-0131 D6] The customisation remedy both read-only refusals below name
+ * ({@link requireWritablePackage}, {@link requireDuplicableSource}), in one
+ * spelling. A managed package's items are sealed, and what a customer changes
+ * lives beside them as environment-level state: a save under an item's own
+ * name is an environment overlay on a type whose registry entry takes one
+ * (`allowEnvironmentOverlay`) unless the package's lock refuses it — that save
+ * is refused `ITEM_LOCKED`, naming the lock and its reason (ADR-0010 §3.3) —
+ * and on every other type the save door's own refusal names the route that
+ * type has: a flow's clone and switch, an action's switch, a permission set's
+ * clone, else the source. The sentence names that door rather than a list of
+ * types, so it cannot drift from the regime table the door reads.
+ */
+const CUSTOMISE_BESIDE_REMEDY =
+    'customise what this package provides beside it, as environment-level state (ADR-0131 D6): save an item '
+    + 'under its own name — that overlays it where the item\'s type takes an environment overlay and the package\'s '
+    + 'lock does not refuse it, and is otherwise refused naming the route that type has, or the lock.';
+
 function requireWritablePackage(
     deps: DomainHandlerDeps,
     engine: unknown,
@@ -417,8 +558,8 @@ function requireWritablePackage(
         response: deps.error(
             `[writable_package_required] Cannot ${action} package '${id}': it is read-only `
             + `(provided by code or an installed app). Packages the deployment ships are managed by `
-            + `the deployment, not over this API — ${action} a package you own, or customise what `
-            + `this one provides in place, with an ADR-0005 org overlay.`,
+            + `the deployment, not over this API — ${action} a package you own, or `
+            + CUSTOMISE_BESIDE_REMEDY,
             422,
             {
                 code: 'WRITABLE_PACKAGE_REQUIRED',
@@ -474,9 +615,13 @@ function requireWritablePackage(
  * Making it clone a code package's items would extend D4 from bases to code
  * packages — a NEW decision, and one the ADR itself still lists as open
  * ("should customising a code item also fork it into a writable base?
- * *Leaning: keep overlay for surgical tweaks*"). ADR-0005 overlay is the built,
- * shipped answer for customising what a code package provides, so the honest
- * behaviour of an unbuilt gesture is to say so.
+ * *Leaning: keep overlay for surgical tweaks*"). Two built answers exist
+ * instead (ADR-0131 D6): customising BESIDE the package, as environment-level
+ * state ({@link CUSTOMISE_BESIDE_REMEDY}), and, for an editable copy of the
+ * whole package, its `unmanaged` install, which the install door judges (the
+ * package must permit it, and the copy cannot sit beside a managed install of
+ * the same package). So the honest behaviour of an unbuilt gesture is to say
+ * so and name both.
  *
  * ## Shape
  *
@@ -486,7 +631,8 @@ function requireWritablePackage(
  * a lie by implicature here: nothing is being written to the source, and its
  * remedy ("use a writable package") reads as *make the source writable*, which
  * is neither possible nor the point. `DUPLICATE_SOURCE_NOT_A_BASE` names the
- * one thing the caller can act on — pick a base, or overlay instead.
+ * one thing the caller can act on — pick a base, customise beside the package,
+ * or install it unmanaged where it permits that.
  *
  * ⛔ Deliberately NOT a check on emptiness. A WRITABLE base holding no active
  * rows still duplicates to `copiedCount: 0`, and that answer stays exactly as
@@ -520,8 +666,9 @@ function requireDuplicableSource(
             + `(provided by code or an installed app), and duplicate clones a writable base's `
             + `stored metadata rows. A code package's metadata is delivered as code, so there are `
             + `no rows to clone and the copy would be empty (ADR-0070 D4 duplicates a BASE). `
-            + `Duplicate a base you own, or customise what this package provides in place, with an `
-            + `ADR-0005 org overlay.`,
+            + `Duplicate a base you own, or ${CUSTOMISE_BESIDE_REMEDY} `
+            + `For an editable copy of the whole package, install it unmanaged instead `
+            + `(installMode 'unmanaged'), where its manifest's installModes permits that.`,
             422,
             {
                 code: 'DUPLICATE_SOURCE_NOT_A_BASE',
@@ -1424,6 +1571,13 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         if (parts.length === 2 && parts[1] === 'publish-drafts' && m === 'POST') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
+            // [#15204 W3] ADR-0131 D3: publishing a catalog draft is the
+            // operator's under a wall. The drafts this verb promotes.
+            const walled = await refuseWalledCatalogPackageWrite(
+                deps, _context, `Publishing the drafts of package "${id}"`,
+                storedRowTypes(qlService, { package_id: id, state: 'draft' }),
+            );
+            if (walled) return walled;
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.publishPackageDrafts === 'function') {
                 try {
@@ -1538,9 +1692,9 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     // producer-side rename card (option B), not a rider on this
                     // one.
                     //
-                    // [#7018 / the #6190 ruling, Option A] `app` declares
-                    // `allowOrgOverride: false`, so this flip carries no
-                    // organization — it lands env-wide, on the
+                    // [#7018 / the #6190 ruling, Option A] this flip carries
+                    // no organization — every metadata write lands env-wide
+                    // (ADR-0131 D6), on the
                     // very row boot hydrates and the App Switcher reads. An
                     // org-scoped flip was a phantom: the app looked published for
                     // the life of the process and went back to `_unpublished:
@@ -1742,6 +1896,13 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         if (parts.length === 2 && parts[1] === 'discard-drafts' && m === 'POST') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
+            // [#15204 W3] ADR-0131 D3: discarding a catalog draft is the
+            // operator's under a wall. The drafts this verb discards.
+            const walled = await refuseWalledCatalogPackageWrite(
+                deps, _context, `Discarding the drafts of package "${id}"`,
+                storedRowTypes(qlService, { package_id: id, state: 'draft' }),
+            );
+            if (walled) return walled;
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.discardPackageDrafts === 'function') {
                 try {
@@ -1783,6 +1944,17 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         if (parts.length === 4 && parts[1] === 'commits' && parts[3] === 'revert' && m === 'POST') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const commitId = decodeURIComponent(parts[2]);
+            // [#15204 W3] ADR-0131 D3: reverting a commit that touched a
+            // catalog item is the operator's under a wall. Judged by the
+            // commit's own items: `revertCommit` takes the commit id alone, so
+            // the URL's package segment names nothing it acts on. A commit
+            // that does not exist reads as touching nothing; the verb answers
+            // its own 404.
+            const walled = await refuseWalledCatalogPackageWrite(
+                deps, _context, `Reverting commit "${commitId}"`,
+                async () => commitItemTypes((await readCommitRow(qlService, commitId))?.items),
+            );
+            if (walled) return walled;
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.revertCommit === 'function') {
                 try {
@@ -1807,6 +1979,30 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 if (!body?.commitId) {
                     return { handled: true, response: deps.error('Body { commitId } is required', 400) };
                 }
+                // [#15204 W3] ADR-0131 D3: a rollback reverts every `apply`
+                // commit of the target's package newer than the target, so it
+                // is the operator's under a wall when any of them touched a
+                // catalog item. Read as `rollbackToPackageCommit` reads them:
+                // the target row, then that package's commits. Every `apply`
+                // commit at or after the target's instant other than the
+                // target itself is read, a superset of the reverted ones.
+                const targetCommitId = String(body.commitId);
+                const walled = await refuseWalledCatalogPackageWrite(
+                    deps, _context, `Rolling back to commit "${targetCommitId}"`,
+                    async () => {
+                        const target = await readCommitRow(qlService, targetCommitId);
+                        if (!target || typeof protocol.listCommits !== 'function') return [];
+                        const commits: any[] = await protocol.listCommits({ packageId: target.package_id });
+                        const at = Date.parse(String(
+                            commits.find((c) => c?.id === targetCommitId)?.createdAt ?? target.created_at,
+                        ));
+                        return commits
+                            .filter((c) => c?.id !== targetCommitId && c?.operation === 'apply'
+                                && !(Date.parse(String(c?.createdAt)) < at))
+                            .flatMap((c) => commitItemTypes(c?.items));
+                    },
+                );
+                if (walled) return walled;
                 try {
                     const result = await protocol.rollbackToPackageCommit({
                         commitId: String(body.commitId),
@@ -1824,6 +2020,13 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         if (parts.length === 2 && parts[1] === 'revert' && m === 'POST') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
+            // [#15204 W3] ADR-0131 D3: discarding a catalog draft is the
+            // operator's under a wall. The drafts this verb discards.
+            const walled = await refuseWalledCatalogPackageWrite(
+                deps, _context, `Reverting package "${id}"`,
+                storedRowTypes(qlService, { package_id: id, state: 'draft' }),
+            );
+            if (walled) return walled;
             // [#22090] A package's members live in one of two places, and each
             // is reverted by the service that holds it. A Studio-authored
             // package is `sys_metadata` rows bound by `package_id` — the rows
@@ -1880,6 +2083,16 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         if (parts.length === 2 && parts[1] === 'adopt-orphans' && m === 'POST') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
+            // [#15204 W3] ADR-0131 D3: rebinding environment catalog rows into
+            // a package is the operator's under a wall. The orphans exactly as
+            // `reassignOrphanedMetadata` selects them: organization-less rows
+            // with no package (null, empty, or the `sys_metadata` sentinel).
+            const walled = await refuseWalledCatalogPackageWrite(
+                deps, _context, `Adopting orphaned metadata into package "${id}"`,
+                storedRowTypes(qlService, { organization_id: null },
+                    (row) => row.package_id == null || row.package_id === '' || row.package_id === 'sys_metadata'),
+            );
+            if (walled) return walled;
             const protocol = await resolveProtocol(deps, _context);
             if (!protocol || typeof protocol.reassignOrphanedMetadata !== 'function') {
                 return { handled: true, response: deps.error('Orphan adoption not supported', 501) };
@@ -1922,6 +2135,15 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // the target package record (`installPackage`) ahead of its copy
             // loop, so a refusal any later still leaves the empty shell behind.
             const notABase = requireDuplicableSource(deps, qlService, id); if (notABase) return notABase;
+            // [#15204 W3] ADR-0131 D3: a duplicate copies the source's items
+            // into a new package, and a copied catalog item is a catalog
+            // creation (its name is not re-namespaced), the operator's under
+            // a wall. The rows `duplicatePackage` copies: active, environment-wide.
+            const walled = await refuseWalledCatalogPackageWrite(
+                deps, _context, `Duplicating package "${id}"`,
+                storedRowTypes(qlService, { package_id: id, state: 'active', organization_id: null }),
+            );
+            if (walled) return walled;
             try {
                 const result = await protocol.duplicatePackage({
                     sourcePackageId: id,
@@ -2033,7 +2255,16 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // the next restart.
             const readOnly = requireWritablePackage(deps, qlService, id, 'delete'); if (readOnly) return readOnly;
             // [ADR-0131 D6/D12] No organization: an uninstall is environment-wide
-            // by construction, and who may uninstall is the operator gate above.
+            // by construction. The gate above checks the `manage_metadata`
+            // capability (or `isSystem`) and no posture rung, so under a wall an
+            // organization's holder passes it. [#15204 W2] What makes the delete
+            // the operator's under a wall is the catalog refusal below (ADR-0131
+            // D3), for a package that carries a position or a permission set.
+            const walled = await refuseWalledCatalogPackageWrite(
+                deps, _context, `Deleting package "${id}"`,
+                storedRowTypes(qlService, { package_id: id }),
+            );
+            if (walled) return walled;
             const protocol = await resolveProtocol(deps, _context);
             const persists = Boolean(protocol && typeof protocol.deletePackage === 'function');
 

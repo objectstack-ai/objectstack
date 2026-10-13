@@ -50,6 +50,7 @@
     "ui/DatasetMeasure",
     "ui/DerivedMeasureOp",
     "ui/DocNavItem",
+    "ui/ElementApiDataSource",
     "ui/ElementButtonProps",
     "ui/ElementDataSource",
     "ui/ElementDefinitionListProps",

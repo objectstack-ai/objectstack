@@ -442,6 +442,11 @@ interface RlsFilterOptions {
    *     sits directly below it on the same middleware pass, guarded by a
    *     SUPERSET of step 2.7's own condition (same `permissionSets`/`userId`/
    *     `ql` triple, same single target id, one extra operation — `insert`);
+   *   • [#23093] the chain walk's master-edit leg
+   *     ({@link SecurityPlugin.assertMasterRowEditable}) sets it on a hop whose
+   *     master is itself `controlled_by_parent`, on a non-delegated write. Why
+   *     the walk covers that master's write is stated once, at that call site's
+   *     `masterGateCoversThisWrite` bullet — not restated here;
    *   • the BULK write path does NOT, and must not: with no single id,
    *     `assertControlledByParentWrite` returns early and nothing replaces the
    *     floor. Reading the posture alone here would have widened bulk writes on
@@ -2462,7 +2467,7 @@ export class SecurityPlugin implements Plugin {
       // ADR-0094 write-through, which TRANSLATES them into a metadata write.
       // Whether that write is ACCEPTED is ADR-0005's call, not this gate's,
       // and since ADR-0094 D5-R (commit ee58392e1 rolled `permission` back to
-      // `allowOrgOverride: false`) a CODE-DECLARED set is refused there with
+      // `allowEnvironmentOverlay: false`) a CODE-DECLARED set is refused there with
       // 403 `NOT_OVERRIDABLE` — the 2026-07-14 "customize / reset via an env
       // overlay" direction this comment used to state is RETIRED.
       // Placed BEFORE the principal-less refusal and the CRUD check so the
@@ -4341,12 +4346,13 @@ export class SecurityPlugin implements Plugin {
       );
     }
 
-    // [ADR-0131 D3, C3 stage 8] No data-door write-through is registered: the
-    // catalog objects are retired, so no `sys_permission_set` or `sys_position`
-    // write reaches the engine at all. A permission set or position is written
-    // through the metadata door alone, which registers it in the security
-    // catalog itself.
-
+    // [ADR-0131 D3, C3 stage 8] No data-door write-through and no walled
+    // catalog data-door refusal is registered: the catalog objects are
+    // retired, so no `sys_position`, `sys_permission_set` or `sys_capability`
+    // write reaches the engine at all. A position, permission set or
+    // capability is written through the metadata door alone, which registers
+    // it in the security catalog itself and, under a wall, refuses a tenant
+    // with the same verdict (`walledCatalogWriteVerdict`).
 
     // Defer platform admin bootstrap until all plugins finish starting —
     // sys_user / sys_user_permission_set objects must be registered (by
@@ -4423,16 +4429,15 @@ export class SecurityPlugin implements Plugin {
           }
           // [#2747] When the owning package is uninstalled, revoke its data-plane permission
           // rows (package-owned sets + their position/user bindings + the
-          // package's suggestion rows) so grants die with the package — the
-          // "no ghost grants" clause of ADR-0090 D5.
+          // package's suggestion rows) and the grants naming the sets it
+          // declared (`args.declared`, captured by the door before it withdrew
+          // the package) so grants die with the package — the "no ghost
+          // grants" clause of ADR-0090 D5.
           if (protocol && typeof protocol.registerUninstallCleanup === 'function') {
             protocol.registerUninstallCleanup(
               'security.package-permissions',
-              async (args: { packageId: string; declared?: ReadonlyArray<{ type: string; name: string }> }) => {
-                // [ADR-0131 D3/D4] The package's sets are the names it declared,
-                // read off it by the uninstalling door before its withdrawal.
-                const setNames = (args.declared ?? []).filter((d) => d?.type === 'permission').map((d) => d.name);
-                const r = await cleanupPackagePermissions(ql, args.packageId, ctx.logger, setNames);
+              async (args: { packageId: string; declared?: { permission?: string[] } }) => {
+                const r = await cleanupPackagePermissions(ql, args.packageId, ctx.logger, args.declared);
                 // [#22801 → A] The package's acceptance rows are gone with it;
                 // `everyone` is derived again without its sets.
                 await this.declareEveryone(ctx.logger);
@@ -4534,7 +4539,6 @@ export class SecurityPlugin implements Plugin {
     } else {
       void runGrantNameBackfill();
     }
-
 
     // [ADR-0131 D3/D4] The catalog reference report: per organization, every
     // assignment and grant whose name the security catalog does not resolve,
@@ -6837,7 +6841,7 @@ export class SecurityPlugin implements Plugin {
     // refused HERE: the write-through middleware (which runs after this gate
     // + the delegated-admin gate + the CRUD checks) translates them into a
     // metadata write, and the refusal is LEFT TO THAT PRODUCER. Since commit
-    // ee58392e1 rolled `permission` back to `allowOrgOverride: false`, a
+    // ee58392e1 rolled `permission` back to `allowEnvironmentOverlay: false`, a
     // CODE-DECLARED (artifact-backed) set is refused there with 403
     // `NOT_OVERRIDABLE`; a `sys_metadata`-backed set rides
     // `allowRuntimeCreate` and still lands. The 2026-07-14 "customize / reset
@@ -9099,15 +9103,34 @@ export class SecurityPlugin implements Plugin {
     //  • the verb is `update`, matching the object-level check above and leg 2
     //    below: this gate's question is EDIT access to the master, never the
     //    detail's own verb;
-    //  • `masterGateCoversThisWrite` is deliberately NOT set. That knob is
-    //    commit 6feac910b's, and it hands a `controlled_by_parent` object's floor to THIS
-    //    gate; setting it here would hand a nested master's floor to a gate that
-    //    is already running, on a path no measurement covers. A master that is
-    //    itself a detail keeps its floor exactly as it does today.
+    //  • [#23093] `masterGateCoversThisWrite` IS set for a master that is itself
+    //    `controlled_by_parent`, on a non-delegated write. Maintainer ruling on
+    //    #23093 (letter A, 2026-10-12) extends the 2026-08-15 ruling — commit
+    //    6feac910b, which hands such an object's platform floor to its master
+    //    gate on its own by-id write (step 2.7) — to this hop. Before it, one
+    //    principal and one middle master row got two answers to one `update`:
+    //    the master's own door dropped the floor, a write to any of its details
+    //    kept it here. So an organization member who could edit a quote could
+    //    not edit its lines unless they had created the quote, and the quote's
+    //    creator could edit the lines of a quote an app policy refused them
+    //    (the floor and that policy compose as alternatives). The hop now asks
+    //    the composition that door asks, clause for clause: only the PLATFORM
+    //    floor yields; an app-authored update policy on the master and the
+    //    #7665 derive-from-select floor still run, and refuse here exactly as
+    //    they refuse the door. The vouch holds structurally, as step 2.7's
+    //    does: the flag is set on the very predicate
+    //    (`declaresControlledByParent(rel.master)`) that makes the walk in
+    //    {@link SecurityPlugin.assertControlledByParentWrite} continue to this
+    //    master's own master, so this master's own master gate runs next, for
+    //    this principal, on this pass — or the walk refuses (cycle, depth bound,
+    //    broken chain). A master that governs its own rows never sets it.
+    //    Pinned in `controlled-by-parent-chain-middle-master.test.ts`.
     //
     // [ADR-0090 D10] The on-behalf-of path is EXCLUDED, mirroring step 2.7's
-    // `floorApplies`. The delegation fact is read off `opCtx.context` rather
-    // than off `context`, because THIS METHOD RUNS TWICE for a delegated write
+    // `floorApplies` and its `masterGateCoversThisWrite = !delegatorSets` — from
+    // the sharing-verdict floor drop and from the vouch alike. The delegation
+    // fact is read off `opCtx.context` rather than off `context`, because THIS
+    // METHOD RUNS TWICE for a delegated write
     // — once per principal, with the delegator's own context substituted — and
     // only the shared `opCtx` carries the link on both passes. (At this point
     // `!!opCtx.context?.onBehalfOf?.userId` is the middleware's `!!delegatorSets`:
@@ -9137,6 +9160,7 @@ export class SecurityPlugin implements Plugin {
       : false;
     const masterWriteFilter = await this.computeRlsFilter(permissionSets, rel.master, 'update', context, {
       dropPlatformOwnershipFloor,
+      masterGateCoversThisWrite: !delegatedWrite && this.declaresControlledByParent(rel.master),
     });
     if (masterWriteFilter) {
       let visible: unknown = null;

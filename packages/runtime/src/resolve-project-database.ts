@@ -48,6 +48,7 @@ import { resolve as resolvePath, isAbsolute } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolveArtifactCollections } from './artifact-collections.js';
+import { convertArtifactAtLoad } from './load-artifact-bundle.js';
 import { resolveDriverId } from '@objectstack/spec/data';
 
 /** The unified default database filename (`<state dir>/data/objectstack.db`). */
@@ -253,7 +254,14 @@ function readConfigDeclaredDefault(opts: {
         // ADR-0112 refusal `resolveArtifactPackageOrder` owns, and this
         // resolver's posture for an artifact it cannot read is to DECLINE (the
         // boot's own loader reports that loudly), never to brick a URL lookup.
-        bundle = resolveArtifactCollections(unwrapped);
+        //
+        // [#23027] Converted first, by the loader's own function: this read and
+        // `loadArtifactBundle` are the boot's two reads of the artifact file, and
+        // the loader converts what it reads. A body carrying a retired key would
+        // otherwise be refused HERE (and declined) while the loader converts it
+        // and boots it — against the unified default database, not the declared
+        // one.
+        bundle = resolveArtifactCollections(convertArtifactAtLoad(unwrapped));
     } catch {
         // Unreadable/malformed artifact — the boot's own loader reports that
         // loudly; the URL resolver just cannot consult it.

@@ -1646,6 +1646,91 @@ function refuseForeignTreeReference(ownName: unknown, fields: unknown, ctx: z.Re
 }
 
 /**
+ * [#23065] The field map with every `tree` field that names no `reference`
+ * given the declaring object's name as its `reference` — the self-reference the
+ * contract already reads it as, written down.
+ *
+ * A `tree` is parent/child WITHIN one object ({@link refuseForeignTreeReference}),
+ * so its target is a fact of the field's POSITION, not of the field: `FieldSchema`
+ * sees one field and cannot supply it, and neither can `referenceTargetOf`
+ * (`field-value.zod.ts`), which reads a field alone. Left absent, every reader of
+ * the target answered "no target" for a declaration the contract accepts and
+ * whose refusal tells authors to write (`Drop \`reference\``): the referential
+ * delete walk skipped it, so the materialized `deleteBehavior` was inert and a
+ * parent delete left its children holding the deleted id; the write-time
+ * reference check, `expand` and nested relation conditions treated it as
+ * targetless. So the target is materialized where the declaring object's name
+ * IS known, and every reader then sees an ordinary self-reference — one reading,
+ * no reader-side fallback:
+ *
+ *  - `ObjectSchema` and `ObjectExtensionSchema` run it as an `.overwrite` after
+ *    their refinements (own name = `name` / `extend`), so every parsed object —
+ *    `defineStack`, `ObjectSchema.create()`, a built artifact — carries it;
+ *  - the engine's object registry runs it at registration, because a metadata
+ *    save stores the authored body verbatim and a raw registration is never
+ *    parsed, and both reach the registry without the parse's output.
+ *
+ * Absence is the two spellings a contract admits for "names no target":
+ * `undefined` (what `FieldSchema`'s `.optional()` admits) and `null` (what the
+ * blueprint's `StrictField` admits). Every other value is returned untouched,
+ * so the two doors cannot disagree about it:
+ *
+ *  - `''` is NOT absence here. The parse refuses it on a `tree` as a foreign
+ *    target (`refuseForeignTreeReference` passes only an absent key or the own
+ *    name), so the registry leaves it as written rather than repairing,
+ *    unparsed, a value the contract refuses; the carrier reader then reads it
+ *    as naming nothing, exactly as before this helper existed;
+ *  - a foreign name is `refuseForeignTreeReference`'s to refuse, and a
+ *    non-string value is the carrier reader's to refuse loudly.
+ *
+ * The key lands at its `FieldSchema` shape position,
+ * so a parsed referenceless `tree` is byte-identical to one that wrote its own
+ * name, and a re-parse is a no-op.
+ *
+ * Returns `fields` itself when no field needs it, so the common case allocates
+ * nothing; otherwise a shallow copy with copies of the fields it stamped.
+ *
+ * @param ownName The declaring object's name (an extension's `extend`).
+ * @param fields  The object's field map, keyed by field name.
+ */
+export function materializeTreeSelfReferences<F>(ownName: unknown, fields: F): F {
+  if (typeof ownName !== 'string' || ownName === '') return fields;
+  if (fields === null || typeof fields !== 'object' || Array.isArray(fields)) return fields;
+  let stamped: Record<string, unknown> | undefined;
+  for (const [fieldName, def] of Object.entries(fields as Record<string, unknown>)) {
+    if (def === null || typeof def !== 'object') continue;
+    const { type, reference } = def as { type?: unknown; reference?: unknown };
+    if (type !== 'tree' || !(reference === undefined || reference === null)) continue;
+    stamped ??= { ...(fields as Record<string, unknown>) };
+    stamped[fieldName] = withReferenceAtShapePosition(def as Record<string, unknown>, ownName);
+  }
+  return (stamped ?? fields) as F;
+}
+
+/**
+ * `def` with `reference: target` inserted where `FieldSchema`'s shape declares
+ * the key: before the first key the shape declares after it. Parse output is in
+ * shape order, so the result is the parse output of the same field with
+ * `reference` written.
+ */
+function withReferenceAtShapePosition(def: Record<string, unknown>, target: string): Record<string, unknown> {
+  const order = Object.keys((FieldSchema as unknown as { shape: Record<string, unknown> }).shape);
+  const declaredAfter = new Set(order.slice(order.indexOf('reference') + 1));
+  const out: Record<string, unknown> = {};
+  let placed = false;
+  for (const [key, value] of Object.entries(def)) {
+    if (key === 'reference') continue;
+    if (!placed && declaredAfter.has(key)) {
+      out.reference = target;
+      placed = true;
+    }
+    out[key] = value;
+  }
+  if (!placed) out.reference = target;
+  return out;
+}
+
+/**
  * The field types an object's `imageField` may name: the two whose stored
  * value IS a picture. One list, read by the refusal below and spelled into its
  * prescription, so the accepted set and the text that names it cannot drift.
@@ -2734,9 +2819,11 @@ const ObjectSchemaBase = strictObject(
 
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package
-   * authors declare lock policy here; the loader translates it
-   * into the private `_lock` envelope at registration time and
-   * strips this block before persistence. See
+   * authors declare lock policy here, in a code package's source;
+   * the loader translates it into the private `_lock` envelope at
+   * registration time and strips this block. The metadata API's
+   * save door does not translate it and refuses it (`400
+   * VALIDATION_ERROR`), so that door never stores it. See
    * `shared/protection.zod.ts`.
    */
   protection: ProtectionSchema.optional().describe(
@@ -2758,6 +2845,13 @@ const ObjectSchemaBase = strictObject(
   // [#22211 ruling A] A read attachment names at least one leaf, and is not a
   // field: its block names may not repeat a declared field name.
   refuseAttachedBlockConflicts(object.attachedOnRead, object.fields, ctx);
+}).overwrite((object) => {
+  // [#23065] A `tree` that names no `reference` references this object, and the
+  // parse writes that down after the refinements above judged what the author
+  // wrote. `.overwrite` keeps this a `ZodObject`, as `.superRefine` does. See
+  // {@link materializeTreeSelfReferences}.
+  const fields = materializeTreeSelfReferences(object.name, object.fields);
+  return fields === object.fields ? object : { ...object, fields };
 });
 
 /**
@@ -3563,6 +3657,11 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
   // [#14892] The same rule as on `ObjectSchema`: the fields merge into
   // `extend`, so that is the object a `tree` field's `reference` must name.
   refuseForeignTreeReference(extension.extend, extension.fields, ctx);
+}).overwrite((extension) => {
+  // [#23065] …and the object a referenceless `tree` field references. See
+  // {@link materializeTreeSelfReferences}.
+  const fields = materializeTreeSelfReferences(extension.extend, extension.fields);
+  return fields === extension.fields ? extension : { ...extension, fields };
 }));
 
 export type ObjectExtension = z.input<typeof ObjectExtensionSchema>;

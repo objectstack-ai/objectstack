@@ -48,14 +48,13 @@ import { applyProtection } from '@objectstack/spec/shared';
 import { deriveViewContainerObject } from './view-container.js';
 
 /**
- * Re-exported from {@link ./view-container.ts}, which is also the
- * `@objectstack/metadata/view-container` LEAF entry point (commit 3bd9b3498). The
- * derivation moved there so a cross-package consumer can reach it without the
- * two `@objectstack/spec` imports below, which esbuild keeps in any bundle
- * that includes this module — it tree-shakes the unused function, not an
- * external package's import statement. Re-exported HERE so every existing
- * importer (`index.ts`'s root export, `plugin.ts`) keeps its spelling: this
- * module is still the package's stated home for "how a container binds".
+ * Re-exported from {@link ./view-container.ts}, the
+ * `@objectstack/metadata/view-container` entry point (commit 3bd9b3498), which
+ * itself re-exports the one declaration in `@objectstack/spec` (#22934: the
+ * stack contract judges the same registry slot, and the spec cannot import
+ * this package). Re-exported HERE so every existing importer (`index.ts`'s
+ * root export, `plugin.ts`) keeps its spelling: this module is still the
+ * package's stated home for "how a container binds".
  */
 export { deriveViewContainerObject };
 

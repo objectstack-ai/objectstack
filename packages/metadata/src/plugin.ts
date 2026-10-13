@@ -46,6 +46,7 @@ const FORWARD_WINDOW_OPENED: Readonly<Record<ArtifactForwardConversionVerdict, b
     'converted-forward': true,
     'converted-undeclared': true,
     'converted-retired-after': true,
+    'converted-major-step': true,
     'authored-current': false,
     'runtime-version-unknown': false,
     'not-an-object': false,
@@ -57,10 +58,18 @@ const FORWARD_WINDOW_OPENED: Readonly<Record<ArtifactForwardConversionVerdict, b
  * label — `main` enforces retirements its label has not moved past — so
  * "predates this runtime's spec", printed beside a runtime version equal to
  * the floor, would read as a contradiction; that verdict says what actually
- * opened it instead.
+ * opened it instead. So does the major-step half, whose floor sits ABOVE a
+ * prerelease runtime's label: it names the floor as the first release of its
+ * protocol major, which a build from that major's prerelease declares too.
  */
 function artifactWindowClause(result: ArtifactForwardConversionResult<unknown>): string {
     const floor = result.authoredFloor ?? '<undeclared>';
+    if (result.verdict === 'converted-major-step') {
+        const major = floor.split('.')[0];
+        return `declares the first release of protocol ${major} (authored engines.protocol floor ${floor}), `
+            + `which a build from any ${major}.0.0 prerelease declares too, so it may predate retirements in the `
+            + `conversion step into protocol ${major} that this runtime enforces (runtime spec ${result.runtimeSpecVersion})`;
+    }
     if (result.verdict === 'converted-retired-after') {
         return `was built on a surface that still accepted shapes this runtime has since retired `
             + `(authored engines.protocol floor ${floor}, at or below the last release that accepted them; `
@@ -851,6 +860,12 @@ export class MetadataPlugin implements Plugin {
                 const { FileSystemRepository } = await import('@objectstack/metadata-fs');
                 const rootDir = this.options.rootDir || process.cwd();
                 const repoRoot = path.join(rootDir, REPO_SUBDIR);
+                // [#23086] The actor rule, stated rather than inherited: no
+                // `fsActor`. An edit seen on disk, or a file no recorded write
+                // produced, has no acting user here, so it records `null`
+                // (`PutOptions.actor`, #4556), and `source: 'fs'` names the
+                // origin. ⛔ Never pass a label as `fsActor`. Pinned in
+                // `plugin-fs-repository-actor.test.ts`.
                 const repo = new FileSystemRepository({
                     root: repoRoot,
                     org: this.options.organizationId ?? 'system',

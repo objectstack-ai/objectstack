@@ -20,7 +20,7 @@ import { explainRule } from './rule-explanations.js';
 // this suite exercises, not a chosen few. Run the whole file: those cases read
 // what the cases above fired.
 const SORT_IDS: readonly string[] = [SORT_FIELD_UNKNOWN, SORT_FIELD_UNSORTABLE, SORT_FIELD_UNPROVISIONED];
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateSortableFields: typeof validateSortableFieldsUnrecorded = (...args) => {
   const findings = validateSortableFieldsUnrecorded(...args);
   fired.push(...findings);
@@ -80,7 +80,8 @@ describe('validateSortableFields — the virtuality verdict (#9257)', () => {
     // The remedy is the engine door's own, so an author refused at authoring
     // time and one refused at request time are sent the same way.
     expect(findings[0].hint).toContain('Denormalise');
-    expect(findings[0].hint).toContain('400 INVALID_SORT');
+    // [#22161] That both runtime doors refuse it is `os explain`'s.
+    expect(explanationOf(SORT_FIELD_UNSORTABLE)).toContain('`400 INVALID_SORT`');
   });
 
   it('flags it in the legacy string form too — the shape Zod cannot judge', () => {
@@ -756,5 +757,36 @@ describe('[#22161] one-line verdicts — the three sort ids', () => {
     // the predicate is held to the predicate here.
     expect([...SEARCH_VIRTUAL_TYPES]).toEqual(['formula']);
     expect(explanationOf(SORT_FIELD_UNSORTABLE)).toContain('`formula` alone');
+  });
+});
+
+// [#22161] Slice 14: the `fix:` line of the three ids. Each names its remedy in
+// one line; that both runtime doors refuse a formula sort, and how to vouch for
+// or opt out of an unprovisioned anchor, are the explanations'. The field roster
+// is not echoed: the verdict's "Did you mean" names the near miss.
+describe('[#22161] one-line fixes — the three sort ids', () => {
+  it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {
+    // Coverage control: every arm fired — both unknown arms, the formula field
+    // and the anchor.
+    const hints = fired.map((f) => f.hint);
+    expect(hints.some((h) => h.startsWith('Fix the name, or add "')), 'unknown name').toBe(true);
+    expect(hints.some((h) => h.startsWith("'sort' reaches only")), 'dotted').toBe(true);
+    expect(hints.some((h) => h.startsWith('Denormalise the value onto "')), 'formula').toBe(true);
+    expect(hints.some((h) => h.startsWith("If the remote table carries '")), 'anchor').toBe(true);
+    for (const f of fired) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  const MOVED_FROM_FIX: Record<string, readonly string[]> = {
+    [SORT_FIELD_UNKNOWN]: ["`sort` reaches only the object's own columns"],
+    [SORT_FIELD_UNSORTABLE]: ['`400 INVALID_SORT`', '`assertSortFieldsExist`', '`assertOrderByIsMaterializable`'],
+    [SORT_FIELD_UNPROVISIONED]: ['`columnMap`', "`ownership: 'none'`", '`systemFields: { audit: false }`'],
+  };
+
+  it.each([...SORT_IDS])('`os explain %s` carries what its `fix:` line no longer says', (rule) => {
+    const text = explanationOf(rule);
+    for (const fact of MOVED_FROM_FIX[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
   });
 });

@@ -12,6 +12,23 @@
  * runner default) and the `${result.*}` INTERPOLATION are the console's — the
  * reader is objectstack-ai/objectui#11344, a later link of the same ruling,
  * carried from the pin this repo builds against (`.objectui-sha` =
+ * `1fb1ced36`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+ * `7578323a5`, re-read there 2026-10-12:
+ * `ActionRunner.composeSuccessMessage`, in `core/src/actions/ActionRunner.ts`, is
+ * byte-identical in body to `9646e2ed2` and MOVED down by 11, `1498` -> `1509`
+ * (objectui#12191, objectui `334f0cff9`: the runner admits `mailto:` through one
+ * navigation-target answer, its eleven import lines added above it; every other
+ * hunk lies below the reader). At `9646e2ed2`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+ * `088e0f705`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
+ * `e5311165a`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `499799502` (`git diff --quiet`), so every anchor held unmoved. At
  * `499799502`, re-read there 2026-10-11:
  * every objectui file this record cites is byte-identical across the hop from
  * `0df67f237` (`git diff --quiet`), so every anchor held unmoved. At

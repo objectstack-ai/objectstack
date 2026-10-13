@@ -56,7 +56,7 @@ const ORG = 'org_alpha';
 
 // The two measured members of the disagreement set (both named in commit 26f3588fb,
 // re-derived at head by execution): URL-only spellings of
-// `allowOrgOverride: true` types, invisible to the manifest map.
+// overlay-enabled types, invisible to the manifest map.
 const MEMBERS = [
     { plural: 'translations', singular: 'translation' },
     { plural: 'email_templates', singular: 'email_template' },
@@ -239,8 +239,8 @@ describe('#10340 · ADR-0131 D6 — no spelling of any type carries an organizat
 
         it('⛔ still leaves a non-overridable type env-wide under every spelling', async () => {
             // The guard against over-folding: the fold must change WHICH type
-            // is judged, never the judgement itself. `object` is
-            // `allowOrgOverride: false`, and an org-scoped write of it is the
+            // is judged, never the judgement itself. `object` is outside the
+            // five overlay-enabled types, and an org-scoped write of it is the
             // phantom row #6190 stopped minting.
             for (const spelling of ['object', 'objects']) {
                 const request = await writeWith(spelling);

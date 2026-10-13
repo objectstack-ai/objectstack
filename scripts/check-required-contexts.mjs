@@ -364,6 +364,21 @@ const UNATTRIBUTED_BATTERY = '(no battery open)';
  * reporting the staleness — sat open, every gate green throughout. The count
  * is a property of the workflow, so the workflow is where it is read from: the
  * job's own step list, one grep away and never stale (#9103).
+ *
+ * ⛔ TOMBSTONE — `Dogfood Regression Gate` (ci.yml:dogfood-gate) and `Temporal
+ * Conformance (live PG + MySQL)` (ci.yml:temporal-conformance), dropped by the
+ * #22998 ruling (two-speed CI; ruling record 6120820653 on #22991): their legs
+ * run in the FULL BATTERY only — `main`'s push, hourly and dispatch runs — so a
+ * PR or queue build carries the fast set and these two contexts leave the
+ * required set. The order is the #9325 two-step: the registry and the
+ * instruction surfaces drop the rows in the PR, and the maintainer removes the
+ * two contexts from the ruleset in the same sitting as the merge; until then
+ * `--verify-required-set` reports them in direction B (required, pinned by no
+ * row), report-only, which is the sitting's own reminder. Prose and not a
+ * RETIRED_CONTEXT_NAMES row, for the reason the `Build Docs` / `Console Pin
+ * Gate` tombstone above gives: neither name is dead — both jobs still publish
+ * these check-runs on every full-battery run, and the instruction files name
+ * them correctly as full-battery jobs.
  */
 export const REQUIRED_CONTEXTS = [
   {
@@ -400,28 +415,12 @@ export const REQUIRED_CONTEXTS = [
   },
   {
     workflow: 'ci.yml',
-    job: 'dogfood-gate',
-    context: 'Dogfood Regression Gate',
-    authorized: '#5617 closing ruling 2026-08-09, confirmation item 2 (the bare aggregate name)',
-    carries: 'the sharded dogfood matrix + dogfood-verify, counted via check:shard-attestation',
-  },
-  {
-    workflow: 'ci.yml',
     job: 'build-core',
     context: 'Build Core',
     authorized:
       '#5617 closing ruling 2026-08-09, second batch — "the highest-value addition"; ' +
       'the only member of that batch the 2026-08-10 ruleset screenshot (#7022) shows applied, and live in the 2026-08-18 read',
     carries: 'the only compile-regression gate in the repo',
-  },
-  {
-    workflow: 'ci.yml',
-    job: 'temporal-conformance',
-    context: 'Temporal Conformance (live PG + MySQL)',
-    authorized:
-      '#5617 closing ruling 2026-08-09, second batch; absent from the 2026-08-10 screenshot and present in the ' +
-      '2026-08-18 read, so it was applied somewhere between the two — no attestation names the day',
-    carries: 'the live-server datetime conformance axis (#3912/#3942)',
   },
   {
     workflow: 'governed-surface-guard.yml',
@@ -551,17 +550,17 @@ export const INSTRUCTION_SURFACES = [
     // misclassification that puts a PR into the queue to be ejected. Then
     // 6→7 by #17798 — the same misclassification, one enrolment later and
     // with every gate green, which is what put the exclusivity rule below in
-    // the judge. The full set is pinned here so the corrected sentence cannot
-    // rot back — a rename in ANY of the seven now reddens this gate instead.
+    // the judge. Then 7→5 by #22998 (two-speed CI: the dogfood and temporal
+    // contexts moved to the full battery). The full set is pinned here so the
+    // corrected sentence cannot rot back — a rename in ANY of the five
+    // reddens this gate instead.
     file: 'AGENTS.md',
     statesTheSet: true,
     mustName: [
       'Lint & Repo Gates',
       'TypeScript Type Check',
       'Test Core',
-      'Dogfood Regression Gate',
       'Build Core',
-      'Temporal Conformance (live PG + MySQL)',
       'Governed Surface Queue Guard',
     ],
   },
@@ -585,12 +584,10 @@ export const INSTRUCTION_SURFACES = [
       'Lint & Repo Gates',
       'TypeScript Type Check',
       'Test Core',
-      'Dogfood Regression Gate',
       'Build Core',
-      'Temporal Conformance (live PG + MySQL)',
-      // The seventh, enrolled 2026-08-27 (#12427) and pinned here by #15233.
-      // The ledger's own count line is hand-followed prose, so it is this
-      // array — held equal to the registry by the exclusivity rule in
+      // Enrolled 2026-08-27 (#12427) and pinned here by #15233. The ledger's
+      // own count line is hand-followed prose, so it is this array — held
+      // equal to the registry by the exclusivity rule in
       // judgeInstructionSurfaces — that makes the seat's copy non-optional.
       'Governed Surface Queue Guard',
     ],
@@ -614,8 +611,8 @@ export const INSTRUCTION_SURFACES = [
  * own source, and "looks like a path" there means "carries a separator". Five
  * of the six surfaces have one; `AGENTS.md` does not, because a repo-root FILE
  * has no separator to be found by — so an AGENTS.md card derived this gate not
- * at all, while that surface is the one carrying `mustName` for all seven
- * required contexts (widened 2→6 by #9677, 6→7 by #17798). Editing the merge-queue
+ * at all, while that surface is the one carrying `mustName` for every
+ * required context (widened 2→6 by #9677, 6→7 by #17798, 7→5 by #22998). Editing the merge-queue
  * paragraph there is precisely how this gate goes red, and it was reachable
  * only by judgment.
  *
@@ -910,6 +907,37 @@ function invokesLiveRead(node) {
 function pinSteps(job) {
   const steps = job && typeof job === 'object' && Array.isArray(job.steps) ? job.steps : [];
   return steps.filter((step) => runCommands(step).some((command) => invokes(command, 'pnpm', PIN_SCRIPT)));
+}
+
+/**
+ * The jobs whose verdict the required `lint` context (`Lint & Repo Gates`) carries, as
+ * `[id, job]` pairs: the `lint` job itself and, since #22991 made it an aggregate, every lane
+ * it BOTH declares in `OS_AGGREGATOR_MEMBERS` AND lists in `needs:`.
+ *
+ * Both, not either. A lane that is only declared is not waited on, and a lane that is only in
+ * `needs:` is the roster drift `check:aggregator-roster` reds — so neither is a place the
+ * pin may live and still be called wired. Read from the parsed document, never from text, for
+ * the reasons `pinSteps` lists. An unreadable document or a missing `lint` job answers no
+ * jobs at all, so every presence assertion over it goes red rather than vacuously green.
+ *
+ * @param {unknown} doc a parsed lint.yml
+ * @returns {Array<[string, Record<string, unknown>]>}
+ */
+function jobsCarriedByLint(doc) {
+  const jobs = doc && typeof doc === 'object' ? doc.jobs : undefined;
+  if (!jobs || typeof jobs !== 'object') return [];
+  const lint = jobs.lint;
+  if (!lint || typeof lint !== 'object') return [];
+  const carried = [['lint', lint]];
+  const env = lint.env && typeof lint.env === 'object' ? lint.env : {};
+  const declared = String(env.OS_AGGREGATOR_MEMBERS ?? '').trim().split(/\s+/).filter(Boolean);
+  const needs = Array.isArray(lint.needs) ? lint.needs.map(String) : typeof lint.needs === 'string' ? [lint.needs] : [];
+  for (const id of declared) {
+    if (!needs.includes(id)) continue;
+    const job = jobs[id];
+    if (job && typeof job === 'object') carried.push([id, job]);
+  }
+  return carried;
 }
 
 /**
@@ -1587,7 +1615,9 @@ export function renderRequiredSetReport(verdict) {
       '',
       `  ⛔ direction B — required in the live set, pinned by NO registry row (${verdict.unpinned.length}). Renaming the job`,
       '     that publishes one of these detaches its gate silently — the defect this whole file exists for. The remedy',
-      '     is a REQUIRED_CONTEXTS row naming the workflow, job id and authorizing ruling; no settings change.',
+      '     is a REQUIRED_CONTEXTS row naming the workflow, job id and authorizing ruling; no settings change —',
+      '     unless a TOMBSTONE above REQUIRED_CONTEXTS records the row as dropped on purpose: then the settings half of',
+      '     that two-step (removing the context from the ruleset) is what is still owed, and re-adding the row is wrong.',
     );
     for (const entry of verdict.unpinned) lines.push(`       • ${entry.context} — from ${entry.from.join(', ')}`);
   }
@@ -1854,24 +1884,30 @@ async function selfTest() {
     renamedBuildCore.problems.some((p) => p.includes("job 'build-core'") && p.includes("'Build Core'")),
     'renaming ci.yml\'s Build Core job ⇒ red (the newly-approved batch is covered too)',
   );
-  const renamedTemporal = fixture('rename Temporal Conformance', 'ci.yml', (s) =>
-    s.replace('    name: Temporal Conformance (live PG + MySQL)\n', '    name: Temporal Conformance\n'),
+  // Re-pointed from `temporal-conformance` (whose "(live PG + MySQL)" suffix
+  // it used to drop) when #22998 moved that job to the full battery: a fixture
+  // must mutate a job the registry still REGISTERS. The aggregate `Test Core`
+  // is the live specimen for the same property — a suffix grown onto a
+  // registered name is a rename, and the bare name never reports again.
+  const renamedTestCore = fixture('rename Test Core', 'ci.yml', (s) =>
+    s.replace('    name: Test Core\n', '    name: Test Core (aggregate)\n'),
   );
   assert(
-    renamedTemporal.problems.some((p) => p.includes("job 'temporal-conformance'") && p.includes('Temporal Conformance (live PG + MySQL)')),
-    'dropping the "(live PG + MySQL)" suffix ⇒ red — the parenthetical is part of the contract, not decoration',
+    renamedTestCore.problems.some((p) => p.includes("job 'test-gate'") && p.includes("'Test Core'")),
+    'growing a suffix on the bare `Test Core` name ⇒ red — the exact literal is the contract, not decoration',
   );
 
   // ── (2) the job disappearing entirely ─────────────────────────────────────
   // Re-pointed from `console-pin` to `temporal-conformance` when #9533 dropped
-  // the console-pin row: a fixture must mutate a job the registry still
+  // the console-pin row, and from `temporal-conformance` to `build-core` when
+  // #22998 dropped that one: a fixture must mutate a job the registry still
   // REGISTERS, or it asserts nothing while reading exactly as before.
   battery('(2) the job disappearing entirely');
-  const droppedJob = fixture('drop the temporal-conformance job', 'ci.yml', (s) =>
-    s.replace('\n  temporal-conformance:\n', '\n  temporal-conformance-disabled:\n'),
+  const droppedJob = fixture('drop the build-core job', 'ci.yml', (s) =>
+    s.replace('\n  build-core:\n', '\n  build-core-disabled:\n'),
   );
   assert(
-    droppedJob.problems.some((p) => p.includes("job 'temporal-conformance' no longer exists") && p.includes('Temporal Conformance (live PG + MySQL)')),
+    droppedJob.problems.some((p) => p.includes("job 'build-core' no longer exists") && p.includes('Build Core')),
     'a required context whose job id is gone ⇒ red',
   );
 
@@ -2395,17 +2431,18 @@ async function selfTest() {
       REQUIRED_CONTEXTS.every((e) => ledgerEntry.mustName.includes(e.context)),
     `the readings ledger is a scanned surface naming all ${REQUIRED_CONTEXTS.length} required contexts — got ${JSON.stringify(ledgerEntry)}`,
   );
-  // A rename reaches it. Read from the file as it ships, with ONE of the six
-  // replaced by a name that never existed: the baseline above is green, so
-  // the literal is present and this substitution cannot be a no-op.
+  // A rename reaches it. Read from the file as it ships, with ONE of the
+  // registered names replaced by a name that never existed: the baseline
+  // above is green, so the literal is present and this substitution cannot be
+  // a no-op. (`Build Core` since #22998 dropped `Dogfood Regression Gate`.)
   const ledgerRenamed = judgeSurfaces({
     files: surfaceMap({
-      [LEDGER_SURFACE]: surfaceSources[LEDGER_SURFACE].replaceAll('Dogfood Regression Gate', 'Nonexistent Job Name'),
+      [LEDGER_SURFACE]: surfaceSources[LEDGER_SURFACE].replaceAll('Build Core', 'Nonexistent Job Name'),
     }),
   });
   assert(
     ledgerRenamed.problems.some(
-      (p) => p.includes(LEDGER_SURFACE) && p.includes("'Dogfood Regression Gate'") && p.includes('no longer names'),
+      (p) => p.includes(LEDGER_SURFACE) && p.includes("'Build Core'") && p.includes('no longer names'),
     ),
     'renaming a required context in the readings ledger ⇒ red on the ledger, naming the dropped literal',
   );
@@ -2456,7 +2493,7 @@ async function selfTest() {
   );
   // THE PIN: a set-stating surface one name short of the registry ⇒ red,
   // naming the surface and the literal it dropped. The FILES are the ones that
-  // ship — AGENTS.md still names all seven — so the floor half sees nothing
+  // ship — AGENTS.md still names all five — so the floor half sees nothing
   // and this red can only be the census.
   const shortOfTheSet = judgeSurfaces({
     surfaces: INSTRUCTION_SURFACES.map((s) =>
@@ -2540,8 +2577,8 @@ async function selfTest() {
   // Enforcement cannot hold any of these: the declaration is read by another
   // tool entirely, so a wrong or missing entry runs perfectly green here and
   // shows up only as a dev dispatched on an AGENTS.md card with this gate
-  // absent from the brief — on the surface that carries `mustName` for all
-  // seven required contexts.
+  // absent from the brief — on the surface that carries `mustName` for every
+  // required context.
   battery('the dispatch-gates declaration (#9979)');
   assert(
     INSTRUCTION_SURFACES.map((s) => s.file)
@@ -2635,7 +2672,18 @@ async function selfTest() {
     assert(snapshot.live.length === 6, `the 2026-08-18 reading carries six required contexts — got ${snapshot.live.length}`);
     assert(snapshot.strict === false, 'strict_required_status_checks_policy is read, not assumed');
     assert(snapshot.enforcing.length === 1 && !snapshot.noEnforcingRuleset, 'one active ruleset covers the default branch');
-    assert(snapshot.unpinned.length === 0, `every context in the 2026-08-18 reading has a registry row — got ${JSON.stringify(snapshot.unpinned)}`);
+    // Direction B against the checked-in registry, derived for the same reason
+    // as direction A below: the 2026-08-18 reading still carries the two
+    // contexts #22998 dropped from the registry (`Dogfood Regression Gate`,
+    // `Temporal Conformance (live PG + MySQL)`), so the snapshot reports them
+    // as required-and-unpinned — exactly the reading the maintainer's
+    // settings half of that two-step clears.
+    const pinned = new Set(REQUIRED_CONTEXTS.map((e) => e.context));
+    const unpinnedNames = snapshot.unpinned.map((e) => e.context ?? e).sort();
+    assert(
+      JSON.stringify(unpinnedNames) === JSON.stringify(snapshot.live.filter((c) => !pinned.has(c)).sort()),
+      `direction B reports exactly the live contexts no registry row pins — got ${JSON.stringify(snapshot.unpinned)}`,
+    );
     // Direction A against the checked-in registry. It was LIVE when this was
     // written (`Build Docs` / `Console Pin Gate`, #9533) and is EMPTY since
     // that card dropped the two rows — which is exactly why the assertion is
@@ -3115,9 +3163,11 @@ async function selfTest() {
     // A PRESENCE assertion about a required context's own wiring, which makes
     // its error direction a silent GREEN: whatever satisfies it wrongly leaves
     // this gate reporting that the pin runs while it does not. `pinSteps` reads
-    // `jobs.lint.steps` and asks each step's `run:` whether it INVOKES the
-    // script; the three text shapes that used to satisfy this are catalogued
-    // there and pinned below in both directions.
+    // a job's steps and asks each step's `run:` whether it INVOKES the script;
+    // the three text shapes that used to satisfy this are catalogued there and
+    // pinned below in both directions. Since #22991 the `lint` job is an
+    // aggregate that runs no gate itself, so "the required job" is the set
+    // `jobsCarriedByLint` reads: `lint` and the lanes it declares AND needs.
     battery('is the pin WIRED into the required job?');
     const lintDoc = parse(sources['lint.yml']);
     const lintJob = lintDoc?.jobs?.lint;
@@ -3129,11 +3179,15 @@ async function selfTest() {
       'wiring: lint.yml must declare a readable `lint` job — this pin cannot say anything about a job it could not read (#4690)',
     );
     /** The seam the fixtures below pin: lint.yml SOURCE in, "is the pin wired" out. */
-    const pinWiredIn = (source) => pinSteps(parse(source)?.jobs?.lint).length > 0;
+    const pinWiredIn = (source) => jobsCarriedByLint(parse(source)).some(([, job]) => pinSteps(job).length > 0);
     assert(
       pinWiredIn(sources['lint.yml']),
-      'wiring: lint.yml\'s `lint` job (the "Lint & Repo Gates" context) must run `pnpm check:required-contexts` — an unwired pin verifies nothing (#4690)',
+      'wiring: lint.yml\'s `lint` job (the "Lint & Repo Gates" context), or a lane it declares and needs, must run `pnpm check:required-contexts` — an unwired pin verifies nothing (#4690)',
     );
+    /** Every carried job that hosts the pin, with the pin steps it hosts. */
+    const hosts = jobsCarriedByLint(lintDoc)
+      .map(([id, job]) => ({ id, job, steps: pinSteps(job) }))
+      .filter((h) => h.steps.length > 0);
     // Unchanged in intent (#10877 left this one alone deliberately: it is an
     // ABSENCE assertion and was never satisfiable by prose), but it consumed
     // the text slice above, so it is re-homed onto the same structural read.
@@ -3142,8 +3196,15 @@ async function selfTest() {
     // does not get pinned. Non-vacuous because the presence assertion above
     // establishes there is at least one.
     assert(
-      pinSteps(lintJob).every((step) => !Object.prototype.hasOwnProperty.call(step, 'if')),
+      hosts.every((h) => h.steps.every((step) => !Object.prototype.hasOwnProperty.call(step, 'if'))),
       'wiring: the required-context pin step must carry NO `if:` — whatever a condition reads is a way for a PR to arrange that this pin does not run on it',
+    );
+    // …and, since the pin moved into a lane (#22991), neither may the LANE: a job-level `if:` is
+    // the same arrangement one level up, and it is the one a step-level read cannot see. The
+    // aggregate itself is exempt by construction — its `if: always()` is what makes it report.
+    assert(
+      hosts.every((h) => h.id === 'lint' || !Object.prototype.hasOwnProperty.call(h.job, 'if')),
+      'wiring: the lane hosting the required-context pin must carry NO job-level `if:` — a skipped lane is a pin that did not run',
     );
 
     // ── the wiring recognizer, in BOTH directions ────────────────────────────
@@ -3218,8 +3279,53 @@ async function selfTest() {
           '        run: pnpm typecheck',
         ),
       ),
-      `wiring: the pin running in a job that is NOT \`lint\` does not wire \`Lint & Repo Gates\` (#10877)`,
+      `wiring: the pin running in a job that is NOT \`lint\`, nor a lane \`lint\` aggregates, does not wire \`Lint & Repo Gates\` (#10877)`,
     );
+    // (q) ⭐ #22991: the pin in a LANE of the `lint` aggregate — declared AND needed — is wired.
+    // The checked-in lint.yml is this shape; the fixture pins the reading apart from it.
+    const aggregateFixture = ({ declare, need, laneIf = null }) =>
+      lintFixture(
+        '  lint:',
+        '    name: Lint & Repo Gates',
+        ...(need ? ['    needs: [lint-lane]'] : []),
+        ...(declare ? ['    env:', '      OS_AGGREGATOR_MEMBERS: lint-lane'] : []),
+        '    if: always()',
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        '      - name: Verify every lint lane succeeded',
+        '        run: node verify.mjs',
+        '  lint-lane:',
+        ...(laneIf ? [`    if: ${laneIf}`] : []),
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        '      - name: Required-context name pin',
+        `        run: pnpm ${PIN_SCRIPT}`,
+      );
+    assert(
+      pinWiredIn(aggregateFixture({ declare: true, need: true })),
+      `wiring: the pin in a lane the \`lint\` aggregate declares AND needs IS wiring (#22991)`,
+    );
+    // (r) …but a lane that is only DECLARED is not waited on: the aggregate can report before
+    // it ends, so its pin is not part of the verdict.
+    assert(
+      !pinWiredIn(aggregateFixture({ declare: true, need: false })),
+      'wiring: the pin in a lane the aggregate declares but does not need is NOT wiring (#22991)',
+    );
+    // (s) …and a lane that is only NEEDED is the roster drift `check:aggregator-roster` reds;
+    // this gate does not call a lane wired that the roster gate calls a defect.
+    assert(
+      !pinWiredIn(aggregateFixture({ declare: false, need: true })),
+      'wiring: the pin in a lane the aggregate needs but does not declare is NOT wiring (#22991)',
+    );
+    // (t) the job-level `if:` on the hosting lane, read the way the live assertion above reads it.
+    {
+      const laneIfDoc = parse(aggregateFixture({ declare: true, need: true, laneIf: "github.event_name != 'pull_request'" }));
+      const laneHosts = jobsCarriedByLint(laneIfDoc).filter(([, job]) => pinSteps(job).length > 0);
+      assert(
+        laneHosts.length === 1 && Object.prototype.hasOwnProperty.call(laneHosts[0][1], 'if'),
+        'wiring: a job-level `if:` on the lane hosting the pin is SEEN by the hosts read (#22991) — the live no-`if:` assertion depends on it',
+      );
+    }
     // (n) the genuine article, spelled the way lint.yml spells it.
     assert(
       pinWiredIn(lintJobFixture('      - name: Required-context name pin', `        run: pnpm ${PIN_SCRIPT}`)),
@@ -3239,14 +3345,14 @@ async function selfTest() {
     const wiring = pkg.scripts?.['check:required-contexts'] ?? '';
     assert(/check-required-contexts\.mjs --self-test/.test(wiring), 'wiring: `check:required-contexts` must run this file\'s --self-test first');
     assert(/check-required-contexts\.mjs(?! --self-test)/.test(wiring), 'wiring: `check:required-contexts` must also run the real pin, not only the self-test');
-    // The pin lives in a job it also pins. That is deliberate and worth stating:
-    // renaming the gate-family job turns this gate red under the NEW name, while
-    // the old required context stops reporting — the PR is blocked from both
-    // sides. That is also why the #9325 rename could not be self-serve: the
+    // The pin lives under a context it also pins — in a lane of the `lint` aggregate since
+    // #22991. That is deliberate and worth stating: renaming the aggregate turns this gate red
+    // under the NEW name, while the old required context stops reporting — the PR is blocked
+    // from both sides. That is also why the #9325 rename could not be self-serve: the
     // repo-side half is checkable here, the Settings half is not reachable at all.
     assert(
       REQUIRED_CONTEXTS.some((entry) => entry.workflow === 'lint.yml' && entry.job === 'lint'),
-      'wiring: the job this gate runs in is itself registered, so a rename of it cannot be the one rename nothing notices',
+      'wiring: the aggregate this gate runs under is itself registered, so a rename of it cannot be the one rename nothing notices',
     );
     // The instruction-surface scan must be wired into the PIN, not only into
     // this self-test — a scan only the self-test exercises is #4690's phantom

@@ -87,6 +87,10 @@ export const SysUserPermissionSet = ObjectSchema.create({
       label: 'Permission Set (legacy id)',
       required: false,
       maxLength: 255,
+      // [#15204 B2] Off the forms: it grants nothing, so an editable id
+      // beside `permission_set` only invites a meaningless value. The column
+      // stays until its data is dropped (ADR-0131 D10).
+      hidden: true,
       description:
         '[ADR-0131 D10] Legacy id of a retired permission-set catalog row, dropped with its data by a later stage. ' +
         'Not written and not read to grant anything: the grant names its set by permission_set.',
@@ -106,6 +110,10 @@ export const SysUserPermissionSet = ObjectSchema.create({
       label: 'Permission Set',
       required: true,
       maxLength: 100,
+      // [ADR-0131 D4, #15204 B2] Picked, not typed: the form lists the sets
+      // the security catalog serves and stores the chosen NAME. Falls back to
+      // a text input where the widget is not registered.
+      widget: 'permission-ref',
       description:
         '[ADR-0131 D4] Machine name of the permission set this grant holds, as the security catalog names it. ' +
         'A name the catalog does not hold is refused. NULL only on a grant written before the column existed.',

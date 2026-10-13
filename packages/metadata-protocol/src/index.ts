@@ -118,8 +118,8 @@ export type {
     SeedTenancySplit,
     SeedTenancyCollision,
 } from './migrations/seed-tenancy-backfill.js';
-export type { UninstallCleanup, UninstallCleanupOutcome, UninstalledCatalogItem } from './protocol.js';
-export { declaredCatalogItemsOf } from './protocol.js';
+export type { UninstallCleanup, UninstallCleanupOutcome, UninstallDeclared } from './protocol.js';
+export { captureUninstallDeclared } from './protocol.js';
 // [#9960] The ONE declared shape of the `deletePackage` seam, exported so the
 // two consumers that speak it (`@objectstack/rest`'s direct-mount package
 // registrar and the `@objectstack/runtime` dispatcher twin) type the seam
@@ -225,6 +225,13 @@ export type { MetadataHostEngine } from './host-engine.js';
 // "which packages are read-only" has ONE definition rather than two that drift.
 export { isWritablePackage, READ_ONLY_PACKAGE_SCOPES } from './package-writability.js';
 export type { PackageWritabilityEngine } from './package-writability.js';
+
+// [ADR-0131 D6] The `unmanaged` install mode's walled-posture refusal — the
+// function `importUnmanagedPackage` raises, exported so the install door
+// (`@objectstack/cloud-connection` install-local) answers it with the same
+// code, status and sentence before it judges anything else about a package,
+// instead of keeping a second copy of the requested-posture rule.
+export { unmanagedInstallPostureRefusal } from './package-unmanaged-install.js';
 
 // #4556 — the `sys_metadata_history.recorded_by` sentinel → NULL conversion,
 // as an ADR-0119 D2 migration plan. Run by `os migrate recorded-by`.
