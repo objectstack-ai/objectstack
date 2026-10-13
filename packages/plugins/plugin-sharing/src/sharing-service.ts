@@ -81,6 +81,27 @@ function makeShareId(): string {
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
 /**
+ * [ADR-0138 D8] Recipient values `RecordShareRecipientType` no longer declares,
+ * each with the refusal {@link SharingService.grant} answers when one still
+ * arrives at runtime — a REST body, an untyped caller. A retired value is told
+ * where its access actually lives; every other non-`user` value keeps the
+ * generic refusal in `grant()`. Keyed by the value exactly as a caller sends it.
+ */
+const RETIRED_RECIPIENT_TYPE_REFUSALS: Readonly<Record<string, string>> = {
+  guest:
+    "recipientType 'guest' was removed (ADR-0138 D8) — a record share to the anonymous principal "
+    + 'was never honoured, because guest access flows through the guest position and share links '
+    + '(ADR-0090 D11). Expose the record through a public form or a share link instead.',
+};
+
+/** The retired-value refusal for a `recipientType` a caller sent, or `undefined`. */
+function retiredRecipientTypeRefusal(value: unknown): string | undefined {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(RETIRED_RECIPIENT_TYPE_REFUSALS, value)
+    ? RETIRED_RECIPIENT_TYPE_REFUSALS[value]
+    : undefined;
+}
+
+/**
  * Owner field convention. Hard-coded to `owner_id` for MVP — the
  * sharing model in Salesforce / ServiceNow / Dynamics all assume a
  * single owner field, and customising it is a follow-up. Objects
@@ -1346,9 +1367,15 @@ export class SharingService implements ISharingService {
     // (ADR-0078). Group / business-unit principals are delivered via sharing
     // rules, whose evaluator expands them into per-user rows.
     if (recipientType !== 'user') {
+      // [ADR-0138 D8] A retired value no longer typechecks, yet still reaches
+      // here untyped. It is told where guest access lives, never that a sharing
+      // rule delivers it: the rule vocabulary retired the same recipient.
+      const retired = retiredRecipientTypeRefusal(recipientType);
       throw new Error(
-        `VALIDATION_FAILED: recipientType must be 'user' (received ${JSON.stringify(recipientType)}) — `
-        + `group/position recipients are delivered via sharing rules (ADR-0111 D7)`,
+        retired !== undefined
+          ? `VALIDATION_FAILED: ${retired}`
+          : `VALIDATION_FAILED: recipientType must be 'user' (received ${JSON.stringify(recipientType)}) — `
+            + `group/position recipients are delivered via sharing rules (ADR-0111 D7)`,
       );
     }
     // Validate BEFORE any write. Previously anything at all was persisted
