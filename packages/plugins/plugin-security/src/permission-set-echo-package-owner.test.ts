@@ -38,6 +38,7 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 import { projectPermissionMutation, registerPermissionSetProjection } from './permission-set-projection.js';
 import { syncAudienceBindingSuggestions } from './suggested-audience-bindings.js';
 import { declareEveryoneBaseline } from './builtin-positions.js';
+import { classifyPackagedPermissionSet } from './packaged-permission-set-lock.js';
 
 /** A writable runtime package — never installed as code, so nothing ships its sets. */
 const RUNTIME_PKG = 'app.crm_workspace';
@@ -218,6 +219,31 @@ describe('#23233 — a runtime package\'s isDefault set, published without a bod
     expect(resolved).toMatchObject({ source: 'metadata', packageId: RUNTIME_PKG });
     expect(listed).toMatchObject({ source: 'metadata', packageId: RUNTIME_PKG });
     expect(resolved?.definition).toMatchObject({ _provenance: 'org', isDefault: true });
+  });
+});
+
+describe('#23233 — the edit surface does not move', () => {
+  // The projected `sys_permission_set` row keeps `managed_by: 'admin'` and no
+  // `package_id`: the owner rides on the echo the catalog reads, and nothing
+  // that gates an admin's edit reads the echo's `_packageId`.
+  it('the owner-carrying echo is still not a shipped artifact: the lock answers org, the item stays editable, and an edit lands', async () => {
+    const { engine, protocol } = boot();
+    await publishThroughPackageDoor(protocol, RUNTIME_PKG, runtimeDefault());
+
+    const layered = await protocol.getMetaItemLayered({ type: 'permission', name: RUNTIME_SET });
+    // Anti-vacuity: the layered read's code layer IS the echo, and it carries the owner.
+    expect(layered.code).toMatchObject({ _packageId: RUNTIME_PKG, _envProjection: true });
+    expect(classifyPackagedPermissionSet(RUNTIME_SET, engine, { status: 'read', envelope: layered })).toEqual({ status: 'org' });
+    expect(layered).toMatchObject({ lock: 'none', editable: true, deletable: true });
+
+    await protocol.saveMetaItem({
+      type: 'permission', name: RUNTIME_SET, packageId: RUNTIME_PKG, item: { ...runtimeDefault(), label: 'Edited' },
+    });
+    expect((await protocol.getMetaItem({ type: 'permission', name: RUNTIME_SET })).item).toMatchObject({ label: 'Edited', _packageId: RUNTIME_PKG });
+    expect((engine.tables.sys_permission_set ?? []).filter((row) => row.name === RUNTIME_SET)).toEqual([
+      expect.objectContaining({ label: 'Edited', managed_by: 'admin' }),
+    ]);
+    expect(engine.tables.sys_permission_set.find((row) => row.name === RUNTIME_SET)?.package_id ?? null).toBeNull();
   });
 });
 
