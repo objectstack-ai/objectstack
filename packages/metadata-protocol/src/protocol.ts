@@ -22657,8 +22657,8 @@ export class ObjectStackProtocolImplementation implements
                     outcome: 'skipped',
                     reason: `the conversion chain rewrites nothing here: it left ${flattenedTodos.length} `
                         + 'site(s) of this row as stored, because no lossless rewrite exists for them — '
-                        + 'each TODO below names the site and why. The row keeps loading unchanged; '
-                        + 'rewrite each site by hand.',
+                        + 'each TODO below names the site and why. The row is read as stored, unchanged, '
+                        + 'and each TODO says what that leaves it doing; rewrite each site by hand.',
                 });
                 continue;
             }
