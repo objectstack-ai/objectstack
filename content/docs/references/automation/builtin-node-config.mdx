@@ -40,7 +40,8 @@ parse the RAW stored config — their typed slots are strings (or `unknown`
 where values interpolate), so `{token}` templates pass and resolve at the
 executor's existing interpolation points. The value slots are the exception
 since #19939: the `{token}` dialect is retired there (the "value slots"
-section below). So are the text slots since #22110: a screen `title` /
+section below), each operand of the CRUD `filter` included, where a query
+placeholder stays the query engine's. So are the text slots since #22110: a screen `title` /
 `description` and an `end` `message` render `{{ }}` holes, and a `{token}`
 there is refused (`flow-text-slot-template.ts`).
 
@@ -80,7 +81,11 @@ a field value is a CEL value envelope or a literal — a `{token}` template is
 refused there since #19939 — and those maps are the expression ledger's
 `value`-role slots, as are, since #19939, the three maps a node hands to a
 callee, a `screen`'s `defaults.*`, field `defaultValue` and `recordId`, and
-the list a `loop` and a `map` iterate (`FlowCollectionSlotSchema`).
+the list a `loop` and a `map` iterate (`FlowCollectionSlotSchema`), and each
+operand of the CRUD `filter` — a field's value, an operator's comparand, each
+element of a list comparand — which a CEL value envelope computes before the
+query while a query placeholder (`{current_user_id}`, `{today}`) stays the
+query engine's (the "CRUD quartet" section below).
 
 Deliberately absent:
  - `decision` / `script` / `subflow` / `wait` / `connector_action` — the
@@ -162,7 +167,7 @@ Value the variable takes: a CEL value envelope `{ dialect: 'cel', source }` eval
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **objectName** | `string` | ✅ | Object to delete from |
-| **filter** | `Record<string, any>` | optional | Field/value pairs identifying the record(s) to delete |
+| **filter** | `Record<string, any>` | optional | Field/value pairs identifying the record(s) to delete: each operand — a field's value, an operator's comparand (`{"$ne": null}`), a list comparand's element — is a CEL value envelope `{ dialect: 'cel', source }` evaluated before the query (one that evaluates to null refuses the node), a query placeholder such as `{current_user_id}` or `{today}` the query engine resolves, or a literal; a flow `{…}` template token is refused |
 | **multi** | `boolean` | optional | Declare bulk intent: delete every row the filter matches (default false — a predicate delete without it is refused by the engine) |
 
 
@@ -226,7 +231,7 @@ A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expr
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **objectName** | `string` | ✅ | Object to query |
-| **filter** | `Record<string, any>` | optional | Field/value pairs to match (operator values like `{"$ne": null}` are preserved) |
+| **filter** | `Record<string, any>` | optional | Field/value pairs to match: each operand — a field's value, an operator's comparand (`{"$ne": null}`), a list comparand's element — is a CEL value envelope `{ dialect: 'cel', source }` evaluated before the query (one that evaluates to null refuses the node), a query placeholder such as `{current_user_id}` or `{today}` the query engine resolves, or a literal; a flow `{…}` template token is refused |
 | **fields** | `string[]` | optional | Field projection — only these fields are read (default: all) |
 | **limit** | `number` | optional | Max records to return; >1 switches to a multi-record query |
 | **outputVariable** | `string` | optional | Flow variable the result is bound to — a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}` |
@@ -323,7 +328,7 @@ A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expr
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **objectName** | `string` | ✅ | Object to update |
-| **filter** | `Record<string, any>` | optional | Field/value pairs identifying the record(s) to update |
+| **filter** | `Record<string, any>` | optional | Field/value pairs identifying the record(s) to update: each operand — a field's value, an operator's comparand (`{"$ne": null}`), a list comparand's element — is a CEL value envelope `{ dialect: 'cel', source }` evaluated before the query (one that evaluates to null refuses the node), a query placeholder such as `{current_user_id}` or `{today}` the query engine resolves, or a literal; a flow `{…}` template token is refused |
 | **fields** | `Record<string, any>` | optional | Field values to write: each key is a field name, each value a CEL value envelope or a literal |
 | **multi** | `boolean` | optional | Declare bulk intent: update every row the filter matches (default false — a predicate update without it is refused by the engine) |
 

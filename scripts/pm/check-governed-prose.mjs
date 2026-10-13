@@ -138,7 +138,14 @@ const UNATTRIBUTED_BATTERY = '(no battery open)';
 // the argv of whatever imported THIS file too, for the duration of the import.
 // The static form stays a dynamic `import()` only because
 // `scripts/pm/dispatch-gates.mjs` reads this edge.
-const { GOVERNED_SURFACES } = await import('./check-governed-merges.mjs');
+//
+// The register is scoped PER ROW (maintainer ruling B2, 2026-10-13): a row may
+// name the repositories it governs, and the instruction files this gate reads
+// are THIS repository's. So the globs the prose must contain are the rows that
+// govern `SELF_REPO_ID` — never the whole table, which would demand that this
+// repository's prose claim a surface governed only elsewhere (an over-claim in
+// the other direction).
+const { SELF_REPO_ID, governedSurfacesFor } = await import('./check-governed-merges.mjs');
 
 const REPO_ROOT = new URL('../../', import.meta.url);
 
@@ -228,7 +235,7 @@ export function verdict(regionText, registerGlobs) {
 }
 
 function registerGlobs() {
-  return GOVERNED_SURFACES.map((surface) => surface.glob);
+  return governedSurfacesFor(SELF_REPO_ID).map((surface) => surface.glob);
 }
 
 function runGate() {
@@ -237,8 +244,8 @@ function runGate() {
 
   if (globs.length === 0) {
     console.error(
-      '✗ check-governed-prose: GOVERNED_SURFACES is empty — red, not a pass. An empty register makes ' +
-        'containment vacuously true, which is the false green this check exists to remove.',
+      `✗ check-governed-prose: no GOVERNED_SURFACES row governs ${SELF_REPO_ID} — red, not a pass. An empty ` +
+        'register makes containment vacuously true, which is the false green this check exists to remove.',
     );
     return 1;
   }
@@ -289,7 +296,7 @@ function runGate() {
 
   console.log(
     `✓ check-governed-prose: ${PROSE_SURFACES.length} instruction surface(s) name all ${globs.length} ` +
-      `registered governed surfaces (${globs.join(' · ')}) and claim no others.`,
+      `registered governed surfaces that govern ${SELF_REPO_ID} (${globs.join(' · ')}) and claim no others.`,
   );
   return 0;
 }

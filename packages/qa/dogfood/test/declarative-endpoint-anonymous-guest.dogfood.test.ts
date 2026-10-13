@@ -67,7 +67,7 @@ const ReadFlow: Flow = {
       id: 'get',
       type: 'get_record',
       label: 'Get note',
-      config: { objectName: OBJECT, filter: { id: '{noteId}' }, outputVariable: 'found' },
+      config: { objectName: OBJECT, filter: { id: { dialect: 'cel', source: 'noteId' } }, outputVariable: 'found' },
     },
     { id: 'end', type: 'end', label: 'End' },
   ],

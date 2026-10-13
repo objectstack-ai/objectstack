@@ -390,7 +390,7 @@ export interface SuspensionRelease {
  *    connector rate-limited, the data engine rejected a write. The metadata is
  *    fine and a later run could succeed. A declared `fault` edge routes it.
  *  - `guard` — the METADATA is wrong, and a refuse-to-execute guard said so:
- *    interpolation erased a filter condition (#3810), a data node names no
+ *    a filter operand evaluated to nothing (#3810), a data node names no
  *    object, a run would execute unscoped (ADR-0049/#1888). Re-running changes
  *    nothing, and the refusal IS the safety property. Not routable — it stays
  *    fatal whether or not a `fault` edge exists.

@@ -9746,7 +9746,7 @@ export function governedRegisterFailure(err) {
  * both specifiers relative to THIS file, which is what makes the sibling-repo
  * absence a catchable `ERR_MODULE_NOT_FOUND` rather than a load-time death.
  */
-export async function loadGovernedRegister(load = (specifier) => import(specifier)) {
+export async function loadGovernedRegister(load = (specifier) => import(specifier), slug = OWNER_REPO) {
   try {
     const [merges, guard] = await Promise.all([
       load('./check-governed-merges.mjs'),
@@ -9756,10 +9756,12 @@ export async function loadGovernedRegister(load = (specifier) => import(specifie
     const tierOf = merges?.landingTierOf;
     const recordTier = merges?.GOVERNED_TIER_S;
     const approvers = guard?.GOVERNED_APPROVERS;
+    const repoIdForSlug = merges?.repoIdForSlug;
     if (
       typeof matcher !== 'function' ||
       typeof tierOf !== 'function' ||
       typeof recordTier !== 'string' ||
+      typeof repoIdForSlug !== 'function' ||
       !Array.isArray(approvers) ||
       approvers.length === 0
     ) {
@@ -9769,13 +9771,35 @@ export async function loadGovernedRegister(load = (specifier) => import(specifie
         tierOf: null,
         recordTier: null,
         approvers: [],
+        repo: null,
         reason:
           'the governed register loaded but did not export what this row reads — `governedPathsIn`, ' +
-          '`landingTierOf`, `GOVERNED_TIER_S` and a non-empty `GOVERNED_APPROVERS`. A rename is the ' +
-          'likely cause, and this row is the reader that noticed',
+          '`landingTierOf`, `GOVERNED_TIER_S`, `repoIdForSlug` and a non-empty `GOVERNED_APPROVERS`. A rename ' +
+          'is the likely cause, and this row is the reader that noticed',
       };
     }
-    return { available: true, matcher, tierOf, recordTier, approvers, reason: null };
+    // The register is scoped PER ROW (maintainer ruling B2, 2026-10-13): its
+    // question has a repository in it, and this patrol's is the board it
+    // sweeps. Bound ONCE here, so H43 and H48 ask `matcher(paths)` about the
+    // swept board and never default to every repository; a board the register
+    // does not know is NOT MEASURED, with the board named — never judged
+    // against another repository's rows, which would read like a clean board.
+    const repo = repoIdForSlug(slug);
+    if (repo === null) {
+      return {
+        available: false,
+        matcher: null,
+        tierOf: null,
+        recordTier: null,
+        approvers: [],
+        repo: null,
+        reason:
+          `the swept board ${slug} is not a governed repository in the register's GOVERNED_REPOS, so no register ` +
+          'row is scoped to it and the governed question has no answer here — NOT MEASURED on this board; every ' +
+          'other row is unaffected',
+      };
+    }
+    return { available: true, matcher: (paths) => matcher(paths, repo), tierOf, recordTier, approvers, repo, reason: null };
   } catch (err) {
     return {
       available: false,
@@ -9783,6 +9807,7 @@ export async function loadGovernedRegister(load = (specifier) => import(specifie
       tierOf: null,
       recordTier: null,
       approvers: [],
+      repo: null,
       reason: governedRegisterFailure(err),
     };
   }
@@ -30819,6 +30844,21 @@ async function selfTest() {
   t('H43 register: a missing sibling names the two files to copy', governedRegisterFailure({ code: 'ERR_MODULE_NOT_FOUND' }).includes('check-governed-queue-guard.mjs'), true);
   t('H43 register: …and says the rest of the sweep is unaffected', governedRegisterFailure({ code: 'ERR_MODULE_NOT_FOUND' }).includes('every other row is unaffected'), true);
   t('H43 register: any other load failure carries its own message', governedRegisterFailure(new Error('boom')).includes('boom'), true);
+
+  // The per-row scope (ruling B2, 2026-10-13): the register's question carries
+  // the swept board, bound ONCE at load. Driven through the real modules with
+  // an explicit board each, so the reading does not depend on which board this
+  // self-test happens to run against.
+  const realLoad = (specifier) => import(specifier);
+  const boundCloud = await loadGovernedRegister(realLoad, 'objectstack-ai/cloud');
+  const boundOs = await loadGovernedRegister(realLoad, 'objectstack-ai/objectos');
+  const boundForeign = await loadGovernedRegister(realLoad, 'someone/fork');
+  t('H43 register: the loader binds the swept board\'s repository id, and this run\'s is the board it sweeps',
+    GOVERNED_REGISTER.available ? GOVERNED_REGISTER.repo : 'NOT MEASURED',
+    GOVERNED_REGISTER.available ? (await realLoad('./check-governed-merges.mjs')).repoIdForSlug(OWNER_REPO) : 'NOT MEASURED');
+  t('H43 register: a workflow path is governed on a cloud board (the scoped row names cloud)', boundCloud.available && boundCloud.repo === 'cloud' && boundCloud.matcher(['.github/workflows/ci.yml']).length === 1, true);
+  t('H43 register: …and NOT on an objectos board, while the default rows still govern it', boundOs.available && boundOs.repo === 'objectos' && boundOs.matcher(['.github/workflows/ci.yml']).length === 0 && boundOs.matcher(['AGENTS.md']).length === 1, true);
+  t('H43 register: a board outside GOVERNED_REPOS is NOT MEASURED with the board named, never judged against another repository\'s rows', !boundForeign.available && boundForeign.matcher === null && boundForeign.repo === null && /someone\/fork/.test(boundForeign.reason) && /NOT MEASURED on this board/.test(boundForeign.reason), true);
 
   // The TIER, read off the REAL register's own slices rather than a fixture
   // that restates which surfaces are which: a PR whose governed paths all lie

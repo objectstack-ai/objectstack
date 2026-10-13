@@ -140,8 +140,11 @@ describe('every flow CEL site the door visits', () => {
       "flow 'f' · node 'set' (assignment) assignment value at config.assignments.who"],
     ['a create_record field envelope', flowStack({ middle: [{ id: 'mk', type: 'create_record', config: { objectName: 'acct', fields: { status: env('user.id') } } }] }),
       "flow 'f' · node 'mk' (create_record) create_record field value at config.fields.status"],
-    ['an update_record field envelope', flowStack({ middle: [{ id: 'up', type: 'update_record', config: { objectName: 'acct', filter: { id: '{record.id}' }, fields: { status: env('user.id') } } }] }),
+    ['an update_record field envelope', flowStack({ middle: [{ id: 'up', type: 'update_record', config: { objectName: 'acct', filter: { id: 'acc_1' }, fields: { status: env('user.id') } } }] }),
       "flow 'f' · node 'up' (update_record) update_record field value at config.fields.status"],
+    // [#19939, stage S6] A filter operand is a value slot: its envelope is a CEL site the door visits.
+    ['a filter operand envelope', flowStack({ middle: [{ id: 'rm', type: 'delete_record', config: { objectName: 'acct', filter: { owner: { $eq: env('user.id') } } } }] }),
+      "flow 'f' · node 'rm' (delete_record) delete_record filter operand at config.filter.owner.$eq"],
   ])('%s', (_site, stack, where) => {
     const found = rootFindings(stack);
     expect(found.map((i) => i.where)).toEqual([where]);
@@ -169,8 +172,8 @@ describe('every flow CEL site the door visits', () => {
 describe('controls — one per binding kind the run has', () => {
   it.each<[string, Parameters<typeof flowStack>[0]]>([
     ['a declared variable', { edgeCondition: 'quota > 1', variables: [{ name: 'quota', type: 'number' }] }],
-    ['an `outputVariable`', { edgeCondition: 'acc.status == "x"', middle: [{ id: 'read', type: 'get_record', config: { objectName: 'acct', filter: { id: '{record.id}' }, outputVariable: 'acc' } }] }],
-    ['a node id (its outputs land under it)', { edgeCondition: 'read.record != null', middle: [{ id: 'read', type: 'get_record', config: { objectName: 'acct', filter: { id: '{record.id}' } } }] }],
+    ['an `outputVariable`', { edgeCondition: 'acc.status == "x"', middle: [{ id: 'read', type: 'get_record', config: { objectName: 'acct', filter: { id: 'acc_1' }, outputVariable: 'acc' } }] }],
+    ['a node id (its outputs land under it)', { edgeCondition: 'read.record != null', middle: [{ id: 'read', type: 'get_record', config: { objectName: 'acct', filter: { id: 'acc_1' } } }] }],
     ['an `assignment` target', { edgeCondition: 'flag == true', middle: [{ id: 'set', type: 'assignment', config: { assignments: { flag: true } } }] }],
     ['a `loop` iterator and index', { edgeCondition: 'row != null && i >= 0', variables: [{ name: 'rows', type: 'list' }], middle: [{ id: 'sweep', type: 'loop', config: { collection: { dialect: 'cel', source: 'rows' }, iteratorVariable: 'row', indexVariable: 'i', body: { nodes: [], edges: [] } } }] }],
     ['a `loop` with no iterator binds the default `item`', { edgeCondition: 'item != null', variables: [{ name: 'rows', type: 'list' }], middle: [{ id: 'sweep', type: 'loop', config: { collection: { dialect: 'cel', source: 'rows' }, body: { nodes: [], edges: [] } } }] }],
