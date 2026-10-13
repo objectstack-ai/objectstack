@@ -53,6 +53,15 @@ import { MAX_BULK_PER_ROW_HOOK_ROWS, resolveBulkPerRowHookBudget } from '@object
 import { ActionActivationProjection, type ActionActivationRow, type ActionActivationStore } from './action-activation.js';
 import { assertListComparandShapes, assertFilterIsMaterializable, invalidFilterError } from './filter-comparand-shape.js';
 import {
+  collectComposableReadableIds,
+  composeReadableIdsLeaves,
+  describeReadableIdsLeaf,
+  readableIdsRefusalError,
+  type ComposableReadableIdsSite,
+} from './filter-comparand-shape.js';
+import { ReadableIds, RLS_DENY_FILTER, markFilterSubtreeProvenance } from '@objectstack/spec/data';
+import type { ISecurityService } from '@objectstack/spec/contracts';
+import {
   assertHavingResolvedTemporalTokensInRange,
   assertHavingTemporalComparandsInterpretable,
   assertResolvedTemporalTokensInRange,
@@ -4135,6 +4144,14 @@ function stampObjectPackage(def: ServiceObject, packageId: string, packageVersio
   return packageVersion === undefined ? def : stampPackage({ ...def }, packageId, packageVersion);
 }
 
+/**
+ * [ADR-0139 D2] What the `ReadableIds` composition asks of the registered
+ * `ISecurityService`: both halves of a read, the object-level one through
+ * `canReadObject` or, when a service predates that optional method, the
+ * `allowed` of its `explain`.
+ */
+type ReadableIdsSecurity = Pick<ISecurityService, 'getReadFilter'> & Partial<Pick<ISecurityService, 'canReadObject' | 'explain'>>;
+
 export class ObjectQL implements IObjectQLEngine {
   /**
    * Ambient transaction store (ADR-0034). While a `transaction()` callback
@@ -5522,6 +5539,218 @@ export class ObjectQL implements IObjectQLEngine {
   registerEffectiveObjectPermissionsResolver(fn: (context: unknown) => Promise<unknown>): void {
     this._effectiveObjectPermissionsResolver = fn;
     this.logger.debug('Registered effective object-permission resolver for current_user.can()');
+  }
+
+  /**
+   * [ADR-0139 D2] Where the executor boundary reads the registered
+   * `ISecurityService` when it composes a `ReadableIds` leaf. `ObjectQLPlugin`
+   * supplies it: a source that reads the kernel's `security` service AT USE,
+   * never at init, so plugin-registration order cannot decide whether a leaf
+   * is composed or denied. Last registration wins.
+   *
+   * Unregistered is a DEFINED state, and it fails closed: so does a source
+   * that answers nothing, one that throws, and a service that cannot answer
+   * both halves of a read. Each answers every leaf `$in: []` — see
+   * {@link resolveReadableIdsSecurity}.
+   */
+  private _securityServiceSource?: () => unknown;
+
+  /** Wire the `security` service source for `ReadableIds` composition (ADR-0139 D2). Last registration wins. */
+  registerSecurityServiceSource(source: () => unknown): void {
+    this._securityServiceSource = source;
+    this.logger.debug('Registered security-service source for ReadableIds composition');
+  }
+
+  /**
+   * The states {@link composeReadableIdsAtBoundary} has already reported for
+   * this engine. It records only that the report was made and caches no
+   * verdict: every composition resolves the service afresh.
+   */
+  private readonly readableIdsSecurityReported = new Set<'absent' | 'unusable'>();
+
+  /**
+   * [ADR-0139 D2] The three resolutions of the `security` service, kept apart
+   * because they are logged apart — and answered alike: only `usable` is
+   * asked anything.
+   *
+   *  - **absent** — no source is registered, or it answered nothing;
+   *  - **unusable** — the source threw (the in-repo kernels throw on a name
+   *    nothing registered), or the service exposes no `getReadFilter`, or
+   *    neither `canReadObject` nor `explain`;
+   *  - **usable** — ask it.
+   */
+  private resolveReadableIdsSecurity():
+    | { kind: 'usable'; svc: ReadableIdsSecurity }
+    | { kind: 'absent' }
+    | { kind: 'unusable'; why: string } {
+    const source = this._securityServiceSource;
+    if (!source) return { kind: 'absent' };
+    let svc: unknown;
+    try {
+      svc = source();
+    } catch (e) {
+      return { kind: 'unusable', why: `resolving the "security" service threw (${String((e as Error)?.message ?? e)})` };
+    }
+    if (svc === undefined || svc === null) return { kind: 'absent' };
+    const candidate = svc as Partial<ReadableIdsSecurity>;
+    if (typeof candidate.getReadFilter !== 'function') {
+      return { kind: 'unusable', why: 'the registered "security" service exposes no getReadFilter()' };
+    }
+    if (typeof candidate.canReadObject !== 'function' && typeof candidate.explain !== 'function') {
+      return { kind: 'unusable', why: 'the registered "security" service exposes neither canReadObject() nor explain()' };
+    }
+    return { kind: 'usable', svc: candidate as ReadableIdsSecurity };
+  }
+
+  /**
+   * [ADR-0139 D2, D5] The executor boundary: every `ReadableIds` leaf in the
+   * FINAL `where` of a read is replaced by its composed form immediately
+   * before the driver call — after the comparand doors, the middleware chain
+   * and the before-hooks, so a leaf the caller, a middleware or a hook wrote
+   * meets the same composition. Returns `ast` by reference when it holds no
+   * leaf, which is every read today; otherwise a shallow copy whose `where` is
+   * rewritten copy-on-write (the hooks' `input.ast` is never edited).
+   *
+   * Per parent object `P`, once per call, in this order:
+   *
+   *  1. **D5's three classes are refused, by name** (`INTERNAL_ERROR` / 500),
+   *     before the security service is asked anything: a delegated
+   *     (on-behalf-of) caller; a parent an object-scoped read middleware
+   *     narrows ({@link hasObjectMiddleware}); a parent bound to another
+   *     datasource than `object` ({@link resolveDatasourceBinding}).
+   *  2. **The security service** — absent or unusable ⇒ `$in: []`.
+   *  3. **`canReadObject(P)`** (its `explain` fallback when the method is
+   *     absent) — false or a throw ⇒ `$in: []`.
+   *  4. **`getReadFilter(P)`** — `undefined` ⇒ composed, no row restriction;
+   *     the deny sentinel `RLS_DENY_FILTER`, by identity, or a throw ⇒
+   *     `$in: []`; any other filter ⇒ composed with it as the scope, marked
+   *     `'policy'` and otherwise passed exactly as `P`'s own read passes its
+   *     injected scope. The tenant wall is the driver's (D3).
+   *
+   * Nothing is memoised across calls. `aggregate`'s `having` and its
+   * aggregations' own filters are judged here too, so a leaf a middleware
+   * wrote there is refused rather than evaluated in memory.
+   */
+  private async composeReadableIdsAtBoundary<A extends QueryAST>(
+    object: string,
+    operation: 'find' | 'findOne' | 'count' | 'aggregate',
+    ast: A,
+    context: ExecutionContext | undefined,
+  ): Promise<A> {
+    if (operation === 'aggregate') {
+      collectComposableReadableIds(object, operation, ast.having, 'having');
+      const aggregations = Array.isArray(ast.aggregations) ? ast.aggregations : [];
+      aggregations.forEach((agg, i) => {
+        collectComposableReadableIds(object, operation, (agg as { filter?: unknown } | undefined)?.filter, `aggregations[${i}].filter`);
+      });
+    }
+    const sites = collectComposableReadableIds(object, operation, ast.where, 'where');
+    if (sites.length === 0) return ast;
+    const parents = this.refuseUncomposableReadableIdsClasses(object, operation, sites, context);
+
+    const security = this.resolveReadableIdsSecurity();
+    if (security.kind !== 'usable' && !this.readableIdsSecurityReported.has(security.kind)) {
+      this.readableIdsSecurityReported.add(security.kind);
+      this.logger.warn(
+        `[ObjectQL] ${operation}('${object}') composes a ReadableIds leaf with no usable "security" service ` +
+        `(${security.kind === 'absent' ? 'none is registered' : security.why}): every such leaf is answered ` +
+        '$in: [], no row of its parent, fail-closed. Register a security service for the leaf to serve rows. ' +
+        'Reported once for this engine; later leaves are answered the same way.',
+      );
+    }
+    const answers = new Map<string, { scope: FilterCondition | undefined } | null>();
+    for (const parent of parents) {
+      answers.set(parent, security.kind === 'usable'
+        ? await this.readableIdsScopeOf(object, operation, parent, security.svc, context)
+        : null);
+    }
+    const where = composeReadableIdsLeaves(ast.where, (leaf) => {
+      const answer = answers.get(leaf.object);
+      return answer ? ReadableIds.compose(leaf, answer.scope) : [];
+    });
+    return { ...ast, where };
+  }
+
+  /**
+   * [ADR-0139 D5] Refuse D5's three classes, by name, and return the distinct
+   * parent objects of `sites` in walk order. Reads the context, the registry
+   * and the middleware registrations only — no security call.
+   */
+  private refuseUncomposableReadableIdsClasses(
+    object: string,
+    operation: string,
+    sites: readonly ComposableReadableIdsSite[],
+    context: ExecutionContext | undefined,
+  ): string[] {
+    const firstSite = new Map<string, ComposableReadableIdsSite>();
+    for (const site of sites) if (!firstSite.has(site.leaf.object)) firstSite.set(site.leaf.object, site);
+    const refuse = (site: ComposableReadableIdsSite, why: string): Error => readableIdsRefusalError(
+      object,
+      `${operation}('${object}'): ${describeReadableIdsLeaf(site.at, site.leaf)}, and the engine composes no ` +
+      `such leaf ${why}. The query was NOT run and no driver was asked. Read this class through its bounded ` +
+      'probe, chosen before the leaf is written.',
+    );
+    const delegator = (context as { onBehalfOf?: { userId?: unknown } } | undefined)?.onBehalfOf?.userId;
+    if (delegator) {
+      throw refuse(sites[0], 'for a delegated (on-behalf-of) caller: the parent\'s read scope does not carry the ' +
+        'delegator intersection, so the composed leaf would not answer what a direct read answers');
+    }
+    const outer = this.resolveDatasourceBinding(object)?.datasource;
+    for (const [parent, site] of firstSite) {
+      if (this.hasObjectMiddleware(parent)) {
+        throw refuse(site, `over '${parent}', whose rows an object-scoped read middleware narrows: that WHERE is ` +
+          `built at read time and is no part of its read scope, so the composed leaf would be wider than a read of '${parent}'`);
+      }
+      const bound = this.resolveDatasourceBinding(parent)?.datasource;
+      if (bound !== outer) {
+        throw refuse(site, `over '${parent}', which is bound to datasource '${String(bound)}' while '${object}' is ` +
+          `bound to '${String(outer)}': no driver evaluates a subquery across two datasources`);
+      }
+    }
+    return [...firstSite.keys()];
+  }
+
+  /**
+   * [ADR-0139 D2 steps 1-2] The scope a leaf over `parent` is composed with,
+   * or `null` for `$in: []`. Fails closed on every answer that is not a
+   * positive one, and on every throw.
+   */
+  private async readableIdsScopeOf(
+    object: string,
+    operation: string,
+    parent: string,
+    svc: ReadableIdsSecurity,
+    context: ExecutionContext | undefined,
+  ): Promise<{ scope: FilterCondition | undefined } | null> {
+    const deny = (why: string, e?: unknown): null => {
+      this.logger.warn(
+        `[ObjectQL] ${operation}('${object}'): the ReadableIds leaf over '${parent}' is answered $in: [] ` +
+        `(fail-closed) — ${why}`,
+        e === undefined ? undefined : writeFailureLogMeta(e, { object, parent }),
+      );
+      return null;
+    };
+    let admitted: boolean;
+    try {
+      admitted = typeof svc.canReadObject === 'function'
+        ? (await svc.canReadObject(parent, context)) === true
+        : (await svc.explain!({ object: parent, operation: 'read' }, context))?.allowed === true;
+    } catch (e) {
+      return deny('the object-level read admission threw', e);
+    }
+    if (!admitted) return null;
+    let scope: unknown;
+    try {
+      scope = await svc.getReadFilter(parent, context);
+    } catch (e) {
+      return deny('getReadFilter() threw', e);
+    }
+    if (scope === undefined) return { scope: undefined };
+    if (scope === RLS_DENY_FILTER) return null;
+    if (scope === null || typeof scope !== 'object' || Array.isArray(scope)) {
+      return deny(`getReadFilter() answered ${scope === null ? 'null' : Array.isArray(scope) ? 'an array' : typeof scope}, not a filter`);
+    }
+    return { scope: markFilterSubtreeProvenance(scope as FilterCondition, 'policy') };
   }
 
   /**
@@ -13206,9 +13435,13 @@ export class ObjectQL implements IObjectQLEngine {
       };
       await this.triggerHooks('beforeFind', hookContext);
       hookContext.input.options = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
+      // [ADR-0139 D2] The executor boundary: the AST is final here — after the
+      // doors, the middleware chain and `beforeFind` — so every `ReadableIds`
+      // leaf is composed (or refused) on it, immediately before the driver.
+      const driverAst = await this.composeReadableIdsAtBoundary(object, 'find', hookContext.input.ast as QueryAST, opCtx.context);
 
       try {
-          let result = await driver.find(object, hookContext.input.ast as QueryAST, hookContext.input.options as any);
+          let result = await driver.find(object, driverAst, hookContext.input.options as any);
 
           // [#21571] The read's default projection is the DECLARED field set:
           // a column no metadata declares (a field retired in an upgrade,
@@ -13500,8 +13733,10 @@ export class ObjectQL implements IObjectQLEngine {
       };
       await this.triggerHooks('beforeFind', hookContext);
       hookContext.input.options = this.buildDriverOptions(objectName, opCtx.context, hookContext.input.options as any);
+      // [ADR-0139 D2] The executor boundary, as in `find`.
+      const driverAst = await this.composeReadableIdsAtBoundary(objectName, 'findOne', hookContext.input.ast as QueryAST, opCtx.context);
 
-      let result = await driver.findOne(objectName, hookContext.input.ast as QueryAST, hookContext.input.options as any);
+      let result = await driver.findOne(objectName, driverAst, hookContext.input.options as any);
 
       // [#21571] Same default projection as `find`, same position: the
       // declared field set, applied to the row as the driver returned it.
@@ -15703,6 +15938,11 @@ export class ObjectQL implements IObjectQLEngine {
      };
 
      await this.executeWithMiddleware(opCtx, async () => {
+       // [ADR-0139 D1] A write's predicate never carries a `ReadableIds` leaf.
+       // The door refused the caller's; this refuses one the middleware chain
+       // wrote — here, at the executor's entry, because the prior-row reads
+       // below reach the driver before `updateMany` does.
+       collectComposableReadableIds(object, 'update', opCtx.ast?.where, 'where');
        // [#20082] The write's ONE permission resolution, shared by its option
        // gates and the formula fields on its response — asked at most once, and
        // only by the first of them that needs the map.
@@ -18504,6 +18744,10 @@ export class ObjectQL implements IObjectQLEngine {
     }
 
     await this.executeWithMiddleware(opCtx, async () => {
+      // [ADR-0139 D1] As in `update`: a leaf the middleware chain wrote into a
+      // delete's predicate is refused at the executor's entry, before the
+      // pre-image reads reach the driver.
+      collectComposableReadableIds(object, 'delete', opCtx.ast?.where, 'where');
       const hookContext: HookContext = {
           object,
           event: 'beforeDelete',
@@ -19033,7 +19277,14 @@ export class ObjectQL implements IObjectQLEngine {
      await this.executeWithMiddleware(opCtx, async () => {
        const countOpts = this.buildDriverOptions(object, opCtx.context);
        if (driver.count) {
-           return driver.count(object, opCtx.ast as QueryAST, countOpts);
+           // [ADR-0139 D2] The executor boundary, as in `find` (`count` has no
+           // before-hook): the AST is final once the chain has run. The
+           // `find()` fallback below composes at its own boundary.
+           return driver.count(
+             object,
+             await this.composeReadableIdsAtBoundary(object, 'count', opCtx.ast as QueryAST, opCtx.context),
+             countOpts,
+           );
        }
        // Fallback to find().length — find() applies the read filters itself,
        // so pass the caller's original where, not the already-scoped ast.
@@ -19486,7 +19737,10 @@ export class ObjectQL implements IObjectQLEngine {
       }
 
       await this.executeWithMiddleware(opCtx, async () => {
-        const ast = opCtx.ast as QueryAST;
+        // [ADR-0139 D2] The executor boundary, once for BOTH driver paths below
+        // (they are exclusive, and the rows path keeps this `where` by
+        // reference): the AST is final once the chain has run.
+        const ast = await this.composeReadableIdsAtBoundary(object, 'aggregate', opCtx.ast as QueryAST, opCtx.context);
 
         // Prefer driver.aggregate() when available — driver.find() in many
         // drivers (e.g. driver-sql) does not honor `groupBy` / `aggregations`

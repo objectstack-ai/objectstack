@@ -600,6 +600,16 @@ export class ObjectQLPlugin implements Plugin {
     // plugins read it — see SKIP_SCHEMA_SYNC_ENGINE_KEY.
     (this.ql as unknown as Record<string, unknown>)[SKIP_SCHEMA_SYNC_ENGINE_KEY] = this.skipSchemaSync;
 
+    // [ADR-0139 D2] The engine composes a `ReadableIds` leaf from the
+    // registered `security` service. Handed over as a SOURCE, read at use and
+    // never here: at this plugin's init the service is not registered yet on
+    // any composition that ships it (plugin-security registers it in its own
+    // start()), so a lookup here would record a verdict the same boot
+    // contradicts. The engine answers every state but a usable service
+    // `$in: []` (fail closed); a throw — the in-repo kernels' answer for a
+    // name nothing registered — is one of them.
+    this.ql.registerSecurityServiceSource(() => ctx.getService('security'));
+
     // Register as provider for Core Kernel Services
     ctx.registerService('objectql', this.ql);
 
