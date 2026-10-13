@@ -154,8 +154,9 @@ async function standingByReader(posture: Posture): Promise<Record<string, unknow
   await user('usr_member', 'member@gra.example', '2025-03-01T00:00:00.000Z');
   await user('usr_agent', 'agent@gra.example', '2025-04-01T00:00:00.000Z');
 
-  // An existing database: the platform-bucket rows an earlier release seeded.
-  await seedLegacyPlatformBucket(engine, bootstrapSets);
+  // An existing database: the platform-bucket rows an earlier release seeded,
+  // where the row object is still registered (C3 stage 8 retires it).
+  if (engine.getObject?.('sys_permission_set')) await seedLegacyPlatformBucket(engine, bootstrapSets);
   const boot = await bootstrapPlatformAdmin(engine, bootstrapSets);
   expect(boot.adminPromoted).toBe(posture === 'single');
   // The organization's own copies of the sets, where the row object is still

@@ -123,8 +123,11 @@ async function soleGrantAnchoredAdmin(): Promise<Rig> {
       'sys_account', { id: `acc_${id}`, user_id: id, account_id: `${id}@un.example`, provider_id: 'credential' }, SYS,
     );
   }
-  // An existing database: the platform-bucket rows an earlier release seeded.
-  await seedLegacyPlatformBucket(engine, (manifest.permissions ?? []) as any[]);
+  // An existing database: the platform-bucket rows an earlier release seeded,
+  // where the row object is still registered (C3 stage 8 retires it).
+  if (engine.getObject?.('sys_permission_set')) {
+    await seedLegacyPlatformBucket(engine, (manifest.permissions ?? []) as any[]);
+  }
   const boot = await bootstrapPlatformAdmin(engine, (manifest.permissions ?? []) as any[]);
   expect(boot).toMatchObject({ adminPromoted: true });
   return { engine };

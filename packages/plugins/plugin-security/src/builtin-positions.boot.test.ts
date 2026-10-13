@@ -574,14 +574,22 @@ const REFUSAL_GOLDEN: Record<string, WriteOutcome> = {
 };
 
 /**
+ * Whether the plugin still declares the `sys_position` row object. C3 stage 8
+ * retires it (ADR-0131 D3) and unregisters the walled data-door refusal with
+ * it; this harness registers the legacy table itself either way.
+ */
+const PLUGIN_DECLARES_POSITION_ROWS = securityObjects.some((o) => o.name === 'sys_position');
+
+/**
  * {@link REFUSAL_GOLDEN} for a scenario: the built-in row cases need an existing
  * database's rows. [ADR-0131 D3] Under a wall the tenant's position CREATE is
- * refused (`walled-catalog-data-door.ts`): the catalog is the platform
- * operator's, and a tenant may only assign it. The assignment cases do not
- * move, and the built-in row refusals keep their `403 PERMISSION_DENIED`.
+ * refused (`walled-catalog-data-door.ts`) while the plugin declares the row
+ * object: the catalog is the platform operator's, and a tenant may only assign
+ * it. The assignment cases do not move, and the built-in row refusals keep
+ * their `403 PERMISSION_DENIED`.
  */
 function refusalGoldenFor(scenario: Scenario): Record<string, WriteOutcome> {
-  const golden: Record<string, WriteOutcome> = scenario.posture === 'single'
+  const golden: Record<string, WriteOutcome> = scenario.posture === 'single' || !PLUGIN_DECLARES_POSITION_ROWS
     ? REFUSAL_GOLDEN
     : { ...REFUSAL_GOLDEN, 'control: create a position row': { ok: false, code: 'PERMISSION_DENIED', status: 403 } };
   if (scenario.existingRows) return golden;
