@@ -57,6 +57,13 @@ Get a specific metadata item with optional ETag caching.
 
 Create or update a metadata item.
 
+Saving requires the `manage_metadata` capability. Under a `group` or `isolated`
+tenancy posture it also requires the platform operator, for every type: the
+environment's metadata is shared by every organization (ADR-0131 D12 items 7–8,
+D11), so a `manage_metadata` holder inside one organization is refused
+`403 FORBIDDEN` naming the posture. The same holds for `DELETE` (reset),
+`POST /meta/:type/:name/publish` and `POST /meta/:type/:name/rollback`.
+
 Creates are gated per type: `MetadataTypeRegistryEntry.allowRuntimeCreate` decides
 whether a **brand-new** name may be minted under that type at all, separately from
 whether an item that already exists may be overlaid (`allowEnvironmentOverlay`). A type that
@@ -123,22 +130,17 @@ Get package details.
 
 ### `DELETE /packages/:id`
 
-Uninstall a package. Under a `group` or `isolated` tenancy posture, a package
-holding positions or permission sets is the platform operator's to delete: any
-other caller is refused `403 PERMISSION_DENIED` (ADR-0131 D3).
+Uninstall a package.
 
-The package's other write verbs follow the same rule under a wall, judged by
-the items each one acts on:
-- `POST /packages/:id/publish-drafts`, `POST /packages/:id/discard-drafts` and
-  `POST /packages/:id/revert`, by the package's pending drafts;
-- `POST /packages/:id/rollback`, by the commits it would undo;
-- `POST /packages/:id/commits/:commitId/revert`, by that commit's own items,
-  whatever package the URL names;
-- `POST /packages/:id/duplicate`, by the source's published items it copies;
-- `POST /packages/:id/adopt-orphans`, by the environment's orphaned rows.
-
-When those items include a position, a permission set or a capability, only the platform
-operator may run the verb.
+Under a `group` or `isolated` tenancy posture every `/packages` write is the
+platform operator's (ADR-0131 D12 items 7–8, D11): install (`POST /packages`),
+the manifest `PATCH`, enable, disable, publish, `publish-drafts`,
+`discard-drafts`, `revert`, `rollback`, `commits/:commitId/revert`, `duplicate`,
+`adopt-orphans` and this delete. Any other caller, a `manage_metadata` holder
+inside one organization included, is refused `403 PERMISSION_DENIED` naming the
+posture, before anything is read or written, whatever the package carries.
+Reads are unchanged. Under `single` every `manage_metadata` holder writes as
+before.
 
 ### `PATCH /packages/:id/enable`
 
