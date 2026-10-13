@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveInjectedSystemColumns, isInjectedColumnDefinition, isTenancyDisabled, checkManagedApiMethodAffordances, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
+import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveInjectedSystemColumns, isInjectedColumnDefinition, isTenancyDisabled, checkManagedApiMethodAffordances, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS, materializeTreeSelfReferences } from '@objectstack/spec/data';
 // [#4513] The audit-family governance table, and [#6562] the injected-column
 // DEFINITION tables it governs — see the re-exports below for why both live in a
 // package `objectql` and `metadata-protocol` both depend on.
@@ -2666,6 +2666,20 @@ export class SchemaRegistry {
     // its own. See {@link ObjectFieldTypeRefusedError}.
     const fieldTypeRefusal = objectFieldTypeRefusal(schema);
     if (fieldTypeRefusal) throw fieldTypeRefusal;
+
+    // [#23065] A `tree` field that names no `reference` references the object
+    // that declares it, and this is where that is written down for every door
+    // the parse does not cover: a metadata save stores the authored body
+    // verbatim and the `sys_metadata` rehydration and a raw `registerObject`
+    // never parse at all. `ObjectSchema`'s parse writes the same thing through
+    // the same spec helper, so the two doors cannot disagree, and every reader
+    // of the registered schema — the referential delete walk, the write-time
+    // reference check, `expand`, nested relation conditions — sees an ordinary
+    // self-reference. ⛔ No reader resolves it on its own. An extension
+    // registers under the object it extends (`name: ext.extend`), which is the
+    // object its trees reference.
+    const treeFields = materializeTreeSelfReferences(schema.name, schema.fields);
+    if (treeFields !== schema.fields) schema = { ...schema, fields: treeFields };
 
     // Apply system-field injection (multi-tenant org_id, future owner/audit)
     // BEFORE FQN computation and contributor storage so every consumer of

@@ -664,7 +664,32 @@ export const PageHeaderProps = strictObject({
     + 'it was `true` or `false`; the shell\'s trail is unchanged. '
     + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
-  actions: z.array(z.string()).optional().describe('Action IDs to show in header'),
+  /**
+   * The ids of the bound object's own actions the header draws.
+   *
+   * An authored list is the WHOLE set, not a filter laid over the actions that
+   * declare a header placement. objectui's `PageHeaderRenderer`
+   * (`containers.tsx`, `resolvedHeaderActions` then `headerActionPlan`)
+   * resolves each id against the actions declared on the bound object, keeps
+   * those whose `locations` include `record_header` or `record_more`, and draws
+   * no other action of the object:
+   *
+   * - an action that declares `record_header` and is NOT named here is not
+   *   drawn in this header. Declaring the placement does not add it, so the
+   *   list is the author's curation of the header, and a new header action is
+   *   added to the list as well as to the object;
+   * - with the key omitted, an authored `page:header` draws none of the
+   *   object's own actions (the list resolves to empty). Only the platform's
+   *   synthesized default record page, used when no page is assigned, builds
+   *   its header from every `record_header` / `record_more` action of the
+   *   object;
+   * - a named id whose action declares neither location renders nowhere;
+   * - the host's own system actions (Edit / Share / Delete) reach the header
+   *   through the record context, not through this list, whatever it names.
+   */
+  actions: z.array(z.string()).optional().describe(
+    'Action IDs the header draws, resolved against the actions declared on the page\'s object. An authored list is the whole set: an action that declares `record_header` (or `record_more`) in its `locations` but is not named here is not drawn, and omitting the key draws none of the object\'s actions. A named action that declares neither location renders nowhere. The host\'s own Edit / Share / Delete chrome is separate from this list.',
+  ),
   /**
    * Which of the two page-header layouts the renderer builds (#6776).
    *

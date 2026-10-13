@@ -34,6 +34,7 @@ import { SysMigration } from '@objectstack/platform-objects/system';
 
 import { SecurityPlugin } from './security-plugin.js';
 import { bootstrapPlatformAdmin } from './bootstrap-platform-admin.js';
+import { seedLegacyPlatformBucket } from './__tests__/legacy-catalog-rows.testkit.js';
 import { reconcileOrgAdminGrant } from './auto-org-admin-grant.js';
 import { SysPosition } from './objects/sys-position.object.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
@@ -175,6 +176,8 @@ async function boot(posture: Posture, opts: { ledger?: boolean } = {}): Promise<
   for (const ps of [...defaultPermissionSets, QA_ADMIN, OWN_SET, OTHER_SET]) {
     engine.registry.registerItem('permission', structuredClone(ps) as any, 'name' as any, CATALOG_PACKAGE);
   }
+  // An existing database: the platform-bucket rows an earlier release seeded.
+  await seedLegacyPlatformBucket(engine, defaultPermissionSets);
   const seeded = await bootstrapPlatformAdmin(engine, defaultPermissionSets);
   expect(seeded.adminPromoted).toBe(false); // no user yet — the golden world promotes after its users exist
 

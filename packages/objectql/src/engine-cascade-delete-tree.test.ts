@@ -36,7 +36,11 @@
  *    registration around it is read single-valued, as the walk's multi-value
  *    arbiter (`isMultiValueField`) reads it for every type;
  *  - CONTROLS: `lookup` (default `set_null`, `cascade`, `restrict`) and
- *    `master_detail` (default `cascade`, `restrict`) answer exactly as before.
+ *    `master_detail` (default `cascade`, `restrict`) answer exactly as before;
+ *  - [#23065] a `tree` that names no `reference` is a reference to its own
+ *    object: the registry writes that self-reference at registration (the door
+ *    a metadata save and a raw registration reach without the spec's parse), so
+ *    every behaviour above takes effect on it too.
  *
  * The driver has REAL snapshot rollback (the `engine-cascade-delete-atomic`
  * shape): a stub whose rollback is a no-op cannot tell "refused and rolled
@@ -44,7 +48,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { FieldSchema } from '@objectstack/spec/data';
+import { FieldSchema, ObjectSchema, referenceTargetOf } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 
 type Row = Record<string, unknown>;
@@ -401,5 +405,108 @@ describe('[#22957] a tree field\'s deleteBehavior takes effect on a parent delet
       expect(driver.committed).toHaveLength(0);
       expect(driver.rolledBack).toHaveLength(0);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#23065] A `tree` field that names no `reference` references the object that
+// declares it. The spec's object parse writes that down, and so does the
+// registry, for the doors that reach it without the parse: a metadata save
+// stores the authored body verbatim, and a raw `registerObject` is never
+// parsed. Before, no reader could read the target off such a field, so the walk
+// above never reached it: the parent delete answered success and the child kept
+// the deleted id, whatever `deleteBehavior` said.
+// ---------------------------------------------------------------------------
+
+describe('[#23065] a tree field that names no reference is a reference to its own object', () => {
+  /** The tree field with no `reference`, as a raw registration carries it. */
+  const bare = (extra: Record<string, unknown> = {}) => ({ type: 'tree', ...extra });
+
+  it('the registry writes the self-reference at registration, and leaves the caller\'s definition alone', async () => {
+    const definition = treeObject('zr_node', bare());
+    const { engine } = await makeEngine([definition]);
+    expect((engine.registry.getObject('zr_node') as any)?.fields?.parent?.reference).toBe('zr_node');
+    // The registered copy carries it; the object the caller handed in does not.
+    expect(definition.fields.parent).not.toHaveProperty('reference');
+  });
+
+  it('an extension\'s tree references the object it extends', async () => {
+    const { engine } = await makeEngine([{ name: 'zr_base', label: 'Base', fields: { id, name } }]);
+    engine.registry.registerObject(
+      { name: 'zr_base', fields: { parent_node: { name: 'parent_node', type: 'tree' } } } as any,
+      '__ext__', undefined, 'extend',
+    );
+    expect((engine.registry.getObject('zr_base') as any)?.fields?.parent_node?.reference).toBe('zr_base');
+  });
+
+  it.each([
+    ['absent (a raw registration)', bare()],
+    ['materialized by the spec\'s field parse', FieldSchema.parse({ type: 'tree' }) as Record<string, unknown>],
+    ['authored', bare({ deleteBehavior: 'set_null' })],
+  ])('set_null, %s: deleting the parent clears the child\'s parent and keeps the child', async (_label, def) => {
+    const { engine, driver } = await makeEngine([treeObject('zr_node', def)]);
+    const p = await engine.insert('zr_node', { name: 'P' });
+    const c = await engine.insert('zr_node', { name: 'C', parent: p.id });
+    const bystander = await engine.insert('zr_node', { name: 'B', parent: c.id });
+
+    await engine.delete('zr_node', { where: { id: p.id } } as any);
+
+    expect(driver.rowOf('zr_node', p.id)).toBeUndefined();
+    expect(driver.rowOf('zr_node', c.id)).toMatchObject({ name: 'C', parent: null });
+    expect(driver.rowOf('zr_node', bystander.id)).toMatchObject({ name: 'B', parent: c.id });
+  });
+
+  it('the object the spec\'s parse produced registers the same way (the declared-stack door)', async () => {
+    const parsed = ObjectSchema.parse({ name: 'zr_parsed', fields: { name: { type: 'text' }, parent: { type: 'tree' } } });
+    expect(parsed.fields.parent.reference).toBe('zr_parsed');
+    const { engine, driver } = await makeEngine([parsed]);
+    const p = await engine.insert('zr_parsed', { name: 'P' });
+    const c = await engine.insert('zr_parsed', { name: 'C', parent: p.id });
+
+    await engine.delete('zr_parsed', { where: { id: p.id } } as any);
+
+    expect(driver.rowOf('zr_parsed', c.id)).toMatchObject({ name: 'C', parent: null });
+  });
+
+  it('restrict refuses with the envelope naming the tree\'s own object, and keeps both rows', async () => {
+    const { engine, driver } = await makeEngine([treeObject('zr_held', bare({ deleteBehavior: 'restrict' }))]);
+    const p = await engine.insert('zr_held', { name: 'P' });
+    const c = await engine.insert('zr_held', { name: 'C', parent: p.id });
+
+    const err = await refusalOf(engine.delete('zr_held', { where: { id: p.id } } as any));
+
+    expect(err).toMatchObject({ code: 'DELETE_RESTRICTED', status: 409, dependentObject: 'zr_held' });
+    expect(driver.rowOf('zr_held', p.id)).toMatchObject({ name: 'P' });
+    expect(driver.rowOf('zr_held', c.id)).toMatchObject({ name: 'C', parent: p.id });
+  });
+
+  it('cascade deletes the subtree, and nothing outside it, as one unit of work', async () => {
+    const { engine, driver } = await makeEngine([treeObject('zr_branch', bare({ deleteBehavior: 'cascade' }))]);
+    const root = await engine.insert('zr_branch', { name: 'root' });
+    const a = await engine.insert('zr_branch', { name: 'a', parent: root.id });
+    await engine.insert('zr_branch', { name: 'b', parent: a.id });
+    await engine.insert('zr_branch', { name: 'a2', parent: root.id });
+
+    await engine.delete('zr_branch', { where: { id: a.id } } as any);
+
+    expect(namesOf(driver.rowsOf('zr_branch'))).toEqual(['a2', 'root']);
+    expect(driver.committed).toHaveLength(1);
+    expect(driver.rolledBack).toHaveLength(0);
+  });
+
+  it('an empty-string reference is not written over: it reaches the registry as written, and names nothing', async () => {
+    // The parse refuses `reference: ''` on a tree (`refuseForeignTreeReference`),
+    // so the registry, which never parses, must not repair it into a valid
+    // self-reference: the two doors give the shape one reading. The carrier
+    // reader then reads it as naming nothing, as it did before.
+    const { engine } = await makeEngine([treeObject('zr_empty', { type: 'tree', reference: '' })]);
+    const parent = (engine.registry.getObject('zr_empty') as any)?.fields?.parent;
+    expect(parent?.reference).toBe('');
+    expect(referenceTargetOf(parent)).toBeUndefined();
+  });
+
+  it('CONTROL: a tree that wrote its own name registers exactly as written', async () => {
+    const { engine } = await makeEngine([treeObject('zr_written', { type: 'tree', reference: 'zr_written' })]);
+    expect((engine.registry.getObject('zr_written') as any)?.fields?.parent?.reference).toBe('zr_written');
   });
 });

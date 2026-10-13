@@ -1750,11 +1750,24 @@ export const GetPublishedMetaItemResponseSchema = lazySchema(() => z.unknown().d
  * `null` is the honest answer for a body that declares none; ⛔ never a
  * machine-name fallback, which would make "has a label" and "has none"
  * indistinguishable to the reader that has to choose between them.
+ *
+ * [#23073] `member` tells two drafts of one bundle apart: for a type whose
+ * identity is a pair (`email_template`, `(name, locale)`), two languages of
+ * one template are two drafts with one `type` and `name`. It is the row's
+ * stored member, never read off the body, and it is the value the by-name
+ * doors' `member` selector takes back.
  */
 export const ListDraftsResponseSchema = lazySchema(() => z.object({
   drafts: z.array(z.object({
     type: z.string().describe('Metadata type name (canonical singular).'),
     name: z.string().describe('Item name.'),
+    member: z.string().optional().describe(
+      'The bundle member this draft is, for a metadata type whose identity is a pair (today only '
+      + '`email_template`, identified by `(name, locale)`): its discriminator value (`zh-CN`), and the '
+      + 'canonical member spelled out (`en-US`). Present on every draft of such a type, so two members of '
+      + 'one name are two entries; absent for a type whose identity is its name alone. Pass it back as the '
+      + 'by-name doors\' `member` selector (`?member=`) to read, publish or discard this draft.',
+    ),
     label: I18nLabelSchema.nullable().describe(
       'The draft body\'s own top-level `label`, as authored: a plain string or an inline '
       + 'locale map (`I18nLabel`), resolved by the reader. `null` when the body declares '

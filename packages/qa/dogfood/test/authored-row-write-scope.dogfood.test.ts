@@ -76,6 +76,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { resolveAuthzContext } from '@objectstack/core';
 import { SecurityPlugin } from '@objectstack/plugin-security';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 // ── the two objects under probe ────────────────────────────────────────────
 
@@ -229,8 +230,8 @@ describe('[#7281] checkAuthoredRowWrite answers the declaration, not the caller 
     expect(aliceId).toBeTruthy();
 
     const bindSet = async (userId: string, name: string) => {
-      const setRow = await ql.findOne('sys_permission_set', { where: { name }, context: { ...SYS } });
-      expect(setRow?.id, `the app-declared set '${name}' is seeded`).toBeTruthy();
+      const setRow = await catalogPermissionSet(ql, name);
+      expect(setRow, `the app-declared set '${name}' is served by the security catalog`).toBeTruthy();
       await ql.insert('sys_user_permission_set',
         { user_id: userId, permission_set: setRow.name }, { context: { ...SYS } });
     };

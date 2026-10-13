@@ -40,6 +40,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
 import { assertArmed, armedWhen } from './armed.js';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const SYS = { isSystem: true } as const;
 const GRANTS = 'sys_user_permission_set';
@@ -80,8 +81,8 @@ describe('a permission-set assignment grants only inside its validity window (AD
     adminTok = await stack.signIn();
     ql = await stack.kernel.getServiceAsync('objectql');
 
-    const set = await ql.findOne('sys_permission_set', { where: { name: SET }, context: SYS });
-    expect(set?.id, `the showcase seeded ${SET}`).toBeTruthy();
+    const set = await catalogPermissionSet(ql, SET);
+    expect(set, `the showcase served by the security catalog ${SET}`).toBeTruthy();
 
     for (const who of ['bare', 'open', 'before', 'inside', 'after', 'edited', 'falls', 'rises']) await sign(who);
     const now = Date.now();

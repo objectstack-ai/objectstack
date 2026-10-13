@@ -39,6 +39,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { assertArmed, armedWhen } from './armed.js';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const CUSTOMER = 'ald_customer';
 const NAMED = 'ald_named';
@@ -142,8 +143,7 @@ describe('[#21878] an activity row names its record by the ADR-0079 title, with 
       token[who] = await stack.signUp(email);
       const userId = await idOf('sys_user', { email });
       for (const name of PRINCIPALS[who]) {
-        const setId = await idOf('sys_permission_set', { name });
-        expect(setId, `fixture permission set ${name} seeded`).toBeTruthy();
+        expect(await catalogPermissionSet(ql, name), `fixture permission set ${name} served by the security catalog`).toBeTruthy();
         await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: name }, SYS);
       }
     }

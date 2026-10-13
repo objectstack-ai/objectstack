@@ -109,6 +109,27 @@ describe('ListPackageCommitsResponseSchema declares the commit timeline body', (
   it('the honest-empty timeline parses — {commits: []} is a declared, legal body', () => {
     expect(ListPackageCommitsResponseSchema.safeParse({ commits: [] }).success).toBe(true);
   });
+
+  it('[#23073] two languages of one email_template are two items told apart by `member`, which the parse keeps', () => {
+    const item = (member: string, existedBefore: boolean) => ({
+      type: 'email_template', name: 'acme.welcome', member, existedBefore, prevVersion: existedBefore ? 2 : null,
+    });
+    const timeline = {
+      commits: [{
+        id: 'cmt_03',
+        operation: 'apply' as const,
+        itemCount: 3,
+        items: [item('en-US', true), item('zh-CN', false), realResponse.commits[0]!.items[0]!],
+      }],
+    };
+    const result = ListPackageCommitsResponseSchema.safeParse(timeline);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data).toEqual(timeline);
+    expect(result.data.commits[0]!.items.map((i) => i.member)).toEqual(['en-US', 'zh-CN', undefined]);
+    // A type whose identity is its name alone carries no `member` key at all.
+    expect(result.data.commits[0]!.items[2]).not.toHaveProperty('member');
+  });
 });
 
 describe('RevertPackageCommitResponseSchema declares the revert body', () => {
