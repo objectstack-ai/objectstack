@@ -2,6 +2,7 @@
 '@objectstack/core': minor
 '@objectstack/objectql': patch
 '@objectstack/plugin-security': patch
+'@objectstack/plugin-sharing': patch
 '@objectstack/runtime': patch
 ---
 
@@ -16,14 +17,15 @@ What changes:
 - **`@objectstack/core`** — the anonymous branch of `resolveAuthzContext` resolves the guest's grants on a face that takes the explicit guest entry (the new `guestEntry` input). It reads the sets the `guest` position's definition names, through the same position-bound read every position uses, and the activation ledger as for any held set. It resolves them only in the organization the guest entry's organization step derives (`resolveGuestOrganization`), which asks ADR-0131 D9's predicate and no second spelling of it. With nothing bound, the guest holds no set and no read is issued. The predicate itself, `resolveSystemWriteOrganization`, moves to `@objectstack/core` so both of its askers share it. New exports: `resolveGuestOrganization`, `resolveSystemWriteOrganization` (with `SystemWriteOrganizationDecision` and `SystemWriteRefusalReason`), and `GuestOrganizationUnresolvedError` with `isGuestOrganizationUnresolvedError` and its constants.
 - **`@objectstack/objectql`** — `resolveSystemWriteOrganization` and its two types are re-exported from `@objectstack/core` as the same bindings. Nothing a caller imports changes.
 - **`@objectstack/plugin-security`** — the set resolution treats the guest's sets as any requested set, and no longer folds the guest's position into the request. A permission set that merely shares the anchor's name no longer reaches an anonymous caller, and the baseline and `everyone` never did. At the CRUD gate, a guest that reaches a data operation acting in no organization, on a deployment where the organization step refuses, is refused before the operation runs.
+- **`@objectstack/plugin-sharing`** — the read filter answers deny-all for the guest on every object that record sharing scopes, before the sharing-model branch: the guest reaches rows only through share links, never through the object's sharing model (ADR-0138 D3 item 6, as the maintainer's ruling C amends it). `externalSharingModel` is still not read for any caller. Share links are redeemed at their own door and are unchanged.
 - **`@objectstack/runtime`** — the runtime face, which serves the guest, asks for the guest's grants.
 
 What an anonymous caller sees at an `authRequired: false` endpoint of `type: 'object_operation'`:
 
-- **One organization, a set bound to `guest`:** the operation runs as the guest, under that set, in that organization. A write lands in that organization with no owner.
+- **One organization, a set bound to `guest`:** the operation runs as the guest, under that set, in that organization. A read the set grants is admitted and returns no row, whatever the object's sharing model (`private`, `public_read`, `public_read_write` or `controlled_by_parent`): the guest reaches a record only through a share link. A create the set grants lands in that organization with no owner.
 - **Nothing bound:** `403 PERMISSION_DENIED`, as before.
 - **A walled deployment, several organizations, or none:** `501 NOT_IMPLEMENTED`, naming the missing site binding (ADR-0138 D5), where it used to be `403 PERMISSION_DENIED` with nothing granted. Nothing that was served stops being served. The operator's log names the reason once.
 
-Unchanged: the public form doors, which keep their own posture and organization; the flow door, which runs under the flow's own declared posture; every surface that answers an anonymous request `401`; and every signed-in caller.
+Unchanged: share links, which still serve an anonymous caller the one record they name, with `publicSharing.eligibility` checked at the mint and at every redemption; the public form doors, which keep their own posture and organization; the flow door, which runs under the flow's own declared posture; every surface that answers an anonymous request `401`; and every signed-in caller.
 
-Level: `minor` for `@objectstack/core`, because new exported symbols widen its published index; `patch` for the other three, whose exports do not move.
+Level: `minor` for `@objectstack/core`, because new exported symbols widen its published index; `patch` for the other four, whose exports do not move.
