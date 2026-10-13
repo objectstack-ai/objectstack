@@ -2307,10 +2307,10 @@
     },
     {
       "id": "platform-core.home-admin-cluster-links",
-      "title": "Shell-hard-coded Administration targets + the retired System hub: every Administration target URL resolves to a real page (no RouteNotFound, no RecordDetailView for an object named 'system'), /apps/:app/system lands on the settings hub in one hop and every hub entry resolves, the five legacy system/* URLs redirect to their canonical object routes, and a member's shell offers no Administration entry",
+      "title": "Shell-hard-coded Administration targets + the retired System hub: every Administration target URL resolves to a real page (no RouteNotFound, no RecordDetailView for an object named 'system'), /apps/:app/system lands on the settings hub in one hop and every hub entry resolves, the five legacy system/* URLs redirect (users and organizations to their object routes, roles, positions and permissions to the Setup metadata catalog), and a member's shell offers no Administration entry",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2331,7 +2331,7 @@
         "as admin, enumerate the Administration target list from source — UnifiedSidebar's adminItems: sys-settings → /apps/setup/system, sys-apps → …/system/apps, sys-marketplace → …/system/marketplace, sys-objects → /apps/setup/metadata/object, sys-datasources → /apps/setup/metadata/datasource, sys-users → …/system/users, sys-orgs → …/system/organizations, sys-roles → …/system/roles, sys-config → …/system/settings (9 entries; the two metadata-admin ones deliberately point at the canonical /metadata/:type routes, #3660/#3739). No sidebar renders this list at the pin (see knownGaps), so it is walked as URLs",
         "navigate to EVERY target URL directly: each lands on a real page — screenshot first, then assert no RouteNotFound, no 'No Apps Configured' empty state, and above all no RecordDetailView rendering for an object literally named 'system' (the historical failure: short words fell through to the record-id tail — objectui#3655's two measured landings)",
         "open /apps/setup/system: it redirects in ONE hop to /apps/setup/system/settings (SystemLandingRedirect — the SystemHubPage card wall, its cards and count badges, was retired by objectui#3743, carried out in objectui#10507), where SettingsHub lists the settings manifests the server returns for this user; click every hub entry the same way. The ungated bare system/ai-approvals route is ai.console-ai-surface-gating's subject, not this walk's",
-        "legacy redirects: navigate directly to /apps/setup/system/users, …/organizations, …/roles, …/positions, …/permissions — each redirects to its canonical object route per the #3655 map (users→sys_user, organizations→sys_organization list, roles→sys_position [ADR-0090 D3 rename — 'Roles' and 'Positions' are one surface], positions→sys_position, permissions→sys_permission_set) and the landing page renders",
+        "legacy redirects: navigate directly to /apps/setup/system/users, …/organizations, …/roles, …/positions, …/permissions. users and organizations redirect to their object routes per the #3655 map (users→sys_user, organizations→sys_organization list). roles, positions and permissions redirect to the Setup metadata catalog in its environment scope (SystemCatalogRedirect, objectui#7611; positions and permission sets are registry items, ADR-0131 D3): roles→/apps/setup/metadata/position?scope=environment [ADR-0090 D3 rename — 'Roles' and 'Positions' are one surface], positions→the same, permissions→/apps/setup/metadata/permission?scope=environment [#3655 decision A: the permission-set surface]. Each landing page renders",
         "as the plain member, open /home and one app: the shell offers no Administration entry anywhere — /home has no sidebar (HomeLayout omits it) and the top-bar Help menu offers documentation only; the server-side half (Setup app refusal for the member) is platform-core.builtin-apps-nav-render clause 2/3 — cross-reference, do not re-score here"
       ],
       "acceptance": [
@@ -2348,9 +2348,9 @@
           "evidence": "the redirect trace + the per-entry verdict table"
         },
         {
-          "clause": "the five legacy system/* URLs redirect per the #3655 map and land on rendering pages — bookmarks and the URLs the retired hub once emitted keep working; roles lands on sys_position (the ADR-0090 rename, one surface under two vocabularies), permissions on sys_permission_set (decision A: rules-and-assignments is layer 2)",
+          "clause": "the five legacy system/* URLs redirect and land on rendering pages — bookmarks and the URLs the retired hub once emitted keep working. users and organizations land on their object routes (sys_user, the sys_organization list — the #3655 map). roles and positions land on the Setup metadata catalog at /apps/setup/metadata/position?scope=environment (the ADR-0090 rename, one surface under two vocabularies), and permissions at /apps/setup/metadata/permission?scope=environment (decision A: rules-and-assignments is layer 2) — the catalog, not the sys_position / sys_permission_set object routes, since objectui#7611 (ADR-0131 D3: positions and permission sets are registry items)",
           "oracle": "network",
-          "verify": "the navigation trace per legacy URL shows the redirect target object route; the landing renders",
+          "verify": "the navigation trace per legacy URL shows the redirect target: the object route for users and organizations, the …/metadata/TYPE?scope=environment catalog route for roles, positions and permissions; the landing renders. A roles, positions or permissions URL landing on the sys_position / sys_permission_set object route is the pre-objectui#7611 shape, so suspect the stale-console-bundle trap before scoring it",
           "evidence": "the five redirect traces + landings"
         },
         {
@@ -2369,7 +2369,7 @@
       "source": [
         "objectui packages/app-shell/src/layout/UnifiedSidebar.tsx (homeNavigation: base Home + Documentation, and the isWorkspaceAdmin-gated adminItems cluster with the #3590 /system targeting note and the #3660/#3739 canonical-metadata-route notes — the target list this item walks; mounted only by ConsoleLayout, which sets the app context) + packages/app-shell/src/console/home/HomeLayout.tsx (/home deliberately omits the sidebar)",
         "objectui apps/console/src/AppContent.tsx (SystemLandingRedirect: the bare …/system landing forwards to …/system/settings; SystemHubPage — its cards and count badges — retired by objectui#3743, carried out in objectui#10507) + apps/console/src/pages/settings/SettingsHub.tsx (the registry-driven hub: the settings manifests the server returns for this user)",
-        "objectui apps/console/src/AppContent.tsx (SystemObjectRedirect — the five legacy URLs, the #3655 object map with the ADR-0090 roles→sys_position note, and the measured pre-fix landings) + the exported systemRoutes fragment",
+        "objectui apps/console/src/AppContent.tsx (SystemObjectRedirect — users and organizations, the #3655 object map and the measured pre-fix landings; SystemCatalogRedirect — roles, positions and permissions onto the Setup catalog in its environment scope since objectui#7611, with the ADR-0090 roles→position note and decision A's permissions→permission note) + packages/app-shell/src/views/metadata-admin/catalog-scope.ts (ENVIRONMENT_SCOPE_QUERY, scope=environment) + the exported systemRoutes fragment",
         "objectui apps/console/src/__tests__/AppContent.systemHubRoutes.test.tsx + AppContent.legacyRedirects.test.tsx (the objectui-side pins — see knownGaps)",
         "platform-core.builtin-apps-nav-render (owns the server-side Setup refusal for the member — this item owns the shell-hard-coded home cluster, which that item does not touch)"
       ],
@@ -2385,6 +2385,12 @@
           "date": "2026-10-05",
           "change": "whole-item revision for three clauses #21782 failed (VF4). Clause 2 (stale): objectui 9eea12a2b (objectui#10507, fixing objectui#3743) deleted SystemHubPage before 17.6.0, and /apps/:app/system is now SystemLandingRedirect, one hop to /system/settings, so the clause walks the settings hub (verifier's wording). Clause 4 (retired): the hub count badges went with SystemHubPage, so the clause is dropped, with its badge-honesty negative and the two badge steps. Clause 5 (assertion defect): no /home sidebar exists for any persona, because HomeLayout omits it and UnifiedSidebar is mounted only by ConsoleLayout, which forces the app context; the member clause now asserts that no Administration entry is offered anywhere (verifier's wording). The verifier also found that the Administration cluster itself has no stable rendering surface, so steps 1-3 and 7, clause 1 and negatives 1 and 4 (now 1 and 3) walk the 9 adminItems as target URLs. A knownGap records why. The member persona now reads invite + sign-up (stock invite_only). Re-read at objectui 9dfaca6543: unchanged from the run's 2e818d0b51ec",
           "ref": "#21797"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-13",
+          "change": "clause 3, acceptance[2] (the legacy-redirect clause) re-pointed, with step 4, the title and the AppContent source note (stale spec, #23104 A2). Since objectui#7611, roles, positions and permissions no longer land on the sys_position / sys_permission_set object routes: SystemCatalogRedirect forwards them to the Setup metadata catalog in its environment scope (roles and positions to /apps/setup/metadata/position?scope=environment, permissions to /apps/setup/metadata/permission?scope=environment), because ADR-0131 D3 makes positions and permission sets registry items. users and organizations still use SystemObjectRedirect and are unchanged. Read at objectui 1fb1ced36243 (this repo's .objectui-sha): AppContent.tsx's systemRoutes, and the 'the catalog entries reach the Setup catalog (objectui#7611)' block of AppContent.systemHubRoutes.test.tsx. Both files are byte-identical at 7578323a544e",
+          "ref": "#23121"
         }
       ]
     },

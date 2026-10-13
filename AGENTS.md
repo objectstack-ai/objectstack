@@ -263,9 +263,9 @@ localStorage / auth gotchas.
 14. **⛔ A governed surface lands only the way its tier allows — Tier H by the maintainer's hand or by an authorized
     approval, Tier S by the owning seat on a contract-tier review of record; before that record no AI seat merges,
     queues, or arms auto-merge on a PR whose diff touches one.** The governed surfaces are `docs/adr/**`,
-    `docs/NORTH-STAR.md`, `.claude/**` (agents, hooks and settings — not only skills), `skills/**`, `AGENTS.md` and
-    `CLAUDE.md` — the file you are reading is one — and a mixed diff is governed whole on a single path hit. The
-    register is the `GOVERNED_SURFACES` table in `scripts/pm/check-governed-merges.mjs`, each row carrying its tier;
+    `docs/NORTH-STAR.md`, `.claude/**` (agents, hooks and settings — not only skills), `skills/**`, `AGENTS.md`,
+    `CLAUDE.md` — this file is one — and `.github/workflows/**`; a mixed diff is governed whole on one path hit.
+    The register is the `GOVERNED_SURFACES` table in `scripts/pm/check-governed-merges.mjs`, each row carrying its tier;
     adding a surface is an edit *there*, never here, and `pnpm check:pm-governed-prose` reds per-PR when this
     paragraph names fewer surfaces than the register — or more. When it reds, name the surface here. A fork PR
     (head repo ≠ base repo) is a proposal, never a delivery, whatever its paths: no AI seat readies, queues, arms
@@ -276,7 +276,7 @@ localStorage / auth gotchas.
     auto-merge, ⛔ never flip it out of draft to make any of those possible — judged on the PR's **file list**, not
     its description; a **mixed diff is not a proportion question**, one path hit is enough; to land the rest, split off
     the governed files. **The landing is tiered by the register; one Tier H path makes the whole PR Tier H.** **Tier H**
-    (人合: `docs/adr/**`, `docs/NORTH-STAR.md`, `skills/**`, `AGENTS.md`, `CLAUDE.md`): those four lift only for an
+    (人合: every register row except `.claude/**`): those four lift only for an
     authorized APPROVED review by an account in `GOVERNED_APPROVERS`, on ANY commit and not dismissed; that word is
     spent once per PR — the OWNING seat then lands it, later pushes included; the director seat requests the word as
     ONE batch of at most five rows, and the click stays the maintainer's. **Tier S** (席内达档复核落地: all of
