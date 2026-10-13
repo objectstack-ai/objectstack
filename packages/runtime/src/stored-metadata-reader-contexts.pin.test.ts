@@ -70,6 +70,15 @@ import { AppPlugin } from './app-plugin.js';
 import { DefaultDatasourcePlugin } from './default-datasource-plugin.js';
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 
+// [#23181] Pay the first transform of the default datasource's drivers at MODULE
+// LOAD. `kernel.bootstrap()` below reaches both through `service-datasource`'s
+// lazy `import()` (measured: they are the two workspace modules this boot first
+// evaluates), and `beforeAll` is clocked while collection is clocked against
+// nothing. Same shape and reason as `datasource-visibility.test.ts` (the
+// clocked-window rule, `scripts/check-test-source-alias.mjs`).
+import '@objectstack/driver-sqlite-wasm';
+import '@objectstack/driver-sql';
+
 const BOOT_TIMEOUT = 180_000;
 const ORIGIN = 'http://localhost:3000';
 const API = '/api/v1';
