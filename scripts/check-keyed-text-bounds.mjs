@@ -78,26 +78,39 @@
  *
  * ## The provenance of a floor, and how to reproduce it
  *
- * `MEASURED` is a claim about ONE named commit -- `MEASURED.ref` -- and never
- * about `main`. It is the census the floors under it were derived from, not a
- * statement about the tree you are running on.
+ * `MEASURED` is a claim about ONE named tree, and never about `main`. It is the
+ * census the floors under it were derived from, not a statement about the tree
+ * you are running on.
  *
- * ⚠️ `MEASURED.ref` is this gate's PR BASE, and this gate DOES NOT EXIST in
- * that tree: the census was taken on the PR branch, and the base is the sha the
- * branch had to record. So the obvious recipe -- check the ref out and run the
- * gate there -- fails with `MODULE_NOT_FOUND` (measured 2026-08-29), and the
- * reader who tries it learns nothing about the record. Reproduce it by running
- * TODAY's instrument AGAINST that tree instead. `sweep` is exported and takes a
- * root for exactly this:
+ * ⚠️ `MEASURED.ref` is the BASE of the PR that last wrote the record, and the
+ * census is that PR's own tree: the base plus the PR's diff, which is the tree
+ * of the commit that landed the record on `main`. A branch sha would not
+ * survive a squash landing, so the base is the sha the branch can record. Two
+ * consequences:
  *
- *   git worktree add --detach ../os-keyed-provenance "$REF"   # $REF = MEASURED.ref
- *   node --input-type=module -e "import('./scripts/check-keyed-text-bounds.mjs')
- *     .then((m) => console.log(m.sweep('../os-keyed-provenance').counts))"
+ *   - Checking the ref out and running the gate there may fail with
+ *     `MODULE_NOT_FOUND` (measured 2026-08-29, when the PR that wrote the first
+ *     record also added this gate). Run TODAY's instrument AGAINST a tree
+ *     instead; `sweep` is exported and takes a root for exactly this:
+ *
+ *       git worktree add --detach ../os-keyed-provenance "$TREE"
+ *       node --input-type=module -e "import('./scripts/check-keyed-text-bounds.mjs')
+ *         .then((m) => console.log(m.sweep('../os-keyed-provenance').counts))"
+ *
+ *   - Against the ref ALONE the instrument reads the base's census, which
+ *     differs from the record by exactly what the writing PR changed. The record
+ *     itself reproduces on the landing commit (or on the ref with that PR's diff
+ *     applied).
  *
  * All five counts are source-only, so where the tree is available the
- * re-derivation is cheap: no install and no build. Re-derived at `MEASURED.ref`
- * on 2026-08-29: 113/118/255/594/151 -- exactly the record, which is the
- * measurement that rules out "the original count was written wrong".
+ * re-derivation is cheap: no install and no build. The first record
+ * (113/118/255/594/151, ref `fa5d137ab0`, written by a PR whose diff declared no
+ * object) re-derived at its ref on 2026-08-29 -- exactly the record, which is
+ * the measurement that ruled out "the original count was written wrong". The
+ * current record is C3 stage 8's: 111/116/236/592/148, re-derived on 2026-10-13
+ * on the stage-8 tree (ref `01a3421f42` plus the stage-8 diff). Against the ref
+ * alone the instrument reads 115/120/248/612/152; the difference is the four
+ * retired security-catalog object files.
  *
  * ⚠️ A SHALLOW clone cannot do this at all -- `MEASURED.ref` predates the
  * default checkout window, so the commit is simply absent. That is why the
@@ -378,21 +391,23 @@ const ALLOWLIST_KINDS = new Set(['unboundable', 'pending']);
 // make visible in a diff.
 
 const MEASURED = Object.freeze({
-  // The commit this census describes. ⚠️ It is this gate's PR BASE, not a tree
-  // the gate ever ran in -- see the header for the recipe that actually
-  // reproduces it, and for why that distinction is not a detail. Immutable, so
-  // the record stays reproducible forever even as `main` moves away from it.
-  // ⛔ Never repoint it without re-running all five counts against the new ref.
+  // The base of the PR that last wrote this census; the census is that base
+  // plus the PR's diff. ⚠️ Not a tree the five counts hold on by itself -- see
+  // the header for the recipe that actually reproduces it, and for why that
+  // distinction is not a detail. Immutable, so the record stays reproducible
+  // forever even as `main` moves away from it.
+  // ⛔ Never repoint it without re-running all five counts against the new tree.
   //
   // [C3 stage 8] Re-measured, all five, when the four security-catalog row
-  // objects retired (ADR-0131 D3) and took their declarations and 25 index
-  // entries with them: the census is the stage-8 branch's, the ref its base.
-  ref: 'eab7236ff7',
-  files: 108,
-  objects: 113,
-  indexEntries: 230,
-  textFields: 569,
-  keyedTextColumns: 144,
+  // objects retired (ADR-0131 D3) and took 4 files, 4 objects, 12 index entries,
+  // 20 text fields and 4 keyed columns with them: the census is the stage-8
+  // tree's, the ref its base.
+  ref: '01a3421f42',
+  files: 111,
+  objects: 116,
+  indexEntries: 236,
+  textFields: 592,
+  keyedTextColumns: 148,
 });
 const MIN_FILES = 105;
 const MIN_OBJECTS = 110;
