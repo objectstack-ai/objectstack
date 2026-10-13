@@ -8,8 +8,10 @@ import {
   ANONYMOUS_DENY_STATUS,
   ANONYMOUS_DENY_CODE,
   ANONYMOUS_DENY_MESSAGE,
+  type AuthGate,
   type PluginContext,
 } from '@objectstack/core';
+import type { ErrorCode } from '@objectstack/spec/api';
 import type {
   IExternalDatasourceService,
   IHttpServer,
@@ -125,6 +127,12 @@ export interface ExternalDatasourceRoutesOptions {
     userId?: string | null;
     isSystem?: boolean;
     systemPermissions?: string[];
+    /**
+     * ADR-0069: the session's authentication-policy posture, as the
+     * `RestServer`'s resolver lifts it (`ExecutionContext.authGate`). Present
+     * only for a session the policy holds; the floor refuses on it.
+     */
+    authGate?: AuthGate;
   } | undefined>;
 }
 
@@ -186,7 +194,8 @@ export function registerExternalDatasourceRoutes(
 
   /**
    * [#9686 authentication, #9901 capability] The admission floor for this whole
-   * family. Answers `401 UNAUTHENTICATED` or `403 PERMISSION_DENIED` and
+   * family. Answers `401 UNAUTHENTICATED`, `403 PERMISSION_DENIED` or, for a
+   * session the ADR-0069 policy holds, `403` with the gate's own code, and
    * returns `true` when the caller must be refused, so every handler opens with
    * `if (await refuseFederationRequest(req, res, '<kind>')) return;`.
    *
@@ -295,7 +304,7 @@ export function registerExternalDatasourceRoutes(
     kind: 'read' | 'write',
   ): Promise<boolean> => {
     let authz:
-      | { userId?: string | null; isSystem?: boolean; systemPermissions?: string[] }
+      | { userId?: string | null; isSystem?: boolean; systemPermissions?: string[]; authGate?: AuthGate }
       | undefined;
     try {
       authz = await options.resolveExecutionContext?.(req);
@@ -303,6 +312,27 @@ export function registerExternalDatasourceRoutes(
       // An identity that could not be resolved is not an identity, and grants
       // that could not be read are not grants.
       authz = undefined;
+    }
+    // ADR-0069: a session the authentication policy HOLDS (an expired
+    // password, enforced MFA not yet enrolled) is gated out of every protected
+    // resource until it remediates, and this family is one: live remote-schema
+    // introspection, and two routes that create metadata. The same resolution
+    // carries the decision: REST's resolver lifts the session's posture onto
+    // `authGate` through `normalizeAuthGate` (`@objectstack/core`), the field
+    // `enforceAuth` reads. Asked first, as `enforceAuth` asks it, and answered
+    // as it answers: `403` with the gate's own `code` and `message`, in this
+    // surface's envelope. A held caller is told what to remediate, and its
+    // capabilities are not consulted.
+    //
+    // No path is consulted. This registrar's base is the host's argument, and
+    // nothing here is a remediation or bootstrap route, so the allow-list has
+    // nothing to exempt. `code` is declared as a bare string on the envelope's
+    // `authGate`. Its one producer (plugin-auth's `customSession` enrichment)
+    // writes only `PASSWORD_EXPIRED` and `MFA_REQUIRED`, both members of the
+    // vocabulary.
+    if (authz?.authGate) {
+      sendError(res, 403, authz.authGate.code as ErrorCode, authz.authGate.message);
+      return true;
     }
     if (shouldDenyAnonymous({ userId: authz?.userId, isSystem: authz?.isSystem, method: req?.method })) {
       sendError(res, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE);
