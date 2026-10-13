@@ -23,12 +23,5 @@ export const zhCNGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_mail_message.fields.reference_ids.label": "5102fd1664d35c0b",
   "objects.sys_mail_message.fields.reply_to.label": "90ad8f2ca791a95a",
   "objects.sys_mail_message.fields.sender_address.label": "89db06253eee9632",
-  "objects.sys_mailbox.fields.imap_folder.help": "6df2504b0ad65c2c",
-  "objects.sys_mailbox.fields.imap_folder.label": "6afaf2e5af3c3732",
-  "objects.sys_mailbox.fields.imap_last_uid.help": "976be380cb5ebe24",
-  "objects.sys_mailbox.fields.imap_last_uid.label": "d53c6793bc344823",
-  "objects.sys_mailbox.fields.imap_synced_at.help": "3c729e1a8081be4f",
-  "objects.sys_mailbox.fields.imap_synced_at.label": "c2a92e90f88ecaa0",
-  "objects.sys_mailbox.fields.imap_uid_validity.help": "ef847bdb1d8e2c72",
   "objects.sys_mailbox.fields.imap_uid_validity.label": "5a2ec2b384b73bb0",
 };

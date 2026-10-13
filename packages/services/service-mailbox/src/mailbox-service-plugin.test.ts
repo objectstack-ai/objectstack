@@ -158,7 +158,8 @@ describe('the inbound-mail objects', () => {
     for (const field of ['imap_folder', 'imap_uid_validity', 'imap_last_uid', 'imap_synced_at']) {
       expect(SysMailbox.fields[field as keyof typeof SysMailbox.fields]?.readonly, field).toBe(true);
     }
-    expect(Object.values(SysMailbox.fields).some((f) => f.type === 'secret' || f.type === 'password')).toBe(false);
+    const types: string[] = Object.values(SysMailbox.fields).map((f) => f.type);
+    expect(types.filter((t) => t === 'secret' || t === 'password')).toEqual([]);
   });
 
   it('let a message carry attachments by file reference', () => {
