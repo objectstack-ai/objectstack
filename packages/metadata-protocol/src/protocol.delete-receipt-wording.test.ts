@@ -57,6 +57,7 @@ interface Row {
     name: string;
     organization_id: string | null;
     state: string;
+    package_id: string | null;
     checksum: string;
     metadata: string;
 }
@@ -69,6 +70,10 @@ function overlayRow(type: string, name: string, state: 'active' | 'draft' = 'act
         type,
         name,
         organization_id: null,
+        // [#23165] Stored as the store holds an unbound row: the column is
+        // there, NULL. The delete now addresses its row by package (ADR-0048),
+        // so a row with no `package_id` key is a shape no store produces.
+        package_id: null,
         state,
         checksum: 'sha256:stored-head',
         metadata: JSON.stringify({ name, label: 'Stored' }),
@@ -82,7 +87,7 @@ function makeStubEngine(opts: {
     const rows = [...(opts.rows ?? [])];
     const artifactKeys = new Set((opts.artifacts ?? []).map((a) => `${a.type}|${a.name}`));
     /** Match only on the keys the caller actually constrained (`whereFor` */
-    /** omits `state` on the legacy path and `package_id` on delete). */
+    /** omits `state` on the legacy path). */
     const matches = (row: Row, where: Record<string, unknown> = {}) =>
         Object.entries(where).every(([k, v]) => (row as any)[k] === v);
 
@@ -92,8 +97,15 @@ function makeStubEngine(opts: {
             if (table !== 'sys_metadata') return null;
             return rows.find((r) => matches(r, query.where)) ?? null;
         },
-        // History counters (`nextItemVersion` / `nextEventSeq`) read here.
-        async find() { return []; },
+        // History counters (`nextItemVersion` / `nextEventSeq`) read here,
+        // from `sys_metadata_history`, which holds nothing in this double.
+        // [#23165] `sys_metadata` answers from the rows: the delete reads the
+        // item's rows to resolve its address.
+        async find(table: string, query: { where?: Record<string, unknown>; limit?: number } = {}) {
+            if (table !== 'sys_metadata') return [];
+            const hit = rows.filter((r) => matches(r, query.where));
+            return typeof query.limit === 'number' ? hit.slice(0, query.limit) : hit;
+        },
         async insert(_table: string, data: Record<string, unknown>) {
             return { id: 'inserted', ...data };
         },
