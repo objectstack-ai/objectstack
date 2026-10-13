@@ -113,13 +113,13 @@ const apiRow = (row: Row, onSuccess: unknown) =>
 // ===========================================================================
 
 describe("a page action row's `onSuccess` is `ActionSchema`'s own post-success block", () => {
-  it.each(ROWS)('REFUSAL: %s with `navigate: \'javascript:alert(1)\'` is refused at `onSuccess.navigate`', (row) => {
+  it.each(ROWS)('REFUSAL: $name with `navigate: \'javascript:alert(1)\'` is refused at `onSuccess.navigate`', (row) => {
     const issues = issuesOf(apiRow(row, { navigate: 'javascript:alert(1)' }));
     expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', [...row.at, 'onSuccess', 'navigate']]]);
     expect(firstSentence(issues[0].message)).toBe(`${NAVIGATE_SUBJECT}${JAVASCRIPT_REST}`);
   });
 
-  it.each(ROWS)('ACCEPTED CONTROL: %s with an in-app route template parses, `openIn` resolved as on the action', (row) => {
+  it.each(ROWS)('ACCEPTED CONTROL: $name with an in-app route template parses, `openIn` resolved as on the action', (row) => {
     const r = apiRow(row, { navigate: '/apps/crm/tasks/${result.id}' });
     expect(r.success, JSON.stringify(issuesOf(r))).toBe(true);
     expect(row.parsed(r.data).onSuccess).toEqual({ navigate: '/apps/crm/tasks/${result.id}', openIn: 'self' });
@@ -154,7 +154,7 @@ describe("a page action row's `onSuccess` is `ActionSchema`'s own post-success b
       : { ok: false, issues: issuesOf(r).map((i) => [i.code, i.path.slice(1), i.message]) };
   };
 
-  it.each(ROWS)('NO SECOND SHAPE: %s gives every probe the verdict `ActionSchema` gives it', (row) => {
+  it.each(ROWS)('NO SECOND SHAPE: $name gives every probe the verdict `ActionSchema` gives it', (row) => {
     for (const [label, onSuccess] of VERDICT_PROBES) {
       const r = apiRow(row, onSuccess);
       const rowVerdict = r.success
@@ -181,7 +181,7 @@ describe("a page action row's `onSuccess` is `ActionSchema`'s own post-success b
 // ===========================================================================
 
 describe("a page action row's executor key refuses `'navigation'`, the runner's alias of `'url'`", () => {
-  it.each(ROWS)("REFUSAL: %s with the alias is refused at its executor key, with the rename onto `'url'`", (row) => {
+  it.each(ROWS)("REFUSAL: $name with the alias is refused at its executor key, with the rename onto `'url'`", (row) => {
     const issues = issuesOf(row.parse({ [row.executorKey]: 'navigation', target: '/apps/crm/tasks' }));
     expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', [...row.at, row.executorKey]]]);
     expect(firstSentence(issues[0].message)).toBe(
@@ -190,13 +190,13 @@ describe("a page action row's executor key refuses `'navigation'`, the runner's 
     expect(issues[0].message).toContain(`Write \`${row.executorKey}: 'url'\``);
   });
 
-  it.each(ROWS)("ACCEPTED CONTROL: %s with `'url'` and the same target parses unchanged", (row) => {
+  it.each(ROWS)("ACCEPTED CONTROL: $name with `'url'` and the same target parses unchanged", (row) => {
     const r = row.parse({ [row.executorKey]: 'url', target: '/apps/crm/tasks' });
     expect(r.success, JSON.stringify(issuesOf(r))).toBe(true);
     expect(row.parsed(r.data)[row.executorKey]).toBe('url');
   });
 
-  it.each(ROWS)('CONTROL: %s keeps its executor key open — a host-registered handler name parses', (row) => {
+  it.each(ROWS)('CONTROL: $name keeps its executor key open — a host-registered handler name parses', (row) => {
     const r = row.parse({ [row.executorKey]: 'navigate_edit' });
     expect(r.success, JSON.stringify(issuesOf(r))).toBe(true);
   });
