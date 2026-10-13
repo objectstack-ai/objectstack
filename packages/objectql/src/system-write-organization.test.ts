@@ -55,6 +55,7 @@ import {
 // re-exports. Same reasoning, and the same shape, as the core precedent
 // `packages/core/src/service-resolution-discriminator.contract.test.ts`.
 import * as barrel from './index.js';
+import { resolveSystemWriteOrganization as coreResolveSystemWriteOrganization } from '@objectstack/core';
 
 const ORG_ID = 'org_msokm9oaz0cal87q';
 const SECOND_ORG_ID = 'org_second';
@@ -554,5 +555,16 @@ describe('#14936 the published recognizer for the org-less system-write refusal'
     // `barrel` is the module-top import (see the imports for why it is there).
     expect(barrel.SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE).toBe(SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE);
     expect(barrel.isSystemWriteOrganizationRequiredError).toBe(isSystemWriteOrganizationRequiredError);
+  });
+
+  it('[ADR-0138 D4] re-exports the ONE predicate @objectstack/core holds, never a copy', () => {
+    // The guest entry's organization step asks the same decision a
+    // system-context write asks (D4 item 2, "never a second spelling of it"),
+    // so the predicate lives one layer down and this package re-exports the
+    // binding itself. A copy here would compile, pass every decision case above,
+    // and drift from the guest's reading silently - identity is the only pin
+    // that cannot.
+    expect(resolveSystemWriteOrganization).toBe(coreResolveSystemWriteOrganization);
+    expect(barrel.resolveSystemWriteOrganization).toBe(coreResolveSystemWriteOrganization);
   });
 });

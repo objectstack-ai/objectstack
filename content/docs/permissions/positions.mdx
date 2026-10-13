@@ -7,9 +7,11 @@ description: "Positions are flat groups that hand permission sets to users — t
 A **position** (岗位) is a named, assignable distribution group: users hold
 positions (`sys_user_position` rows), a position names the permission sets it
 distributes in `permissionSets` on its definition, and a user's capability is
-the union of every set reached that way plus direct grants. A
-`sys_position_permission_set` row grants nothing. Positions carry **no capability
-of their own** — they only decide *who gets which sets*.
+the union of every set reached that way plus direct grants. The definition is
+the only binding: the retired `sys_position_permission_set` junction object is
+no longer registered, and a row an older database still holds grants nothing.
+Positions carry **no capability of their own** — they only decide *who gets
+which sets*.
 
 > **Formerly "roles".** ADR-0090 D3 renamed the concept in one step and
 > reserved the word *role* platform-wide (the D7 publish linter rejects it in
@@ -59,7 +61,7 @@ Assigning a position is a plain data row:
 ```typescript
 await objectql.object('sys_user_position').insert({
   user_id: 'user123',
-  position: 'sales_manager',          // machine name (sys_position.name)
+  position: 'sales_manager',          // the position's name in the security catalog
   business_unit_id: 'bu_east',        // ADR-0090 Addendum: the assignment anchor
 });
 ```
@@ -99,22 +101,28 @@ Two more built-in positions are **implicit** — they are never stored as
 assignment rows (the runtime rejects such rows) because whole principal
 classes hold them automatically:
 
-- **`everyone`** — every authenticated user. Binding a permission set to
-  `everyone` is how an admin authors *default grants* — additive, alongside
-  the configured baseline (`member_default`); receiving an explicit grant
-  never costs the baseline (the "fallback cliff" was abolished by D5).
-  Packages may *suggest* an everyone-binding via a set's `isDefault: true`;
-  the admin confirms each suggestion — nothing auto-binds.
+- **`everyone`** — every authenticated user. Its sets are the deployment's
+  *default grants*: the configured baseline (`member_default`) plus each
+  package set an admin holding `manage_metadata` accepted. Receiving an
+  explicit grant never costs the baseline (the "fallback cliff" was abolished
+  by D5). Packages *suggest* a default via a set's `isDefault: true`; the
+  admin confirms each suggestion — nothing auto-binds (see
+  [Permission Sets](/docs/permissions/permission-sets#package-suggestion--isdefault-adr-0090-d5)).
 - **`guest`** — every unauthenticated principal, which holds this position
-  *and nothing else*. Guest bindings face the strictest tier: explicit
-  objects only, read-only by default (create is the case-by-case exception,
-  e.g. public form intake), no View/Modify All, no system permissions.
+  *and nothing else*. Its definition is the platform's and names no permission
+  set, so a guest reaches data only through a surface that authorizes itself
+  from a declaration — a public form's `publicFormGrant`, a share link, a
+  public book (see the anonymous-deny gate in
+  [Authorization](/docs/permissions/authorization#the-enforcement-chain)).
 
-Both anchors reject **high-privilege bindings at the data layer** — no View/
-Modify All Data, no delete/purge/transfer, no `'*'` wildcard, no system
-permissions — no matter who asks (even a platform admin). Grant powerful sets
-through ordinary positions instead. Anchor bindings are tenant-level only: no
-delegated admin scope can touch them.
+No caller writes either anchor's definition — a platform admin and every
+delegated admin scope included: the platform declares both and derives
+`everyone`'s sets ([Authorization](/docs/permissions/authorization)). The
+high-privilege gate runs on that derived definition: accepting a set that
+carries a bit the `everyone` anchor forbids — View/Modify All Data,
+delete/purge/transfer, system permissions — is refused, and a later publish
+that adds one is withheld. Grant powerful sets through ordinary positions
+instead.
 
 ---
 

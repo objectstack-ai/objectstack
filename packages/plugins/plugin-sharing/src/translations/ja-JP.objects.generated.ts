@@ -38,8 +38,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           user: "ユーザー",
           group: "グループ",
           position: "ポジション",
-          unit_and_subordinates: "ビジネスユニットと下位階層",
-          guest: "ゲスト"
+          unit_and_subordinates: "ビジネスユニットと下位階層"
         }
       },
       recipient_id: {

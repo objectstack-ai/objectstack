@@ -106,6 +106,7 @@
 
 import {
   classifyFilterToken,
+  isReadableIds,
   isRecordContextToken,
   parseDateMacroParam,
   type DateMacroUnit,
@@ -505,6 +506,9 @@ export function resolveFilterToken(
 function hasFilterToken(node: unknown): boolean {
   if (typeof node === 'string') return classifyFilterToken(node) !== null;
   if (Array.isArray(node)) return node.some(hasFilterToken);
+  // A `ReadableIds` leaf is a comparand value: its `object` names a table and
+  // is never a placeholder (see `resolveFilterTokens`).
+  if (isReadableIds(node)) return false;
   if (node && typeof node === 'object' && !(node instanceof Date)) {
     return Object.values(node as Record<string, unknown>).some(hasFilterToken);
   }
@@ -518,6 +522,13 @@ function hasFilterToken(node: unknown): boolean {
  * bake one request's user id, and one day's dates, into every later render).
  *
  * Returns the input unchanged, by reference, when it holds no placeholders.
+ *
+ * [ADR-0139 D1] A branded `ReadableIds` leaf is returned BY REFERENCE, never
+ * rebuilt. Its brand is a non-enumerable symbol key, so the plain-object copy
+ * below would hand back an unbranded `{ object }`: a leaf beside a resolved
+ * placeholder would then reach the engine's executor boundary as a plain
+ * object in a `$in` comparand, which the engine cannot compose. The leaf holds
+ * no placeholder and is frozen, so returning it unchanged is exact.
  */
 export function resolveFilterTokens<T>(
   filter: T,
@@ -542,6 +553,8 @@ export function resolveFilterTokens<T>(
       return resolved;
     }
     if (Array.isArray(node)) return node.map(walk);
+    // [ADR-0139 D1] The leaf by reference, brand intact (see above).
+    if (isReadableIds(node)) return node;
     if (node && typeof node === 'object') {
       // Dates and other class instances are comparands, not filter structure.
       if (node instanceof Date) return node;

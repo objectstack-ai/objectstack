@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { ReadableIds, isReadableIds } from '@objectstack/spec/data';
 import {
   resolveFilterToken,
   resolveFilterTokens,
@@ -295,6 +296,21 @@ describe('resolveFilterTokens — tree walk', () => {
 
   it('accepts the `${token}` spelling', () => {
     expect(resolveFilterTokens({ d: '${30_days_ago}' }, ctx)).toEqual({ d: '2026-06-15' });
+  });
+
+  // [ADR-0139 D1] The tree around a placeholder is rebuilt; a `ReadableIds`
+  // leaf in it is not. Its brand is a non-enumerable symbol key, so a copy of
+  // it is an unbranded `{ object }` that the engine's executor boundary cannot
+  // compose.
+  it('returns a ReadableIds leaf beside a resolved placeholder by reference, brand intact', () => {
+    const leaf = ReadableIds.of('cpz_doc');
+    const out = resolveFilterTokens(
+      { owner: '{current_user_id}', $or: [{ record_id: { $in: leaf } }, { note: 'x' }] },
+      ctx,
+    ) as { owner: string; $or: Array<{ record_id?: { $in: unknown } }> };
+    expect(out.owner).toBe('usr_1');
+    expect(out.$or[0].record_id!.$in).toBe(leaf);
+    expect(isReadableIds(out.$or[0].record_id!.$in)).toBe(true);
   });
 });
 

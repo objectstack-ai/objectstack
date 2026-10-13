@@ -215,9 +215,11 @@ read and the metadata door serve.
 **No authorization check reads a `sys_capability` row.** Permission-set grants
 and resource `requiredPermissions` match capability names **as strings**. The
 boot writes no row for a capability, declared or curated: both are served by
-the registry. A row an older database still holds is a catalogue only, and
-clearing its `active` flag revokes nothing. Withdraw a capability by
-withdrawing the **grant**.
+the registry. The `sys_capability` object itself is retired and no longer
+registered (ADR-0131 D3): a row an older database still holds is served by no
+route and read by nothing, and `os migrate organization-ownership --apply`
+reports the authored rows and deletes the seeded copies (ADR-0131 D10).
+Withdraw a capability by withdrawing the **grant**.
 </Callout>
 
 ## `capability` is code-only
@@ -243,9 +245,10 @@ result is an unreferenced grant target sitting in the live authorization
 namespace. `job` and `agent` carry the same pair for the same reason.
 
 Under a `group` or `isolated` tenancy posture, a caller below the platform
-operator reads a different refusal, with the same `403` status: the security
-catalog refusal (ADR-0131 D3), whose message names the posture, with the code
-`FORBIDDEN` on the REST door and `PERMISSION_DENIED` on the runtime dispatcher.
+operator reads a different refusal, with the same `403` status: the walled
+refusal every environment-metadata write takes there (ADR-0131 D3, D12 items
+7–8), whose message names the posture, with the code `FORBIDDEN` on the REST
+door and `PERMISSION_DENIED` on the runtime dispatcher.
 It runs before the code-only refusal, so the block above is the answer the
 platform operator reads, and every caller under `single`.
 

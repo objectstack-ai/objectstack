@@ -38,8 +38,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           user: "Usuario",
           group: "Grupo",
           position: "Puesto",
-          unit_and_subordinates: "Unidad de negocio y subordinados",
-          guest: "Invitado"
+          unit_and_subordinates: "Unidad de negocio y subordinados"
         }
       },
       recipient_id: {

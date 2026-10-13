@@ -56,8 +56,10 @@ import {
   BUILTIN_IDENTITY_PLATFORM_ADMIN,
   ADMIN_FULL_ACCESS,
   ADMIN_FULL_ACCESS_CAPABILITIES,
+  GUEST_POSITION,
   ORGANIZATION_ADMIN_GRANTS,
 } from '@objectstack/spec';
+import { SystemObjectName } from '@objectstack/spec/system';
 import type { AuthzPosture, TenancyPosture } from '@objectstack/spec/security';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { isValueDomainMember } from '@objectstack/spec/shared';
@@ -70,6 +72,7 @@ import { openRequestGrantsMemo, withRequestGrantsMemo } from './request-grants-m
 import { matchesConfiguredPlatformAdmin, resolvePlatformAdminEmails } from './platform-admin.js';
 import { derivePosture } from './posture-ladder.js';
 import { securityCatalogReaderOf, type SecurityCatalogReader } from './security-catalog.js';
+import { resolveSystemWriteOrganization, type SystemWriteOrganizationDecision } from './system-write-organization.js';
 import { METADATA_ACTIVATION_TABLE } from '../utils/metadata-activation-store.js';
 
 /** The transport-agnostic authorization envelope produced from a request. */
@@ -140,6 +143,20 @@ export interface ResolveAuthzInput {
    * never made WORSE, only less strict.
    */
   tenancyPosture?: TenancyPosture;
+  /**
+   * [ADR-0138 D3/D4] This face takes the EXPLICIT guest entry
+   * (`assembleExecutionContextOrGuest`): a request that resolves no principal
+   * is served as the guest, so the guest's grants are resolved for it — the
+   * sets bound to the `guest` anchor position, in the organization D4 derives
+   * ({@link resolveGuestAnchorGrants}).
+   *
+   * Only the face that serves the guest asks for them (D2's adoption rule: the
+   * guest-entry doors, classes 4 and 5). A face that answers an anonymous
+   * request 401 (the fail-closed default entry) omits it and pays no read for
+   * a guest it never serves — and no set bound to `guest` can reach a door that
+   * never adopted the guest entry.
+   */
+  guestEntry?: boolean;
 }
 
 /**
@@ -334,7 +351,9 @@ async function tryFind(
 
 /**
  * Resolve the authorization context for an inbound request. Anonymous requests
- * yield `{ positions: [], permissions: [], ... }`.
+ * yield `{ positions: [], permissions: [], ... }` — and, on a face that takes
+ * the guest entry ({@link ResolveAuthzInput.guestEntry}), the guest's grants
+ * (ADR-0138 D3/D4, {@link resolveGuestAnchorGrants}).
  *
  * ⚠️ [commit 6a180e42d] This function used to document itself as "Always resolves — never
  * throws", and that total guarantee WAS the defect: the only way to always
@@ -425,7 +444,25 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
     }
   }
 
-  if (!userId) return ctx;
+  if (!userId) {
+    // [ADR-0138 D3/D4] The anonymous branch — until E1 it returned here before
+    // any position or binding was resolved, so a set bound to the `guest`
+    // anchor granted nothing: ADR-0090 D9's declared-not-enforced point. A face
+    // that serves the guest now resolves the guest's grants, in the
+    // organization D4 derives. A REFUSED API key never reaches this line (it
+    // returned above): a request whose credential was refused is not served
+    // the guest's grants.
+    if (input.guestEntry) {
+      const guest = await resolveGuestAnchorGrants(ql, input.tenancyPosture);
+      if (guest) {
+        ctx.tenantId = guest.organizationId;
+        ctx.permissions = guest.permissions;
+        ctx.systemPermissions = guest.systemPermissions;
+        if (guest.tabPermissions) ctx.tabPermissions = guest.tabPermissions;
+      }
+    }
+    return ctx;
+  }
   ctx.userId = userId;
   if (tenantId) ctx.tenantId = tenantId;
   if (!ql || typeof ql.find !== 'function') return ctx;
@@ -838,6 +875,203 @@ async function catalogSetBody(
 }
 
 /**
+ * [ADR-0131 D3/D4] The sets each of `positions` names in its catalog
+ * definition, in declared order — THE position-bound read: every position's
+ * bindings, the `guest` anchor's included, are read here and nowhere else
+ * (ADR-0138 D3 item 1: "the one binding reader every position uses"). In
+ * process: no row is read. A name the catalog holds no position for names
+ * nothing, and with no catalog bound every position names nothing.
+ */
+async function positionBoundSetNames(
+  catalog: SecurityCatalogReader | undefined,
+  positions: readonly string[],
+): Promise<Map<string, string[]>> {
+  const named = new Map<string, string[]>();
+  if (!catalog) return named;
+  for (const positionName of positions) {
+    named.set(positionName, positionSetNamesOf((await catalog.resolve('position', positionName))?.definition));
+  }
+  return named;
+}
+
+type TabVisibility = 'visible' | 'hidden' | 'default_on' | 'default_off';
+
+/**
+ * Fold held set bodies into a grant envelope: each set's name onto
+ * `permissions`, its system permissions onto `systemPermissions`, and its tab
+ * permissions merged by highest visibility — the derivation every held set
+ * takes, the user's (§6b) and the guest's ({@link resolveGuestAnchorGrants})
+ * alike. Bodies arrive already filtered: a switched-off set is never handed in.
+ */
+function foldCatalogSetBodies(
+  target: { permissions: string[]; systemPermissions: string[]; tabPermissions?: Record<string, TabVisibility> },
+  bodies: readonly CatalogSetBody[],
+): void {
+  const tabRank: Record<string, number> = { hidden: 0, default_off: 1, default_on: 2, visible: 3 };
+  const mergedTabs: Record<string, TabVisibility> = {};
+  for (const ps of bodies) {
+    if (ps.name && !target.permissions.includes(ps.name)) target.permissions.push(ps.name);
+    const sysPerms = ps.systemPermissions;
+    if (Array.isArray(sysPerms)) {
+      for (const p of sysPerms) {
+        if (typeof p === 'string' && !target.systemPermissions.includes(p)) target.systemPermissions.push(p);
+      }
+    }
+    const tabs = ps.tabPermissions;
+    if (tabs && typeof tabs === 'object' && !Array.isArray(tabs)) {
+      for (const [app, val] of Object.entries(tabs as Record<string, unknown>)) {
+        if (typeof val !== 'string' || !(val in tabRank)) continue;
+        const cur = mergedTabs[app];
+        if (!cur || tabRank[val] > tabRank[cur]) {
+          mergedTabs[app] = val as TabVisibility;
+        }
+      }
+    }
+  }
+  if (Object.keys(mergedTabs).length > 0) target.tabPermissions = mergedTabs;
+}
+
+/**
+ * Whether the engine's registry holds `object`. A registry that cannot answer
+ * is not an answer — `true`, so the read is issued and decides (the
+ * activation-ledger guard's reading, {@link ledgerUnregistered}).
+ */
+function registryHoldsObject(ql: any, object: string): boolean {
+  const getObject = ql?.registry?.getObject;
+  if (typeof getObject !== 'function') return true;
+  try {
+    return !!getObject.call(ql.registry, object);
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * [ADR-0138 D4] The guest entry's organization step: the organization an
+ * anonymous request acts in, decided by `resolveSystemWriteOrganization` —
+ * ADR-0131 D9's predicate, the one a system-context write asks (D4 item 2,
+ * "never a second spelling of it"). Derived when the deployment holds exactly
+ * one organization under `single`; refused under a wall, at several
+ * organizations, and at none; and `no-organization-object` in a composition
+ * that registers no organization object at all.
+ *
+ * Server-side only: nothing the client sends is read (D4 item 1).
+ *
+ * Its facts, supplied here as the engine supplies its own:
+ *
+ *  - the posture: the face's EFFECTIVE posture, the value the Layer 0 wall is
+ *    handed. No posture is no wall (`single`), the reading
+ *    {@link vetOrganizationClaim} gives an omitted posture.
+ *  - the probe: at most two organization ids, read as the system — through
+ *    {@link tryFind}, so an unprovisioned table is zero organizations and any
+ *    other failed read is the loud `AuthzStoreUnavailableError`, never an
+ *    invented count.
+ *  - whether the organization object is registered, asked of the registry
+ *    BEFORE the probe, as the engine's own probe asks it: an unregistered name
+ *    is refused by the engine as "object not found", which is not a missing
+ *    table, so it is never read. An engine with no `find` at all wires no
+ *    data plane, so it registers none.
+ *
+ * Two askers, one step: the guest entry ({@link resolveGuestAnchorGrants}),
+ * and the CRUD gate that raises D4's located refusal for a guest that reaches
+ * a data operation with no organization (`@objectstack/plugin-security`,
+ * `GuestOrganizationUnresolvedError`).
+ */
+export async function resolveGuestOrganization(
+  ql: any,
+  tenancyPosture: TenancyPosture | undefined,
+): Promise<SystemWriteOrganizationDecision> {
+  // No engine wired is no data plane at all — no organization can exist — and
+  // is not a failed read (`tryFind`'s own reading of it).
+  const organizationObjectRegistered = !!ql && typeof ql.find === 'function'
+    && registryHoldsObject(ql, SystemObjectName.ORGANIZATION);
+  return resolveSystemWriteOrganization({
+    posture: tenancyPosture ?? 'single',
+    probeOrganizations: async () => {
+      if (!organizationObjectRegistered) return [];
+      const rows = await tryFind(ql, SystemObjectName.ORGANIZATION, {}, 2);
+      return rows
+        .map((row) => row?.id ?? row?._id)
+        .filter((id: unknown) => id !== undefined && id !== null && String(id) !== '')
+        .map((id: unknown) => String(id));
+    },
+    organizationObjectRegistered,
+  });
+}
+
+/** What the guest entry adds to the anonymous envelope ({@link resolveGuestAnchorGrants}). */
+interface GuestAnchorGrants {
+  /** The organization D4 derived — the guest's `tenantId`. */
+  organizationId: string;
+  permissions: string[];
+  systemPermissions: string[];
+  tabPermissions?: Record<string, TabVisibility>;
+}
+
+/**
+ * [ADR-0138 D3] The guest's grants: the permission sets bound to the `guest`
+ * anchor position, in the organization D4 derives — or `undefined` when the
+ * guest holds nothing.
+ *
+ *  1. **The binding is the position's own definition** (ADR-0131 D3/D4), read
+ *     by {@link positionBoundSetNames}, the reader every position's bindings
+ *     go through. No guest-specific storage, no second reader (D3 item 1).
+ *  2. **Nothing bound, nothing read.** The definition is read first, in
+ *     process, only to learn whether anything is bound: with nothing bound the
+ *     guest holds no set (D3 item 2, the ADR-0056 D2 deny baseline) and no row
+ *     is read — the common anonymous request pays no query here.
+ *  3. **The organization comes first** (D3 item 7). No set is granted without
+ *     D4's organization: a `refuse` decision, or a composition with no
+ *     organization object, leaves the guest holding nothing and acting in no
+ *     organization. The REFUSAL is not raised here — this envelope is
+ *     assembled for every sessionless request the face serves, and D4 is asked
+ *     only where the organization matters (D4 item 3) — but by the CRUD gate
+ *     a guest data operation reaches.
+ *  4. **Deactivation is the activation ledger's** ({@link readDisabledCatalogNames}),
+ *     as for every held position and set: a switched-off `guest` position
+ *     grants nothing, and a switched-off set is dropped.
+ *  5. **The bodies fold as every held set's do** ({@link foldCatalogSetBodies}).
+ *     A set bound to `guest` passed the strictest anchor tier where it was
+ *     bound (D3 item 4); its names reach `permissions`, where the security
+ *     plugin's set resolution treats them as any requested set.
+ *
+ * ⛔ Nothing else reaches the guest (D3 item 3). The `everyone` anchor and the
+ * platform-admin derivations live in {@link resolveUserAuthzGrants}, which a
+ * request with no user never reaches; the authenticated baseline is applied by
+ * the security plugin's set resolution to a caller with a user id only; and
+ * the position-name fold is closed for the guest there too
+ * (`SecurityPlugin.resolvePermissionSetsForContextUnmemoized`).
+ */
+async function resolveGuestAnchorGrants(
+  ql: any,
+  tenancyPosture: TenancyPosture | undefined,
+): Promise<GuestAnchorGrants | undefined> {
+  if (!ql || typeof ql.find !== 'function') return undefined;
+  const catalog = securityCatalogReaderOf(ql);
+  const bound = (await positionBoundSetNames(catalog, [GUEST_POSITION])).get(GUEST_POSITION) ?? [];
+  if (bound.length === 0) return undefined;
+
+  const organization = await resolveGuestOrganization(ql, tenancyPosture);
+  if (organization.kind !== 'derived') return undefined;
+
+  const grants: GuestAnchorGrants = {
+    organizationId: organization.organizationId,
+    permissions: [],
+    systemPermissions: [],
+  };
+  const disabled = await readDisabledCatalogNames(ql, [GUEST_POSITION], bound);
+  if (disabled.positions.has(GUEST_POSITION)) return grants;
+  const bodies: CatalogSetBody[] = [];
+  for (const name of bound) {
+    if (disabled.permissions.has(name)) continue;
+    const body = await catalogSetBody(catalog, name);
+    if (body && !bodies.some((b) => b.name === body.name)) bodies.push(body);
+  }
+  foldCatalogSetBodies(grants, bodies);
+  return grants;
+}
+
+/**
  * resolveUserAuthzGrants — the userId-driven core of {@link resolveAuthzContext}.
  *
  * Given a KNOWN user id, aggregate the authorization grants that user holds:
@@ -1134,12 +1368,7 @@ export async function resolveUserAuthzGrants(
   if (grants.positions.length > 0) {
     // The definitions first (in-process), so the ONE ledger read can ask about
     // every position and every set this resolution may grant.
-    const namedByPosition = new Map<string, string[]>();
-    if (catalog) {
-      for (const positionName of grants.positions) {
-        namedByPosition.set(positionName, positionSetNamesOf((await catalog.resolve('position', positionName))?.definition));
-      }
-    }
+    const namedByPosition = await positionBoundSetNames(catalog, grants.positions);
     disabled = await readDisabledCatalogNames(
       ql,
       grants.positions,
@@ -1209,29 +1438,7 @@ export async function resolveUserAuthzGrants(
     // `deactivate_permission_set` dialog's promise ("existing assignments stay
     // in place but stop granting access"). Dropped BEFORE any derivation, the
     // same discipline the validity window gets at §6.
-    const psRows = psRowsAll.filter((r) => r.active);
-    const tabRank: Record<string, number> = { hidden: 0, default_off: 1, default_on: 2, visible: 3 };
-    const mergedTabs: Record<string, 'visible' | 'hidden' | 'default_on' | 'default_off'> = {};
-    for (const ps of psRows) {
-      if (ps.name && !grants.permissions.includes(ps.name)) grants.permissions.push(ps.name);
-      const sysPerms = ps.systemPermissions;
-      if (Array.isArray(sysPerms)) {
-        for (const p of sysPerms) {
-          if (typeof p === 'string' && !grants.systemPermissions.includes(p)) grants.systemPermissions.push(p);
-        }
-      }
-      const tabs = ps.tabPermissions;
-      if (tabs && typeof tabs === 'object' && !Array.isArray(tabs)) {
-        for (const [app, val] of Object.entries(tabs as Record<string, unknown>)) {
-          if (typeof val !== 'string' || !(val in tabRank)) continue;
-          const cur = mergedTabs[app];
-          if (!cur || tabRank[val] > tabRank[cur]) {
-            mergedTabs[app] = val as 'visible' | 'hidden' | 'default_on' | 'default_off';
-          }
-        }
-      }
-    }
-    if (Object.keys(mergedTabs).length > 0) grants.tabPermissions = mergedTabs;
+    foldCatalogSetBodies(grants, psRowsAll.filter((r) => r.active));
   }
 
   // 6b-config. [#11663 L2] The DEPLOYMENT-CONFIG anchor for PLATFORM_ADMIN —
