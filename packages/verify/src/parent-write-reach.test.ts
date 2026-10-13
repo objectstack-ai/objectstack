@@ -67,7 +67,7 @@ const source = {
       label: 'Contract',
       sharingModel: 'controlled_by_parent',
       fields: {
-        account: { type: 'master_detail', label: 'Account', reference: 'pwr_account' },
+        account: { type: 'master_detail', required: true, label: 'Account', reference: 'pwr_account' },
         // A second required reference, to an object the personas hold no grant on.
         signer: { type: 'lookup', label: 'Signer', reference: 'pwr_person', required: true },
         title: { type: 'text', label: 'Title' },
@@ -77,14 +77,14 @@ const source = {
       name: 'pwr_quote',
       label: 'Quote',
       sharingModel: 'controlled_by_parent',
-      fields: { account: { type: 'master_detail', label: 'Account', reference: 'pwr_account' }, title: { type: 'text', label: 'Title' } },
+      fields: { account: { type: 'master_detail', required: true, label: 'Account', reference: 'pwr_account' }, title: { type: 'text', label: 'Title' } },
     },
     {
       // Two levels: a line's master is a quote, whose own master is an account.
       name: 'pwr_quote_line',
       label: 'Quote line',
       sharingModel: 'controlled_by_parent',
-      fields: { quote: { type: 'master_detail', label: 'Quote', reference: 'pwr_quote' }, title: { type: 'text', label: 'Title' } },
+      fields: { quote: { type: 'master_detail', required: true, label: 'Quote', reference: 'pwr_quote' }, title: { type: 'text', label: 'Title' } },
     },
   ],
   permissions: [manager, rep],
@@ -130,7 +130,7 @@ describe('deriveParentWriteReachCases — what the family reads from the metadat
     const deep = Array.from({ length: 10 }, (_, i) => ({
       name: `pwr_deep_${i}`,
       sharingModel: 'controlled_by_parent',
-      fields: { up: { type: 'master_detail', reference: i === 9 ? 'pwr_account' : `pwr_deep_${i + 1}` } },
+      fields: { up: { type: 'master_detail', required: true, reference: i === 9 ? 'pwr_account' : `pwr_deep_${i + 1}` } },
     }));
     const config = {
       objects: [
@@ -140,17 +140,17 @@ describe('deriveParentWriteReachCases — what the family reads from the metadat
           name: 'pwr_two_masters',
           sharingModel: 'controlled_by_parent',
           fields: {
-            account: { type: 'master_detail', reference: 'pwr_account' },
-            person: { type: 'master_detail', reference: 'pwr_person' },
+            account: { type: 'master_detail', required: true, reference: 'pwr_account' },
+            person: { type: 'master_detail', required: true, reference: 'pwr_person' },
           },
         },
         { name: 'pwr_no_master', sharingModel: 'controlled_by_parent', fields: { account: { type: 'lookup', reference: 'pwr_account', required: true } } },
-        { name: 'pwr_outside', sharingModel: 'controlled_by_parent', fields: { owner: { type: 'master_detail', reference: 'crm_elsewhere' } } },
-        { name: 'pwr_loop_a', sharingModel: 'controlled_by_parent', fields: { b: { type: 'master_detail', reference: 'pwr_loop_b' } } },
-        { name: 'pwr_loop_b', sharingModel: 'controlled_by_parent', fields: { a: { type: 'master_detail', reference: 'pwr_loop_a' } } },
+        { name: 'pwr_outside', sharingModel: 'controlled_by_parent', fields: { owner: { type: 'master_detail', required: true, reference: 'crm_elsewhere' } } },
+        { name: 'pwr_loop_a', sharingModel: 'controlled_by_parent', fields: { b: { type: 'master_detail', required: true, reference: 'pwr_loop_b' } } },
+        { name: 'pwr_loop_b', sharingModel: 'controlled_by_parent', fields: { a: { type: 'master_detail', required: true, reference: 'pwr_loop_a' } } },
         { name: 'pwr_badge', label: 'Badge', fields: { photo: { type: 'image', required: true } } },
-        { name: 'pwr_badge_line', sharingModel: 'controlled_by_parent', fields: { badge: { type: 'master_detail', reference: 'pwr_badge' } } },
-        { name: 'pwr_bad', sharingModel: 'controlled_by_parent', fields: { account: { type: 'master_detail', reference: 'pwr_account', bogus: true } } },
+        { name: 'pwr_badge_line', sharingModel: 'controlled_by_parent', fields: { badge: { type: 'master_detail', required: true, reference: 'pwr_badge' } } },
+        { name: 'pwr_bad', sharingModel: 'controlled_by_parent', fields: { account: { type: 'master_detail', required: true, reference: 'pwr_account', bogus: true } } },
         ...deep,
       ],
     };
@@ -171,8 +171,15 @@ describe('deriveParentWriteReachCases — what the family reads from the metadat
       ],
     });
     // Named instead of probed.
-    expect(byObject.get('pwr_two_masters')!.excluded).toMatch(/^pwr_two_masters declares 2 master_detail fields \(account, person\)/);
-    expect(byObject.get('pwr_no_master')!.excluded).toMatch(/^pwr_no_master declares no master_detail field/);
+    // [#23100] ADR-0055 §1 is the parse's rule now: two required masters and a
+    // master derived through a required lookup are refused by `ObjectSchema`
+    // itself, so the family names the parse's refusal rather than its own.
+    expect(byObject.get('pwr_two_masters')!.excluded).toMatch(
+      /^the object does not parse under the spec's ObjectSchema \(fields: Object 'pwr_two_masters' declares sharingModel 'controlled_by_parent' with 2 required `master_detail` fields/,
+    );
+    expect(byObject.get('pwr_no_master')!.excluded).toMatch(
+      /^the object does not parse under the spec's ObjectSchema \(sharingModel: Object 'pwr_no_master' declares sharingModel 'controlled_by_parent' but no required `master_detail` field/,
+    );
     expect(byObject.get('pwr_outside')!.excluded).toMatch(/^the master crm_elsewhere is not an object this app declares/);
     expect(byObject.get('pwr_loop_a')!.excluded).toMatch(/^the master chain re-enters pwr_loop_a \(a cycle\)/);
     expect(byObject.get('pwr_deep_0')!.excluded).toMatch(/^the master chain reaches 8 controlled_by_parent masters, the write gate's depth bound/);
@@ -306,20 +313,20 @@ const controlSource = {
       name: 'pwc_signed',
       label: 'Signed',
       sharingModel: 'controlled_by_parent',
-      fields: { account: { type: 'master_detail', label: 'Account', reference: 'pwc_account' }, title: { type: 'text', label: 'Title' } },
+      fields: { account: { type: 'master_detail', required: true, label: 'Account', reference: 'pwc_account' }, title: { type: 'text', label: 'Title' } },
     },
     {
       name: 'pwc_locked',
       label: 'Locked',
       sharingModel: 'controlled_by_parent',
-      fields: { account: { type: 'master_detail', label: 'Account', reference: 'pwc_account' }, title: { type: 'text', label: 'Title' } },
+      fields: { account: { type: 'master_detail', required: true, label: 'Account', reference: 'pwc_account' }, title: { type: 'text', label: 'Title' } },
     },
     { name: 'pwc_frozen', label: 'Frozen', sharingModel: 'private', fields: { name: { type: 'text', label: 'Name', required: true } } },
     {
       name: 'pwc_frozen_line',
       label: 'Frozen line',
       sharingModel: 'controlled_by_parent',
-      fields: { frozen: { type: 'master_detail', label: 'Frozen', reference: 'pwc_frozen' }, title: { type: 'text', label: 'Title' } },
+      fields: { frozen: { type: 'master_detail', required: true, label: 'Frozen', reference: 'pwc_frozen' }, title: { type: 'text', label: 'Title' } },
     },
   ],
   hooks: [
