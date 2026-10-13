@@ -27,18 +27,10 @@
 
 import { describe, expect, it } from 'vitest';
 import { resolveEffectiveApiMethods, isApiOperationAllowed } from '@objectstack/spec/data';
-import { SysCapability } from './objects/sys-capability.object';
-import { SysPermissionSet } from './objects/sys-permission-set.object';
-import { SysPosition } from './objects/sys-position.object';
-import { SysPositionPermissionSet } from './objects/sys-position-permission-set.object';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object';
 import { SysUserPosition } from './objects/sys-user-position.object';
 
 const RBAC_OBJECTS = [
-  ['sys_capability', SysCapability],
-  ['sys_permission_set', SysPermissionSet],
-  ['sys_position', SysPosition],
-  ['sys_position_permission_set', SysPositionPermissionSet],
   ['sys_user_permission_set', SysUserPermissionSet],
   ['sys_user_position', SysUserPosition],
 ] as const;

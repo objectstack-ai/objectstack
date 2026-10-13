@@ -45,7 +45,7 @@
       "note": "The gate's founding case: apps.mdx claimed eight types and omitted `separator` (#4165)."
     },
     {
-      "key": "provider:api|object|schema|value",
+      "key": "provider:object|schema|value",
       "label": "view data provider",
       "docs": [
         "content/docs/ui/views.mdx",

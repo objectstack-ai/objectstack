@@ -949,7 +949,8 @@ const MASTER_DENIAL_LEG_DETAIL: Record<ControlledByParentWriteDenialLeg, string>
  */
 const MASTER_UNRESOLVED_DETAIL: Record<ControlledByParentWriteUnresolvedReason, { condition: string; answer: string }> = {
   master_detail_relation_missing: {
-    condition: 'the object declares controlled_by_parent with no master_detail relation to derive access from',
+    condition:
+      'the object declares controlled_by_parent without exactly one required master_detail field to derive access from',
     answer: '422 INVALID_METADATA',
   },
   record_not_found: { condition: 'the record does not exist', answer: '404 RECORD_NOT_FOUND' },
@@ -1990,6 +1991,37 @@ function attributeThePrincipalsRead(layers: ExplainLayer[], read: ExplainDecisio
   }
 }
 
+/**
+ * [#23157] The person a user id names, for the principal layer's prose: the
+ * display name and email first and the id secondary — `Ada Lovelace
+ * (ada@example.com; id usr_1)` — the way the explain panel's own Principal
+ * line shows that person.
+ *
+ * The user row is read through the ASKER's door: `ql.findOne` under the
+ * asker's context, every data middleware included, so the sentence carries
+ * only what the asker could read of that user anyway, row-level and
+ * field-level security both. An asker the read returns no row to, or a row
+ * with neither a name nor an email, gets the bare id the sentence always
+ * carried, and nothing more. So does a read that cannot run or that throws:
+ * the label is presentation, never an input to a verdict, and the id it falls
+ * back to is the fact the context already states.
+ */
+async function personOf(ql: any, askerContext: any, userId: string): Promise<string> {
+  if (!userId || typeof ql?.findOne !== 'function') return userId;
+  let row: any;
+  try {
+    row = await ql.findOne('sys_user', { where: { id: userId }, context: askerContext });
+  } catch {
+    return userId;
+  }
+  const text = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+  const name = text(row?.name);
+  const email = text(row?.email);
+  if (name && email && name !== email) return `${name} (${email}; id ${userId})`;
+  if (name || email) return `${name || email} (id ${userId})`;
+  return userId;
+}
+
 async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: ExplainAsker | undefined): Promise<ExplainDecision> {
   const { object, operation, context } = input;
   const engineOp = EXPLAIN_TO_ENGINE_OP[operation];
@@ -2054,22 +2086,39 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: 
     Array.isArray(context?.delegatedPositions) ? context.delegatedPositions : [];
   const delegationOf = (name: string): { from: string; until?: string } | undefined =>
     delegatedPositions.find((d) => d.name === name);
+  // [#23157] The principal and its delegator are named as people, read
+  // through the asker's door ({@link personOf}); a self-explanation's asker is
+  // the explained principal.
+  const askerContext = asker?.context ?? context;
+  const principalPerson = context?.userId != null
+    ? await personOf(deps.ql, askerContext, String(context.userId))
+    : '(anonymous)';
+  const delegatorPerson = context?.onBehalfOf?.userId
+    ? await personOf(deps.ql, askerContext, String(context.onBehalfOf.userId))
+    : '';
+  // ...and so is the user each ADR-0091 D3 delegated position came from, once
+  // per distinct user, in the clause and in the position's attribution alike.
+  const positionDelegators = new Map<string, string>();
+  for (const from of new Set(delegatedPositions.map((d) => d.from))) {
+    positionDelegators.set(from, await personOf(deps.ql, askerContext, from));
+  }
+  const delegatorOf = (from: string): string => positionDelegators.get(from) ?? from;
   layers.push({
     layer: 'principal',
     verdict: delegatorMissing || delegatorUnresolved ? 'denies' : 'neutral',
     detail:
-      `Principal ${context?.userId ?? '(anonymous)'} holds position(s) [${positions.join(', ') || 'none'}] ` +
+      `Principal ${principalPerson} holds position(s) [${positions.join(', ') || 'none'}] ` +
       `resolving to permission set(s) [${setNames.join(', ') || 'none'}] (union-merged, most-permissive).` +
       (context?.onBehalfOf?.userId
         ? delegatorMissing
-          ? ` Acting on behalf of ${context.onBehalfOf.userId}, who no longer exists — D10 fails CLOSED (access denied).`
+          ? ` Acting on behalf of ${delegatorPerson}, who no longer exists — D10 fails CLOSED (access denied).`
           : delegatorUnresolved
-            ? ` Acting on behalf of ${context.onBehalfOf.userId}, whose grants could not be resolved (the lookup threw) — D10 fails CLOSED (access denied).`
-            : ` Acting on behalf of ${context.onBehalfOf.userId} — effective access is the D10 INTERSECTION with the delegator's set(s) [${delegatorNames.join(', ') || 'none'}].`
+            ? ` Acting on behalf of ${delegatorPerson}, whose grants could not be resolved (the lookup threw) — D10 fails CLOSED (access denied).`
+            : ` Acting on behalf of ${delegatorPerson} — effective access is the D10 INTERSECTION with the delegator's set(s) [${delegatorNames.join(', ') || 'none'}].`
         : '') +
       (delegatedPositions.length > 0
         ? ` ${delegatedPositions.length} position(s) held via delegation (ADR-0091 D3): [${delegatedPositions
-            .map((d) => `${d.name} from ${d.from}${d.until ? ` until ${d.until}` : ''}`)
+            .map((d) => `${d.name} from ${delegatorOf(d.from)}${d.until ? ` until ${d.until}` : ''}`)
             .join(', ')}].`
         : '') +
       (expiredGrants.length > 0
@@ -2086,7 +2135,7 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: 
       ...positions.map((p) => {
         const d = delegationOf(p);
         return d
-          ? { kind: 'position' as const, name: p, via: `delegation from ${d.from}${d.until ? ` until ${d.until}` : ''}` }
+          ? { kind: 'position' as const, name: p, via: `delegation from ${delegatorOf(d.from)}${d.until ? ` until ${d.until}` : ''}` }
           : { kind: 'position' as const, name: p };
       }),
       ...setNames.map((n) => ({ kind: 'permission_set' as const, name: n, via: viaOf(n) })),

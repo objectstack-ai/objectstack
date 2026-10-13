@@ -99,7 +99,9 @@ describe('#21490: runUninstallCleanups — the uninstall-cleanup registry\'s one
 
         const res = await protocol.deletePackage(request);
 
-        expect(runner.mock.calls).toEqual([[request]]);
+        // Its own request — plus, when the package declared permission sets, their
+        // names (`declared`, ADR-0131 D4), read before its withdrawal.
+        expect(runner.mock.calls).toEqual([[expect.objectContaining(request)]]);
         expect(res.cleanups).toEqual(await runner.mock.results[0]!.value);
         expect(res.cleanups).toEqual([{ name: 'security.package-permissions', success: true, removed: 4 }]);
     });

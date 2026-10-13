@@ -19598,6 +19598,13 @@ export class ObjectStackProtocolImplementation implements
      * that no package ships, is registered as before. [#22057] The question is
      * {@link anotherPackageShips}, the one the container row's own
      * registration asks too.
+     *
+     * ## [#23149] Each registration is recorded for the delete's heal
+     *
+     * Every name registered here is recorded against the container's name
+     * ({@link recordViewExpansion}), and the delete's heal
+     * ({@link restoreArtifactRegistryView}) heals exactly those names. A name
+     * skipped above is not recorded, so the heal never touches it.
      */
     private hydrateExpandedViewItems(
         type: string,
@@ -19610,7 +19617,61 @@ export class ObjectStackProtocolImplementation implements
             shipping ??= this.shippingPackagesOf(type);
             if (this.anotherPackageShips(type, String(item.name), item._packageId, shipping)) continue;
             registry.registerItem(type, item, 'name' as any);
+            ObjectStackProtocolImplementation.recordViewExpansion(
+                registry, (data as { name?: unknown }).name, item.name,
+            );
         }
+    }
+
+    /**
+     * [#23149] The names {@link hydrateExpandedViewItems} registered, per
+     * registry and then per container name: what a reset of that container
+     * has to heal.
+     *
+     * The registry holds no link from an expanded item back to its container,
+     * and the container row is gone by the time the heal runs. Expanding the
+     * body again at reset time would also answer from registry state that may
+     * have moved since the publish: a package installed in between changes
+     * which names {@link anotherPackageShips} skips. So the heal reads this
+     * record instead, and heals the names that were registered, no more.
+     *
+     * Keyed on the registry, not on the protocol instance, for the reason
+     * `meta-overlay-cache.ts` keys its bucket on the engine: two protocol
+     * instances over one registry share the entries they write. A `WeakMap`,
+     * so the record lives as long as the registry and no longer.
+     *
+     * Two rows of one name (a package-less row and a package-bound one) record
+     * into one set. A reset of either heals the set, as the plain-key heal
+     * already lifts the one bare entry the name has, and the remaining row is
+     * hydrated again on the next list read.
+     */
+    private static readonly registeredViewExpansions = new WeakMap<object, Map<string, Set<string>>>();
+
+    /** [#23149] Records one expansion registration. See {@link registeredViewExpansions}. */
+    private static recordViewExpansion(registry: unknown, container: unknown, expanded: unknown): void {
+        if (!registry || typeof registry !== 'object') return;
+        if (typeof container !== 'string' || container === '') return;
+        if (typeof expanded !== 'string' || expanded === '') return;
+        let byContainer = this.registeredViewExpansions.get(registry);
+        if (byContainer === undefined) this.registeredViewExpansions.set(registry, (byContainer = new Map()));
+        let names = byContainer.get(container);
+        if (names === undefined) byContainer.set(container, (names = new Set()));
+        names.add(expanded);
+    }
+
+    /**
+     * [#23149] Removes and returns the expansions recorded for a view
+     * container, for the heal to heal once. Empty for every type but `view`,
+     * and for a name no container registered expansions under.
+     */
+    private static takeViewExpansions(registry: unknown, type: string, container: string): string[] {
+        if (canonicalMetaType(type) !== 'view') return [];
+        if (!registry || typeof registry !== 'object') return [];
+        const byContainer = this.registeredViewExpansions.get(registry);
+        const names = byContainer?.get(container);
+        if (byContainer === undefined || names === undefined) return [];
+        byContainer.delete(container);
+        return [...names];
     }
 
     /**
@@ -19848,6 +19909,31 @@ export class ObjectStackProtocolImplementation implements
      * still guards re-registration only, because that is a fact about the
      * kernel this protocol instance serves, not about the row in hand.
      *
+     * ## [#23149] A view container's expansions are healed too
+     *
+     * A view container row registers more than its plain key: every view it
+     * expands to is registered under its own name `<object>.<viewKey>`
+     * ({@link hydrateExpandedViewItems}). The tiers above healed the container's
+     * plain key alone, so after a reset of a packaged view container that
+     * answered `reset: true`, the list doors kept serving the overlay's
+     * expanded views until a restart. Measured on a real `SchemaRegistry`: the
+     * packaged expansions sit under `<packageId>:<object>.<viewKey>`, untouched
+     * by the publish, and the overlay's under the bare names, where the reset
+     * left them.
+     *
+     * So each name the container registered ({@link takeViewExpansions}) is
+     * healed by this same walk, as a `(type, name)` of its own: a packaged view
+     * of that name is un-shadowed, a baseline is re-registered, and a name no
+     * layer serves is retired. Each name inherits every gate above: an
+     * organization-scoped heal touches none of them, and only a control-plane
+     * kernel re-registers. A name the hydration skipped because another
+     * package ships it was never recorded, so it is never touched.
+     *
+     * The names are taken before the walk, so each registration is healed
+     * once. A walk that stops on a degraded baseline read leaves that name
+     * registered until the container is published and reset again, or until a
+     * restart.
+     *
      * Best-effort: a failure must never block the delete that already
      * succeeded; the next full reload fixes the registry anyway.
      */
@@ -19869,6 +19955,15 @@ export class ObjectStackProtocolImplementation implements
         // [#6780] ADR-0005 — the plain-key entry belongs to the env-wide row,
         // so only an env-wide removal may heal (or retire) it.
         if (organizationId !== null && organizationId !== undefined) return;
+        // [#23149] The view container's expansions, each by this same walk.
+        // See the header. Ahead of the container's own walk, which returns
+        // early from three of its tiers.
+        const expansions = ObjectStackProtocolImplementation.takeViewExpansions(
+            (this.engine as any)?.registry, type, name,
+        );
+        for (const expanded of expansions) {
+            await this.restoreArtifactRegistryView(type, expanded, organizationId);
+        }
         try {
             const registry: any = this.engine.registry;
             const singular = PLURAL_TO_SINGULAR[type] ?? type;

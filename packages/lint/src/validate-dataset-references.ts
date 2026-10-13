@@ -206,10 +206,13 @@ export function validateDatasetReferences(stack: AnyRec): DatasetRefFinding[] {
       const verdict = resolveFieldPath(graph, object, entry);
       if (isUnjudgeable(verdict) || !verdict) return;
 
+      // [#22161] One remedy line on every arm: the verdict's "Did you mean"
+      // names the nearest field, so the object's field list and the
+      // traversable types (`account.detail`) are not echoed; the three-hop
+      // limit, which types join, and that "a.b" includes "a" are
+      // `os explain dataset-include-unknown`.
       const prescription =
-        `Declare a relationship (lookup / master_detail) that exists on the join chain from ` +
-        `"${object}", or drop the entry. ADR-0071 allows up to 3 hops and declaring "a.b" ` +
-        `implicitly includes "a".`;
+        `Name a relationship field on the join chain from "${object}" (up to 3 hops), or drop the entry`;
 
       if (verdict.kind === 'ok') {
         // The entry resolves to a real field — but `include` joins, so the
@@ -245,7 +248,7 @@ export function validateDatasetReferences(stack: AnyRec): DatasetRefFinding[] {
         where,
         path,
         message: account.message,
-        hint: `${prescription} ${account.detail}`,
+        hint: prescription,
       });
     });
 
@@ -276,7 +279,11 @@ export function validateDatasetReferences(stack: AnyRec): DatasetRefFinding[] {
           where: positionWhere,
           path,
           message: account.message,
-          hint: `${prescription} ${account.detail}`,
+          // [#22161] `dataset-field-unknown` prints its remedy alone: the
+          // verdict's "Did you mean" names the nearest field, so the object's
+          // field list (`account.detail`) is not echoed. The filter-key id
+          // keeps the list until its own slice.
+          hint: rule === DATASET_FIELD_UNKNOWN ? prescription : `${prescription} ${account.detail}`,
         });
         return;
       }

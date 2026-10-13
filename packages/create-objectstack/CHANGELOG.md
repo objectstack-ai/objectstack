@@ -1,5 +1,54 @@
 # create-objectstack
 
+## 18.0.0-next.0
+
+### Minor Changes
+
+- 19805d8: The blank starter ships a test story: `pnpm test` boots the scaffolded app's own stack with `bootStack` from `@objectstack/verify` and asserts one business fact through its in-process handle
+  
+  Clause-②: no
+  
+  A project scaffolded with `npx create-objectstack` used to start with no `test` script and no way to assert its own behaviour, so the first test an author wrote was a hand-assembled kernel or a faked `ctx`. The blank template now carries:
+  
+  - **`note.test.ts`**, one starter test. It boots the app the project declares (its objects, its plugins, the services it requires) on the real engine, in-process, with an in-memory database and no server, and asserts that a note without a title is refused with the engine's own `VALIDATION_FAILED` error naming `title`, beside the same note with a title being saved. It addresses the object as `Note.name`, so it follows the namespace scaffolding writes.
+  - **`vitest.config.ts`**: a 60 s hook timeout for the boot, vitest's console capture switched off, so a log line the stack writes while a worker shuts down cannot fail a green run, and `OS_REGISTRY_LOG: 'warn'`, which drops the engine's one-line-per-registered-item boot log.
+  - **`package.json`**: a `test` script (`vitest run`), and `@objectstack/verify` (at the project's `@objectstack/*` range) and `vitest` as devDependencies. The vitest range is `~4.0.0`, the one `objectstack init -t plugin` and `objectstack create plugin` declare, and it is generated from that shared policy rather than written by hand, so the three scaffolders cannot drift apart. `~4.0.0` is the range that installs on npm 10, the npm Node 22 bundles; `^4.0.0` does not.
+  - **`tsconfig.json`** includes every root `*.ts` (`"*.ts"`, as `objectstack init` writes it), so `pnpm typecheck` checks the starter test and the vitest config.
+  - **`README.md`** lists `pnpm test` beside `validate`, `lint` and `typecheck`.
+  
+  The project's CI workflow is unchanged: its steps are the script set every scaffolder's project must declare, and `objectstack init -t app` declares no `test` script.
+
+### Patch Changes
+
+- 5f98778: fix(create-objectstack): the scaffolded Dockerfile installs from the lockfile the project carries
+  
+  Clause-②: no
+  
+  Where pnpm is on PATH, `create-objectstack` installs with pnpm and the project gets `pnpm-lock.yaml` and no `package-lock.json`. The `Dockerfile` it wrote copied `package*.json` and ran `npm ci`, so `docker build` stopped with `EUSAGE` before `os build` ran.
+  
+  - The build stage now copies `package.json` and whichever of `pnpm-lock.yaml`, `pnpm-workspace.yaml` and `package-lock.json` exist, then installs from the lockfile: `corepack pnpm@10 install --frozen-lockfile` for `pnpm-lock.yaml`, `npm ci` for `package-lock.json`. With neither, the build stops and says to install once and commit the lockfile.
+  - pnpm is pinned to major 10, the major the template's `.github/workflows/ci.yml` installs with. An unpinned Corepack takes the registry's newest pnpm, which the Corepack bundled with Node 22 could not run when this was measured.
+  - Unchanged: `os build` in the image, the runtime stage and its pinned image tag.
+  - A project scaffolded before this release keeps its own `Dockerfile`. To fix one, replace its `COPY package*.json ./` and `RUN npm ci` lines with the build stage shown in the self-hosting guide.
+- 31cd210: A new project's `pnpm-workspace.yaml` is now a short settings file: one comment line above each block instead of 57 to 66 lines of version history and measurements. `npm create objectstack`, `objectstack init` and a standalone `objectstack create` now write the same 21-line file.
+  
+  Clause-②: no
+  
+  - The settings are unchanged: `packages: []`, the same `onlyBuiltDependencies` and `allowBuilds` lists, and the same `peerDependencyRules.allowedVersions` entries, in the same order. A project installs exactly as before.
+  - Each block keeps one line that says why it is there: which pnpm versions read each build-approval key, and that the peer rules only silence a warning that was measured harmless.
+  - The measurements behind each setting now live in the `@objectstack/cli` source next to the values they explain, so they are kept up to date there instead of in every project.
+  - Already-scaffolded projects are not touched. Their longer comments can be deleted or kept; the settings are identical.
+- e4ad677: fix(create-objectstack): a project name that starts with the template's namespace scaffolds instead of being refused
+  
+  Clause-②: no
+  
+  A project whose namespace begins with the template's own namespace plus `_` (for example `blank-probe`, namespace `blank_probe`, under the `blank` template) was refused with exit 1: "1 object name(s) still carry the template's 'blank_' prefix … This is a bug in the scaffolder". The rewrite was correct (`blank_note` became `blank_probe_note`), but the check that verifies it tested each name against the template prefix alone, and `blank_probe_note` starts with `blank_`.
+  
+  - The check now reports a name as stale only when it carries the template's prefix and not the new namespace's prefix, so `blank-probe` scaffolds with objects named `blank_probe_*`.
+  - A name the rewrite really missed (`blank_note` under namespace `blank_probe`) is still refused, as before.
+  - The same rule applies to every template namespace; no name is treated specially.
+  - No migration: a project that scaffolded before this release is unaffected, and a name that was refused before can be scaffolded again.
+
 ## 17.7.0
 
 ### Minor Changes

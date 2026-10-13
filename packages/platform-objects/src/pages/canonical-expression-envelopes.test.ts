@@ -183,8 +183,9 @@ describe('platform Page exports serve canonical expression envelopes', () => {
     ).toBe('');
 
     // Population floor: the gate is worthless if it silently reads nothing.
-    expect(EXPORTED_PAGES.length).toBeGreaterThanOrEqual(3);
-    expect(declared.length).toBeGreaterThanOrEqual(3);
+    // (The `sys_position` record page retired with its object, C3 stage 8.)
+    expect(EXPORTED_PAGES.length).toBeGreaterThanOrEqual(2);
+    expect(declared.length).toBeGreaterThanOrEqual(2);
   });
 
   it.each(AUDITS)('$exportName parses through PageSchema (door 1 precondition)', ({ audit }) => {

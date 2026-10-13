@@ -286,7 +286,7 @@ interface ListPosition {
    * `lint` path, never an accepted spelling.
    */
   retiredAlias?: string;
-  /** The prescription half of the hint. */
+  /** The hint: this position's remedy, one line (the verdict carries the "Did you mean"). */
   prescription: string;
 }
 
@@ -363,7 +363,7 @@ interface FieldNameSlot {
   verbatim: boolean;
   /** Read this slot's name out of one entry, or `undefined` when it holds none. */
   read: (entry: unknown) => SlotRead | undefined;
-  /** The prescription half of the hint. */
+  /** The hint: this position's remedy, one line (the verdict carries the "Did you mean"). */
   prescription: string;
 }
 
@@ -470,7 +470,7 @@ export function validateObjectFieldRefs(stack: AnyRec): ObjectFieldRefFinding[] 
   /**
    * Resolve one name and push the finding when it misses. `true` = reported.
    * Every position funnels through here, so the message shape — the verdict's
-   * account; the prescription, then the addressed object's field list — is one
+   * account, and the position's prescription as the hint — is one
    * shape across the family.
    */
   const judge = (at: {
@@ -492,9 +492,12 @@ export function validateObjectFieldRefs(stack: AnyRec): ObjectFieldRefFinding[] 
       where: at.where,
       path: at.path,
       // [#22161] The shared field-path sentence alone; what the miss costs at
-      // each position is `os explain object-field-ref-unknown`.
+      // each position is `os explain object-field-ref-unknown`. The hint is
+      // the position's remedy alone: the verdict's "Did you mean" names the
+      // nearest field, so the addressed object's field list
+      // (`account.detail`) is not echoed.
       message: account.message,
-      hint: `${at.prescription} ${account.detail}`,
+      hint: at.prescription,
     });
     return true;
   };

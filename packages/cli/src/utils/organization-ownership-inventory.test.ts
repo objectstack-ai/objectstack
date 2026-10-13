@@ -86,7 +86,8 @@ describe('ADR-0131 D10 inventory — every censused object has one fate and a ci
 
   it('the platform registry as it stands — a platform object without a row reds here, by name', () => {
     const registered = Object.values(PLATFORM_OBJECTS_BY_PACKAGE).flat();
-    expect(registered.length).toBeGreaterThan(80);
+    // (The four retired catalog row objects left the registry with C3 stage 8.)
+    expect(registered.length).toBeGreaterThan(75);
     expect(unlisted(registered)).toEqual([]);
   });
 

@@ -122,8 +122,8 @@ export const FLOW_CLONE_STATUS = 'draft' as const;
 export const FLOW_CLONE_MUTATED_FIELDS = ['name', 'label', 'status'] as const;
 
 /**
- * Keys that must NOT survive onto a clone — the ADR-0010 protection envelope
- * plus the read-time decorations.
+ * Keys that must NOT survive onto a clone — the ADR-0010 protection envelope,
+ * the read-time decorations, and the package author's `protection` block.
  *
  * DERIVED from the spec, never restated: `MetadataProtectionFields` is the
  * declaration `FlowSchema` itself spreads, and `METADATA_READ_DECORATIONS` is
@@ -135,10 +135,21 @@ export const FLOW_CLONE_MUTATED_FIELDS = ['name', 'label', 'status'] as const;
  * The read decorations would usually be absent here — a clone reads its source
  * from the engine's flow map, not over `/meta` — but the strip costs nothing
  * and closes the case where a caller's source came through a served read.
+ *
+ * [#23120, ADR-0010 §3.5] `protection` is named, not derived, exactly as
+ * `PERMISSION_SET_CLONE_DROPPED_KEYS` names it: no spec export lists the block
+ * on its own. Only the package loader translates it into a lock
+ * (`applyProtection`, ADR-0010 Phase 4.3), and the metadata save door refuses
+ * it on an environment-authored write with `400 VALIDATION_ERROR`. A flow the
+ * loader registered arrives with it already stripped, but a flow bound from a
+ * row stored before that refusal still carries it — `FlowSchema` declares the
+ * key, so the parse keeps it — and a copy that kept it would be refused over a
+ * block the admin never sent. Dropping it changes no verdict: it never bound.
  */
 export const FLOW_CLONE_DROPPED_KEYS: readonly string[] = Object.freeze([
     ...METADATA_READ_DECORATIONS,
     ...Object.keys(MetadataProtectionFields),
+    'protection',
 ]);
 
 /**

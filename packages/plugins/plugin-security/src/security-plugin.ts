@@ -8344,8 +8344,31 @@ export class SecurityPlugin implements Plugin {
 
   /**
    * Resolve a controlled_by_parent object's master-detail relation (the FK field
-   * key + the master object name), or null. Prefers a required `master_detail`
-   * field; falls back to any `master_detail`, then a required `lookup`. Cached.
+   * key + the master object name), or null. Cached.
+   *
+   * [ADR-0055 §1 · #23100, maintainer ruling B] The master is the object's ONE
+   * `master_detail` field declared `required: true` that names a reference — and
+   * nothing else. Zero such fields, or two or more, resolve `null`, which both
+   * halves already treat as fail-closed: the read leg answers `RLS_DENY_FILTER`
+   * and the write leg throws `MasterDetailRelationMissingError` (422
+   * INVALID_METADATA). This used to be a three-tier fallback — a required
+   * `master_detail`, else ANY `master_detail`, else a required `lookup`, the
+   * first match by field order within a tier — and ADR-0055 §1 recorded only
+   * the first tier. Ruling B retired the second and third (ADR-0049
+   * enforce-or-remove; step-18 semantic migration
+   * `cbp-master-relation-tiers-retired`) and refused two candidates rather than
+   * picking one by declaration order. The same sentence is judged by
+   * `ObjectSchema`'s parse (`refuseControlledByParentWithoutOneMaster`) and by
+   * `os lint` (`cbpMasterCandidates` in
+   * `packages/lint/src/validate-security-posture.ts`); this reader keeps its own
+   * read of it because it reads the unparsed registry — the reference-spelling
+   * tolerance below is why — and ⛔ it must not grow a fallback tier back: a
+   * relation the parse refuses must not be one this gate derives access from.
+   *
+   * A `controlled_by_parent` object that resolves no relation is REPORTED, once
+   * per object per cache generation ({@link SecurityPlugin.reportCbpMasterUnresolved}),
+   * so a stored or raw-registered object that relied on a retired tier is not
+   * denied in silence.
    *
    * [#8688] Also carries {@link CbpRelation.omissionRefusedByValidation} — the
    * one bit the insert leg's conditional stand-down turns on. It is resolved
@@ -8412,11 +8435,14 @@ export class SecurityPlugin implements Plugin {
       const k = refKey(f);
       return k === undefined ? undefined : f[k];
     };
-    const pick = (pred: (f: any) => boolean) => entries.find(([, f]) => pred(f) && ref(f));
-    const found =
-      pick((f) => f?.type === 'master_detail' && f?.required) ??
-      pick((f) => f?.type === 'master_detail') ??
-      pick((f) => f?.type === 'lookup' && f?.required);
+    // [ADR-0055 §1 · #23100 ruling B] Exactly one required `master_detail`
+    // naming a reference — see the docblock. `required === true` is the spec's
+    // own type for the key and the lint's reading of it.
+    const candidates = entries.filter(([, f]) => f?.type === 'master_detail' && f?.required === true && ref(f));
+    const found = candidates.length === 1 ? candidates[0] : undefined;
+    if (!found && masterGovernsRowWrites(schema)) {
+      this.reportCbpMasterUnresolved(object, entries, candidates.map(([k]) => String(k)));
+    }
     if (found) {
       const def = found[1];
       // Resolved from the SAME field def the relation itself came from, and
@@ -8438,16 +8464,73 @@ export class SecurityPlugin implements Plugin {
         // — it is the licence for the guard to stand down, and every shape it
         // reports `true` for is a shape validation provably refuses.
         //
-        // `master_detail` is required on top of the validator's own test: the
-        // relation resolver's third fallback accepts a required `lookup`, and
-        // the ruling covers `master_detail` only. Narrower than the validator
-        // is the safe direction — the guard keeps answering.
+        // `master_detail` + `required` are the resolver's own predicate above
+        // (since #23100 nothing else resolves), so they always hold here; they
+        // stay spelled out so this licence reads as the validator's test it
+        // mirrors and cannot widen if the resolver ever changes.
         omissionRefusedByValidation:
           def?.type === 'master_detail' && !!def?.required && !def?.readonly && !def?.system,
       };
     }
     this.cbpRelCache.set(object, rel);
     return rel;
+  }
+
+  /**
+   * [ADR-0055 §1 · #23100] Report that a `controlled_by_parent` object resolved NO
+   * master relation, so every read of it is denied and every write refused — and
+   * say why, naming the retired tier the object relied on when that is the cause.
+   *
+   * The parse refuses the same shape (`ObjectSchema`, with the same prescription),
+   * so an object reaching here unresolved came through a door that does not
+   * parse — a raw `registerObject`, or a stored row the boot registered anyway
+   * under its `[metadata_spec_invalid]` diagnostic. The read leg's denial is an
+   * EMPTY result, indistinguishable from "no rows" to its caller, which is why
+   * the reason is stated once here rather than left to be inferred.
+   *
+   * `warn`, not `error`, by the degradation-log-level question (AGENTS.md):
+   * nothing claimed persisted is lost — the object is visibly unusable, every
+   * write is refused to its caller with 422 INVALID_METADATA, and the denial is
+   * the fail-closed answer, not a fall-back. Same granularity and channel as
+   * {@link SecurityPlugin.reportRejectedReferenceAlias}: the only call site is
+   * `resolveCbpRelation`'s resolution body, which runs on a `cbpRelCache` miss
+   * alone, so it fires once per object and re-arms when metadata changes.
+   */
+  private reportCbpMasterUnresolved(
+    object: string,
+    entries: ReadonlyArray<readonly [string, any]>,
+    requiredMasters: readonly string[],
+  ): void {
+    const optionalMasters = entries
+      .filter(([, f]) => f?.type === 'master_detail' && f?.required !== true)
+      .map(([k]) => String(k));
+    const requiredLookups = entries
+      .filter(([, f]) => f?.type === 'lookup' && f?.required === true)
+      .map(([k]) => String(k));
+    const why =
+      requiredMasters.length > 1
+        ? `it declares ${requiredMasters.length} required master_detail fields (${requiredMasters.join(', ')}) ` +
+          'and derives its master from exactly one'
+        : [
+            'it declares no required master_detail field',
+            ...(optionalMasters.length > 0
+              ? [`master_detail without required: true: ${optionalMasters.join(', ')} (add required: true)`]
+              : []),
+            ...(requiredLookups.length > 0
+              ? [
+                  `required lookup: ${requiredLookups.join(', ')} (a lookup derives no access — declare the ` +
+                    "master as type: 'master_detail', or give the object its own sharingModel)",
+                ]
+              : []),
+          ].join('; ');
+    this.logger.warn?.(
+      `[security/controlled-by-parent] object "${object}" declares sharingModel 'controlled_by_parent' but ` +
+        `resolves no master relation — ${why}. Every read of it is DENIED and every write refused ` +
+        '(422 INVALID_METADATA): ADR-0055 §1 derives the master from exactly one master_detail field declared ' +
+        'required: true, and from nothing else. A non-required master_detail and a required lookup no longer ' +
+        'derive access.',
+      { object, requiredMasters, optionalMasters, requiredLookups },
+    );
   }
 
   /**
@@ -8548,9 +8631,9 @@ export class SecurityPlugin implements Plugin {
    *
    * An empty set yields `{ masterFK: { $in: [] } }`, which matches no rows (fail
    * closed), as does a failure to resolve the sharing half. A misconfigured
-   * object (no master_detail/lookup to derive from) denies all reads
-   * (defense-in-depth; spec validation should prevent authoring it). Returns null
-   * when the object is not controlled_by_parent.
+   * object (not exactly one required master_detail to derive from, ADR-0055 §1)
+   * denies all reads (defense-in-depth; the spec's parse refuses authoring it
+   * since #23100). Returns null when the object is not controlled_by_parent.
    *
    * [ADR-0055 amendment] The derivation COMPOSES ACROSS A CHAIN. It used to resolve the
    * master set from the two halves above and nothing else, which made a master
@@ -9031,6 +9114,11 @@ export class SecurityPlugin implements Plugin {
       //     PURPOSE so metadata already at rest keeps loading (its docblock
       //     says so). Measured: `safeParse` of a `controlled_by_parent` object
       //     takes both an omitted `required` and an explicit `required: false`.
+      //     ⚠️ [#23100, ruling B] SUPERSEDED for this shape: the parse now
+      //     refuses it, and `resolveCbpRelation` resolves only a required
+      //     `master_detail`, so a non-required one never becomes `rel` and this
+      //     branch is unreachable for it (the object meets the `!rel` 422
+      //     above instead). The freeze below still binds the other two shapes.
       //   • `required` + `readonly` and `required` + `system` — STILL newly
       //     authorable through `ObjectSchema.create()` itself: the force
       //     returns early on `required === true` and never inspects

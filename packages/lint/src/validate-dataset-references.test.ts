@@ -23,7 +23,7 @@ const SHORTENED_RULE_IDS: readonly string[] = [
   DATASET_FIELD_NOT_INCLUDED,
   DATASET_FILTER_FIELD_UNKNOWN,
 ];
-const firedShortened: Array<{ rule: string; message: string }> = [];
+const firedShortened: Array<{ rule: string; message: string; hint: string }> = [];
 const validateDatasetReferences: typeof validateDatasetReferencesUnrecorded = (...args) => {
   const findings = validateDatasetReferencesUnrecorded(...args);
   for (const f of findings) if (SHORTENED_RULE_IDS.includes(f.rule)) firedShortened.push(f);
@@ -607,5 +607,65 @@ describe('[#22161] one-line verdicts — the rule ids this file shortened', () =
     expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
     const text = explanation!.paragraphs.join('\n');
     for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
+});
+
+// [#22161] Slice 16: the `fix:` lines of the include and field ids. Each is the
+// remedy alone: the verdict's "Did you mean" names the nearest field, so the
+// object's field list and the traversable types are no longer appended; the
+// three-hop limit and what joins are the explanation's.
+describe('[#22161] one-line fixes — dataset-include-unknown and dataset-field-unknown', () => {
+  const SLICE_16 = [DATASET_INCLUDE_UNKNOWN, DATASET_FIELD_UNKNOWN];
+
+  it('every `fix:` line of the two ids the cases above fired is one line of at most 200 characters', () => {
+    const converted = firedShortened.filter((f) => SLICE_16.includes(f.rule));
+    // Coverage control: every arm fired — an include entry that resolves to an
+    // ordinary field, one that names nothing, one whose hop is not a
+    // relationship; a dimension, a measure and a joined field path.
+    const include = converted.filter((f) => f.rule === DATASET_INCLUDE_UNKNOWN);
+    expect(include.some((f) => f.message.includes('not a relationship, so no join'))).toBe(true);
+    expect(include.some((f) => f.message.includes('Did you mean "duty"?'))).toBe(true);
+    expect(include.some((f) => f.message.includes('nothing to join through'))).toBe(true);
+    const field = converted.filter((f) => f.rule === DATASET_FIELD_UNKNOWN);
+    expect(field.some((f) => f.message.startsWith('dimension field'))).toBe(true);
+    expect(field.some((f) => f.message.startsWith('measure field'))).toBe(true);
+    expect(field.some((f) => f.message.includes('object "duly_duty"'))).toBe(true);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+      // The object's field list is the verdict's "Did you mean", not the fix line's.
+      expect(f.hint, f.rule).not.toContain('Fields on');
+    }
+  });
+
+  it('each reads as one remedy', () => {
+    const [include] = validateDatasetReferences(stackWith({ include: ['dutee'], dimensions: [], measures: [] }));
+    expect(include.hint).toBe(
+      'Name a relationship field on the join chain from "duly_task" (up to 3 hops), or drop the entry',
+    );
+    const [dimension] = validateDatasetReferences(
+      stackWith({ dimensions: [{ name: 'period', field: 'period_kee' }], measures: [] }),
+    );
+    expect(dimension.hint).toBe(
+      'Bind the dimension to a field on "duly_task", or to a `relationship[.relationship].field` path ' +
+        'whose prefix is declared in `include`.',
+    );
+  });
+
+  it('`os explain` carries what the two `fix:` lines no longer say', () => {
+    const facts: Record<string, readonly string[]> = {
+      [DATASET_INCLUDE_UNKNOWN]: [
+        'up to three hops (ADR-0071)',
+        'a lookup, master_detail, user or tree field',
+        'Declaring `a.b` implicitly includes `a`',
+        'never an ON clause',
+        '"Did you mean"',
+      ],
+      [DATASET_FIELD_UNKNOWN]: ['the hop that failed', '"Did you mean"'],
+    };
+    for (const [rule, list] of Object.entries(facts)) {
+      const text = explainRule(rule)!.paragraphs.join('\n');
+      for (const fact of list) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+    }
   });
 });
