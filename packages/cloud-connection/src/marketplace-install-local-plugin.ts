@@ -112,6 +112,10 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import {
     resolveAuthzContext,
     isAuthzStoreUnavailableError,
+    // ADR-0069 — the authentication-policy gate's ONE decision, asked of the
+    // session `resolveInstallPrincipal` reads (see `admitInstallCaller`).
+    evaluateAuthGate,
+    type AuthGate,
     // [#16013] The ADMISSION seam's posture derivation, in ONE call — the same
     // symbol `packages/rest`'s seam now imports, for the same reason. It reads
     // the posture IN FORCE off the kernel's `tenancy` service and carries
@@ -528,6 +532,25 @@ function organizationWallActive(ctx: PluginContext): boolean {
  */
 const NO_ACTIVE_ORGANIZATION_CODE = 'PERMISSION_DENIED';
 const NO_ACTIVE_ORGANIZATION_STATUS = 403;
+
+/**
+ * The caller one install-local admission resolved: identity and grants off the
+ * shared resolver, plus the two postures the doors read.
+ */
+interface InstallPrincipal {
+    userId: string;
+    systemPermissions: string[];
+    /** [#15204 W2] The ADR-0095 posture rung the resolver derived. */
+    posture?: unknown;
+    /** [#15204 W2] The EFFECTIVE tenancy posture this admission resolved. */
+    tenancyPosture?: TenancyPosture;
+    /**
+     * ADR-0069: the authentication-policy posture of the session this
+     * admission resolved, present only for a session the policy holds.
+     * `admitInstallCaller` refuses on it.
+     */
+    authGate?: AuthGate;
+}
 
 /**
  * [#15204 W2] What an admitted mutating request carries past
@@ -1719,8 +1742,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // Before the ledger is touched, exactly as the mutating doors refuse
         // before any work: a refused caller must not be able to learn what is
         // installed from timing or from a downstream storage error.
-        const principal = await this.resolveInstallPrincipal(c, ctx);
-        if (!principal) return this.refuseUnauthenticated(c);
+        const admitted = await this.admitInstallCaller(c, ctx);
+        if (!admitted.ok) return admitted.response;
+        const { principal } = admitted;
         const operator = principal.systemPermissions.includes(INSTALL_LOCAL_CAPABILITY);
 
         const { entries, skipped } = this.readAll();
@@ -3280,14 +3304,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     private resolveInstallPrincipal = async (
         c: any,
         ctx: PluginContext,
-    ): Promise<{
-        userId: string;
-        systemPermissions: string[];
-        /** [#15204 W2] The ADR-0095 posture rung the resolver derived. */
-        posture?: unknown;
-        /** [#15204 W2] The EFFECTIVE tenancy posture this admission resolved. */
-        tenancyPosture?: TenancyPosture;
-    } | null> => {
+    ): Promise<InstallPrincipal | null> => {
         const headers = c?.req?.raw?.headers;
         if (!headers) return null;
         try {
@@ -3301,6 +3318,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             let ql: IObjectQLEngine | undefined;
             try { ql = ctx.getService<IObjectQLEngine>('objectql'); } catch { /* no data engine */ }
 
+            // The session user the bridge below read, kept so the ADR-0069 gate
+            // is asked about the SAME session the resolver admitted: one read,
+            // both decisions. The resolver calls the bridge only when no API
+            // key admitted the caller, so a key caller leaves it unset and no
+            // policy holds it.
+            let sessionUser: unknown;
+
             // The better-auth session bridge — resolved lazily and defensively,
             // exactly as the previous implementation did, then handed to the
             // shared resolver instead of being trusted on its own.
@@ -3313,7 +3337,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     }
                     // [#22258] The in-process session-read rule, as in
                     // `resolveActiveOrgId` above.
-                    return await api?.getSession?.(inProcessSessionReadInput(h));
+                    const session = await api?.getSession?.(inProcessSessionReadInput(h));
+                    sessionUser = session?.user;
+                    return session;
                 } catch {
                     return undefined;
                 }
@@ -3325,11 +3351,19 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             const tenancyPosture = await this.resolveAdmissionTenancyPosture(ctx);
             const authz = await resolveAuthzContext({ ql, headers, getSession, tenancyPosture });
             if (!authz.userId) return null;
+            // ADR-0069: the ONE consult of the authentication-policy gate for
+            // all five doors, on the session read above (the posture rides its
+            // user, computed by plugin-auth's `customSession` enrichment only
+            // while a gate feature is active). No request path is passed, so
+            // the allow-list can grant no exemption (an empty path earns none,
+            // #7898); no install-local route is a remediation or bootstrap route.
+            const authGate = evaluateAuthGate(sessionUser, '');
             return {
                 userId: String(authz.userId),
                 systemPermissions: Array.isArray(authz.systemPermissions) ? authz.systemPermissions : [],
                 posture: authz.posture,
                 tenancyPosture,
+                ...(authGate ? { authGate } : {}),
             };
         } catch (err) {
             // [commit 6a180e42d] `null` here means "nobody is authenticated", which is
@@ -3356,6 +3390,29 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     }, 401);
 
     /**
+     * ADR-0069: the floor all five doors open with, the listing included.
+     * Nobody authenticated is `401` ({@link refuseUnauthenticated}). A session
+     * the authentication policy HOLDS (an expired password, enforced MFA not
+     * yet enrolled) is gated out of every protected resource until it
+     * remediates, so it gets REST's answer: `403` with the gate's own `code`
+     * and `message`, in this plugin's envelope, before its capabilities are
+     * consulted and before the ledger is read. One helper for the same reason
+     * the 401 is one literal: a door added later cannot copy a weaker answer.
+     */
+    private admitInstallCaller = async (
+        c: any,
+        ctx: PluginContext,
+    ): Promise<{ ok: true; principal: InstallPrincipal } | { ok: false; response: Response }> => {
+        const principal = await this.resolveInstallPrincipal(c, ctx);
+        if (!principal) return { ok: false, response: this.refuseUnauthenticated(c) };
+        if (principal.authGate) {
+            const { code, message } = principal.authGate;
+            return { ok: false, response: c.json({ success: false, error: { code, message } }, 403) };
+        }
+        return { ok: true, principal };
+    };
+
+    /**
      * [#8976] The shared refusal for the four mutating routes: 401 when nobody
      * is authenticated, 403 when somebody is but holds no authoring capability,
      * otherwise the acting `userId`.
@@ -3379,8 +3436,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         ctx: PluginContext,
         action: string,
     ): Promise<InstallAdmission | { ok: false; response: Response }> => {
-        const principal = await this.resolveInstallPrincipal(c, ctx);
-        if (!principal) return { ok: false, response: this.refuseUnauthenticated(c) };
+        const admitted = await this.admitInstallCaller(c, ctx);
+        if (!admitted.ok) return admitted;
+        const { principal } = admitted;
         if (!principal.systemPermissions.includes(INSTALL_LOCAL_CAPABILITY)) {
             ctx.logger?.warn?.(
                 `[MarketplaceInstallLocal] refused ${action} for ${principal.userId} — `
