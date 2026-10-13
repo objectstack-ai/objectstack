@@ -41,6 +41,7 @@ import { SysMetadataActivation } from '@objectstack/platform-objects/system';
 import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-guard.js';
 import { ensureDefaultOrganization } from './ensure-default-organization.js';
 import { seedLegacyPlatformBucket } from './__tests__/legacy-catalog-rows.testkit.js';
+import { withLegacyPermissionSetTable } from './__tests__/legacy-catalog-objects.testkit.js';
 
 const SYS = { isSystem: true } as const;
 const POSTURE_ENV = 'OS_TENANCY_POSTURE';
@@ -128,7 +129,9 @@ async function standingByReader(posture: Posture): Promise<Record<string, unknow
     type: 'plugin',
     scope: 'system',
     // [ADR-0131 D3] The activation ledger a permission set is switched off in.
-    objects: [SysUser, SysAccount, SysMember, SysOrganization, SysMetadataActivation, ...securityObjects],
+    // The retired `sys_permission_set` table too: an existing database still
+    // holds its platform-bucket rows (C3 stage 8 retires the object).
+    objects: withLegacyPermissionSetTable([SysUser, SysAccount, SysMember, SysOrganization, SysMetadataActivation, ...securityObjects]),
   } as any);
   await engine.syncSchemas();
   await plugin.start(ctx);
@@ -154,14 +157,11 @@ async function standingByReader(posture: Posture): Promise<Record<string, unknow
   await user('usr_member', 'member@gra.example', '2025-03-01T00:00:00.000Z');
   await user('usr_agent', 'agent@gra.example', '2025-04-01T00:00:00.000Z');
 
-  // An existing database: the platform-bucket rows an earlier release seeded,
-  // where the row object is still registered (C3 stage 8 retires it).
-  if (engine.getObject?.('sys_permission_set')) await seedLegacyPlatformBucket(engine, bootstrapSets);
+  // An existing database: the platform-bucket rows an earlier release seeded.
+  await seedLegacyPlatformBucket(engine, bootstrapSets);
   const boot = await bootstrapPlatformAdmin(engine, bootstrapSets);
   expect(boot.adminPromoted).toBe(posture === 'single');
-  // The organization's own copies of the sets, where the row object is still
-  // registered; C3 stage 8 retires it, and a grant names its set (ADR-0131 D4).
-  if (walled && engine.getObject?.('sys_permission_set')) {
+  if (walled) {
     for (const name of ['organization_admin', 'organization_admin_no_bypass']) {
       const [bucket] = await engine.find('sys_permission_set', { where: { name }, context: SYS });
       const { id: _id, created_at: _c, updated_at: _u, ...rest } = bucket as any;
