@@ -6,7 +6,9 @@ import { PLATFORM_CAPABILITIES } from '@objectstack/spec/security';
 import { CAPABILITY_PROVIDERS } from '@objectstack/core';
 import {
   MailboxServicePlugin,
+  MailIngestService,
   MAILBOX_ADMIN_CAPABILITY,
+  MAILBOX_SERVICE,
   MAILBOX_SERVICE_MANIFEST_ID,
   SysMailAssociation,
   SysMailbox,
@@ -16,16 +18,21 @@ import {
 /** A plugin context that records the manifest it is handed and the hooks it arms. */
 function fakeContext() {
   const registered: Array<Record<string, any>> = [];
+  const services = new Map<string, unknown>();
   const hooks: Record<string, Array<() => Promise<void>>> = {};
   const ctx: any = {
     getService: (name: string) => {
       if (name === 'manifest') return { register: (m: Record<string, any>) => registered.push(m) };
       throw new Error(`no service ${name}`);
     },
+    registerService: (name: string, service: unknown) => {
+      if (services.has(name)) throw new Error(`service ${name} registered twice`);
+      services.set(name, service);
+    },
     hook: (event: string, fn: () => Promise<void>) => (hooks[event] ??= []).push(fn),
     logger: { info: () => {}, warn: () => {}, error: () => {} },
   };
-  return { ctx, registered, hooks };
+  return { ctx, registered, services, hooks };
 }
 
 describe('MailboxServicePlugin', () => {
@@ -39,6 +46,16 @@ describe('MailboxServicePlugin', () => {
       'sys_mail_message',
       'sys_mailbox',
     ]);
+  });
+
+  it('registers the ingest seam as the `mailbox` kernel service, and only that service', async () => {
+    const { ctx, services } = fakeContext();
+    await new MailboxServicePlugin().init(ctx);
+    expect([...services.keys()]).toEqual([MAILBOX_SERVICE]);
+    const service = services.get(MAILBOX_SERVICE) as MailIngestService;
+    expect(service).toBeInstanceOf(MailIngestService);
+    expect(typeof service.ingest).toBe('function');
+    expect(typeof service.rematch).toBe('function');
   });
 
   it('is the provider the `mailbox` capability token names, under its registered identity', () => {

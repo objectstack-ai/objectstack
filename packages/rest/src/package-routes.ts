@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { IHttpServer, shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE, rethrowAuthzStoreUnavailable } from '@objectstack/core';
+import { IHttpServer, shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE, rethrowAuthzStoreUnavailable, type AuthGate } from '@objectstack/core';
+import type { ErrorCode } from '@objectstack/spec/api';
 import type { PackageService } from '@objectstack/service-package';
 // The declared envelope is written in ONE place for the whole platform (#3973),
 // and so (#8016) is the rule that reads an HTTP answer off a THROWN error.
@@ -63,6 +64,26 @@ async function refusePackageRequest(
   const ctx = options.resolveExecutionContext
     ? await options.resolveExecutionContext(req).catch(rethrowAuthzStoreUnavailable)
     : undefined;
+  // ADR-0069: a session the authentication policy HOLDS (an expired password,
+  // enforced MFA not yet enrolled) is gated out of every protected resource
+  // until it remediates, and publishing a package is one. The context already
+  // carries the decision: REST's resolver lifts the session's posture onto
+  // `authGate` through `normalizeAuthGate` (`@objectstack/core`), the field
+  // `enforceAuth` reads. Asked first, as `enforceAuth` asks it, and answered
+  // as it answers: `403` with the gate's own `code` and `message`, in this
+  // surface's envelope. A held caller is told what to remediate, and its
+  // capabilities are not consulted.
+  //
+  // No path is consulted. This registrar's base is the host's argument, and
+  // the publish route is no remediation or bootstrap route, so the allow-list
+  // has nothing to exempt here. `code` is declared as a bare string on the
+  // envelope's `authGate`. Its one producer (plugin-auth's `customSession`
+  // enrichment) writes only `PASSWORD_EXPIRED` and `MFA_REQUIRED`, both members
+  // of the vocabulary.
+  if (ctx?.authGate) {
+    sendError(res, 403, ctx.authGate.code as ErrorCode, ctx.authGate.message);
+    return true;
+  }
   // Anonymous-deny floor. This direct-mount surface DECLARES the wrapped
   // BaseResponseSchema envelope — every other body here goes through
   // sendOk/sendError, and `check:route-envelope` pins this module at ZERO
@@ -340,6 +361,12 @@ export interface PackageRoutesOptions {
     userId?: string | null;
     isSystem?: boolean;
     systemPermissions?: string[];
+    /**
+     * ADR-0069: the session's authentication-policy posture, as the
+     * `RestServer`'s resolver lifts it (`ExecutionContext.authGate`). Present
+     * only for a session the policy holds; the door refuses on it.
+     */
+    authGate?: AuthGate;
   } | undefined>;
 }
 

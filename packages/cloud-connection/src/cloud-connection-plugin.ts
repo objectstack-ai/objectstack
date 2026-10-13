@@ -23,8 +23,10 @@
  * `apps/objectos` (multi-tenant) and `apps/objectos-ee` (single-environment)
  * — wire the same canonical implementation. cloud ADR-0008 Phase 2 moves this
  * surface into the open `@objectstack/cloud-connection` package; keep this
- * file dependency-light (structural Plugin types, no @objectstack/core) so
- * the move is mechanical.
+ * file dependency-light (structural Plugin types) so the move is mechanical.
+ * The one value it takes from `@objectstack/core` is the ADR-0069 gate's
+ * decision, `evaluateAuthGate`: a second copy of a security decision is the
+ * defect that function exists to prevent (see `sessionFromAuthService`).
  *
  * ## Environment & session resolution — two modes
  *
@@ -50,7 +52,7 @@
  * self-hosted runtimes).
  */
 
-// Minimal structural plugin contract — keep this module independent of
+// Minimal structural plugin contract — keep this module's TYPES independent of
 // @objectstack/core so the cloud ADR-0008 Phase 2 move to the open package stays
 // mechanical (mirrors the other plugins in this package).
 interface PluginContext {
@@ -78,11 +80,21 @@ interface Plugin {
 }
 
 import { hostname } from 'node:os';
+import { evaluateAuthGate, type AuthGate } from '@objectstack/core';
 import { inProcessSessionReadInput } from '@objectstack/types';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { CLOUD_CONNECTION_UI_BUNDLE } from './cloud-connection-ui.js';
 
 const CLOUD_CONNECTION_PREFIX = '/api/v1/cloud-connection';
+
+/**
+ * A signed-in caller of this surface, and the ADR-0069 posture its session
+ * carries (`authGate`, present only for a session the policy holds).
+ */
+interface ResolvedSession {
+    userId: string;
+    authGate?: AuthGate;
+}
 
 /**
  * The one message every `ENVIRONMENT_NOT_FOUND` refusal on this surface carries.
@@ -201,17 +213,40 @@ export class CloudConnectionPlugin implements Plugin {
                 manifest?.register?.(CLOUD_CONNECTION_UI_BUNDLE);
             } catch { /* no manifest service — headless kernel */ }
 
-            const sessionFromAuthService = async (authSvc: any, rawReq: Request): Promise<{ userId?: string } | null> => {
+            const sessionFromAuthService = async (authSvc: any, rawReq: Request): Promise<ResolvedSession | null> => {
                 const api = typeof authSvc?.getApi === 'function' ? await authSvc.getApi() : authSvc?.api ?? authSvc;
                 // [#22258] The in-process session-read rule: a request carrying a
                 // session cookie reads without renewal, because this route's
                 // response never carries a renewed cookie.
                 const session = await api?.getSession?.(inProcessSessionReadInput(rawReq.headers));
                 const userId = session?.user?.id ? String(session.user.id) : undefined;
-                return userId ? { userId } : null;
+                if (!userId) return null;
+                // ADR-0069: the ONE consult of the authentication-policy gate for
+                // every door on this surface, asked of the session this read
+                // returned (the posture rides its user, computed by plugin-auth's
+                // `customSession` enrichment only while a gate feature is active).
+                // Both modes read here: the host kernel's `auth` (single-env) and
+                // the environment's own kernel's (multi-tenant).
+                //
+                // No request path is passed, so the allow-list can grant no
+                // exemption (an empty path earns none, #7898). Nothing this plugin
+                // mounts is a remediation or bootstrap route.
+                const authGate = evaluateAuthGate(session?.user, '');
+                return authGate ? { userId, authGate } : { userId };
             };
 
-            const resolveSession = async (environmentId: string, rawReq: Request): Promise<{ userId?: string } | null> => {
+            /**
+             * ADR-0069: a session the authentication policy HOLDS (an expired
+             * password, enforced MFA not yet enrolled) is gated out of every
+             * protected resource until it remediates. Every door that resolves
+             * a session answers it this way, before its own 401 and before any
+             * control-plane call: REST's answer (`403` with the gate's own
+             * `code` and `message`), in this surface's envelope.
+             */
+            const refuseHeldSession = (c: any, gate: AuthGate) =>
+                c.json({ success: false, error: { code: gate.code, message: gate.message } }, 403);
+
+            const resolveSession = async (environmentId: string, rawReq: Request): Promise<ResolvedSession | null> => {
                 try {
                     if (this.cfg.singleEnvironment) {
                         // Single-env: the host kernel owns auth.
@@ -294,6 +329,7 @@ export class CloudConnectionPlugin implements Plugin {
                     return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND', message: ENVIRONMENT_NOT_FOUND_MESSAGE } }, 404);
                 }
                 const session = await resolveSession(environmentId ?? '', c.req.raw);
+                if (session?.authGate) return refuseHeldSession(c, session.authGate);
                 if (!session?.userId) return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to this environment to connect a cloud account.' } }, 401);
                 if (!cloudUrl) return c.json({ success: false, error: { code: 'CLOUD_UNCONFIGURED', message: 'No cloud control plane configured.' } }, 503);
                 try {
@@ -349,6 +385,7 @@ export class CloudConnectionPlugin implements Plugin {
                     return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND', message: ENVIRONMENT_NOT_FOUND_MESSAGE } }, 404);
                 }
                 const session = await resolveSession(environmentId ?? '', c.req.raw);
+                if (session?.authGate) return refuseHeldSession(c, session.authGate);
                 if (!session?.userId) return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to this environment.' } }, 401);
                 if (!cloudUrl) return c.json({ success: false, error: { code: 'CLOUD_UNCONFIGURED', message: 'No cloud control plane configured.' } }, 503);
 
@@ -447,6 +484,7 @@ export class CloudConnectionPlugin implements Plugin {
                     return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND', message: ENVIRONMENT_NOT_FOUND_MESSAGE } }, 404);
                 }
                 const session = await resolveSession(environmentId ?? '', c.req.raw);
+                if (session?.authGate) return refuseHeldSession(c, session.authGate);
                 if (!session?.userId) return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to this environment.' } }, 401);
 
                 // Revoke cloud-side FIRST (the oscc_ bearer self-identifies;
@@ -495,6 +533,7 @@ export class CloudConnectionPlugin implements Plugin {
                 // explicit env-admin role check; today only owners/admins obtain
                 // a session via SSO-as-owner.)
                 const session = await resolveSession(environmentId, c.req.raw);
+                if (session?.authGate) return refuseHeldSession(c, session.authGate);
                 if (!session?.userId) {
                     return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to this environment to install apps.' } }, 401);
                 }
@@ -545,6 +584,7 @@ export class CloudConnectionPlugin implements Plugin {
                 }
 
                 const session = await resolveSession(environmentId, c.req.raw);
+                if (session?.authGate) return refuseHeldSession(c, session.authGate);
                 if (!session?.userId) {
                     return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to this environment.' } }, 401);
                 }
@@ -607,6 +647,7 @@ export class CloudConnectionPlugin implements Plugin {
                 }
 
                 const session = await resolveSession(environmentId, c.req.raw);
+                if (session?.authGate) return refuseHeldSession(c, session.authGate);
                 if (!session?.userId) {
                     return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to this environment.' } }, 401);
                 }
@@ -644,6 +685,7 @@ export class CloudConnectionPlugin implements Plugin {
                 }
 
                 const session = await resolveSession(environmentId ?? '', c.req.raw);
+                if (session?.authGate) return refuseHeldSession(c, session.authGate);
                 if (!session?.userId) {
                     return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to this environment.' } }, 401);
                 }

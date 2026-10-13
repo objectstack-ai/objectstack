@@ -103,12 +103,13 @@ const SITES: ReadonlyArray<Site & {
         viewOnlyBy: 'const bound = canonicalType === \'view\' ? boundPackageOf(options.packageId) : undefined;',
     },
     {
-        member: 'hydrateExpandedViewItems', args: 'type, item, \'name\' as any',
+        // [#23198] Moved from hydrateExpandedViewItems into the one reconcile, which that hydration calls.
+        member: 'reconcileViewExpansions', args: 'type, item, \'name\' as any',
         disposition: 'yes, view only: skips a name another package ships',
-        path: 'hydrateOverlayIntoRegistry, for each expansion of a stored view container',
+        path: 'hydrateExpandedViewItems (from hydrateOverlayIntoRegistry), for each expansion of a stored view container',
         why: 'an expansion: not registered where another package ships its name (#21980), and the by-name read answers it '
             + 'from its stored container row',
-        viewOnlyBy: 'if ((PLURAL_TO_SINGULAR[type] ?? type) !== \'view\') return [];',
+        viewOnlyBy: 'if (canonicalMetaType(type) !== \'view\') return;',
     },
     {
         member: 'restoreArtifactRegistryView', args: 'type, baseline.data, \'name\'',
