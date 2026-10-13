@@ -1,51 +1,37 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#10103] The RBAC catalog is materialized PER ORGANIZATION.
+ * [#10103] The cross-organization grant bleed stays closed on the REAL
+ * resolver.
  *
- * ## What was measured, and why these cases exist
- *
- * On a walled deployment every principal — org owner and platform admin alike —
- * listed ZERO positions, permission sets and sharing rules while the tables held
- * rows. The rows were all organization-less: this plugin's Layer 0 composes a
- * strict `organization_id = :tenant`, the middleware ANDs it over the driver's
- * `(organization_id = :tenant OR organization_id IS NULL)`, and the conjunction
- * of the two is the strict equality alone. Nothing could be administered and a
- * declared `hierarchy-security` could never be armed.
- *
- * The repair does not touch the wall at either layer. It gives the rows an
- * owner. So every case here asserts about ROWS AND THEIR ORGANIZATION, through
- * the real shipped seeders, never about a wall predicate.
+ * Cases 1–5 of this file pinned the per-organization materialization of the
+ * permission-set catalog rows. That materialization retired with the
+ * declared-permission seeder (ADR-0131 D3: the boot writes no catalog row, and
+ * every organization reads the same registry), so they went with it. What
+ * remains is the enforcement-plane half: an existing database still holds the
+ * per-organization `everyone` copies and junction rows the retired seeders
+ * wrote, and no organization's member may collect another organization's
+ * binding through them.
  *
  * ## Why a real driver, and a real engine
  *
- * The whole defect lives in the interaction between a scope the ENGINE threads
- * and a predicate the DRIVER emits. A hand-written engine double implements
- * neither, so it reports green on a `tenantId` the real stack never applies —
- * and it is precisely a double's silence that let the shipped behaviour read as
- * correct for as long as it did. These cases therefore run a real `SqlDriver` on
- * better-sqlite3 `:memory:` behind a real `ObjectQL`, and call the SHIPPED
- * seeder functions rather than re-implementing their upserts.
- *
- * `case 6` additionally imports the REAL `resolveUserAuthzGrants` from
- * `@objectstack/core` — the enforcement-plane half of this change — so the
- * cross-organization grant bleed is pinned against the shipped resolver rather
- * than a transcription of its shape. That import resolves through the package's
- * `exports` to core's `dist/`, so core must be BUILT for this case to mean
- * anything; the suite's `pnpm test` run is preceded by a dependency-closure
- * build for exactly that reason.
+ * The defect lived in the interaction between a scope the ENGINE threads and a
+ * predicate the DRIVER emits, so this case runs a real `SqlDriver` on
+ * better-sqlite3 `:memory:` behind a real `ObjectQL`, and imports the REAL
+ * `resolveUserAuthzGrants` from `@objectstack/core`. That import resolves
+ * through the package's `exports` to core's `dist/`, so core must be BUILT for
+ * this case to mean anything; the suite's `pnpm test` run is preceded by a
+ * dependency-closure build for exactly that reason.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveUserAuthzGrants } from '@objectstack/core';
-import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
-import { bootstrapDeclaredPermissions } from './bootstrap-declared-permissions.js';
-import { SysPosition } from './objects/sys-position.object.js';
-import { SysPermissionSet } from './objects/sys-permission-set.object.js';
-import { SysPositionPermissionSet } from './objects/sys-position-permission-set.object.js';
+import { SysPosition } from './__tests__/legacy-catalog-objects.testkit.js';
+import { SysPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
+import { SysPositionPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { SysOrganization, SysUser, SysMember } from '@objectstack/platform-objects/identity';
@@ -61,35 +47,6 @@ afterEach(async () => {
     try { await engines.pop()?.destroy(); } catch { /* noop */ }
   }
 });
-
-/**
- * One declared position and one packaged permission set. [ADR-0131 D2] The
- * position is declared and gets no row: no boot seeder writes `sys_position`
- * any more, which case 1 holds as a census beside the permission set's rows.
- */
-const STUB_REGISTRY = {
-  listItems: (type: string) => {
-    if (type === 'position') return [{ name: 'sales_manager', label: 'Sales Manager' }];
-    if (type === 'permission') return [{ name: 'sales_readonly', label: 'Sales RO', _packageId: 'com.acme.crm', objects: {} }];
-    return [];
-  },
-  getItem: (type: string, name: string) => STUB_REGISTRY.listItems(type).find((item) => item.name === name),
-  isPackageDisabled: () => false,
-};
-
-/** A logger that records what the seeders said, so a LOUD guard can be asserted. */
-function recordingLogger() {
-  const warns: Array<{ message: string; meta: any }> = [];
-  const infos: Array<{ message: string; meta: any }> = [];
-  return {
-    warns,
-    infos,
-    logger: {
-      info: (message: string, meta?: any) => { infos.push({ message, meta }); },
-      warn: (message: string, meta?: any) => { warns.push({ message, meta }); },
-    },
-  };
-}
 
 async function boot(): Promise<ObjectQL> {
   const engine = new ObjectQL();
@@ -124,176 +81,15 @@ async function boot(): Promise<ObjectQL> {
   return engine;
 }
 
-/**
- * The REAL engine, faced with the stub registry (`ObjectQL.registry` is a
- * getter, so it cannot simply be assigned).
- *
- * A delegating pass-through, not a fake: every verb reaches the real ObjectQL
- * behind it, which is the whole point of this suite. `update` still opens with
- * the PRODUCER's own dispatch predicate (#4550 / #5480 / #6277) rather than a
- * hand-mirrored guard, because a seam that merely forwards is exactly the shape
- * that reads as "not a double" and then admits a call the real engine would
- * reject. `delete` is not declared at all — the seeder does not delete,
- * and a verb no caller exercises would be a contract this seam does not have to
- * make.
- */
-function withRegistry(engine: any): any {
-  return {
-    find: (o: string, q?: any, opt?: any) => engine.find(o, q, opt),
-    insert: (o: string, d: any, opt?: any) => engine.insert(o, d, opt),
-    update: (o: string, d: any, opt?: any) => {
-      assertEngineUpdateDispatch(d, opt);
-      return engine.update(o, d, opt);
-    },
-    registry: STUB_REGISTRY,
-  };
-}
-
 /** Ground truth: every stored row, straight off knex, past all tenancy. */
 async function stored(engine: ObjectQL, table: string): Promise<any[]> {
   const driver: any = (engine as any).getDriver(table);
   return driver.knex(table).select('*');
 }
 
-/**
- * Run the catalog seeder for one organization (walled), or none (single).
- * [ADR-0131 D2] The two position seeders are retired; the permission-set
- * seeder is the one left here.
- */
-async function seedCatalog(engine: ObjectQL, logger: any, organizationId?: string): Promise<void> {
-  const ql = withRegistry(engine);
-  await bootstrapDeclaredPermissions(ql, null, { logger, organizationId });
-}
-
 const orgOf = (r: any): string | null => (r.organization_id ?? null);
 
-describe('[#10103] per-organization RBAC catalog materialization', () => {
-  it('1. walled: every seeded catalog row is STAMPED with its organization, and each organization holds its own copy', async () => {
-    const engine = await boot();
-    const { logger } = recordingLogger();
-    for (const org of ORGS) await seedCatalog(engine, logger, org);
-
-    const positions = await stored(engine, 'sys_position');
-    const sets = await stored(engine, 'sys_permission_set');
-
-    // [ADR-0131 D2] No position row at all — the declared `sales_manager` and
-    // the six built-ins are registry items, written to no table.
-    expect(positions).toEqual([]);
-
-    // The inversion of the shipped behaviour: no row belongs to nobody.
-    expect(sets.filter((r) => orgOf(r) === null)).toEqual([]);
-
-    // Stated per organization so a failure names the tenant that lost its
-    // catalog rather than printing a set diff.
-    for (const org of ORGS) {
-      expect(sets.filter((r) => orgOf(r) === org).map((r) => r.name)).toEqual(['sales_readonly']);
-    }
-  });
-
-  it('2. walled: the read that measured ZERO over the whole catalog now returns the organization’s own rows', async () => {
-    const engine = await boot();
-    const { logger } = recordingLogger();
-    for (const org of ORGS) await seedCatalog(engine, logger, org);
-
-    // The AST plugin-security's Layer 0 AND-composes for `isolated`: a strict
-    // `organization_id = <active org>`, over which the driver adds its own
-    // predicate. This is the exact read that returned nothing.
-    const walled = await (engine as any).find('sys_permission_set', {
-      where: { organization_id: ORG_JIA },
-      context: { isSystem: true, tenantId: ORG_JIA },
-    });
-    const names = (walled as any[]).map((r) => r.name).sort();
-    expect(names).toEqual(['sales_readonly']);
-
-    // And the wall still walls: org_yi's copies are not in org_jia's read.
-    for (const row of walled as any[]) expect(orgOf(row)).toBe(ORG_JIA);
-  });
-
-  it('3. THE silent no-op is gone: a per-organization pass over a PRE-FIX organization-less row creates the organization’s own copy AND says so loudly, by name', async () => {
-    const engine = await boot();
-    const { logger, warns } = recordingLogger();
-
-    // Reproduce a pre-fix deployment exactly: one organization-less pass, the
-    // shipped behaviour, writing the rows every deployment that booted the old
-    // code carries.
-    await seedCatalog(engine, logger, undefined);
-    const before = await stored(engine, 'sys_permission_set');
-    expect(before.every((r) => orgOf(r) === null)).toBe(true);
-    const setBefore = before.filter((r) => r.name === 'sales_readonly');
-    expect(setBefore).toHaveLength(1);
-
-    warns.length = 0;
-    for (const org of ORGS) await seedCatalog(engine, logger, org);
-
-    // (a) NOT a no-op. The measured failure was: the tenant-threaded pass sees
-    // the organization-less row through the driver's compatibility arm, reads
-    // the name as already represented, takes the update branch and creates
-    // nothing — leaving the deployment as broken as before while reporting
-    // success. Each organization now has its OWN `sales_readonly`.
-    const after = await stored(engine, 'sys_permission_set');
-    const setAfter = after.filter((r) => r.name === 'sales_readonly');
-    // Sorted with `null` spelled explicitly rather than left to the default
-    // comparator, which stringifies and orders `null` first.
-    expect(setAfter.map(orgOf).sort((a, b) => `${a}`.localeCompare(`${b}`)))
-      .toEqual([ORG_JIA, ORG_YI, null].sort((a, b) => `${a}`.localeCompare(`${b}`)));
-    expect(setAfter.filter((r) => orgOf(r) === ORG_JIA)).toHaveLength(1);
-    expect(setAfter.filter((r) => orgOf(r) === ORG_YI)).toHaveLength(1);
-
-    // (b) LOUD. Named rows, named remedy — this is what stands in place of the
-    // reap, so a warning that merely counted would not discharge it.
-    const guard = warns.filter((w) => w.message.includes('pre-fix organization-less'));
-    expect(guard.length).toBeGreaterThanOrEqual(2); // at least once per organization
-    for (const org of ORGS) {
-      const forOrg = guard.filter((w) => w.meta?.organization === org);
-      expect(forOrg.length).toBeGreaterThan(0);
-      const names = forOrg.flatMap((w) => w.meta?.names ?? []);
-      expect(names).toContain('sales_readonly');
-    }
-    // The remedy is spelled out, and the reason nothing is deleted with it.
-    const text = guard.map((w) => w.message).join(' ');
-    expect(text).toContain('re-initialize');
-    expect(text).toContain('adopt');
-    expect(text).toContain('NOT deleted');
-
-    // (c) and nothing was reaped — the organization-less row that grants point
-    // at is still there, which is why the guard is a warning and not a delete.
-    expect(setAfter.filter((r) => orgOf(r) === null)).toHaveLength(1);
-  });
-
-  it('4. `single`-posture carve-out: exactly ONE organization-less pass, no copies, and NO warning', async () => {
-    const engine = await boot();
-    const { logger, warns } = recordingLogger();
-
-    await seedCatalog(engine, logger, undefined);
-    await seedCatalog(engine, logger, undefined); // idempotent re-run, as at boot
-
-    const sets = await stored(engine, 'sys_permission_set');
-    expect(sets.every((r) => orgOf(r) === null)).toBe(true);
-    expect(sets.filter((r) => r.name === 'sales_readonly')).toHaveLength(1);
-    // An organization-less row is the CORRECT shape here, so the guard that
-    // calls it invalid state must stay silent.
-    expect(warns.filter((w) => w.message.includes('pre-fix organization-less'))).toEqual([]);
-  });
-
-  it('5. boot reconciliation is O(changed declarations): a second pass over unchanged declarations writes NOTHING', async () => {
-    const engine = await boot();
-    const { logger } = recordingLogger();
-    for (const org of ORGS) await seedCatalog(engine, logger, org);
-
-    // `updated_at` is the observable a blind re-write would move. Snapshot the
-    // whole row set, re-run every pass, and require byte-equality — a pass that
-    // re-wrote unchanged rows would fail here even if the VALUES matched.
-    const snapshot = JSON.stringify((await stored(engine, 'sys_position')).map((r) => ({ ...r })).sort((a, b) => `${a.id}`.localeCompare(`${b.id}`)));
-    const setSnapshot = JSON.stringify((await stored(engine, 'sys_permission_set')).map((r) => ({ ...r })).sort((a, b) => `${a.id}`.localeCompare(`${b.id}`)));
-
-    for (const org of ORGS) await seedCatalog(engine, logger, org);
-
-    const again = JSON.stringify((await stored(engine, 'sys_position')).map((r) => ({ ...r })).sort((a, b) => `${a.id}`.localeCompare(`${b.id}`)));
-    const setAgain = JSON.stringify((await stored(engine, 'sys_permission_set')).map((r) => ({ ...r })).sort((a, b) => `${a.id}`.localeCompare(`${b.id}`)));
-    expect(again).toBe(snapshot);
-    expect(setAgain).toBe(setSnapshot);
-  });
-
+describe('[#10103] per-organization RBAC catalog — the resolver', () => {
   it('6. the cross-organization grant bleed is closed: the REAL resolver collects no organization’s junction binding', async () => {
     const engine = await boot();
     // [ADR-0131 D2] No boot seeder writes `everyone` rows any more; an existing

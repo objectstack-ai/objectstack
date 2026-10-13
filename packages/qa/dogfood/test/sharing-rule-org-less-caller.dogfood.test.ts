@@ -64,6 +64,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
 import { leaveOrganization } from './armed.js';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const RULES = '/sharing/rules';
 const SYS = { isSystem: true } as const;
@@ -137,13 +138,14 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
     // An ORG-SCOPED sharing-admin permission set: `manage_sharing` and
     // deliberately NOT `manage_platform_settings` — the card's exposed class is
     // precisely the caller who holds the org capability and no platform one.
-    const psId = 'ps_8158_sharing_admin';
-    await ql.insert('sys_permission_set', {
-      id: psId,
+    // Saved through the metadata door, the security catalog's one write path
+    // (ADR-0131 D3): a grant names it, and the resolver reads it from there.
+    const protocol = (await stack.kernel.getServiceAsync('protocol')) as any;
+    await protocol.saveMetaItem({
+      type: 'permission',
       name: 'sharing_admin_8158',
-      label: 'Sharing Administrator (org-scoped)',
-      system_permissions: JSON.stringify(['manage_sharing']),
-    }, { context: SYS });
+      item: { name: 'sharing_admin_8158', label: 'Sharing Administrator (org-scoped)', objects: {}, systemPermissions: ['manage_sharing'] },
+    });
 
     // Real sign-ups: better-auth's own path, through every database hook.
     await stack.signUp(ORG_LESS_EMAIL, PASSWORD);
@@ -186,8 +188,8 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
     // A platform operator outside the organization: `admin_full_access` held
     // globally, the grant a platform administrator holds under `single`.
     await stack.signUp(OPERATOR_EMAIL, PASSWORD);
-    const adminSet = await ql.findOne('sys_permission_set', { where: { name: 'admin_full_access' }, context: SYS });
-    expect(adminSet?.id, 'admin_full_access is seeded').toBeTruthy();
+    const adminSet = await catalogPermissionSet(ql, 'admin_full_access');
+    expect(adminSet, 'admin_full_access is served by the security catalog').toBeTruthy();
     await ql.insert('sys_user_permission_set', {
       user_id: await uid(OPERATOR_EMAIL), permission_set: adminSet.name, organization_id: null,
     }, { context: SYS });

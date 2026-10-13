@@ -50,7 +50,10 @@ function makeReqRes(opts: { params?: Record<string, string>; body?: any; headers
 // [Finding-1] An authorized admin context (verified, holds the branding
 // manifest's setup.access/setup.write capabilities). The production plugin
 // derives this from the verified session/API-key; here we inject it directly.
-const adminProvider = () => ({ enforced: true, permissions: ['setup.access', 'setup.write'] });
+// It names its `userId`: a context without one is ANONYMOUS, and the family's
+// anonymous floor refuses it 401 before any capability is consulted (ADR-0056
+// D2) — see `settings-routes.anonymous-floor.pin.test.ts`.
+const adminProvider = () => ({ enforced: true, permissions: ['setup.access', 'setup.write'], userId: 'usr_admin' });
 
 describe('settings-routes', () => {
   it('GET /api/settings → manifests', async () => {
@@ -94,7 +97,9 @@ describe('settings-routes', () => {
   it('PUT 404 for unknown namespace', async () => {
     const http = new MockHttp();
     const svc = new SettingsService();
-    registerSettingsRoutes(http, svc);
+    // A signed-in caller: an anonymous one is refused 401 before the namespace
+    // is looked up, so it can no longer learn which namespaces exist.
+    registerSettingsRoutes(http, svc, { contextFromRequest: adminProvider });
     const h = http.routes.get('PUT /api/settings/:namespace')!;
     const { req, res, state } = makeReqRes({ params: { namespace: 'nope' }, body: { a: 1 } });
     await h(req, res);
@@ -148,8 +153,13 @@ describe('settings-routes', () => {
 
   // ── [Finding-1] the DEFAULT (no verified provider) is SECURE ──────────────
   // Header-trusted identity is gone; an unauthenticated request can neither
-  // enumerate protected namespaces nor write them.
-  it('anonymous GET /api/settings hides manifests that require a read capability', async () => {
+  // enumerate protected namespaces nor write them. Since the family took the
+  // shared anonymous floor (ADR-0056 D2), the default context is refused 401
+  // UNAUTHENTICATED on every route before the service is consulted — the
+  // per-route sweep is `settings-routes.anonymous-floor.pin.test.ts`; the
+  // capability filter these tests used to reach anonymously is driven below
+  // by a SIGNED-IN caller who holds no capability.
+  it('anonymous GET /api/settings is refused 401 UNAUTHENTICATED, with no manifest list', async () => {
     const http = new MockHttp();
     const svc = new SettingsService();
     svc.registerManifest(brandingSettingsManifest); // requires setup.access
@@ -158,10 +168,25 @@ describe('settings-routes', () => {
     const h = http.routes.get('GET /api/settings')!;
     const { req, res, state } = makeReqRes();
     await h(req, res);
+    expect(state.status).toBe(401);
+    expect(state.body.error.code).toBe('UNAUTHENTICATED');
+    expect(state.body.data).toBeUndefined();
+  });
+
+  it('a signed-in caller with no capability sees no manifest that requires one', async () => {
+    const http = new MockHttp();
+    const svc = new SettingsService();
+    svc.registerManifest(brandingSettingsManifest); // requires setup.access
+    registerSettingsRoutes(http, svc, { contextFromRequest: () => ({ enforced: true, permissions: [], userId: 'usr_member' }) });
+
+    const h = http.routes.get('GET /api/settings')!;
+    const { req, res, state } = makeReqRes();
+    await h(req, res);
+    expect(state.status).toBe(200);
     expect(state.body.data.manifests.length).toBe(0);
   });
 
-  it('anonymous GET /api/settings/:ns is DENIED (403), not served', async () => {
+  it('anonymous GET /api/settings/:ns is refused 401 UNAUTHENTICATED, not served', async () => {
     const http = new MockHttp();
     const svc = new SettingsService({ env: {} });
     svc.registerManifest(brandingSettingsManifest);
@@ -170,11 +195,25 @@ describe('settings-routes', () => {
     const h = http.routes.get('GET /api/settings/:namespace')!;
     const { req, res, state } = makeReqRes({ params: { namespace: 'branding' } });
     await h(req, res);
+    expect(state.status).toBe(401);
+    expect(state.body.error.code).toBe('UNAUTHENTICATED');
+    expect(state.body.data).toBeUndefined();
+  });
+
+  it('a signed-in caller without the read capability is DENIED (403), not served', async () => {
+    const http = new MockHttp();
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(brandingSettingsManifest);
+    registerSettingsRoutes(http, svc, { contextFromRequest: () => ({ enforced: true, permissions: [], userId: 'usr_member' }) });
+
+    const h = http.routes.get('GET /api/settings/:namespace')!;
+    const { req, res, state } = makeReqRes({ params: { namespace: 'branding' } });
+    await h(req, res);
     expect(state.status).toBe(403);
     expect(state.body.error.code).toBe('SETTINGS_FORBIDDEN');
   });
 
-  it('anonymous PUT /api/settings/:ns is DENIED (403) — the unauthenticated write hole is closed', async () => {
+  it('anonymous PUT /api/settings/:ns is refused 401 UNAUTHENTICATED — the unauthenticated write hole is closed', async () => {
     const http = new MockHttp();
     const svc = new SettingsService({ env: {} });
     svc.registerManifest(brandingSettingsManifest);
@@ -183,8 +222,9 @@ describe('settings-routes', () => {
     const h = http.routes.get('PUT /api/settings/:namespace')!;
     const { req, res, state } = makeReqRes({ params: { namespace: 'branding' }, body: { workspace_name: 'pwn' } });
     await h(req, res);
-    expect(state.status).toBe(403);
-    expect(state.body.error.code).toBe('SETTINGS_FORBIDDEN');
+    expect(state.status).toBe(401);
+    expect(state.body.error.code).toBe('UNAUTHENTICATED');
+    expect((await svc.get('branding', 'workspace_name')).source).toBe('default');
   });
 
   it('a spoofed x-user-id / x-permissions header grants NOTHING (default ignores identity headers)', async () => {
@@ -200,14 +240,17 @@ describe('settings-routes', () => {
       headers: { 'x-user-id': 'attacker', 'x-permissions': 'setup.write,setup.access' },
     });
     await h(req, res);
-    expect(state.status).toBe(403);
+    // The forged id is not an identity: the caller is anonymous, and the floor says so.
+    expect(state.status).toBe(401);
+    expect(state.body.error.code).toBe('UNAUTHENTICATED');
+    expect((await svc.get('branding', 'workspace_name')).source).toBe('default');
   });
 
   it('a caller holding only read (setup.access) may read but NOT write', async () => {
     const http = new MockHttp();
     const svc = new SettingsService({ env: {} });
     svc.registerManifest(brandingSettingsManifest);
-    registerSettingsRoutes(http, svc, { contextFromRequest: () => ({ enforced: true, permissions: ['setup.access'] }) });
+    registerSettingsRoutes(http, svc, { contextFromRequest: () => ({ enforced: true, permissions: ['setup.access'], userId: 'usr_reader' }) });
 
     const read = http.routes.get('GET /api/settings/:namespace')!;
     const r1 = makeReqRes({ params: { namespace: 'branding' } });

@@ -3,8 +3,9 @@
 // Build-time guardrail for `{record.<path>}` template references in a
 // record-change flow's node config (#3426).
 //
-// A `notify` / `update_record` / `http` / ... node interpolates
-// `{record.<field>}` tokens against the triggering record. Two authoring
+// A `notify` / `update_record` / `http` / ... node resolves `{record.<field>}`
+// references against the triggering record — a `{{ }}` hole in a text slot, a
+// single-brace token where that dialect still reads. Two authoring
 // mistakes render a SILENT empty string at runtime, with no design-time
 // signal — exactly the failure #3426 reported:
 //
@@ -159,8 +160,10 @@ const RELATION_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 // The CRUD nodes whose `filter` the runtime guards (framework#3810): each calls
-// `resolveNodeFilter`, which refuses the node when interpolation erased any
-// authored condition. `create_record` is deliberately absent — it writes a
+// `resolveNodeFilter`, which refuses the node when an authored operand
+// evaluated to nothing. (Since #19939 a single-brace token at a filter operand
+// is refused before any run, by the value-slot judge; this rule still reads
+// one there until the single-brace reading retires.) `create_record` is deliberately absent — it writes a
 // payload and has no filter, so an unresolved token there is a blank value on
 // the new row, not a widened query.
 const FILTER_GUARDED_NODE_TYPES: ReadonlySet<string> = new Set([
@@ -198,7 +201,7 @@ interface TemplateRef {
  *    dotted path;
  *  - a `{{ ... }}` hole — the formula template engine's grammar, which the
  *    text slots render since #22110 (a notify `title` / `message` and, since
- *    #19939, its `actionUrl`, a screen
+ *    #19939, its `actionUrl` and an http `url` and `headers` values, a screen
  *    `title` / `description`, an `end` `message`): a path with an optional
  *    `| formatter[:arg]`, whose segments may be bracket-indexed
  *    (`{{ rows[0].subject }}`). The path before the pipe, with each `[i]`

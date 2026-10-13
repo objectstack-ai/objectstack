@@ -147,6 +147,11 @@
  * caller who guessed wrong can fix the request from the response alone,
  * without reading our source or our docs.
  *
+ * A route whose closed set is EMPTY reads no query parameter at all (#23072:
+ * `GET /meta/:type/:name/references` and `/published`), and the second half
+ * says so in words: `Supported parameters: .` would read as a truncated
+ * answer, where the remedy is to send none.
+ *
  * @param unknown    the unrecognised names, in the order they should be
  *                   reported (the caller sorts them for determinism)
  * @param supported  every name this route accepts, sorted
@@ -158,9 +163,36 @@ export function unknownQueryParamMessage(
   const subject = unknown.length === 1
     ? `The "${unknown[0]}" query parameter is not supported by this endpoint.`
     : `The query parameters ${unknown.map(n => `"${n}"`).join(', ')} are not supported by this endpoint.`;
+  const accepted = supported.length === 0
+    ? 'This endpoint takes no query parameters.'
+    : `Supported parameters: ${supported.join(', ')}.`;
   return `${subject} This endpoint will not silently ignore a parameter it does not `
     + `understand — an ignored filter is indistinguishable from one that matched everything. `
-    + `Supported parameters: ${supported.join(', ')}.`;
+    + accepted;
+}
+
+/**
+ * The recognition DECISION, as a pure function of the query: the located
+ * sentence for a query carrying any name outside `allowed`, or `undefined` when
+ * every name is understood (or there is no query object at all).
+ * {@link refuseUnknownQueryParams} writes it; a door with its own envelope —
+ * the by-name `/meta` doors' `metaItemQueryRefusal`, which the runtime
+ * dispatcher asks — takes it and writes its own body (#23072).
+ *
+ * @param query    the request's parsed query (any shape; a non-object has no names)
+ * @param allowed  every parameter name the route accepts
+ */
+export function unknownQueryParamRefusalMessage(
+  query: unknown,
+  allowed: readonly string[],
+): string | undefined {
+  if (!query || typeof query !== 'object') return undefined;
+  const permitted = new Set(allowed);
+  // Sorted so a request carrying several unknown names always produces the
+  // same message, whatever order the adapter happened to build the object in.
+  const unknown = Object.keys(query).filter(k => !permitted.has(k)).sort();
+  if (unknown.length === 0) return undefined;
+  return unknownQueryParamMessage(unknown, [...allowed].sort());
 }
 
 /**
@@ -184,17 +216,12 @@ export function refuseUnknownQueryParams(
   res: any,
   allowed: readonly string[],
 ): boolean {
-  const query = req?.query;
-  if (!query || typeof query !== 'object') return false;
-  const permitted = new Set(allowed);
-  // Sorted so a request carrying several unknown names always produces the
-  // same message, whatever order the adapter happened to build the object in.
-  const unknown = Object.keys(query).filter(k => !permitted.has(k)).sort();
-  if (unknown.length === 0) return false;
+  const message = unknownQueryParamRefusalMessage(req?.query, allowed);
+  if (message === undefined) return false;
   res.status(400).json({
     error: {
       code: 'VALIDATION_ERROR',
-      message: unknownQueryParamMessage(unknown, [...allowed].sort()),
+      message,
     },
   });
   return true;

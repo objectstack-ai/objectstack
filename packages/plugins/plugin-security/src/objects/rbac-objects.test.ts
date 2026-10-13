@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { SysPosition, SysPermissionSet, SysCapability, SysUserPermissionSet, SysUserPosition, defaultPermissionSets } from './index.js';
+import { SysUserPermissionSet, SysUserPosition, defaultPermissionSets } from './index.js';
 
 /**
  * RBAC object + default-permission-set assertions. Moved here with the objects
@@ -62,10 +62,9 @@ describe('default permission sets', () => {
 
   it('organization_admin is read-only on global RBAC tables to prevent privilege escalation', () => {
     const orgAdmin = defaultPermissionSets.find((p) => p.name === 'organization_admin')!;
+    // [C3 stage 8] The catalog row objects are retired (ADR-0131 D3); the
+    // assignment and grant tables are what is left to protect.
     for (const obj of [
-      'sys_position',
-      'sys_permission_set',
-      'sys_position_permission_set',
       'sys_user_permission_set',
       'sys_user_position',
     ]) {
@@ -188,130 +187,6 @@ describe('default permission sets', () => {
   });
 });
 
-describe('RBAC object canonical names + row actions', () => {
-  it('SysPosition / SysPermissionSet use their canonical sys_ short names and are system objects', () => {
-    expect(SysPosition.name).toBe('sys_position');
-    expect(SysPermissionSet.name).toBe('sys_permission_set');
-    expect(SysPosition.isSystem).toBe(true);
-    expect(SysPermissionSet.isSystem).toBe(true);
-  });
-
-  it('SysPosition exposes activate/deactivate/clone/set-default row actions (ADR-0090 D3 vocabulary)', () => {
-    const names = (SysPosition.actions ?? []).map((a) => a.name).sort();
-    expect(names).toEqual(['activate_position', 'clone_position', 'deactivate_position', 'set_default_position']);
-  });
-
-  it('SysPermissionSet exposes activate/deactivate/clone row actions', () => {
-    const names = (SysPermissionSet.actions ?? []).map((a) => a.name).sort();
-    expect(names).toEqual([
-      'activate_permission_set', 'clone_permission_set', 'deactivate_permission_set',
-    ]);
-  });
-
-  it('[field report — rc→GA declared≠enforced surfacing] SysPermissionSet.drift_status is a select naming the two detected causes, and appears in the "Needs Attention" list view', () => {
-    const f: any = (SysPermissionSet.fields as any).drift_status;
-    expect(f, 'drift_status field exists').toBeDefined();
-    expect(f.type).toBe('select');
-    expect(f.readonly).toBe(true);
-    const opts = (f.options ?? []).map((o: any) => o.value).sort();
-    expect(opts).toEqual(['other', 'overlay_shadow', 'provenance_skip']);
-
-    const views: any = SysPermissionSet.listViews;
-    expect(views.drifted, 'drifted list view exists').toBeDefined();
-    expect(views.drifted.columns).toContain('drift_status');
-    expect(views.all_permsets.columns).toContain('drift_status');
-  });
-
-  it('[A4 #2920] SysPermissionSet.managed_by is a select on the unified platform/package/admin vocab', () => {
-    const f: any = (SysPermissionSet.fields as any).managed_by;
-    expect(f, 'managed_by field exists').toBeDefined();
-    expect(f.type).toBe('select');
-    expect(f.readonly).toBe(true);
-    const opts = (f.options ?? []).map((o: any) => o.value).sort();
-    expect(opts).toEqual(['admin', 'package', 'platform']);
-  });
-
-  it('[A4 #2920] SysPosition.managed_by is a select on the unified vocab and appears in every list view', () => {
-    const f: any = (SysPosition.fields as any).managed_by;
-    expect(f, 'managed_by field exists').toBeDefined();
-    expect(f.type).toBe('select');
-    expect(f.readonly).toBe(true);
-    const opts = (f.options ?? []).map((o: any) => o.value).sort();
-    expect(opts).toEqual(['admin', 'package', 'platform']);
-    // The provenance column is surfaced in all four position list views.
-    const views: any = SysPosition.listViews;
-    for (const v of ['active', 'default_positions', 'custom', 'all_positions']) {
-      expect(views[v].columns, `${v} view shows managed_by`).toContain('managed_by');
-    }
-  });
-
-  it('[A4 #2920] all three RBAC catalogs share the identical managed_by vocabulary', () => {
-    const vocab = (schema: any) =>
-      ((schema.fields.managed_by.options ?? []) as any[]).map((o) => o.value).sort();
-    const cap = vocab(SysCapability);
-    expect(cap).toEqual(['admin', 'package', 'platform']);
-    expect(vocab(SysPermissionSet)).toEqual(cap);
-    expect(vocab(SysPosition)).toEqual(cap);
-  });
-
-  it('[ADR-0094] declares a readonly `customized` provenance flag surfaced in the All list view', () => {
-    const f: any = (SysPermissionSet.fields as any).customized;
-    expect(f, 'customized field exists').toBeDefined();
-    expect(f.type).toBe('boolean');
-    expect(f.readonly).toBe(true);
-    const allView: any = (SysPermissionSet.listViews as any).all_permsets;
-    expect(allView.columns).toContain('customized');
-    expect(allView.columns).toContain('managed_by');
-  });
-
-  it('[ADR-0094] locks the API name after creation (readonly on edit, editable on create)', () => {
-    // The name is the metadata identity the record projects from — renaming
-    // through the data door is rejected (400); this is the matching UI lock.
-    const nameField: any = (SysPermissionSet.fields as any).name;
-    expect(nameField.readonlyWhen, 'name carries a readonlyWhen lock').toBeTruthy();
-    // The predicate keys off the server-assigned id: absent on create, present
-    // on edit — so create stays editable and edit is locked.
-    const pred = JSON.stringify(nameField.readonlyWhen);
-    expect(pred).toContain('record.id');
-    // The static readonly flag is NOT set (that would block create too).
-    expect(nameField.readonly ?? false).toBe(false);
-  });
-});
-
-
-describe('sys_capability — ADR-0066 D1 capability registry', () => {
-  it('is a system config object with the canonical name', () => {
-    expect(SysCapability.name).toBe('sys_capability');
-    expect(SysCapability.isSystem).toBe(true);
-    expect(SysCapability.managedBy).toBe('config');
-  });
-
-  it('declares name/label/scope/managed_by fields', () => {
-    const f: any = SysCapability.fields;
-    expect(f.name).toBeDefined();
-    expect(f.label).toBeDefined();
-    expect(f.scope).toBeDefined();
-    expect(f.managed_by).toBeDefined();
-    // scope + managed_by are constrained selects
-    const scopeOpts = (f.scope.options ?? []).map((o: any) => o.value).sort();
-    expect(scopeOpts).toEqual(['org', 'platform']);
-    const mbOpts = (f.managed_by.options ?? []).map((o: any) => o.value).sort();
-    expect(mbOpts).toEqual(['admin', 'package', 'platform']);
-  });
-
-  it('enforces a unique index on name, scoped per organization', () => {
-    const nameIdx = (SysCapability.indexes ?? []).find((i: any) => Array.isArray(i.fields) && i.fields.includes('name'));
-    // [#8323] Was `toBe(true)`. On a DECLARED index bare `true` is the
-    // positional spelling of `'global'` — the listed columns verbatim — which
-    // made `name` an installation-wide key on a tenant-scoped object and turned
-    // its 409 into a cross-tenant existence oracle. The assertion is respelled
-    // rather than relaxed: a truthiness check here would accept the very
-    // spelling that was the defect. Full contract in
-    // `sys-capability.organization-unique.test.ts`.
-    expect(nameIdx?.unique).toBe('organization');
-  });
-});
-
 describe('sys_user_permission_set — `delegated_from` is retired (#9730, ADR-0049)', () => {
   it('no longer declares `delegated_from` — the runtime delegation gate never read it here', () => {
     // Maintainer ruling 2026-08-18 (REMOVE): the delegation gate's
@@ -331,33 +206,5 @@ describe('sys_user_permission_set — `delegated_from` is retired (#9730, ADR-00
     expect(f).toBeDefined();
     expect(f.type).toBe('lookup');
     expect(f.reference).toBe('sys_user');
-  });
-});
-
-describe('sys_position — `permissions` is retired (#9885, ADR-0049)', () => {
-  it('no longer declares `permissions` — nothing ever wrote or read it', () => {
-    // Maintainer ruling 2026-08-20 (REMOVE): the object-scoped census read
-    // every sys_position-naming file — the bootstrap writers set label /
-    // description / managed_by / active / is_default only, and position→grant
-    // resolution consults `sys_position_permission_set` rows plus the position
-    // `name`, never a `permissions` column. A free-text grant catalogue no
-    // runtime enforces tells an author that direct position-level grants
-    // exist; they do not. Re-declaring the key here without a runtime reader
-    // in the same change is the exact defect the ruling removed; this pin
-    // makes that re-growth loud.
-    expect(SysPosition.fields).not.toHaveProperty('permissions');
-  });
-
-  it('clone_position no longer copies the retired column (defaultFromRow itself survives)', () => {
-    const clone: any = (SysPosition.actions ?? []).find((a: any) => a.name === 'clone_position');
-    expect(clone, 'clone_position action still declared').toBeDefined();
-    const copied = ((clone.params ?? []) as any[])
-      .filter((p) => typeof p.field === 'string')
-      .map((p) => p.field);
-    // Positive control first: the copy mechanism is untouched — only the
-    // retired column left it. A clone that stopped copying `description`
-    // would be a different regression, not this retirement.
-    expect(copied).toContain('description');
-    expect(copied).not.toContain('permissions');
   });
 });

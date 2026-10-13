@@ -38,6 +38,7 @@ import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plug
 import { PermissionSetSchema, type PermissionSet } from '@objectstack/spec/security';
 import { commentsFixtureStack, cmtFixtureBaselineSet } from './fixtures/comments-fixture.js';
 import { armedWhen, assertArmed, principalArmed } from './armed.js';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const SYS = { isSystem: true } as const;
 const LEDGER = 'sys_audit_log';
@@ -81,8 +82,8 @@ describe('[#21175] sys_audit_log: a ledger reader reads the rows about records i
     ql = await stack.kernel.getServiceAsync('objectql');
 
     const readerId = (await ql.findOne('sys_user', { where: { email: READER_EMAIL }, context: SYS }))?.id;
-    const set = await ql.findOne('sys_permission_set', { where: { name: ledgerReaderSet.name }, context: SYS });
-    expect(set?.id, 'fixture permission set seeded').toBeTruthy();
+    const set = await catalogPermissionSet(ql, ledgerReaderSet.name);
+    expect(set, 'fixture permission set served by the security catalog').toBeTruthy();
     await ql.insert('sys_user_permission_set', { user_id: readerId, permission_set: set.name }, { context: { ...SYS } });
 
     const idOf = async (res: Response) => {

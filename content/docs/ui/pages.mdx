@@ -66,7 +66,7 @@ const homePage = {
 | `regions` | `PageRegion[]` | optional | Layout regions with components (default `[]` — `list` pages render via `interfaceConfig`, and an empty `record`/`home`/`app` page falls back to the synthesized default layout) |
 | `source` | `string` | optional | Page source text — required (and authoritative over `regions`) when `kind` is `'html'` or `'react'`. For `kind: 'html'` it is constrained JSX/HTML compiled to the tree by `@objectstack/sdui-parser` at save time (parse, never execute). For `kind: 'react'` it is real React/JSX executed at render by `@object-ui/react-runtime` (trusted tier). See [React Pages](/docs/ui/react-pages) |
 | `variables` | `PageVariable[]` | optional | Local state variables |
-| `isDefault` | `boolean` | optional | Is default page for its type |
+| `isDefault` | `boolean` | optional | The default record page of its `object` — the page that object's record view opens. At most one `isDefault: true` record page per object per deployment: a second is refused by `defineStack` / `os validate`, at package registration and at metadata save, naming both pages. Saving a page under the existing default's own name is that page, not a second default. Outside the rule on a page that is not a record page bound to an object |
 
 ### Page Types
 
@@ -186,7 +186,45 @@ The `type` field is a union of the standard `PageComponentType` enum and any cus
 - **AI:** `ai:suggestion` — `ai:chat_window` was retired in v17.x: AI chat is not a page element, and the floating chat overlay the console mounts on every page is the supported entry point (set the app's `defaultAgent` to choose which platform agent answers there). No renderer for it ever shipped, and an authored `ai:chat_window` node is refused at the schema door — `definePage()`, `os validate`, `os build` — with that prescription at the node's path instead of drawing an unknown-type panel in front of a user
 - **Elements:** `element:text`, `element:number`, `element:image`, `element:divider`, `element:button`, `element:record_picker`, `element:text_input` (`element:filter` and `element:form` were retired in v17.x — no renderer ever shipped for either, and an authored node of either type is refused at the schema door — `definePage()`, `os validate`, `os build` — with that prescription at the node's path, bare node included. List surfaces own their filtering via a view's `userFilters` quick-filter bar or the list toolbar's filter builder; for forms use the object-bound `object-form` block, which is rendered and designer-publishable)
 
-Components may also carry `dataSource` (per-element object binding for multi-object pages), `responsiveStyles` (per-breakpoint scoped CSS, ADR-0065), and `aria` configuration. Custom string types are also accepted for project-specific widgets. (The former `responsive` layout block was retired in v17.x — no renderer ever applied it; see the upgrade guide.)
+Components may also carry `dataSource` (a per-element data binding — see below), `responsiveStyles` (per-breakpoint scoped CSS, ADR-0065), and `aria` configuration. Custom string types are also accepted for project-specific widgets. (The former `responsive` layout block was retired in v17.x — no renderer ever applied it; see the upgrade guide.)
+
+### Element data sources
+
+A component's `dataSource` takes one of two shapes. The **object** binding queries an object, overriding the page's own `object`, so one page can show several objects. The **API** binding reads one endpoint on the deployment's own origin and binds its answer, so a page can compose from a summary that is not an object:
+
+{/* os:check */}
+```typescript
+import type { PageComponent } from '@objectstack/spec/ui';
+
+// Object binding: `object` is required; `view`, `filter`, `sort` and `limit` narrow it.
+const openDeals: PageComponent = {
+  type: 'list-view',
+  dataSource: {
+    object: 'opportunity',
+    view: 'open_deals',
+    filter: [{ field: 'amount', operator: 'greater_than', value: 10000 }],
+    limit: 10,
+  },
+};
+
+// API binding: `read.url` is a same-origin API path; `path` selects the part
+// of the `{ success, data }` response the element binds.
+const environments: PageComponent = {
+  type: 'stat',
+  dataSource: {
+    provider: 'api',
+    read: { url: '/api/v1/cloud/home' },
+    path: 'data.environments',
+  },
+};
+```
+
+The API binding's rules:
+
+- **Same-origin only.** `read.url` must open with a single `/`. An absolute URL of any scheme (`https:`, `mailto:`, `javascript:`, …), a protocol-relative `//host`, a backslash the browser reads as a slash, a space or control character, and a relative path such as `./home` are all refused when the page is parsed (`definePage()`, `os validate`, `os build`), with the reason.
+- **No credentials in metadata.** The console reads the endpoint with its own signed-in fetch, so the read block has no `headers`, and a credential key such as `headers`, `credentials` or `token` is refused.
+- **Reads only.** `read.method` is optional and accepts `GET` alone; there is no `write` block.
+- **Not rendered yet.** The console's generic blocks that read an API binding (a stat, a usage bar, a checklist) have not shipped: until they do, the binding parses and no block reads it.
 
 ## Variables
 

@@ -43,7 +43,7 @@ export const GUARD_REFUSAL: unique symbol = Symbol.for(
  * Use it when BOTH hold:
  *   1. re-running the flow unchanged can never succeed, and
  *   2. the fix is to edit metadata (a missing required config key, a graph that
- *      recurses, a filter whose condition interpolation erased).
+ *      recurses, a filter whose operand evaluated to nothing).
  *
  * If either is false the failure is a `runtime` one — the world did not
  * cooperate — and it must stay routable so authors can handle it. A connector

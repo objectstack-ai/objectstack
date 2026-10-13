@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
 
 /**
@@ -53,16 +54,46 @@ import { strictObject } from '../shared/strict-object';
 export const EMAIL_TEMPLATE_FLOOR_LOCALE = 'en-US';
 
 /**
- * Logical grouping; surfaces as a filter facet in Studio listings.
+ * `category` and `isSystem` — RETIRED (#22876, ADR-0049 enforce-or-remove).
+ *
+ * Both lost their only consumer when ADR-0131 D6/D10 retired the projection of
+ * declared templates into `sys_email_template` rows: `category` fed a Setup
+ * column, and `isSystem` fed the built-in seeder's stand-down. Measured before
+ * removal: no reader anywhere in this repository (plugin-email,
+ * service-messaging, plugin-auth, the metadata protocol, objectql, the
+ * runtime, the REST layer), and at the `.objectui-sha` pin objectui read
+ * neither — the Studio listing never built the filter facet `category`'s doc
+ * promised, and nothing refused deleting a template that set `isSystem`. A
+ * built-in template is a code package's declaration, so an environment item
+ * over it can only be discarded, whatever the key said. Both keys carried a
+ * schema default, so every template carried them and the dead-property
+ * advisory fired on every template with no way for an author to clear it.
+ *
+ * `retiredKey()` tombstones on the `strictObject` below rather than strict
+ * deletions, so the refusal carries the prescription instead of a bare
+ * unknown-key verdict and a typed authoring site fails `tsc` first. The
+ * `category` enum (`EmailTemplateDefinitionCategorySchema`) left with its one
+ * key. The ADR-0087 D2 conversion `email-template-category-is-system-removed`
+ * strips both keys wherever the chain is replayed (stored rows and built
+ * artifacts, which a 17.x parse materialized both defaults into), and the D3
+ * entry `email-template-category-is-system-retired` carries what the author
+ * still owes.
  */
-export const EmailTemplateDefinitionCategorySchema = lazySchema(() => z.enum([
-  'auth',          // Password reset, email verification, magic link, invitation
-  'notification',  // System notifications, alerts
-  'workflow',      // Approval/flow generated mail
-  'marketing',     // Outbound campaigns
-  'custom',        // App-defined
-]));
-export type EmailTemplateDefinitionCategory = z.input<typeof EmailTemplateDefinitionCategorySchema>;
+const EMAIL_TEMPLATE_CATEGORY_REMOVED =
+  '`email_template.category` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
+  + 'nothing read it: the Studio listing never offered the filter facet it promised, and delivery '
+  + 'never depended on it. Delete the key. A template is found by its `name`, so group templates '
+  + 'with a dotted namespace prefix instead (`auth.password_reset`, `crm.welcome`). '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` '
+  + 'applies the ones it can prove, and you apply the rest by hand.';
+
+const EMAIL_TEMPLATE_IS_SYSTEM_REMOVED =
+  '`email_template.isSystem` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
+  + 'nothing enforced it: no door refused deleting a template that set it. Delete the key. A '
+  + "built-in template is a code package's declaration: a Studio save overrides it for the "
+  + "environment, and discarding that save restores the package's copy. "
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` '
+  + 'applies the ones it can prove, and you apply the rest by hand.';
 
 export const EmailTemplateDefinitionVariableSchema = lazySchema(() => z.object({
   name: z.string().describe('Variable name as referenced in placeholders (snake_case or dotted path)'),
@@ -105,8 +136,9 @@ export const EmailTemplateDefinitionSchema = lazySchema(() => strictObject({
   /** Human-readable label shown in Studio. */
   label: z.string().describe('Display label'),
 
-  /** Logical grouping. */
-  category: EmailTemplateDefinitionCategorySchema.default('custom'),
+  // `category` REMOVED (#22876, ADR-0049 enforce-or-remove) — nothing read it.
+  // See the note above `EMAIL_TEMPLATE_CATEGORY_REMOVED`.
+  category: retiredKey(EMAIL_TEMPLATE_CATEGORY_REMOVED),
 
   /**
    * IETF BCP-47 locale tag — the second half of the bundle key.
@@ -188,20 +220,19 @@ export const EmailTemplateDefinitionSchema = lazySchema(() => strictObject({
   /** When false, `sendTemplate()` returns an error (`TEMPLATE_INACTIVE`). */
   active: z.boolean().default(true),
 
-  /**
-   * When true the template is provided by a plugin / platform and
-   * SHOULD NOT be deleted by tenants (overlay/edit still allowed).
-   * Mirrors the `isSystem` flag on object schemas.
-   */
-  isSystem: z.boolean().default(false),
+  // `isSystem` REMOVED (#22876, ADR-0049 enforce-or-remove) — nothing enforced
+  // it. See the note above `EMAIL_TEMPLATE_IS_SYSTEM_REMOVED`.
+  isSystem: retiredKey(EMAIL_TEMPLATE_IS_SYSTEM_REMOVED),
 
   /** Free-form description shown in Studio. */
   description: z.string().optional(),
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package
-   * authors declare lock policy here; the loader translates it
-   * into the private `_lock` envelope at registration time and
-   * strips this block before persistence. See
+   * authors declare lock policy here, in a code package's source;
+   * the loader translates it into the private `_lock` envelope at
+   * registration time and strips this block. The metadata API's
+   * save door does not translate it and refuses it (`400
+   * VALIDATION_ERROR`), so that door never stores it. See
    * `shared/protection.zod.ts`.
    */
   protection: ProtectionSchema.optional().describe(

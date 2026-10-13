@@ -168,6 +168,9 @@ const OTHER_NODE_SLOTS: Readonly<Record<string, Disposition>> = {
   // [#19939] A rendered text slot that is not copy: the link a person follows.
   'notify.actionUrl': noReader('the link the notification points at — an app path with `{{ }}` holes, not copy'),
   'http.body': noReader('the request body sent to the endpoint'),
+  // [#19939] Rendered text slots that are not copy: the request an endpoint receives.
+  'http.url': noReader('the endpoint the request is sent to — a url with `{{ }}` holes, not copy'),
+  'http.headers': noReader('the request headers sent to the endpoint — values with `{{ }}` holes, not copy'),
   [`${APPROVAL_NODE_TYPE}.decisionOutputs[].label`]: {
     owed:
       "the approver reads it as an input label in the approval decision dialog. No translation face addresses an "

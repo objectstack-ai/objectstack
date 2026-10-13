@@ -91,6 +91,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 用户账号仅三用:assignee、授权批准、维护者亲手;批准账号永不跑席位或作其关联用户。
 - 内容写只走 REST 代理,⛔ 无 MCP 写,唯一例外 `rerun_failed_jobs`(限 CI 红单次重跑,先核 head)。
 - 写侧恒为 `objectstack-fleet[bot]`;`user.login` 记令牌不记席位,归属 = 文本里的 session ID。
+- 席位及其子代理 ⛔ 永不打印环境变量的值;判存在只用不印值的形式 `[ -n "${X+x}" ]`。
 - GitHub 上一切新内容用英文;中文只留四通道(维护者速读、轮报、裁决引文、四维分析)。
 - 裁决引文照抄不译;四维中文只管新记录,存量英文块 ⛔ 不迁移;存量中文 ⛔ 不追溯改写。
 - 一 PM 恰管一车道,一车道由一组座位管,一席一贴;PM Y 管什么恰一个答案。
@@ -180,8 +181,8 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 
 - **ACCEPT 之后的路径分叉**:翻 ready / 挂 auto-merge / 入队前先取一次 PR 的路径面。
 - 路径面用 `get_files` 取,⛔ 不看报告自述;动手之前先分,不是事后对照。
-- governed 面统一定义:`docs/adr/**` + `.claude/**`(全量)+ `skills/**` + `docs/NORTH-STAR.md`。
-- governed 面同含 `AGENTS.md` + `CLAUDE.md`;`GOVERNED_REPOS` 各仓同治理待遇,执行席恒随落地仓车道。
+- governed 面统一定义:`docs/adr/**`+`.claude/**`(全量)+`skills/**`+`docs/NORTH-STAR.md`+`.github/workflows/**`。
+- governed 面同含 `AGENTS.md`+`CLAUDE.md`;`GOVERNED_REPOS` 同治理、行可限仓,执行席恒随落地仓车道。
 - 路径面命中 Tier H ⇒ ACCEPT 换终局四件套,混合 diff ⛔ 不按比例判;要拆让 dev 单独开 PR。
 - 改动 >3000 行(含生成物)同换终局四件套,⛔ 无 Tier S 例外;读数 = PR additions+deletions。
 - ① 复核结论照常写在 issue 上;技能面 hunk 须由契约复审档的席复核,档外席先交 skills 席。
@@ -201,7 +202,6 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 已入队 ⇒ 转 draft 并 disable,即请维护者手动出队(席位无实测手段);出队以阳性探针答。
 - skills 车道自有 PR:纯代码面如 `scripts/pm/` 由本席按达档自审(清单不减)后落地。
 - 受管面两层:Tier S = `.claude/**` 全树,余皆 Tier H 等人批;S 经达档复核 PASS 后 ready → 入队。
-- 路径面干净的才转 ready → 入队;队列是唯一被认可的落地路径,⛔ 永不队列外合并。
 - 入队资格:每 check 绿或预期 skip,⛔ 非必查子集;名单 check-expected-skips.mjs 只判 objectstack。
 - 非必查红是真缺陷或坏门,归 PM 入队前处置;第三种按设计而红,三条全立才可带红入队:
 - 源码自述 pushed 分支上按设计而红、不跑 `merge_group`、PR 评论记明门与因,缺一即否。

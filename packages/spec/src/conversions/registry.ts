@@ -5133,8 +5133,10 @@ const pageHeaderSubtitleAlias: MetadataConversion = {
  * conversion can honour at a nested site, not only at region level.
  *
  * All three are **retired from the load path**: each key is tombstoned in
- * `ui/component.zod.ts`, so the loader rejects it loudly with the prescription
- * and only `os migrate meta` lists the mechanical edits for existing sources.
+ * `ui/component.zod.ts`, so `os validate`, `os build` and `os lint` refuse it
+ * with the prescription (the component-props gate, `@objectstack/lint`; the
+ * load path keeps the open `properties` bag as written) and only
+ * `os migrate meta` lists the mechanical edits for existing sources.
  */
 const RECORD_PICKER_COMPONENT_TYPE = 'element:record_picker';
 
@@ -5832,7 +5834,9 @@ const inlineActionApiParamsToBodyExtra: MetadataConversion = {
  * component's inner `type` (an action's `type: 'url'`, a tab item's fields)
  * into a rewrite target: only `properties.type` on a node whose own `type` is
  * `page:tabs` moves. The tombstone still carries the refusal at the authoring
- * site (`tsc`) and at load (the parse), whatever the walk reached.
+ * site (`tsc`) and at `os validate` / `os build` / `os lint`, where the
+ * component-props gate refuses it as an `error` (the load path keeps the open
+ * `properties` bag as written), whatever the walk reached.
  *
  * `retiredFromLoadPath: true`: no alias window, deliberately. The tombstone owns
  * the refusal; this entry exists so `spec-changes.json`, the upgrade guide and
@@ -8025,8 +8029,12 @@ const translationPerAppSettingsRemoved: MetadataConversion = {
  * Reach: the literal defaults the narrowed gates judge — a `time` field's
  * (`objects[]`, `objectExtensions[]`) and an action param typed `time`
  * (`actions[]`, `objects[].actions[]`, an `element:button`'s inline action).
- * Retired from the load path: an author is refused at parse, and data at rest
- * and `os migrate meta` replay it.
+ * Retired from the load path: an author is refused at parse — except on an
+ * `element:button`'s inline action, which sits in the open `properties` bag the
+ * load path keeps as written, where the refusal is an advisory
+ * `component-props-invalid` finding at `os validate` / `os build` / `os lint`
+ * (the component-props gate, `@objectstack/lint`) — and data at rest and
+ * `os migrate meta` replay it.
  */
 const timeDefaultUtcSuffixDropped: MetadataConversion = {
   id: 'time-default-utc-suffix-dropped',
@@ -8322,8 +8330,12 @@ const translationComponentSubmitLabelRemoved: MetadataConversion = {
  * positions the component-props gate judges. `variant` on any other component
  * type is that component's own vocabulary and is never read here.
  *
- * `retiredFromLoadPath`: an author is refused at parse with the prescription
- * rather than silently rewritten; stored rows replay it at rehydration
+ * `retiredFromLoadPath`: an author is not silently rewritten — `os validate`,
+ * `os build` and `os lint` report an old spelling as an advisory
+ * `component-props-invalid` finding carrying the prescription (the
+ * component-props gate, `@objectstack/lint`: a retired enum value is a value
+ * verdict, a warning; the load path keeps the open `properties` bag as
+ * written); stored rows replay it at rehydration
  * (`applyConversionsToStoredItem`) and `os migrate meta` lists the edit for
  * existing sources. Idempotent by construction: the rewrite's output is
  * outside its own input set.
@@ -8463,6 +8475,124 @@ function respellInlineGridColumns(
   });
   return changed ? next : columns;
 }
+
+/**
+ * `category` and `isSystem` on an email template — retired together (#22876,
+ * ADR-0049 enforce-or-remove).
+ *
+ * Nothing read either key once ADR-0131 D6/D10 retired the projection of
+ * declared templates into `sys_email_template` rows: `category` fed a Setup
+ * column there and `isSystem` the built-in seeder's stand-down. The tombstones
+ * on `EmailTemplateDefinitionSchema` refuse both at parse (see
+ * `EMAIL_TEMPLATE_CATEGORY_REMOVED` and `EMAIL_TEMPLATE_IS_SYSTEM_REMOVED` in
+ * `system/email-template.zod.ts`).
+ *
+ * ## Why a D2 strip
+ *
+ * Both keys carried a schema DEFAULT (`'custom'`, `false`), so a 17.x parse
+ * wrote both into every template it emitted, whether or not the author wrote
+ * them: every built artifact and every stored `email_template` row carries
+ * them. After the tombstones the boot door refuses such a template
+ * (`ObjectStackDefinitionSchema` spreads
+ * `emailTemplates: z.array(EmailTemplateDefinitionSchema)`), and so does the
+ * email plugin's loader, which re-parses every candidate at send time. Only
+ * the D2 table is replayed at the rehydration seams
+ * (`applyArtifactForwardConversions`, `applyConversionsToStoredItem`), so a
+ * built artifact or a stored row loads and sends only through this entry. The
+ * strip is lossless: nothing read either key, so no send renders differently.
+ *
+ * Each key leaves whatever it holds — the default, an authored value, or a
+ * value no longer of the declared type: the tombstone refuses every value, so
+ * a strip that kept any would leave a template that still cannot load. The
+ * emitted path NAMES the template, as `cube-refresh-key-removed` names its
+ * cube: an index into `emailTemplates[]` is a position, not a name. The D3
+ * record is the semantic entry `email-template-category-is-system-retired`.
+ */
+const emailTemplateCategoryIsSystemRemoved: MetadataConversion = {
+  id: 'email-template-category-is-system-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
+  surface: 'emailTemplates[].category / emailTemplates[].isSystem',
+  summary:
+    "email template keys 'category' and 'isSystem' removed (ADR-0049 enforce-or-remove — nothing read "
+    + 'either: the Studio listing never offered the category facet, and no door refused deleting a '
+    + "template that set isSystem. Delete both keys; a built-in template is a code package's declaration "
+    + 'that a Studio save overrides and a discard restores)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'emailTemplates', (template, path) => {
+      // Name the template, not just its index: the notice is the only record
+      // an upgrading author gets of WHICH template lost the keys.
+      const where = typeof template.name === 'string' ? `${path}(${template.name})` : path;
+      return stripKeys(template, ['category', 'isSystem'], emit, where);
+    });
+  },
+  fixture: {
+    before: {
+      emailTemplates: [
+        {
+          // The built-in auth templates' shape: both keys authored.
+          name: 'auth.password_reset',
+          label: 'Password Reset',
+          category: 'auth',
+          locale: 'en-US',
+          subject: 'Reset your password',
+          bodyHtml: '<p>{{{resetUrl}}}</p>',
+          isSystem: true,
+        },
+        {
+          // What a 17.x parse emitted for a template whose author wrote
+          // neither key: both defaults, materialized.
+          name: 'crm.welcome',
+          label: 'Welcome',
+          category: 'custom',
+          locale: 'en-US',
+          subject: 'Welcome',
+          bodyHtml: '<p>Welcome</p>',
+          isSystem: false,
+        },
+        {
+          // Already canonical — rides through untouched. The fixture's own
+          // control: the strip dispatches on key presence, and copy-on-write
+          // keeps this reference.
+          name: 'crm.follow_up',
+          label: 'Follow-up',
+          locale: 'en-US',
+          subject: 'Following up',
+          bodyHtml: '<p>Following up</p>',
+        },
+      ],
+    },
+    after: {
+      emailTemplates: [
+        {
+          name: 'auth.password_reset',
+          label: 'Password Reset',
+          locale: 'en-US',
+          subject: 'Reset your password',
+          bodyHtml: '<p>{{{resetUrl}}}</p>',
+        },
+        {
+          name: 'crm.welcome',
+          label: 'Welcome',
+          locale: 'en-US',
+          subject: 'Welcome',
+          bodyHtml: '<p>Welcome</p>',
+        },
+        {
+          name: 'crm.follow_up',
+          label: 'Follow-up',
+          locale: 'en-US',
+          subject: 'Following up',
+          bodyHtml: '<p>Following up</p>',
+        },
+      ],
+    },
+    // Four notices, one per STRIPPED KEY: both keys on `auth.password_reset`
+    // and on `crm.welcome`, none for the canonical `crm.follow_up`.
+    expectedNotices: 4,
+  },
+};
 
 /**
  * `field.inlineColumns[]` / `field.relatedListColumns[]` — the mechanical half
@@ -9700,7 +9830,8 @@ function gridFilterHasContent(value: unknown): boolean {
  * Zero authored occurrences in this repository (the showcase pins it at zero),
  * so the entry exists for stored `sys_metadata` rows and for authors outside
  * the repo. Retired from the load path: an author writing the key is refused
- * at the parse with the prescription.
+ * by `os validate`, `os build` and `os lint` (the component-props gate) with
+ * the prescription.
  */
 const objectGridDefaultFiltersRemoved: MetadataConversion = {
   id: 'object-grid-default-filters-removed',
@@ -10488,8 +10619,10 @@ const objectKanbanQuickAddRemoved: MetadataConversion = {
  * nothing fills the slot. The console draws the navigation trail once, in the
  * shell (`@object-ui/app-shell` `AppHeader`, inside `/apps/:appName/*`), so the
  * retirement takes the key away rather than building a second trail. The
- * tombstone on `PageHeaderProps` refuses it for a live author (advisory, via
- * the props lint: `PageComponentSchema.properties` is an open bag).
+ * tombstone on `PageHeaderProps` refuses it for a live author: `os validate`,
+ * `os build` and `os lint` refuse it as an `error` with the prescription (the
+ * component-props gate, `@objectstack/lint`; the load path keeps the open
+ * `properties` bag as written).
  *
  * **A delete of both values.** `true` and `false` go alike: neither ever drew
  * a trail, so there is no value to preserve and no rewrite target. The one
@@ -13029,6 +13162,196 @@ const listViewSortStringClauseToArray: MetadataConversion = {
 };
 
 /**
+ * The two containers whose members a page action row's executor `type`
+ * lives on — the members {@link pageActionRowNavigationExecutorToUrl}
+ * rewrites, beside the {@link ACTION_RUNNER_BLOCK_TYPES} nodes.
+ */
+const ACTION_CONTAINER_BLOCK_TYPES = new Set(['action:group', 'action:menu']);
+
+/**
+ * A page action row's executor value `'navigation'` → `'url'` (protocol 18).
+ *
+ * objectui's action runner keeps `'navigation'` as a local alias of the url
+ * executor: its built-in table sends the alias to `executeNavigation`, which
+ * reads `to || target || redirect` and hands off to `navigateTo`, the
+ * navigator `executeUrl` calls with `target || redirect`. On a page action row
+ * the two spellings are the same navigation — the alias's own keys (`to`,
+ * `redirect`, `external`, `newTab`, `replace`) are not row keys, and both read
+ * the row's `target` and `openIn`. The rows judged a url `target` only when
+ * the executor read `'url'`, so the alias spelling carried a target the click
+ * refuses past the parse. The rows now refuse the alias at the executor key
+ * (`refuseRowUrlExecutorAlias`, `ui/component.zod.ts`) with the rename onto
+ * `'url'`, and this entry carries the sources and stored rows that wrote it.
+ *
+ * **The rewrite is lossless, so the chain owes it** (ADR-0087's launch-window
+ * section: a lossless break lands as a `retiredFromLoadPath` conversion beside
+ * its D3 entry, `ui-page-action-row-navigation-executor-refused`). A page's
+ * `properties` is not parsed on the metadata load path, so a stored row
+ * written with the alias keeps working only while the runner keeps it; the
+ * stored-row seam and `os migrate meta --write` carry it across.
+ *
+ * Two surfaces, both value renames and nothing else: `properties.actionType`
+ * on an `action:button` / `action:icon` node, and `type` on each
+ * `action:group` / `action:menu` member of `properties.actions`. Every other
+ * executor value is left alone — the key stays open, and a host-registered
+ * handler name (`navigate_edit`, …) is not this entry's. A member that is not
+ * an object, or a list that is not an array, is left as stored. The reach is
+ * every position `mapPageComponents` visits — regions, slots, nested
+ * containers — which is the props gate's own reach. Idempotent by
+ * construction: a rewritten value reads `'url'`, which this entry never
+ * touches.
+ *
+ * **Retired from the load path from day one**, as
+ * {@link actionBlockEndpointToTarget} is: the authoring door keeps teaching
+ * with the rows' refusal, and this entry serves the two paths that rewrite
+ * EXISTING data, stored-row rehydration and `os migrate meta`.
+ */
+const pageActionRowNavigationExecutorToUrl: MetadataConversion = {
+  id: 'page-action-row-navigation-executor-to-url',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
+  surface: 'page.component.action:button.actionType / page.component.action:icon.actionType / '
+    + 'page.component.action:group.actions[].type / page.component.action:menu.actions[].type',
+  summary:
+    "page action row executor 'navigation' → 'url' — objectui's runner-local alias of the url executor; "
+    + 'on a row both spellings run one navigator on the same `target`, so the rename is lossless and the '
+    + 'url scheme set then judges `target`',
+  apply(stack, emit) {
+    return mapPageComponents(stack, (component, path) => {
+      const type = component.type;
+      if (typeof type !== 'string') return component;
+      const properties = component.properties;
+      if (!isDict(properties)) return component;
+      if (ACTION_RUNNER_BLOCK_TYPES.has(type)) {
+        if (properties.actionType !== 'navigation') return component;
+        emit({ from: 'navigation', to: 'url', path: `${path}.properties.actionType` });
+        return { ...component, properties: { ...properties, actionType: 'url' } };
+      }
+      if (!ACTION_CONTAINER_BLOCK_TYPES.has(type)) return component;
+      const actions = properties.actions;
+      if (!Array.isArray(actions)) return component;
+      let changed = false;
+      const nextActions = actions.map((member, i) => {
+        if (!isDict(member) || member.type !== 'navigation') return member;
+        changed = true;
+        emit({ from: 'navigation', to: 'url', path: `${path}.properties.actions[${i}].type` });
+        return { ...member, type: 'url' };
+      });
+      return changed ? { ...component, properties: { ...properties, actions: nextActions } } : component;
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'ops_links',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                // The measured shape: a url button spelled with the runner's alias.
+                {
+                  type: 'action:button',
+                  properties: { label: 'Runbook', actionType: 'navigation', target: '/apps/ops/runbook', openIn: 'new-tab' },
+                },
+                { type: 'action:icon', properties: { icon: 'external-link', actionType: 'navigation', target: 'https://status.example.com' } },
+                // Canonical already: untouched.
+                { type: 'action:button', properties: { label: 'Home', actionType: 'url', target: '/apps/ops' } },
+                // A host-registered handler name: the key stays open, untouched.
+                { type: 'action:button', properties: { label: 'Edit', actionType: 'navigate_edit' } },
+                // An `element:button` inline action keeps the parse's own fold — not this entry's.
+                { type: 'element:button', properties: { label: 'Pricing', action: { type: 'navigation', to: '/pricing' } } },
+                // A container member: only the alias member is renamed.
+                {
+                  type: 'action:group',
+                  properties: {
+                    actions: [
+                      { label: 'Runs', type: 'navigation', target: '/apps/ops/runs' },
+                      { label: 'Run', type: 'api', target: '/api/v1/ops/run' },
+                    ],
+                  },
+                },
+                // Nested one container down.
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Links',
+                    children: [
+                      { type: 'action:menu', properties: { actions: [{ label: 'Wiki', type: 'navigation', target: 'https://wiki.example.com' }] } },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        // A slotted record page's named slot.
+        {
+          name: 'ops_link_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            header: { type: 'action:icon', properties: { icon: 'book', actionType: 'navigation', target: './docs' } },
+          },
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'ops_links',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                {
+                  type: 'action:button',
+                  properties: { label: 'Runbook', actionType: 'url', target: '/apps/ops/runbook', openIn: 'new-tab' },
+                },
+                { type: 'action:icon', properties: { icon: 'external-link', actionType: 'url', target: 'https://status.example.com' } },
+                { type: 'action:button', properties: { label: 'Home', actionType: 'url', target: '/apps/ops' } },
+                { type: 'action:button', properties: { label: 'Edit', actionType: 'navigate_edit' } },
+                { type: 'element:button', properties: { label: 'Pricing', action: { type: 'navigation', to: '/pricing' } } },
+                {
+                  type: 'action:group',
+                  properties: {
+                    actions: [
+                      { label: 'Runs', type: 'url', target: '/apps/ops/runs' },
+                      { label: 'Run', type: 'api', target: '/api/v1/ops/run' },
+                    ],
+                  },
+                },
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Links',
+                    children: [
+                      { type: 'action:menu', properties: { actions: [{ label: 'Wiki', type: 'url', target: 'https://wiki.example.com' }] } },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'ops_link_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            header: { type: 'action:icon', properties: { icon: 'book', actionType: 'url', target: './docs' } },
+          },
+        },
+      ],
+    },
+    // The button, the icon, the group member, the nested menu member and the
+    // slotted header icon.
+    expectedNotices: 5,
+  },
+};
+
+/**
  * `page.assignedProfiles` removed (protocol 18, ADR-0090 D2 / ADR-0049).
  *
  * The key named the Profile concept ADR-0090 D2 deleted, and it enforced
@@ -13078,6 +13401,164 @@ const pageAssignedProfilesRemoved: MetadataConversion = {
         { name: 'team_home', label: 'Team Home', isDefault: true },
       ],
     },
+    expectedNotices: 1,
+  },
+};
+
+/**
+ * The one `master_detail` of a `controlled_by_parent` object with `required`
+ * OMITTED → `required: true` (protocol 18, #23100 — ADR-0055 §1, maintainer
+ * ruling B; the data-at-rest half of the D3 semantic entry
+ * `cbp-master-relation-tiers-retired`).
+ *
+ * Ruling B made the parse refuse a `controlled_by_parent` object without
+ * exactly one `master_detail` declared `required: true`, and retired the
+ * security runtime's second tier, which derived the master from ANY
+ * `master_detail`. One shape inside that refusal has a producer at rest:
+ * objectui's Studio adds a field as `{ type, label }` and its Required toggle
+ * writes `required: true` or nothing, and the object's Settings tab offers
+ * `controlled_by_parent`. So a Studio-authored detail can be stored with its
+ * one master reference carrying no `required` key at all. Before protocol 18
+ * that row loaded and derived its master through the second tier; after it, the
+ * row would register under `[metadata_spec_invalid]` and be denied every read.
+ *
+ * **Lossless — this is the builder's own force, applied to data at rest.**
+ * `ObjectSchema.create()` already turns an omitted `required` on every
+ * `master_detail` under this sharing model into `required: true`
+ * (`forceCbpMasterDetailRequired`, `data/object.zod.ts`), so the converted row
+ * is exactly the object the builder would have produced from the same source.
+ * The relation it resolves is the one the second tier resolved, and the write
+ * the row could not legally take (an insert without its master, an update
+ * nulling it) was refused before as well, by the security gate.
+ *
+ * **Deliberately narrow — exactly one shape, nothing else.**
+ * - An explicit `required: false` is NOT converted. The builder refuses it
+ *   loudly rather than forcing it (an authored contradiction, ADR-0032), so the
+ *   stored pass does not overrule an author the builder would have stopped.
+ * - An object with two or more `master_detail` fields is NOT converted. Choosing
+ *   which reference becomes the master is exactly the pick ADR-0055 §1 refuses.
+ * - A required `lookup` (the retired third tier) is NOT converted. Turning it
+ *   into a `master_detail` changes what deleting the master does to every row.
+ * - Any other sharing model is NOT touched. The force is this sharing model's
+ *   rule only.
+ *
+ * **Retired from the load path, from day one.** The authoring funnel does not
+ * replay it, so a live author still meets the parse's refusal and its
+ * prescription. A stored row, a built artifact inside its declared-floor window
+ * and `os migrate meta --from 17` all replay it. Idempotent by construction: a
+ * converted field carries `required`, which this transform never touches again.
+ */
+const cbpMasterDetailRequiredDefaulted: MetadataConversion = {
+  id: 'cbp-master-detail-required-defaulted',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
+  surface: "object.fields.MASTER.required, MASTER being the one master_detail of a sharingModel: 'controlled_by_parent' object",
+  summary:
+    "the one `master_detail` of a `controlled_by_parent` object with `required` omitted → `required: true` "
+    + '(ADR-0055 §1: the master is exactly one required master_detail; this is the force '
+    + '`ObjectSchema.create()` already applies, so the row resolves the same master it always did; '
+    + 'an explicit `required: false`, two masters and a required lookup are not converted)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'objects', (obj, path) => {
+      if (obj.sharingModel !== 'controlled_by_parent') return obj;
+      const fields = obj.fields;
+      if (!isDict(fields)) return obj;
+      const masters = Object.entries(fields).filter(([, def]) => isDict(def) && def.type === 'master_detail');
+      if (masters.length !== 1) return obj;
+      const [name, def] = masters[0] as [string, Dict];
+      if ('required' in def) return obj;
+      emit({ from: '(omitted)', to: 'true', path: `${path}.fields.${name}.required` });
+      return { ...obj, fields: { ...fields, [name]: { ...def, required: true } } };
+    });
+  },
+  fixture: {
+    before: {
+      objects: [
+        {
+          // The Studio-authored shape: converted.
+          name: 'cbpd_line',
+          label: 'Line',
+          sharingModel: 'controlled_by_parent',
+          fields: {
+            header: { type: 'master_detail', label: 'Header', reference: 'cbpd_header' },
+            note: { type: 'text', label: 'Note' },
+          },
+        },
+        {
+          // An explicit `required: false` — refused by the builder, not converted here.
+          name: 'cbpd_explicit',
+          label: 'Explicit',
+          sharingModel: 'controlled_by_parent',
+          fields: { header: { type: 'master_detail', label: 'Header', reference: 'cbpd_header', required: false } },
+        },
+        {
+          // Two masters — no pick.
+          name: 'cbpd_two',
+          label: 'Two',
+          sharingModel: 'controlled_by_parent',
+          fields: {
+            a: { type: 'master_detail', label: 'A', reference: 'cbpd_header' },
+            b: { type: 'master_detail', label: 'B', reference: 'cbpd_other' },
+          },
+        },
+        {
+          // The retired third tier — a required lookup — is not converted.
+          name: 'cbpd_member',
+          label: 'Member',
+          sharingModel: 'controlled_by_parent',
+          fields: { header: { type: 'lookup', label: 'Header', reference: 'cbpd_header', required: true } },
+        },
+        {
+          // Not controlled_by_parent: untouched.
+          name: 'cbpd_plain',
+          label: 'Plain',
+          sharingModel: 'private',
+          fields: { header: { type: 'master_detail', label: 'Header', reference: 'cbpd_header' } },
+        },
+      ],
+    },
+    after: {
+      objects: [
+        {
+          name: 'cbpd_line',
+          label: 'Line',
+          sharingModel: 'controlled_by_parent',
+          fields: {
+            header: { type: 'master_detail', label: 'Header', reference: 'cbpd_header', required: true },
+            note: { type: 'text', label: 'Note' },
+          },
+        },
+        {
+          name: 'cbpd_explicit',
+          label: 'Explicit',
+          sharingModel: 'controlled_by_parent',
+          fields: { header: { type: 'master_detail', label: 'Header', reference: 'cbpd_header', required: false } },
+        },
+        {
+          name: 'cbpd_two',
+          label: 'Two',
+          sharingModel: 'controlled_by_parent',
+          fields: {
+            a: { type: 'master_detail', label: 'A', reference: 'cbpd_header' },
+            b: { type: 'master_detail', label: 'B', reference: 'cbpd_other' },
+          },
+        },
+        {
+          name: 'cbpd_member',
+          label: 'Member',
+          sharingModel: 'controlled_by_parent',
+          fields: { header: { type: 'lookup', label: 'Header', reference: 'cbpd_header', required: true } },
+        },
+        {
+          name: 'cbpd_plain',
+          label: 'Plain',
+          sharingModel: 'private',
+          fields: { header: { type: 'master_detail', label: 'Header', reference: 'cbpd_header' } },
+        },
+      ],
+    },
+    // One notice: `cbpd_line.header` only.
     expectedNotices: 1,
   },
 };
@@ -13430,8 +13911,10 @@ const dashboardWidgetChartConfigStructureRemoved: MetadataConversion = {
  * `sort_field` (`:874`). An authored value changed nothing on that console, so
  * deleting it preserves observed behaviour exactly; the line order is kept by
  * the child object's own field, which the entry's tombstone names. The
- * tombstone refuses the key for a live author (advisory, via the props lint:
- * `PageComponentSchema.properties` is an open bag).
+ * tombstone refuses the key for a live author: `os validate`, `os build` and
+ * `os lint` refuse it as an `error` with the prescription (the component-props
+ * gate, `@objectstack/lint`; the load path keeps the open `properties` bag as
+ * written).
  *
  * ⚠️ Scoped by component `type` and by POSITION — `properties.details[]` of an
  * `object-master-detail-form` — never by key name: `sortField` is an ordinary
@@ -15716,6 +16199,7 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: agentMemoryLongTermStoreRemoved, order: 56 },
   { conversion: agentStructuredOutputRefusedMembersRemoved, order: 55 },
   { conversion: apiEndpointCacheTtlToCacheTtlSeconds, order: 23 },
+  { conversion: cbpMasterDetailRequiredDefaulted, order: 63 },
   { conversion: chartConfigAriaRemoved, order: 32 },
   { conversion: connectorConnectionTimeoutMsRemoved, order: 20 },
   { conversion: connectorErrorMappingRemoved, order: 19 },
@@ -15740,6 +16224,7 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: elementFormRemoved, order: 5 },
   { conversion: elementInputTargetVariableRemoved, order: 3 },
   { conversion: elementTextVariantHeadingLevels, order: 59 },
+  { conversion: emailTemplateCategoryIsSystemRemoved, order: 62 },
   { conversion: fieldColumnListsCanonicalized, order: 6 },
   { conversion: fieldMalformedScalePrecisionRemoved, order: 1 },
   { conversion: fieldReferenceToAlias, order: 18 },
@@ -15761,6 +16246,7 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: objectKanbanQuickAddRemoved, order: 15 },
   { conversion: objectMasterDetailFormDetailSortFieldRemoved, order: 60 },
   { conversion: objectTenancyOrganizationFieldRemoved, order: 35 },
+  { conversion: pageActionRowNavigationExecutorToUrl, order: 63 },
   { conversion: pageAssignedProfilesRemoved, order: 31 },
   { conversion: pageComponentFilterRecordToRuleArray, order: 36 },
   { conversion: pageComponentResponsiveRemoved, order: 13 },

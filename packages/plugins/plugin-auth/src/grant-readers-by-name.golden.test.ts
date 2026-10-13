@@ -40,6 +40,8 @@ import { SysMetadataActivation } from '@objectstack/platform-objects/system';
 
 import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-guard.js';
 import { ensureDefaultOrganization } from './ensure-default-organization.js';
+import { seedLegacyPlatformBucket } from './__tests__/legacy-catalog-rows.testkit.js';
+import { withLegacyPermissionSetTable } from './__tests__/legacy-catalog-objects.testkit.js';
 
 const SYS = { isSystem: true } as const;
 const POSTURE_ENV = 'OS_TENANCY_POSTURE';
@@ -127,7 +129,9 @@ async function standingByReader(posture: Posture): Promise<Record<string, unknow
     type: 'plugin',
     scope: 'system',
     // [ADR-0131 D3] The activation ledger a permission set is switched off in.
-    objects: [SysUser, SysAccount, SysMember, SysOrganization, SysMetadataActivation, ...securityObjects],
+    // The retired `sys_permission_set` table too: an existing database still
+    // holds its platform-bucket rows (C3 stage 8 retires the object).
+    objects: withLegacyPermissionSetTable([SysUser, SysAccount, SysMember, SysOrganization, SysMetadataActivation, ...securityObjects]),
   } as any);
   await engine.syncSchemas();
   await plugin.start(ctx);
@@ -153,6 +157,8 @@ async function standingByReader(posture: Posture): Promise<Record<string, unknow
   await user('usr_member', 'member@gra.example', '2025-03-01T00:00:00.000Z');
   await user('usr_agent', 'agent@gra.example', '2025-04-01T00:00:00.000Z');
 
+  // An existing database: the platform-bucket rows an earlier release seeded.
+  await seedLegacyPlatformBucket(engine, bootstrapSets);
   const boot = await bootstrapPlatformAdmin(engine, bootstrapSets);
   expect(boot.adminPromoted).toBe(posture === 'single');
   if (walled) {

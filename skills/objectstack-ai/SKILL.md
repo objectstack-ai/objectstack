@@ -9,10 +9,10 @@ description: >
   not by authoring `*.agent.ts`. Do not use for general LLM prompting questions
   unrelated to ObjectStack metadata.
 license: Apache-2.0
-compatibility: Requires @objectstack/spec 17.x (Zod v4 schemas)
+compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "17.7.0"
+  version: "18.0.0-next.0"
   domain: ai
   tags: agent, tool, skill, knowledge, llm, embedding, mcp
 ---
@@ -344,7 +344,7 @@ business logic as **AI-exposed Actions**, wire domain knowledge through
 ## Platform agents — reference only ☁️
 
 The `agent` type is **closed** to third parties (`allowRuntimeCreate:false`,
-`allowOrgOverride:false`; ADR-0063 §2) and `os g agent` is retired: a
+`allowEnvironmentOverlay:false`; ADR-0063 §2) and `os g agent` is retired: a
 stack-authored agent is filtered out of `listAgents()`, refused outright by
 `loadAgent()`, and 404s on chat. You extend the platform with **skills**, never
 by adding an agent. `AgentSchema`'s full field list is in

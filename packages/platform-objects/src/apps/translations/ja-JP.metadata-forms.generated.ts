@@ -1307,7 +1307,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       isDefault: {
         label: "既定",
-        helpText: "このページ種別の既定ページに設定"
+        helpText: "このオブジェクトのレコードを開くときにこのレコードページを使います。既定のレコードページはオブジェクトごとに 1 つだけで、2 つ目は拒否されます。"
       },
       kind: {
         label: "モード",
@@ -2230,9 +2230,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       label: {
         label: "表示名"
       },
-      category: {
-        label: "カテゴリ"
-      },
       locale: {
         label: "ロケール",
         helpText: "BCP-47 タグ（例: en-US, zh-CN）"
@@ -2264,10 +2261,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       active: {
         label: "有効",
         helpText: "未チェックの場合、sendTemplate() は TEMPLATE_INACTIVE を返します。"
-      },
-      isSystem: {
-        label: "システム組み込み",
-        helpText: "組み込みテンプレート。テナントは上書きできますが、削除すべきではありません。"
       }
     }
   },

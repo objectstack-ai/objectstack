@@ -384,3 +384,87 @@ export function fillRelationalRefs(
   }
   return { body };
 }
+
+// ── Fixture helpers the proof families share ────────────────────────────────
+//
+// The delete-behavior, unique-scope, parent-write-reach and dashboard-window
+// families write fixture rows from the body a CRUD case synthesizes, and these
+// are the pieces they have in common. They are exported from this module for
+// those families only, ⛔ never from `index.ts`: they are not part of the
+// package's public surface.
+
+const DAY_MS = 86_400_000;
+
+/** A `date` / `datetime` value moved `days` later, in the same spelling. Any other value comes back as it is. */
+export function laterBy(value: string, days: number): string;
+export function laterBy(value: unknown, days: number): unknown;
+export function laterBy(value: unknown, days: number): unknown {
+  if (typeof value !== 'string' || days === 0) return value;
+  const at = Date.parse(value);
+  if (Number.isNaN(at)) return value;
+  const moved = new Date(at + days * DAY_MS).toISOString();
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? moved.slice(0, 10) : moved;
+}
+
+/**
+ * The `k`-th distinct value of a sample `base`. A number moves by `k`, a date
+ * by `k` days, and a phone number gains `k`'s digits. Any other string takes
+ * `tag`, the calling family's own letter, beside `k`: `Acme-u3`,
+ * `ada-u3@example.com`, `https://example.com/u3`. Each family passes its own
+ * letter, so the values it writes are the ones it has always written.
+ */
+export function vary(base: string | number, k: number, tag: string): string | number {
+  if (typeof base === 'number') return base + k;
+  if (/^\d{4}-\d{2}-\d{2}/.test(base)) return laterBy(base, k);
+  const at = base.indexOf('@');
+  if (at > 0) return `${base.slice(0, at)}-${tag}${k}${base.slice(at)}`;
+  if (/^https?:\/\//.test(base)) return `${base.replace(/\/$/, '')}/${tag}${k}`;
+  if (/^\+\d+$/.test(base)) return `${base}${k}`;
+  return `${base}-${tag}${k}`;
+}
+
+/**
+ * The fields of `objectDef` a uniqueness constraint covers: a field declaring a
+ * `unique` scope, and every field of a unique `indexes[]` entry.
+ */
+export function uniqueFields(objectDef: any): Set<string> {
+  const out = new Set<string>();
+  for (const [name, def] of Object.entries<any>(objectDef?.fields ?? {})) {
+    if (def?.unique !== undefined && def?.unique !== false) out.add(name);
+  }
+  for (const index of Array.isArray(objectDef?.indexes) ? objectDef.indexes : []) {
+    if (index?.unique) for (const f of Array.isArray(index.fields) ? index.fields : []) out.add(String(f));
+  }
+  return out;
+}
+
+/**
+ * A record of `objectDef` built from the `body` a CRUD case synthesized (its
+ * required relations already filled). By default it is the smallest: the
+ * values for the fields the object REQUIRES, so every optional field takes the
+ * app's own default. With `full` it carries every field the case synthesized,
+ * which is what an app rule that requires a field only in some state asks for.
+ * Each `date` / `datetime` value is one day after the one declared before it,
+ * so a "starts before it ends" rule holds. Each unique-constrained value is
+ * made distinct by `n` through {@link vary}, with the family's `tag`, so a
+ * fixture collides with nothing but the value a probe writes on purpose.
+ */
+export function fixtureBody(
+  body: Record<string, unknown>,
+  objectDef: any,
+  n: number,
+  tag: string,
+  full = false,
+): Record<string, unknown> {
+  const unique = uniqueFields(objectDef);
+  const out: Record<string, unknown> = {};
+  let dates = 0;
+  for (const [name, def] of Object.entries<any>(objectDef?.fields ?? {})) {
+    if ((!full && def?.required !== true) || !(name in body)) continue;
+    let value = body[name];
+    if ((def?.type === 'date' || def?.type === 'datetime') && typeof value === 'string') value = laterBy(value, dates++);
+    if (unique.has(name) && (typeof value === 'string' || typeof value === 'number')) value = vary(value, n, tag);
+    out[name] = value;
+  }
+  return out;
+}

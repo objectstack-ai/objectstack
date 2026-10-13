@@ -1,0 +1,224 @@
+---
+title: Install modes — managed or an unmanaged copy
+navTitle: Install Modes
+description: Declare which install modes a package permits with installModes, then pick one at install time. What a managed install keeps, and what an unmanaged copy keeps and drops, the vendor's protection locks included.
+---
+
+A package reaches a running runtime in one of two **install modes**
+([ADR-0131](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0131-total-organization-ownership-no-null-organization-id.md)
+D6). The package author declares which modes it permits; whoever installs it
+picks one of those.
+
+|  | **managed** (the default) | **unmanaged** |
+|:---|:---|:---|
+| What is installed | the package, registered as code | a copy of every metadata item, written once into the environment |
+| Who is the authority | the package | this environment: the copy is its own metadata |
+| Editing | nothing it ships is edited in place; you customise beside it | every copied item is edited like anything authored in Studio |
+| Later versions | install the next version | the copy follows no upgrade |
+| The vendor's protection locks | kept and enforced | not copied; the install lists each lock it drops |
+| Tenancy posture | any | refused where the deployment walls organizations (`group`, `isolated`) |
+
+---
+
+## Declare the modes a package permits
+
+The manifest key is `installModes`:
+
+```ts
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
+  manifest: {
+    id: 'com.acme.crm',
+    namespace: 'crm',
+    version: '1.0.0',
+    type: 'app',
+    name: 'Acme CRM',
+    installModes: ['managed', 'unmanaged'],
+  },
+  // objects, views, dashboards, …
+});
+```
+
+- **Leave it out and the package permits `managed` only.** The key has no
+  parse-time default: absent means `['managed']`, and nothing is stamped into
+  the stored manifest.
+- **Name at least one mode.** An empty list is refused; omit the key instead.
+  A value other than `managed` or `unmanaged` is refused too.
+- **`unmanaged` alone is legal.** It suits a starter app a customer takes over
+  wholesale. A deployment that walls organizations cannot install such a
+  package at all.
+
+### Permitting `unmanaged` is checked when you build
+
+An unmanaged install copies every item through the same save door a Studio edit
+takes, or copies nothing; there is no partial copy. So `defineStack`, and with
+it `os validate` and `os build`, refuses a package that permits `unmanaged`
+while it carries something that door cannot write as environment metadata. The
+refusal is `STACK_UNMANAGED_INSTALL_UNCOPYABLE`, with one finding per key:
+
+- items of a metadata type the metadata-type registry declares
+  runtime-uncreatable (`allowRuntimeCreate: false`);
+- code: `functions`, `plugins` and the other keys that carry or describe code;
+- extensions of another package's items: `objectExtensions`,
+  `picklistExtensions`, `navigationContributions`, `contributes`;
+- `packages`, which describes an artifact of several packages, while one
+  unmanaged install copies one package.
+
+The fix is to stop permitting `unmanaged`, or to move what cannot be copied
+out of the package. The install door judges the same body with the same
+classification, so a package that passes `os validate` is not refused there
+for a key you were never told about.
+
+---
+
+## Pick the mode at install time
+
+```bash
+# managed, the default
+os package install ./dist/objectstack.json
+
+# an unmanaged copy, from a local artifact or from the runtime's catalog
+os package install ./dist/objectstack.json --install-mode unmanaged
+os package install com.acme.crm --version 1.2.0 --install-mode unmanaged
+```
+
+`--install-mode` sets the `installMode` field of
+`POST /api/v1/marketplace/install-local`; without it no field is sent and the
+runtime installs managed. The door judges the mode before it writes anything:
+
+| The request | The answer |
+|:---|:---|
+| A mode the package's `installModes` does not permit | `422 INSTALL_MODE_NOT_PERMITTED`, naming what it permits |
+| `unmanaged` on a deployment whose requested tenancy posture walls organizations (`group`, `isolated`) | `409 UNMANAGED_INSTALL_WALLED_POSTURE`, naming the posture |
+| `managed`, while an unmanaged copy of the package holds its namespace | `409 RESOURCE_CONFLICT`, naming the copy's base |
+
+A runtime that predates install modes ignores the field and installs the
+package managed. If you asked for `unmanaged`, the CLI says so and exits `1`.
+The install door itself, credentials included, is described under
+[`os package install`](/docs/deployment/cli#os-package-install).
+
+---
+
+## What a managed install keeps
+
+The package is registered as code and stays the authority. Its install is
+recorded on the runtime host, so it is registered again at every boot, and a
+later version is installed over it.
+
+**Nothing it ships is edited in place.** What a customer changes lives beside
+the package, as environment-level state:
+
+- a `view`, `dashboard`, `report`, `translation` or `email_template` is
+  overlaid by saving one under the same name, and removing the overlay brings
+  the package's own back;
+- a flow is switched off, or cloned under a new name and changed there;
+- a save onto any other item the package ships is refused, and the refusal
+  names the route its type has.
+
+**The vendor's protection locks hold.** A package locks an item in either
+[ADR-0010](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0010-metadata-protection-model.md)
+spelling: the `_lock` envelope (`_lock`, `_lockReason`, `_lockDocsUrl`), or the
+author-facing `protection: { lock, reason, docsUrl }` block, which the install
+translates into the envelope with `_lockSource: 'package'`. The item is served
+locked with the vendor's reason, and the write doors refuse what the lock
+forbids with `403 ITEM_LOCKED`: `no-overlay` refuses a save, `no-delete` a
+delete, and `full` both.
+
+---
+
+## What an unmanaged copy keeps, and what it drops
+
+The package's metadata is copied **once** into a new writable base,
+`<package id>-copy`, which keeps the package's namespace. Every item is written
+through the save door a Studio edit takes, environment-wide, and is served as
+environment-authored metadata: the next save edits it.
+
+- **Translations are copied.** Each locale of each bundle becomes one
+  `translation` item named `<namespace>_<locale>`, the locale lower-cased with
+  its hyphens underscored (`crm_zh_cn`).
+- **Sample data is not loaded.** When the package declares any, the install
+  answer says so, with `seeded.mode: 'skipped'`.
+- **Nothing is registered under the package's own id.** No install record,
+  nothing re-registered at boot, nothing upgraded. A managed install of the
+  package is refused while the copy holds its namespace, and a second unmanaged
+  install is refused because the base already exists.
+- **All or nothing.** Every refusal is judged before the base exists, including
+  a name the environment or a managed package already holds. A write that fails
+  deletes the base, so there is never a half-copied app.
+
+### The copy keeps no lock, in either spelling
+
+The package permitted `unmanaged` through `installModes`, so its vendor already
+chose to let environments take editable copies. Once the package is no longer
+the authority, a lock whose source is the package has nothing to stand on. So
+every copied item is written:
+
+- without `_lock`, `_lockReason`, `_lockSource` and `_lockDocsUrl`;
+- without its `protection` block, on a type whose schema declares one.
+
+Every copied item is then served unlocked, and its next save is accepted.
+
+Two cases are left to the save door exactly as before, and either refuses the
+whole install, which rolls back:
+
+- a lock value the declarations refuse, such as `_lock: 'locked'`, a reason
+  that is not a string, or a malformed `protection` block, is not stripped: the
+  save door answers `422 INVALID_METADATA`;
+- a `protection` block on a type whose schema does not declare one (`action`,
+  `hook`, `page`) is left in place, and the save door refuses it as an
+  unrecognised key.
+
+### The install lists each lock it drops
+
+The install answer carries `strippedLocks`: one entry per dropped lock that
+binds (`no-overlay`, `no-delete` or `full`), in the order the items were
+written.
+
+```json
+"strippedLocks": [
+  { "type": "dashboard", "name": "pipeline_dashboard", "lock": "full", "reason": "The pipeline figures feed the board pack — edit the source package instead." },
+  { "type": "app", "name": "crm_app", "lock": "no-delete" }
+]
+```
+
+- `reason` is the vendor's text, verbatim, and is absent when the package gave
+  none.
+- An item that carries both spellings is listed once, with the lock a managed
+  install would bind: the `protection` block's.
+- A `none` lock declares nothing and is not listed.
+- The list is always present, and empty when the package locked nothing.
+
+`os package install --install-mode unmanaged` prints the list under
+`Locks removed`, one line per lock as `<type>.<name>: <lock> — <reason>`, the
+dash and reason left off when there is none:
+
+```text
+    Locks removed: 2 — the package locked these items; the copy is editable
+    dashboard.pipeline_dashboard: full — The pipeline figures feed the board pack — edit the source package instead.
+    app.crm_app: no-delete
+```
+
+Read it before you edit: it is why the vendor locked each item.
+
+---
+
+## Choosing what to permit
+
+- **Permit `unmanaged`** when the package is a starting point a customer should
+  be able to take over and change freely.
+- **Keep it managed only** when you must keep shipping upgrades to it, or when
+  some item must never be edited by any customer. An unmanaged copy drops every
+  lock, so a lock is no reason to permit the copy; it is a reason to withhold
+  it.
+
+## Related
+
+- [Publish, Versioning & Preview](/docs/deployment/publish-and-preview): compile,
+  publish and install a version
+- [`os package install`](/docs/deployment/cli#os-package-install): the flag-level
+  reference
+- [Package manifest reference](/docs/references/kernel/manifest)
+- [Package lifecycle reference](/docs/references/api/package-lifecycle): the
+  import's request and answer, `strippedLocks` included
+- [Tenancy Modes](/docs/deployment/tenancy-modes)

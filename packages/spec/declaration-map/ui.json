@@ -96,6 +96,8 @@
     "DerivedMeasureOp": "ui/DerivedMeasureOp",
     "DocNavItem": "ui/DocNavItem",
     "DocNavItemSchema": "ui/DocNavItem",
+    "ElementApiDataSource": "ui/ElementApiDataSource",
+    "ElementApiDataSourceSchema": "ui/ElementApiDataSource",
     "ElementButtonPropsSchema": "ui/ElementButtonProps",
     "ElementDataSource": "ui/ElementDataSource",
     "ElementDataSourceSchema": "ui/ElementDataSource",

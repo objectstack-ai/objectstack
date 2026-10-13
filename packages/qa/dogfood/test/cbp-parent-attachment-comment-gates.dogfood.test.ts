@@ -41,6 +41,7 @@ import { StorageServicePlugin } from '@objectstack/service-storage';
 import { AuditPlugin } from '@objectstack/plugin-audit';
 import { cpgStack, cpgSecurity } from './fixtures/cbp-parent-gates-fixture.js';
 import { assertArmed, principalArmed } from './armed.js';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const SYS = { isSystem: true } as const;
 
@@ -161,8 +162,8 @@ describe('controlled_by_parent parent gates: sys_attachment and sys_comment judg
     adminId = await uid('admin@objectos.ai');
     memberId = await uid('cpg-member@verify.test');
 
-    const domainSet = await ql.findOne('sys_permission_set', { where: { name: 'cpg_files_and_threads' }, context: SYS });
-    expect(domainSet?.id, 'fixture permission set seeded').toBeTruthy();
+    const domainSet = await catalogPermissionSet(ql, 'cpg_files_and_threads');
+    expect(domainSet, 'fixture permission set served by the security catalog').toBeTruthy();
     await ql.insert('sys_user_permission_set', { user_id: memberId, permission_set: domainSet.name }, { context: { ...SYS } });
 
     await assertArmed([

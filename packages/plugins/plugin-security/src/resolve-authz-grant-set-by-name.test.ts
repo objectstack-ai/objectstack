@@ -31,11 +31,12 @@ import { SysMigration } from '@objectstack/platform-objects/system';
 
 import { SecurityPlugin } from './security-plugin.js';
 import { bootstrapPlatformAdmin } from './bootstrap-platform-admin.js';
+import { seedLegacyPlatformBucket } from './__tests__/legacy-catalog-rows.testkit.js';
 import { reconcileOrgAdminGrant } from './auto-org-admin-grant.js';
-import { SysPosition } from './objects/sys-position.object.js';
+import { SysPosition } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
-import { SysPermissionSet } from './objects/sys-permission-set.object.js';
-import { SysPositionPermissionSet } from './objects/sys-position-permission-set.object.js';
+import { SysPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
+import { SysPositionPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 
@@ -199,6 +200,8 @@ describe('[ADR-0131 D4] an unnamed grant confers nothing through the resolver; i
     const engine = await boot();
     await insertUser(engine, 'usr_admin');
     await insertUser(engine, 'usr_owner');
+    // An existing database: the platform-bucket rows an earlier release seeded.
+    await seedLegacyPlatformBucket(engine, defaultPermissionSets);
     await bootstrapPlatformAdmin(engine, defaultPermissionSets);
     await engine.insert('sys_organization', { id: ORG_A, name: 'A', slug: 'a' }, { context: SYS } as any);
     // A plain member holding an organization-administrator grant the backfill

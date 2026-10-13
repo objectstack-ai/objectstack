@@ -7,7 +7,7 @@ import { Field, FieldType, isMultiValueField } from '@objectstack/spec/data';
 // and the type-layer ratchet reads this file (`TEST_DEBT`, via the package's
 // tsconfig with the test exclusion lifted). The bare specifier here was
 // costing 1 × TS2835 plus one TS7006 per callback parameter in the file.
-import { deriveCrudCases } from './derive.js';
+import { deriveCrudCases, fixtureBody, laterBy, uniqueFields, vary } from './derive.js';
 
 describe('deriveCrudCases — federated (external) objects (ADR-0015)', () => {
   it('blocks a read-only external object so verify never probe-inserts it', () => {
@@ -305,5 +305,79 @@ describe('deriveCrudCases — a sample takes the shape the field is STORED in (#
     expect(judged).toEqual(
       expect.arrayContaining(['select multiple=false', 'text multiple=true', 'master_detail multiple=true']),
     );
+  });
+});
+
+/**
+ * The fixture helpers four proof families share (delete-behavior,
+ * unique-scope, parent-write-reach, dashboard-window). Each family used to
+ * carry a private copy; one implementation now serves all four, so these pins
+ * hold the values a family writes, not only that the helpers run.
+ */
+describe('the fixture helpers the proof families share', () => {
+  it('laterBy moves a date or a datetime by days, in the spelling it came in, and leaves anything else alone', () => {
+    expect(laterBy('2026-10-13', 2)).toBe('2026-10-15');
+    expect(laterBy('2026-02-28', 1)).toBe('2026-03-01');
+    expect(laterBy('2026-10-13T12:00:00.000Z', 1)).toBe('2026-10-14T12:00:00.000Z');
+    expect(laterBy('2026-10-13T23:59:59Z', 1)).toBe('2026-10-14T23:59:59.000Z');
+    expect(laterBy('2026-10-13', 0)).toBe('2026-10-13');
+    expect(laterBy('not a date', 3)).toBe('not a date');
+    for (const v of [null, undefined, 42, true]) expect(laterBy(v, 3)).toBe(v);
+  });
+
+  it("vary marks a string with the family's own tag, so each family keeps the values it writes", () => {
+    expect(vary('Acme', 3, 'u')).toBe('Acme-u3');
+    expect(vary('Acme', 3, 'p')).toBe('Acme-p3');
+    expect(vary('Acme', 3, 'w')).toBe('Acme-w3');
+    expect(vary('ada@example.com', 2, 'u')).toBe('ada-u2@example.com');
+    expect(vary('ada@example.com', 2, 'w')).toBe('ada-w2@example.com');
+    expect(vary('https://example.com/', 1, 'p')).toBe('https://example.com/p1');
+    expect(vary('https://example.com', 1, 'w')).toBe('https://example.com/w1');
+    // A number, a date and a phone number take `k` alone, whatever the tag.
+    expect(vary(10, 3, 'u')).toBe(13);
+    expect(vary('2026-10-13', 2, 'p')).toBe('2026-10-15');
+    expect(vary('+15551234', 4, 'w')).toBe('+155512344');
+  });
+
+  it('uniqueFields names every field a unique scope or a unique index covers, and nothing else', () => {
+    const def = {
+      fields: {
+        code: { type: 'text', unique: true },
+        email: { type: 'email', unique: 'organization' },
+        nick: { type: 'text', unique: false },
+        plain: { type: 'text' },
+      },
+      indexes: [{ fields: ['region', 'number'], unique: true }, { fields: ['plain'] }],
+    };
+    expect([...uniqueFields(def)]).toEqual(['code', 'email', 'region', 'number']);
+    expect([...uniqueFields({})]).toEqual([]);
+    expect([...uniqueFields(undefined)]).toEqual([]);
+  });
+
+  it('fixtureBody keeps the required fields, staggers the dates and varies the unique values with the tag', () => {
+    const def = {
+      fields: {
+        name: { type: 'text', required: true, unique: true },
+        starts_on: { type: 'date', required: true },
+        ends_at: { type: 'datetime', required: true },
+        email: { type: 'email', required: true, unique: 'organization' },
+        note: { type: 'text' },
+        missing: { type: 'text', required: true },
+      },
+    };
+    const body = { name: 'Acme', starts_on: '2026-10-13', ends_at: '2026-10-13T12:00:00.000Z', email: 'ada@example.com', note: 'n' };
+    expect(fixtureBody(body, def, 4, 'u')).toEqual({
+      name: 'Acme-u4',
+      starts_on: '2026-10-13',
+      ends_at: '2026-10-14T12:00:00.000Z',
+      email: 'ada-u4@example.com',
+    });
+    expect(fixtureBody(body, def, 4, 'w', true)).toEqual({
+      name: 'Acme-w4',
+      starts_on: '2026-10-13',
+      ends_at: '2026-10-14T12:00:00.000Z',
+      email: 'ada-w4@example.com',
+      note: 'n',
+    });
   });
 });

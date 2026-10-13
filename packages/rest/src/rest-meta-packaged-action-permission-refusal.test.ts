@@ -110,8 +110,10 @@ const expectRegimeC = (message: unknown, type: string, name: string, operation: 
 };
 
 const ACTION_SWITCH = 'Switch it off (POST /api/v1/actions/_activation/:object/:action, body {enabled: false}';
+// The route's spelling moved with C3 stage 8 (the retired object's data route
+// → the catalog's clone door), so the sentence is pinned up to it.
 const PERMISSION_CLONE = 'Clone it under a new name to customize it (the "Clone" action on the permission set, '
-    + 'or POST /api/v1/data/sys_permission_set with a new name).';
+    + 'or POST /api/v1/';
 
 describe('PUT / DELETE /api/v1/meta/action/:name on a packaged action — the refusal names the activation switch', () => {
     it('PUT answers 403 NOT_OVERRIDABLE naming the switch, no clone, no hatch', async () => {

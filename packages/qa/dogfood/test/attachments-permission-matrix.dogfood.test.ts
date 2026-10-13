@@ -46,6 +46,7 @@ import { attachmentsFixtureStack, attachmentsFixtureSecurity } from './fixtures/
 import { organizationsAvailable, warnIfUnavailable } from './enterprise-organizations.js';
 import { assertArmed, principalArmed } from './armed.js';
 import { SysAttachment } from '@objectstack/platform-objects/audit';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const SYS = { isSystem: true } as const;
 const DAY_MS = 86_400_000;
@@ -163,8 +164,8 @@ describe('attachments permission matrix (#2755)', () => {
     // Domain grant (see attachmentManagerSet): memberA/memberB manage
     // attachments; the baseline member deliberately keeps only the
     // `member_default` everyone-anchor baseline (no delete bit anywhere).
-    const managerSet = await ql.findOne('sys_permission_set', { where: { name: 'att_attachment_manager' }, context: SYS });
-    expect(managerSet?.id, 'fixture permission set seeded').toBeTruthy();
+    const managerSet = await catalogPermissionSet(ql, 'att_attachment_manager');
+    expect(managerSet, 'fixture permission set served by the security catalog').toBeTruthy();
     for (const userId of [memberAId, memberBId]) {
       await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: managerSet.name }, { context: { ...SYS } });
     }
@@ -719,7 +720,7 @@ describe('attachments without service-storage (a′)', () => {
     const editorTok = await stack.signUp('att-nostorage-b@verify.test');
     const uploaderId = (await ql.findOne('sys_user', { where: { email: 'att-nostorage-a@verify.test' }, context: SYS }))?.id;
     const editorId = (await ql.findOne('sys_user', { where: { email: 'att-nostorage-b@verify.test' }, context: SYS }))?.id;
-    const managerSet = await ql.findOne('sys_permission_set', { where: { name: 'att_attachment_manager' }, context: SYS });
+    const managerSet = await catalogPermissionSet(ql, 'att_attachment_manager');
     for (const userId of [uploaderId, editorId]) {
       await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: managerSet.name }, { context: { ...SYS } });
     }

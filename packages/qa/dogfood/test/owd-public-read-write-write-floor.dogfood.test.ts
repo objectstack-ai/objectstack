@@ -54,6 +54,7 @@ import { resolveAuthzContext } from '@objectstack/core';
 import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { SecurityPlugin } from '@objectstack/plugin-security';
 import { assertArmed, principalArmed } from './armed.js';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 /**
  * [#8074] The control every case below measures, and the default that silences
@@ -226,8 +227,8 @@ describe('[#8023] a public_read_write OWD opens row-level writes (and nothing el
     const carolId = await uid('owdw-carol@verify.test');
 
     const bindSet = async (userId: string, name: string) => {
-      const setRow = await ql.findOne('sys_permission_set', { where: { name }, context: { ...SYS } });
-      expect(setRow?.id, `the app-declared set '${name}' is seeded`).toBeTruthy();
+      const setRow = await catalogPermissionSet(ql, name);
+      expect(setRow, `the app-declared set '${name}' is served by the security catalog`).toBeTruthy();
       await ql.insert(
         'sys_user_permission_set',
         { user_id: userId, permission_set: setRow.name },

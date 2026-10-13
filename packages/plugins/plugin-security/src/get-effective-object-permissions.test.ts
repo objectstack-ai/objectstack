@@ -43,7 +43,7 @@ import {
 import { SecurityPlugin } from './security-plugin.js';
 import { PermissionEvaluator } from './permission-evaluator.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
-import { SysPermissionSet, SysPosition } from './objects/index.js';
+import { SysUserPosition, SysUserPermissionSet } from './objects/index.js';
 
 /** The metadata-declared baseline every member resolves additively. */
 const MEMBER_DEFAULT: PermissionSet = {
@@ -335,8 +335,8 @@ describe('[#20083] parity: can() over the member\'s map answers what checkObject
     [SysUser.name]: SysUser,                     // better-auth, opts `edit` in
     [SysMember.name]: SysMember,                 // better-auth, write-denied blanket
     [SysSecret.name]: SysSecret,                 // private, engine-owned, named by no shipped set
-    [SysPosition.name]: SysPosition,             // the org admin's read-only RBAC rows
-    [SysPermissionSet.name]: SysPermissionSet,
+    [SysUserPosition.name]: SysUserPosition,     // the org admin's read-only RBAC rows
+    [SysUserPermissionSet.name]: SysUserPermissionSet,
   };
   const shipped = (name: string): PermissionSet => {
     const set = defaultPermissionSets.find((ps) => ps.name === name);
@@ -484,12 +484,12 @@ describe('[#20083] parity: can() over the member\'s map answers what checkObject
       vi.spyOn(plugin as any, 'resolvePermissionSetsForContext').mockResolvedValue(sets);
       const permissions = toEvalPermissions(await svc.getEffectiveObjectPermissions!(context));
       for (const [verb, operation] of [['edit', 'update'], ['create', 'insert'], ['delete', 'delete']] as const) {
-        expect(evaluator.checkObjectPermission(operation, SysPosition.name, sets), `${label} ${verb}`).toBe(false);
-        expect(can(permissions, SysPosition.name, verb), `${label} ${verb}`).toBe(false);
+        expect(evaluator.checkObjectPermission(operation, SysUserPosition.name, sets), `${label} ${verb}`).toBe(false);
+        expect(can(permissions, SysUserPosition.name, verb), `${label} ${verb}`).toBe(false);
       }
       // …and still reads them, on both sides.
-      expect(evaluator.checkObjectPermission('find', SysPosition.name, sets)).toBe(true);
-      expect(can(permissions, SysPosition.name, 'read')).toBe(true);
+      expect(evaluator.checkObjectPermission('find', SysUserPosition.name, sets)).toBe(true);
+      expect(can(permissions, SysUserPosition.name, 'read')).toBe(true);
     }
     // `sys_user` edit: `member_default` grants it, `organization_admin` alone names it write-denied.
     const alone = SUBJECTS['[#20136 row b] walled org admin WITHOUT member_default'];

@@ -33,6 +33,7 @@ import { bootShowcase } from './showcase-boot.js';
 import { resolveAuthzContext } from '@objectstack/core';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { PermissionSetSchema } from '@objectstack/spec/security';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const OBJ = '/data/showcase_private_note';
 const idOf = (b: any) => b?.id ?? b?.record?.id ?? b?.data?.id ?? b?.recordId;
@@ -97,8 +98,8 @@ describe('owner anchor guard + owner-scoped bulk writes (#3004 / #2982)', () => 
 
     // Direct per-user grant of the delete set (never anchor-bound).
     const SYS = { isSystem: true } as const;
-    const delSet = await ql.findOne('sys_permission_set', { where: { name: 'anchor_note_delete' }, context: SYS });
-    expect(delSet?.id, 'declared delete set seeded').toBeTruthy();
+    const delSet = await catalogPermissionSet(ql, 'anchor_note_delete');
+    expect(delSet, 'declared delete set served by the security catalog').toBeTruthy();
     for (const userId of [aliceId, bobId]) {
       await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: delSet.name }, { context: { ...SYS } });
     }

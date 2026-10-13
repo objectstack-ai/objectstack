@@ -181,14 +181,8 @@ export class SqlNotificationOutbox implements INotificationOutbox {
             { ...dispatcherSweepOptions({ id: { $in: ids }, status: 'pending' }), context: DISPATCHER_SYSTEM_CONTEXT },
         );
 
-        // 4. Read back only the rows we own. [commit d9cf78eaa] The read-back WHERE just
-        //    proved (claimed_by, claimed_at) — the claim credential — so the
-        //    explicit stamp below narrows to ClaimedDeliveryRecord without a
-        //    cast, and states nothing the query did not already establish.
-        const claimed = (await this.engine.find(this.objectName, {
-            where: { id: { $in: ids }, claimed_by: opts.nodeId, claimed_at: now, status: 'in_flight' },
-        }, { context: DISPATCHER_SYSTEM_CONTEXT })) as DeliveryRow[];
-        return claimed.map((r) => ({ ...this.toRecord(r), claimedBy: opts.nodeId, claimedAt: now }));
+        // 4. Read back only the rows we own, with the credential as stored.
+        return this.readBackClaimed(ids, opts.nodeId);
     }
 
     async claimDigest(opts: ClaimOptions): Promise<ClaimedDeliveryRecord[]> {
@@ -222,11 +216,46 @@ export class SqlNotificationOutbox implements INotificationOutbox {
             { ...dispatcherSweepOptions({ id: { $in: ids }, status: 'pending' }), context: DISPATCHER_SYSTEM_CONTEXT },
         );
 
-        // 4. Read back the rows we own — same credential stamp as claim().
+        // 4. Read back the rows we own — same credential as claim().
+        return this.readBackClaimed(ids, opts.nodeId);
+    }
+
+    /**
+     * Step 4 of {@link claim} / {@link claimDigest}: the rows the claiming
+     * UPDATE just took, each carrying its claim credential **as the store
+     * holds it**.
+     *
+     * `claimedAt` is the `claimed_at` value read back from the row, never the
+     * `now` this process wrote. A numeric column does not have to round-trip
+     * an epoch-ms value exactly: a Postgres table created while the `number`
+     * arm still mapped to `real` (IEEE-754 binary32) stores `now` rounded to a
+     * float32 step (131 072 ms at today's magnitude) and reads back a nearby
+     * decimal, so a credential holding `now` never equals the stored value,
+     * every `ack()` is refused as a lost claim, and the row is re-sent after
+     * each reap. The value the store returned compares equal to every later
+     * read of the same cell, and binds back to the same stored value in the
+     * compare-and-set, whatever numeric type holds it.
+     *
+     * That is also why `claimed_at` is not in the WHERE: an equality between
+     * the column and the client's `now` holds only when the store coerces the
+     * comparand to the column's own type. The rows are identified by exact
+     * predicates instead — candidate id, holder, status. Every candidate was
+     * `pending` when step 2 read it, so a candidate now `in_flight` under
+     * `nodeId` was taken by this call's UPDATE: a node runs one claim at a
+     * time (the dispatcher's ticks never overlap, and `claim` / `claimDigest`
+     * split the rows on `digest_key`). And the credential read here still
+     * tells this claim from any earlier one on the same row: a re-claim needs
+     * a reap first, the reap needs the stored instant to be older than
+     * `now - claimTtlMs` on the same column, and the re-claim then stores a
+     * later instant.
+     */
+    private async readBackClaimed(ids: string[], nodeId: string): Promise<ClaimedDeliveryRecord[]> {
         const claimed = (await this.engine.find(this.objectName, {
-            where: { id: { $in: ids }, claimed_by: opts.nodeId, claimed_at: now, status: 'in_flight' },
+            where: { id: { $in: ids }, claimed_by: nodeId, status: 'in_flight' },
         }, { context: DISPATCHER_SYSTEM_CONTEXT })) as DeliveryRow[];
-        return claimed.map((r) => ({ ...this.toRecord(r), claimedBy: opts.nodeId, claimedAt: now }));
+        // `claimed_at` is non-null on an `in_flight` row: every write that sets
+        // `in_flight` sets it, and every write that clears it leaves `in_flight`.
+        return claimed.map((r) => ({ ...this.toRecord(r), claimedBy: nodeId, claimedAt: r.claimed_at as number }));
     }
 
     async ack(claimed: ClaimedDeliveryRecord, result: AckResult): Promise<void> {
@@ -266,6 +295,9 @@ export class SqlNotificationOutbox implements INotificationOutbox {
         // exactly the overwrite the card measured). Deterministic refusal
         // before any write; the SAME test is re-stated in the conditional
         // write below, which is the half that actually holds under the race.
+        // Both sides of the `claimed_at` test are reads of the same cell —
+        // `claimedAt` is the value `claim()` read back (`readBackClaimed`) —
+        // so it is exact on any numeric column, a lossy `real` one included.
         if (current.claimed_by !== claimed.claimedBy || current.claimed_at !== claimed.claimedAt) {
             throw new NotificationAckError(
                 notificationAckLostClaimMessage(id, current.status ?? 'unknown'),

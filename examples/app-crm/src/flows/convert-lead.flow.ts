@@ -60,8 +60,9 @@ export const ConvertLeadScreenFlow = defineFlow({
         objectName: 'crm_lead',
         // get_record filters via `filter` (it ignores a bare `recordId`), so
         // load THIS lead by id — otherwise findOne with an empty filter returns
-        // the first lead in the table.
-        filter: { id: '{recordId}' },
+        // the first lead in the table. A filter operand the flow computes is a
+        // CEL value envelope, evaluated before the query.
+        filter: { id: { dialect: 'cel', source: 'recordId' } },
         outputVariable: 'lead_record',
       },
     },
@@ -150,7 +151,7 @@ export const ConvertLeadScreenFlow = defineFlow({
       label: 'Mark Lead Converted',
       config: {
         objectName: 'crm_lead',
-        filter: { id: '{recordId}' },
+        filter: { id: { dialect: 'cel', source: 'recordId' } },
         // A value slot computes with a CEL value envelope — the `{…}` template
         // dialect is retired there. Both ids are bound by the screens above
         // (`idVariable`) before this node runs, so no `has()` guard is needed.

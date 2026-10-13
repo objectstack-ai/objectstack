@@ -1,29 +1,31 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#21876] On a composition with no metadata plugin — the `objectstack start`
-// shape — the federation service compares every federated object.
+// [#21876] The federation service compares every federated object, on the
+// composition the verify harness boots.
 //
 // ## What was broken
 //
 // `ExternalDatasourceServicePlugin.init()` read the `metadata` service once and
-// kept the answer. `objectstack start` composes no metadata plugin: its
-// `metadata` service is the kernel's in-memory fallback, registered after every
-// plugin's `init()`, just before the start phase. So the federation service
-// kept "no metadata service" for the life of the process. Measured on the
-// showcase under `objectstack start`: `POST /datasources/:name/external/validate`
-// answered `ok: true` with no rows, and the boot gate logged "all federated
-// objects match their remote schema" with `objects: 0` — although two
-// federated objects exist, and one of them could have drifted. Under
-// `objectstack dev` (which composes the metadata plugin before this one) both
-// objects were compared. The service now resolves `metadata` when it is used.
+// kept the answer. On a composition with no metadata plugin, that service is
+// the kernel's in-memory fallback, registered after every plugin's `init()`,
+// just before the start phase. So the federation service kept "no metadata
+// service" for the life of the process. Measured on the showcase at the time:
+// `POST /datasources/:name/external/validate` answered `ok: true` with no rows,
+// and the boot gate logged "all federated objects match their remote schema"
+// with `objects: 0` — although two federated objects exist, and one of them
+// could have drifted. The service now resolves `metadata` when it is used.
+// That ordering fix is pinned at its seam, in
+// `packages/services/service-datasource/src/__tests__/external-validate-reads-live-registry.test.ts`.
 //
 // ## Why this composition
 //
-// The verify harness composes no metadata plugin either, so its `metadata`
-// service is the same kernel fallback, registered at the same moment, as on
-// `objectstack start`. The first case asserts that, so a harness that one day
-// composes a metadata plugin cannot turn this file into a silent pass. The
-// harness does not mount the federation service, so this file mounts it, as
+// The verify harness composes `@objectstack/metadata`'s `MetadataPlugin`, the
+// artifact-less one `objectstack serve` and `start` give a host configuration
+// such as the showcase (#23088). The first case asserts that occupant: the
+// plugin is registered, and the `metadata` service is its manager, with the
+// endpoint matcher. So a change to what the harness composes cannot pass
+// through this file unnoticed. The harness does not mount the federation
+// service, so this file mounts it, as
 // `objectstack dev` and `start` do. It does not mount the boot gate either
 // (`createExternalValidationPlugin`, `@objectstack/runtime`): the gate's input
 // is the federation service's whole-farm sweep, `validateAll()`, which the
@@ -41,6 +43,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack, { onEnable } from '@objectstack/example-showcase';
 import { ExternalDatasourceServicePlugin, resolveSqliteDriver } from '@objectstack/service-datasource';
+import { MetadataManager } from '@objectstack/metadata';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -82,7 +85,7 @@ async function driftRemoteCustomers(): Promise<void> {
   }
 }
 
-describe('federation on a composition with no metadata plugin (the objectstack start shape)', () => {
+describe('federation on the harness composition, which holds the metadata plugin', () => {
   let stack: VerifyStack;
   let token: string;
   let prevCwd: string;
@@ -107,10 +110,14 @@ describe('federation on a composition with no metadata plugin (the objectstack s
     if (dir) rmSync(dir, { recursive: true, force: true });
   });
 
-  it('precondition: the metadata service is the kernel\'s in-memory fallback, as on objectstack start', () => {
-    const metadata = stack.kernel.getService<{ __serviceInfo?: { status?: string; message?: string } }>('metadata');
-    expect(metadata.__serviceInfo?.status).toBe('degraded');
-    expect(metadata.__serviceInfo?.message).toMatch(/^In-memory metadata registry/);
+  it('precondition: the metadata service is the composed MetadataPlugin\'s manager, with its endpoint matcher', () => {
+    // The plugin is registered under its own name, and the `metadata` slot is
+    // its `MetadataManager`, not the kernel's in-memory fallback (a plain
+    // object with no matcher).
+    expect(stack.kernel.hasPlugin('com.objectstack.metadata')).toBe(true);
+    const metadata = stack.kernel.getService<{ matchEndpoint?: unknown }>('metadata');
+    expect(metadata).toBeInstanceOf(MetadataManager);
+    expect(typeof metadata.matchEndpoint).toBe('function');
   });
 
   it('validate compares each federated object, and reports the drifted column', async () => {

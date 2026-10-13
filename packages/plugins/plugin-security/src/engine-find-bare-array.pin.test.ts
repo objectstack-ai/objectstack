@@ -17,16 +17,18 @@
  * Every seam answered `[object Array]`, with no own `records` key, on a
  * populated page and an empty one alike.
  *
- * ⚠️ These are six pins, not one pin repeated. A single reading of "the engine
+ * ⚠️ These are four pins, not one pin repeated. A single reading of "the engine
  * returns an array" would say nothing about whether a given seam is even
- * reachable — six of them sit behind a trigger (a truncated page, a refused
- * bulk write, a publish-materializer call path), and a seam nothing reaches is
+ * reachable — some of them sit behind a trigger (a truncated page, a refused
+ * bulk write), and a seam nothing reaches is
  * precisely how a dead limb survives review. So each case DRIVES its own block
  * through the real function and asserts the answer that block produced, and
  * {@link assertBareArrayPage} then reads back the value the engine handed it.
  *
- * The seventh seam, `security-plugin.ts`'s `sys_permission_set` loader, is
- * gone: the plugin takes a set's body from the security catalog
+ * Blocks 3 and 6 (the declared-permission seeder's per-name read and the
+ * `managed_by` normalizer's scan) retired with their modules (ADR-0131 D3:
+ * the boot writes no catalog row). The seventh seam, `security-plugin.ts`'s
+ * `sys_permission_set` loader, is gone too: the plugin takes a set's body from the security catalog
  * (ADR-0131 D3/D4) and reads no `sys_permission_set` row, so it has no
  * engine page to pin. Its fault direction (a read that did not answer
  * propagates, and `PermissionEvaluator`'s #2565 warn fires) is pinned on the
@@ -37,9 +39,9 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 
-import { SysPosition } from './objects/sys-position.object.js';
-import { SysPermissionSet } from './objects/sys-permission-set.object.js';
-import { SysPositionPermissionSet } from './objects/sys-position-permission-set.object.js';
+import { SysPosition } from './__tests__/legacy-catalog-objects.testkit.js';
+import { SysPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
+import { SysPositionPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { SysOrganization, SysUser, SysMember } from '@objectstack/platform-objects/identity';
@@ -51,10 +53,8 @@ import {
 } from '@objectstack/metadata-core';
 
 import { buildExistingByName } from './seed-name-lookup.js';
-import { upsertPackagePermissionSet } from './bootstrap-declared-permissions.js';
 import { reconcileOrgAdminGrant } from './auto-org-admin-grant.js';
 import { claimSeedOwnership } from './claim-seed-ownership.js';
-import { normalizeManagedByVocab } from './normalize-managed-by.js';
 
 const SYS = { context: { isSystem: true } } as any;
 const ORG = 'org_a';
@@ -243,29 +243,6 @@ describe('[#15598] block 2 — seed-name-lookup perItemIndex (the DEGRADATION re
   }, 120_000);
 });
 
-describe('[#15598] block 3 — bootstrap-declared-permissions defaultLookup', () => {
-  it('answers from one bare array on the publish-materializer path', async () => {
-    const engine = await boot();
-    const seen: Seen = [];
-
-    // No `existingByName` — the ADR-0086 P2 publish materializer path, which is
-    // the only caller that reaches `defaultLookup`'s own read.
-    const outcome = await upsertPackagePermissionSet(
-      observed(engine, seen),
-      { name: 'ps_published', label: 'Published', objects: {} } as any,
-      'com.acme.crm',
-      undefined,
-      {} as any,
-    );
-
-    assertBareArrayPage(seen, 'defaultLookup');
-    // `unreadable` is what a seam that cannot read its page reports, and it is
-    // one-hot with `seeded` — so this pair is the discriminator.
-    expect(outcome.unreadable).toBe(0);
-    expect(outcome.seeded).toBe(1);
-  }, 120_000);
-});
-
 describe('[#15598] block 4 — auto-org-admin-grant tryFind', () => {
   it('reads the set and the membership out of bare arrays, and grants on them', async () => {
     const engine = await boot();
@@ -319,21 +296,5 @@ describe('[#15598] block 5 — claim-seed-ownership idsFrom (the PAGING fallback
     // pass with "matched no rows to page" and leaves the row unowned.
     const rows = await (engine as any).find('probe_deal', { where: { id: 'd1' } }, SYS);
     expect(rows[0].owner_id).toBe(ADMIN);
-  }, 120_000);
-});
-
-describe('[#15598] block 6 — normalize-managed-by tryFind', () => {
-  it('reads the legacy rows out of one bare array and rewrites them', async () => {
-    const engine = await boot();
-    await (engine as any).insert('sys_position', { name: 'pos_legacy', label: 'Legacy', managed_by: 'system' }, SYS);
-    const seen: Seen = [];
-
-    const counts = await normalizeManagedByVocab(observed(engine, seen), {});
-
-    assertBareArrayPage(seen, 'normalize-managed-by tryFind');
-    // The rewrite happened, which it cannot if the scan read nothing.
-    expect(counts.positions).toBe(1);
-    const rows = await (engine as any).find('sys_position', { where: { name: 'pos_legacy' } }, SYS);
-    expect(rows[0].managed_by).toBe('platform');
   }, 120_000);
 });

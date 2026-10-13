@@ -224,6 +224,18 @@ const NOT_A_STAND_IN = {
   runReferenceShapeProofs: 'same `VerifyStack` handle as runCrudVerification.',
   formatReferenceShapeReport:
     'formats a `ReferenceShapeReport` this package produced; presentation, not conformance.',
+  runDeleteBehaviorProofs: 'same `VerifyStack` handle as runCrudVerification.',
+  formatDeleteBehaviorReport:
+    'formats a `DeleteBehaviorReport` this package produced; presentation, not conformance.',
+  runUniqueScopeProofs: 'same `VerifyStack` handle as runCrudVerification.',
+  formatUniqueScopeReport:
+    'formats a `UniqueScopeReport` this package produced; presentation, not conformance.',
+  runParentWriteReachProofs: 'same `VerifyStack` handle as runCrudVerification.',
+  formatParentWriteReachReport:
+    'formats a `ParentWriteReachReport` this package produced; presentation, not conformance.',
+  runDashboardWindowProofs: 'same `VerifyStack` handle as runCrudVerification.',
+  formatDashboardWindowReport:
+    'formats a `DashboardWindowReport` this package produced; presentation, not conformance.',
   fillRelationalRefs:
     'takes one `CrudCase` derived by `deriveCrudCases` — a data record this package built, with no ' +
     'external implementer.',

@@ -68,23 +68,23 @@ describe('plugin-security suggestion key bounds are their referenced columns\' (
   it('the suggestion key columns carry their referenced-column bounds, not just any bound', async () => {
     // Pinned by VALUE, and by the RELATION that sources each value:
     //   package_id           255 — the width every landed same-class column
-    //                              uses, `sys_permission_set.package_id`
-    //                              included, which the SAME boot pass writes
-    //                              the SAME value into.
-    //   permission_set_name  100 — the width of `sys_permission_set.name`, the
-    //                              column this value must resolve against at
-    //                              confirm time.
+    //                              uses.
+    //   permission_set_name  100 — the width of the other column that names a
+    //                              permission set, a grant's
+    //                              `sys_user_permission_set.permission_set`
+    //                              (ADR-0131 D4): a name confirmed here is a
+    //                              name a grant stores. [C3 stage 8] It was
+    //                              `sys_permission_set.name`, a retired object.
     const byName = new Map((await registeredObjects()).map((o) => [o.name, o]));
     const suggestion = byName.get('sys_audience_binding_suggestion');
-    const permissionSet = byName.get('sys_permission_set');
+    const grant = byName.get('sys_user_permission_set');
 
     expect(suggestion?.fields.package_id?.maxLength).toBe(255);
     expect(suggestion?.fields.permission_set_name?.maxLength).toBe(100);
 
-    // The referenced columns, read from the same registration surface — so a
+    // The referenced column, read from the same registration surface — so a
     // widening there turns THIS red instead of silently orphaning the bound.
-    expect(permissionSet?.fields.package_id?.maxLength).toBe(255);
-    expect(permissionSet?.fields.name?.maxLength).toBe(100);
+    expect(grant?.fields.permission_set?.maxLength).toBe(100);
   });
 
   it('the composite key stays expressible on MySQL — utf8mb4 index-key ceiling', async () => {

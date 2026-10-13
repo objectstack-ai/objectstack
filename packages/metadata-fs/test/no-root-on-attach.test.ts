@@ -196,6 +196,6 @@ describe('FileSystemRepository — attaching creates nothing on disk (#7000)', (
     expect(collected).toHaveLength(1);
     expect(collected[0]!.op).toBe('update');
     expect(collected[0]!.source).toBe('fs');
-    expect(collected[0]!.actor).toBe('fs');
+    expect(collected[0]!.actor).toBeNull();
   }, WATCHER_CASE_TIMEOUT_MS);
 });

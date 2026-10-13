@@ -47,7 +47,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { DeleteRecordConfigSchema, UpdateRecordConfigSchema } from '@objectstack/spec/automation';
+import { DeleteRecordConfigSchema, UpdateRecordConfigSchema, isExpressionEnvelopeShaped } from '@objectstack/spec/automation';
 
 import { allFlows } from '../src/automation/flows/index.js';
 
@@ -114,16 +114,18 @@ for (const flow of allFlows as unknown as FlowLike[]) {
  * requires — a SCALAR `id`? `{ id: { $in: [...] } }` does not qualify (the
  * engine refuses it), and neither does any other predicate.
  *
- * `{recordId}` / `{record.id}` templates count: they interpolate to one scalar
- * id, and #3810 already refuses the node outright when such a template erases
- * to nothing, so a "scalar" that vanished never reaches the write.
+ * A CEL value envelope at `id` (`{ dialect: 'cel', source: 'record.id' }`)
+ * counts: the executor evaluates it to one scalar id before the query, and
+ * #3810 refuses the node outright when it evaluates to nothing, so a "scalar"
+ * that vanished never reaches the write (#19939: a filter operand is a value
+ * slot, the single-brace `{record.id}` it replaced is refused).
  */
 function namesOneRowById(filter: unknown): boolean {
   if (!filter || typeof filter !== 'object') return false;
   const keys = Object.keys(filter as Record<string, unknown>);
   if (keys.length !== 1 || keys[0] !== 'id') return false;
   const id = (filter as { id: unknown }).id;
-  return typeof id === 'string' || typeof id === 'number';
+  return typeof id === 'string' || typeof id === 'number' || isExpressionEnvelopeShaped(id);
 }
 
 function isNonEmptyPredicate(filter: unknown): boolean {

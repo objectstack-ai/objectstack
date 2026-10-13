@@ -36,6 +36,8 @@ import { SysUser, SysAccount, SysMember, SysOrganization } from '@objectstack/pl
 
 import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-guard.js';
 import { ensureDefaultOrganization } from './ensure-default-organization.js';
+import { seedLegacyPlatformBucket } from './__tests__/legacy-catalog-rows.testkit.js';
+import { withLegacyPermissionSetTable } from './__tests__/legacy-catalog-objects.testkit.js';
 
 const SYS = { context: { isSystem: true } } as any;
 const GUARD_PACKAGE = 'test.grant-readers-unnamed';
@@ -103,12 +105,14 @@ async function soleGrantAnchoredAdmin(): Promise<Rig> {
     version: '1.0.0',
     type: 'plugin',
     scope: 'system',
-    objects: [
+    // The retired `sys_permission_set` table too: an existing database still
+    // holds its platform-bucket rows (C3 stage 8 retires the object).
+    objects: withLegacyPermissionSetTable([
       SysUser, SysAccount, SysMember, SysOrganization,
       ...(manifest.objects ?? []).filter((o: any) =>
         ['sys_position', 'sys_user_position', 'sys_permission_set', 'sys_position_permission_set', 'sys_user_permission_set']
           .includes(o?.name)),
-    ],
+    ]),
   } as any);
   await engine.syncSchemas();
   await plugin.start(ctx);
@@ -122,6 +126,8 @@ async function soleGrantAnchoredAdmin(): Promise<Rig> {
       'sys_account', { id: `acc_${id}`, user_id: id, account_id: `${id}@un.example`, provider_id: 'credential' }, SYS,
     );
   }
+  // An existing database: the platform-bucket rows an earlier release seeded.
+  await seedLegacyPlatformBucket(engine, (manifest.permissions ?? []) as any[]);
   const boot = await bootstrapPlatformAdmin(engine, (manifest.permissions ?? []) as any[]);
   expect(boot).toMatchObject({ adminPromoted: true });
   return { engine };

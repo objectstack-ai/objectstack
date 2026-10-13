@@ -236,6 +236,8 @@ import { firstPartyModuleClosure, stageFirstPartyClosure } from './first-party-c
 const SELF_TEST_BATTERIES = Object.freeze({
   'and one in RC pre-mode': 15,
   '#6099: the `minor` + prose-annotation family': 17,
+  '#23112: a DECORATED annotation — a pictograph before the word': 16,
+  '#23118: a bold LEAD LABEL holding a `(breaking …)` parenthetical': 16,
   'end-to-end through the shell driver': 5,
   'an unwalkable range: REFUSE, loudly (#14178)': 1,
   'the INITIAL pin still degrades, and says so': 1,
@@ -254,7 +256,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 16;
+const SELF_TEST_BATTERY_FLOOR = 18;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -438,16 +440,90 @@ export function clampSummary(summary, limit = 180) {
  */
 const BREAKING_EMPHASIS_LABEL = /(\*\*|__)[ \t]*breaking\b[^*_\n]{0,48}\1/i;
 
+/**
+ * A DECORATION an author may put in front of the word (#23112): a run of
+ * pictographic symbols, each with its optional variation selector — `⚠️` is
+ * U+26A0 WARNING SIGN + U+FE0F, and `⚠` without the selector is the same sign.
+ * It sits AFTER the heading or bullet mark, on either side of the emphasis mark
+ * (`## ⚠️ BREAKING`, `⚠️ **BREAKING`, `**⚠️ Breaking`), and admits nothing else:
+ * no letter, no digit, no ASCII punctuation, so the line-start anchor below is
+ * exactly as strict as it was for every line that carries no pictograph.
+ *
+ * Measured over objectui's whole changeset history (every blob under
+ * `.changeset/` on every head of a full clone, objectui `main` at `5595aabca30b`:
+ * 5678 blobs, 704 block-head lines carrying the word), the ONLY decoration that
+ * occurs is `⚠️`, in four placements on 51 blobs, and 47 of those were read as
+ * not breaking — objectui#12242's `## ⚠️ BREAKING, priced as minor …` among them.
+ *
+ * Why a CLASS rather than the one sign the corpus shows, and why not "any
+ * non-word run": ASCII punctuation in front of the word is a PROSE shape in that
+ * same corpus — `(breaking …)`, `"Breaking for TypeScript readers" below`,
+ * `— breaking for a top-level logo` — and a code span (`` `breaking` ``) names
+ * an identifier, so admitting it would trade this miss for false positives. A
+ * pictograph in front of the word at the head of a block is never prose; closing
+ * the class keeps the next author's `🚨 BREAKING` from being the same miss again.
+ */
+const DECORATION = String.raw`(?:\p{Extended_Pictographic}[\u{FE0E}\u{FE0F}]?[ \t]*)*`;
+
 /** The same label, but required to OPEN the text — used to avoid restating it. */
-const OPENS_WITH_BREAKING_LABEL = /^[ \t]*(?:\*\*|__)[ \t]*breaking\b/i;
+const OPENS_WITH_BREAKING_LABEL = new RegExp(
+  String.raw`^[ \t]*${DECORATION}(?:\*\*|__)[ \t]*${DECORATION}breaking\b`,
+  'iu',
+);
 
 /**
  * A block (paragraph, heading or top-level bullet) that OPENS with the word
  * "breaking" — `## Breaking note …`, `Breaking for anyone reading \`node.ui\` …`,
  * `BREAKING CHANGE: …` (the conventional-commit footer needs no separate rule;
- * it opens a block by construction).
+ * it opens a block by construction) — optionally behind a `DECORATION`
+ * (`## ⚠️ BREAKING, priced as minor …`).
  */
-const BREAKING_BLOCK_OPENER = /^[ \t]*(?:#{1,6}[ \t]+)?(?:[-*+][ \t]+)?(?:\*\*|__|\*|_)?[ \t]*breaking\b/i;
+const BREAKING_BLOCK_OPENER = new RegExp(
+  String.raw`^[ \t]*(?:#{1,6}[ \t]+)?(?:[-*+][ \t]+)?${DECORATION}(?:\*\*|__|\*|_)?[ \t]*${DECORATION}breaking\b`,
+  'iu',
+);
+
+/**
+ * A bold LEAD LABEL that carries the annotation in a parenthetical (#23118):
+ * ``**`@object-ui/layout` (breaking, declared `minor` per the version policy).**``,
+ * `**Narrowed (breaking).**`, `- **Tolerant face (breaking for invalid documents).**`.
+ * The word is not first, so the opener above cannot see it, and the label names
+ * no word first either, so neither can `BREAKING_EMPHASIS_LABEL`.
+ *
+ * A SECOND POSITION, beside the opener and not inside it, with all three parts
+ * required:
+ *
+ *   * the line OPENS with `**`, after optional indentation and an optional
+ *     bullet — the label is the line's first token;
+ *   * the `(` sits INSIDE that first bold span: nothing before it may close the
+ *     span, and the span closes on the same line;
+ *   * `breaking` is the parenthetical's FIRST word, so `(non-breaking)` and
+ *     `(not breaking)` stay what they say.
+ *
+ * So a `(breaking …)` anywhere else is prose — mid-sentence, after a label that
+ * already closed (`**Behaviour change** (breaking …`), in a bold span that is not
+ * the line's first token — and so is a label with no parenthetical.
+ *
+ * Judged on EVERY line, not only at a block start: a bullet opens a line without
+ * opening a block (`- **Strict authoring face.** …` then `- **Tolerant face
+ * (breaking for invalid documents).** …`), and a wrap column cannot manufacture
+ * a closed bold span holding the parenthetical the way it can land a bare word
+ * first on a line.
+ *
+ * Measured over objectui's changeset history (every `.changeset/*.md` blob on
+ * every head and every pull-request head of a clone, objectui `main` at
+ * `45ae6b89e845`: 6449 blobs), the label opens 41 lines in 39 blobs (18 paths),
+ * none of them read as breaking before, and each is a lead label. It never sits
+ * behind `__`, a heading mark, an ordered-list mark or a pictograph, and its
+ * span never crosses a line, so none of those is admitted.
+ *
+ * `markBreaking` STAMPS such an entry. The label names a package or a topic, not
+ * the class, so it is not a label `OPENS_WITH_BREAKING_LABEL` keeps verbatim, and
+ * the uniform marker is what keeps the count note's "Each is marked" true. None
+ * of those 39 blobs opens its summary with the label, so the stamp lands on an
+ * ordinary first paragraph there.
+ */
+const BREAKING_LEAD_LABEL = /^[ \t]*(?:[-*+][ \t]+)?\*\*(?:(?!\*\*)[^\n])*?\([ \t]*breaking\b(?:(?!\*\*)[^\n])*\*\*/i;
 
 /**
  * Did the AUTHOR annotate this change as breaking, in the changeset body?
@@ -455,7 +531,9 @@ const BREAKING_BLOCK_OPENER = /^[ \t]*(?:#{1,6}[ \t]+)?(?:[-*+][ \t]+)?(?:\*\*|_
  * THE PRECISION RULE IS POSITIONAL, NOT LEXICAL. "breaking" is an ordinary
  * English word that appears in changeset prose all the time; what makes an
  * occurrence a *declaration* is where the author put it — in an emphasis label,
- * or at the head of a block. It is never enough that the word merely occurs.
+ * at the head of a block, or as the first word of a parenthetical inside the
+ * bold lead label that opens a line (`BREAKING_LEAD_LABEL`, #23118). It is never
+ * enough that the word merely occurs.
  *
  * Measured over `f5bc4c78be76..f995a452d2ca` (65 changesets, 5 mention the word):
  *
@@ -489,6 +567,8 @@ export function hasBreakingAnnotation(body) {
       atBlockStart = true;
       continue;
     }
+    // #23118: line-initial, unlike the opener below — see `BREAKING_LEAD_LABEL`.
+    if (BREAKING_LEAD_LABEL.test(line)) return true;
     // A heading opens a block whether or not a blank line precedes it.
     if (atBlockStart || /^[ \t]*#{1,6}[ \t]+/.test(line)) {
       if (BREAKING_BLOCK_OPENER.test(line)) return true;
@@ -1747,6 +1827,350 @@ function selfTest() {
       '#6099 nothing was downgraded — there was no major to downgrade',
       annotated.bump === 'minor' && annotated.downgradedMajor === false,
       `bump=${annotated.bump} downgraded=${annotated.downgradedMajor}`,
+    );
+
+    // --- #23112: a DECORATED annotation — a pictograph before the word -------
+    // objectui#12242's changeset opens its annotation `## ⚠️ BREAKING, priced as
+    // minor …`, and the opener used to admit nothing between the heading mark and
+    // the word, so the digest read it as not breaking. Every positive below is a
+    // placement measured in objectui's own changeset history (see `DECORATION`);
+    // every negative is a line the decoration must NOT turn into a declaration.
+    battery('#23112: a DECORATED annotation — a pictograph before the word');
+    // Verbatim heading of `.changeset/12242-types-field-metadata-family.md` at
+    // objectui `1fb1ced36243`, with its paragraphs trimmed.
+    const heading12242 = "## ⚠️ BREAKING, priced as minor under the fixed group's version policy";
+    const body12242 =
+      'The exported field metadata types stop declaring the members `FieldSchema` refuses by name ' +
+      '(objectui#12242).\n\n' +
+      '- `BaseFieldMetadata`: FROM `filterable?: boolean` → TO refused.\n\n' +
+      `${heading12242}\n\n` +
+      'TypeScript that writes a retired member no longer compiles.\n';
+    check(
+      "#23112 objectui#12242's changeset body reads breaking (`## ⚠️ BREAKING, …`)",
+      body12242.includes('## \u26A0\uFE0F BREAKING') && hasBreakingAnnotation(body12242),
+    );
+    check(
+      '#23112 the plain-heading control still reads breaking (`## BREAKING, …`)',
+      hasBreakingAnnotation(body12242.replace('## \u26A0\uFE0F BREAKING', '## BREAKING')),
+    );
+    check(
+      '#23112 a decorated PROSE sentence containing "breaking" does not read breaking',
+      !hasBreakingAnnotation('⚠️ Upgrade note: nothing in this change is breaking for an existing author.') &&
+        !hasBreakingAnnotation('## ⚠️ Read before upgrading — this is not breaking') &&
+        !hasBreakingAnnotation('⚠️ Non-breaking cleanup; a groundbreaking refactor.'),
+    );
+    check(
+      '#23112 the sign BEFORE the emphasis mark reads breaking (`⚠️ **BREAKING (…)**`)',
+      // Wrapped as objectui `10719-retire-phase35-validation-types.md` wraps it, so
+      // the label's run crosses a line and `BREAKING_EMPHASIS_LABEL` cannot see it:
+      // only the opener can answer.
+      hasBreakingAnnotation(
+        "a\n\n⚠️ **BREAKING (scored `minor` per this repository's version-alignment\n" +
+          'convention) — x.**',
+      ),
+    );
+    check(
+      '#23112 the sign INSIDE the emphasis mark reads breaking (`**⚠️ Breaking …**`)',
+      hasBreakingAnnotation('a\n\n**⚠️ Breaking for consumers that read `result.data`.** `validateSchema` x'),
+    );
+    check(
+      '#23112 the sign opening a plain paragraph reads breaking (`⚠️ Breaking in places, …`)',
+      hasBreakingAnnotation("a\n\n⚠️ Breaking in places, marked `minor` under this repo's rule."),
+    );
+    check(
+      '#23112 the sign without its variation selector reads breaking (`## ⚠ BREAKING`)',
+      hasBreakingAnnotation('a\n\n## \u26A0 BREAKING'),
+    );
+    check(
+      '#23112 the rule is the pictograph CLASS, not the one sign (`- 🚨 BREAKING:` behind a bullet)',
+      hasBreakingAnnotation('a\n\n- 🚨 BREAKING: `onReorder` is retired.'),
+    );
+    check(
+      '#23112 ASCII punctuation is NOT decoration — a code span and a quotation stay prose',
+      !hasBreakingAnnotation('a\n\n`breaking` joins `ChangeEntry` as an optional boolean.') &&
+        !hasBreakingAnnotation('a\n\n"Breaking for TypeScript readers", below, lists the members.'),
+    );
+    check(
+      "#23112 markBreaking keeps an author's DECORATED label verbatim — never restated",
+      markBreaking('⚠️ **BREAKING (scored `minor`)** — x') === '⚠️ **BREAKING (scored `minor`)** — x' &&
+        markBreaking('**⚠️ Breaking for consumers.** y') === '**⚠️ Breaking for consumers.** y' &&
+        markBreaking('⚠️ An ordinary summary.') === '**BREAKING** — ⚠️ An ordinary summary.',
+    );
+
+    // Through the real digest, in a repo of its own so the #6099 counts above
+    // stay pinned. Commit (A) is the 12242 shape, (B) opens its SUMMARY with a
+    // decorated label (objectui `10719-retire-phase35-validation-types.md`), (C)
+    // is decorated prose.
+    const uiDeco = join(tmp, 'objectui-decorated');
+    mkdirSync(join(uiDeco, '.changeset'), { recursive: true });
+    const gDeco = (...args) => git(uiDeco, args);
+    gDeco('init', '-q', '-b', 'main');
+    gDeco('config', 'user.email', 'selftest@objectstack.ai');
+    gDeco('config', 'user.name', 'self test');
+    gDeco('config', 'commit.gpgsign', 'false');
+    const commitDeco = (subject, files) => {
+      for (const [path, content] of Object.entries(files)) {
+        mkdirSync(dirname(join(uiDeco, path)), { recursive: true });
+        writeFileSync(join(uiDeco, path), content);
+      }
+      gDeco('add', '-A');
+      gDeco('commit', '-q', '-m', subject);
+      return gDeco('rev-parse', 'HEAD').trim();
+    };
+    const baseDeco = commitDeco('chore: base', { 'README.md': 'base\n' });
+    const shaA = commitDeco('fix(types): field metadata family (#12242)', {
+      '.changeset/12242-types-field-metadata-family.md':
+        "---\n'@object-ui/types': minor\n---\n\n" + body12242,
+      'src/types.ts': 'a\n',
+    });
+    commitDeco('fix(types): retire the phase-3.5 validation types (#10719)', {
+      '.changeset/10719-retire-phase35-validation-types.md':
+        "---\n'@object-ui/types': minor\n---\n\n" +
+        "⚠️ **BREAKING (scored `minor` per this repository's version-alignment\n" +
+        'convention) — `@object-ui/types` no longer exports the eight "Phase 3.5"\n' +
+        'validation types (objectui#10719).**\n',
+      'src/core.ts': 'b\n',
+    });
+    commitDeco('fix(fields): a picker note (#3336)', {
+      '.changeset/picker-note.md':
+        "---\n'@object-ui/fields': patch\n---\n\n" +
+        '⚠️ Upgrade note: nothing in this change is breaking for an existing author.\n',
+      'src/fields.ts': 'c\n',
+    });
+    const headDeco = gDeco('rev-parse', 'HEAD').trim();
+    const decorated = buildDigest({ objectuiRoot: uiDeco, frameworkRoot: fwPlain, from: baseDeco, to: headDeco });
+    check(
+      '#23112 exactly the two decorated annotations are counted, the decorated prose is not',
+      decorated.releasing.length === 3 && decorated.breaking === 2 && decorated.breakingByAnnotation === 2,
+      `releasing=${decorated.releasing.length} breaking=${decorated.breaking} byAnnotation=${decorated.breakingByAnnotation}`,
+    );
+    check(
+      '#23112 the count line reads 2, by annotation',
+      decorated.body.includes("⚠️ 2 of these carry a breaking change: 2 by the author's own breaking annotation"),
+      decorated.body,
+    );
+    check(
+      '#23112 the heading-annotated entry GETS the marker on its line',
+      decorated.body.includes('- **minor** — **BREAKING** — The exported field metadata types stop declaring'),
+      decorated.body,
+    );
+    check(
+      "#23112 a summary opening with a decorated label renders it verbatim, never restated",
+      // The `breaking` clause is load-bearing: an UNFLAGGED entry renders this
+      // same line, so the text clauses alone would pass for an empty reason.
+      decorated.releasing.find((r) => r.path.includes('10719'))?.breaking === true &&
+        decorated.body.includes(
+          "- **minor** — ⚠️ **BREAKING (scored `minor` per this repository's version-alignment convention)",
+        ) &&
+        !decorated.body.includes('**BREAKING** — ⚠️ **BREAKING'),
+      decorated.body,
+    );
+    check(
+      '#23112 the decorated prose entry is NOT marked',
+      decorated.body.includes('- **patch** — ⚠️ Upgrade note: nothing in this change is breaking'),
+      decorated.body,
+    );
+    // The card's second consequence: a range whose ONLY breaking entry is the
+    // decorated heading used to raise no count at all, and so no ADR-0087
+    // disposition prompt.
+    const onlyA = buildDigest({ objectuiRoot: uiDeco, frameworkRoot: fwPlain, from: baseDeco, to: shaA });
+    check(
+      '#23112 a range whose ONLY breaking entry is the decorated heading still raises the ADR-0087 question',
+      onlyA.breaking === 1 && onlyA.adr0087Scaffold === true && onlyA.body.includes(ADR_0087_SCAFFOLD),
+      `breaking=${onlyA.breaking} scaffold=${onlyA.adr0087Scaffold}`,
+    );
+
+    // --- #23118: a bold LEAD LABEL holding a `(breaking …)` parenthetical -----
+    // objectui `8a55f0ccd`'s `.changeset/12059-sidebar-no-reorder.md` annotates its
+    // change in a per-package lead label, and the word is neither first in the
+    // block nor first in the emphasis run, so the digest read it as not breaking.
+    // Every positive below is a shape measured in objectui's own changeset
+    // history (see `BREAKING_LEAD_LABEL`); every negative is a `(breaking …)`
+    // the rule must leave as prose, most of them verbatim from that same history.
+    battery('#23118: a bold LEAD LABEL holding a `(breaking …)` parenthetical');
+    const label12059 = '**`@object-ui/layout` (breaking, declared `minor` per the version policy).**';
+    // `.changeset/12059-sidebar-no-reorder.md` at objectui `8a55f0ccd`, paragraphs trimmed.
+    const body12059 =
+      "The console sidebar no longer lets a user drag the app's menu into a private order; the " +
+      'Pinned section is now the one place a user orders entries (objectui#12059).\n\n' +
+      `${label12059} \`NavigationRenderer\` retires \`enableReorder\` and \`onReorder\`.\n\n` +
+      "**`@object-ui/app-shell`.** The sidebar no longer reads or writes the per-user menu order.\n";
+    check(
+      "#23118 the card's example reads breaking (``**`@object-ui/layout` (breaking, …).**``)",
+      body12059.includes(`\n\n${label12059} `) && hasBreakingAnnotation(body12059),
+    );
+    check(
+      '#23118 the rule is LINE-initial: a bulleted label that opens no block reads breaking',
+      // objectui `6152-object-form-unmirrored-members.md`: the second bullet of a list.
+      hasBreakingAnnotation(
+        'What an author sees change:\n\n' +
+          '- **Strict authoring face.** A document using any of these keys is no longer refused.\n' +
+          '- **Tolerant face (breaking for invalid documents).** A value of the wrong type is refused.',
+      ),
+    );
+    check(
+      '#23118 the label alone on its line, with more after the parenthetical, and in any case',
+      hasBreakingAnnotation('a\n\n**Narrowed (breaking).**\n\n`object-grid` x') &&
+        hasBreakingAnnotation("a\n\n**Narrowed (breaking), `@object-ui/types`.** `@objectstack/spec`'s x") &&
+        hasBreakingAnnotation('a\n\n**`@object-ui/i18n` (BREAKING, declared `minor`).** `console.nav` x'),
+    );
+    check(
+      '#23118 a prose `(breaking …)` outside a lead label does not read breaking',
+      // objectui `11717-dashboard-widget-chart-measure-arity.md` (mid-sentence) and
+      // `6152-unmirrored-round4.md` (a wrapped line that opens with the parenthetical).
+      !hasBreakingAnnotation(
+        'a\n\nThis narrows the accepted documents (breaking for a document of either shape). The fix: x',
+      ) &&
+        !hasBreakingAnnotation(
+          'a\n\nA wrong-typed value at either key is now refused at its path, where it used to be kept\n' +
+            'unexamined\n(breaking for invalid documents).',
+        ),
+    );
+    check(
+      '#23118 a lead label WITHOUT the parenthetical does not read breaking',
+      !hasBreakingAnnotation('a\n\n**`@object-ui/app-shell`.** The sidebar no longer reads x') &&
+        !hasBreakingAnnotation('a\n\n- **Strict authoring face.** A document using any of these keys x'),
+    );
+    check(
+      '#23118 a parenthetical AFTER the label has closed is prose (`**…** (breaking …`)',
+      // objectui `5896-feeditem-single-constructor.md`, verbatim.
+      !hasBreakingAnnotation(
+        'a\n\n**Behaviour change on the console record page** (breaking in the objectui sense,\n' +
+          "shipped `minor` — objectui's `major` tracks `@objectstack`):",
+      ),
+    );
+    check(
+      "#23118 a bold span that is NOT the line's first token does not read breaking",
+      !hasBreakingAnnotation('a\n\nSee **`@object-ui/layout` (breaking).** below.') &&
+        !hasBreakingAnnotation('a\n\n**Removed.** **`@object-ui/layout` (breaking).** x'),
+    );
+    check(
+      "#23118 `breaking` must be the parenthetical's FIRST word (`(non-breaking)`, `(not breaking …)`)",
+      !hasBreakingAnnotation('a\n\n**`@object-ui/layout` (non-breaking).** x') &&
+        !hasBreakingAnnotation('a\n\n**Cleanup (not breaking for any author).** x'),
+    );
+    check(
+      '#23118 an UNBOLDED label is prose: plain text and a code span stay unread',
+      // objectui `11168-element-family-inputs.md` and `11674-shortcuts-dialog-wired-only.md`.
+      !hasBreakingAnnotation(
+        'a\n\nNarrowed (breaking for an author who wrote them, which the spec already\nrefuses):',
+      ) &&
+        !hasBreakingAnnotation(
+          "a\n\n`@object-ui/i18n` (BREAKING; `minor` under this repository's release model): x",
+        ),
+    );
+    check(
+      '#23118 markBreaking STAMPS a summary that opens with a lead label — it is not a breaking label',
+      markBreaking('**`@object-ui/types` (breaking, hence `minor`).** x') ===
+        '**BREAKING** — **`@object-ui/types` (breaking, hence `minor`).** x' &&
+        markBreaking('**BREAKING (v17)** — x') === '**BREAKING (v17)** — x',
+    );
+
+    // Through the real digest, in a repo of its own so the counts above stay
+    // pinned. (A) is the 12059 shape, (B) the bulleted label, (C) opens its
+    // SUMMARY with a lead label (no measured specimen; it pins the renderer
+    // through the real path), (D)-(F) are the prose shapes the rule must leave.
+    const uiLead = join(tmp, 'objectui-lead-label');
+    mkdirSync(join(uiLead, '.changeset'), { recursive: true });
+    const gLead = (...args) => git(uiLead, args);
+    gLead('init', '-q', '-b', 'main');
+    gLead('config', 'user.email', 'selftest@objectstack.ai');
+    gLead('config', 'user.name', 'self test');
+    gLead('config', 'commit.gpgsign', 'false');
+    const commitLead = (subject, files) => {
+      for (const [path, content] of Object.entries(files)) {
+        mkdirSync(dirname(join(uiLead, path)), { recursive: true });
+        writeFileSync(join(uiLead, path), content);
+      }
+      gLead('add', '-A');
+      gLead('commit', '-q', '-m', subject);
+      return gLead('rev-parse', 'HEAD').trim();
+    };
+    const baseLead = commitLead('chore: base', { 'README.md': 'base\n' });
+    const shaLeadA = commitLead('feat(layout): the sidebar menu is not user-reorderable (#12059)', {
+      '.changeset/12059-sidebar-no-reorder.md': "---\n'@object-ui/layout': minor\n---\n\n" + body12059,
+      'src/layout.ts': 'a\n',
+    });
+    commitLead('feat(types): the object-form mirror declares its members (#6152)', {
+      '.changeset/6152-object-form-unmirrored-members.md':
+        "---\n'@object-ui/types': minor\n---\n\n" +
+        'The `object-form` zod mirror declares the members its TypeScript twin declared.\n\n' +
+        '- **Strict authoring face.** A document using any of these keys is no longer refused.\n' +
+        '- **Tolerant face (breaking for invalid documents).** A value of the wrong type is refused.\n',
+      'src/form.ts': 'b\n',
+    });
+    commitLead('feat(types): a list view retires its legacy chart axes (#6152)', {
+      '.changeset/lead-label-summary.md':
+        "---\n'@object-ui/types': minor\n---\n\n" +
+        '**`@object-ui/types` (breaking for a writer of a retired key, hence `minor`).** The legacy\n' +
+        'chart axes are refused at the key.\n',
+      'src/chart.ts': 'c\n',
+    });
+    commitLead('feat(dashboard): a widget measure arity (#11717)', {
+      '.changeset/11717-dashboard-widget-chart-measure-arity.md':
+        "---\n'@object-ui/plugin-dashboard': patch\n---\n\n" +
+        'A chart widget refuses a measure it cannot draw.\n\n' +
+        'This narrows the accepted documents (breaking for a document of either shape). The fix: x\n',
+      'src/dashboard.ts': 'd\n',
+    });
+    commitLead('refactor(app-shell): one feed item constructor (#5896)', {
+      '.changeset/5896-feeditem-single-constructor.md':
+        "---\n'@object-ui/app-shell': patch\n---\n\n" +
+        'The record feed builds every item through one constructor.\n\n' +
+        '**Behaviour change on the console record page** (breaking in the objectui sense,\n' +
+        "shipped `minor` — objectui's `major` tracks `@objectstack`):\n",
+      'src/feed.ts': 'e\n',
+    });
+    commitLead('feat(app-shell): the sidebar keeps no private order', {
+      '.changeset/app-shell-no-private-order.md':
+        "---\n'@object-ui/app-shell': patch\n---\n\n" +
+        '**`@object-ui/app-shell`.** The sidebar no longer reads or writes the per-user menu order.\n',
+      'src/sidebar.ts': 'f\n',
+    });
+    const headLead = gLead('rev-parse', 'HEAD').trim();
+    const lead = buildDigest({ objectuiRoot: uiLead, frameworkRoot: fwPlain, from: baseLead, to: headLead });
+    const leadFlag = (frag) => lead.releasing.find((r) => r.path.includes(frag))?.breaking;
+    check(
+      '#23118 exactly the three lead-label annotations are counted, the three prose shapes are not',
+      lead.releasing.length === 6 &&
+        lead.breaking === 3 &&
+        lead.breakingByAnnotation === 3 &&
+        leadFlag('12059') === true &&
+        leadFlag('6152-object-form') === true &&
+        leadFlag('lead-label-summary') === true,
+      `releasing=${lead.releasing.length} breaking=${lead.breaking} byAnnotation=${lead.breakingByAnnotation}`,
+    );
+    check(
+      '#23118 the count line reads 3, by annotation',
+      lead.body.includes("⚠️ 3 of these carry a breaking change: 3 by the author's own breaking annotation"),
+      lead.body,
+    );
+    check(
+      '#23118 the 12059-shaped entry GETS the marker on its line',
+      lead.body.includes("- **minor** — **BREAKING** — The console sidebar no longer lets a user drag the app's menu"),
+      lead.body,
+    );
+    check(
+      '#23118 a summary opening with a lead label is stamped ONCE, the label kept verbatim after it',
+      lead.body.includes(
+        '- **minor** — **BREAKING** — **`@object-ui/types` (breaking for a writer of a retired key, hence `minor`).** The legacy',
+      ) && !lead.body.includes('**BREAKING** — **BREAKING'),
+      lead.body,
+    );
+    check(
+      '#23118 the three prose entries are NOT marked',
+      lead.body.includes('- **patch** — A chart widget refuses a measure it cannot draw.') &&
+        lead.body.includes('- **patch** — The record feed builds every item through one constructor.') &&
+        lead.body.includes('- **patch** — **`@object-ui/app-shell`.** The sidebar no longer reads'),
+      lead.body,
+    );
+    // The family card's second consequence: a range whose ONLY breaking entry is
+    // a lead label used to raise no count, and so no ADR-0087 disposition prompt.
+    const onlyLead = buildDigest({ objectuiRoot: uiLead, frameworkRoot: fwPlain, from: baseLead, to: shaLeadA });
+    check(
+      '#23118 a range whose ONLY breaking entry is a lead label still raises the ADR-0087 question',
+      onlyLead.breaking === 1 && onlyLead.adr0087Scaffold === true && onlyLead.body.includes(ADR_0087_SCAFFOLD),
+      `breaking=${onlyLead.breaking} scaffold=${onlyLead.adr0087Scaffold}`,
     );
 
     // --- end-to-end through the shell driver -------------------------------

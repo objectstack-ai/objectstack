@@ -191,6 +191,19 @@ describe('SYNC_ARCHITECTURE.md L3 connector examples compile', () => {
     expect(markdown).not.toContain("```typescript\nimport type { ETLPipeline }");
   });
 
+  // This `it` carries its OWN timeout instead of the package's 60 s default
+  // (`vitest.config.ts`): it builds one `ts.createProgram` over the spec's types
+  // (both document examples plus the harness self-test probe, at `strict`), and
+  // that is more work than the default is sized for. CI readings, `Test Core
+  // (1/6)`: 55,680 ms on `main` (commit 85b4ac634e; the same figure appears at
+  // 018b077fbf and eab7236ff7 because turbo replayed one cached run, so it is
+  // one reading, not three) and 61,767 ms on a cold spec re-run (PR head
+  // 63710c5572), which timed out at 60,000 ms. A local run (2 workers) reads
+  // 13,796 ms. 180_000 ms is about 2.9x the cold CI reading: room for a slower
+  // runner, still short enough that a hung compile fails inside three minutes,
+  // and the figure `shared/alias-integrity.test.ts` already gives its own
+  // import-everything `beforeAll`. Only this `it` is widened: raising the
+  // global `testTimeout` would hide the next slow test as well.
   it('compiles every full connector example verbatim, import line included', () => {
     const probes: Record<string, string> = {};
     compilable.forEach((block, i) => { probes[`doc-l3-connector-${i}`] = block; });
@@ -211,7 +224,7 @@ describe('SYNC_ARCHITECTURE.md L3 connector examples compile', () => {
         `L3 example #${i} must compile clean`,
       ).toBe('');
     });
-  });
+  }, 180_000);
 });
 
 describe('the spellings the example used to carry are rejected', () => {

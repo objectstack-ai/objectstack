@@ -324,7 +324,12 @@ const MODULES = {
     // #21079 — its four `{ code, error }` answers (400 `INVALID_REQUEST`, 404
     // `FORM_NOT_FOUND`, 403 `LOOKUP_NOT_PUBLIC`, 500 `LOOKUP_TARGET_MISSING`)
     // left with the handler. Deleted, not converted; banked per the same rule.
-    stringError: 39,
+    //
+    // 39 → 26 (#23050 slice 1): NOT progress — a MOVE. The thirteen literal
+    // string `error` bodies of `registerDataActionEndpoints`' handlers left this
+    // file with that body for `data-action-routes.ts`, which declares them
+    // below at the count they had here; the sum is unchanged (26 + 13 = 39).
+    stringError: 26,
     // 77 → 75 (#7981): registerSecurityEndpoints' two `handleError` arms moved
     // off the `{ code, error }` sibling-code literal onto the shared
     // `respondError` helper, banking that progress per the ratchet's own rule.
@@ -362,7 +367,11 @@ const MODULES = {
     //
     // 58 → 54 (#21180): the same four picker-route answers as `stringError`
     // above, counted again here — the route was deleted, not converted.
-    siblingCode: 54,
+    //
+    // 54 → 39 (#23050 slice 1): NOT progress — the same MOVE as `stringError`
+    // above. Fifteen `{ code, error }` bodies left with the data-action body for
+    // `data-action-routes.ts`, declared below; the sum is unchanged (39 + 15 = 54).
+    siblingCode: 39,
   },
 
   // [#8850] The ADR-0112 error/fault-classification prologue, extracted from
@@ -396,6 +405,27 @@ const MODULES = {
     ok: 0,
     err: 0,
     ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+  },
+
+  // [#23050 slice 1] `RestServer#registerDataActionEndpoints`' body — record
+  // clone, the import doors and import-job reads, the export — moved out of
+  // `rest-server.ts` whole. A MOVE, no wire answer changed, so it is held to
+  // EXACTLY what it was held to inside `rest-server.ts`: the two dialect facts
+  // and no write-site count. `dialectOnly` here is that inheritance, not a new
+  // waiver — pinning `responses` would be a guarantee these bodies never
+  // carried, added by a PR whose contract is to move nothing.
+  //
+  // Both counts were measured on the moved file and equal what left
+  // `rest-server.ts` above in the same PR (stringError 39 → 26, siblingCode
+  // 54 → 39), so each sum is unchanged. Both only ever tick down, as there.
+  // Discovered by the `*-routes.ts` convention and declared in the same PR that
+  // created the module, so the gap never exists.
+  'packages/rest/src/data-action-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 1 and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 13,
+    siblingCode: 15,
   },
 };
 

@@ -72,7 +72,8 @@ export interface HttpDelivery {
     /**
      * Custom headers — the ordinary place a credential (`Authorization:
      * Bearer …`) goes, whichever producer authored them (a `WebhookSchema`
-     * `headers` map, or a flow `http` node's per-run interpolated values).
+     * `headers` map, or a flow `http` node's values, rendered per run before
+     * the enqueue).
      *
      * [#8118] On engine-backed storage the row column (`headers_json`) is
      * declared `internal: true`, so the generic data path never returns it.
@@ -639,9 +640,11 @@ export interface IHttpOutbox {
      *
      * [#17634] Every returned row carries its claim credential —
      * `claimedBy` = `opts.nodeId`, `claimedAt` = the claim instant — exactly as
-     * the claiming write stamped it. {@link ack} takes that pair back to prove
-     * the claim it completes, so an implementation that honours `ack`'s
-     * `claimed` argument MUST stamp it on every row.
+     * the store holds it after the claiming write: a store whose numeric column
+     * does not round-trip epoch-ms exactly hands back the value it read, not the
+     * `now` it was given. {@link ack} takes that pair back to prove the claim it
+     * completes, so an implementation that honours `ack`'s `claimed` argument
+     * MUST stamp it on every row.
      */
     claim(opts: HttpClaimOptions): Promise<HttpDelivery[]>;
 

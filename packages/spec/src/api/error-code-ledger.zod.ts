@@ -606,6 +606,15 @@ export const ERROR_CODE_LEDGER = {
     'COMMIT_NOT_FOUND',
     'CONCURRENT_UPDATE',
     'DESTRUCTIVE_CHANGE',         // change would drop data; needs an explicit opt-in
+    // [#23015] The save door's half of "one default record page per object per
+    // deployment" (maintainer ruling A, record 6134056653): `saveMetaItem`
+    // refuses a `page` body that is the default record page of an object a
+    // stored page or a packaged page already holds, naming both, 422 — the
+    // same code and status `@objectstack/objectql`'s registration refusal
+    // stamps for the same condition (that package depends on this one, so the
+    // string is spelled in each). Served by the `/meta` write doors through
+    // `errorFromThrown`.
+    'DEFAULT_RECORD_PAGE_CONFLICT',
     // [#9567] ADR-0078's rename guard refuses a metadata write whose `type`/
     // `name` token is already a LIVE name owned by something else in the
     // environment — persisting the un-renamed body would mint exactly the row
@@ -650,7 +659,11 @@ export const ERROR_CODE_LEDGER = {
     // so nothing is written. Each gives a consumer a branch no existing code
     // gives: the package installs MANAGED instead, and neither the
     // `OS_METADATA_WRITABLE` hatch (`NOT_CREATABLE`'s remedy) nor a retry
-    // helps. No HTTP door on this tree yet; the thrown value is the boundary.
+    // helps. Doored: `POST /api/v1/marketplace/install-local` with
+    // `installMode: 'unmanaged'` (`@objectstack/cloud-connection`) answers
+    // both with their own code and status; the install door also raises the
+    // WALLED_POSTURE refusal itself, through the same function, before it
+    // judges anything else about the package.
     //  - UNCOPYABLE, 422: the body carries what the copy cannot write as
     //    environment rows — a runtime-uncreatable type, code, an extension of
     //    another package's items, or an artifact envelope.
@@ -887,6 +900,21 @@ export const ERROR_CODE_LEDGER = {
     // carries; `DUPLICATE_RECORD` / `DUPLICATE_VALUE` name a different
     // condition and share only the first token).
     'DUPLICATE_ARTIFACT_OBJECT_NAME',
+    // [#23015] One default record page per object per deployment (maintainer
+    // ruling A, record 6134056653): a package registering a record page as the
+    // default record page of an object another page already holds — another
+    // package's page, the environment's, or a second page of the same manifest
+    // — is refused at the package door (`SchemaRegistry.installPackage`, ahead
+    // of every mutation) and at the item seam (`registerItem`), naming both
+    // pages (`DefaultRecordPageConflictError`, `registry.ts`; `status: 422`;
+    // the exported `DEFAULT_RECORD_PAGE_CONFLICT_CODE`). Wire-reachable: the
+    // two HTTP install doors call `installPackage`. Its own code rather than
+    // `NAMESPACE_CONFLICT`: no name is taken — an object's one default slot is
+    // held — and renaming fixes nothing; the remedy is `isDefault: false` on
+    // one page, or composing the deployment without the other package. Not a
+    // synonym of any standard member: the manifest is well-formed, and the
+    // refusal comes from what the deployment already holds.
+    'DEFAULT_RECORD_PAGE_CONFLICT',
   ],
   '@objectstack/core': [
     'ERR_BULK_RESULT_MISMATCH',
@@ -1076,6 +1104,12 @@ export const ERROR_CODE_LEDGER = {
     // admits the (code, shadows) pair, and this row extends its emitter list,
     // never endorses the spelling for new code.
     'FORBIDDEN',
+    // [ADR-0131 D6] install-local refused a requested `installMode` the
+    // package's `installModes` does not permit (absent meaning `['managed']`),
+    // 422, before any write; `details.permitted` names the modes it does.
+    // Its own code because the consumer's branch is its own: retrying with a
+    // permitted mode helps, and no edit of the package is needed.
+    'INSTALL_MODE_NOT_PERMITTED',
     'INVALID_REQUEST',
     'MANIFEST_CONFLICT',             // manifest_id already defined by local code
     'MARKETPLACE_PROXY_FAILED',
@@ -1474,6 +1508,13 @@ export const ERROR_CODE_LEDGER = {
     'STACK_SCHEMA_INVALID',                      // `ObjectStackDefinitionSchema.safeParse` failed; `issues` carries the zod issues structurally
     'STACK_SINGLE_APP_VIOLATION',                // an `app` package declares more than one app (ADR-0019 D3)
     'STACK_TRIGGER_CAPABILITY_REQUIRED',         // an auto-launched flow while `requires` omits `triggers` or `automation` (the pair installs its trigger)
+    // [ADR-0131 D6] The eighth `defineStack` refusal, same family and same
+    // reading (`door: 'none'`, `status: 422`): the package permits the
+    // `unmanaged` install mode while it carries what an unmanaged install
+    // cannot copy — an item of a runtime-uncreatable type, code, an extension
+    // of another package's items. Its install-time counterpart is
+    // `UNMANAGED_INSTALL_UNCOPYABLE` under `@objectstack/metadata-protocol`.
+    'STACK_UNMANAGED_INSTALL_UNCOPYABLE',
     // [#16348] The COMPOSITION half of the same family, and `door: 'none'` on
     // the same reading: the six `composeStacks` refusals, one code per raise
     // site, every one `status: 422` (`StackRefusalError`, `stack.zod.ts`), the

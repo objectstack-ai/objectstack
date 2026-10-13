@@ -44,6 +44,8 @@ import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 import {
     backfillOverlayBundleMembers,
     ensureMetadataOverlayIndexes,
+    overlayMemberOfBody,
+    overlayMemberValue,
     overlayMemberWhere,
 } from './migrations/overlay-index.js';
 import { driverCanRunSql, resolveDriverExec } from './migrations/driver-exec.js';
@@ -160,7 +162,7 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSp
 // live transport in through `attachMetadataMutationPubSub`.
 import type { IObjectQLEngine, IPubSub, ISecurityService } from '@objectstack/spec/contracts';
 import { applyConversionsToFlow, applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
-import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer, resolveI18nLabel } from '@objectstack/spec/ui';
+import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer, resolveI18nLabel, defaultRecordPageObject } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
 // structurally mention `FormFieldInput` (FormView `sections[].fields`), and
 // this file imports BOTH `@objectstack/spec` (root, for
@@ -186,6 +188,7 @@ import {
     evaluateLockForDelete,
     resolveLockState,
     MetadataLockSchema,
+    MetadataProtectionFields,
     type MetadataLock,
     type MetadataLockSource,
     type MetadataProvenance,
@@ -805,6 +808,59 @@ function resolveOverlaySchema(type: string, _item: unknown): z.ZodTypeAny | null
 }
 
 /**
+ * [ADR-0131 D6, ADR-0010 Phase 4.3] The schema the save door judges `key` by on
+ * an item of `type` — read off {@link resolveOverlaySchema}, the door's own
+ * resolver, so no list of which types declare which key is kept anywhere — or
+ * `undefined` when that schema declares no such key (or the type has none).
+ *
+ * Read structurally: the object shapes the schema parses to, through the
+ * wrappers the registered types use (lazy, pipe, union, intersection and the
+ * optional family). A union declares the key when any member does. A schema
+ * this walk cannot read answers `undefined`, which leaves the key to the save
+ * door's own verdict — the direction that changes no refusal.
+ *
+ * The unmanaged import asks it for `protection`: only a type that declares the
+ * block has one to strip (`stripUnmanagedImportLock`); on any other type the
+ * save door judges the block exactly as it did before.
+ */
+export function overlaySchemaDeclaredKey(type: string, key: string): z.ZodTypeAny | undefined {
+    return declaredKeySchema(resolveOverlaySchema(type, undefined), key, 0);
+}
+
+function declaredKeySchema(schema: unknown, key: string, depth: number): z.ZodTypeAny | undefined {
+    if (!schema || depth > 12) return undefined;
+    const def = (schema as { _zod?: { def?: Record<string, any> } })._zod?.def;
+    switch (def?.type) {
+        case 'object': {
+            const shape = (schema as { shape?: Record<string, unknown> }).shape ?? def.shape ?? {};
+            return Object.prototype.hasOwnProperty.call(shape, key) ? shape[key] as z.ZodTypeAny : undefined;
+        }
+        case 'lazy':
+            return declaredKeySchema(def.getter?.(), key, depth + 1);
+        case 'pipe':
+            return declaredKeySchema(def.in, key, depth + 1) ?? declaredKeySchema(def.out, key, depth + 1);
+        case 'intersection':
+            return declaredKeySchema(def.left, key, depth + 1) ?? declaredKeySchema(def.right, key, depth + 1);
+        case 'union':
+            for (const option of (def.options ?? []) as unknown[]) {
+                const found = declaredKeySchema(option, key, depth + 1);
+                if (found) return found;
+            }
+            return undefined;
+        case 'optional':
+        case 'nullable':
+        case 'default':
+        case 'prefault':
+        case 'readonly':
+        case 'nonoptional':
+        case 'catch':
+            return declaredKeySchema(def.innerType, key, depth + 1);
+        default:
+            return undefined;
+    }
+}
+
+/**
  * [#21658, #21689] The save door's refusal of a `hook` that carries no `body`:
  * such a hook can never run once this door has stored it. One predicate, two
  * shapes it meets, one envelope: a hook whose `handler` names a function, and a
@@ -879,6 +935,191 @@ function runtimeHookWithoutBodyRefusal(
     ) as Error & { code: 'VALIDATION_ERROR'; status: 400 };
     err.code = 'VALIDATION_ERROR';
     err.status = 400;
+    return err;
+}
+
+/** The author-facing lock block (ADR-0010 Phase 4.3), as the spec mounts it on a metadata item. */
+const PROTECTION_BLOCK_KEY = 'protection';
+
+/**
+ * [ADR-0010 §3.5 and Phase 4.3] The save door's refusal of a `protection`
+ * block — the package author's lock declaration, which this door cannot
+ * honour.
+ *
+ * ADR-0010 states one door for the block. Phase 4.3 calls it the public
+ * author surface "that translates into the private `_lock` envelope at load
+ * time": the loader "calls `applyProtection(item, { packageId })` to translate
+ * the block … and strips the public `protection` block so it never leaks into
+ * the overlay row". An item this door writes is authored in the environment,
+ * and §3.5 states what a lock means for one: "Tenant `org` artifacts ignore
+ * L3 / L4 entirely (the tenant owns them in full, can also delete them)". So
+ * the block has no translation here, and translating it anyway would open a
+ * lock door ADR-0010 does not state. Stored verbatim, which is what this door
+ * did before, the block was served back as `protection.lock: 'full'` while the
+ * item read `lock: 'none'` and every edit and delete succeeded: a body telling
+ * its reader the item is protected when it is not.
+ *
+ * Asked only on a type whose schema declares the block, read structurally by
+ * {@link overlaySchemaDeclaredKey} (the unmanaged import asks the same
+ * question). On any other type the schema's own verdict stands: an
+ * unrecognized key, refused by the parse.
+ *
+ * Every AUTHORING write is refused: the REST and dispatcher saves, in draft
+ * and in publish mode, the domain doors that save through this one, and the
+ * unmanaged import, which strips a block it can parse before the body reaches
+ * this door (`stripUnmanagedImportLock`) and hands a malformed one on to be
+ * refused here. The server-stated rewrites of rows the store already holds —
+ * a `source`-stating re-save (`migrateStoredMetadata`, the flow credential
+ * move) and `duplicatePackage` — strip the block instead, through
+ * {@link withoutProtectionBlock}, exactly as they strip the derived provenance
+ * stamps (`tenantAuthoredWriteRefusal` draws the same line): a row stored
+ * before this rule may carry one, the block never bound, so removing it
+ * changes no verdict, and failing the rewrite would fail a stored migration or
+ * a credential move over a key that does nothing. A row nothing rewrites keeps
+ * its bytes.
+ *
+ * `VALIDATION_ERROR` / 400, the envelope of the door's other content refusals
+ * (`savedItemNameRefusal`, the hook refusal above). No code is minted. It is
+ * located twice: the message names the key, and `issues[]` carries it as a
+ * path, the shape the Studio designer keys on. Every present value is refused,
+ * a malformed block included, because the block is not accepted here at all:
+ * judging its value first would ask an author to repair a block they then have
+ * to delete. The message prescribes first and explains second, because a 4xx
+ * message crosses the REST boundary bounded at 500 characters with its TAIL
+ * truncated.
+ *
+ * ⛔ The prescription names the package loader's door, never a `_lock*` key:
+ * those are the runtime's private envelope, never authored
+ * (`shared/protection.zod.ts`).
+ */
+function protectionBlockRefusal(
+    type: string,
+    item: unknown,
+    saveName: string,
+): (Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] }) | undefined {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
+    if (!Object.prototype.hasOwnProperty.call(item, PROTECTION_BLOCK_KEY)) return undefined;
+    if ((item as Record<string, unknown>)[PROTECTION_BLOCK_KEY] === undefined) return undefined;
+    if (overlaySchemaDeclaredKey(type, PROTECTION_BLOCK_KEY) === undefined) return undefined;
+    const err = new Error(
+        `Remove the \`protection\` block from ${type} '${saveName}' and send it again. Nothing was written. `
+        + 'This door does not translate the block, so it would lock nothing: an item saved through the metadata API '
+        + 'is authored in this environment (ADR-0010 §3.5). To lock an item, declare `protection` on it in a code '
+        + "package's source, where the package loader translates it into the item's lock (ADR-0010 Phase 4.3).",
+    ) as Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] };
+    err.code = 'VALIDATION_ERROR';
+    err.status = 400;
+    err.issues = [{
+        path: PROTECTION_BLOCK_KEY,
+        message: "Not accepted through the metadata API: only a code package's loader translates `protection` into a lock.",
+        code: 'custom',
+    }];
+    return err;
+}
+
+/**
+ * [ADR-0010 §3.5] The server-stated rewrites' half of
+ * {@link protectionBlockRefusal}: the same body without its `protection` block,
+ * on a type whose schema declares one. On any other type the body passes as
+ * it is, for the parse to judge.
+ *
+ * Returns the SAME reference when there is nothing to strip, and a copy
+ * otherwise, so a caller's own body is never mutated.
+ */
+function withoutProtectionBlock(type: string, item: unknown): unknown {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+    if (!Object.prototype.hasOwnProperty.call(item, PROTECTION_BLOCK_KEY)) return item;
+    if (overlaySchemaDeclaredKey(type, PROTECTION_BLOCK_KEY) === undefined) return item;
+    const rest = { ...(item as Record<string, unknown>) };
+    delete rest[PROTECTION_BLOCK_KEY];
+    return rest;
+}
+
+/**
+ * [ADR-0010 §3.3] The lock family: the `_lock*` members of the protection
+ * envelope every metadata type spreads (`MetadataProtectionFields`), read off
+ * that declaration so this file keeps no list of its own.
+ */
+const LOCK_FAMILY_KEYS: readonly string[] = Object.freeze(
+    Object.keys(MetadataProtectionFields).filter((key) => key.startsWith('_lock')),
+);
+
+/** The lock family `body` carries: each member with a value, and nothing else. */
+function lockFamilyOf(body: unknown): Record<string, unknown> {
+    const family: Record<string, unknown> = {};
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return family;
+    for (const key of LOCK_FAMILY_KEYS) {
+        const value = (body as Record<string, unknown>)[key];
+        if (value !== undefined) family[key] = value;
+    }
+    return family;
+}
+
+/** Do two lock families state the same members with the same values? */
+function sameLockFamily(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+    return LOCK_FAMILY_KEYS.every((key) => a[key] === b[key]);
+}
+
+/**
+ * `body` carrying exactly `family` as its lock family: every member `family`
+ * states, and no other `_lock*` key. Returns `body` itself when nothing
+ * changes, and a copy otherwise, so a caller's own body is never mutated.
+ */
+function withLockFamily(body: Record<string, unknown>, family: Record<string, unknown>): Record<string, unknown> {
+    const unchanged = LOCK_FAMILY_KEYS.every((key) =>
+        family[key] === undefined ? !Object.prototype.hasOwnProperty.call(body, key) : body[key] === family[key]);
+    if (unchanged) return body;
+    const out: Record<string, unknown> = { ...body };
+    for (const key of LOCK_FAMILY_KEYS) {
+        if (family[key] === undefined) delete out[key];
+        else out[key] = family[key];
+    }
+    return out;
+}
+
+/**
+ * [ADR-0010 §3.5 and §4.1] The save door's refusal of a body whose lock family
+ * would set, change or remove the item's lock: an author's write never does
+ * any of the three. See {@link ObjectStackProtocolImplementation.authoredLockFamily}
+ * for what is judged against what, and for the echo it accepts.
+ *
+ * The refusal family {@link protectionBlockRefusal} gives the `protection`
+ * block, at the same position: `VALIDATION_ERROR` / 400, no code minted, the
+ * prescription first because a 4xx message crosses the REST boundary bounded
+ * at 500 characters with its tail truncated. It is located twice: the message
+ * names every `_lock*` key the body sent, and `issues[]` carries each as a
+ * path, the shape the Studio designer keys on. The remedy is to remove them —
+ * a body that sends no `_lock*` key keeps the lock the item has — and the
+ * door it names for a lock is the one ADR-0010 states: a code package's
+ * loader, translating `protection` (Phase 4.3).
+ */
+function authoredLockFamilyRefusal(
+    type: string,
+    saveName: string,
+    sent: Record<string, unknown>,
+    served: Record<string, unknown>,
+): Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] } {
+    const keys = LOCK_FAMILY_KEYS.filter((key) => sent[key] !== undefined);
+    const servedLock = served._lock ?? 'none';
+    const sentLock = sent._lock ?? 'none';
+    const effect = servedLock === 'none'
+        ? (sentLock === 'none' ? 'add lock keys to it' : 'set a lock on it')
+        : sentLock === 'none' ? 'remove its lock' : 'change its lock';
+    const err = new Error(
+        `Remove ${keys.map((key) => `\`${key}\``).join(', ')} from ${type} '${saveName}' and send it again. `
+        + `Nothing was written. They would ${effect}, and the metadata API never sets, changes or removes a lock: `
+        + 'an item saved here is authored in this environment (ADR-0010 §3.5). To lock an item, declare `protection` '
+        + "on it in a code package's source, where the package loader translates it into the item's lock "
+        + '(ADR-0010 Phase 4.3).',
+    ) as Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] };
+    err.code = 'VALIDATION_ERROR';
+    err.status = 400;
+    err.issues = keys.map((key) => ({
+        path: key,
+        message: "Not accepted through the metadata API: only a code package's loader sets an item's lock. "
+            + 'Sent back exactly as a read of this item serves it, the key is accepted and ignored.',
+        code: 'custom',
+    }));
     return err;
 }
 
@@ -1744,6 +1985,26 @@ type ShippingPackages = {
 };
 
 /**
+ * [#23198] What a write did to a view container's stored rows, as
+ * `ObjectStackProtocolImplementation.reconcileViewExpansions` takes it.
+ *
+ * - `binding`: one row was hydrated (a publish, a republish, a rollback, a
+ *   revert, a replica's convergence, the boot, the list read). `binding` is
+ *   the row's package binding, `undefined` for the package-less row, and
+ *   `expansion` is everything that row's body expands to now.
+ * - `removed: 'every-row'`: a row of the name was removed (a reset, a delete,
+ *   a revert's removal, a replica's removal). The heal is handed no binding,
+ *   so it addresses every row of the name, and the set they imply is empty.
+ */
+type ViewContainerWrite =
+    | {
+        readonly container: string;
+        readonly binding: string | undefined;
+        readonly expansion: ReadonlyArray<Record<string, unknown>>;
+    }
+    | { readonly container: string; readonly removed: 'every-row' };
+
+/**
  * ADR-0010 §3.3 — Overlay the artifact's metadata-protection envelope
  * onto a returned item so artifact-level lock/packageId/provenance
  * always wins over whatever was persisted in the `sys_metadata` overlay
@@ -1775,8 +2036,31 @@ type ShippingPackages = {
  * stands in for the overlay layer over `artifactItem` alone, as before: the
  * registry's hydration and a previewed draft, neither of which is a read's
  * lock answer.
+ *
+ * [#23074] An artifact lends its envelope only to a body of its OWN identity.
+ * For a type whose identity is a pair ({@link ITEM_KEY_DISCRIMINATORS}:
+ * `email_template`'s `(name, locale)`), that is the same bundle member, read
+ * by {@link bundleMemberOf}, the identity's one declaration; an artifact of
+ * another member is treated as no artifact at all. So an environment overlay
+ * of a member the package does not ship (a `zh-CN` template beside a shipped
+ * `en-US`) keeps the tenant authorship it was registered with, and is never
+ * read as packaged code: `isCodeArtifactBody` false, no `_packageId` /
+ * `_packageVersion` / `_provenance` stamp, no artifact `_lock*`. Grafted, it
+ * read as the bundle's own artifact of that member to the registry's artifact
+ * lookup and its overlay-entry retirement, and the read doors served it under
+ * the package's provenance. The shipped member's overlay is unchanged: each
+ * caller looks the artifact up at the body's own member
+ * (`lookupArtifactItem`'s `member`), so it still wears that member's
+ * artifact's envelope. A registry that ignores `member` can answer another
+ * member's artifact, and this check is what keeps that answer off the body.
+ * Every other type has no members, so `bundleMemberOf` is `undefined` on both
+ * sides and the merge is exactly what it was. ⛔ The lock family a read
+ * resolved (`itemLock`) is applied before this check and is not moved by it:
+ * a lock binds the NAME, at the read and at the `_lock` gate alike
+ * ({@link resolveItemLock} over every package that ships the name).
  */
 function mergeArtifactProtection(
+    type: string,
     item: unknown,
     artifactItem: unknown,
     itemLock?: ItemLock,
@@ -1786,6 +2070,7 @@ function mergeArtifactProtection(
     if (artifactItem === undefined || artifactItem === null) return item;
     const a = artifactItem as Record<string, unknown>;
     if (typeof a !== 'object') return item;
+    if (bundleMemberOf(type, a) !== bundleMemberOf(type, item)) return item;
     const out: Record<string, unknown> = { ...(item as Record<string, unknown>) };
     if (itemLock === undefined && resolveItemLock({ artifact: [a], overlay: item }).layer === 'artifact') {
         if (a._lock !== undefined) out._lock = a._lock;
@@ -1797,6 +2082,18 @@ function mergeArtifactProtection(
     if (a._packageVersion !== undefined) out._packageVersion = a._packageVersion;
     if (a._provenance !== undefined) out._provenance = a._provenance;
     return out;
+}
+
+/**
+ * [#23074] The bundle member a body IS, for a type whose identity is a pair
+ * ({@link ITEM_KEY_DISCRIMINATORS}): `itemDiscriminator` under the type's
+ * canonical spelling, so the canonical member for a body that declares none.
+ * `undefined` for every other type, which has no members. The member
+ * {@link mergeArtifactProtection} matches an artifact against, and the one
+ * each of its callers looks the artifact up at.
+ */
+function bundleMemberOf(type: string, body: unknown): string | undefined {
+    return itemDiscriminator(canonicalMetaType(type), body);
 }
 
 /**
@@ -1984,6 +2281,138 @@ function storedRowDiscriminator(type: string, record: unknown): string | undefin
         try { body = JSON.parse(raw); } catch { body = undefined; }
     }
     return itemDiscriminator(type, body);
+}
+
+/**
+ * [#22877] The by-name doors' bundle member selector: the request member, and
+ * the `?member=` query parameter in each REST route's closed set (ruling
+ * 6116165299, Q2 i). Named after what the stored column holds
+ * (`sys_metadata.bundle_member`) and type-neutral, never `locale`: on `/meta`,
+ * `?locale=` is the response translation locale.
+ */
+export const BUNDLE_MEMBER_SELECTOR = 'member';
+
+/**
+ * [#22877] The longest member a stored row can carry — the declared
+ * `maxLength` of `sys_metadata.bundle_member` (`@objectstack/metadata-core`
+ * `SysMetadataObject`, pinned equal in `protocol.bundle-member-selector.test.ts`).
+ * A longer selector names no member that could be stored, so it is refused as
+ * malformed rather than answered as an absent member.
+ */
+export const BUNDLE_MEMBER_MAX_LENGTH = 100;
+
+/**
+ * [#22877] THE one reading of the bundle member selector, shared by every
+ * by-name door (`getMetaItem`, `deleteMetaItem`, `publishMetaItem`,
+ * `historyMetaItem`, `rollbackMetaItem`).
+ *
+ * Returns the member as named, trimmed, or `undefined` when none was named,
+ * which every door reads as the CANONICAL member, as the registry's bare-name
+ * read does. Naming the canonical value (`en-US`) is the same request. A
+ * well-formed member with nothing stored or shipped is not refused here: each
+ * door answers it as it answers an absent item.
+ *
+ * Refuses, with a located 400 `VALIDATION_ERROR` — the code the REST door's
+ * recognition refusal answers for a misspelled selector on the same routes —
+ * a selector on a type whose identity is its name alone, and a value that
+ * cannot name a member: not a string, blank, or longer than
+ * {@link BUNDLE_MEMBER_MAX_LENGTH}. The message names the parameter. The REST
+ * door renders it through its one error door (`handleRouteError`), as it
+ * renders every refusal this protocol raises. ⛔ A blank selector is never read as
+ * absent: `?member=` asked for something, and answering the canonical member
+ * for it would be a guess.
+ */
+export function resolveBundleMemberSelector(type: string, member: unknown): string | undefined {
+    if (member === undefined) return undefined;
+    // Either spelling of the type: the doors ask after their boundary fold,
+    // and a direct caller may not have folded.
+    const singular = canonicalMetaType(type);
+    const disc = ITEM_KEY_DISCRIMINATORS[singular];
+    const refuse = (sentence: string): never => {
+        const err = new Error(`The "${BUNDLE_MEMBER_SELECTOR}" selector ${sentence}`) as Error & {
+            code: 'VALIDATION_ERROR'; status: 400; param: string;
+        };
+        err.code = 'VALIDATION_ERROR';
+        err.status = 400;
+        err.param = BUNDLE_MEMBER_SELECTOR;
+        throw err;
+    };
+    if (!disc) {
+        return refuse(
+            `names a bundle member, and a '${singular}' item has none: its identity is its name alone. `
+            + `Remove the selector.`,
+        );
+    }
+    const example = `'${disc.canonical}'`;
+    if (typeof member !== 'string') {
+        return refuse(`must be one string: the ${disc.field} of one '${singular}' member, e.g. ${example}.`);
+    }
+    const value = member.trim();
+    if (value === '') {
+        return refuse(
+            `is blank. Name one '${singular}' member by its ${disc.field} (e.g. ${example}), or omit the `
+            + `selector to address the canonical member (${example}).`,
+        );
+    }
+    if (value.length > BUNDLE_MEMBER_MAX_LENGTH) {
+        return refuse(
+            `is ${value.length} characters long; a stored '${singular}' member holds at most `
+            + `${BUNDLE_MEMBER_MAX_LENGTH}, so it names no member. Name one by its ${disc.field} (e.g. ${example}).`,
+        );
+    }
+    return value;
+}
+
+/**
+ * [#22877] The discriminator value of the member a selector addresses, for a
+ * registry call or a body comparison: the selector itself, or the canonical
+ * member when none was named. `undefined` for a type with no members.
+ */
+function bundleMemberDiscriminator(type: string, member: string | undefined): string | undefined {
+    const disc = ITEM_KEY_DISCRIMINATORS[canonicalMetaType(type)];
+    if (!disc) return undefined;
+    return member?.trim() || disc.canonical;
+}
+
+/**
+ * [#22877] `MetadataMutationEvent.member` for the member a write addressed,
+ * as a spread: empty for the canonical member and for a type with no members,
+ * so those events keep the shape they always had.
+ */
+function mutationEventMember(type: string, member: string | null | undefined): { member?: string } {
+    const value = overlayMemberValue(type, member);
+    return typeof value === 'string' ? { member: value } : {};
+}
+
+/**
+ * [#22877] One item of a package commit's revert plan (ADR-0067), as
+ * `sys_metadata_commit.items` stores it: `member` is the bundle member the
+ * item is, for a type whose identity is a pair, and is absent for the
+ * canonical member and every type with no members — so the plan of every
+ * other item is stored byte-identical to what it was. [#23073] The commit
+ * timeline serves it on every item of a bundled type, the canonical member
+ * spelled out ({@link ObjectStackProtocolImplementation.listCommits}).
+ */
+type CommitPlanItem = { type: string; name: string; existedBefore: boolean; prevVersion: number | null; member?: string };
+
+/** [#22877] The identity of a plan item or a draft within one batch: two members of one name are two. */
+function commitPlanKey(item: { type: string; name: string; member?: string }): string {
+    return `${item.type}/${item.name}\u0000${item.member ?? ''}`;
+}
+
+/**
+ * [#22877] A repository call's `member` option as a spread: present only when a
+ * member was named, so a call addressing the canonical member — and every call
+ * for a type with no members — passes exactly the options it always did.
+ */
+function memberOption(member: string | undefined): { member?: string } {
+    return member !== undefined ? { member } : {};
+}
+
+/** [#22877] {@link mutationEventMember} for the member a written BODY belongs to. */
+function mutationEventMemberOfBody(type: string, body: unknown): { member?: string } {
+    const value = overlayMemberOfBody(type, body);
+    return typeof value === 'string' ? { member: value } : {};
 }
 
 /**
@@ -3431,8 +3860,10 @@ function specValidationFindings(
             // as `<path>: <message>`, then a `(+N more)` tail. Read by
             // `duplicatePackage`'s `failed[].error`, `migrateStoredMetadata`'s
             // `rows[].reason`, `importUnmanagedPackage`'s rolled-back refusal
-            // (`'package-unmanaged-import'`), and the two out-of-package log
-            // faces — none of which carry `issues[]`.
+            // (`'package-unmanaged-import'`, whose one door relays no
+            // `issues[]` — see `MetadataWriteFace`), and the two
+            // out-of-package log faces — none of which carry `issues[]` to
+            // their caller.
             return issues.slice(0, 3)
                 .map((i: { path: string; message: string }) => `${i.path || '<root>'}: ${i.message}`)
                 .join('; ')
@@ -5043,10 +5474,18 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
  * ⚠️ [ADR-0131 D6] `'package-unmanaged-import'` is stated by
  * {@link ObjectStackProtocolImplementation.importUnmanagedPackage}, the
  * `unmanaged` install mode's copy-once import, for every item it writes. Its
- * refusal is relayed by that verb's own thrown error, which carries the
- * item's message and nothing structured beside it, so it too keeps the
- * full-prose default on the 422. Its 409 clause is its own: the import accepts
- * no `force`, and it writes only names no environment row held when it began.
+ * refusal is relayed by that verb's own thrown error. The thrown value does
+ * forward the save door's `issues` (the rollback keeps the cause's code,
+ * status and issues), but the one door that calls the verb —
+ * `POST /api/v1/marketplace/install-local` with `installMode: 'unmanaged'`
+ * (`@objectstack/cloud-connection`) — answers with the message, the code and
+ * `details` only, so no `issues[]` reaches its caller beside the message and
+ * the message is the sole carrier of the findings: it keeps the full-prose
+ * default on the 422, the polarity `'external-import'` keeps for the same
+ * reason. A door that starts relaying `issues` moves this face into
+ * {@link specValidationFindings}' trimming case in the same change. Its 409
+ * clause is its own: the import accepts no `force`, and it writes only names
+ * no environment row held when it began.
  */
 type MetadataWriteFace =
     | 'package-duplicate'
@@ -5154,7 +5593,67 @@ export type PublishMaterializer = (args: {
 export type UninstallCleanup = (args: {
     packageId: string;
     actor?: string;
+    /**
+     * What the package declared, read from the registry just before the door
+     * withdrew it ({@link captureUninstallDeclared}). Optional: absent when the
+     * registry did not hold the package or cannot answer, and a cleanup that
+     * does not read it behaves as before.
+     */
+    declared?: UninstallDeclared;
 }) => Promise<{ success: boolean; removed: number; error?: string }>;
+
+/**
+ * [ADR-0090 D5, ADR-0131 D4] The security-catalog names an uninstalled package
+ * held. A grant names its set, and the package's sets are served from the
+ * registry, not stored, so after the withdrawal nothing else knows them.
+ */
+export interface UninstallDeclared {
+    /** The permission-set names the package held. */
+    permission?: string[];
+}
+
+/**
+ * Capture what `packageId` declared, for {@link UninstallCleanup}'s `declared`
+ * — the ONE capture both uninstall doors (`deletePackage` and install-local's
+ * `DELETE`) call, at the same point: after the uninstall is decided and just
+ * BEFORE `registry.uninstallPackage`, which releases the names. The withdrawal
+ * still precedes the cleanups (#21576); only what they are handed grows.
+ *
+ * Two sources, unioned: the names the registry says the package holds (an
+ * installed package's claims and item slots), and the `permission` rows of the
+ * package's `sys_metadata` the door already read (`stored`). The second is
+ * what names a writable base's sets (ADR-0070): an item authored into a base
+ * is stored, and the registry holds it in the bare slot with no `_packageId`
+ * (provenance `org`, measured), so the registry alone cannot attribute it to
+ * the base.
+ *
+ * `undefined` when neither source names a set — so a package that declared
+ * none hands its cleanups exactly the request they had before.
+ */
+export function captureUninstallDeclared(
+    registry: unknown,
+    packageId: string,
+    stored?: ReadonlyArray<{ type?: unknown; name?: unknown } | null | undefined>,
+): UninstallDeclared | undefined {
+    const names = new Set<string>();
+    const held = (registry as { securityCatalogNamesHeldBy?: (id: string, type: 'permission') => unknown } | null | undefined)
+        ?.securityCatalogNamesHeldBy;
+    if (typeof held === 'function') {
+        try {
+            const fromRegistry = held.call(registry, packageId, 'permission');
+            if (Array.isArray(fromRegistry)) {
+                for (const n of fromRegistry) if (typeof n === 'string' && n !== '') names.add(n);
+            }
+        } catch { /* the registry could not say; the stored rows still can */ }
+    }
+    if (stored) {
+        for (const row of stored) {
+            const type = row?.type;
+            if ((type === 'permission' || type === 'permissions') && typeof row?.name === 'string' && row.name !== '') names.add(row.name);
+        }
+    }
+    return names.size > 0 ? { permission: [...names] } : undefined;
+}
 
 /** Per-cleanup outcome reported on the `deletePackage` response. */
 export interface UninstallCleanupOutcome {
@@ -5244,6 +5743,14 @@ export interface MetadataMutationEvent {
     /** Resulting lifecycle state of the row the mutation produced. */
     state: 'active' | 'draft' | 'deleted';
     organizationId?: string | null;
+    /**
+     * [#22877] The bundle member the mutated row belongs to, for a type whose
+     * identity is a pair (`'zh-CN'` of an `email_template`) — part of the
+     * row's ADDRESS, so a peer converging on this signal re-reads that
+     * member's row, not the canonical one. Absent for the canonical member and
+     * for every type with no members, as on every by-name door.
+     */
+    member?: string;
 }
 
 /**
@@ -5955,7 +6462,7 @@ export class ObjectStackProtocolImplementation implements
      * does — and never swallows it.
      */
     async runUninstallCleanups(
-        request: Pick<DeletePackageRequest, 'packageId' | 'actor'>,
+        request: Pick<DeletePackageRequest, 'packageId' | 'actor'> & { declared?: UninstallDeclared },
     ): Promise<UninstallCleanupOutcome[]> {
         const cleanups: UninstallCleanupOutcome[] = [];
         for (const [name, cleanup] of this.uninstallCleanups) {
@@ -5963,6 +6470,7 @@ export class ObjectStackProtocolImplementation implements
                 const r = await cleanup({
                     packageId: request.packageId,
                     ...(request.actor ? { actor: request.actor } : {}),
+                    ...(request.declared ? { declared: request.declared } : {}),
                 });
                 cleanups.push({
                     name,
@@ -7002,13 +7510,19 @@ export class ObjectStackProtocolImplementation implements
             name: evt.name,
             org: 'env',
         } as Parameters<typeof repo.get>[0];
-        const current = await repo.get(ref, { state: 'active' });
+        // [#22877] The member the event addresses: a peer's save of a second
+        // locale converges on THAT locale's row. Re-reading the canonical one,
+        // as this did, re-registered the canonical body and left the peer's
+        // registry without the member that changed (and a reset of it
+        // unhealed). A member the event names but this type does not have is
+        // read as the canonical one, as every repository read reads it.
+        const current = await repo.get(ref, { state: 'active', ...memberOption(evt.member) });
         if (current) {
             // The row's OWN package binding, read from this replica's DB the
             // way the recovery callers derive it (#4867 / #4636) — the wire
             // carries no binding, and must not.
-            const packageId = await this.resolveOverlayPackageBinding(type, evt.name, orgId);
-            this.applyRegistryWriteThrough({
+            const packageId = await this.resolveOverlayPackageBinding(type, evt.name, orgId, evt.member);
+            await this.applyRegistryWriteThrough({
                 type,
                 name: evt.name,
                 item: current.body,
@@ -7016,7 +7530,7 @@ export class ObjectStackProtocolImplementation implements
                 organizationId: orgId,
             });
         } else {
-            await this.restoreArtifactRegistryView(type, evt.name, orgId);
+            await this.restoreArtifactRegistryView(type, evt.name, orgId, evt.member);
         }
         // [#13609] Retire this replica's overlay-row cache at the moment of
         // convergence — never a direct `@objectstack/objectql` import, see
@@ -9196,7 +9710,7 @@ export class ObjectStackProtocolImplementation implements
                 if (this.environmentId === undefined) {
                     for (const { name, data, packageId: recPkg, organizationId: recOrg } of overlays) {
                         if (request.type === 'object' && this.isUnservedSealedOverlay(request.type, name)) continue;
-                        this.hydrateOverlayIntoRegistry(request.type, data, {
+                        await this.hydrateOverlayIntoRegistry(request.type, data, {
                             packageId: recPkg,
                             organizationId: recOrg,
                         });
@@ -9493,7 +10007,9 @@ export class ObjectStackProtocolImplementation implements
             // takes priority; else the item's own `_packageId`.) [#22024]
             // The by-name read takes the same rule ({@link envelopePackageId}).
             const itemPackageId = envelopePackageId(packageId, it);
-            const a = this.lookupArtifactItem(request.type, itemName, itemPackageId);
+            // [#23074] …and to the item's own bundle member, whose artifact
+            // alone may lend it an envelope ({@link mergeArtifactProtection}).
+            const a = this.lookupArtifactItem(request.type, itemName, itemPackageId, bundleMemberOf(request.type, it));
             let itemLock: ItemLock | undefined;
             if (typeof itemName === 'string' && (it as any)?._draft !== true) {
                 const address: ItemAddress = {
@@ -9514,7 +10030,7 @@ export class ObjectStackProtocolImplementation implements
             // is the other exit a client reads field metadata from, and
             // an overlay row wins over the (already-governed) registry
             // entry in the merge above, so it carries the same lie.
-            governed.push(this.governServedObject(request.type, mergeArtifactProtection(it, a, itemLock)));
+            governed.push(this.governServedObject(request.type, mergeArtifactProtection(request.type, it, a, itemLock)));
         }
         return {
             type: request.type,
@@ -9836,6 +10352,8 @@ export class ObjectStackProtocolImplementation implements
         name: string;
         state: 'active' | 'draft';
         packageId?: string;
+        /** [#22877] The bundle member a by-name door's selector named; omitted, the canonical one. */
+        member?: string;
     }): Promise<{ row: any } | undefined> {
         // [#21804] The order is {@link servedOverlayRowCandidates}, the one
         // the list's merge takes over the rows it read: the canonical
@@ -9849,10 +10367,10 @@ export class ObjectStackProtocolImplementation implements
             if (type === undefined) continue;
             const where: Record<string, unknown> = {
                 type, name: args.name, state: args.state, organization_id: candidate.organizationId,
-                // [#22877] A by-name read of a bundled type answers its
-                // CANONICAL member, as the registry's bare-name read does;
-                // nothing for every other type.
-                ...overlayMemberWhere(type),
+                // [#22877] A by-name read of a bundled type answers the member
+                // its selector named, else its CANONICAL member, as the
+                // registry's bare-name read does; nothing for every other type.
+                ...overlayMemberWhere(type, args.member),
             };
             if (candidate.packageId !== undefined) where.package_id = candidate.packageId;
             // [#21911, ADR-0096] The explicit system opt-in: a platform store
@@ -9904,9 +10422,21 @@ export class ObjectStackProtocolImplementation implements
         }, options);
     }
 
-    async getMetaItem(request: { type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean }) {
+    async getMetaItem(request: {
+        type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
+        /** [#22877] The bundle member to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
+        member?: string,
+    }) {
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
         request = canonicalizeMetaRequestType(request);
+        // [#22877] Ruling 6116165299 (Q2 i): ONE member of a bundled type is
+        // addressed by name, the selector's or else the canonical one. Every
+        // layer below answers that member or nothing — the stored row, the
+        // code layer's member and the registry's.
+        const member = resolveBundleMemberSelector(request.type, request.member);
+        const wantedMember = bundleMemberDiscriminator(request.type, member);
+        const isWantedMember = (candidate: unknown): boolean =>
+            wantedMember === undefined || itemDiscriminator(request.type, candidate) === wantedMember;
         let item: unknown;
         // [ADR-0131 D6] Environment → code: the environment's stored row,
         // else the code packages' definition. No organization's row is read —
@@ -9973,6 +10503,7 @@ export class ObjectStackProtocolImplementation implements
                     name: request.name,
                     state: 'draft',
                     ...(request.packageId ? { packageId: request.packageId } : {}),
+                    ...memberOption(member),
                 }))?.row;
                 if (draftRec) {
                     const draftItem = this.convertStoredItem(
@@ -10018,6 +10549,7 @@ export class ObjectStackProtocolImplementation implements
                 name: request.name,
                 state: readState,
                 ...(request.packageId ? { packageId: request.packageId } : {}),
+                ...memberOption(member),
             }))?.row;
             storedRowServed = record !== undefined && record !== null;
             // [#20946, #21922] The stored-row half — see `storedRowDeclined` above.
@@ -10064,7 +10596,9 @@ export class ObjectStackProtocolImplementation implements
                 item: decorateMetadataItem(request.type, this.governServedObject(request.type, item)),
                 // [#22114] The draft row's version token — the one a draft save
                 // (`?mode=draft`) at this address accepts as `If-Match`.
-                version: await this.readVersionToken(request, 'draft'),
+                // [#22877] The member's own row's, as a save of that member's
+                // body addresses it.
+                version: await this.readVersionToken({ ...request, member }, 'draft'),
             };
         }
 
@@ -10154,12 +10688,18 @@ export class ObjectStackProtocolImplementation implements
                     request.packageId,
                 );
                 if (fromService.data !== undefined && fromService.data !== null) {
+                    // [#22877] …when it is the member this read addresses. The
+                    // service keys a type's items by name alone, so for a
+                    // bundle it holds whichever member it registered last, and
+                    // that one answered every member's read.
                     // [#7556] A layer, not a resolved schema — see
                     // {@link foldObjectExtendersFromRegistry}. No-op for every
                     // type but `object`, and for an object nothing extends.
-                    item = this.foldObjectExtendersFromRegistry(
-                        request.type, request.name, fromService.data,
-                    );
+                    if (isWantedMember(fromService.data)) {
+                        item = this.foldObjectExtendersFromRegistry(
+                            request.type, request.name, fromService.data,
+                        );
+                    }
                 } else if (fromService.degraded) {
                     serviceDegraded = fromService;
                 }
@@ -10180,27 +10720,28 @@ export class ObjectStackProtocolImplementation implements
         //    necessary. Without this, project-kernel callers of
         //    `GET /api/v1/meta/object/<name>` 404 even though the object is
         //    registered and visible via the list endpoint.
-        // [#22877] A bundled type's bare name addresses its CANONICAL member
-        // (ruling A, Q2 i: no member named means the canonical one). Step 1
-        // read only the canonical member's stored row; when there is none, the
-        // canonical member is the code layer's. The registry's bare-name read
-        // below answers its overlay tier first, which would hand back a
-        // non-canonical member's hydrated overlay (a template customized in
-        // `zh-CN` only) for a read that named no member. It still answers a
-        // bundle that ships no canonical member at all.
-        if (item === undefined) {
-            const disc = ITEM_KEY_DISCRIMINATORS[request.type];
-            const artifact = disc ? this.lookupArtifactItem(request.type, request.name, request.packageId) : undefined;
-            if (disc && artifact !== undefined && itemDiscriminator(request.type, artifact) === disc.canonical) {
-                item = artifact;
-            }
+        // [#22877] A bundled type's name addresses ONE member (ruling A, Q2 i):
+        // the selector's, else the CANONICAL one. Step 1 read only that
+        // member's stored row; when there is none, the member is the code
+        // layer's — the artifact that ships it — and then the registry's, asked
+        // for that member. The registry's bare-name read answers the canonical
+        // member wherever it sits (its own [#22877] note), and still answers a
+        // bundle that ships no canonical member at all; a named member that no
+        // layer holds answers nothing, so the door answers it as absent.
+        if (item === undefined && wantedMember !== undefined) {
+            const artifact = this.lookupArtifactItem(request.type, request.name, request.packageId, wantedMember);
+            if (artifact !== undefined && isWantedMember(artifact)) item = artifact;
         }
         if (item === undefined) {
-            item = this.engine.registry.getItem(request.type, request.name, request.packageId);
+            item = this.engine.registry.getItem(request.type, request.name, request.packageId, member);
             if (item === undefined) {
                 const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
-                if (alt) item = this.engine.registry.getItem(alt, request.name, request.packageId);
+                if (alt) item = this.engine.registry.getItem(alt, request.name, request.packageId, member);
             }
+            // [#22877] A registry that does not narrow by member (a host
+            // double, an older registry) can answer another member of the
+            // bundle for a named one; that answer is not this member.
+            if (member !== undefined && item !== undefined && !isWantedMember(item)) item = undefined;
             // [#20946] The registry half — see `storedRowDeclined` above.
             // `getItem` answers the bare slot first, and for a shipped flow name
             // that slot holds the hydrated stored row, which is not one of the
@@ -10254,8 +10795,11 @@ export class ObjectStackProtocolImplementation implements
         // serves. Before, a read naming no package took the first-registered
         // package's envelope, so a name two packages ship answered one
         // package's stored copy under the other package's `_packageId`.
+        // [#23074] …and at the served item's own bundle member, whose artifact
+        // alone may lend it an envelope ({@link mergeArtifactProtection}): a
+        // member the package does not ship is served as the environment's own.
         const artifactItem = this.lookupArtifactItem(
-            request.type, request.name, envelopePackageId(request.packageId, item),
+            request.type, request.name, envelopePackageId(request.packageId, item), bundleMemberOf(request.type, item),
         );
         // [#21738] The lock is the one item-lock resolution's, over the layers
         // this read resolved from its address: [#21803] every installed
@@ -10276,7 +10820,7 @@ export class ObjectStackProtocolImplementation implements
             request.type,
             this.governServedObject(
                 request.type,
-                mergeArtifactProtection(item, artifactItem, itemLock),
+                mergeArtifactProtection(request.type, item, artifactItem, itemLock),
             ),
         );
         // ADR-0047 — list views additionally get reference-integrity
@@ -10345,7 +10889,7 @@ export class ObjectStackProtocolImplementation implements
             // editor reads `state: 'draft'` or the plain read.
             ...(request.previewDrafts
                 ? {}
-                : { version: storedRowServed ? await this.readVersionToken(request, 'active') : null }),
+                : { version: storedRowServed ? await this.readVersionToken({ ...request, member }, 'active') : null }),
         };
     }
 
@@ -17205,8 +17749,13 @@ export class ObjectStackProtocolImplementation implements
      * Look up an item from the artifact registry across both the requested
      * type and its singular/plural twin. Returns `undefined` when the
      * registry is unavailable or the item is not artifact-backed.
+     *
+     * [#22877] `member` — for a type whose identity is a pair, the ONE bundle
+     * member whose artifact to answer, as its discriminator value; omitted,
+     * the bundle's artifact canonical-first. A registry without the parameter
+     * ignores it, so a caller that needs the member checks the answer.
      */
-    private lookupArtifactItem(type: string, name: string, currentPackageId?: string): unknown {
+    private lookupArtifactItem(type: string, name: string, currentPackageId?: string, member?: string): unknown {
         const registry = (this.engine as any)?.registry;
         if (!registry) return undefined;
         const singular = PLURAL_TO_SINGULAR[type] ?? type;
@@ -17218,8 +17767,8 @@ export class ObjectStackProtocolImplementation implements
         // as unlocked after PUT+GET until restart). `currentPackageId`
         // (ADR-0048) makes that scan package-scoped (prefer-local).
         if (typeof registry.getArtifactItem === 'function') {
-            return registry.getArtifactItem(singular, name, currentPackageId)
-                ?? registry.getArtifactItem(type, name, currentPackageId);
+            return registry.getArtifactItem(singular, name, currentPackageId, member)
+                ?? registry.getArtifactItem(type, name, currentPackageId, member);
         }
         // Partial registry mocks in tests — fall back to getItem and apply
         // the same package-provenance filter inline.
@@ -17971,7 +18520,8 @@ export class ObjectStackProtocolImplementation implements
      * (#11087) — the address the save resolves, not the key it was handed.
      */
     private async readVersionToken(
-        request: { type: string; name: string; packageId?: string },
+        /** [#22877] `member` — the bundle member the read addressed; omitted, the canonical one. */
+        request: { type: string; name: string; packageId?: string; member?: string },
         state: 'active' | 'draft',
     ): Promise<string | null> {
         const repo = this.getOverlayRepo();
@@ -17980,7 +18530,7 @@ export class ObjectStackProtocolImplementation implements
             name: request.name,
             org: 'env',
         } as Parameters<typeof repo.headAt>[0];
-        const stored = await this.storedHeadAt(repo, ref, state, request.packageId ?? null);
+        const stored = await this.storedHeadAt(repo, ref, state, request.packageId ?? null, request.member);
         return stored === null ? null : this.receiptVersion(stored);
     }
 
@@ -18353,10 +18903,17 @@ export class ObjectStackProtocolImplementation implements
      * stays with the callers: that is a fact about the kernel this protocol
      * instance serves, not about the row in hand.
      *
-     * Returns whether the row is live in this registry's view: registered, or
-     * answered from its row as the section below states. Org-scoped rows,
+     * Resolves to whether the row is live in this registry's view: registered,
+     * or answered from its row as the section below states. Org-scoped rows,
      * bodies without a `name`, and registry doubles without `registerItem`
-     * are no-ops and return `false`. The boot's page report reads it.
+     * are no-ops and resolve to `false`. The boot's page report reads it.
+     *
+     * [#23198] Asynchronous because a view container's expansion ends in
+     * {@link reconcileViewExpansions}, which heals each name the row no longer
+     * expands to through the delete's walk, and that walk reads the
+     * MetadataService. Everything up to that point still runs before the
+     * first `await`, the type assert below included, and every caller awaits
+     * it, so a refusal reaches the same `catch` it reached before.
      *
      * ## [#22057] A VIEW row bound to one package, never under a name another ships
      *
@@ -18471,11 +19028,11 @@ export class ObjectStackProtocolImplementation implements
      * anything the static map does not carry, so a runtime kind the platform
      * has never heard of can never trip this gate.
      */
-    private hydrateOverlayIntoRegistry(
+    private async hydrateOverlayIntoRegistry(
         type: string,
         data: unknown,
         options: { packageId?: string | null; organizationId: string | null },
-    ): boolean {
+    ): Promise<boolean> {
         // [#9111] See the header: the mint door asserts, the caller folds.
         // Placed FIRST, ahead of every no-op return below, so the contract is
         // judged on the spelling itself rather than on whether this particular
@@ -18507,10 +19064,18 @@ export class ObjectStackProtocolImplementation implements
         // judged by their own names. ⛔ View only.
         const bound = canonicalType === 'view' ? boundPackageOf(options.packageId) : undefined;
         if (bound !== undefined && this.anotherPackageShips(type, String((data as any).name), bound)) {
-            this.hydrateExpandedViewItems(type, data, options, registry);
+            await this.hydrateExpandedViewItems(type, data, options);
             return true;
         }
-        const artifact = this.lookupArtifactItem(type, (data as any).name, options.packageId ?? undefined);
+        // [#23074] The artifact of the row's OWN bundle member: an overlay of
+        // a member the package does not ship has none, so it registers as the
+        // tenant row it is ({@link mergeArtifactProtection}). It used to take
+        // the bundle's artifact canonical-first, and a `zh-CN` overlay beside
+        // a shipped `en-US` was registered wearing that envelope, which every
+        // registry reader then took for the package's own `zh-CN` artifact.
+        const artifact = this.lookupArtifactItem(
+            type, (data as any).name, options.packageId ?? undefined, bundleMemberOf(type, data),
+        );
         // [#16702] Say what this row IS before the artifact envelope is grafted
         // on top of it. Every body reaching this hydrator came out of a
         // `sys_metadata` write and is therefore tenant-authored by definition
@@ -18532,8 +19097,8 @@ export class ObjectStackProtocolImplementation implements
         // and its receipt rendered both as the package. Registered as the
         // tenant row it is, it is reported as one and never armed.
         const envelope = canonicalType === 'flow' ? undefined : artifact;
-        registry.registerItem(type, mergeArtifactProtection(stateTenantAuthorship(data), envelope), 'name' as any);
-        this.hydrateExpandedViewItems(type, data, options, registry);
+        registry.registerItem(type, mergeArtifactProtection(type, stateTenantAuthorship(data), envelope), 'name' as any);
+        await this.hydrateExpandedViewItems(type, data, options);
         return true;
     }
 
@@ -18684,7 +19249,7 @@ export class ObjectStackProtocolImplementation implements
             // where the item's own artifact exists, its `_provenance` still
             // wins (ADR-0010 §3.3), as it does on the container.
             const authored = options.tenantAuthored ? stateTenantAuthorship(item) : item;
-            out.push(mergeArtifactProtection(authored, ownArtifact) as Record<string, unknown>);
+            out.push(mergeArtifactProtection(type, authored, ownArtifact) as Record<string, unknown>);
         }
         return out;
     }
@@ -18947,20 +19512,143 @@ export class ObjectStackProtocolImplementation implements
      * that no package ships, is registered as before. [#22057] The question is
      * {@link anotherPackageShips}, the one the container row's own
      * registration asks too.
+     *
+     * ## [#23149, #23198] The registration is the reconcile's
+     *
+     * This expands the row and hands the result to
+     * {@link reconcileViewExpansions}, which registers it (skipping a name
+     * another package ships, as above), records it against the row, and heals
+     * every name the row registered before and does not expand to now. A
+     * republish that dropped a member used to register the new set and retire
+     * nothing, so the dropped member was served until a restart.
      */
-    private hydrateExpandedViewItems(
+    private async hydrateExpandedViewItems(
         type: string,
         data: unknown,
         options: { packageId?: string | null; organizationId: string | null },
-        registry: any,
-    ): void {
+    ): Promise<void> {
+        await this.reconcileViewExpansions(type, {
+            container: String((data as { name?: unknown }).name),
+            binding: boundPackageOf(options.packageId),
+            expansion: this.expandRuntimeViewContainer(type, data, { ...options, tenantAuthored: true }),
+        }, options.organizationId);
+    }
+
+    /**
+     * [#23198] THE reconcile of a view container's expansions: after any write
+     * that changes a container's stored row (a publish, a republish, a reset, a
+     * delete), the registry holds exactly the expansion set the stored row now
+     * implies. Both sides call it: the registration
+     * ({@link hydrateExpandedViewItems}, for every hydration of a row) and the
+     * delete's heal ({@link restoreArtifactRegistryView}, whose set is
+     * empty). No other code registers an expansion, reads the record, or
+     * writes it (`protocol.view-expansion-reconcile-call-sites.test.ts`).
+     *
+     * In order:
+     *
+     * 1. Register each expanded view, unless another package ships its name
+     *    ([#21980, #22057], {@link anotherPackageShips}). Such a name is never
+     *    recorded, so no heal ever touches it.
+     * 2. Replace the record of the rows the write addresses with the names
+     *    registered in step 1. The old names come out of the record before any
+     *    heal runs, so a write that lands meanwhile reconciles against the new
+     *    set.
+     * 3. Heal each old name the new set lacks through the delete's per-name
+     *    walk ({@link restoreArtifactRegistryView}): a packaged view of that
+     *    name is un-shadowed, a MetadataService baseline is re-registered, and
+     *    a name no layer serves is retired.
+     *
+     * Every gate the walk carries applies here too. An organization-scoped
+     * write registers nothing and heals nothing (#6602 / #6780: the bare
+     * entries belong to the environment-wide row). Only a control-plane kernel
+     * re-registers a baseline. A walk that stops on a degraded baseline read
+     * retires nothing, and that name stays registered, unrecorded, until a
+     * restart: there is no retry ([#23149]'s residual, now reached from a
+     * republish as well as a reset).
+     *
+     * Views only, judged on the canonical type: no other type expands, and a
+     * row of another type stored under a container's name must not heal the
+     * container's expansions.
+     */
+    private async reconcileViewExpansions(
+        type: string,
+        write: ViewContainerWrite,
+        /** The write's own scope: `null` for an env-wide row. [#6780] */
+        organizationId: string | null,
+    ): Promise<void> {
+        if (canonicalMetaType(type) !== 'view') return;
+        if (organizationId !== null && organizationId !== undefined) return;
+        const registry: any = (this.engine as any)?.registry;
+        if (!registry || typeof registry !== 'object') return;
+
+        // 1. The set the stored row implies now. A non-empty expansion comes
+        // only from the hydrator, past its `registerItem` capability probe.
+        const registered = new Set<string>();
         let shipping: ShippingPackages | undefined;
-        for (const item of this.expandRuntimeViewContainer(type, data, { ...options, tenantAuthored: true })) {
+        for (const item of 'expansion' in write ? write.expansion : []) {
             shipping ??= this.shippingPackagesOf(type);
             if (this.anotherPackageShips(type, String(item.name), item._packageId, shipping)) continue;
             registry.registerItem(type, item, 'name' as any);
+            registered.add(String(item.name));
+        }
+
+        // 2. The record: the addressed rows' old names out, the new set in.
+        const record = ObjectStackProtocolImplementation.registeredViewExpansions;
+        let containers = record.get(registry);
+        if (containers === undefined) record.set(registry, (containers = new Map()));
+        const rows = containers.get(write.container) ?? new Map<string, ReadonlySet<string>>();
+        const previous = new Set<string>();
+        if ('removed' in write) {
+            for (const names of rows.values()) for (const name of names) previous.add(name);
+            rows.clear();
+        } else {
+            const row = write.binding ?? '';
+            for (const name of rows.get(row) ?? []) previous.add(name);
+            if (registered.size > 0) rows.set(row, registered);
+            else rows.delete(row);
+        }
+        if (rows.size > 0) containers.set(write.container, rows);
+        else containers.delete(write.container);
+
+        // 3. Heal what the rows registered before and do not now.
+        for (const name of previous) {
+            if (registered.has(name)) continue;
+            await this.restoreArtifactRegistryView(type, name, organizationId);
         }
     }
+
+    /**
+     * [#23149, #23198] The names {@link reconcileViewExpansions} registered,
+     * per registry, then per container name, then per stored row of that name
+     * (its package binding, `''` for the package-less row). It is what a later
+     * write of that row reconciles against, and what a reset heals. Only the
+     * reconcile reads or writes it.
+     *
+     * The registry holds no link from an expanded item back to its container,
+     * and the container row is gone by the time the heal runs. Expanding the
+     * body again at reset time would also answer from registry state that may
+     * have moved since the publish: a package installed in between changes
+     * which names {@link anotherPackageShips} skips. So the heal reads this
+     * record instead, and heals the names that were registered, no more.
+     *
+     * Keyed on the registry, not on the protocol instance, for the reason
+     * `meta-overlay-cache.ts` keys its bucket on the engine: two protocol
+     * instances over one registry share the entries they write. A `WeakMap`,
+     * so the record lives as long as the registry and no longer.
+     *
+     * Per row, because one container name can have two stored rows (a
+     * package-less row and a package-bound one, ADR-0048), and the list read
+     * hydrates both on every call. Keyed on the name alone, each row's
+     * hydration reconciled against the other row's set, so a list read
+     * retired the members one row has and the other lacks. A view both rows
+     * expand to, which one row drops, leaves the registry with that row; both
+     * doors answer it from the other row's stored row, and the next list read
+     * registers it again. A reset addresses every row of the name, because
+     * its heal is handed no binding, and the row that remains is hydrated
+     * again on the next list read.
+     */
+    private static readonly registeredViewExpansions =
+        new WeakMap<object, Map<string, Map<string, ReadonlySet<string>>>>();
 
     /**
      * [#21980, #22057] True when a code package other than `own` ships an
@@ -19025,15 +19713,19 @@ export class ObjectStackProtocolImplementation implements
      * for all three hydration paths. Callers pass the SAME `orgId` they wrote
      * the row with, so the registry's view cannot disagree with the row's
      * scope.
+     *
+     * [#23198] Every caller awaits it: a republish of a view container heals
+     * the members it dropped ({@link reconcileViewExpansions}) before the
+     * write answers, so the reads that follow it serve the published set.
      */
-    private applyRegistryWriteThrough(request: {
+    private async applyRegistryWriteThrough(request: {
         type: string;
         name: string;
         item?: any;
         packageId?: string | null;
         /** The row's org scope — `null` for an env-wide row. [#6602] */
         organizationId: string | null;
-    }): void {
+    }): Promise<void> {
         // [#8862] The `|| request.type === 'objects'` limb is GONE — this
         // branch admitted the plural that {@link applyObjectRegistryMutation}
         // then consumed. All four call sites of this method fold at their
@@ -19077,7 +19769,7 @@ export class ObjectStackProtocolImplementation implements
         }
         if (this.environmentId !== undefined) return;
         try {
-            this.hydrateOverlayIntoRegistry(request.type, request.item, {
+            await this.hydrateOverlayIntoRegistry(request.type, request.item, {
                 packageId: request.packageId ?? undefined,
                 organizationId: request.organizationId,
             });
@@ -19197,6 +19889,32 @@ export class ObjectStackProtocolImplementation implements
      * still guards re-registration only, because that is a fact about the
      * kernel this protocol instance serves, not about the row in hand.
      *
+     * ## [#23149] A view container's expansions are healed too
+     *
+     * A view container row registers more than its plain key: every view it
+     * expands to is registered under its own name `<object>.<viewKey>`
+     * ({@link hydrateExpandedViewItems}). The tiers above healed the container's
+     * plain key alone, so after a reset of a packaged view container that
+     * answered `reset: true`, the list doors kept serving the overlay's
+     * expanded views until a restart. Measured on a real `SchemaRegistry`: the
+     * packaged expansions sit under `<packageId>:<object>.<viewKey>`, untouched
+     * by the publish, and the overlay's under the bare names, where the reset
+     * left them.
+     *
+     * So each name the container's rows registered is healed by this same
+     * walk, as a `(type, name)` of its own: a packaged view of that name is
+     * un-shadowed, a baseline is re-registered, and a name no layer serves is
+     * retired. Each name inherits every gate above: an organization-scoped
+     * heal touches none of them, and only a control-plane kernel
+     * re-registers. A name the hydration skipped because another package
+     * ships it was never recorded, so it is never touched.
+     *
+     * [#23198] The heal does this through {@link reconcileViewExpansions},
+     * the one function a republish reconciles through too, with the empty set
+     * a removed row implies. The names leave the record before the walk, so
+     * each registration is healed once. A walk that stops on a degraded
+     * baseline read leaves that name registered until a restart.
+     *
      * Best-effort: a failure must never block the delete that already
      * succeeded; the next full reload fixes the registry anyway.
      */
@@ -19205,13 +19923,31 @@ export class ObjectStackProtocolImplementation implements
         name: string,
         /** The DELETE's own scope — `null` for an env-wide row. [#6780] */
         organizationId: string | null,
+        /**
+         * [#22877] The bundle member whose row was removed, as the door's
+         * selector named it; omitted, the canonical member. For a type whose
+         * identity is a pair every tier below addresses that member alone:
+         * its shadow, its baseline and its overlay entry. The other members'
+         * rows are still stored and served, so their registry entries stay.
+         * No effect for a type with no members.
+         */
+        member?: string,
     ): Promise<void> {
         // [#6780] ADR-0005 — the plain-key entry belongs to the env-wide row,
         // so only an env-wide removal may heal (or retire) it.
         if (organizationId !== null && organizationId !== undefined) return;
+        // [#23149, #23198] The view container's expansions, through the one
+        // reconcile, with the empty set a removed row implies; it heals each
+        // by this same walk. See the header. Ahead of the container's own
+        // walk, which returns early from three of its tiers.
+        await this.reconcileViewExpansions(type, { container: name, removed: 'every-row' }, organizationId);
         try {
             const registry: any = this.engine.registry;
             const singular = PLURAL_TO_SINGULAR[type] ?? type;
+            // The member's discriminator value (the canonical one when none was
+            // named), or `undefined` for a type with no members — whose registry
+            // calls below are then exactly the calls they always were.
+            const memberKey = bundleMemberDiscriminator(singular, member);
 
             // ── [ADR-0029 D9.7] THE OBJECT HALF'S LAYER SUBTRACTION ──
             //
@@ -19238,15 +19974,20 @@ export class ObjectStackProtocolImplementation implements
 
             let healed = false;
             if (typeof registry.removeRuntimeShadow === 'function') {
-                healed = registry.removeRuntimeShadow(singular, name);
+                healed = registry.removeRuntimeShadow(singular, name, memberKey);
                 if (type !== singular) {
-                    healed = registry.removeRuntimeShadow(type, name) || healed;
+                    healed = registry.removeRuntimeShadow(type, name, memberKey) || healed;
                 }
             }
             if (healed) return;
 
             const baseline = await this.readItemFromMetadataService(type, name);
-            if (baseline.data !== undefined && baseline.data !== null) {
+            // [#22877] A baseline of ANOTHER member is no baseline of this one:
+            // the service keys a type's items by name alone, so it can hold a
+            // bundle's other member under the name.
+            const baselineServesMember = memberKey === undefined
+                || itemDiscriminator(singular, baseline.data) === memberKey;
+            if (baseline.data !== undefined && baseline.data !== null && baselineServesMember) {
                 if (this.environmentId === undefined) {
                     // [#22057] See tier 2 in the header. ⛔ View only.
                     const bound = canonicalMetaType(type) === 'view'
@@ -19265,8 +20006,8 @@ export class ObjectStackProtocolImplementation implements
 
             // [#5079] No artifact, no baseline: the row WAS the item.
             if (typeof registry.removeOverlayEntry === 'function') {
-                registry.removeOverlayEntry(singular, name);
-                if (type !== singular) registry.removeOverlayEntry(type, name);
+                registry.removeOverlayEntry(singular, name, memberKey);
+                if (type !== singular) registry.removeOverlayEntry(type, name, memberKey);
             }
             // [#6808] …and an `object` lives in a SECOND place, so tier 3 has a
             // second limb. `applyObjectRegistryMutation` writes both halves on
@@ -19377,7 +20118,10 @@ export class ObjectStackProtocolImplementation implements
      * this, inserting into a freshly-published object fails with "no such
      * table" (surfaced as `object_not_found`) until the next restart.
      * Best-effort + non-fatal: drivers without DDL (or read-only datasources)
-     * simply no-op, and a sync failure must not abort the publish.
+     * simply no-op, and a sync failure must not abort the publish. Non-fatal is
+     * not quiet: a refused sync is reported at `error` with its consequence
+     * and fix (#22985), because the publish it follows has already answered
+     * success.
      */
     private async ensureObjectStorage(type: string, name: string): Promise<void> {
         // [#8862] The `&& type !== 'objects'` limb is GONE. Both call sites
@@ -19393,7 +20137,22 @@ export class ObjectStackProtocolImplementation implements
         try {
             await this.engine.syncObjectSchema(name);
         } catch (err: any) {
-            console.warn(`[Protocol] table sync failed for object '${name}': ${err?.message ?? err}`);
+            // [#22985] `error`, not `warn`, by the one question AGENTS.md
+            // "Degradation log levels" turns this on: the publish still
+            // answers success and the object is registered and served, while
+            // the storage it was published for does not exist. Said once per
+            // publish of the object, never per write; the publish is
+            // deliberately NOT failed (see the docblock). The driver's refusal
+            // is a separate argument, so a multi-line driver error cannot split
+            // the line that carries the level.
+            console.error(
+                `[Protocol] object '${name}' was published but its storage was NOT created or altered — its schema `
+                + 'sync was refused. The publish answered success and the object is registered and served, so it '
+                + 'looks usable while its writes fail (or drop the columns this publish added) until the sync runs. '
+                + "Fix: resolve the driver's refusal (logged after this line), then publish the object again, which "
+                + 're-runs this sync, or restart, since the boot syncs every registered object\'s storage.',
+                err?.message ?? err,
+            );
         }
     }
 
@@ -19422,6 +20181,11 @@ export class ObjectStackProtocolImplementation implements
         type: string,
         name: string,
         organizationId: string | null,
+        /**
+         * [#22877] The bundle member whose row's binding to read; omitted, the
+         * canonical member. Nothing for a type with no members.
+         */
+        member?: string,
     ): Promise<string | null> {
         // [#21911] The explicit system opt-in — see findServedOverlayRow.
         const row = await this.engine.findOne('sys_metadata', {
@@ -19430,6 +20194,7 @@ export class ObjectStackProtocolImplementation implements
                 name,
                 organization_id: organizationId,
                 state: 'active',
+                ...overlayMemberWhere(type, member),
             },
             context: { isSystem: true },
         });
@@ -19650,6 +20415,123 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#23015] The save door's half of "one default record page per object per
+     * deployment" (maintainer ruling A, record 6134056653; `PageSchema.isDefault`).
+     *
+     * A `page` body that is the default record page of an object
+     * (`defaultRecordPageObject`, the one reading `defineStack` and the
+     * registry judge by too) is refused when another page already holds that
+     * object's default. The holders are the two sources a deployment serves
+     * pages from, judged by name:
+     *
+     *  - **the stored pages** — the environment-wide active rows
+     *    ({@link readActiveOverlayRows}, parsed by {@link storedOverlayEntries}),
+     *    a row bound to a package naming that package;
+     *  - **the registry's pages** — `SchemaRegistry.defaultRecordPageHoldersOf`
+     *    (the reading the registration refusals judge by: packaged pages, their
+     *    install claims, and the environment items written through), for every
+     *    name no stored row holds. A stored row under a name stands in for
+     *    every registry slot of that name, as it does on every read
+     *    (ADR-0005), so its own body decides for the name.
+     *
+     * Asked twice: by `saveMetaItem` on the body it is about to store (draft or
+     * publish mode), and by the draft publish (`promoteDraftForPublish`) on the
+     * draft body it is about to promote — the save judged only the pages
+     * active at that moment, and another may have taken the default since.
+     *
+     * The page saved under `saveName` is never its own holder: a save under the
+     * existing default's own name is an overlay of that page (ADR-0005), not a
+     * second default, and stays accepted. A registry with no such reading (a
+     * host engine that is not `SchemaRegistry`) contributes no packaged holder;
+     * the stored rows are still judged.
+     *
+     * An UNPROVISIONED store counts as "no stored pages"; any other read
+     * failure propagates ({@link rethrowUnlessMetadataStoreUnprovisioned}):
+     * answering "no other default" from a read that never happened would
+     * accept the very second default this exists to refuse.
+     *
+     * `DEFAULT_RECORD_PAGE_CONFLICT` / 422 — the envelope the registry's
+     * registration refusal carries for the same condition, so a client reads
+     * one code whether the second default arrived by a save or by an install.
+     * The message names this page and the holder, then the prescription, then
+     * why: a 4xx message crosses the REST boundary truncated at its tail. ⛔ It
+     * never prescribes overlaying a page a package ships by name: the save door
+     * refuses that write (`NOT_OVERRIDABLE`). Runtime words carry no tracker
+     * number.
+     */
+    private async defaultRecordPageSaveRefusal(
+        type: string,
+        item: unknown,
+        saveName: string,
+        verb: 'saved' | 'published' = 'saved',
+    ): Promise<(Error & { code: 'DEFAULT_RECORD_PAGE_CONFLICT'; status: 422 }) | undefined> {
+        if (type !== 'page') return undefined;
+        const object = defaultRecordPageObject(item);
+        if (object === undefined) return undefined;
+
+        // `shipped`: a page a package ships through the registry, which no save
+        // can edit; a stored row (bound to a package or not) is editable here.
+        type Holder = { page: string; packageId?: string; shipped: boolean };
+        const holders: Holder[] = [];
+        let records: any[] = [];
+        try {
+            // [ADR-0131 D6] A save lands environment-wide, so the pages it meets
+            // are the environment-wide rows.
+            records = await this.readActiveOverlayRows({ type }, undefined);
+        } catch (error) {
+            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+        }
+        const stored = this.storedOverlayEntries({ type }, records);
+        const storedNames = new Set(stored.map((entry) => entry.name));
+        for (const entry of stored) {
+            if (entry.name === saveName || defaultRecordPageObject(entry.data) !== object) continue;
+            holders.push(entry.packageId
+                ? { page: entry.name, packageId: entry.packageId, shipped: false }
+                : { page: entry.name, shipped: false });
+        }
+        const registry = this.engine.registry;
+        if (typeof registry?.defaultRecordPageHoldersOf === 'function') {
+            const registered = registry.defaultRecordPageHoldersOf(object) as Array<
+                { kind: 'package'; packageId: string; page: string } | { kind: 'environment'; page: string }
+            >;
+            for (const holder of registered) {
+                if (holder.page === saveName || storedNames.has(holder.page)) continue;
+                holders.push(holder.kind === 'package'
+                    ? { page: holder.page, packageId: holder.packageId, shipped: true }
+                    : { page: holder.page, shipped: false });
+            }
+        }
+        if (holders.length === 0) return undefined;
+
+        const seen = new Set<string>();
+        const unique = holders.filter((h) => {
+            const key = `${h.packageId ?? ''}|${h.page}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+        const describe = (h: Holder) =>
+            h.packageId ? `page '${h.page}' of package '${h.packageId}'` : `page '${h.page}', authored in this environment`;
+        const named = unique.map(describe);
+        const others = named.length === 1 ? `${named[0]} already is` : `${named.join(' and ')} already are`;
+        const remedy = unique.some((h) => h.shipped)
+            ? `Save '${saveName}' with \`isDefault: false\`: a page a package ships stays the default unless the `
+              + `deployment is composed without that package.`
+            : `Save '${saveName}' with \`isDefault: false\`, or first save ${unique.map((h) => `'${h.page}'`).join(' and ')} `
+              + `with \`isDefault: false\` to make '${saveName}' the default instead.`;
+        const err = new Error(
+            `Default record page conflict: page '${saveName}' cannot be ${verb} as the default record page of object `
+            + `'${object}': ${others}. ${remedy} At most one \`isDefault: true\` record page may exist for an object `
+            + `in a deployment: the record view opens that page with no tie-break.`,
+        ) as Error & { code: 'DEFAULT_RECORD_PAGE_CONFLICT'; status: 422; object: string; holders: readonly Holder[] };
+        err.code = 'DEFAULT_RECORD_PAGE_CONFLICT';
+        err.status = 422;
+        err.object = object;
+        err.holders = unique;
+        return err;
+    }
+
+    /**
      * [#21639] The save door's ONE collision predicate for a view container:
      * a container is refused when its save name, or any name its expansion
      * produces, is a name already served from elsewhere — the family's rule,
@@ -19857,6 +20739,115 @@ export class ObjectStackProtocolImplementation implements
         return new Set(
             this.expandRuntimeViewContainer(type, shipped, { packageId: ownPackageId }).map((view) => String(view.name)),
         );
+    }
+
+    /**
+     * [#23119, ADR-0010 §3.5 and §4.1] The lock family an AUTHOR's save
+     * persists: the one the row it writes already stores. An author's write
+     * never sets, changes or removes an item's lock. ADR-0010 §4.1 strips the
+     * protection fields on write and has the loader reattach them on load,
+     * §3.5 gives an environment-authored item no package lock, and the spec
+     * calls the `_lock*` keys the runtime's private envelope, never authored
+     * (`shared/protection.zod.ts`). A stored row lock is one the runtime
+     * stamped: a loader's or a plugin's `applyProtection`, an install, a
+     * migration's re-save. Stored verbatim, which is what this door did, a
+     * hand-written or echoed `_lock: 'full'` bound the item for good: the next
+     * save and the delete answered `ITEM_LOCKED`, and no door unlocks it.
+     *
+     * Three outcomes, judged after the `protection` block's refusal:
+     *
+     *  - **No `_lock*` key in the body.** The body says nothing about the
+     *    lock, so the row keeps the family it stores. This is not a removal.
+     *    Dropping the stored family instead would be the fail-open direction
+     *    {@link DERIVED_PROVENANCE_KEYS}' note refuses, and it was measured
+     *    here: a `no-delete` a server face had stamped was lost to the next
+     *    author save, and the delete it refused went through.
+     *  - **An echo.** Studio and the AI authoring surfaces send the served
+     *    body back on every edit, so a family equal to one a read of this item
+     *    serves is accepted and ignored. Two such families exist. One is what
+     *    the active reads serve at the save's address ({@link getMetaItem},
+     *    the layered read's `effective`, the list): the one item-lock
+     *    resolution's answer ({@link resolveItemLock} over every shipping
+     *    package's artifact and the item's stored rows in scope), written onto
+     *    the body by {@link withItemLockFamily}. The other is the family stored
+     *    on the row this save writes, which the draft read, the preview read
+     *    and the layered read's `overlay` layer serve verbatim. Accepting the
+     *    second changes nothing, because it is the family carried forward. A
+     *    new item, or a first overlay of a packaged one, has no row: its
+     *    artifact's lock still binds through the resolution, and the row it
+     *    gets stores none.
+     *  - **Anything else** sets, changes or removes the lock, and is refused
+     *    ({@link authoredLockFamilyRefusal}). That includes a family copied
+     *    from another item, which neither read serves for this one.
+     *
+     * The row is the one the repository's `put` resolves for this save
+     * ({@link SysMetadataRepository.headAt}: its state, package and bundle
+     * member, the inherited draft binding included). A draft save with no
+     * draft row yet reads the ACTIVE row the draft overlays. That fallback is
+     * load-bearing: the draft is published by promotion, so a draft that
+     * dropped the active row's lock would publish the loss
+     * ({@link storedBodyForCarryForward} draws the same line for a credential).
+     * Read with no `try`/`catch`: a stored lock that could not be read must
+     * fail the save, never be written away.
+     *
+     * A member whose value the type's own declaration refuses is left to the
+     * parse: the body is handed on untouched, and the parse refuses it with
+     * `422 INVALID_METADATA`, as before. That is the path the unmanaged
+     * import's strip (`stripUnmanagedImportLock`) hands a lock it cannot parse
+     * down, and its refusal does not move. A type that declares no such key,
+     * or has no schema at all (`external_catalog`), is judged here: no parse
+     * would refuse the key there, and stored, the `_lock` gate reads it.
+     *
+     * Asked of every write that reaches the author arm: the REST `PUT`
+     * (`meta-envelope`), the runtime dispatcher (`meta-dispatch`), the
+     * external-table import (`external-import`, whose body the server builds
+     * and which never carries a `_lock*` key), the unmanaged import
+     * (`package-unmanaged-import`, stripped, and writing only names no row
+     * held), and the in-process doors that state no face. The server-stated
+     * rewrites (`source`, `package-duplicate`) keep stamping, as before. No
+     * stored lock is unbound here.
+     */
+    private async authoredLockFamily(args: {
+        type: string;
+        name: string;
+        packageId: string | null | undefined;
+        mode: 'draft' | 'publish';
+        item: unknown;
+    }): Promise<unknown> {
+        const { item } = args;
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+        const body = item as Record<string, unknown>;
+        const sent = lockFamilyOf(body);
+        for (const [key, value] of Object.entries(sent)) {
+            const declared = overlaySchemaDeclaredKey(args.type, key);
+            if (declared !== undefined && !declared.safeParse(value).success) return item;
+        }
+        const repo = this.getOverlayRepo();
+        const ref = { type: args.type, name: args.name, org: 'env' } as Parameters<typeof repo.headAt>[0];
+        const state: 'active' | 'draft' = args.mode === 'draft' ? 'draft' : 'active';
+        const member = itemDiscriminator(args.type, body);
+        const target = await repo.headAt(ref, { state, packageId: args.packageId ?? null, member });
+        let head = target.head;
+        if (!head && state === 'draft') {
+            head = (await repo.headAt(ref, { state: 'active', packageId: target.packageId, member })).head;
+        }
+        const stored = lockFamilyOf(head?.body);
+        if (Object.keys(sent).length > 0 && !sameLockFamily(sent, stored)) {
+            const address: ItemAddress = { type: args.type, name: args.name, packageId: args.packageId ?? undefined };
+            let overlayLockLayer: unknown;
+            try {
+                overlayLockLayer = await this.overlayLockLayerAt(address, { otherSpelling: true });
+            } catch (error) {
+                // [#5532] A lock read that did not happen is not an unlocked item.
+                this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+            }
+            const served = lockFamilyOf(withItemLockFamily({}, resolveItemLock({
+                artifact: this.artifactLockLayerAt(address),
+                overlay: overlayLockLayer,
+            })));
+            if (!sameLockFamily(sent, served)) throw authoredLockFamilyRefusal(args.type, args.name, sent, served);
+        }
+        return withLockFamily(body, stored);
     }
 
     // [#21207] `parentVersion` is a CALLER's version token — the keyed form a
@@ -20211,6 +21202,38 @@ export class ObjectStackProtocolImplementation implements
                     request.name, layer.packageId, layer.ownerPackageId,
                 );
             }
+        }
+
+        // [ADR-0010 §3.5, Phase 4.3] A `protection` block is refused, on every
+        // type that declares one: only a code package's loader translates it
+        // into a lock, and this door writes environment-authored items, so it
+        // was stored verbatim and served as a lock that bound nothing. Asked
+        // after the authorization refusals above (a locked item still answers
+        // `ITEM_LOCKED`, a sealed one `NOT_OVERRIDABLE`) and before every gate
+        // that reads or reshapes the body, so the block is judged as authored
+        // and a refused save costs no read. The server-stated rewrites — the
+        // same two the flow authoring rule above exempts — strip it instead.
+        // See {@link protectionBlockRefusal}.
+        //
+        // [#23119, ADR-0010 §3.5 and §4.1] …and the lock family, at the same
+        // position: an author's write persists the family the row it writes
+        // already stores. A body echoing a family a read of this item serves
+        // is accepted and ignored; one that would set, change or remove the
+        // lock is refused in the block's refusal family. The server-stated
+        // rewrites keep the family their body carries, as before. See
+        // {@link authoredLockFamily}.
+        if (request.source === undefined && request.writeFace !== 'package-duplicate') {
+            const protectionRefusal = protectionBlockRefusal(singularType, request.item, request.name);
+            if (protectionRefusal) throw protectionRefusal;
+            request.item = await this.authoredLockFamily({
+                type: singularType,
+                name: request.name,
+                packageId: request.packageId,
+                mode,
+                item: request.item,
+            });
+        } else {
+            request.item = withoutProtectionBlock(singularType, request.item);
         }
 
         // Phase 3a-destructive: for `object` writes, diff against the
@@ -20637,6 +21660,19 @@ export class ObjectStackProtocolImplementation implements
             if (hookRefusal) throw hookRefusal;
         }
 
+        // One default record page per object per deployment (maintainer ruling
+        // A on objectstack#23015): a page saved as the default record page of an
+        // object another page already holds — a stored page, or a page a
+        // package ships — is refused, naming both, in draft and in publish mode,
+        // after the schema (the body is a page) and before the authoring gate
+        // and every write. A save under the existing default's own name is an
+        // overlay of that page, not a second default. See
+        // {@link defaultRecordPageSaveRefusal}.
+        {
+            const defaultPageRefusal = await this.defaultRecordPageSaveRefusal(singularType, request.item, request.name);
+            if (defaultPageRefusal) throw defaultPageRefusal;
+        }
+
         // The #4463 runtime authoring gate — the shared author-time rule
         // registry, on the write path. `active` saves only (D1): this is the
         // publish verb, and it is the same table `os build` gates on. Placed
@@ -20988,7 +22024,7 @@ export class ObjectStackProtocolImplementation implements
             // so an item that is already listable must be dispatchable
             // in the same breath. See {@link applyRegistryWriteThrough}.
             if (mode === 'publish') {
-                this.applyRegistryWriteThrough({
+                await this.applyRegistryWriteThrough({
                     type: singularTypeForRepo,
                     name: request.name,
                     item: request.item,
@@ -21025,6 +22061,8 @@ export class ObjectStackProtocolImplementation implements
                 name: request.name,
                 state: mode === 'draft' ? 'draft' : 'active',
                 organizationId: null,
+                // [#22877] The saved body's member — the row this save wrote.
+                ...mutationEventMemberOfBody(singularTypeForRepo, request.item),
             });
             return {
                 success: true,
@@ -21157,7 +22195,9 @@ export class ObjectStackProtocolImplementation implements
      *   are about to write (the same conversion). It is empty by construction,
      *   and there is no author here for a confirmation prompt to reach.
      * - `source: 'migrate-stored'` — so a history diff distinguishes a
-     *   canonicalization pass from an edit someone made.
+     *   canonicalization pass from an edit someone made. This is the ONLY
+     *   place the pass names itself: `actor` (below) is the user who ran it
+     *   or nobody, never a label (#23068).
      *
      * ## What it lists and never writes
      *
@@ -21251,7 +22291,16 @@ export class ObjectStackProtocolImplementation implements
         apply?: boolean;
         /** Restrict to these metadata types (singular or plural spelling). */
         types?: string[];
-        /** Recorded as the writer on the history + audit rows. */
+        /**
+         * The id of the user running the pass — omit it when no user is
+         * (a CLI run against the database, an `isSystem` caller). It becomes
+         * each rewrite's `PutOptions.actor`, so it lands in
+         * `sys_metadata_history.recorded_by` and the row's `updated_by`, both
+         * `lookup('sys_user')`: omitted, they record `null`, #4556's
+         * "system-initiated". ⛔ Never a label naming the door or the pass —
+         * that is a reference to no user, and `source: 'migrate-stored'`
+         * already says where the write came from (#23068).
+         */
         actor?: string;
         /**
          * Canonicalize a stored `flow` body (#4454). **Optional override** —
@@ -21583,7 +22632,10 @@ export class ObjectStackProtocolImplementation implements
                     packageId,
                     force: true,
                     source: 'migrate-stored',
-                    actor: request.actor ?? 'migrate-stored',
+                    // [#23068] The user who ran the pass, or none — and none
+                    // reaches `PutOptions.actor` as `null` (`saveMetaItem`'s
+                    // #4556 default). The pass's name is on `source` above.
+                    ...(request.actor ? { actor: request.actor } : {}),
                 });
                 record({ ...base, notices: flattened, todos: flattenedTodos, outcome: 'rewritten' });
             } catch (e: any) {
@@ -21642,6 +22694,8 @@ export class ObjectStackProtocolImplementation implements
         name: string;
         sinceSeq?: number;
         limit?: number;
+        /** [#22877] The bundle member whose lineage to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
+        member?: string;
     }): Promise<{ events: import('@objectstack/metadata-core').MetadataEvent[] }> {
         // [#9157] #4432 / #7894 — CANONICAL TYPE KEY. See {@link canonicalMetaType}
         // and the twin comment on {@link auditMetaItem}; #9180 step ① routes all
@@ -21675,6 +22729,12 @@ export class ObjectStackProtocolImplementation implements
         // (`viewes`) must be refused 400 naming `view` / `views`, not silently
         // absorbed by the early return.
         request = canonicalizeMetaRequestType(request);
+        // [#22877] Ruling 6116165299 (Q2 i) and the seat's answer 6118224899:
+        // the bundle shares ONE lineage counter per name, and this read serves
+        // one member's events of it — the selector's, else the canonical one.
+        // Checked before the gate below, so a selector on a type with no
+        // members is refused, never absorbed by the early empty answer.
+        const member = resolveBundleMemberSelector(request.type, request.member);
         // Canonical by construction from the fold above — NOT a second fold.
         const singularType = request.type;
         if (!ObjectStackProtocolImplementation.isOverlayAllowed(singularType)
@@ -21704,7 +22764,7 @@ export class ObjectStackProtocolImplementation implements
         } as Parameters<typeof repo.history>[0];
 
         const events: import('@objectstack/metadata-core').MetadataEvent[] = [];
-        const opts: { sinceSeq?: number; limit?: number } = {};
+        const opts: { sinceSeq?: number; limit?: number; member?: string } = { ...memberOption(member) };
         if (request.sinceSeq !== undefined) opts.sinceSeq = request.sinceSeq;
         if (request.limit !== undefined) opts.limit = request.limit;
         // [#21207] Each event's hash and parent hash are served in keyed form —
@@ -21779,6 +22839,8 @@ export class ObjectStackProtocolImplementation implements
          * multi-pass over the whole set), so it suppresses the per-item apply here.
          */
         _skipSeedApply?: boolean;
+        /** [#22877] The bundle member whose draft to publish — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
+        member?: string;
     }): Promise<{
         success: boolean;
         version: string;
@@ -21908,6 +22970,10 @@ export class ObjectStackProtocolImplementation implements
         // rewrites it on upgrade). Different input class, different map; see
         // {@link canonicalMetaType}'s header for why the two are not one fold.
         request = canonicalizeMetaRequestType(request);
+        // [#22877] Ruling 6116165299 (Q2 i): the promotion addresses ONE
+        // member's draft of a bundled type, the selector's, else the canonical
+        // one. Read once here and handed down trimmed.
+        const member = resolveBundleMemberSelector(request.type, request.member);
         // [commit 311433f6b] The item-name grammar verdict, same as `saveMetaItem`'s:
         // the promotion door writes an `active` row under this name, so an
         // off-grammar name is refused here too rather than promoted. With the
@@ -21920,7 +22986,7 @@ export class ObjectStackProtocolImplementation implements
         // site has no transaction of its own, so recording it in the `catch` is
         // where it always effectively landed; what changed is that the helper no
         // longer assumes that on behalf of the batch route too.
-        const { singularType, advisories, result } = await this.promoteDraftForPublish(request)
+        const { singularType, advisories, result } = await this.promoteDraftForPublish({ ...request, member })
             .catch(async (err: unknown) => {
                 await this.recordPendingDenialAudit(err);
                 throw err;
@@ -22066,6 +23132,12 @@ export class ObjectStackProtocolImplementation implements
          * "same-batch" closure would be the item itself and change nothing.
          */
         pending?: RuntimePendingDeclarations;
+        /**
+         * [#22877] The bundle member whose draft to promote; omitted, the
+         * canonical one. The draft read, the gate's read and the promotion
+         * all address it, so the body judged is the body that goes live.
+         */
+        member?: string;
     }): Promise<{
         singularType: string;
         /**
@@ -22131,9 +23203,10 @@ export class ObjectStackProtocolImplementation implements
                 draftRow = await this.engine.findOne('sys_metadata', {
                     where: {
                         type: singularType, name: request.name, organization_id: null, state: 'draft',
-                        // [#22877] The canonical member's draft — the one
-                        // `repo.get` / `repo.promoteDraft` below address.
-                        ...overlayMemberWhere(singularType),
+                        // [#22877] The addressed member's draft (the canonical
+                        // one when none was named) — the one `repo.get` /
+                        // `repo.promoteDraft` below address.
+                        ...overlayMemberWhere(singularType, request.member),
                     },
                     context: { isSystem: true },
                 });
@@ -22164,7 +23237,7 @@ export class ObjectStackProtocolImplementation implements
         }
         const draftForGate = await repo.get(
             { type: singularType, name: request.name, org: 'env' } as Parameters<typeof repo.get>[0],
-            { state: 'draft', ...(draftKey !== undefined ? { packageId: draftKey } : {}) },
+            { state: 'draft', ...(draftKey !== undefined ? { packageId: draftKey } : {}), ...memberOption(request.member) },
         );
         // [#21470] …and the divergent `name` refusal, on the same body and for
         // the same reason: a draft stored before `saveMetaItem` judged every
@@ -22176,6 +23249,16 @@ export class ObjectStackProtocolImplementation implements
         if (draftForGate) {
             const nameRefusal = savedItemNameRefusal(singularType, draftForGate.body, request.name, 'publish');
             if (nameRefusal) throw nameRefusal;
+        }
+        // [#23015] …and one default record page per object per deployment: a
+        // draft saved while no other page held its object's default can meet
+        // one by the time it is published, since the save door judged only the
+        // ACTIVE pages of that moment. Judged again here, on the draft body and
+        // with the save door's own predicate and envelope, before
+        // `repo.promoteDraft` writes — so a batch publish aborts on it too.
+        if (draftForGate) {
+            const defaultPageRefusal = await this.defaultRecordPageSaveRefusal(singularType, draftForGate.body, request.name, 'published');
+            if (defaultPageRefusal) throw defaultPageRefusal;
         }
         // [#9176] The gate's return is its advisory half (#4717): captured and
         // handed out so `publishMetaItem` can attach it to the 2xx this
@@ -22281,6 +23364,8 @@ export class ObjectStackProtocolImplementation implements
                 // none), so a draft saved after the gate's read is refused as a
                 // conflict instead of being promoted unjudged.
                 expectedDraftHash: draftForGate ? draftForGate.hash : null,
+                // [#22877] …of the member that was judged.
+                ...memberOption(request.member),
             });
             return { singularType, advisories: runtimeAdvisories, result };
         } catch (err: any) {
@@ -22347,7 +23432,7 @@ export class ObjectStackProtocolImplementation implements
         // saveMetaItem's post-persistence registry update path — #4521 makes
         // that path cover every overlay type, so promoting a drafted action
         // makes it dispatchable at once instead of at the next listing).
-        this.applyRegistryWriteThrough({
+        await this.applyRegistryWriteThrough({
             type: args.singularType,
             name: args.name,
             item: args.body,
@@ -22427,9 +23512,10 @@ export class ObjectStackProtocolImplementation implements
                 );
             }
         }
-        // [ADR-0094] Awaited projection: runs AFTER the package-door
-        // materializer (which stamps package provenance) so the projector
-        // sees final record state; refuses/no-ops per its own rules.
+        // [ADR-0094] Awaited projection: runs AFTER any materializer
+        // registered for the type, so the projector sees final record state;
+        // refuses/no-ops per its own rules. (No `permission` materializer is
+        // registered since ADR-0131 C3 stage 6b-2.)
         const publishProjection = await this.runMutationProjector({
             type: args.singularType,
             name: args.name,
@@ -22443,6 +23529,8 @@ export class ObjectStackProtocolImplementation implements
             name: args.name,
             state: 'active',
             organizationId: null,
+            // [#22877] The promoted body's member — the row the promotion wrote.
+            ...mutationEventMemberOfBody(args.singularType, args.body),
         });
         return out;
     }
@@ -22549,6 +23637,13 @@ export class ObjectStackProtocolImplementation implements
      * only its own `label` ([#22200]), the one member a draft-only item can be
      * shown by other than its machine name, passed through from
      * {@link SysMetadataRepository.listDrafts} as the repository projects it.
+     *
+     * [#23073] `member` tells two drafts of one bundle apart (ruling
+     * 6116165299, letter A: each member is addressable by name). It is the
+     * repository header's stored member, the column the package-batch doors
+     * promote and discard by, with the canonical member spelled out, as the
+     * by-name doors' `member` selector takes it back
+     * ({@link bundleMemberDiscriminator}); absent for a type with no members.
      */
     async listDrafts(request?: {
         packageId?: string;
@@ -22557,6 +23652,8 @@ export class ObjectStackProtocolImplementation implements
         drafts: Array<{
             type: string;
             name: string;
+            /** [#23073] The bundle member the draft is (`'zh-CN'`, the canonical `'en-US'`); absent for a type with no members. */
+            member?: string;
             /** The draft body's own top-level `label`, as authored; `null` when it declares none. */
             label: I18nLabel | null;
             packageId: string | null;
@@ -22571,7 +23668,15 @@ export class ObjectStackProtocolImplementation implements
             ...(request?.type ? { type: PLURAL_TO_SINGULAR[request.type] ?? request.type } : {}),
             ...(request?.packageId ? { packageId: request.packageId } : {}),
         });
-        return { drafts };
+        // [#23073] The declared header (`ListDraftsResponseSchema`), with the
+        // row's stored member on every draft of a bundled type: absent there
+        // means the canonical member, which is spelled out here.
+        return {
+            drafts: drafts.map(({ member: stored, ...header }) => {
+                const member = bundleMemberDiscriminator(header.type, stored);
+                return member === undefined ? header : { ...header, member };
+            }),
+        };
     }
 
     /**
@@ -22635,7 +23740,7 @@ export class ObjectStackProtocolImplementation implements
      * and the absence of the member it needs is stated rather than assumed.
      */
     private async collectBatchPendingDeclarations(
-        drafts: ReadonlyArray<{ type: string; name: string }>,
+        drafts: ReadonlyArray<{ type: string; name: string; member?: string }>,
     ): Promise<RuntimePendingDeclarations | undefined> {
         // [#13216] Typed as a mapped type over `RuntimePendingDeclarations`
         // with `-?`, not as a hand-listed literal. The literal it replaces was
@@ -22696,7 +23801,8 @@ export class ObjectStackProtocolImplementation implements
             const ref = {
                 type: singular, name: d.name, org: 'env',
             } as unknown as Parameters<typeof repo.get>[0];
-            const draft = await repo.get(ref, { state: 'draft' });
+            // [#22877] The draft's own bundle member, as listed.
+            const draft = await repo.get(ref, { state: 'draft', ...memberOption(d.member) });
             if (draft?.body === undefined || draft.body === null) continue;
             pending[key].push(draft.body);
             any = true;
@@ -23131,15 +24237,21 @@ export class ObjectStackProtocolImplementation implements
         // unprovisioned is truthful emptiness, everything else surfaces. See
         // the `catch` below for why the benign branch keeps exactly the push
         // that was wrong unconditionally.
-        const commitItems: Array<{ type: string; name: string; existedBefore: boolean; prevVersion: number | null }> = [];
+        const commitItems: CommitPlanItem[] = [];
         for (const d of ordered) {
             try {
                 // Read the pre-publish active row in the draft's scope, the
                 // environment's (ADR-0131 D6), so an env-wide edit is not
                 // mis-recorded as a create in the revert plan (#3115).
                 // [#21911] The explicit system opt-in — see findServedOverlayRow.
+                // [#22877] …and the draft's own bundle member: another
+                // member's active row is not this member's pre-publish state,
+                // and the revert plan records the member it describes.
                 const activeRow = (await this.engine.findOne('sys_metadata', {
-                    where: { organization_id: null, type: d.type, name: d.name, state: 'active' },
+                    where: {
+                        organization_id: null, type: d.type, name: d.name, state: 'active',
+                        ...overlayMemberWhere(d.type, d.member),
+                    },
                     context: { isSystem: true },
                 })) as { version?: number } | null;
                 commitItems.push({
@@ -23147,6 +24259,7 @@ export class ObjectStackProtocolImplementation implements
                     name: d.name,
                     existedBefore: !!activeRow,
                     prevVersion: activeRow && typeof activeRow.version === 'number' ? activeRow.version : null,
+                    ...(d.member !== undefined ? { member: d.member } : {}),
                 });
             } catch (error) {
                 // [#8896] Benign: `sys_metadata` has not been provisioned yet.
@@ -23170,7 +24283,10 @@ export class ObjectStackProtocolImplementation implements
                 // No new error code and no new response field: the caller
                 // receives the read's own failure, envelope intact.
                 if (!isMissingTableError(error, 'sys_metadata')) throw error;
-                commitItems.push({ type: d.type, name: d.name, existedBefore: false, prevVersion: null });
+                commitItems.push({
+                    type: d.type, name: d.name, existedBefore: false, prevVersion: null,
+                    ...(d.member !== undefined ? { member: d.member } : {}),
+                });
             }
         }
         const publishedSeqs: number[] = [];
@@ -23193,7 +24309,7 @@ export class ObjectStackProtocolImplementation implements
         // stubs) fall through to a plain sequential run with the same weaker
         // guarantee the repository's `withTxn` documents.
         type PromotedDraft = {
-            d: { type: string; name: string };
+            d: { type: string; name: string; member?: string };
             singularType: string;
             body: unknown;
             packageId: string | null;
@@ -23228,7 +24344,7 @@ export class ObjectStackProtocolImplementation implements
                             // deleted by the promote, and reading the draft is
                             // unambiguous).
                             const ref = { type: d.type, name: d.name, org: 'env' } as unknown as Parameters<typeof repo.get>[0];
-                            const draft = await repo.get(ref, { state: 'draft' });
+                            const draft = await repo.get(ref, { state: 'draft', ...memberOption(d.member) });
                             if (draft?.body) seedBodies.push(draft.body);
                         }
                         const { singularType, advisories, result } = await this.promoteDraftForPublish({
@@ -23266,6 +24382,13 @@ export class ObjectStackProtocolImplementation implements
                             // `d.packageId` is the row's own binding, so this
                             // is the listed key restated, never a new one.
                             packageId: d.packageId,
+                            // [#22877] …and as the bundle member `listDrafts`
+                            // surfaced it as: two members' drafts of one name
+                            // are two drafts, and promoting the canonical one
+                            // for each promoted it twice (`NO_DRAFT` the
+                            // second time, aborting the batch) and left the
+                            // other member's draft pending.
+                            ...memberOption(d.member),
                             // [#10377] The whole batch's own declarations, so
                             // this member is judged against the package it is
                             // being published AS PART OF and not against the
@@ -23297,14 +24420,16 @@ export class ObjectStackProtocolImplementation implements
                 // the published state land or roll back together, so a recorded
                 // commit can never describe a partial publish.
                 if (promoted.length > 0) {
-                    const promotedKeys = new Set(promoted.map((p) => `${p.d.type}/${p.d.name}`));
+                    // [#22877] Keyed by member too: two members of one name
+                    // are two plan items.
+                    const promotedKeys = new Set(promoted.map((p) => commitPlanKey(p.d)));
                     commit = await this.recordPackageCommit({
                         packageId: request.packageId,
                         operation: 'apply',
                         ...(request.message ? { message: request.message } : {}),
                         ...(request.actor ? { actor: request.actor } : {}),
                         ...(request.aiModel ? { aiModel: request.aiModel } : {}),
-                        items: commitItems.filter((it) => promotedKeys.has(`${it.type}/${it.name}`)),
+                        items: commitItems.filter((it) => promotedKeys.has(commitPlanKey(it))),
                         ...(publishedSeqs.length
                             ? { eventSeqStart: Math.min(...publishedSeqs), eventSeqEnd: Math.max(...publishedSeqs) }
                             : {}),
@@ -23317,7 +24442,7 @@ export class ObjectStackProtocolImplementation implements
             // BATCH_ABORTED so the caller sees the all-or-nothing semantics
             // instead of inferring them from publishedCount 0.
             const causal = e?.__batchItem as
-                { type: string; name: string; organizationId?: string | null } | undefined;
+                { type: string; name: string; organizationId?: string | null; member?: string } | undefined;
             // [#8333 · P6] `failed[].error` is RESPONSE DATA, not a message, so
             // no HTTP boundary's withhold reaches it. Measured on `origin/main`
             // by failing the `sys_metadata` write under the promote: the batch
@@ -23432,7 +24557,7 @@ export class ObjectStackProtocolImplementation implements
             // for a failure nobody can attribute would put a fictional item in
             // a compliance ledger. `console.warn` above stays the record there.
             const failedOut = ordered.map((d) =>
-                causal && d.type === causal.type && d.name === causal.name
+                causal && commitPlanKey(d) === commitPlanKey(causal)
                     ? {
                         type: d.type, name: d.name,
                         error: clientFacingFailureText(e, 'publish failed'),
@@ -23719,7 +24844,13 @@ export class ObjectStackProtocolImplementation implements
      * repository (ADR-0131 D6).
      */
     private async discardDraftInItsScope(
-        draft: { type: string; name: string },
+        /**
+         * [#22877] `member` — the draft's bundle member, as `listDrafts`
+         * surfaced it: the discard removes THAT member's draft. Without it the
+         * canonical member's was addressed for every draft of the name, so a
+         * second locale's draft answered "no pending draft" and stayed.
+         */
+        draft: { type: string; name: string; member?: string },
         actor: string | undefined,
     ): Promise<void> {
         await this.deleteMetaItem({
@@ -23727,6 +24858,7 @@ export class ObjectStackProtocolImplementation implements
             name: draft.name,
             state: 'draft',
             ...(actor ? { actor } : {}),
+            ...(draft.member !== undefined ? { member: draft.member } : {}),
         });
     }
 
@@ -24057,6 +25189,11 @@ export class ObjectStackProtocolImplementation implements
         // registry that lacks that method, or a throw nothing asked ahead of
         // time: it is logged, not fatal, because the durable row is already
         // gone and the next boot is clean either way.
+        //
+        // [ADR-0090 D5] What the package declared is captured first: the
+        // withdrawal releases its names, and the cleanups below revoke the
+        // grants that name them.
+        const declared = captureUninstallDeclared((this.engine as any)?.registry, request.packageId, rows);
         try {
             (this.engine as any)?.registry?.uninstallPackage?.(request.packageId);
         } catch (e) {
@@ -24073,7 +25210,7 @@ export class ObjectStackProtocolImplementation implements
         // a security condition) is visible to the caller, never silent.
         // [#21490] Through the registry's one runner, which install-local's
         // uninstall door calls too.
-        const cleanups = await this.runUninstallCleanups(request);
+        const cleanups = await this.runUninstallCleanups({ ...request, ...(declared ? { declared } : {}) });
 
         return {
             success: failed.length === 0 && deleted.length > 0,
@@ -24474,8 +25611,14 @@ export class ObjectStackProtocolImplementation implements
      * the environment ledger, through {@link saveMetaItem} — the same save
      * door a Studio edit takes — so every copied item is environment metadata
      * from its first byte: owned by the base, `organization_id` NULL, served
-     * `_provenance: 'org'`, editable by the next save, and followed by no
-     * upgrade. The managed mode is the package install; this verb is what that
+     * `_provenance: 'org'`, edited by the next save, and followed by no
+     * upgrade. The package's protection lock is not copied, in either
+     * spelling — the `_lock` envelope (`_lock`, `_lockReason`, `_lockSource`,
+     * `_lockDocsUrl`) or, on a type that declares it, the `protection` block —
+     * and the answer's `strippedLocks` names each lock dropped with the
+     * package's reason (ADR-0010 §3.3 and Phase 4.3; the ruling on the D6 lock
+     * fork, record 6119681934 — `stripUnmanagedImportLock`).
+     * The managed mode is the package install; this verb is what that
      * install's manifest service is to it, and no more (see
      * `package-unmanaged-install.ts` for what is copied, what is refused, and
      * what is left to the door).
@@ -24547,6 +25690,9 @@ export class ObjectStackProtocolImplementation implements
             ...(declared.data.targetName !== undefined ? { targetName: declared.data.targetName } : {}),
             // The save door's own predicate — registry-only, the hatch unread.
             isRuntimeCreatable: (type) => ObjectStackProtocolImplementation.isRuntimeCreateAllowed(type),
+            // The save door's own schema, asked which types declare the
+            // `protection` block the copy strips (ADR-0010 Phase 4.3).
+            protectionDeclarationOf: (type) => overlaySchemaDeclaredKey(type, 'protection'),
             loadOrderOf: (type) =>
                 DEFAULT_METADATA_TYPE_REGISTRY.find((entry) => entry.type === type)?.loadOrder ?? Number.MAX_SAFE_INTEGER,
         });
@@ -24662,6 +25808,9 @@ export class ObjectStackProtocolImplementation implements
             namespace,
             copiedCount: copied.length,
             copied,
+            // Planned before the base existed; every item was written, so every
+            // lock listed was dropped from a copy that now exists.
+            strippedLocks: plan.strippedLocks,
         };
     }
 
@@ -24960,7 +26109,7 @@ export class ObjectStackProtocolImplementation implements
         actor?: string;
         aiModel?: string;
         parentCommitId?: string;
-        items: Array<{ type: string; name: string; existedBefore: boolean; prevVersion: number | null }>;
+        items: CommitPlanItem[];
         eventSeqStart?: number;
         eventSeqEnd?: number;
     }): Promise<{ commitId: string } | null> {
@@ -25041,8 +26190,8 @@ export class ObjectStackProtocolImplementation implements
 
     private parseCommitItems(
         raw: unknown,
-    ): Array<{ type: string; name: string; existedBefore: boolean; prevVersion: number | null }> {
-        if (Array.isArray(raw)) return raw as Array<{ type: string; name: string; existedBefore: boolean; prevVersion: number | null }>;
+    ): CommitPlanItem[] {
+        if (Array.isArray(raw)) return raw as CommitPlanItem[];
         if (typeof raw === 'string') {
             try {
                 const p = JSON.parse(raw);
@@ -25099,7 +26248,12 @@ export class ObjectStackProtocolImplementation implements
         aiModel?: string;
         parentCommitId?: string;
         itemCount: number;
-        items: Array<{ type: string; name: string; existedBefore: boolean; prevVersion: number | null }>;
+        /**
+         * [#23073] `member` — the bundle member the item is (`'zh-CN'`, the
+         * canonical `'en-US'`), as the stored revert plan records it; absent
+         * for a type with no members.
+         */
+        items: Array<{ type: string; name: string; member?: string; existedBefore: boolean; prevVersion: number | null }>;
         createdAt?: string;
     }>> {
         try {
@@ -25129,7 +26283,14 @@ export class ObjectStackProtocolImplementation implements
                 ...(r.ai_model ? { aiModel: r.ai_model } : {}),
                 ...(r.parent_commit_id ? { parentCommitId: r.parent_commit_id } : {}),
                 itemCount: typeof r.item_count === 'number' ? r.item_count : 0,
-                items: this.parseCommitItems(r.items),
+                // [#23073] The declared item (`ListPackageCommitsResponseSchema`),
+                // with the plan item's stored member — the one `revertCommit`
+                // acts on — on every item of a bundled type: absent there means
+                // the canonical member, which is spelled out here.
+                items: this.parseCommitItems(r.items).map(({ member: stored, ...item }) => {
+                    const member = bundleMemberDiscriminator(item.type, stored);
+                    return member === undefined ? item : { ...item, member };
+                }),
                 // [#14038] Canonicalise the ONE driver materialisation this
                 // column is measured to produce (a valid JS `Date`, on
                 // Postgres/MySQL); every other shape — including an
@@ -25231,6 +26392,9 @@ export class ObjectStackProtocolImplementation implements
         const actor = request.actor ?? null;
         const reverted: Array<{ type: string; name: string; action: 'removed' | 'restored' }> = [];
         const failed: Array<{ type: string; name: string; error: string; code?: string }> = [];
+        // [#22877] The members of what `reverted` reports, in its order, for
+        // the revert's own plan below; the response keeps its declared keys.
+        const revertedMembers: Array<string | undefined> = [];
 
         // Reverse apply order so artifacts that depend on others (e.g. a view on
         // a new object) are removed before the thing they reference.
@@ -25363,8 +26527,13 @@ export class ObjectStackProtocolImplementation implements
             const itemOrgId = null;
             const repo = this.getOverlayRepo();
             const ref = { type: it.type, name: it.name, org: itemOrgId ?? 'env' } as unknown as Parameters<typeof repo.get>[0];
+            // [#22877] The plan item's bundle member: every row read, write
+            // and heal below addresses it, so reverting a commit that changed
+            // one locale of a template leaves the other locale's row alone.
+            // Absent (the canonical member) on every other item, as before.
+            const member = it.member;
             try {
-                const current = await repo.get(ref, { state: 'active' });
+                const current = await repo.get(ref, { state: 'active', ...memberOption(member) });
                 if (!it.existedBefore) {
                     // Created by this commit → soft-remove (metadata only; table stays).
                     //
@@ -25407,6 +26576,7 @@ export class ObjectStackProtocolImplementation implements
                             source: 'protocol.revertCommit',
                             intent,
                             state: 'active',
+                            ...memberOption(member),
                         });
                     }
                     // [#6621] The registry must stop serving what the revert
@@ -25464,7 +26634,7 @@ export class ObjectStackProtocolImplementation implements
                     // #6602 gate this parameter carries asks "is this row
                     // env-wide?", and an env-wide row reverted by an org-scoped
                     // caller skipped the heal entirely while answering success.
-                    await this.restoreArtifactRegistryView(it.type, it.name, itemOrgId);
+                    await this.restoreArtifactRegistryView(it.type, it.name, itemOrgId, member);
                     // [#14179] …and announce it on the ONE choke point,
                     // {@link emitMetadataMutation}, exactly as the sibling
                     // delete caller {@link deleteMetaItem} does after its own
@@ -25496,9 +26666,11 @@ export class ObjectStackProtocolImplementation implements
                             name: it.name,
                             state: 'deleted',
                             organizationId: itemOrgId,
+                            ...mutationEventMember(it.type, member),
                         });
                     }
                     reverted.push({ type: it.type, name: it.name, action: 'removed' });
+                    revertedMembers.push(member);
                 } else if (restoreToVersion !== null) {
                     // Edited an existing artifact → restore the pre-commit body.
                     //
@@ -25543,7 +26715,7 @@ export class ObjectStackProtocolImplementation implements
                     // fallible query downstream of a write that already succeeded —
                     // the shape that ends in a `catch {}` swallowing a real outage
                     // (#4867). Per ITEM, because a batch mixes bindings.
-                    const restorePackageId = await this.resolveOverlayPackageBinding(it.type, it.name, itemOrgId);
+                    const restorePackageId = await this.resolveOverlayPackageBinding(it.type, it.name, itemOrgId, member);
                     const restored = await repo.restoreVersion(ref, restoreToVersion, {
                         actor,
                         source: 'protocol.revertCommit',
@@ -25555,6 +26727,7 @@ export class ObjectStackProtocolImplementation implements
                         // the SINGULAR type, the spelling the write-through
                         // registers under. See {@link restoredBodyWriter}.
                         deriveRestoredBody: this.restoredBodyWriter(PLURAL_TO_SINGULAR[it.type] ?? it.type, it.name),
+                        ...memberOption(member),
                     });
                     // [#6621] #4521 — a revert is a live write like any other: the
                     // restored body must be the one the runtime dispatches on
@@ -25576,7 +26749,7 @@ export class ObjectStackProtocolImplementation implements
                     // the repo-facing reads above keep `it.type`, which is the
                     // spelling the row is stored with. Two different keys, on
                     // purpose.
-                    this.applyRegistryWriteThrough({
+                    await this.applyRegistryWriteThrough({
                         type: PLURAL_TO_SINGULAR[it.type] ?? it.type,
                         name: it.name,
                         item: restored.item.body,
@@ -25614,8 +26787,10 @@ export class ObjectStackProtocolImplementation implements
                         name: it.name,
                         state: 'active',
                         organizationId: itemOrgId,
+                        ...mutationEventMember(it.type, member),
                     });
                     reverted.push({ type: it.type, name: it.name, action: 'restored' });
+                    revertedMembers.push(member);
                 }
             } catch (e: any) {
                 // [#8333 · P11] `failed[].error` is revert-response DATA.
@@ -25660,11 +26835,12 @@ export class ObjectStackProtocolImplementation implements
             message: `Revert: ${row.message ?? request.commitId}`,
             ...(request.actor ? { actor: request.actor } : {}),
             parentCommitId: request.commitId,
-            items: reverted.map((r) => ({
+            items: reverted.map((r, index) => ({
                 type: r.type,
                 name: r.name,
                 existedBefore: r.action === 'restored',
                 prevVersion: null,
+                ...(revertedMembers[index] !== undefined ? { member: revertedMembers[index] } : {}),
             })),
         });
 
@@ -25770,6 +26946,12 @@ export class ObjectStackProtocolImplementation implements
         toVersion: number;
         actor?: string;
         message?: string;
+        /**
+         * [#22877] The bundle member to revert — {@link resolveBundleMemberSelector};
+         * omitted, the canonical one. The bundle shares one lineage counter, so
+         * a version of ANOTHER member answers 404 `VERSION_NOT_FOUND`.
+         */
+        member?: string;
     }): Promise<{
         success: boolean;
         version: string;
@@ -25836,6 +27018,9 @@ export class ObjectStackProtocolImplementation implements
         // deleted because a reader arriving here still needs to know which of
         // these effects belong to THIS boundary and which moved to the producer.
         request = canonicalizeMetaRequestType(request);
+        // [#22877] Ruling 6116165299 (Q2 i): the revert addresses ONE member
+        // of a bundled type — the selector's, else the canonical one.
+        const member = resolveBundleMemberSelector(request.type, request.member);
         // Canonical by construction from the fold above. NOT a second fold: the
         // `PLURAL_TO_SINGULAR` lookup that used to stand here is exactly what
         // #7894 removed from this boundary. The binding survives under its own
@@ -25889,7 +27074,7 @@ export class ObjectStackProtocolImplementation implements
         // it afterwards would put a fallible query downstream of a write that
         // already succeeded — the shape that ends in a `catch {}` swallowing a
         // real outage (#4867).
-        const rollbackPackageId = await this.resolveOverlayPackageBinding(singularType, request.name, orgId);
+        const rollbackPackageId = await this.resolveOverlayPackageBinding(singularType, request.name, orgId, member);
         try {
             const result = await repo.restoreVersion(ref, request.toVersion, {
                 // #4556 — NULL, not 'system', for an actor-less rollback.
@@ -25902,6 +27087,8 @@ export class ObjectStackProtocolImplementation implements
                 // credential move keeps the write-only channel's current
                 // credential and stores none. See {@link restoredBodyWriter}.
                 deriveRestoredBody: this.restoredBodyWriter(singularType, request.name),
+                // [#22877] The member whose lineage `toVersion` is taken from.
+                ...memberOption(member),
             });
             // #4521 — a rollback is a live write like any other: the restored
             // body must be the one the runtime dispatches on immediately, not
@@ -25912,7 +27099,7 @@ export class ObjectStackProtocolImplementation implements
             // `already owned by package "app.<slug>"` into the best-effort
             // `console.warn` — a rollback that reported success while the
             // registry kept serving the body it was supposed to revert.
-            this.applyRegistryWriteThrough({
+            await this.applyRegistryWriteThrough({
                 type: singularType,
                 name: request.name,
                 item: result.item.body,
@@ -25967,6 +27154,7 @@ export class ObjectStackProtocolImplementation implements
                 name: request.name,
                 state: 'active',
                 organizationId: orgId,
+                ...mutationEventMember(singularType, member),
             });
             return {
                 success: true,
@@ -26352,6 +27540,8 @@ export class ObjectStackProtocolImplementation implements
          * object" flow so a publish-to-preview leaves no orphan table.
          */
         dropStorage?: boolean;
+        /** [#22877] The bundle member to reset — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
+        member?: string;
     }): Promise<{
         success: boolean;
         message?: string;
@@ -26371,6 +27561,10 @@ export class ObjectStackProtocolImplementation implements
         // spelling while the repository deletes under the singular — so a
         // DELETE could remove the row and leave the shadow it was meant to lift.
         request = canonicalizeMetaRequestType(request);
+        // [#22877] Ruling 6116165299 (Q2 i): a reset by name removes ONE
+        // member's row of a bundled type — the selector's, else the canonical
+        // one — and heals the registry for that member alone.
+        const member = resolveBundleMemberSelector(request.type, request.member);
         // [#21899] The removal verdict on an ORIGIN-GATED code-defined item
         // (ADR-0126 §3: `datasource` — code-defined read-only, runtime-created
         // free), held back until the row probe below. See
@@ -26526,7 +27720,7 @@ export class ObjectStackProtocolImplementation implements
                 const targetState: 'active' | 'draft' = request.state === 'draft' ? 'draft' : 'active';
                 // Probe first — "no overlay exists" is a success/no-op, not
                 // a conflict. The repo would otherwise throw ConflictError.
-                const current = await repo.get(ref, { state: targetState });
+                const current = await repo.get(ref, { state: targetState, ...memberOption(member) });
                 // [#21899] An origin-gated code-defined item with NO stored row:
                 // the delete would remove nothing, and the item itself is not
                 // removable at runtime — refused with the package door's own
@@ -26549,7 +27743,7 @@ export class ObjectStackProtocolImplementation implements
                     // `sys_metadata`. A gate applied only to the delete-ful
                     // branch below would have left this door standing open.
                     if (targetState === 'active') {
-                        await this.restoreArtifactRegistryView(request.type, request.name, orgId);
+                        await this.restoreArtifactRegistryView(request.type, request.name, orgId, member);
                     }
                     return {
                         success: true,
@@ -26593,6 +27787,7 @@ export class ObjectStackProtocolImplementation implements
                         ? 'override-artifact'
                         : 'runtime-only',
                     state: targetState,
+                    ...memberOption(member),
                 });
 
                 // Heal the registry: drop the overlay's runtime shadow so the
@@ -26610,7 +27805,7 @@ export class ObjectStackProtocolImplementation implements
                 // ENV-WIDE row, i.e. one tenant's "reset to default" blanked
                 // the item for every other tenant and the control plane.
                 if (targetState === 'active') {
-                    await this.restoreArtifactRegistryView(request.type, request.name, orgId);
+                    await this.restoreArtifactRegistryView(request.type, request.name, orgId, member);
                 }
 
                 // Storage teardown (opt-in): drop the now-orphaned physical table
@@ -26646,6 +27841,7 @@ export class ObjectStackProtocolImplementation implements
                     name: request.name,
                     state: 'deleted',
                     organizationId: orgId,
+                    ...mutationEventMember(singularTypeForRepo, member),
                 });
                 return {
                     success: true,
@@ -27105,7 +28301,7 @@ export class ObjectStackProtocolImplementation implements
                         // env-wide rows") stops depending on a query filter
                         // staying correct, because the hydrator refuses an
                         // org-scoped row whatever selected it.
-                        const hydrated = this.hydrateOverlayIntoRegistry(
+                        const hydrated = await this.hydrateOverlayIntoRegistry(
                             normalizedType,
                             data,
                             {

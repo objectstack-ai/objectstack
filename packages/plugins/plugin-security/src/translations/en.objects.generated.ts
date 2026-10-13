@@ -226,11 +226,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       package_id: {
         label: "Owning Package",
-        help: "Package that ships this permission set (absent = environment-authored). Populated by bootstrapDeclaredPermissions; makes package uninstall/upgrade well-defined."
+        help: "Package that ships this permission set (absent = environment-authored). Set on rows an earlier release seeded for a package's set; no current writer sets it."
       },
       managed_by: {
         label: "Managed By",
-        help: "Record provenance, on the one platform / package / admin vocabulary that capabilities, permission sets and positions all share: 'platform' = shipped by the platform; 'package' = versioned package metadata (re-seeded on upgrade, read-mostly for admins); 'admin' = created/owned in this environment by an administrator (live-edited, never touched by package seeding). Legacy rows may carry 'user' (== admin).",
+        help: "Record provenance, on the one platform / package / admin vocabulary that capabilities, permission sets and positions all share: 'platform' = shipped by the platform; 'package' = a row an earlier release seeded for a package's set (read-mostly for admins); 'admin' = created/owned in this environment by an administrator (live-edited). Legacy rows may carry 'user' (== admin).",
         options: {
           platform: "Platform",
           package: "Package",
@@ -240,19 +240,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       customized: {
         label: "Customized",
         help: "This packaged permission set has an environment customization overlay (ADR-0094). Reset it (delete through the data door) to return to the shipped baseline."
-      },
-      drift_status: {
-        label: "Declaration Drift",
-        help: "Cause of a declared≠enforced mismatch for this package-declared set. 'overlay_shadow' = a Studio-authored environment overlay is shadowing the packaged declaration. 'provenance_skip' = this row predates package provenance tracking, so boot sync treats it as environment-authored and never reconciles it with the package (no automated fix — file an issue / see the ops runbook for the manual adoption recipe). Absent = enforced grants match the shipped artifact, or this set is not currently package-declared.",
-        options: {
-          overlay_shadow: "Overlay shadow",
-          provenance_skip: "Provenance skip",
-          other: "Drift (other)"
-        }
-      },
-      drift_detail: {
-        label: "Drift Detail",
-        help: "Human-readable detail for `drift_status` — names the grant-count mismatch and its cause."
       },
       id: {
         label: "Permission Set ID"
@@ -273,9 +260,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       all_permsets: {
         label: "All"
-      },
-      drifted: {
-        label: "Needs Attention"
       }
     },
     _actions: {

@@ -21,6 +21,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { getSharedShowcase } from './shared-showcase.js';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const SYS = { isSystem: true } as const;
 
@@ -48,8 +49,8 @@ describe('showcase: ADR-0090 D10 agent intersection (served engine)', () => {
 
     // The agent holds the auditor set (viewAllRecords on the private note); the
     // delegator holds NOTHING beyond the additive member_default baseline.
-    const auditor = await ql.findOne('sys_permission_set', { where: { name: 'showcase_auditor' }, context: SYS });
-    expect(auditor?.id, 'showcase_auditor seeded').toBeTruthy();
+    const auditor = await catalogPermissionSet(ql, 'showcase_auditor');
+    expect(auditor, 'showcase_auditor served by the security catalog').toBeTruthy();
     await ql.insert('sys_user_permission_set', { user_id: agentId, permission_set: auditor.name }, { context: SYS });
 
     // A private note owned by int-owner (NOT the delegator) — the VAMA probe.

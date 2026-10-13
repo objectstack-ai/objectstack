@@ -57,6 +57,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { assertArmed, armedWhen } from './armed.js';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const OBJ = 'atp_item';
 const APPR = 'atp_appr';
@@ -267,8 +268,7 @@ describe('[#21154] a query over activity text or the approval snapshot, by a rea
       const userId = await idOf('sys_user', { email });
       const sets = who === 'writer' ? READERS.control : READERS[who as keyof typeof READERS];
       for (const name of sets) {
-        const setId = await idOf('sys_permission_set', { name });
-        expect(setId, `fixture permission set ${name} seeded`).toBeTruthy();
+        expect(await catalogPermissionSet(ql, name), `fixture permission set ${name} served by the security catalog`).toBeTruthy();
         await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: name }, SYS);
       }
       if (who === 'control') {
@@ -278,7 +278,6 @@ describe('[#21154] a query over activity text or the approval snapshot, by a rea
         // position expansion does not read, and an all-literal slate would then
         // open on the organization's administrators instead (#22824).
         const membership = await ql.findOne('sys_member', { where: { user_id: userId }, context: { isSystem: true } });
-        await ql.insert('sys_position', { id: 'pos_atp', name: POSITION, label: 'Reviewer', active: true }, SYS);
         await ql.insert('sys_user_position', {
           id: 'hold_atp', user_id: userId, position: POSITION, organization_id: membership?.organization_id,
         }, SYS);

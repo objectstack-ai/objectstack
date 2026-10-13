@@ -100,6 +100,10 @@ import {
 // [#22611] The audience gate's ONE describe, shared with `DashboardSchema`
 // and declared outside the `ui` barrel.
 import { AUDIENCE_REQUIRED_PERMISSIONS_DESCRIPTION } from './audience-required-permissions';
+// [#23004] The url target grammar of the console's action runner, stated once
+// and reached by relative import only: an empty state's `link.url` is judged by
+// it, never by a second predicate.
+import { navigationTargetRefusal } from './navigation-target';
 
 export { HttpMethodSubsetSchema, HttpRequestSchema };
 
@@ -156,11 +160,58 @@ export type { HttpRequest } from '../shared/http.zod';
 export type { HttpMethodSubset } from '../shared/http.zod';
 
 /**
+ * Prescription for the retired view-level `api` data source — the
+ * `provider: 'api'` arm of {@link ViewDataSchema} (ADR-0049 enforce-or-remove;
+ * maintainer ruling 2026-10-12, letter C: retire, not align).
+ *
+ * The arm carried `read` / `write` request blocks of any `url` and any
+ * `headers`, so a credential or a cross-origin call written into a view was
+ * stored as metadata, served to every client that read the view and sent by
+ * the console as written. The page element's API binding
+ * (`ElementApiDataSourceSchema`, `ui/page.zod.ts`) is the governed door for a
+ * metadata-declared API call — same-origin, credential-free, read with the
+ * console's own signed-in fetch — and one operation with two implementations
+ * that behave differently keeps the governed one: the view-level source is
+ * re-homed on the page element and removed, not aligned.
+ *
+ * Like the retired bare-string `sort` clause
+ * ({@link LIST_VIEW_SORT_STRING_RETIRED}) this retires a VALUE of the
+ * discriminator, not a key: `data` survives, one arm lighter, so there is no
+ * `retiredKey()` tombstone to hang the prescription on. The union's own
+ * `error` map carries it, keyed on `input.provider === 'api'`, so only the
+ * spelling that used to be legal gets the "was removed" message — every other
+ * invalid discriminator keeps zod's default report, which lists the live arms.
+ *
+ * No D2 conversion, deliberately: the replacement lives on a different surface
+ * (a page component's `dataSource`), and the only mechanical edit a conversion
+ * could make — deleting `data` so the view falls back to its object — would
+ * silently change what the view shows. An author or a stored row still carrying
+ * the arm is refused at parse with this prescription; the D3 semantic entry
+ * `view-data-api-provider-retired` carries the judgement an upgrader owes.
+ */
+const VIEW_DATA_API_PROVIDER_RETIRED =
+  "`view.data.provider: 'api'` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — "
+  + 'a view-level API source took any `url` and any `headers`, so a credential or a cross-origin call '
+  + 'written there was stored with the view, served to every client that read it and sent by the '
+  + "console as written; a metadata-declared API call now has one door, the page element's binding, "
+  + 'which is same-origin and credential-free. '
+  + "Bind the view to its object — `data: { provider: 'object', object: '<object_name>' }` — or to "
+  + "static rows — `data: { provider: 'value', items: [...] }` — and move the API read onto a page "
+  + "component: `dataSource: { provider: 'api', read: { url: '/api/...' } }` (with an optional `path` "
+  + 'into the response) under a page\'s `regions[].components[]`, which the console reads with its '
+  + 'own signed-in fetch.';
+
+/**
  * View Data Source Configuration
  * Supports three modes:
  * 1. 'object': Standard Protocol - Auto-connects to ObjectStack Metadata and Data APIs
- * 2. 'api': Custom API - Explicitly provided API URLs
- * 3. 'value': Static Data - Hardcoded data array
+ * 2. 'value': Static Data - Hardcoded data array
+ * 3. 'schema': Schema-bound - a standalone form shaped by a JSON Schema
+ *
+ * The former fourth mode, `'api'` (custom API URLs in `read` / `write`
+ * request blocks), is RETIRED — refused by name with
+ * {@link VIEW_DATA_API_PROVIDER_RETIRED}. A metadata-declared API call is a
+ * page element's `dataSource` binding (`ui/page.zod.ts`), never a view's.
  */
 export const ViewDataSchema = lazySchema(() => z.discriminatedUnion('provider', [
   strictObject({
@@ -179,23 +230,9 @@ export const ViewDataSchema = lazySchema(() => z.discriminatedUnion('provider', 
     provider: z.literal('object'),
     object: z.string().describe('Target object name'),
   }),
-  strictObject({
-    surface: 'this `api` data source',
-    history: VIEW_HISTORY,
-    // The HTTP verbs are the request BLOCKS' business (`read`/`write` each hold
-    // an `HttpRequestSchema`), so an author who put the whole request inline is
-    // pointed at the block that owns it rather than at a near-miss key.
-    guidance: {
-      url: 'Set the URL inside the request block: `read: { url, method }` (or `write: { … }`) — the data source itself declares only `read` / `write`.',
-      method: 'Set the method inside the request block: `read: { url, method }` (or `write: { … }`).',
-      fetch: 'Use `read` for the fetch request and `write` for the submit request.',
-      submit: 'Use `write` for the submit request (and `read` for the fetch request).',
-    },
-  }, {
-    provider: z.literal('api'),
-    read: HttpRequestSchema.optional().describe('Configuration for fetching data'),
-    write: HttpRequestSchema.optional().describe('Configuration for submitting data (for forms/editable tables)'),
-  }),
+  // The `api` arm — `{ provider: 'api', read?: HttpRequest, write?: HttpRequest }`
+  // — was REMOVED here; see `VIEW_DATA_API_PROVIDER_RETIRED` above for what
+  // replaces it and the union's `error` map below for how an author meets it.
   strictObject({
     surface: 'this `value` data source',
     history: VIEW_HISTORY,
@@ -226,7 +263,20 @@ export const ViewDataSchema = lazySchema(() => z.discriminatedUnion('provider', 
     /** Optional inline JSON Schema; when omitted the runtime resolves schemaId from the server. */
     schema: z.record(z.string(), z.unknown()).optional().describe('Inline JSON Schema (Draft 2020-12). Optional when schemaId is resolvable.'),
   }),
-]));
+], {
+  // The retired `api` arm's prescription, raised at `provider` for exactly the
+  // spelling that used to be legal (an `invalid_union` issue, path
+  // `[..., 'provider']`). `hasOwnProperty`-free on purpose: the lookup is a
+  // literal comparison, so an authored `provider: 'constructor'` meets zod's
+  // own report like every other unknown value.
+  error: (issue) => {
+    const input = issue.input;
+    return typeof input === 'object' && input !== null
+      && (input as { provider?: unknown }).provider === 'api'
+      ? VIEW_DATA_API_PROVIDER_RETIRED
+      : undefined;
+  },
+}));
 
 /**
  * Canonical filter operators for view filter rules.
@@ -1742,14 +1792,79 @@ export const AddRecordConfigSchema = lazySchema(() => strictObject({
  * entry point is a list view's own `addRecord` block, and the `object-grid`
  * page block declares no authorable one at all, so a sentence pointing at
  * "this list view" would be a wrong answer on the grid.
+ *
+ * [#23004] Restated when the empty state gained its one `link`: an author
+ * reaching for `action` or `button` is pointed at that link, the one next step
+ * an empty state can name, and told that it opens a page or an address and runs
+ * nothing. The add-record half is unchanged.
  */
 const EMPTY_STATE_ACTION_GUIDANCE =
-  'The empty state renders text only — a `title`, a `message` and an `icon`. An "add record" '
-  + 'entry point is not part of it: on a list view, configure it in that view\'s own `addRecord` block.';
+  'An empty state names its one next step with `link` — `{ label, url }`, a link the user follows to an '
+  + 'in-app page or to an `http(s)://` or `mailto:` address, such as a how-to page. It runs no action, flow '
+  + 'or script. An "add record" entry point is not part of it: on a list view, configure it in that '
+  + 'view\'s own `addRecord` block.';
+
+/** [#23004] The answer to a link target written flat on the empty state rather than inside `link`. */
+const EMPTY_STATE_FLAT_LINK_GUIDANCE =
+  'An empty state\'s link is one block that holds its text and its target together: '
+  + '`link: { label, url }`.';
+
+/** [#23004] The subject every refusal of an empty-state link's target opens with. */
+const EMPTY_STATE_LINK_URL_SUBJECT = 'An empty-state link\'s `url`';
+
+/**
+ * [#23004] The one link an empty state carries — `{ label, url }`, both
+ * required, and nothing else: the "one plain sentence and one action" an empty
+ * page owes, as the consumer asked for it (a docs page, a how-to), and a link
+ * only. An empty state invokes no action, flow or script.
+ *
+ * `url` is judged by {@link navigationTargetRefusal} — the ONE grammar for a
+ * target the console's action runner opens, the same function a
+ * `type: 'url'` action's `target` is judged by — so the door admits exactly
+ * what the runner opens at the click. ⛔ No second URL predicate here: a change
+ * to the admitted set is a change to `navigation-target.ts` and the runner
+ * together. An empty `url` is answered by `.min(1)` alone, which also reaches
+ * the published JSON Schema as `minLength`; the grammar itself is a refinement,
+ * dropped from the published file and recorded in
+ * `dropped-refinements.baseline.json`.
+ *
+ * Module-private: it is reached only as `EmptyStateSchema.link`, so it adds no
+ * export of its own.
+ */
+const emptyStateLinkSchema = () => strictObject({
+  surface: 'this empty-state link',
+  history: 'A key an empty-state link does not declare would otherwise be dropped in silence, and the '
+    + 'link would be drawn without it.',
+  // `href`/`to`/`target` are the target's names in HTML, in the inline action
+  // and in the registered action; `text`/`title` the text's names elsewhere.
+  aliases: { href: 'url', to: 'url', target: 'url', text: 'label', title: 'label' },
+}, {
+  label: I18nLabelSchema
+    .describe('Text of the link — a string, or an inline locale map resolved against the display locale'),
+  url: z.string()
+    .min(1, {
+      error: `${EMPTY_STATE_LINK_URL_SUBJECT} is empty. Write the in-app path or the address the link `
+        + 'opens, such as `/docs/connect` or `https://example.com/how-to`.',
+    })
+    .superRefine((url, ctx) => {
+      // The empty string is `.min(1)`'s to name, once.
+      if (url === '') return;
+      const refusal = navigationTargetRefusal(url, EMPTY_STATE_LINK_URL_SUBJECT);
+      if (refusal !== undefined) ctx.addIssue({ code: 'custom', message: refusal });
+    })
+    .describe(
+      'Where the link goes — a target a `type: \'url\'` action opens: an in-app path that starts with `/` '
+      + 'or `./` (such as `/docs/connect`), or an address that opens with `http://`, `https://` or '
+      + '`mailto:`. Any other scheme, a protocol-relative `//host`, a bare relative path and a tab, line '
+      + 'feed or carriage return are refused at parse; a template that opens with `${…}`, such as '
+      + '`${ctx.origin}/docs`, is judged when it is clicked, after interpolation.',
+    ),
+});
 
 /**
  * Empty State — what a record list draws in place of rows when it has none to
- * show: a heading, a line of text and an icon.
+ * show: a heading, a line of text, an icon and, optionally, one link to
+ * follow.
  *
  * [#20694] ONE declaration for every door that carries it, taken BY REFERENCE —
  * the list view's `emptyState` below and the `object-grid` page block's
@@ -1765,6 +1880,20 @@ const EMPTY_STATE_ACTION_GUIDANCE =
  * the same success, parsed data, issue codes and paths before and after. The
  * one deliberate text change is {@link EMPTY_STATE_ACTION_GUIDANCE}, which now
  * reads true on both doors.
+ *
+ * [#23004] It gained one optional `link` — `{ label, url }`, see
+ * {@link emptyStateLinkSchema} — for the maintainer's "one plain sentence and
+ * one action" on an empty page, contract first (objectstack-ai/cloud#2776,
+ * route letter A on objectstack-ai/cloud#2803). Taken by reference, the link
+ * widens EVERY door at once: the list view's `emptyState` and the doors it
+ * reaches, the `object-grid` page block's, and a list page's own
+ * `interfaceConfig.emptyState` (`page.zod.ts`, #23005). No renderer draws it
+ * yet — measured at objectui `7af0ab3`, `ListView` hands `ListEmptyState` the
+ * `title`, `message` and `icon` and nothing else (`ListView.tsx:5688-5696`),
+ * `ObjectGrid` reads the same three (`ObjectGrid.tsx:6647-6655`), and
+ * `InterfaceListPage` passes a source view's `emptyState` only
+ * (`InterfaceListPage.tsx:503`) — so its describe carries the planned marker;
+ * the renderer half is objectstack-ai/objectui#12270.
  */
 export const EmptyStateSchema = lazySchema(() => strictObject({
   surface: 'this empty state',
@@ -1772,17 +1901,27 @@ export const EmptyStateSchema = lazySchema(() => strictObject({
   // `description`/`text`/`subtitle` are the words the neighbouring empty-state
   // vocabularies use for the secondary line; here it is `message`.
   aliases: { description: 'message', text: 'message', subtitle: 'message', heading: 'title', label: 'title', image: 'icon' },
-  // An author wiring a CTA into the empty state is reaching for the add-record
-  // entry point, which is a separate block where one exists at all.
+  // An author wiring a CTA into the empty state is pointed at its one link,
+  // and at the add-record entry point, which is a separate block where one
+  // exists at all. A target written flat is pointed into the `link` block.
   guidance: {
     action: EMPTY_STATE_ACTION_GUIDANCE,
     button: EMPTY_STATE_ACTION_GUIDANCE,
+    url: EMPTY_STATE_FLAT_LINK_GUIDANCE,
+    href: EMPTY_STATE_FLAT_LINK_GUIDANCE,
   },
 }, {
   title: I18nLabelSchema.optional().describe('Heading of the empty state'),
   message: I18nLabelSchema.optional().describe('Line of text below the heading'),
   icon: z.string().optional()
     .describe('Icon name drawn above the heading; a name that resolves to no icon draws the default empty-state glyph'),
+  link: emptyStateLinkSchema().optional()
+    .describe(
+      '[PLANNED — not yet rendered] The one next step an empty list names: a link the user follows, '
+      + '`{ label, url }` — for example to the how-to page that explains what belongs here when nobody can '
+      + 'add a row. It opens a page or an address and runs no action. The console\'s empty-state renderers '
+      + 'are its planned readers; until they ship, the link parses and is not drawn.',
+    ),
 }));
 
 /**
@@ -2014,7 +2153,7 @@ export const GanttConfigSchema = lazySchema(() => strictObject({
   // optional; each describe says what the renderer does with the key.
   borderColorField: z.string().optional().describe('Field carrying a per-task alert stroke color — any CSS color or semantic palette name (red, orange, …): the bar keeps its fill and gains an outline plus halo in that color (e.g. red for overdue, orange for due-soon; typically a server-computed alert field). Empty or null means no stroke'),
   lockField: z.string().optional().describe('Field marking a row view-only (truthy means locked): a locked bar cannot be dragged or resized, its progress cannot be dragged, no dependency can be drawn from it and its inline-edit and edit/delete menu entries are hidden — clicking it (open drawer, jump) still works. Independent of the global readOnly; freezes individual levels while siblings stay editable'),
-  objectField: z.string().optional().describe("Field carrying the row's OWN object API name, for mixed-object trees (an api provider composing parent-object rows with child-object rows): the detail drawer and its full-page link follow each row's real object instead of the view's bound object. Empty or missing falls back to the bound object"),
+  objectField: z.string().optional().describe("Field carrying the row's OWN object API name, for mixed-object trees (a row set composing parent-object rows with child-object rows): the detail drawer and its full-page link follow each row's real object instead of the view's bound object. Empty or missing falls back to the bound object"),
   summaryExtent: z.enum(['children', 'self']).optional().describe("How a summary bar's span is computed. 'children' (renderer default) rolls the bar up from its children — min start, max end, duration-weighted progress — and ignores the record's own dates; 'self' renders the record's OWN start, end and progress and falls back to rollup only for records without dates (use it when the parent's schedule is authoritative, e.g. a shift plan whose work-order children are locked history)"),
   defaultCollapsedDepth: z.number().int().min(0).optional().describe('Auto-collapse tree nodes at or below this 0-indexed depth on first render (roots are depth 0): every node at that depth or deeper that has children starts folded; the user can still expand them. Omit to start fully expanded'),
   dependencyTypes: z.boolean().optional().describe('Whether the backing store persists dependency link TYPES (fs, ss, ff, sf); renderer default true. Set false when dependencies are bare predecessor ids: the link menu hides the type switcher (a switch would be silently reverted on refetch) and drag-created links are always finish-to-start'),
@@ -2230,16 +2369,23 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * `objectql.zod.ts` and `ObjectMap.tsx` are byte-identical, so
  * `ObjectMapConfigSchema` (`2523`, still closed with `.strict()`),
  * `LIST_VIEW_LOCAL_OVERRIDES` (`1506`, still without `map`) and the two
- * `getMapConfig` lines did not move. Each anchor quotes the line it was read at,
+ * `getMapConfig` lines did not move. RE-READ again at pin `7578323a5` on
+ * 2026-10-12: `ListView.tsx` (+34/-79: objectui#12217, objectui `f5b66bf97`)
+ * gained one import line above both of its anchors, so `resolveListMapConfig`
+ * `209` -> `210` and `FLAT_MAP_CONFIG_SPELLING` `95` -> `96`, each
+ * byte-identical; `ObjectView.tsx`, `objectql.zod.ts` and `ObjectMap.tsx` are
+ * byte-identical (`git diff --quiet`), so `case 'map':` (`2479`),
+ * `ObjectMapConfigSchema` (`2523`) and the two `getMapConfig` lines did not
+ * move. Each anchor quotes the line it was read at,
  * so the next pin bump reds instead of rotting
  * (`check:objectui-pin-citations`):
  *
  * - **The block this face feeds is FLATTENED, not forwarded.** `ListView`
- *   (`packages/plugin-list/src/ListView.tsx:209` first line
+ *   (`packages/plugin-list/src/ListView.tsx:210` first line
  *   `function resolveListMapConfig(schema: { map?: unknown; options?: { map?: unknown } }): Record<string, unknown> {`)
  *   and `ObjectView` (`packages/plugin-view/src/ObjectView.tsx:2479` first line
  *   `case 'map':`) copy it through a HAND-LISTED whitelist
- *   (`packages/plugin-list/src/ListView.tsx:95` first line
+ *   (`packages/plugin-list/src/ListView.tsx:96` first line
  *   `export const FLAT_MAP_CONFIG_SPELLING = {`) — ⚠️ re-read at the new pin:
  *   the whitelist was a key LIST named `FLAT_MAP_CONFIG_KEYS` carrying this
  *   block's keys MINUS `style`, and objectui#9950 made it a total map from
@@ -3429,7 +3575,20 @@ const FormFieldBaseSchema = lazySchema(() => {
    * inside the `53ded82bf7...87af769e9` range, so the widest-tier-only
    * under-span this block used to record (#17328: one cell of two at
    * 720px) no longer reproduces at the pin this repo builds against
-   * (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+   * (`.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+   * `7578323a5`, re-read there 2026-10-12:
+   * `autoLayout.ts`, `fields`' `field-type-alias.ts` and `form.tsx` are
+   * byte-identical to `9646e2ed2` (`git diff --quiet`), so `resolveColSpan`
+   * `:154`, `WIDE_FIELD_TYPES` `:58-69`, the `repeater` -> `field:grid` mapping,
+   * `spanLadderFor` `:275-302` and its one call site `:3329` held unmoved, and it
+   * still emits the ladder. At `9646e2ed2`, re-read there 2026-10-12:
+   * `autoLayout.ts`, `fields`' `field-type-alias.ts` and `form.tsx` are
+   * byte-identical to `088e0f705` (`git diff --quiet`), so `resolveColSpan`
+   * `:154`, `WIDE_FIELD_TYPES` `:58-69`, the `repeater` -> `field:grid` mapping,
+   * `spanLadderFor` `:275-302` and its one call site `:3329` held unmoved, and it
+   * still emits the ladder. At `088e0f705`, re-read there 2026-10-12:
    * `autoLayout.ts` and `fields`' `field-type-alias.ts` are byte-identical to
    * `e5311165a` (`git diff --quiet`), so `resolveColSpan` `:154`,
    * `WIDE_FIELD_TYPES` `:58-69` and the `repeater` -> `field:grid` mapping held
@@ -3552,7 +3711,7 @@ const FormFieldBaseSchema = lazySchema(() => {
    * had changed only in its registration's input list, objectui#9910's
    * `children` slot; at `62597c588` it was byte-identical to `87af769e9`).
    */
-  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `088e0f705520`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
+  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `1fb1ced36243`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
 
   /** Custom widget override — only needed when auto-inference is insufficient */
   widget: z.string().optional().describe('Custom widget/component name (overrides type-based inference)'),
@@ -4530,8 +4689,9 @@ export const FormViewSchema = lazySchema(() => strictObject({
    * re-verified the entry: `defineForm` (below) writes
    * `data: { provider: 'schema', schemaId }` onto EVERY metadata form, and
    * `metadata-protocol` serves it to the metadata-admin pipeline. The
-   * record-form provider values (`object`/`api`/`value`) may still be
-   * unread — that is a narrower value-subset audit, not a key removal.
+   * record-form provider values (`object`/`value`) may still be unread — that
+   * is a narrower value-subset audit, not a key removal. The former `api`
+   * value is retired on the union itself (`VIEW_DATA_API_PROVIDER_RETIRED`).
    */
   data: ViewDataSchema.optional().describe('Data source configuration (defaults to "object" provider)'),
 
@@ -5033,9 +5193,11 @@ export const ViewSchema = lazySchema(() => strictObject({
     formViews: z.record(z.string(), FormViewSchema).optional().describe('Additional named form views'),
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package
-   * authors declare lock policy here; the loader translates it
-   * into the private `_lock` envelope at registration time and
-   * strips this block before persistence. See
+   * authors declare lock policy here, in a code package's source;
+   * the loader translates it into the private `_lock` envelope at
+   * registration time and strips this block. The metadata API's
+   * save door does not translate it and refuses it (`400
+   * VALIDATION_ERROR`), so that door never stores it. See
    * `shared/protection.zod.ts`.
    */
   protection: ProtectionSchema.optional().describe(
@@ -5253,8 +5415,9 @@ function viewItemBaseShape() {
     owner: retiredKey(VIEW_ITEM_OWNER_RETIRED),
     hidden: retiredKey(VIEW_ITEM_HIDDEN_RETIRED),
     /**
-     * Package author protection block — same envelope as {@link ViewSchema};
-     * the loader translates it into the private `_lock` envelope.
+     * Package author protection block — same envelope as {@link ViewSchema}:
+     * the loader translates it into the private `_lock` envelope, and the
+     * metadata API's save door refuses it.
      */
     protection: ProtectionSchema.optional().describe(
       'Package author protection block — lock policy for this view.',

@@ -17,7 +17,10 @@
  *  - `POST /:name/clone` asks the same rule of the copy, registers it, and saves
  *    it through the protocol's own save as a tenant row: no provenance on the
  *    saved body, env-wide; a save that fails withdraws the registration and
- *    relays the failure, so no clone is reported that would not survive.
+ *    relays the failure, so no clone is reported that would not survive;
+ *  - [#23120] a clone of a flow whose stored row still carries a `protection`
+ *    block saves a body without it (the save door refuses the block), and a
+ *    source with no block saves the body it always did.
  *
  * Harness as in `automation-packaged-base-lock.test.ts`: a REAL protocol over a
  * REAL `SchemaRegistry` answers every verdict, with the packaged flow
@@ -32,6 +35,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { isCodeArtifactBody } from '@objectstack/metadata-core';
+import { FlowSchema } from '@objectstack/spec/automation';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
@@ -39,6 +43,10 @@ import type { HttpProtocolContext } from '../http-dispatcher.js';
 const PACKAGED = 'pkg_alert_flow';
 const PACKAGE_ID = 'com.example.pkg';
 const CUSTOMER = 'customer_flow';
+/** A tenant flow whose stored row predates the save door's `protection` refusal. */
+const LEGACY = 'legacy_locked_flow';
+/** The block such a row still carries: the save door now refuses it, and it never bound. */
+const LEGACY_BLOCK = { lock: 'full', reason: 'Stored before the metadata save door refused this block.' };
 
 /** The stamps a caller would send to claim the real package's provenance. */
 const ASSERTED = { _packageId: PACKAGE_ID, _provenance: 'package' };
@@ -60,6 +68,9 @@ function boot() {
     const flows = new Map<string, unknown>([
         [PACKAGED, { ...definitionOf(PACKAGED), ...ASSERTED }],
         [CUSTOMER, definitionOf(CUSTOMER)],
+        // As the engine binds a stored tenant row: `FlowSchema.parse` output,
+        // and `FlowSchema` declares `protection`, so the block rides along.
+        [LEGACY, FlowSchema.parse({ ...definitionOf(LEGACY), protection: LEGACY_BLOCK })],
     ]);
     const registerFlow = vi.fn((name: string, definition: unknown) => {
         flows.set(name, definition);
@@ -176,5 +187,58 @@ describe('[#20761, ADR-0126 §7.1] the clone door saves its copy as a tenant row
         expect(errorOf(response).code).toBe('NOT_OVERRIDABLE');
         expect(h.unregisterFlow).toHaveBeenCalledWith('my_alert_copy');
         expect(h.held('my_alert_copy')).toBeUndefined();
+    });
+});
+
+/**
+ * [#23120, ADR-0010 §3.5] The body the clone door saves is composed by the
+ * server from a stored row, so it drops the `protection` block before it
+ * reaches `saveMetaItem`. The save door refuses the block on an
+ * environment-authored write (`400 VALIDATION_ERROR`); a row stored before
+ * that refusal still carries one, and only the package loader ever translated
+ * it into a lock, so dropping it changes no verdict.
+ *
+ * `protection` is spelled here, not read from `FLOW_CLONE_DROPPED_KEYS`: the
+ * key the save door refuses is the contract this pins, so removing it from
+ * that constant has to turn this red.
+ */
+describe('[#23120] a clone does not carry its source\'s stored `protection` block into the save', () => {
+    const COPY = { name: 'legacy_locked_flow_copy', label: 'Legacy copy' };
+    const MUTATED = ['name', 'label', 'status'];
+    const without = (body: Record<string, unknown>, keys: readonly string[]) => {
+        const copy = { ...body };
+        for (const key of keys) delete copy[key];
+        return copy;
+    };
+
+    it('a clone of a flow whose stored row carries the block saves, and the body it saves carries none', async () => {
+        const h = boot();
+        const source = h.held(LEGACY) as Record<string, unknown>;
+        // The fixture really carries the block, so this measures a drop and not an absence.
+        expect(source.protection).toEqual(LEGACY_BLOCK);
+
+        const { response } = await h.dispatcher.handleAutomation(`/${LEGACY}/clone`, 'POST', COPY, AUTHOR(), undefined);
+
+        expect(statusOf(response)).toBe(200);
+        expect(h.saveMetaItem).toHaveBeenCalledTimes(1);
+        const saved = h.saveMetaItem.mock.calls[0]![0] as { type: string; name: string; item: Record<string, unknown>; source?: unknown };
+        expect(saved).toMatchObject({ type: 'flow', name: COPY.name });
+        expect(saved.item).not.toHaveProperty('protection');
+        // No server-stated `source`: the clone stays an authoring write, judged by every gate.
+        expect(saved.source).toBeUndefined();
+        // Only the block went: everything else the source carries is saved.
+        expect(without(saved.item, MUTATED)).toEqual(without(source, [...MUTATED, 'protection']));
+        expect(h.registerFlow).toHaveBeenCalledWith(COPY.name, saved.item);
+        expect(dataOf(response)?.flow).not.toHaveProperty('protection');
+    });
+
+    it('control: a clone of a flow with no block saves the same body it always did', async () => {
+        const h = boot();
+        const { response } = await h.dispatcher.handleAutomation(`/${CUSTOMER}/clone`, 'POST', COPY, AUTHOR(), undefined);
+
+        expect(statusOf(response)).toBe(200);
+        expect(h.saveMetaItem).toHaveBeenCalledTimes(1);
+        const saved = h.saveMetaItem.mock.calls[0]![0] as { item: Record<string, unknown> };
+        expect(saved.item).toEqual({ ...definitionOf(CUSTOMER), name: COPY.name, label: COPY.label, status: 'draft' });
     });
 });

@@ -28,7 +28,7 @@ import { SnapshotContact, SnapshotContactViews } from './showcase-shape.fixtures
 // and the last cases in this file hold each recorded verdict to one line of at
 // most 200 characters — every firing variant this suite exercises, not a
 // chosen few. Run the whole file: those cases read what the cases above fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateTranslationReferences: typeof validateTranslationReferencesUnrecorded = (...args) => {
   const findings = validateTranslationReferencesUnrecorded(...args);
   fired.push(...findings);
@@ -116,7 +116,8 @@ describe('validateTranslationReferences — orphan keys', () => {
     expect(findings[0].severity).toBe('error');
     expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
     expect(findings[0].path).toBe('translations[0]["zh-CN"].objects.crm_lead.fields.assigned_to');
-    expect(findings[0].hint).toContain('Declared fields: name, source, status.');
+    // [#22161] One remedy line: the verdict's "Did you mean" replaced the declared-field list.
+    expect(findings[0].hint).toBe('Point the key at a declared field, or drop it if the field was removed or renamed.');
   });
 
   it('accepts every key that resolves — fields, options, views, actions, sections', () => {
@@ -194,7 +195,7 @@ describe('validateTranslationReferences — orphan keys', () => {
     );
     expect(findings).toHaveLength(1);
     expect(findings[0].path).toBe('translations[0].en.objects.crm_lead._actions.convert_lead.params.assignee');
-    expect(findings[0].hint).toContain('Declared params: owner.');
+    expect(findings[0].hint).toBe('Match the key to a declared param `name`, or drop it.');
   });
 });
 
@@ -790,9 +791,9 @@ describe('validateTranslationReferences — contributed navigation (#18203)', ()
       path: 'translations[0]["zh-CN"].apps.crm_enterprise.navigation.nav_deleted_surface',
     });
     expect(findings[0].message).toContain('which app "crm_enterprise" does not declare');
-    // The contributed id joins the population the hint enumerates, so the
-    // remedy an author is handed lists what they may actually key to.
-    expect(findings[0].hint).toContain('nav_case');
+    // The contributed id joins the population that resolves: `nav_case` drew
+    // no finding beside the orphan. [#22161] The fix line no longer lists it.
+    expect(findings[0].hint).toBe("Match the key to the navigation item's `id`, or drop it.");
   });
 
   /**
@@ -931,10 +932,9 @@ describe('validateTranslationReferences — objectExtensions-injected surfaces (
       severity: 'error',
       path: 'translations[0]["zh-CN"].objects.crm_lead.fields.zzz_gone',
     });
-    // The injected name joins the population the remedy enumerates — which is
-    // also the evidence the fold reached this run at all, rather than the leg
-    // having gone quiet.
-    expect(findings[0].hint).toContain('Declared fields: name, sla_tier.');
+    // [#22161] The fix line no longer enumerates the population; that the
+    // injected name resolves is the next case's silent half.
+    expect(findings[0].hint).toBe('Point the key at a declared field, or drop it if the field was removed or renamed.');
   });
 
   it('separates the two directions on ONE bundle — the injected key is silent, the typo is not', () => {
@@ -961,7 +961,7 @@ describe('validateTranslationReferences — objectExtensions-injected surfaces (
       severity: 'error',
       path: 'translations[0]["zh-CN"].objects.crm_lead._validations.zzz_rule',
     });
-    expect(findings[0].hint).toContain('Declared rules: sla_required.');
+    expect(findings[0].hint).toBe("Match the key to the rule's `name`, or drop it if the rule was renamed or removed.");
   });
 
   /**
@@ -1206,7 +1206,9 @@ describe('validateTranslationReferences — an app a package contributes into wi
       path: 'translations[0]["zh-CN"].apps.crm_enterprise.navigation.nav_deleted',
     });
     expect(findings[0].message).toContain('which this stack contributes into');
-    expect(findings[0].hint).toContain('Contributed navigation ids: nav_case.');
+    expect(findings[0].hint).toBe(
+      "Match the key to a contributed item's `id`, or move it to the package that owns app \"crm_enterprise\".",
+    );
   });
 
   /** ⭐ The other control: the widening is per contributed app, not per key. */
@@ -1219,7 +1221,7 @@ describe('validateTranslationReferences — an app a package contributes into wi
       severity: 'error',
       path: 'translations[0]["zh-CN"].apps.zzz_not_an_app',
     });
-    expect(findings[0].hint).toContain('Apps this stack defines or contributes into: crm_enterprise.');
+    expect(findings[0].hint).toBe("Match the key to an app's `name`, or drop it.");
   });
 
   /**
@@ -1236,7 +1238,10 @@ describe('validateTranslationReferences — an app a package contributes into wi
     const findings = validateTranslationReferences(asPerPackageLeg(body, [{ manifest: body }]));
     expect(findings).toHaveLength(1);
     expect(findings[0].path).toBe('translations[0]["zh-CN"].apps.ops_console.navigation.nav_case');
-    expect(findings[0].hint).toContain('Contributed navigation ids: nav_ops.');
+    // [#22161] The fix line no longer lists the contributed ids; `ops_console`'s
+    // own id resolves under it.
+    const own = { ...body, translations: [{ 'zh-CN': { apps: { ops_console: { navigation: { nav_ops: { label: '运维' } } } } } }] };
+    expect(validateTranslationReferences(asPerPackageLeg(own, [{ manifest: own }]))).toEqual([]);
   });
 
   it('resolves the app even when no contributed item carries an id, and says so', () => {
@@ -1248,7 +1253,11 @@ describe('validateTranslationReferences — an app a package contributes into wi
     const findings = validateTranslationReferences(asPerPackageLeg(body, [{ manifest: body }]));
     expect(findings).toHaveLength(1);
     expect(findings[0].path).toBe('translations[0]["zh-CN"].apps.crm_enterprise.navigation.nav_case');
-    expect(findings[0].hint).toContain('contributes no identified item into "crm_enterprise" at all.');
+    // [#22161] The verdict says so; the fix line names the remedy alone.
+    expect(findings[0].message).toContain('which this stack contributes into without declaring');
+    expect(findings[0].hint).toBe(
+      "Match the key to a contributed item's `id`, or move it to the package that owns app \"crm_enterprise\".",
+    );
   });
 
   /**
@@ -1263,7 +1272,7 @@ describe('validateTranslationReferences — an app a package contributes into wi
     });
     expect(findings).toHaveLength(1);
     expect(findings[0].message).toContain('which app "crm_enterprise" does not declare');
-    expect(findings[0].hint).toContain('Declared navigation ids: group_service.');
+    expect(findings[0].hint).toBe("Match the key to the navigation item's `id`, or drop it.");
   });
 });
 
@@ -1383,10 +1392,12 @@ describe('validateTranslationReferences — an object a SIBLING package of the a
       severity: 'error',
       path: 'translations[0]["zh-CN"].objects.zzz_not_an_object',
     });
-    // The remedy enumerates what the ARTIFACT provides, not this package's own
-    // objects alone — the same reading `validateObjectReferences` pins for the
-    // same widening, and the evidence the fold reached this run at all.
-    expect(findings[0].hint).toContain('Defined objects: crm_account, crm_order.');
+    // [#22161] The fix line no longer enumerates what the ARTIFACT provides;
+    // that the fold reached this run is the sibling-key cases' silence.
+    expect(findings[0].hint).toBe(
+      'Rename the key to the object it was written for, drop it, or ignore this if the object is ' +
+        'contributed by another installed package.',
+    );
   });
 
   /** ⭐ The second false-negative control, one rung down: the subtree stays judged. */
@@ -1398,7 +1409,7 @@ describe('validateTranslationReferences — an object a SIBLING package of the a
       severity: 'error',
       path: 'translations[0]["zh-CN"].objects.crm_account.fields.zzz_gone',
     });
-    expect(findings[0].hint).toContain('Declared fields: industry, name.');
+    expect(findings[0].hint).toBe('Point the key at a declared field, or drop it if the field was removed or renamed.');
   });
 
   it('separates the two directions on ONE bundle — the sibling key is silent, the typo is not', () => {
@@ -1583,18 +1594,18 @@ describe('validateTranslationReferences — collection rungs a SIBLING package o
         severity: 'error',
         path: 'translations[0]["zh-CN"].dashboards.zzz_no_dashboard',
       });
-      // The remedy enumerates what the ARTIFACT provides — the evidence the
-      // fold reached this run at all, and not a vacuous hint assertion.
-      expect(findings[0].hint).toContain('Defined dashboards: crm_overview.');
+      // [#22161] The fix line no longer enumerates what the ARTIFACT provides;
+      // that the fold reached this run is the accepting case above.
+      expect(findings[0].hint).toBe("Match the key to a dashboard's `name`, or drop it.");
     });
 
     it('NON-DEGENERACY — the sub-rung stays judged against the SIBLING declaration', () => {
       const widget = perPackageLeg({ dashboards: { crm_overview: { widgets: { zzz_gone: 'x' } } } });
       expect(onlyPath(widget)).toEqual(['translations[0]["zh-CN"].dashboards.crm_overview.widgets.zzz_gone']);
-      expect(widget[0].hint).toContain('Declared widget ids: pipeline.');
+      expect(widget[0].hint).toBe("Match the key to the widget's `id`, or drop it.");
       const action = perPackageLeg({ dashboards: { crm_overview: { actions: { '/zzz/gone': 'x' } } } });
       expect(onlyPath(action)).toEqual(['translations[0]["zh-CN"].dashboards.crm_overview.actions./zzz/gone']);
-      expect(action[0].hint).toContain('Declared header actions: /orders/new.');
+      expect(action[0].hint).toBe("Header-action translations are keyed by the action's `actionUrl`, not its label.");
     });
 
     /**
@@ -1640,20 +1651,20 @@ describe('validateTranslationReferences — collection rungs a SIBLING package o
     it('NON-DEGENERACY — a flow NO package of the artifact declares still errors', () => {
       const findings = perPackageLeg({ flows: { zzz_no_flow: {} } });
       expect(onlyPath(findings)).toEqual(['translations[0]["zh-CN"].flows.zzz_no_flow']);
-      expect(findings[0].hint).toContain('Defined flows: lead_conversion.');
+      expect(findings[0].hint).toBe("Match the key to a flow's `name` (the machine name, not its label), or drop it.");
     });
 
     it('NON-DEGENERACY — both sub-rungs stay judged against the SIBLING declaration', () => {
       const screen = perPackageLeg({ flows: { lead_conversion: { screens: { zzz_gone: {} } } } });
       expect(onlyPath(screen)).toEqual(['translations[0]["zh-CN"].flows.lead_conversion.screens.zzz_gone']);
-      expect(screen[0].hint).toContain('Declared screen node ids: qualify.');
+      expect(screen[0].hint).toBe("Screen translations are keyed by the node's `id` (the client's `ScreenSpec.nodeId`), not its `label`.");
       const field = perPackageLeg({
         flows: { lead_conversion: { screens: { qualify: { fields: { zzz_gone: 'x' } } } } },
       });
       expect(onlyPath(field)).toEqual([
         'translations[0]["zh-CN"].flows.lead_conversion.screens.qualify.fields.zzz_gone',
       ]);
-      expect(field[0].hint).toContain('Declared screen field names: amount.');
+      expect(field[0].hint).toBe('Match the key to a `config.fields[].name` on that screen, or drop it.');
     });
   });
 
@@ -1677,7 +1688,7 @@ describe('validateTranslationReferences — collection rungs a SIBLING package o
     it('NON-DEGENERACY — an action NO package of the artifact declares still errors', () => {
       const findings = perPackageLeg({ globalActions: { zzz_no_action: { label: 'x' } } });
       expect(onlyPath(findings)).toEqual(['translations[0]["zh-CN"].globalActions.zzz_no_action']);
-      expect(findings[0].hint).toContain('Object-less actions: export_all.');
+      expect(findings[0].hint).toBe("Match the key to an object-less action's name, or drop it.");
     });
 
     /**
@@ -1742,10 +1753,12 @@ describe('validateTranslationReferences — collection rungs a SIBLING package o
     it('NON-DEGENERACY — a view and a tab neither package declares still error', () => {
       const view = perPackageLeg({ objects: { crm_order: { _views: { zzz_gone: { label: 'x' } } } } });
       expect(onlyPath(view)).toEqual(['translations[0]["zh-CN"].objects.crm_order._views.zzz_gone']);
-      expect(view[0].hint).toContain('Declared views: board.');
+      expect(view[0].hint).toBe(
+        "Match the key to the view's `name` (not its label; a nameless default `list` is `default`), or drop it.",
+      );
       const tab = perPackageLeg({ objects: { crm_order: { _tabs: { zzz_gone: { label: 'x' } } } } });
       expect(onlyPath(tab)).toEqual(['translations[0]["zh-CN"].objects.crm_order._tabs.zzz_gone']);
-      expect(tab[0].hint).toContain('Declared tabs: mine.');
+      expect(tab[0].hint).toBe("Match the key to the tab's `name` (not its label), or drop it if the preset was renamed or removed.");
     });
 
     /**
@@ -1825,7 +1838,7 @@ describe('validateTranslationReferences — collection rungs a SIBLING package o
     it('NON-DEGENERACY — an app NO package of the artifact declares or is contributed into still errors', () => {
       const findings = perPackageLeg({ apps: { zzz_no_app: { navigation: { a: 'x' } } } });
       expect(onlyPath(findings)).toEqual(['translations[0]["zh-CN"].apps.zzz_no_app']);
-      expect(findings[0].hint).toContain('Apps this stack defines or contributes into: crm_app.');
+      expect(findings[0].hint).toBe("Match the key to an app's `name`, or drop it.");
     });
 
     /**
@@ -1837,7 +1850,7 @@ describe('validateTranslationReferences — collection rungs a SIBLING package o
     it('NON-DEGENERACY — a nav id nothing declares still errors, with the DECLARED-app diagnosis', () => {
       const findings = perPackageLeg({ apps: { crm_app: { navigation: { zzz_gone: 'x' } } } });
       expect(onlyPath(findings)).toEqual(['translations[0]["zh-CN"].apps.crm_app.navigation.zzz_gone']);
-      expect(findings[0].hint).toContain('Declared navigation ids: leads.');
+      expect(findings[0].hint).toBe("Match the key to the navigation item's `id`, or drop it.");
       expect(findings[0].message).toContain('does not declare');
       expect(findings[0].message).not.toContain('contributes into');
     });
@@ -1953,20 +1966,14 @@ describe('validateTranslationReferences — flows (#7646 / #11287)', () => {
 
   const bundle = (flows: unknown) => ({ ...flowStack, translations: [{ 'zh-CN': { flows } }] });
 
-  /**
-   * The universe the collector actually reached, read back out of the rule's
-   * OWN hint — the tail `listNames()` prints.
-   *
-   * This is the assertion the leg exists for. A universe collector that
-   * silently reaches nothing reports nothing, which is indistinguishable from
-   * a leg that looked and found no orphans; here the collected names come back
-   * through the production code path, so a collector that reached nothing
-   * prints an empty tail and fails.
-   */
-  const enumeratedUniverse = (hint: string, lead: string): string[] => {
-    const matched = new RegExp(`${lead}: ([^.]*)\\.`).exec(hint);
-    return matched ? matched[1].split(', ').filter(Boolean) : [];
-  };
+  // The universe the collector actually reached, read back through the
+  // production code path: the verdict's "Did you mean" can only offer a name
+  // the collector reached, and the all-resolve case below can only stay
+  // silent if it reached every name it keys. This is the assertion the leg
+  // exists for — a collector that silently reaches nothing reports nothing,
+  // indistinguishable from a leg that looked and found no orphans. [#22161]
+  // The fix line's declared-name list, which used to carry this read-back, is
+  // gone; the verdict's suggestion carries it.
 
   it('reports nothing when the flow, the screen node and the field all resolve', () => {
     const findings = validateTranslationReferences(
@@ -1988,7 +1995,7 @@ describe('validateTranslationReferences — flows (#7646 / #11287)', () => {
     expect(findings).toEqual([]);
   });
 
-  it('fires on an orphan at level 1 — the flow name — and enumerates a non-empty flow universe', () => {
+  it('fires on an orphan at level 1 — the flow name — and reads back a non-empty flow universe', () => {
     const findings = validateTranslationReferences(
       bundle({ lead_conversions: { label: 'x', screens: { details: { title: 'y' } } } }),
     );
@@ -1997,11 +2004,10 @@ describe('validateTranslationReferences — flows (#7646 / #11287)', () => {
     expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
     expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.lead_conversions');
     expect(findings[0].message).toContain('Did you mean "lead_conversion"?');
-    // ⭐ the collector reached a real flow, so the zero above is a reading.
-    expect(enumeratedUniverse(findings[0].hint, 'Defined flows')).toEqual(['lead_conversion']);
+    // ⭐ the collector reached a real flow (the suggestion above), so the zero above is a reading.
   });
 
-  it('fires on an orphan at level 2 — the screen node id — and enumerates a non-empty screen universe', () => {
+  it('fires on an orphan at level 2 — the screen node id — and reads back a non-empty screen universe', () => {
     const findings = validateTranslationReferences(
       bundle({ lead_conversion: { label: '线索转换', screens: { detail: { title: 'y' } } } }),
     );
@@ -2010,10 +2016,9 @@ describe('validateTranslationReferences — flows (#7646 / #11287)', () => {
     expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.lead_conversion.screens.detail');
     expect(findings[0].message).toContain('Did you mean "details"?');
     expect(findings[0].hint).toContain('ScreenSpec.nodeId');
-    expect(enumeratedUniverse(findings[0].hint, 'Declared screen node ids')).toEqual(['details']);
   });
 
-  it('fires on an orphan at level 3 — the screen field name — and enumerates a non-empty field universe', () => {
+  it('fires on an orphan at level 3 — the screen field name — and reads back a non-empty field universe', () => {
     const findings = validateTranslationReferences(
       bundle({
         lead_conversion: {
@@ -2027,10 +2032,6 @@ describe('validateTranslationReferences — flows (#7646 / #11287)', () => {
       'translations[0]["zh-CN"].flows.lead_conversion.screens.details.fields.opportunity',
     );
     expect(findings[0].message).toContain('Did you mean "opportunity_name"?');
-    expect(enumeratedUniverse(findings[0].hint, 'Declared screen field names')).toEqual([
-      'close_date',
-      'opportunity_name',
-    ]);
   });
 
   it('diagnoses a key on a real node of the wrong type as such, not as a missing node', () => {
@@ -2087,7 +2088,7 @@ describe('validateTranslationReferences — flows (#7646 / #11287)', () => {
       nestedBundle({ nested_screen: { fields: { confirme: { label: '已确认' } } } }),
     );
     expect(findings).toHaveLength(1);
-    expect(enumeratedUniverse(findings[0].hint, 'Declared screen field names')).toEqual(['confirmed']);
+    expect(findings[0].message).toContain('Did you mean "confirmed"?');
   });
 
   it('redirects a field key on an object-form screen to the objects group', () => {
@@ -2182,7 +2183,7 @@ describe('validateTranslationReferences — flow refusals (#22450)', () => {
       'Translations are keyed to refusal "done", which flow "quote_generation" declares as an `end` node ' +
         "that completes, not one declaring `outcome: 'refused'`, so nothing resolves this key.",
     );
-    expect(findings[0].hint).toContain('Declared refusing end node ids: refuse_held.');
+    expect(findings[0].hint).toBe("Refusal translations are keyed by the `id` of an `end` node declaring `outcome: 'refused'`.");
   });
 
   it('refuses a refusal key over an UNKNOWN node, with the nearest refusing node offered', () => {
@@ -2462,7 +2463,10 @@ describe('validateTranslationReferences — the canonical view-record shape', ()
     });
     expect(findings).toHaveLength(1);
     expect(findings[0].path).toBe('translations[0].en.objects.crm_lead._views.hot_leads');
-    expect(findings[0].hint).toContain('all_leads');
+    // [#22161] The fix line no longer lists the declared views (`all_leads`); the case above keys it silently.
+    expect(findings[0].hint).toBe(
+      "Match the key to the view's `name` (not its label; a nameless default `list` is `default`), or drop it.",
+    );
   });
 
   // ── #6038 / #5164 leg 2: the default list's key is the RUNTIME's ─────────
@@ -2816,7 +2820,11 @@ describe('validateTranslationReferences — section anchors', () => {
       translations: [{ en: { objects: { crm_lead: { label: 'Lead', _sections: { deal_info: { label: 'Deal' } } } } } }],
     });
     expect(findings).toHaveLength(1);
-    expect(findings[0].hint).toContain('declares no named section at all');
+    // [#22161] The remedy says why: a section is translatable only through a stable name.
+    expect(findings[0].hint).toBe(
+      'Sections are translatable only through a STABLE NAME: give the group/section a `key`/`name` and ' +
+        'use it here, or drop the translation.',
+    );
   });
 
   // #5415. `collectViewRecord` walked `['listViews', 'formViews']` and the
@@ -2929,7 +2937,7 @@ describe('validateTranslationReferences — filter-preset tabs (#13835)', () => 
     expect(findings[0].severity).toBe('error');
     expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
     expect(findings[0].path).toBe('translations[0]["zh-CN"].objects.crm_lead._tabs.overdue');
-    expect(findings[0].hint).toContain('Declared tabs: mine, urgent.');
+    expect(findings[0].hint).toBe("Match the key to the tab's `name` (not its label), or drop it if the preset was renamed or removed.");
   });
 
   it('accepts a `_tabs` key naming a declared preset', () => {
@@ -2993,11 +3001,12 @@ describe('validateTranslationReferences — filter-preset tabs (#13835)', () => 
     expect(findings[0].path).toBe('translations[0].en.objects.crm_lead._tabs.urgent');
   });
 
-  it('de-duplicates one preset name authored on several pages over the same object', () => {
+  it('reads one preset name authored on several pages over the same object as one tab', () => {
     // `walkObjectTabs` de-duplicates through an index so it emits each key
     // once; the universe is a Set, which is the same fact with nothing to
-    // choose between two authorings. Pinned because a per-page fact set would
-    // still ACCEPT this bundle — the observable difference is the hint.
+    // choose between two authorings. [#22161] The de-duplication was visible
+    // only in the declared-tab list the fix line used to print; what stays
+    // observable is that both pages' presets resolve and the ghost still fires.
     const findings = validateTranslationReferences({
       objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
       pages: [
@@ -3012,17 +3021,18 @@ describe('validateTranslationReferences — filter-preset tabs (#13835)', () => 
           interfaceConfig: { userFilters: { tabs: [{ name: 'urgent', filter: [] }, { name: 'mine', filter: [] }] } },
         },
       ],
-      translations: [{ en: { objects: { crm_lead: { _tabs: { ghost: { label: 'Ghost' } } } } } }],
+      translations: [{ en: { objects: { crm_lead: { _tabs: { ghost: { label: 'Ghost' }, urgent: { label: 'Urgent' }, mine: { label: 'Mine' } } } } } }],
     });
     expect(findings).toHaveLength(1);
-    expect(findings[0].hint).toContain('Declared tabs: mine, urgent.');
+    expect(findings[0].path).toBe('translations[0].en.objects.crm_lead._tabs.ghost');
   });
 
   it('says so when the object declares no preset bar at all, and names the dead carrier', () => {
     // `ListViewSchema.tabs` is `ViewTabSchema`'s other carrier and has no
     // renderer in either repo, so a `_tabs` key written for one resolves
     // nowhere. The hint has to say that, or an author reads the finding as a
-    // bug in the rule and "fixes" it by moving the tab to a list view.
+    // bug in the rule and "fixes" it by moving the tab to a list view. [#22161]
+    // It says it as its one remedy line: declare the tab where it resolves.
     const findings = validateTranslationReferences({
       objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
       views: [
@@ -3036,8 +3046,10 @@ describe('validateTranslationReferences — filter-preset tabs (#13835)', () => 
     });
     expect(findings).toHaveLength(1);
     expect(findings[0].path).toBe('translations[0].en.objects.crm_lead._tabs.urgent');
-    expect(findings[0].hint).toContain('declares a filter-preset tab bar at all');
-    expect(findings[0].hint).toContain("list view's own `tabs` has no renderer");
+    expect(findings[0].hint).toBe(
+      "Declare the tab in a page's `interfaceConfig.userFilters.tabs` (a list view's own `tabs` has no " +
+        'renderer), or drop the key.',
+    );
   });
 
   it('reads the preset bar on a source-authored page, which the component walk skips', () => {
@@ -3170,10 +3182,11 @@ describe('validateTranslationReferences — the showcase contact surface (#5415)
       'translations[0]["zh-CN"].objects.showcase_contact._sections.contract',
       'translations[0]["zh-CN"].objects.showcase_contact._sections.who_is_this',
     ]);
-    // The hint now enumerates the anchors the object really has, instead of
-    // claiming it "declares no named section at all".
+    // The real anchors resolve (the case above); the typo is offered its
+    // nearest. [#22161] The fix line no longer enumerates the anchors.
+    expect(findings[0].message).toContain('Did you mean "contact"?');
     for (const finding of findings) {
-      expect(finding.hint).toContain('Declared sections: contact, notes, status, work');
+      expect(finding.hint).not.toContain('Declared sections');
       expect(finding.hint).not.toContain('declares no named section at all');
     }
   }, 60_000);
@@ -3872,5 +3885,61 @@ describe('[#22161] one-line verdicts — translation-target-unknown, translation
   it('the explanation names every flow toast key the rule judges', () => {
     const text = explainRule(TRANSLATION_TARGET_UNKNOWN)!.paragraphs.join('\n');
     for (const key of FLOW_TERMINAL_MESSAGE_KEYS) expect(text, key).toContain(`\`.${key}\``);
+  });
+});
+
+// [#22161] Slice 16: the `fix:` line. Each `translation-target-unknown` hint is
+// one remedy line: the declared names it used to list are the verdict's "Did
+// you mean" (the nearest one), and what each leg may name is the explanation's.
+// The bound reads every finding the cases above fired.
+describe('[#22161] one-line fixes — translation-target-unknown', () => {
+  /** One fragment per hint arm, each unique to its arm. */
+  const HINT_ARMS = [
+    'Rename the key to the object it was written for',
+    'Point the key at a declared field',
+    "Match the key to the view's `name`",
+    'Sections are translatable only through a STABLE NAME',
+    "Match the key to the tab's `name`",
+    "Declare the tab in a page's `interfaceConfig.userFilters.tabs`",
+    "Match the key to the rule's `name`",
+    'Match the key to a defined action name',
+    'Move these keys under `objects.',
+    "Match the key to an object-less action's name",
+    "Match the key to an app's `name`",
+    "Match the key to a contributed item's `id`",
+    "Match the key to the navigation item's `id`",
+    "Match the key to a dashboard's `name`",
+    "Match the key to the widget's `id`",
+    'Header-action translations are keyed by',
+    "Match the key to a flow's `name`",
+    'on the flow, or drop the key',
+    "Screen translations are keyed by the node's `id`",
+    'Declare `config.description` on the screen',
+    'Move this copy under `objects.',
+    'Match the key to a `config.fields[].name`',
+    'Refusal translations are keyed by the `id`',
+    'Match the key to a declared param `name`',
+    "Match the key to an outcome the action's `outcomeMessages` declares",
+    'Move the `resultDialog` translations under the action',
+    "Match the key to a declared field's literal `path`",
+  ];
+
+  it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === TRANSLATION_TARGET_UNKNOWN);
+    // Coverage control: every hint arm fired at least once.
+    for (const arm of HINT_ARMS) expect(converted.some((f) => f.hint.includes(arm)), arm).toBe(true);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+      // The declared names are the verdict's "Did you mean", never a list on the fix line.
+      expect(f.hint, f.rule).not.toMatch(/(Declared|Defined|Contributed) [a-z ]+: /);
+    }
+  });
+
+  it('`os explain` says where the declared names went', () => {
+    const text = explainRule(TRANSLATION_TARGET_UNKNOWN)!.paragraphs.join('\n');
+    expect(text).toContain('"Did you mean"');
+    expect(text).toContain('without listing what is declared');
+    expect(text).toContain("a list view's own `tabs` has no renderer");
   });
 });

@@ -45,6 +45,7 @@ import { defineStack, ADMIN_FULL_ACCESS_CAPABILITIES } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { PermissionSetSchema, PLATFORM_CAPABILITIES } from '@objectstack/spec/security';
 import { assertArmed, armedWhen } from './armed.js';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 /** The capability under test, as `PLATFORM_CAPABILITIES` declares it. */
 const CAP = 'view_all_audit_log';
@@ -178,8 +179,8 @@ describe('[#21260] the ledger audit capability exempts its holder from the paren
     const userIdOf = async (email: string) =>
       String((await ql.findOne('sys_user', { where: { email }, context: { ...SYS } }))?.id ?? '');
     const grant = async (email: string, setName: string) => {
-      const set = await ql.findOne('sys_permission_set', { where: { name: setName }, context: { ...SYS } });
-      expect(set?.id, `fixture permission set ${setName} seeded`).toBeTruthy();
+      const set = await catalogPermissionSet(ql, setName);
+      expect(set, `fixture permission set ${setName} served by the security catalog`).toBeTruthy();
       await ql.insert('sys_user_permission_set', { user_id: await userIdOf(email), permission_set: set.name }, { context: { ...SYS } });
     };
     for (const who of ['holder', 'reader', 'writer'] as const) {
@@ -406,8 +407,8 @@ describe('[#21260] the ledger audit capability is bounded by its holder’s orga
       expect((await stack.apiAs(tok[who], 'POST', '/auth/organization/set-active', { organizationSlug: `alc-org-${who}` })).status).toBe(200);
     }
     const userA = await ql.findOne('sys_user', { where: { email: 'alc-org-a@verify.test' }, context: { ...SYS } });
-    const set = await ql.findOne('sys_permission_set', { where: { name: capOnly.name }, context: { ...SYS } });
-    await ql.insert('sys_user_permission_set', { user_id: userA.id, permission_set: set.name }, { context: { ...SYS } });
+    expect(await catalogPermissionSet(ql, capOnly.name), 'fixture permission set served by the security catalog').toBeTruthy();
+    await ql.insert('sys_user_permission_set', { user_id: userA.id, permission_set: capOnly.name }, { context: { ...SYS } });
     for (const who of ['a', 'b'] as const) {
       const res = await stack.apiAs(tok[who], 'POST', `/data/${OBJ}`, { name: `gone ${who}` });
       expect(res.status).toBeLessThan(300);

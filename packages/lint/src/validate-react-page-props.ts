@@ -63,7 +63,7 @@ import {
 // #5020's zod-rejection renderer, shared with the SDUI component-props gate
 // since #5068 — see `zod-issue-format.ts` for why one copy matters here.
 import { describeIssue, type LintZodIssue } from './zod-issue-format.js';
-import { createSourceFileChecked, describeParseFailure, PARSE_FAILURE_HINT } from './checked-parse.js';
+import { createSourceFileChecked, describeParseFailure, PARSE_FAILURE_FIX } from './checked-parse.js';
 // [#22161] The verdict half of a forwarded `@objectstack/spec` refusal — one
 // cut for every rule that forwards the same producer's words.
 import { schemaRefusalHead } from './validate-flow-trigger-readiness.js';
@@ -71,7 +71,7 @@ import { schemaRefusalHead } from './validate-flow-trigger-readiness.js';
 import {
   SYSTEM_FIELDS,
   indexUnprovisionedAnchors,
-  unprovisionedAnchorHint,
+  unprovisionedAnchorFix,
   unprovisionedAnchorVerdict,
 } from './system-fields.js';
 import { collectionEntries } from './collection-entries.js';
@@ -166,6 +166,18 @@ const BLOCKS: Map<string, BlockSpec> = new Map(
     },
   ]),
 );
+
+/**
+ * [#22161] The first sentence of a contract description, for a one-line
+ * `fix:`: the cut `schemaRefusalHead` makes for a forwarded spec refusal (the
+ * text up to the first `. `), without the rename question a refusal can carry.
+ * A description of one sentence is quoted whole.
+ */
+function descriptionHead(description: string): string {
+  const text = description.replace(/\s+/g, ' ').trim();
+  const cut = text.indexOf('. ');
+  return cut === -1 ? text : text.slice(0, cut);
+}
 
 function editDistance(a: string, b: string, cap = 2): number {
   if (Math.abs(a.length - b.length) > cap) return cap + 1;
@@ -606,14 +618,15 @@ function checkObjectChart(
         // error, so the chart renders and says nothing true.
         if (anchors?.has(name)) {
           // [#22161] One verdict sentence, in the shared short form of the
-          // anchor cause; ADR-0015's federation and why the query does not fail
-          // are `os explain react-chart-field-unprovisioned`.
+          // anchor cause, and the shared one-line fix; ADR-0015's federation,
+          // why the query does not fail and how to vouch for or opt out of the
+          // anchor are `os explain react-chart-field-unprovisioned`.
           push(
             'warning',
             REACT_CHART_FIELD_UNPROVISIONED,
             `aggregate.${prop} "${name}": ${unprovisionedAnchorVerdict(objectName, name)}, so the chart ` +
               (prop === 'groupBy' ? 'groups everything into one empty bucket' : 'aggregates nothing'),
-            unprovisionedAnchorHint(objectName, name),
+            unprovisionedAnchorFix(objectName, name),
           );
         }
         return;
@@ -1063,13 +1076,13 @@ function recordContextFinding(
     where,
     path,
     // [#22161] One verdict sentence; why binding the block does not help is
-    // `os explain react-block-needs-record-context`.
+    // `os explain react-block-needs-record-context`. The `fix:` line is the
+    // spec's replacement for the block, as one line: that the replacement
+    // binds the record itself is the explanation's, so the lead-in is a word.
     message:
       `<${tag}> renders "${schemaType}", which reads its record from a record page's context; a ` +
       `kind:'react' page mounts none, so the block renders empty`,
-    hint:
-      `On a react page bind the record yourself: ` +
-      `${REACT_RECORD_BLOCK_ALTERNATIVES[schemaType] ?? RECORD_BLOCK_GENERIC_FIX}`,
+    hint: `Instead: ${REACT_RECORD_BLOCK_ALTERNATIVES[schemaType] ?? RECORD_BLOCK_GENERIC_FIX}`,
   };
 }
 
@@ -1138,12 +1151,13 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
         rule: REACT_PAGE_SOURCE_UNPARSEABLE,
         where: `page "${name}"`,
         path: `${pagePath}.source`,
-        // [#22161] One verdict sentence; what a partially recovered tree means
-        // for the checks is `os explain react-page-source-unparseable`.
+        // [#22161] One verdict sentence and the shared one-line fix; what a
+        // partially recovered tree means for the checks is
+        // `os explain react-page-source-unparseable`.
         message:
           `kind:'react' source did not parse (${describeParseFailure(failure)}), so the ` +
           `component-contract checks may have missed problems in it`,
-        hint: PARSE_FAILURE_HINT,
+        hint: PARSE_FAILURE_FIX,
       });
     }
 
@@ -1217,12 +1231,16 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
                 // write it — the author gets the spelling, not a pointer.
                 // [#22161] `hint` is the CLI's `fix:` line, and a description
                 // alone ("The registered component type to render.") is not a
-                // fix: the instruction leads, the description follows it.
+                // fix: the instruction leads, the description follows it —
+                // its first sentence, which names the binding and its spelling.
+                // What a description says after that (which providers are
+                // accepted, why the prop is required) is the contract's, and
+                // the published react-blocks reference carries it whole.
                 hint: dep
                   ? dep.note
                   : `Pass ${req}={…}` +
                     (block.requiredDescriptions.has(req)
-                      ? `: ${block.requiredDescriptions.get(req)}`
+                      ? `: ${descriptionHead(block.requiredDescriptions.get(req)!)}`
                       : '. See the react-tier component contract.'),
               });
             }

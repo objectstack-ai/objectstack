@@ -36,7 +36,7 @@
  *    interchangeable hashes.
  */
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterAll, beforeAll, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
@@ -50,6 +50,63 @@ import {
   isLegacyShareLinkPasswordHash,
 } from './share-link-password.js';
 import type { SharingEngine } from './sharing-service.js';
+
+/**
+ * [#23184] One scrypt derivation per distinct input, per file.
+ *
+ * Every password here is hashed and verified by the production code at the
+ * production parameters (N=16384, r=16): about 0.1 s per derivation on a dev
+ * container and over three times that on a loaded `Test Core` shard. The
+ * cases asked for 96 derivations, most of them an input this file had already
+ * derived (the same password against the same salt), and the file sat at
+ * 34-41 s of wall in the hourly full battery.
+ *
+ * So `node:crypto.scrypt` answers an input it has already derived in this file
+ * with the bytes the real call produced, and runs the real call for any other.
+ * The key is every input: password, salt, key length and cost parameters.
+ * scrypt is a pure function, so each answer is the one a fresh call would
+ * give, and a verifier that derived with another normalisation, salt or
+ * parameter would miss and be judged by a real derivation, as before. Nothing
+ * above `node:crypto` is replaced: `share-link-password.ts` parses,
+ * dispatches, compares and refuses exactly as in production. An input already
+ * being derived for a concurrent case is waited for, not derived twice.
+ */
+vi.mock('node:crypto', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:crypto')>();
+  type Reply = (err: Error | null, key: Buffer) => void;
+  const derived = new Map<string, Buffer>();
+  const inFlight = new Map<string, Reply[]>();
+  function scrypt(password: unknown, salt: unknown, keylen: number, options: unknown, callback?: unknown): void {
+    const [opts, done] = typeof options === 'function' ? [{}, options] : [options ?? {}, callback];
+    const reply = done as Reply;
+    const key = JSON.stringify([password, salt, keylen, opts]);
+    const hit = derived.get(key);
+    if (hit) {
+      // Asynchronous like the real call, and a copy: no caller can alter the memo.
+      process.nextTick(reply, null, Buffer.from(hit));
+      return;
+    }
+    const waiting = inFlight.get(key);
+    if (waiting) {
+      waiting.push(reply);
+      return;
+    }
+    inFlight.set(key, [reply]);
+    actual.scrypt(
+      password as import('node:crypto').BinaryLike,
+      salt as import('node:crypto').BinaryLike,
+      keylen,
+      opts as import('node:crypto').ScryptOptions,
+      (err, out) => {
+        const replies = inFlight.get(key) ?? [];
+        inFlight.delete(key);
+        if (!err) derived.set(key, Buffer.from(out));
+        for (const r of replies) r(err, err ? out : Buffer.from(out));
+      },
+    );
+  }
+  return { ...actual, scrypt };
+});
 
 type Row = Record<string, unknown>;
 
@@ -135,8 +192,20 @@ const B = '/api/v1/share-links';
 const CREATOR = { userId: 'usr_creator' };
 const PASSWORD = 'correct horse 21839 $ battery';
 
+/**
+ * [#23184] Every case boots its own engine, service, routes and logger, and
+ * reads no state another case writes beyond the two derivation caches in this
+ * file, whose entries never change once written (a case that edits an
+ * object's sharing policy edits its own engine's copy of the schema; a second
+ * engine was measured not to see the edit). So the suites below run
+ * their cases concurrently, and the scrypt derivations a case cannot share,
+ * the ones minting or re-hashing under a fresh salt, overlap on the libuv
+ * pool instead of queueing one behind another. The engines are therefore
+ * destroyed when the file is done rather than after each case, which would
+ * destroy an engine a running case still holds.
+ */
 const engines: ObjectQL[] = [];
-afterEach(async () => {
+afterAll(async () => {
   while (engines.length) {
     try {
       await (engines.pop() as unknown as { destroy?(): Promise<void> })?.destroy?.();
@@ -246,6 +315,40 @@ async function setStoredHash(engine: any, id: string, hash: string): Promise<voi
   await engine.getDriver('sys_share_link').update('sys_share_link', id, { password_hash: hash });
 }
 
+/**
+ * [#23184] The stored hash of a protected link whose minting is not what the
+ * case is about: one real `hashShareLinkPassword` per password per file,
+ * shared by every case that needs that password. With the scrypt memo above,
+ * verifying the right password against it is the derivation already done.
+ */
+const fixtureHashes = new Map<string, Promise<string>>();
+function fixtureHash(password: string): Promise<string> {
+  let hash = fixtureHashes.get(password);
+  if (!hash) {
+    hash = hashShareLinkPassword(password);
+    fixtureHashes.set(password, hash);
+  }
+  return hash;
+}
+
+/**
+ * [#23184] A link protected by `password`, for a case about what happens AFTER
+ * minting. Minted by the service with no password, then its stored row given
+ * {@link fixtureHash}, the way the legacy cases seed theirs: the row is the one
+ * a password mint stores, with the file's shared salt. The cases about minting
+ * itself still mint through the service with the password.
+ */
+async function mintProtected(
+  booted: { engine: any; service: ShareLinkService },
+  object: string,
+  recordId: string,
+  password: string,
+) {
+  const link = await booted.service.createLink({ object, recordId }, CREATOR);
+  await setStoredHash(booted.engine, link.id, await fixtureHash(password));
+  return link;
+}
+
 function legacySha256(password: string, salt = 'legacySalt123456'): string {
   return `sha256$${salt}$${createHash('sha256').update(`${salt}:${password}`, 'utf8').digest('hex')}`;
 }
@@ -263,7 +366,7 @@ function expectNoHash(value: unknown, hash: string, label: string): void {
   }
 }
 
-describe('[#21839] the stored hash never leaves the server', () => {
+describe.concurrent('[#21839] the stored hash never leaves the server', () => {
   it('the mint response, through the service and through the route, carries no hash', async () => {
     const { engine, service, http } = await boot();
 
@@ -282,8 +385,9 @@ describe('[#21839] the stored hash never leaves the server', () => {
   });
 
   it('the list and the redemption result, through the service and through the route, carry no hash', async () => {
-    const { engine, service, http } = await boot();
-    const minted = await service.createLink({ object: 'pin_doc', recordId: 'doc_1', password: PASSWORD }, CREATOR);
+    const booted = await boot();
+    const { engine, service, http } = booted;
+    const minted = await mintProtected(booted, 'pin_doc', 'doc_1', PASSWORD);
     const stored = (await storedHash(engine, minted.id))!;
 
     const listed = await service.listLinks({ createdBy: CREATOR.userId }, CREATOR);
@@ -303,8 +407,9 @@ describe('[#21839] the stored hash never leaves the server', () => {
   });
 
   it('the list and the redemption result carry no hash even from an engine that does not strip it', async () => {
-    const { engine, service } = await boot({ leakyReads: true });
-    const minted = await service.createLink({ object: 'pin_doc', recordId: 'doc_1', password: PASSWORD }, CREATOR);
+    const booted = await boot({ leakyReads: true });
+    const { engine, service } = booted;
+    const minted = await mintProtected(booted, 'pin_doc', 'doc_1', PASSWORD);
     const stored = (await storedHash(engine, minted.id))!;
 
     // Control: the wired engine really hands the hash back, so the absence
@@ -322,7 +427,7 @@ describe('[#21839] the stored hash never leaves the server', () => {
   });
 });
 
-describe('[#21839] the stored form is the platform slow password hash', () => {
+describe.concurrent('[#21839] the stored form is the platform slow password hash', () => {
   it('a new link stores scrypt, with no plaintext, and two hashes of one password differ', async () => {
     const { engine, service } = await boot();
     const a = await service.createLink({ object: 'pin_doc', recordId: 'doc_1', password: PASSWORD }, CREATOR);
@@ -336,7 +441,7 @@ describe('[#21839] the stored form is the platform slow password hash', () => {
   });
 
   it('the verifier accepts the right password and refuses a wrong one, an empty one and an unknown form', async () => {
-    const hash = await hashShareLinkPassword(PASSWORD);
+    const hash = await fixtureHash(PASSWORD); // [#23184] hashShareLinkPassword's, shared
     expect(await verifyShareLinkPassword(PASSWORD, hash)).toBe(true);
     expect(await verifyShareLinkPassword(`${PASSWORD} `, hash)).toBe(false);
     expect(await verifyShareLinkPassword('', hash)).toBe(false);
@@ -345,13 +450,16 @@ describe('[#21839] the stored form is the platform slow password hash', () => {
   });
 });
 
-describe.each([
+describe.concurrent.each([
   ['salted SHA-256', legacySha256],
   ['plaintext (no SubtleCrypto)', legacyPlaintext],
 ] as const)('[#21839] a legacy %s row', (_name, legacy) => {
   it('still verifies, refuses a wrong password without touching the row, and is upgraded by the right one', async () => {
     const { engine, service } = await boot();
-    const link = await service.createLink({ object: 'pin_doc', recordId: 'doc_1', password: 'placeholder' }, CREATOR);
+    // [#23184] Minted with no password: the legacy hash below is the row's
+    // only password state, so a mint-time hash would be a derivation nothing
+    // reads (it used to be a placeholder password's, overwritten unread).
+    const link = await service.createLink({ object: 'pin_doc', recordId: 'doc_1' }, CREATOR);
     const legacyHash = legacy(PASSWORD);
     await setStoredHash(engine, link.id, legacyHash);
     expect(isLegacyShareLinkPasswordHash(legacyHash)).toBe(true);
@@ -371,10 +479,13 @@ describe.each([
   });
 });
 
-describe('[#21839] the legacy upgrade', () => {
+describe.concurrent('[#21839] the legacy upgrade', () => {
+  // [#23184] The two cases on the default hasher mint with no password: the
+  // legacy hash each seeds is the row's only password state (see the
+  // legacy-row case above). The injected pair's mint costs no derivation.
   it('is not attempted for a switched-off object, whose redemption is refused', async () => {
     const { engine, service } = await boot();
-    const link = await service.createLink({ object: 'pin_doc', recordId: 'doc_1', password: 'placeholder' }, CREATOR);
+    const link = await service.createLink({ object: 'pin_doc', recordId: 'doc_1' }, CREATOR);
     const legacyHash = legacySha256(PASSWORD);
     await setStoredHash(engine, link.id, legacyHash);
     const schema = engine.getSchema('pin_doc');
@@ -390,7 +501,7 @@ describe('[#21839] the legacy upgrade', () => {
 
   it('a refused upgrade write does not block the read, leaves the legacy form verifying, and is reported once without the password', async () => {
     const { engine, service, logger } = await boot({ refuseHashWrites: true });
-    const link = await service.createLink({ object: 'pin_doc', recordId: 'doc_1', password: 'placeholder' }, CREATOR);
+    const link = await service.createLink({ object: 'pin_doc', recordId: 'doc_1' }, CREATOR);
     const legacyHash = legacySha256(PASSWORD);
     await setStoredHash(engine, link.id, legacyHash);
 
@@ -420,13 +531,10 @@ describe('[#21839] the legacy upgrade', () => {
   });
 });
 
-describe('[#21839] how the password travels in', () => {
+describe.concurrent('[#21839] how the password travels in', () => {
   async function protectedConversation() {
     const booted = await boot();
-    const link = await booted.service.createLink(
-      { object: 'ai_conversations', recordId: 'conv_1', password: PASSWORD },
-      CREATOR,
-    );
+    const link = await mintProtected(booted, 'ai_conversations', 'conv_1', PASSWORD);
     return { ...booted, link };
   }
 
@@ -472,14 +580,26 @@ describe('[#21839] how the password travels in', () => {
   });
 
   // [#22418] An explicit budget, sized to the measured work: one mint and eight
-  // redemptions are nine native scrypt derivations at the production
+  // redemptions were nine native scrypt derivations at the production
   // parameters, the most of any case in this file. Its slowest `Test Core`
-  // reading was 3805 ms, over half of vitest's 5000 ms default, so it gets 3x
+  // reading was 3805 ms, over half of vitest's 5000 ms default, so it got 3x
   // that, rounded up to the next second; the rule and why 3x is in
   // share-link-password-webcontainer.test.ts. Every other case here read at
   // most 2163 ms and keeps the default.
+  //
+  // [#23184] They are two now (the mint's, and the first wrong password's; the
+  // scrypt memo answers the rest), but the case also shares the CPU with the
+  // cases running beside it, so no reading of the old shape sizes the new one.
+  // The budget stands until a `Test Core` reading of this shape re-sizes it.
   it('no log line carries the presented password, on any outcome', async () => {
-    const { http, link, logger } = await protectedConversation();
+    // Minted by the service WITH the password, as before: the mint stays
+    // inside what this logger saw.
+    const booted = await boot();
+    const link = await booted.service.createLink(
+      { object: 'ai_conversations', recordId: 'conv_1', password: PASSWORD },
+      CREATOR,
+    );
+    const { http, logger } = booted;
     for (const pw of [PASSWORD, 'wrong one 21839']) {
       for (const route of ['resolve', 'messages']) {
         await drive(http, `GET ${B}/:token/${route}`, { params: { token: link.token }, headers: { 'x-share-password': pw } });
@@ -491,20 +611,24 @@ describe('[#21839] how the password travels in', () => {
   }, 12_000);
 });
 
-describe('[#22049] the password header declares its encoding', () => {
+describe.concurrent('[#22049] the password header declares its encoding', () => {
   const CJK = '分享密码二二零四九';
   const EMOJI = 'open 🔐🦊 sesame';
   const LATIN1 = 'Déjà vu ½ ÿ 22049';
   const RAW_PERCENT = 'grade 100% %zz 22049';
   const RAW_PERCENT_ESCAPE = '50%25 off 22049';
+  const RAW_UNDECODABLE = '%E5%88 22049';
   const UTF8 = { 'x-share-password-encoding': 'utf-8' };
+
+  // [#23184] The six fixture hashes are independent, so they are derived
+  // together, on the libuv pool's threads, rather than one per first use.
+  beforeAll(async () => {
+    await Promise.all([CJK, EMOJI, LATIN1, RAW_PERCENT, RAW_PERCENT_ESCAPE, RAW_UNDECODABLE].map(fixtureHash));
+  });
 
   async function protectedConversation(password: string) {
     const booted = await boot();
-    const link = await booted.service.createLink(
-      { object: 'ai_conversations', recordId: 'conv_1', password },
-      CREATOR,
-    );
+    const link = await mintProtected(booted, 'ai_conversations', 'conv_1', password);
     return { ...booted, link };
   }
 
@@ -581,7 +705,7 @@ describe('[#22049] the password header declares its encoding', () => {
   it.each(['resolve', 'messages'] as const)(
     '/%s never falls back to a raw compare: an undecodable value that IS the raw password is still refused',
     async (route) => {
-      const rawPassword = '%E5%88 22049';
+      const rawPassword = RAW_UNDECODABLE;
       const { http, link } = await protectedConversation(rawPassword);
       const raw = await drive(http, `GET ${B}/:token/${route}`, {
         params: { token: link.token },
@@ -608,7 +732,7 @@ describe('[#22049] the password header declares its encoding', () => {
   });
 });
 
-describe('[#21839] the public routes are never cached', () => {
+describe.concurrent('[#21839] the public routes are never cached', () => {
   function expectNoStore(res: { headers: Record<string, string | string[]> }, label: string) {
     expect(res.headers['Cache-Control'], label).toBe('no-store');
     expect(res.headers.Vary, label).toBe('X-Share-Password, X-Share-Password-Encoding');
@@ -616,10 +740,7 @@ describe('[#21839] the public routes are never cached', () => {
 
   it.each(['resolve', 'messages'] as const)('/%s sends no-store + Vary on success and on every refusal', async (route) => {
     const booted = await boot();
-    const link = await booted.service.createLink(
-      { object: 'ai_conversations', recordId: 'conv_1', password: PASSWORD },
-      CREATOR,
-    );
+    const link = await mintProtected(booted, 'ai_conversations', 'conv_1', PASSWORD);
     const key = `GET ${B}/:token/${route}`;
     const ok = await drive(booted.http, key, { params: { token: link.token }, headers: { 'x-share-password': PASSWORD } });
     expect(ok.status).toBe(200);

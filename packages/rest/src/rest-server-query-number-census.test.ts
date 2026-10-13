@@ -64,6 +64,15 @@ import { RestServer } from './rest-server.js';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SOURCE_FILE = 'rest-server.ts';
 const SOURCE = readFileSync(resolve(HERE, SOURCE_FILE), 'utf8');
+// [#23050 slice 1] `RestServer#registerDataActionEndpoints`' body moved to its
+// own module, carrying the export door and its `page` exemption with it. The
+// census reads both files as one population — a site's key is its route or
+// function, never its file, so the ledger below did not change a row.
+const MOVED_FILES = ['data-action-routes.ts'] as const;
+const SOURCES: ReadonlyArray<readonly [string, string]> = [
+    [SOURCE_FILE, SOURCE],
+    ...MOVED_FILES.map((file) => [file, readFileSync(resolve(HERE, file), 'utf8')] as const),
+];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The walker
@@ -257,7 +266,7 @@ describe('#20139 census — the walker', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('#20139 census — every numeric coercion in rest-server.ts is classified', () => {
-    const sites = coercionSites(SOURCE, SOURCE_FILE);
+    const sites = SOURCES.flatMap(([file, text]) => coercionSites(text, file).map((site) => ({ ...site, file })));
     const ledgered = new Map(LEDGER.map((row) => [row.site, row]));
 
     it('the ledger names each site once', () => {
@@ -268,7 +277,7 @@ describe('#20139 census — every numeric coercion in rest-server.ts is classifi
         const unclassified = sites
             .filter((site) => !ledgered.has(site.key))
             .map((site) => [
-                `${SOURCE_FILE}:${site.line} — \`${site.key}\` is a numeric coercion the census has not classified.`,
+                `${site.file}:${site.line} — \`${site.key}\` is a numeric coercion the census has not classified.`,
                 '  A request query value: read it through `readDeclaredQueryNumber` against its declared',
                 '  schema (or `UNDECLARED_WHOLE_NUMBER_PARAM` where none is declared) — never a bare coercion,',
                 '  which invents `NaN` / `0` and answers 200.',

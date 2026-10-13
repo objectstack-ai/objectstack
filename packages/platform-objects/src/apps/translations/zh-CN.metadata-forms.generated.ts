@@ -1307,7 +1307,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       isDefault: {
         label: "默认",
-        helpText: "设为该页面类型的默认页"
+        helpText: "打开该对象的记录时使用此记录页。每个对象只能有一个默认记录页：第二个会被拒绝。"
       },
       kind: {
         label: "模式",
@@ -2230,9 +2230,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       label: {
         label: "显示名称"
       },
-      category: {
-        label: "分类"
-      },
       locale: {
         label: "语言区域",
         helpText: "BCP-47 标签，例如 en-US、zh-CN"
@@ -2264,10 +2261,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       active: {
         label: "启用",
         helpText: "未勾选时，sendTemplate() 返回 TEMPLATE_INACTIVE。"
-      },
-      isSystem: {
-        label: "系统内置",
-        helpText: "内置模板；租户可以覆盖，但不应删除。"
       }
     }
   },

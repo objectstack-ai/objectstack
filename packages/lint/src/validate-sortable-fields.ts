@@ -235,7 +235,7 @@ import { suggestName } from './object-graph.js';
 import {
   SYSTEM_FIELDS,
   indexUnprovisionedAnchors,
-  unprovisionedAnchorHint,
+  unprovisionedAnchorFix,
   unprovisionedAnchorVerdict,
 } from './system-fields.js';
 import {
@@ -412,7 +412,7 @@ export function checkSortDeclaration(
           message:
             `${subject}: ${unprovisionedAnchorVerdict(objectName, name)}, so its ORDER BY is ` +
             `dropped and every fetch returns rows in an arbitrary order`,
-          hint: unprovisionedAnchorHint(objectName, name),
+          hint: unprovisionedAnchorFix(objectName, name),
         });
       }
       continue;
@@ -429,13 +429,12 @@ export function checkSortDeclaration(
           `${subject} orders by "${name}", which is not a field on object ` +
           `"${objectName}", so every load of this view answers 400 INVALID_SORT.` +
           (dotted ? '' : suggestName(head, known)),
-        hint:
-          (dotted
-            ? `'sort' reaches only whole columns of "${objectName}" itself, never a ` +
-              `related record's column — denormalise the value onto "${objectName}" ` +
-              `(a stored field, written when the source changes) and sort by that. `
-            : `Fix the name, or add "${name}" to ${objectName}.fields. `) +
-          (known.size > 0 ? `Object fields: ${[...known].sort().join(', ')}.` : ''),
+        // [#22161] One remedy line; the field roster is not echoed, since the
+        // verdict's "Did you mean" names the near miss.
+        hint: dotted
+          ? `'sort' reaches only "${objectName}"'s own columns, never a related record's: denormalise ` +
+            `the value onto a stored field here and sort by that`
+          : `Fix the name, or add "${name}" to ${objectName}.fields`,
       });
       continue;
     }
@@ -455,12 +454,11 @@ export function checkSortDeclaration(
         message:
           `${subject} orders by "${name}" on object "${objectName}", ` +
           `${virtualFieldClause(vtype)}, so there is no column to ORDER BY`,
+        // [#22161] One remedy line; that both runtime doors refuse it with
+        // 400 INVALID_SORT is the id's `os explain` entry.
         hint:
-          `Denormalise the value onto "${objectName}" (a stored field, written when ` +
-          `the source changes) and sort by that, or drop "${name}" from this sort. ` +
-          `At runtime both doors now refuse it with 400 INVALID_SORT — the REST ` +
-          `ingress and the engine itself — so the declaration ` +
-          `breaks the view's first fetch, and every fetch after it.`,
+          `Denormalise the value onto "${objectName}" (a stored field, written when the source ` +
+          `changes) and sort by that, or drop "${name}" from this sort`,
       });
     }
   }

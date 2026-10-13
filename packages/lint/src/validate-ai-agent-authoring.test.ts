@@ -14,7 +14,7 @@ import { explainRule } from './rule-explanations.js';
 // the last cases in this file hold each recorded verdict to one line of at most
 // 200 characters — every firing variant this suite exercises, not a chosen few.
 // Run the whole file: those cases read what the cases above fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateAiAgentAuthoring: typeof validateAiAgentAuthoringUnrecorded = (...args) => {
   const findings = validateAiAgentAuthoringUnrecorded(...args);
   fired.push(...findings);
@@ -54,7 +54,7 @@ describe('validate-ai-agent-authoring', () => {
   it('omits the skill sentence when the agent references none', () => {
     const findings = validateAiAgentAuthoring({ agents: [{ name: 'lonely' }] });
     expect(findings).toHaveLength(1);
-    expect(findings[0].hint).not.toContain('skills this agent references');
+    expect(findings[0].hint).not.toContain('it references');
   });
 
   it('uses distinct wording when a stack shadows a platform agent id', () => {
@@ -278,5 +278,48 @@ describe('[#22161] one-line verdicts — the three agent-authoring ids', () => {
     // One paragraph, printed under all three ids it explains.
     expect(explainRule(DEFAULT_AGENT_OUTSIDE_ROSTER)!.paragraphs[0]).toBe(roster);
     expect(explainRule(AGENT_AUTHORING_WITHDRAWN)!.paragraphs[0]).toBe(roster);
+  });
+});
+
+// [#22161] Slice 15: the `fix:` line of the two ids whose line ran long. Each
+// names its remedy in one line; that skills attach to the platform agents by
+// `surface` affinity, and that dropping the persona loses nothing a skill
+// carries, are the explanations'.
+describe('[#22161] one-line fixes — agent-authoring-withdrawn and default-agent-outside-roster', () => {
+  const SHORTENED = [AGENT_AUTHORING_WITHDRAWN, DEFAULT_AGENT_OUTSIDE_ROSTER];
+
+  it('counts one referenced skill in the singular', () => {
+    const [finding] = validateAiAgentAuthoring({ agents: [{ name: 'solo', skills: ['live_data'] }] });
+    expect(finding!.hint).toBe(
+      'Delete the agent and express its capability as skills, moving the useful parts of its `instructions` ' +
+        'into theirs; the 1 skill it references already carries it',
+    );
+  });
+
+  it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {
+    // Coverage control: both ids fired, the declaration id on both arms and
+    // with and without referenced skills.
+    expect([...new Set(fired.map((f) => f.rule).filter((r) => SHORTENED.includes(r)))].sort()).toEqual(
+      [...SHORTENED].sort(),
+    );
+    const declared = fired.filter((f) => f.rule === AGENT_AUTHORING_WITHDRAWN);
+    expect(declared.some((f) => f.hint.startsWith('Remove the declaration'))).toBe(true);
+    expect(declared.some((f) => f.hint.endsWith('already carry it'))).toBe(true);
+    expect(declared.some((f) => f.hint.endsWith('into theirs'))).toBe(true);
+    for (const f of fired.filter((x) => SHORTENED.includes(x.rule))) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('`os explain` carries what the `fix:` lines no longer say', () => {
+    const facts: Record<string, string[]> = {
+      [AGENT_AUTHORING_WITHDRAWN]: ['by `surface` affinity', 'persona text', 'nothing is lost by dropping the persona'],
+      [DEFAULT_AGENT_OUTSIDE_ROSTER]: ['by `surface` affinity', 'not through a custom agent or a custom `defaultAgent` value'],
+    };
+    for (const [rule, list] of Object.entries(facts)) {
+      const text = explainRule(rule)?.paragraphs.join('\n') ?? '';
+      for (const fact of list) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+    }
   });
 });

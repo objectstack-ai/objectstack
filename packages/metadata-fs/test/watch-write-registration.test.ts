@@ -203,6 +203,6 @@ describe('FileSystemRepository watcher — writes register their own path (#7282
     const updates = events.filter((e) => e.ref.name === 'fresh' && e.op === 'update');
     expect(updates).toHaveLength(1);
     expect(updates[0]!.source).toBe('fs');
-    expect(updates[0]!.actor).toBe('fs');
+    expect(updates[0]!.actor).toBeNull();
   }, CASE_TIMEOUT_MS);
 });

@@ -38,7 +38,10 @@
         },
         "data": {
           "status": "live",
-          "note": "objectui: ListView.tsx:841-850 fetch effect supports ViewDataSchema provider modes ('value' inline, 'api'; gantt owns api-provided data at :476). Supersedes the 2026-06 audit's 'api/schema dead in list path'. The 'schema' provider remains form/metadata-admin-only — not honored on lists."
+          "evidenceScope": "cross-repo",
+          "verifiedAt": "2026-10-13",
+          "evidence": "objectui @7578323a544e packages/plugin-list/src/ListView.tsx and objectui @7578323a544e packages/plugin-gantt/src/ObjectGantt.tsx — the list's fetch effect reads `schema.data.provider` and charts `value` rows inline, and hands a gantt the whole `data` block, which the gantt resolves through `resolveDataSource`; framework: packages/spec/src/ui/view.zod.ts#ViewDataSchema",
+          "note": "objectui: ListView.tsx fetch effect supports the ViewDataSchema provider modes it is handed ('value' inline; the gantt owns its data block). Supersedes the 2026-06 audit's 'api/schema dead in list path'. The 'schema' provider remains form/metadata-admin-only — not honored on lists. RETIREMENT RECORD (2026-10-13, ADR-0049 enforce-or-remove, maintainer ruling 2026-10-12 letter C): the `api` provider VALUE left ViewDataSchema — refused by name on the union's own error map (`VIEW_DATA_API_PROVIDER_RETIRED`), no tombstone key, no D2 conversion, D3 `view-data-api-provider-retired`. A renderer reader EXISTED in objectui, measured at 7578323a544e — `.objectui-sha` has since moved to 1fb1ced36243 and the next cross-repo re-measure re-reads it there (ListView.tsx routed an `api` block to `ApiDataSource`; ObjectGantt.tsx built one from the block's `read`/`write`) — and is now unreachable from authored metadata: zero producers wrote the value outside documentation in objectstack (bcebd8409), objectui (origin/main f228d710 — the console's approval-requests source constructs `ApiDataSource` in code from an `ApiDataSourceConfig`, never a `ViewData`) and hotcrm (0f84c9c), each with a lit `provider: 'object'` control. This key stays `live` because the surviving arms are read; the arm's record sits on this row because the walk never descends a union arm."
         },
         "columns": {
           "status": "live",
@@ -235,7 +238,7 @@
         "emptyState": {
           "status": "live",
           "evidence": "packages/cli/src/utils/i18n-extract.ts",
-          "note": "objectui: ListView empty-state panel (audit L15); CLI i18n extract emits _views.<view>.emptyState keys (spec CHANGELOG)."
+          "note": "objectui: ListView empty-state panel (audit L15); CLI i18n extract emits _views.<view>.emptyState keys (spec CHANGELOG). [#23004] This blanket `live` verdict does NOT cover `emptyState.link`, which is PLANNED: declared ahead of its renderer, contract first, and marked `[PLANNED — not yet rendered]` in its describe. Measured at objectui 7af0ab3: ListView hands ListEmptyState `title`, `message` and `icon` only (ListView.tsx:5688-5696), and nothing in objectui reads `emptyState.link`. Renderer half and carrier: objectstack-ai/objectui#12270. The walk does not read the marker, because `view/list.emptyState` is a recorded undrilled container (undrilled-containers.baseline.json); drilling it is the route to a gate-read `planned` row."
         },
         "aria": {
           "status": "live",
@@ -263,7 +266,7 @@
           "status": "live",
           "verifiedAt": "2026-07-30",
           "evidence": "packages/spec/src/ui/view.zod.ts defineForm (writes data.provider=schema + schemaId onto every metadata form); packages/metadata-protocol/src/protocol.ts:1580,1598 (serves schemaId with the form to the metadata-admin pipeline)",
-          "note": "CORRECTED 2026-07-30: the #3896 sweep attempted removal on the prior dead verdict and the build itself refuted it — defineForm authors the key on every *.form.ts. The record-form provider VALUES (object/api/value) may still lack readers; that is a value-subset audit, not a key removal."
+          "note": "CORRECTED 2026-07-30: the #3896 sweep attempted removal on the prior dead verdict and the build itself refuted it — defineForm authors the key on every *.form.ts. The record-form provider VALUES (object/value) may still lack readers; that is a value-subset audit, not a key removal. 2026-10-13: the `api` value is RETIRED on the union itself (see `list.data`'s retirement record) — a form's `data` no longer admits a request block; a submit-to-endpoint is not a view concern."
         },
         "type": {
           "status": "live",

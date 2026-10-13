@@ -1392,6 +1392,36 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.save-door-lock-family.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.save-door-lock-family.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.save-door-lock-family.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.save-door-protection.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.save-door-protection.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.save-door-protection.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.save-flow-canonicalization.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1558,6 +1588,21 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol.validate-data.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.view-container-reset-expansions.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.view-container-reset-expansions.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.view-container-reset-expansions.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3127,11 +3172,6 @@
       "pinned": 1
     },
     {
-      "file": "packages/plugins/plugin-security/src/bootstrap-seed-round-trips.test.ts",
-      "verb": "update",
-      "pinned": 1
-    },
-    {
       "file": "packages/plugins/plugin-security/src/check-only-write-scope.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3187,22 +3227,22 @@
       "pinned": 1
     },
     {
-      "file": "packages/plugins/plugin-security/src/declared-permission-reload-projection.test.ts",
+      "file": "packages/plugins/plugin-security/src/engine-find-bare-array.pin.test.ts",
       "verb": "findOne",
       "pinned": 1
     },
     {
-      "file": "packages/plugins/plugin-security/src/declared-permission-reload-projection.test.ts",
+      "file": "packages/plugins/plugin-security/src/engine-find-bare-array.pin.test.ts",
       "verb": "update",
       "pinned": 1
     },
     {
-      "file": "packages/plugins/plugin-security/src/engine-find-bare-array.pin.test.ts",
+      "file": "packages/plugins/plugin-security/src/everyone-rederivation-on-permission-mutation.test.ts",
       "verb": "findOne",
       "pinned": 1
     },
     {
-      "file": "packages/plugins/plugin-security/src/engine-find-bare-array.pin.test.ts",
+      "file": "packages/plugins/plugin-security/src/everyone-rederivation-on-permission-mutation.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3307,11 +3347,6 @@
       "pinned": 1
     },
     {
-      "file": "packages/plugins/plugin-security/src/per-organization-catalog.test.ts",
-      "verb": "update",
-      "pinned": 1
-    },
-    {
       "file": "packages/plugins/plugin-security/src/permission-denied-user-copy.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3332,22 +3367,12 @@
       "pinned": 1
     },
     {
-      "file": "packages/plugins/plugin-security/src/permission-set-drift.test.ts",
-      "verb": "update",
-      "pinned": 1
-    },
-    {
       "file": "packages/plugins/plugin-security/src/permission-set-duplicate-name-refusal.test.ts",
       "verb": "findOne",
       "pinned": 1
     },
     {
       "file": "packages/plugins/plugin-security/src/permission-set-duplicate-name-refusal.test.ts",
-      "verb": "update",
-      "pinned": 1
-    },
-    {
-      "file": "packages/plugins/plugin-security/src/permission-set-name-collision.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3483,11 +3508,6 @@
     },
     {
       "file": "packages/plugins/plugin-security/src/vama-write-path-convergence.test.ts",
-      "verb": "update",
-      "pinned": 1
-    },
-    {
-      "file": "packages/plugins/plugin-security/src/walled-platform-bucket-diagnostic.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3659,6 +3679,11 @@
     {
       "file": "packages/plugins/plugin-webhooks/src/webhook-drop-durable-record.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-webhooks/src/webhook-redeliver-auth-gate.pin.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {

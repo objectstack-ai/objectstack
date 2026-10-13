@@ -57,8 +57,9 @@ import { AggregationFunction } from '../data/query.zod';
 // `{ formats }` while the grid reads `.formats` and lifts nothing. Declared
 // outside the `ui` barrel so the two carriers share it without publishing it.
 import { ListViewExportOptionsSchema } from './list-view-export-options';
-import { InlineActionSchema, ActionLocationSchema } from './action.zod';
+import { ActionSchema, InlineActionSchema, ActionLocationSchema } from './action.zod';
 import { ACTION_TARGET_ALIASES } from './action-target-aliases';
+import { navigationTargetRefusal } from './navigation-target';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 // [#21464] `object-metric.aggregate.groupBy` is the chart aggregate's own
 // `groupBy` union, by reference — the tile routes it exactly as the chart does.
@@ -81,7 +82,10 @@ import { enumWithRetiredValues, retiredKey } from '../shared/retired-key';
 // The retired page-component TYPES' prescriptions — one string per type, three
 // doors (#14159): the enum's error map and the `PageComponentSchema.type` check
 // in page.zod.ts, and the kept `ComponentPropsMap` rows below.
-import { RETIRED_PAGE_COMPONENT_TYPES } from './page.zod';
+// `record:related_list.parentDataSource` is the SAME object binding
+// `PageComponentSchema.dataSource` takes, referenced rather than re-spelled
+// (#23134). `page.zod.ts` imports nothing from this module, so no cycle.
+import { ElementDataSourceSchema, RETIRED_PAGE_COMPONENT_TYPES } from './page.zod';
 // `element:record_picker`'s flat `sort` shorthand is the SAME contract as
 // `ElementDataSourceSchema.sort` (page.zod.ts) — one shape, imported from the
 // shared source rather than re-spelled here (commit 78f0be872).
@@ -281,10 +285,10 @@ import { INLINE_GRID_SORT_FIELD_LIST } from '../data/inline-grid-sort-fields';
 //     `saveMetaItem` / REST `/meta` write still stores an unvalidated props bag
 //     (#4463's fourth wall). That is recorded, not fixed, by #5068.
 //
-// The gate is WARNING-level in this first step. The live corpus violated these
+// The gate was WARNING-level in this first step. The live corpus violated these
 // declarations in places that were open contract questions rather than
-// authoring mistakes, and the inventory is the acceptance baseline for the
-// error upgrade. Two of the three entries are now cleared:
+// authoring mistakes, and the inventory was the acceptance baseline for the
+// error upgrade. Two of the three entries were cleared here:
 //
 //  - #5775 declared the keys objectui's renderers honour and tombstoned the
 //    four nothing read.
@@ -296,9 +300,11 @@ import { INLINE_GRID_SORT_FIELD_LIST } from '../data/inline-grid-sort-fields';
 //    same ruling and moved onto it. That retired all 42 `component-props-invalid`
 //    findings this gate reported on the platform pages (34 label + 8 content).
 //
-// What remains before the upgrade to error is the page rewrites
-// (`page:card.visible` → the component-level `visibleWhen`, #5776's tab `key`
-// → `value`), not a declaration in this file.
+// The page rewrites (`page:card.visible` → the component-level `visibleWhen`,
+// #5776's tab `key` → `value`) closed the third, and #23026 took the upgrade
+// for one class once the inventory measured empty: a `retiredKey()`
+// tombstone's verdict is an `error` at `os validate` / `os build` / `os lint`.
+// Every other finding of the gate stays a warning (#23147 carries the rest).
 //
 // ⚠️ One inventory item batch A ADDED rather than closed, because measuring the
 // renderers turned it up: objectui's Studio block designer publishes inputs that
@@ -651,8 +657,9 @@ export const PageHeaderProps = strictObject({
    * inside `/apps/:appName/*`), so a page-level renderer would duplicate it
    * rather than supply something missing. The default `true` was never
    * materialized into a built artifact: `PageComponentSchema.properties` is an
-   * open bag, and this row is parsed only by the advisory props lint, which
-   * writes nothing back — so no retired-default residue stage is owed.
+   * open bag, and this row is parsed only by the props lint (advisory in every
+   * release that shipped the default), which writes nothing back — so no
+   * retired-default residue stage is owed.
    *
    * Stored and built pages that carry the key (`true` or `false`) are stripped
    * by the D2 conversion `page-header-breadcrumb-removed`, with a notice.
@@ -664,7 +671,32 @@ export const PageHeaderProps = strictObject({
     + 'it was `true` or `false`; the shell\'s trail is unchanged. '
     + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
-  actions: z.array(z.string()).optional().describe('Action IDs to show in header'),
+  /**
+   * The ids of the bound object's own actions the header draws.
+   *
+   * An authored list is the WHOLE set, not a filter laid over the actions that
+   * declare a header placement. objectui's `PageHeaderRenderer`
+   * (`containers.tsx`, `resolvedHeaderActions` then `headerActionPlan`)
+   * resolves each id against the actions declared on the bound object, keeps
+   * those whose `locations` include `record_header` or `record_more`, and draws
+   * no other action of the object:
+   *
+   * - an action that declares `record_header` and is NOT named here is not
+   *   drawn in this header. Declaring the placement does not add it, so the
+   *   list is the author's curation of the header, and a new header action is
+   *   added to the list as well as to the object;
+   * - with the key omitted, an authored `page:header` draws none of the
+   *   object's own actions (the list resolves to empty). Only the platform's
+   *   synthesized default record page, used when no page is assigned, builds
+   *   its header from every `record_header` / `record_more` action of the
+   *   object;
+   * - a named id whose action declares neither location renders nowhere;
+   * - the host's own system actions (Edit / Share / Delete) reach the header
+   *   through the record context, not through this list, whatever it names.
+   */
+  actions: z.array(z.string()).optional().describe(
+    'Action IDs the header draws, resolved against the actions declared on the page\'s object. An authored list is the whole set: an action that declares `record_header` (or `record_more`) in its `locations` but is not named here is not drawn, and omitting the key draws none of the object\'s actions. A named action that declares neither location renders nowhere. The host\'s own Edit / Share / Delete chrome is separate from this list.',
+  ),
   /**
    * Which of the two page-header layouts the renderer builds (#6776).
    *
@@ -840,7 +872,16 @@ export const PageTabsProps = strictObject({
      * false candidate a component over).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+     * (`.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+     * every objectui file this record cites is byte-identical across the hop from
+     * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+     * `7578323a5`, re-read there 2026-10-12:
+     * every objectui file this record cites is byte-identical across the hop from
+     * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+     * `9646e2ed2`, re-read there 2026-10-12:
+     * every objectui file this record cites is byte-identical across the hop from
+     * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+     * `088e0f705`, re-read there 2026-10-12:
      * every objectui file this record cites is byte-identical across the hop from
      * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
      * `e5311165a`, re-read there 2026-10-12:
@@ -957,8 +998,8 @@ export const PageTabsProps = strictObject({
      * evaluator, and that evaluator differs on two points — both renderer
      * behaviour, NOT contract-guaranteed:
      *
-     *   * **`data` is the record ROW here**, where the component-node evaluator
-     *     binds it to the data-source ADAPTER. Same key, two meanings.
+     *   * **`data` is the record ROW here**; the component-node evaluator
+     *     mounts no `data` root at all (see `PageComponentSchema.visibleWhen`).
      *   * **The row's bare fields are spread flat**, so `status` resolves as
      *     well as `record.status`. The ambient scope is spread AFTER the row,
      *     so an ambient root (`features`, `user`, …) wins over a record
@@ -968,8 +1009,8 @@ export const PageTabsProps = strictObject({
      * `features` / `os.user` roots, which no ADR rules for a UI predicate
      * (ADR-0068's Non-goals: "only the user object is in scope here").
      *
-     * Measured at the `.objectui-sha` pin `190fbd01d061`:
-     * `components/src/renderers/layout/containers.tsx:450-457`.
+     * Measured at the `.objectui-sha` pin `1fb1ced36243`:
+     * `components/src/renderers/layout/containers.tsx:642-649`.
      *
      * Canonical `*When` name per ADR-0089 — this key is new, so the deprecated
      * `visibility` / `visibleOn` aliases are NOT ACCEPTED on tab items: unlike
@@ -980,7 +1021,7 @@ export const PageTabsProps = strictObject({
      * being pointed AT `visibleWhen` is not the same as being accepted).
      */
     visibleWhen: EvaluatedExpressionInputSchema.optional().describe(
-      'Visibility predicate (CEL) — the whole tab (header + panel) is omitted when FALSE; the renderer falls back to the first visible tab when the active one is hidden. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user`), `page.<var>`. ⚠️ NOT the same environment as page-component `visibleWhen`: this surface\'s own evaluator binds `data` to the record ROW (not the data-source adapter) and also spreads the row\'s bare fields — renderer behaviour, NOT contract-guaranteed. ADR-0089 canonical name — `visible`/`showWhen`/`visibility`/`visibleOn` are all rejected here (not folded in), each with a pointer at this key.',
+      'Visibility predicate (CEL) — the whole tab (header + panel) is omitted when FALSE; the renderer falls back to the first visible tab when the active one is hidden. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user`), `page.<var>`. ⚠️ NOT the same environment as page-component `visibleWhen`: this surface\'s own evaluator binds `data` to the record ROW (the component-node evaluator mounts no `data` root) and also spreads the row\'s bare fields — renderer behaviour, NOT contract-guaranteed. ADR-0089 canonical name — `visible`/`showWhen`/`visibility`/`visibleOn` are all rejected here (not folded in), each with a pointer at this key.',
     ),
     /**
      * Stable URL token for this tab — the value `?tab=` carries and the
@@ -1089,7 +1130,16 @@ export const PageCardProps = strictObject({
  * declarations identical.
  *
  * Each clause is read off the objectui pin this repo builds against
- * (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+ * (`.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+ * `7578323a5`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+ * `9646e2ed2`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+ * `088e0f705`, re-read there 2026-10-12:
  * every objectui file this record cites is byte-identical across the hop from
  * `e5311165a8d6` (`git diff --quiet`), so every anchor held unmoved. At
  * `e5311165a8d6`, re-read there 2026-10-12:
@@ -1239,6 +1289,134 @@ const RECORD_BLOCK_REQUIRED_PERMISSIONS_DESCRIPTION =
   + 'When the client has resolved the user\'s capabilities and any of these is missing, this block does not render its content; wherever it would otherwise render, an insufficient-permissions notice takes its place. '
   + 'Presentation only: it authorises nothing, and the data API still serves the same data to the same user. '
   + 'A client that cannot resolve the user\'s capabilities (no permission provider, or one that does not report `systemPermissions`) renders this block as if they were held — it fails open.';
+
+/**
+ * [#23013] The ONE hole a `record:details` section heading binds: `{{ count }}`
+ * — the number of values the field named by the section's `count.field` holds
+ * on the current record. Inner whitespace is free (`{{count}}` is the same
+ * hole), exactly as i18next and the formula template engine both trim a hole's
+ * content.
+ *
+ * Non-global on purpose: a `g` RegExp carries `lastIndex` between calls, so a
+ * shared one is a footgun. A renderer filling the hole builds its own global
+ * copy from `.source`. Exported so the renderer that fills the hole and the
+ * judge below that refuses a heading without one read ONE grammar — two
+ * readings of a hole is how a heading parses clean and still renders the hole
+ * as literal text.
+ */
+export const SECTION_HEADING_COUNT_HOLE = /\{\{\s*count\s*\}\}/;
+
+/** Every double-brace hole, whatever it names — a heading binds only `count`. */
+const SECTION_HEADING_ANY_HOLE = /\{\{([^{}]*)\}\}/g;
+
+/**
+ * The single-brace spelling of the same hole (`{count}`, `${count}`), read
+ * AFTER the double-brace holes are stripped so `{{ count }}` itself never
+ * matches. That dialect is being retired from the platform's text slots and a
+ * heading never interpolated it, so it would render as literal text.
+ */
+const SECTION_HEADING_SINGLE_BRACE_COUNT = /\{\s*count\s*\}/;
+
+/** `count.field` — one field of the bound object, as its machine name. */
+const SECTION_COUNT_FIELD_PATTERN = /^[a-z_][a-z0-9_]*$/;
+
+const SECTION_COUNT_EXAMPLE =
+  "`count: { field: 'tags' }` with `label: '{{ count }} tags'`";
+
+/**
+ * [#23013] The parse half of the section heading's count: a section that
+ * declares `count` must SHOW it. The field reference itself — does `count.field`
+ * name a field the bound object declares, and is that field multi-valued? — is
+ * a cross-schema question this shape cannot see, so it is answered where every
+ * page-to-object field reference is: `@objectstack/lint`'s page field-binding
+ * pass (`page-field-unknown`, `page-section-count-not-multi-value`), the
+ * `sections[].group` precedent one key over.
+ *
+ * Judged only when `count` is present. A `{{ count }}` hole in a section that
+ * declares no `count` is NOT refused here: `label` accepted any text before
+ * this key existed, and refusing one of its values is a narrowing this
+ * widening does not carry.
+ */
+function sectionHeadingCountRefinement(
+  section: { count?: unknown; group?: unknown; label?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  if (section.count === undefined) return;
+
+  if (typeof section.group === 'string' && section.group.length > 0) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['count'],
+      message:
+        '`count` cannot be combined with `group` on this `record:details` section. A group-referencing '
+        + "section's heading is the group's own `label` from the object's `fieldGroups` entry, shared by "
+        + 'every surface that group renders on, and those surfaces bind no `{{ count }}` hole. Drop `group`, '
+        + 'enumerate `fields`, and write the heading on this section: ' + SECTION_COUNT_EXAMPLE + '.',
+    });
+    return;
+  }
+
+  const label = section.label;
+  if (label === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['label'],
+      message:
+        'This `record:details` section declares `count` but no `label`, so the count is never shown: '
+        + 'the number appears only where the heading writes the `{{ count }}` hole. Add the heading, '
+        + 'e.g. ' + SECTION_COUNT_EXAMPLE + ', or drop `count`.',
+    });
+    return;
+  }
+
+  const variants: Array<[path: Array<string>, text: unknown]> =
+    typeof label === 'string'
+      ? [[[], label]]
+      : label && typeof label === 'object'
+        ? Object.entries(label as Record<string, unknown>).map(([locale, text]) => [[locale], text])
+        : [];
+
+  for (const [path, text] of variants) {
+    if (typeof text !== 'string') continue; // the label's own schema reports a non-string
+    const where = path.length > 0 ? `the \`${path[0]}\` text of \`label\`` : '`label`';
+    const foreign = [...text.matchAll(SECTION_HEADING_ANY_HOLE)]
+      .map((m) => m[1].trim())
+      .filter((name) => name !== 'count');
+    if (foreign.length > 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['label', ...path],
+        message:
+          `${where} writes ${foreign.map((n) => '`{{ ' + n + ' }}`').join(', ')}, a hole this section `
+          + 'heading does not bind. The one value a heading binds is `{{ count }}`, written bare, without '
+          + 'a formatter; any other hole renders as literal text. Read other record values in the '
+          + 'section body through `fields`.',
+      });
+      continue;
+    }
+    const stripped = text.replace(SECTION_HEADING_ANY_HOLE, '');
+    if (SECTION_HEADING_SINGLE_BRACE_COUNT.test(stripped)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['label', ...path],
+        message:
+          `${where} writes the count as a single-brace \`{count}\`, which a section heading never `
+          + 'interpolates, so it would render as literal text. Write the double-brace hole `{{ count }}`.',
+      });
+      continue;
+    }
+    if (!SECTION_HEADING_COUNT_HOLE.test(text)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['label', ...path],
+        message:
+          `This \`record:details\` section declares \`count\`, but ${where} has no \`{{ count }}\` hole, `
+          + 'so the count is never shown. Write the hole where the number belongs, e.g. '
+          + SECTION_COUNT_EXAMPLE + '. Every locale of an inline label map writes it.',
+      });
+    }
+  }
+}
 
 export const RecordDetailsProps = strictObject({
   surface: 'this `record:details`',
@@ -1430,6 +1608,71 @@ export const RecordDetailsProps = strictObject({
      * renderer's own fallback.
      */
     headerColor: z.enum(['muted', 'muted/50', 'accent', 'primary/10', 'secondary/10', 'destructive/10']).optional().describe('Section-header background tint, from the closed six-token vocabulary rendered by objectui\'s `record:details` header (`muted` | `muted/50` | `accent` | `primary/10` | `secondary/10` | `destructive/10`). A value outside the enum is refused at authoring time rather than silently not painting. Omit for an untinted header.'),
+    /**
+     * [#23013] How many values a multi-value field holds on the current
+     * record, shown in this section's heading — the spec half of
+     * objectui#12192 (the heading 「N 项功能需要更高套餐 · 查看」 accepted on
+     * cloud#2772 item 3). Generic by construction: any multi-value field, on
+     * any object, never a product-specific widget.
+     *
+     * THE SHAPE, and why it is two halves. The field reference is a declared
+     * key (`count.field`), and the heading carries only the fixed hole
+     * `{{ count }}` ({@link SECTION_HEADING_COUNT_HOLE}). The alternative —
+     * a field path inside the label (`{{ tags | count }}`) — was measured and
+     * rejected: the formula template engine's formatter whitelist has no
+     * count, every section label would become a template, and the field name
+     * would live in translated text, where a translator can change it and no
+     * reference check reads it. Here the reference is one checkable key and a
+     * translation carries only a closed variable name.
+     *
+     * THE HOLE is the platform's kept delimiter: ADR-0032 §3's `{{ }}`, the
+     * form the flow text slots render, and the form i18next interpolates
+     * natively (objectui's label resolver passes bundle text through `t()`,
+     * which keeps a `{{ … }}` hole it was given no value for — measured on
+     * i18next 26.4.0, `skipOnVariables: true` by default). So a translated
+     * `objects.<object>._sections.<name>.label` carries the same `{{ count }}`
+     * the authored label does, and `os i18n extract` seeds the skeleton with
+     * the authored label verbatim. The single-brace `{var}` dialect is NOT
+     * used (it is being retired from the flow value slots, and a heading never
+     * read it).
+     *
+     * STRICTNESS, split along the line the `group` key above already draws:
+     * the shape and the label rule are judged here at parse
+     * ({@link sectionHeadingCountRefinement}); whether `count.field` names a
+     * field the bound object declares, and whether that field is multi-valued
+     * (`isMultiValueField`, the one answer to that question), is a cross-schema
+     * reference judged by `@objectstack/lint`'s page field-binding pass at
+     * ERROR severity — unlike a section's `fields[]`, where a miss is skipped,
+     * a count over a missing or single-valued field renders a confident wrong
+     * number.
+     *
+     * DECLARED AHEAD OF ITS READER. At this landing no renderer reads the key,
+     * so the describe carries the `[EXPERIMENTAL — not enforced]` marker, the
+     * liveness ledger's own spelling, recorded here because page components
+     * sit in the undrilled `page/regions` container and no ledger row exists
+     * for any `ComponentPropsMap` key (the `editable`-navigation precedent in
+     * this file). Drop the marker in the change that lands the renderer at the
+     * `.objectui-sha` pin.
+     */
+    count: strictObject({
+      surface: 'this `record:details` section `count`',
+      history: PROPS_HISTORY,
+    }, {
+      field: z.string().regex(SECTION_COUNT_FIELD_PATTERN, {
+        message:
+          '`count.field` names one field of the bound object by its machine name (snake_case, no dotted '
+          + "path): a related record's field cannot be counted from this heading.",
+      }).describe('Machine name of the multi-value field whose values on the current record are counted.'),
+    }).optional().describe(
+      '[EXPERIMENTAL — not enforced] Show how many values a multi-value field holds on the current record '
+      + "in this section's heading: `{ field: 'tags' }`, with `label` writing the `{{ count }}` hole where the "
+      + "number goes (`'{{ count }} tags'`). The field must be a multi-value field the bound object declares — "
+      + '`multiselect`, `checkboxes`, `tags`, or a `select` / `lookup` / `user` / `file` / `image` field with '
+      + '`multiple: true` — and an absent or empty value counts 0. Every locale of an inline label map, and a '
+      + 'translated `objects.<object>._sections.<name>.label`, writes the same `{{ count }}` hole. Not allowed '
+      + 'beside `group`. Declared ahead of its renderer: until the record detail renderer reads it, the hole '
+      + 'renders as literal text.',
+    ),
   }).superRefine(sectionGroupReferenceRefinement({
     surface: 'this `record:details` section',
     // Exactly the keys `deriveFieldGroupLayout` fills from the group. `name` is
@@ -1442,7 +1685,7 @@ export const RecordDetailsProps = strictObject({
     // `headerColor`. Those are how THIS page lays the section out and the group
     // declares nothing about them, so there is no second source to create.
     derivedKeys: ['name', 'label', 'icon', 'description', 'collapsible', 'defaultCollapsed'],
-  }))).optional().describe('Field groups rendered as the detail body, in order. Object form: `{ name?, label?, columns?, fields, hideEmpty?, collapsible?, showBorder?, defaultCollapsed?, icon?, description?, headerColor? }` — or the group-reference form `{ group, columns?, hideEmpty?, showBorder?, headerColor? }`, which inherits members and presentation from the object\'s `fieldGroups` entry (ADR-0085 §5).'),
+  })).superRefine(sectionHeadingCountRefinement)).optional().describe('Field groups rendered as the detail body, in order. Object form: `{ name?, label?, columns?, fields, hideEmpty?, collapsible?, showBorder?, defaultCollapsed?, icon?, description?, headerColor?, count? }` — or the group-reference form `{ group, columns?, hideEmpty?, showBorder?, headerColor? }`, which inherits members and presentation from the object\'s `fieldGroups` entry (ADR-0085 §5). `count: { field }` shows how many values a multi-value field holds in the heading, through its `{{ count }}` hole.'),
   fields: z.array(z.string()).optional().describe('Explicit field list to display (optional, overrides highlightFields)'),
   /**
    * Field names to omit from the body, applied to both `fields` and every
@@ -1549,6 +1792,65 @@ export const RecordRelatedListProps = strictObject({
    * parent-side value written by the Add picker.
    */
   relationshipValueField: z.string().default('id').describe("Parent-record field whose value relationshipField stores (default 'id'; e.g. 'name' for name-keyed junctions)."),
+  /**
+   * [#23134] The PARENT record this list hangs off, bound by a query of its
+   * own — the spec half of ruling B on objectstack-ai/objectui#12296 (ruling
+   * comment 6137226306). `record:related_list` is the one record block with
+   * TWO bindings, and they never trade meanings:
+   *
+   *  - the node-level `dataSource` (`PageComponentSchema.dataSource`) is the
+   *    CHILD rows — its published meaning since #6953: objectui's
+   *    `ElementDataSourceGate` maps the binding's `object` onto `objectName`
+   *    and its `view` / `filter` / `sort` / `limit` onto the list's own keys.
+   *    Unchanged here, byte for byte, and never re-read as the parent (the
+   *    ruling refuses that reading, option C, by name);
+   *  - this key is the PARENT record: the object binding
+   *    {@link ElementDataSourceSchema} `{ object, view?, filter?, sort?,
+   *    limit? }`, BY REFERENCE (no second copy), read by the single-record
+   *    rule the three sibling record blocks take for their own `dataSource`
+   *    under objectui#12294 — the FIRST row of the bound set by its `sort`;
+   *    no row ⇒ a loud absence, never an empty list. An empty list would read
+   *    as "this record has no related records", a wrong fact in the silent
+   *    direction. The API arm of `dataSource` is not admitted: the card fixes
+   *    the shape as the object binding's (object, view, filter, sort, limit),
+   *    the one the sibling blocks read, and that arm is still unrendered.
+   *
+   * Absent, the parent is the record page's record context, as it always was
+   * (objectui `RecordRelatedListBody` reads `useRecordContext()`'s `recordId`
+   * / `data`). `relationshipValueField` is read on whichever row is the parent.
+   *
+   * WHY THE PROPS DOOR, NOT A NODE KEY BESIDE `dataSource`.
+   * `PageComponentSchema` is one shape for every component type, so a node
+   * key there would be authorable on all of them. `ComponentPropsMap` is the
+   * per-type door: every other row refuses this key with its own
+   * `unrecognized_keys` (the two retired rows refuse the whole bag), and
+   * `os validate` reports that as `component-props-unknown-key`. objectui's
+   * `SchemaRenderer` hoists `properties` onto the node, so the reader sees the
+   * key on `schema` as it sees every other prop.
+   *
+   * THE NAME, measured on objectui `main` at `f0532d8a` and this repo at
+   * `e540e7ffb`: the three sibling record blocks read their one binding as
+   * `dataSource` (`plugin-detail/src/renderers/recordBinding.tsx`, through
+   * `isElementDataSourceConfig(schema.dataSource)`), and the one other block
+   * with a parent half, `record:line_items` above, spells that half `parent*`
+   * (`parentObject`, `parentId`). `parentDataSource` is both — the `dataSource`
+   * stem, so the two bindings read as one family, and the `parent` prefix, so
+   * it names the parent record and nothing else.
+   *
+   * ⛔ No `os validate` consistency finding against a sibling `record:details`
+   * binding: the ruling's own exclusion (a new gate defaults to no).
+   *
+   * PLANNED, not yet read: at objectui `f0532d8a` no renderer reads this key.
+   * Its reader is the related-list leg of objectui#12294, which lands once a
+   * spec release carrying the key is installable. The liveness record is the
+   * `liveness/page.json` `_note` (a component-level key carries no ledger row:
+   * the walk stops at the undrilled `page/regions` container) and the
+   * `[PLANNED — not yet rendered]` marker the describe opens with; when that
+   * leg lands, the marker leaves and the `_note` sentence is rewritten.
+   */
+  parentDataSource: ElementDataSourceSchema.optional().describe(
+    '[PLANNED — not yet rendered] The PARENT record this related list hangs off, bound by a query of its own: an object binding `{ object, view?, filter?, sort?, limit? }`, the shape `dataSource` takes. Read by the single-record rule: the FIRST row of the bound set by its `sort` is the parent (declare `limit: 1` to say one row is meant), and when no row answers, the block renders a loud absence, never an empty list, which would read as "this record has no related records". `relationshipValueField` is read on that row. When this key is absent, the record page\'s record context remains the parent. The node-level `dataSource` on this block keeps its published meaning, the CHILD rows the list draws (it fills `objectName`, `columns`, `filter`, `sort` and `limit`), and is never read as the parent.',
+  ),
   /**
    * [#18639] The SAME union `listViews[].columns` declares (`view.zod.ts`) —
    * not a lookalike: `ListColumnSchema` is imported from the view face, so two
@@ -2496,7 +2798,16 @@ export const PageAccordionProps = strictObject({
      * re-derive the same false candidate).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+     * (`.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+     * every objectui file this record cites is byte-identical across the hop from
+     * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+     * `7578323a5`, re-read there 2026-10-12:
+     * every objectui file this record cites is byte-identical across the hop from
+     * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+     * `9646e2ed2`, re-read there 2026-10-12:
+     * every objectui file this record cites is byte-identical across the hop from
+     * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+     * `088e0f705`, re-read there 2026-10-12:
      * every objectui file this record cites is byte-identical across the hop from
      * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
      * `e5311165a`, re-read there 2026-10-12:
@@ -2936,7 +3247,16 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * the button.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+   * (`.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+   * `7578323a5`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+   * `9646e2ed2`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+   * `088e0f705`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
    * `e5311165a`, re-read there 2026-10-12:
@@ -3417,7 +3737,16 @@ export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
  * had no row for — `action:button`, `action:group`, `action:menu`,
  * `action:icon`, `element:definition-list`, `element:repeater`
  * (`core/src/registry/public-blocks.ts:117-122` at the pin this repo builds
- * against, `.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+ * against, `.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+ * `7578323a5`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+ * `9646e2ed2`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+ * `088e0f705`, re-read there 2026-10-12:
  * `public-blocks.ts`, `auto-trigger.ts`, `static-params.ts`, `ui/button.tsx`,
  * the four `action-*.tsx` renderers, `basic/data-list.tsx` and
  * `previews/block-config.ts` are byte-identical across the hop from
@@ -3696,6 +4025,110 @@ const ACTION_NODE_ALIASES = {
 } as const;
 
 /**
+ * The scheme set of a page action row's url `target` — on `action:button` and
+ * `action:icon` (`actionType: 'url'`) and on an `action:group` /
+ * `action:menu` member (`type: 'url'`). Every one of them forwards `target` to
+ * the console's action runner, which navigates to it on a click and refuses a
+ * target outside the set (`classifyNavigationTarget`). The grammar is
+ * `navigation-target.ts`'s, the one the url-action doors apply (ruling A+ on
+ * objectstack-ai/objectui#12191: the scheme set is stated once in the contract
+ * and the runtime fulfils exactly that); this only scopes it to the url
+ * executor. ⛔ No second URL grammar here.
+ *
+ * On every other executor `target` names a script, flow, page, endpoint or
+ * form and is untouched; the url executor's alias spelling `'navigation'` is
+ * refused at the executor key ({@link refuseRowUrlExecutorAlias}), so no row
+ * whose EXECUTOR KEY names the url navigator reaches it with its `target`
+ * unjudged. A row with no executor key at all is outside both rules: the
+ * runner then dispatches on the row's `name`, so `name: 'url'` reaches the
+ * same navigator with `target` judged only at the click — that leg is #23168's
+ * question, not settled here. A row with no `target` is not judged here:
+ * nothing was written for the set to judge.
+ * Because `os validate`'s props gate parses
+ * `properties` against these same rows (`ComponentPropsMap`), it reports this
+ * refusal at the same path with the same text — one rule, two doors.
+ */
+function refuseUnopenableRowUrlTarget(executorKey: 'actionType' | 'type', subject: string) {
+  return (row: { actionType?: string; type?: string; target?: string }, ctx: z.RefinementCtx): void => {
+    if (row[executorKey] !== 'url' || typeof row.target !== 'string') return;
+    const refusal = navigationTargetRefusal(row.target, subject);
+    if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: ['target'], message: refusal });
+  };
+}
+
+/**
+ * The url executor's one spelling on a page action row. The console's action
+ * runner keeps `'navigation'` as a local alias of `'url'`: its built-in table
+ * sends the alias to `executeNavigation`, which reads `to || target ||
+ * redirect` and hands off to `navigateTo`, the navigator `executeUrl` calls
+ * with `target || redirect` (`core/src/actions/ActionRunner.ts` at the pin).
+ * On a row the two are the same navigation: the alias's own keys (`to`,
+ * `redirect`, `external`, `newTab`, `replace`) are not row keys, so the strict
+ * row refuses them, and both read the row's `target` and `openIn`. But
+ * {@link refuseUnopenableRowUrlTarget} judges `target` only on `'url'`, so the
+ * alias spelling carried a target the click refuses past the parse. The
+ * executor gets one spelling: the alias is refused at the executor key, with
+ * the lossless rename onto `'url'`, whose `target` the url scheme set judges.
+ *
+ * The key otherwise stays open, as its `describe` says: the runner dispatches a
+ * handler a host registers under any other name before its built-ins, and the
+ * console registers several (`navigate_create`, `navigate_edit`, …), so every
+ * other value is the host's and is not judged here. The rename is lossless,
+ * so the ADR-0087 D2 conversion `page-action-row-navigation-executor-to-url`
+ * (`conversions/registry.ts`, retired from the load path) rewrites a stored row
+ * or a source that wrote the alias; the authoring door teaches with this
+ * refusal. The `element:button` inline action keeps its own declared fold of
+ * `type: 'navigation'` onto `'url'` (`normalizeInlineAction`, `action.zod.ts`),
+ * a bridge for its measured producers.
+ */
+function refuseRowUrlExecutorAlias(executorKey: 'actionType' | 'type', subject: string) {
+  return (row: { actionType?: string; type?: string }, ctx: z.RefinementCtx): void => {
+    if (row[executorKey] !== 'navigation') return;
+    ctx.addIssue({
+      code: 'custom',
+      path: [executorKey],
+      message:
+        `${subject} is the console runner's local alias of \`'url'\`, and the url executor has one spelling. `
+        + `Write \`${executorKey}: 'url'\`: on a page action row the alias runs the same navigator on the same `
+        + '`target` and `openIn`, so nothing else changes, and a `\'url\'` row\'s `target` is judged by the url '
+        + 'scheme set.',
+    });
+  };
+}
+
+/**
+ * A page action row's `onSuccess`: `ActionSchema`'s own post-success block, by
+ * reference — the one `strictObject` `{ navigate, openIn }` that
+ * `ActionSchema.onSuccess` declares, read off the object half of the action's
+ * pipe (the way {@link buildObjectFormSectionFieldEntry} reads
+ * `FormFieldSchema`'s). ⛔ No second shape and no second URL grammar.
+ *
+ * Every row forwards `onSuccess` to the console's action runner whole
+ * (`action-button.tsx`, `action-icon.tsx`, `action-group.tsx` and
+ * `action-menu.tsx` at the pin), and the runner reads exactly this block:
+ * `handlePostExecution` → `readOnSuccessNavigation` (a non-array object with a
+ * non-empty string `navigate`, and nothing else gets a reading) →
+ * `navigateOnSuccess` (interpolates `navigate`, classifies the result with
+ * `classifyNavigationTarget` and performs no navigation for a refused one,
+ * opens a new tab only on `openIn: 'newTab'`). It reads no key the block does
+ * not declare. So the block brings its whole judgement along:
+ * `refuseUnopenableOnSuccessNavigate` judges `navigate` with
+ * `navigation-target.ts`'s grammar, an unknown key gets the block's rename
+ * prescriptions, and `openIn` is the closed `'self' | 'newTab'` enum with its
+ * materialised `'self'` default, which the runner relies on by reading only
+ * `=== 'newTab'`. Until this, the rows declared `z.unknown()`, and a
+ * `navigate` the runner refuses, a misspelled key or a retired callback shape
+ * parsed clean and did nothing after the action succeeded.
+ *
+ * What the block does not bring: `ActionSchema`'s rules ABOUT `onSuccess` — it
+ * is refused beside a `type` other than `api` / `script`, and beside
+ * `opensInNewTab: true` — are refinements of the action, not of the block. The
+ * rows' executor set is open and the runner runs the hop after every executor,
+ * a host handler included, so those rules do not carry over as written.
+ */
+const actionOnSuccessBlock = () => ActionSchema.in.shape.onSuccess.unwrap();
+
+/**
  * Read-but-not-authorable keys shared by `action:button` and `action:icon`,
  * each read by the renderer and each refused here with what to write instead.
  */
@@ -3788,7 +4221,7 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
   icon: z.string().optional()
     .describe('Lucide icon name drawn left of the label, resolved through the shared action-icon resolver (an unknown name draws no icon)'),
   actionType: z.string().optional()
-    .describe('Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. Write it here, not as `type`: on a page component `type` is the component itself'),
+    .describe('Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. `navigation`, the runner\'s alias of `url`, is refused: write `url`. Write it here, not as `type`: on a page component `type` is the component itself'),
   variant: z.enum([...BUTTON_PRIMITIVE_VARIANTS, 'primary']).optional()
     .describe('Button variant — the Button primitive\'s vocabulary, plus `primary`, which renders as `default` (renderer default: `default`)'),
   size: z.enum([...BUTTON_PRIMITIVE_SIZES, 'md']).optional()
@@ -3802,7 +4235,7 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
   description: z.string().optional()
     .describe('Action description, forwarded to the runner — the parameter dialog shows it under its title'),
   target: z.string().optional()
-    .describe('Executor target, forwarded to the runner: the URL, script name, flow name or API endpoint, per `actionType`'),
+    .describe('Executor target, forwarded to the runner: the URL, script name, flow name or API endpoint, per `actionType`. For `actionType: \'url\'`: an http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ — every other scheme and a protocol-relative //host are refused'),
   openIn: z.enum(['self', 'new-tab']).optional()
     .describe('For a `url` action: `self` navigates in place, `new-tab` opens a new browser tab'),
   method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
@@ -3820,16 +4253,19 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
     .describe('Action locations, forwarded to the runner — the console uses them to tell a record-scoped action from an object-level one'),
   toast: z.unknown().optional().describe('Toast behaviour, forwarded to the runner'),
   resultDialog: z.unknown().optional().describe('One-shot result dialog for a value the response shows exactly once, forwarded to the runner'),
-  onSuccess: z.unknown().optional().describe('Declared post-success navigation, forwarded to the runner'),
+  onSuccess: actionOnSuccessBlock().optional()
+    .describe('Post-success navigation, forwarded to the runner: `ActionSchema`\'s own `{ navigate, openIn }` block. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with ${, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab`'),
   objectName: z.string().optional()
     .describe('Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page\'s object. Omit to act on the page\'s object'),
-}));
+}).superRefine(refuseUnopenableRowUrlTarget('actionType', "An `action:button`'s `target` (`actionType: 'url'`)"))
+  .superRefine(refuseRowUrlExecutorAlias('actionType', "An `action:button`'s `actionType: 'navigation'`")));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ActionButtonProps = z.input<typeof ActionButtonPropsSchema>;
 /**
  * ADR-0122: the parsed state differs from the authored state on `visible` and `disabled` — the
  * bare-string arm of the condition union normalizes to the canonical
- * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform).
+ * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform) — and on
+ * `onSuccess`, whose `openIn` the action's own block resolves to `'self'` when it is omitted.
  */
 export type ActionButtonPropsParsed = z.infer<typeof ActionButtonPropsSchema>;
 
@@ -3887,7 +4323,7 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
   icon: z.string().optional()
     .describe('Lucide icon name, resolved through the shared action-icon resolver (renderer registration default `play`)'),
   actionType: z.string().optional()
-    .describe('Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. Write it here, not as `type`'),
+    .describe('Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. `navigation`, the runner\'s alias of `url`, is refused: write `url`. Write it here, not as `type`'),
   variant: z.enum([...BUTTON_PRIMITIVE_VARIANTS, 'primary']).optional()
     .describe('Button variant — the Button primitive\'s vocabulary, plus `primary`, which renders as `default` (renderer default: `ghost`)'),
   visible: actionCondition().optional()
@@ -3899,7 +4335,7 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
   params: z.unknown().optional()
     .describe('Action parameters, forwarded to the runner: an array is the list of inputs to collect from the user; an object is forwarded as the static parameter values'),
   target: z.string().optional()
-    .describe('Executor target, forwarded to the runner: the URL, script name, flow name or API endpoint, per `actionType`'),
+    .describe('Executor target, forwarded to the runner: the URL, script name, flow name or API endpoint, per `actionType`. For `actionType: \'url\'`: an http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ — every other scheme and a protocol-relative //host are refused'),
   openIn: z.enum(['self', 'new-tab']).optional()
     .describe('For a `url` action: `self` navigates in place, `new-tab` opens a new browser tab'),
   method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
@@ -3915,16 +4351,19 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
     .describe('Action locations, forwarded to the runner — the console uses them to tell a record-scoped action from an object-level one'),
   toast: z.unknown().optional().describe('Toast behaviour, forwarded to the runner'),
   resultDialog: z.unknown().optional().describe('One-shot result dialog for a value the response shows exactly once, forwarded to the runner'),
-  onSuccess: z.unknown().optional().describe('Declared post-success navigation, forwarded to the runner'),
+  onSuccess: actionOnSuccessBlock().optional()
+    .describe('Post-success navigation, forwarded to the runner: `ActionSchema`\'s own `{ navigate, openIn }` block. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with ${, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab`'),
   objectName: z.string().optional()
     .describe('Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page\'s object. Omit to act on the page\'s object'),
-}));
+}).superRefine(refuseUnopenableRowUrlTarget('actionType', "An `action:icon`'s `target` (`actionType: 'url'`)"))
+  .superRefine(refuseRowUrlExecutorAlias('actionType', "An `action:icon`'s `actionType: 'navigation'`")));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ActionIconProps = z.input<typeof ActionIconPropsSchema>;
 /**
  * ADR-0122: the parsed state differs from the authored state on `visible` and `disabled` — the
  * bare-string arm of the condition union normalizes to the canonical
- * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform).
+ * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform) — and on
+ * `onSuccess`, whose `openIn` the action's own block resolves to `'self'` when it is omitted.
  */
 export type ActionIconPropsParsed = z.infer<typeof ActionIconPropsSchema>;
 
@@ -4007,7 +4446,16 @@ export type ActionIconPropsParsed = z.infer<typeof ActionIconPropsSchema>;
  * inventory. A member's `params` is its `ActionParam[]` input list: both
  * containers forward an array as `actionParams` (group `:346-348`, menu
  * `:270-272`, re-read at the pin this repo builds against, `.objectui-sha` =
- * `088e0f705`, 2026-10-12: `action-group.tsx`, `action-menu.tsx` and
+ * `1fb1ced36`, 2026-10-12: `action-group.tsx`, `action-menu.tsx` and
+ * `static-params.ts` are byte-identical across the hop from `7578323a5` (`git
+ * diff --quiet`), so both held unmoved; at `7578323a5`, 2026-10-12:
+ * `action-group.tsx`, `action-menu.tsx` and
+ * `static-params.ts` are byte-identical across the hop from `9646e2ed2` (`git
+ * diff --quiet`), so both held unmoved; at `9646e2ed2`, 2026-10-12:
+ * `action-group.tsx`, `action-menu.tsx` and
+ * `static-params.ts` are byte-identical across the hop from `088e0f705` (`git
+ * diff --quiet`), so both held unmoved; at `088e0f705`, 2026-10-12:
+ * `action-group.tsx`, `action-menu.tsx` and
  * `static-params.ts` are byte-identical across the hop from `e5311165a` (`git
  * diff --quiet`), so both held unmoved; at `e5311165a`, 2026-10-12:
  * `action-group.tsx`, `action-menu.tsx` and
@@ -4062,7 +4510,7 @@ function actionContainerMemberShape() {
     icon: z.string().optional()
       .describe('Lucide icon name drawn before the label, resolved through the shared action-icon resolver (an unknown name draws no icon)'),
     type: z.string().optional()
-      .describe('Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. A member is an action entry, so its executor is `type` (on an `action:button` node it is `actionType`)'),
+      .describe('Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. `navigation`, the runner\'s alias of `url`, is refused: write `url`. A member is an action entry, so its executor is `type` (on an `action:button` node it is `actionType`)'),
     variant: z.enum([...BUTTON_PRIMITIVE_VARIANTS, 'primary']).optional()
       .describe('Item variant — the Button primitive\'s vocabulary, plus `primary` (drawn as `default`). An inline `action:group` button draws it (falling back to the group\'s `variant`); a dropdown or `action:menu` item draws `destructive` red and every other variant plainly'),
     visible: actionCondition().optional()
@@ -4076,7 +4524,7 @@ function actionContainerMemberShape() {
     description: z.string().optional()
       .describe('Action description, forwarded to the runner — the parameter dialog shows it under its title'),
     target: z.string().optional()
-      .describe('Executor target, forwarded to the runner: the URL, script name, flow name or API endpoint, per `type`'),
+      .describe('Executor target, forwarded to the runner: the URL, script name, flow name or API endpoint, per `type`. For `type: \'url\'`: an http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ — every other scheme and a protocol-relative //host are refused'),
     openIn: z.enum(['self', 'new-tab']).optional()
       .describe('For a `url` action: `self` navigates in place, `new-tab` opens a new browser tab'),
     method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
@@ -4092,7 +4540,8 @@ function actionContainerMemberShape() {
       .describe('Action locations, forwarded to the runner — an `action:group` with a `location` draws only the members that list it, and the console uses them to tell a record-scoped action from an object-level one'),
     toast: z.unknown().optional().describe('Toast behaviour, forwarded to the runner'),
     resultDialog: z.unknown().optional().describe('One-shot result dialog for a value the response shows exactly once, forwarded to the runner'),
-    onSuccess: z.unknown().optional().describe('Declared post-success navigation, forwarded to the runner'),
+    onSuccess: actionOnSuccessBlock().optional()
+      .describe('Post-success navigation, forwarded to the runner: `ActionSchema`\'s own `{ navigate, openIn }` block. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with ${, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab`'),
     objectName: z.string().optional()
       .describe('Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page\'s object. Omit to act on the page\'s object'),
   };
@@ -4179,7 +4628,9 @@ function buildActionGroupMember() {
     ...actionContainerMemberShape(),
     size: z.enum([...BUTTON_PRIMITIVE_SIZES, 'md']).optional()
       .describe('Inline button size — the Button primitive\'s vocabulary, plus `md` (drawn as `default`), falling back to the group\'s `size`. A dropdown item reads no size'),
-  }).superRefine(actionContainerMemberParamsFitType('action:group'));
+  }).superRefine(actionContainerMemberParamsFitType('action:group'))
+    .superRefine(refuseUnopenableRowUrlTarget('type', "An `action:group` member's `target` (`type: 'url'`)"))
+    .superRefine(refuseRowUrlExecutorAlias('type', "An `action:group` member's `type: 'navigation'`"));
 }
 let actionGroupMemberOnce: ReturnType<typeof buildActionGroupMember> | undefined;
 /** The one {@link buildActionGroupMember} instance. */
@@ -4198,7 +4649,9 @@ function buildActionMenuMember() {
         + 'button (the menu\'s own `size`). Remove it, or put the action in an `action:group`, whose inline buttons '
         + 'read a member\'s `size`.',
     },
-  }, actionContainerMemberShape()).superRefine(actionContainerMemberParamsFitType('action:menu'));
+  }, actionContainerMemberShape()).superRefine(actionContainerMemberParamsFitType('action:menu'))
+    .superRefine(refuseUnopenableRowUrlTarget('type', "An `action:menu` member's `target` (`type: 'url'`)"))
+    .superRefine(refuseRowUrlExecutorAlias('type', "An `action:menu` member's `type: 'navigation'`"));
 }
 let actionMenuMemberOnce: ReturnType<typeof buildActionMenuMember> | undefined;
 /** The one {@link buildActionMenuMember} instance. */
@@ -4285,7 +4738,9 @@ export type ActionGroupProps = z.input<typeof ActionGroupPropsSchema>;
 /**
  * ADR-0122: the parsed state differs from the authored state on `visible` — the
  * bare-string arm of the condition union normalizes to the canonical
- * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform).
+ * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform) — and on
+ * a member's `onSuccess`, whose `openIn` the action's own block resolves to `'self'` when it
+ * is omitted.
  */
 export type ActionGroupPropsParsed = z.infer<typeof ActionGroupPropsSchema>;
 
@@ -4342,7 +4797,9 @@ export type ActionMenuProps = z.input<typeof ActionMenuPropsSchema>;
 /**
  * ADR-0122: the parsed state differs from the authored state on `visible` — the
  * bare-string arm of the condition union normalizes to the canonical
- * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform).
+ * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform) — and on
+ * a member's `onSuccess`, whose `openIn` the action's own block resolves to `'self'` when it
+ * is omitted.
  */
 export type ActionMenuPropsParsed = z.infer<typeof ActionMenuPropsSchema>;
 
@@ -4572,8 +5029,11 @@ export type ElementRepeaterPropsParsed = z.infer<typeof ElementRepeaterPropsSche
  * inventory, exactly like the #5068 → #4001-batch-A sequence above.
  *
  * The warning→error upgrade is untouched by this section: findings on these
- * entries are advisory, still gated on the #5068 inventory (the ruling:
- * 「warning 层先行,error 升级仍以 inventory 为闸,本裁定不改那个闸」).
+ * entries were advisory, gated on the #5068 inventory (the ruling:
+ * 「warning 层先行,error 升级仍以 inventory 为闸,本裁定不改那个闸」). Once
+ * that inventory measured empty, #23026 made one class an `error` — a
+ * `retiredKey()` tombstone's verdict, such as a retired key these rows carry;
+ * every other finding on them stays advisory (#23147 carries the rest).
  *
  * Deliberately NOT declared, each with its reason:
  *
@@ -4707,7 +5167,16 @@ const GridOperationsSchema = lazySchema(() => strictObject({
  * control `schema.editable` in `ObjectGrid.tsx`. It was declared ahead of its
  * reader on purpose (the BUILD objectui#11068 chose), and its describe carried
  * the `[EXPERIMENTAL — not enforced]` marker that said so. Re-measured at the
- * pin this repo builds against (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+ * pin this repo builds against (`.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+ * `7578323a5`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+ * `9646e2ed2`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+ * `088e0f705`, re-read there 2026-10-12:
  * every objectui file this record cites is byte-identical across the hop from
  * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
  * `e5311165a`, re-read there 2026-10-12:
@@ -4842,7 +5311,16 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * same members, and objectui's grid follows this declaration.
    *
    * ⚠️ That gap is closed at the pin this repo builds against (`.objectui-sha`
-   * = `088e0f705`, re-read there 2026-10-12:
+   * = `1fb1ced36`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+   * `7578323a5`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+   * `9646e2ed2`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+   * `088e0f705`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
    * `e5311165a`, re-read there 2026-10-12:
@@ -5253,7 +5731,16 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * `ComponentPropsMap` key. This record said to drop the marker in the change
    * that lands the BUILD at the pin, and it is dropped here.
    *
-   * Read at the pin this repo builds against (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+   * Read at the pin this repo builds against (`.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+   * `7578323a5`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+   * `9646e2ed2`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+   * `088e0f705`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
    * `e5311165a`, re-read there 2026-10-12:
@@ -5413,7 +5900,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * `object-grid-data-view-data-converged` semantic entry.
    */
   data: ViewDataSchema.optional()
-    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | api | value | schema). Static inline rows live at `{ provider: 'value', items: [...] }`; the bare-array shortcut is refused — see migration `object-grid-data-view-data-converged`"),
+    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | value | schema). Static inline rows live at `{ provider: 'value', items: [...] }`; the bare-array shortcut is refused — see migration `object-grid-data-view-data-converged`"),
   staticData: z.array(z.unknown()).optional().describe("Deprecated bare-array static-rows shortcut the renderer still reads. Prefer `data: { provider: 'value', items: [...] }`"),
 }));
 /** Author state (ADR-0122: the bare name is the author state). */
@@ -5709,7 +6196,16 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * same record for the metric tile.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+   * (`.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+   * `7578323a5`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+   * `9646e2ed2`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+   * `088e0f705`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
    * `e5311165a`, re-read there 2026-10-12:
@@ -5975,7 +6471,16 @@ const ObjectKanbanLaneSchema = lazySchema(() => strictObject({
  * DESIGNER's spelling with
  * zero read points (#7973 class) — aliased to the `groupBy` the board reads.
  * `limit` (#16503) was measured later, at the pin this repo builds against
- * (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+ * (`.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+ * `7578323a5`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+ * `9646e2ed2`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+ * `088e0f705`, re-read there 2026-10-12:
  * every objectui file this record cites is byte-identical across the hop from
  * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
  * `e5311165a`, re-read there 2026-10-12:
@@ -6102,7 +6607,22 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * Row cap (#16503 — the spec half of objectui#8172; decision batch #68,
    * 2026-09-07, option A: the contract declares the capability that already
    * ships, is documented and is in use). Measured at the objectui pin this
-   * repo builds against (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+   * repo builds against (`.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+   * `7578323a5`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved;
+   * `ListView.tsx` and `ObjectView.tsx`, named below only as an earlier
+   * re-read's record and no longer anchors here, are not among them
+   * (`ListView.tsx` and app-shell's `ObjectView.tsx` changed on this hop). At
+   * `9646e2ed2`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved;
+   * `ListView.tsx` and `ObjectView.tsx`, named below only as an earlier
+   * re-read's record and no longer anchors here, are not among them
+   * (`ListView.tsx` changed on this hop). At `088e0f705`, re-read there
+   * 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
    * `e5311165a`, re-read there 2026-10-12:
@@ -6401,7 +6921,16 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * quick-add control and no block a document can name offers one either).
    *
    * Measured at the objectui pin this repo builds against
-   * (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+   * (`.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+   * `7578323a5`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+   * `9646e2ed2`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+   * `088e0f705`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
    * `e5311165a`, re-read there 2026-10-12:
@@ -6629,6 +7158,15 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * element schemas).
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
+   * `1fb1ced36`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+   * `7578323a5`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+   * `9646e2ed2`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
    * `088e0f705`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
@@ -6864,6 +7402,15 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
    * `object-kanban`'s above.
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
+   * `1fb1ced36`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+   * `7578323a5`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+   * `9646e2ed2`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
    * `088e0f705`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
@@ -8096,7 +8643,16 @@ const OBJECT_MAP_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * `object-map` (objectui `plugin-map/src/ObjectMap.tsx` plus the registry shell
  * `plugin-map/src/index.tsx`, read at the pin this repo builds against —
- * `.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+ * `.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+ * `7578323a5`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+ * `9646e2ed2`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+ * `088e0f705`, re-read there 2026-10-12:
  * every objectui file this record cites is byte-identical across the hop from
  * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
  * `e5311165a`, re-read there 2026-10-12:
@@ -8296,14 +8852,23 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
    * props channel alone.
    */
   data: ViewDataSchema.optional()
-    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | api | value | schema), read FIRST by `getDataConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused"),
+    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | value | schema), read FIRST by `getDataConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused"),
   staticData: z.array(z.unknown()).optional()
     .describe("Inline records — read SECOND by `getDataConfig`, wrapped into a `{ provider: 'value' }` config"),
   /**
    * Base query filter — the `ViewFilterRule` ARRAY form, the one filter
    * orthography every `filter` door in this map shares (ui#6206-B reaching the
    * `object-*` family: #15449, decision batch #55, option A). Measured at the
-   * pin this repo builds against (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+   * pin this repo builds against (`.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+   * `7578323a5`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+   * `9646e2ed2`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+   * `088e0f705`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
    * `e5311165a`, re-read there 2026-10-12:
@@ -8389,7 +8954,16 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
    * Marker order — the `SortItem` ARRAY form, the one sort orthography every
    * DECLARED `sort` door on this platform carries (objectui#8221, decision batch
    * #77, option B). Measured at the pin this repo builds against
-   * (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+   * (`.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+   * `7578323a5`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+   * `9646e2ed2`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+   * `088e0f705`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
    * `e5311165a`, re-read there 2026-10-12:
@@ -8597,7 +9171,26 @@ function objectGanttMarker() {
 /**
  * `object-gantt` (objectui `plugin-gantt/src/ObjectGantt.tsx` plus the registry
  * shell `plugin-gantt/src/index.tsx`, read at the pin this repo builds against
- * — `.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+ * — `.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+ * `7578323a5`, re-read there 2026-10-12:
+ * `ObjectGantt.tsx`, `record-source.ts` and `plugin-gantt/src/index.tsx` are
+ * byte-identical across the hop from `9646e2ed2` (`git diff --quiet`), so every
+ * anchor in them held unmoved; `ListView.tsx` changed (+34/-79, objectui#12217,
+ * objectui `f5b66bf97`: two import lines changed in place and one added at the
+ * top, a docblock added and `useListViewTranslation` exported near `:1040`, the
+ * grid's inline empty state replaced from `:5677` down), and its `case 'gantt'`
+ * MOVED `3959` -> `3964`, byte-identical, and still writes the toolbar Search
+ * term onto the node as `search` / `searchableFields`. At `9646e2ed2`, re-read
+ * there 2026-10-12:
+ * `ObjectGantt.tsx`, `record-source.ts` and `plugin-gantt/src/index.tsx` are
+ * byte-identical across the hop from `088e0f705` (`git diff --quiet`), so every
+ * anchor in them held unmoved; `ListView.tsx` changed (+9/-9, objectui#12189,
+ * objectui `26b0bd2d1`: the FilterBuilder group type's rename, nine lines
+ * replaced in place, the last at `:1558`), and its `case 'gantt'` held at
+ * `3959` and still writes the toolbar Search term onto the node as `search` /
+ * `searchableFields`. At `088e0f705`, re-read there 2026-10-12:
  * every objectui file this record cites is byte-identical across the hop from
  * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
  * `e5311165a`, re-read there 2026-10-12:
@@ -8809,7 +9402,7 @@ export const ObjectGanttPropsSchema = lazySchema(() => strictObject({
    * record-source config the fetch resolves through `resolveDataSource`.
    */
   data: ViewDataSchema.optional()
-    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | api | value | schema), read FIRST by `resolveRecordSourceConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused"),
+    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | value | schema), read FIRST by `resolveRecordSourceConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused"),
   staticData: z.array(z.unknown()).optional()
     .describe("Inline records — read SECOND by `resolveRecordSourceConfig`, wrapped into a `{ provider: 'value' }` config"),
   /** Base query filter — the family's one `ViewFilterRule` array orthography (#15449). */
@@ -8874,10 +9467,29 @@ export type ObjectGanttPropsParsed = z.infer<typeof ObjectGanttPropsSchema>;
 /**
  * The flat `TreeConfig` spellings `getTreeConfig` reads ahead of the `tree`
  * block (`ObjectTree.tsx:289-302`) and that `ObjectView` / `ListView` EMIT when
- * they flatten `options.tree` (`ListView.tsx:4120-4144`, `case 'tree'`: the
+ * they flatten `options.tree` (`ListView.tsx:4125-4149`, `case 'tree'`: the
  * product carries these keys, the EFFECTIVE `filter` objectui#10250 added, and
  * NO `tree` key). Both halves re-READ at the
- * pin this repo builds against (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+ * pin this repo builds against (`.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+ * `7578323a5`, re-read there 2026-10-12:
+ * `ObjectTree.tsx` and `plugin-tree/src/index.tsx` are byte-identical to
+ * `9646e2ed2` (`git diff --quiet`), so `289-302` and `240-261` did not move;
+ * and `ListView.tsx` changed (+34/-79, objectui#12217, objectui `f5b66bf97`:
+ * two import lines changed in place and one added at the top, a docblock added
+ * and `useListViewTranslation` exported near `:1040`, the grid's inline empty
+ * state replaced from `:5677` down), so its `case 'tree'` arm MOVED `4120-4144`
+ * -> `4125-4149`, byte-identical, with `labelField: treeCfg.labelField ||
+ * 'name'` at `:4145`, and the flat key set it emits did not move. At
+ * `9646e2ed2`, re-read there 2026-10-12:
+ * `ObjectTree.tsx` and `plugin-tree/src/index.tsx` are byte-identical to
+ * `088e0f705` (`git diff --quiet`), so `289-302` and `240-261` did not move;
+ * and `ListView.tsx` changed (+9/-9, objectui#12189, objectui `26b0bd2d1`: the
+ * FilterBuilder group type's rename, nine lines replaced in place, the last at
+ * `:1558`), so its `case 'tree'` arm held at `4120-4144` with `labelField:
+ * treeCfg.labelField || 'name'` at `:4140`, and the flat key set it emits did
+ * not move. At `088e0f705`, re-read there 2026-10-12:
  * every objectui file this record cites is byte-identical across the hop from
  * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
  * `e5311165a`, re-read there 2026-10-12:
@@ -9031,7 +9643,16 @@ const OBJECT_TREE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * `object-tree` (objectui `plugin-tree/src/ObjectTree.tsx` plus the registry
  * shell `plugin-tree/src/index.tsx`, read at the pin this repo builds against
- * — `.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+ * — `.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+ * `7578323a5`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+ * `9646e2ed2`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+ * `088e0f705`, re-read there 2026-10-12:
  * every objectui file this record cites is byte-identical across the hop from
  * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
  * `e5311165a`, re-read there 2026-10-12:
@@ -9236,7 +9857,16 @@ export const ObjectTreePropsSchema = lazySchema(() => strictObject({
    * holds for them because each registers through `ElementDataSourceGate`,
    * which lowers the spec binding onto `objectName` before the renderer sees
    * the node. `plugin-tree/src/index.tsx` does NOT: at the pin this repo
-   * builds against (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+   * builds against (`.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+   * `7578323a5`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+   * `9646e2ed2`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+   * `088e0f705`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
    * `e5311165a`, re-read there 2026-10-12:
@@ -9348,7 +9978,7 @@ export const ObjectTreePropsSchema = lazySchema(() => strictObject({
    * mirror, which carries no `data` on either face at this pin.
    */
   data: ViewDataSchema.optional()
-    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | api | value | schema), read FIRST by `resolveRecordSourceConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused"),
+    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | value | schema), read FIRST by `resolveRecordSourceConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused"),
   staticData: z.array(z.unknown()).optional()
     .describe("Inline records — read SECOND by `resolveRecordSourceConfig`, wrapped into a `{ provider: 'value' }` config"),
   /** Base query filter — the family's one `ViewFilterRule` array orthography (#15449). */
@@ -9654,7 +10284,16 @@ function objectTimelineItemsFitVariant() {
  * `object-timeline` (objectui `plugin-timeline/src/ObjectTimeline.tsx`, the
  * presentational `plugin-timeline/src/renderer.tsx` it composes into, and the
  * registry shell `plugin-timeline/src/index.tsx` — all read at the pin this
- * repo builds against (`.objectui-sha` = `088e0f705`, re-read there 2026-10-12:
+ * repo builds against (`.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+ * `7578323a5`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+ * `9646e2ed2`, re-read there 2026-10-12:
+ * every objectui file this record cites is byte-identical across the hop from
+ * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+ * `088e0f705`, re-read there 2026-10-12:
  * every objectui file this record cites is byte-identical across the hop from
  * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
  * `e5311165a`, re-read there 2026-10-12:
@@ -9920,6 +10559,15 @@ export const ObjectTimelinePropsSchema = lazySchema(() => strictObject({
    * first publishes a refusal for a key the renderer honours.
    *
    * Read points at the pin this repo builds against (`.objectui-sha` =
+   * `1fb1ced36`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+   * `7578323a5`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+   * `9646e2ed2`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
    * `088e0f705`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
@@ -10292,6 +10940,15 @@ export const ComponentPropsMap = {
   // set from this map's keys), on the three-part evidence that vocabulary's
   // string-arm ledger asks of a type admitted without an enum member — all
   // measured at the pin this repo builds against (`.objectui-sha` =
+  // `1fb1ced36`, re-read there 2026-10-12:
+  // every objectui file this record cites is byte-identical across the hop from
+  // `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+  // `7578323a5`, re-read there 2026-10-12:
+  // every objectui file this record cites is byte-identical across the hop from
+  // `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+  // `9646e2ed2`, re-read there 2026-10-12:
+  // every objectui file this record cites is byte-identical across the hop from
+  // `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
   // `088e0f705`, re-read there 2026-10-12:
   // every objectui file this record cites is byte-identical across the hop from
   // `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
@@ -10407,6 +11064,15 @@ export const ComponentPropsMap = {
   // authority for map and gantt while tree's rung-1 `data` read stayed
   // undeclared on every face. Key sets measured from the renderers' read
   // points at the pin this repo builds against (`.objectui-sha` =
+  // `1fb1ced36`, re-read there 2026-10-12:
+  // every objectui file this record cites is byte-identical across the hop from
+  // `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+  // `7578323a5`, re-read there 2026-10-12:
+  // every objectui file this record cites is byte-identical across the hop from
+  // `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+  // `9646e2ed2`, re-read there 2026-10-12:
+  // every objectui file this record cites is byte-identical across the hop from
+  // `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
   // `088e0f705`, re-read there 2026-10-12:
   // every objectui file this record cites is byte-identical across the hop from
   // `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
@@ -10503,6 +11169,15 @@ export const ComponentPropsMap = {
   // it — so `object-timeline` was unjudged in both directions, a real key and
   // a typo riding through alike. Key set measured from the renderer's read
   // points at the pin this repo builds against (`.objectui-sha` =
+  // `1fb1ced36`, re-read there 2026-10-12:
+  // every objectui file this record cites is byte-identical across the hop from
+  // `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+  // `7578323a5`, re-read there 2026-10-12:
+  // every objectui file this record cites is byte-identical across the hop from
+  // `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+  // `9646e2ed2`, re-read there 2026-10-12:
+  // every objectui file this record cites is byte-identical across the hop from
+  // `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
   // `088e0f705`, re-read there 2026-10-12:
   // every objectui file this record cites is byte-identical across the hop from
   // `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At

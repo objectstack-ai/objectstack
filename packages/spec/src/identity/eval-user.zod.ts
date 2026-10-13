@@ -150,6 +150,10 @@ export const ADMIN_FULL_ACCESS_CAPABILITIES: Pick<PermissionSet, 'objects' | 'sy
     // from the ledger's parent-record read gate. Platform administrators hold
     // it by default (ruling B on #21175); every other position by explicit grant.
     'view_all_audit_log',
+    // The mailbox administrator capability: its holder is exempt from the
+    // inbound-mail read gates, the unassociated pool included (ruling
+    // 6116489638, Q4 → A). Organization administrators hold it too.
+    'manage_mailboxes',
   ],
 };
 

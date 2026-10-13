@@ -793,11 +793,21 @@ describe('ElementDataSourceSchema `filter` — one filter orthography platform-w
       properties: { labelField: 'name' },
       dataSource: { object: 'account', filter: RECORD_FORM },
     });
-    expect(issuesAt(bindingRecord, 'dataSource.filter').map((i) => i.code)).toEqual(['invalid_type']);
+    // Since the API binding (#23016) `dataSource` is a `z.union` of the object
+    // binding and the API binding, so a refused object binding arrives at the
+    // component door as ONE `invalid_union` at `dataSource`, and the object
+    // branch — the first member — carries the very issue this pin reads. The
+    // object shape itself is unchanged: `ElementDataSourceSchema` alone still
+    // raises it directly (the cases above).
+    type Issue = { path: PropertyKey[]; code: string };
+    const atDataSource = issuesAt(bindingRecord, 'dataSource') as Array<Issue & { errors?: Issue[][] }>;
+    expect(atDataSource.map((i) => i.code)).toEqual(['invalid_union']);
+    const objectBranch: ParseResult = { success: false, error: { issues: atDataSource[0].errors![0] } };
+    expect(issuesAt(objectBranch, 'filter').map((i) => i.code)).toEqual(['invalid_type']);
     const grid = ComponentPropsMap['object-grid'];
     expect(issuesAt(grid.safeParse({ objectName: 'account', filter: RULES }), 'filter')).toEqual([]);
     expect(issuesAt(grid.safeParse({ objectName: 'account', filter: RECORD_FORM }), 'filter').map((i) => i.code))
-      .toEqual(issuesAt(bindingRecord, 'dataSource.filter').map((i) => i.code));
+      .toEqual(issuesAt(objectBranch, 'filter').map((i) => i.code));
   });
 });
 
@@ -816,8 +826,13 @@ describe('PageComponent dataSource integration', () => {
       },
     });
 
-    expect(component.dataSource?.object).toBe('order');
-    expect(component.dataSource?.limit).toBe(100);
+    // `dataSource` is the object binding OR the API binding (#23016); this
+    // node wrote the object one, so narrow before reading its keys.
+    const ds = component.dataSource;
+    expect(ds && 'object' in ds).toBe(true);
+    if (!ds || !('object' in ds)) return;
+    expect(ds.object).toBe('order');
+    expect(ds.limit).toBe(100);
   });
 
   it('should accept component without dataSource', () => {

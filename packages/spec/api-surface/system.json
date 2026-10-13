@@ -216,8 +216,6 @@
     "EmailServiceConfigParsed (type)",
     "EmailServiceConfigSchema (const)",
     "EmailTemplateDefinition (type)",
-    "EmailTemplateDefinitionCategory (type)",
-    "EmailTemplateDefinitionCategorySchema (const)",
     "EmailTemplateDefinitionParsed (type)",
     "EmailTemplateDefinitionSchema (const)",
     "EmailTemplateDefinitionVariable (type)",

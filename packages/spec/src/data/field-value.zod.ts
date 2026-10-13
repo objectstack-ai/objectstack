@@ -178,9 +178,22 @@ const IMPLICIT_REFERENCE_TARGETS: ReadonlyMap<string, string> = new Map([
  * engine that performs it alike.
  *
  * Returns `undefined` only when the field genuinely names no target: a
- * non-reference type, or a `lookup`/`master_detail`/`tree` with no `reference`
- * (an authoring bug — those types carry an author-chosen target and nothing
- * can supply it for them).
+ * non-reference type, or a `lookup`/`master_detail` with no `reference` (an
+ * authoring bug — those types carry an author-chosen target, nothing can supply
+ * it for them, and `FieldSchema` refuses the omission).
+ *
+ * A `tree` with no `reference` is NOT that case (#23065). Its target is the
+ * object that declares it — a hierarchy is parent/child within one object, and
+ * `refuseForeignTreeReference` tells authors to drop the key — but that is a
+ * fact of the field's position, which a reader of one field cannot see. So it
+ * is written onto the field where the object is known, and not derived here:
+ * `ObjectSchema` / `ObjectExtensionSchema`'s parse and the engine's object
+ * registry give the field its own object's name (`materializeTreeSelfReferences`,
+ * `object.zod.ts`), and a reader of a parsed or registered object receives an
+ * ordinary self-reference. This function answers `undefined` for a bare
+ * `{ type: 'tree' }` only because no object came with it. ⛔ A caller that holds
+ * the object does not patch the gap with its own fallback: it reads the object
+ * through one of those doors.
  *
  * Framework#4443 / cloud#983: the two callers used to read `field.reference`
  * raw, which made a `{ type: 'user' }` field targetless to BOTH — the expand

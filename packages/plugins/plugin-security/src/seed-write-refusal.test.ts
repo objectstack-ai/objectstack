@@ -28,7 +28,7 @@
  *    is the ask, fatal is not: a rethrow would turn a silent degradation into a
  *    boot failure on every deployment carrying the legacy index;
  * 2. the warning is AGGREGATED — N refusals in one pass produce one line, not
- *    N, the same discipline `warnOrganizationLessRows` is built on (a catalog
+ *    N, the same discipline the retired organization-less row guard was built on (a catalog
  *    that refuses 400 rows must not print 400 warnings and bury the remedy);
  * 3. a NON-unique-violation refusal is not silently reclassified as one — it
  *    gets its own line, because the migrate remedy does not apply to it and

@@ -61,6 +61,38 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * (`400 INVALID_FIELD` on a write that names it), and
  * `os migrate apply --allow-destructive` drops it.
  *
+ * ## Platform-written: `is_edited` / `edited_at` (maintainer ruling A on #23124)
+ *
+ * The two edit-mark fields were declared here with no platform writer: nothing
+ * stamped them when an author changed a comment, so the one client that did
+ * (the console's comment editor) was the only producer, an API or agent edit
+ * left no mark, and any writer could clear or forge the mark at will. A
+ * declared lifecycle field that the platform does not keep is the ADR-0049
+ * shape this docblock already removed twice; this time the fields are kept and
+ * ENFORCED instead, because readers measurably rely on the mark (the record
+ * feed shows "edited" from `is_edited`):
+ *
+ * - **The stamp.** `installCommentAccessHooks` registers a `beforeUpdate`
+ *   handler that sets `is_edited: true` and `edited_at` (server clock) when the
+ *   update's `body` differs from the stored body — for every caller, as the
+ *   engine's own `updated_at` stamp is. An update that does not name `body`, or
+ *   names it unchanged (a `mentions`-only edit), is not an edit and stamps
+ *   nothing. A predicate (`multi: true`) update is stamped per matched row; a
+ *   batch whose rows disagree (some bodies change, some do not) is refused whole
+ *   by the engine (`MULTI_UPDATE_HOOK_KEY_DIVERGENCE`), because one SET clause
+ *   cannot carry a per-row mark.
+ * - **Read-only at the data door.** Both fields declare `readonly: true`. On
+ *   update the engine hides a non-system caller's value from the hooks and
+ *   strips it afterwards (reported as `droppedFields`, logged at `warn`), so a
+ *   client can neither clear nor forge the mark; the stamp's own write is kept.
+ *   On create the engine leaves `sys_` objects to their own guards, so the
+ *   create hook sets `is_edited: false` / `edited_at: null` over a client value:
+ *   a new comment is not an edited one. ⛔ Not a refusal: the console released
+ *   before this change still sends both fields on every edit, and refusing them
+ *   would fail that edit; the value simply never lands. A `preserveAudit`
+ *   (historical import) update keeps a supplied value, as it does for
+ *   `updated_at`.
+ *
  * @namespace sys
  */
 export const SysComment = ObjectSchema.create({
@@ -145,15 +177,20 @@ export const SysComment = ObjectSchema.create({
     // stored or computed on the comment row (#22573).
 
     // ── Lifecycle ────────────────────────────────────────────────
+    // Platform-written (#23124): the `beforeUpdate` stamp in
+    // `comment-access-hooks.ts` sets both when the body changes; a client's
+    // value never lands (see "Platform-written" above).
     is_edited: Field.boolean({
       label: 'Edited',
       defaultValue: false,
+      readonly: true,
       group: 'Lifecycle',
     }),
 
     edited_at: Field.datetime({
       label: 'Edited At',
       required: false,
+      readonly: true,
       group: 'Lifecycle',
     }),
 

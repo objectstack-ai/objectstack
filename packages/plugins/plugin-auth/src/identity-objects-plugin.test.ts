@@ -16,6 +16,11 @@
  *     is this export).
  *  4. The full kernel is unchanged: `AuthPlugin` registers the same identity
  *     manifest, from the same builder, in its one registration.
+ *  5. [ADR-0131 D3] Under `single`, the plugin that registers `sys_organization`
+ *     keeps its Default Organization: a system insert on a tenant-scoped object
+ *     is stamped with it instead of refused (D9). Idempotent; a walled posture
+ *     is unchanged; a host's `tenancy` service decides over the requested
+ *     posture; the composition with `AuthPlugin` is still refused.
  *
  * "An app" is a plugin that registers its manifest through the `manifest`
  * service in `init()`, which is what `AppPlugin.init()` does. `AppPlugin` itself
@@ -23,7 +28,7 @@
  * cannot import it without a workspace cycle.
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ObjectKernel,
   resolvePluginOrder,
@@ -155,6 +160,107 @@ describe('createIdentityObjectsPlugin() — identity objects for a kernel withou
 
     const registered = ql.registry.getAllObjects(AUTH_PLUGIN_ID).map((o) => o.name).sort();
     expect(registered).toEqual(authIdentityObjects.map((o) => o.name).sort());
+  });
+});
+
+describe('[ADR-0131 D3] 5. the Default Organization, kept by the plugin that registers sys_organization', () => {
+  let kernel: ObjectKernel | undefined;
+  const rowsOf = (r: unknown): Array<Record<string, any>> =>
+    Array.isArray(r) ? r : ((r as { records?: Array<Record<string, any>> })?.records ?? []);
+
+  beforeEach(() => {
+    // `single` is the unset default; spelled out so a stray variable in the
+    // runner's environment cannot decide these pins.
+    vi.stubEnv('OS_TENANCY_POSTURE', 'single');
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    try {
+      await kernel?.shutdown();
+    } catch {
+      /* a refused boot leaves the kernel stopped */
+    }
+    kernel = undefined;
+  });
+
+  /** A host plugin registering a `tenancy` service, as a kit's own kernel may. */
+  function tenancyService(posture: string): Plugin {
+    return {
+      name: 'test.tenancy',
+      type: 'standard',
+      version: '1.0.0',
+      async init(ctx: PluginContext) {
+        ctx.registerService('tenancy', { posture });
+      },
+    };
+  }
+
+  async function boot(plugins: Plugin[]): Promise<ObjectQL> {
+    kernel = new ObjectKernel({ logger: { level: 'silent' } });
+    await kernel.use(sqliteDriverPlugin());
+    await kernel.use(new ObjectQLPlugin());
+    await kernel.use(appPlugin());
+    for (const p of plugins) await kernel.use(p);
+    await kernel.bootstrap();
+    return kernel.getService<ObjectQL>('objectql');
+  }
+
+  const organizations = async (ql: ObjectQL) => rowsOf(await ql.find('sys_organization', { context: SYS }));
+
+  it('under single, without AuthPlugin: a system insert on a tenant-scoped object is stamped with the Default Organization', async () => {
+    const ql = await boot([createIdentityObjectsPlugin(), new SecurityPlugin()]);
+
+    // The seed loader's and a hook's shape: system context, no organization named.
+    const row = await ql.insert('kit_account', { name: 'Seeded by the system' }, { context: SYS });
+    const orgs = await organizations(ql);
+    expect(orgs.map((o) => o.slug)).toEqual(['default']);
+    const stored = await ql.findOne('kit_account', { where: { id: row.id }, context: SYS });
+    expect(stored?.organization_id).toBe(orgs[0].id);
+  });
+
+  it('is idempotent: start() again over the same store finds the organization and creates none', async () => {
+    const ql = await boot([createIdentityObjectsPlugin()]);
+    const [org] = await organizations(ql);
+
+    const ctx = {
+      getService: (name: string) => {
+        if (name === 'objectql') return ql;
+        throw new Error(`service not registered: ${name}`);
+      },
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+    } as unknown as PluginContext;
+    await createIdentityObjectsPlugin().start(ctx);
+
+    expect((await organizations(ql)).map((o) => o.id)).toEqual([org.id]);
+  });
+
+  it.each(['group', 'isolated'])('under the walled %s posture, nothing changes: no organization is created', async (posture) => {
+    vi.stubEnv('OS_TENANCY_POSTURE', posture);
+    const ql = await boot([createIdentityObjectsPlugin()]);
+
+    expect(await organizations(ql)).toEqual([]);
+  });
+
+  it('a host-registered tenancy service decides over the requested posture, in both directions', async () => {
+    vi.stubEnv('OS_TENANCY_POSTURE', 'isolated');
+    const single = await boot([tenancyService('single'), createIdentityObjectsPlugin()]);
+    expect((await organizations(single)).map((o) => o.slug)).toEqual(['default']);
+    await kernel?.shutdown();
+
+    vi.stubEnv('OS_TENANCY_POSTURE', 'single');
+    const walled = await boot([tenancyService('isolated'), createIdentityObjectsPlugin()]);
+    expect(await organizations(walled)).toEqual([]);
+  });
+
+  it('the composition with AuthPlugin is still refused, at init, on a real kernel', async () => {
+    const refusal = await boot([
+      new AuthPlugin({ secret: 'test-secret-at-least-32-chars-long', baseUrl: 'http://localhost:3000' }),
+      createIdentityObjectsPlugin(),
+    ]).then(() => undefined, (err: unknown) => err as Error);
+
+    expect(refusal?.message).toContain(IDENTITY_OBJECTS_PLUGIN_NAME);
+    expect(refusal?.message).toContain('AuthPlugin');
   });
 });
 

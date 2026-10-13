@@ -79,6 +79,21 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
   // platform administrator reaches every row, deployment-level rows included,
   // through its superuser read bypass, not through this capability.
   { name: 'view_all_audit_log', label: 'View All Audit Log', description: 'Read every compliance-ledger (sys_audit_log) row the holder’s ledger grant and row scope reach, past the parent-record read gate: rows about deleted records, ended sessions and records the holder cannot open. Under an organization wall an organization reader’s row scope is the rows about its organization (tenant_id); a platform administrator reads every row, deployment-level rows included. Field-level security still narrows each row’s before/after snapshots.', scope: 'org' },
+  // The mailbox administrator capability (ruling 6116489638, Q4 → A on the
+  // inbound-mail record). A read of a mirrored inbound message
+  // (`sys_mail_message`, `@objectstack/service-mailbox`) takes a read gate: a
+  // message is served to a caller who can read a record it is associated with,
+  // or who owns the mailbox it arrived in. A message nothing matched (the
+  // unassociated pool) has no record to read, so it is RESTRICTED by default
+  // to its mailbox's owner and to this capability's holder. Its holder is
+  // exempt from the message gate and the association gate, and is the one
+  // caller the mailbox directory (`sys_mailbox`) serves; the object grants and
+  // field-level security still apply. Held by default by platform
+  // administrators (`ADMIN_FULL_ACCESS_CAPABILITIES`) and by organization
+  // administrators; every other position only by explicit grant. `org`: every
+  // row it reaches carries the organization column, so the organization wall
+  // still bounds a holder to its own organization's mail.
+  { name: 'manage_mailboxes', label: 'Manage Mailboxes', description: 'Administer inbound mailboxes: read the mailbox directory, and read every mirrored inbound message and its record associations in the holder’s organization past the mail read gates, the unassociated pool (messages no record matched) included. Without it a message is served only to its mailbox’s owner and to a caller who can read a record it is associated with.', scope: 'org' },
 ];
 
 /** Set of built-in capability names, for fast membership checks (lint, gating). */

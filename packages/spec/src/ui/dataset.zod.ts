@@ -283,6 +283,15 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
    * and this docblock and the `describe` beneath it both said so.
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
+   * `1fb1ced36`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+   * `7578323a5`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+   * `9646e2ed2`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
    * `088e0f705`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
@@ -525,9 +534,10 @@ export const DatasetSchema = lazySchema(() => strictObject({
   measures: z.array(DatasetMeasureSchema).describe('Aggregatable values'),
 
   /**
-   * ADR-0010 — package-author protection envelope; the loader translates this
-   * into the private `_lock` envelope at registration and strips it before
-   * persistence.
+   * ADR-0010 — package-author protection envelope, declared in a code package's
+   * source; the loader translates this into the private `_lock` envelope at
+   * registration and strips it. The metadata API's save door does not translate
+   * it and refuses it (`400 VALIDATION_ERROR`), so that door never stores it.
    */
   protection: ProtectionSchema.optional().describe(
     'Package author protection block — lock policy for this dataset.',

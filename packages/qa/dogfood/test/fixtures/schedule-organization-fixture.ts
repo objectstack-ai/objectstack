@@ -172,7 +172,7 @@ export function declaringTimeRelativeFlow(organizationId: string, recipientId: s
         label: 'Mark touched',
         config: {
           objectName: 'sched_org_target',
-          filter: { id: '{record.id}' },
+          filter: { id: { dialect: 'cel', source: 'record.id' } },
           fields: { touched: true },
         },
       },

@@ -399,8 +399,6 @@ export { validateDashboardWidgetOptions } from './validate-dashboard-widget-opti
 export type { DashboardWidgetOptionFinding } from './validate-dashboard-widget-options.js';
 
 export { validateFilterTokens, FILTER_TOKEN_UNKNOWN } from './validate-filter-tokens.js';
-export { validateFlowFilterTokens, FLOW_FILTER_TOKEN_UNKNOWN } from './validate-flow-filter-tokens.js';
-export type { FlowFilterTokenFinding } from './validate-flow-filter-tokens.js';
 export { classifyFlowTemplateToken, FLOW_TEMPLATE_DATE_FUNCTIONS, FLOW_TEMPLATE_VALUE_FUNCTIONS } from './flow-template-grammar.js';
 export type { FlowTemplateTokenVerdict } from './flow-template-grammar.js';
 export type { FilterTokenFinding, FilterTokenSeverity } from './validate-filter-tokens.js';
@@ -532,6 +530,7 @@ export {
   PAGE_FIELD_UNKNOWN,
   PAGE_FIELD_UNPROVISIONED,
   PAGE_SECTION_GROUP_UNKNOWN,
+  PAGE_SECTION_COUNT_NOT_MULTI_VALUE,
 } from './validate-page-field-bindings.js';
 export type { PageFieldFinding, PageFieldSeverity } from './validate-page-field-bindings.js';
 

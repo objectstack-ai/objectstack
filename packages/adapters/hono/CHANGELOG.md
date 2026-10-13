@@ -1,5 +1,91 @@
 # @objectstack/hono
 
+## 18.0.0-next.0
+
+### Minor Changes
+
+- 5cfd866: feat(sharing): a share-link password can be sent in the `X-Share-Password` header whatever its characters, under a declared encoding (`X-Share-Password-Encoding: utf-8`)
+  
+  Clause-②: yes (widening)
+  
+  - **What was missing.** A browser cannot put a character above U+00FF in a request header (`Headers` throws a `TypeError` before the request leaves), and it strips leading and trailing spaces. `createLink` accepts any password, so a link whose password has a CJK character or an emoji could not be opened through the header.
+  - **What is now accepted.** A new companion request header, `X-Share-Password-Encoding`, declares how `X-Share-Password` is encoded. Its one value is `utf-8`, compared case-insensitively. Under it, `X-Share-Password` carries the password's UTF-8 bytes percent-encoded, as `encodeURIComponent(password)` produces them, and both public routes (`GET /api/v1/share-links/:token/resolve` and `/:token/messages`) decode it on both mounts: the sharing plugin's routes and the runtime dispatcher's `/share-links` domain. Both read the pair through one helper, `readSharePasswordHeader`, exported from `@objectstack/types` with the header-name constants.
+  - **Unchanged.** Without `X-Share-Password-Encoding`, `X-Share-Password` is read raw, exactly as before, so every value a client sends today resolves as it did. That includes a Latin-1 password and a raw password containing `%`; the server never percent-decodes a value nobody declared encoded. The `?password=` query parameter is still read first, and when it is present the header pair is not read.
+  - **What is refused.** `X-Share-Password-Encoding` naming any other value, or a password header that is not percent-encoded UTF-8 under `utf-8` (a `%` without two hex digits, octets that are not well-formed UTF-8, a character outside visible ASCII), answers `400 VALIDATION_FAILED` before the token is looked up. It is never compared raw instead. The message names the headers and the rule, never the presented value.
+  - **Response headers.** Both public routes now answer `Vary: X-Share-Password, X-Share-Password-Encoding`, still beside `Cache-Control: no-store`.
+  - **Cross-origin clients.** `X-Share-Password-Encoding` is in the default CORS preflight allow-list (`DEFAULT_CORS_ALLOW_HEADERS` in `@objectstack/plugin-hono-server`, which the `@objectstack/hono` adapter also applies). A deployment that passes its own `allowHeaders` must add `X-Share-Password-Encoding` beside `X-Share-Password` to let a cross-origin client send an encoded password.
+
+### Patch Changes
+
+- 26aa999: fix(runtime,hono): approval e-mail links work on a kernel with no raw HTTP app — the dispatcher serves `/approvals/act`, and the Hono catch-all no longer consumes request bodies
+  
+  Clause-②: no
+  
+  On a self-hosted server, `@objectstack/plugin-approvals` serves the ADR-0043 action page (the approve / reject link in an approval e-mail or IM message) by mounting `GET` and `POST /api/v1/approvals/act` on the raw Hono app. A hosted tenant kernel has no raw app, so on that shape the path answered `404 ROUTE_NOT_FOUND` and every action link was dead.
+  
+  **`@objectstack/runtime`.** `HttpDispatcher` now serves exactly `/approvals/act` (no sub-paths) for `GET`, `HEAD` and `POST`. It forwards the request, unread, to the request kernel's `approvals` service (`IApprovalService.handleActionPage`) and returns that `Response` as it is.
+  
+  - `HEAD` answers as the self-hosted mount does: the `GET` page's status and headers, with no body. It renders and never decides.
+  - No `approvals` service registered, or one without `handleActionPage`: `501 NOT_IMPLEMENTED`, naming which. Never `ROUTE_NOT_FOUND`.
+  - A member that throws: a sanitised `500 INTERNAL_ERROR`, with the original error in the server log. The same answer, logged, when a transport hands over a `POST` whose body was already read, instead of an "invalid link" page for a live link.
+  - The token is the only credential, as on the self-hosted mount. The project-membership gate now skips the exact act path (unscoped or `/environments/:id`-scoped), so a signed-in caller who is not a member of the environment reaches the page like an anonymous one instead of getting `403 PROJECT_MEMBERSHIP_REQUIRED`. Every other path, `/approvals/act/...` and `/approvals/requests/...` included, is checked as before.
+  
+  **`@objectstack/hono`.** The `createHonoApp` catch-all (and the `/auth/*` fallback) read the JSON body with `c.req.json()`, which consumed the raw request for every `Content-Type`. A domain that forwarded the request got it empty. The body is now parsed from a clone, so `context.request` reaches the dispatcher unread, byte for byte. The parsed `body` the domains receive is unchanged for every input: JSON values as parsed, and `{}` for an empty, form, text or invalid body. The cost is that a request body is buffered twice for the life of the request.
+  
+  Nothing changes on a self-hosted server: the plugin's raw-app mount still serves the path there and never reaches the dispatcher.
+- Updated dependencies [fec87e7]
+- Updated dependencies [34dba5a]
+- Updated dependencies [67b669e]
+- Updated dependencies [45e206e]
+- Updated dependencies [cd3d391]
+- Updated dependencies [95a8435]
+- Updated dependencies [9e9e6f9]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [240890c]
+- Updated dependencies [1fb274e]
+- Updated dependencies [5cfd866]
+- Updated dependencies [a543e24]
+- Updated dependencies [d0bb78e]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3aa0c7b]
+- Updated dependencies [fbcbcf1]
+- Updated dependencies [f4069c5]
+- Updated dependencies [a45d5d8]
+- Updated dependencies [ca135dc]
+- Updated dependencies [746637e]
+- Updated dependencies [db9cf80]
+- Updated dependencies [c572fe2]
+- Updated dependencies [b53b949]
+- Updated dependencies [faf6348]
+- Updated dependencies [0fea05f]
+- Updated dependencies [26aa999]
+- Updated dependencies [cb3bb93]
+- Updated dependencies [5081090]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [6d5191e]
+- Updated dependencies [8558668]
+- Updated dependencies [fe58bbc]
+- Updated dependencies [51f36e7]
+- Updated dependencies [20028df]
+- Updated dependencies [8bc7836]
+- Updated dependencies [117817e]
+- Updated dependencies [0cbfb7c]
+- Updated dependencies [7f2f081]
+- Updated dependencies [4267484]
+- Updated dependencies [c5b43b6]
+- Updated dependencies [6662e3f]
+- Updated dependencies [0aef788]
+- Updated dependencies [8c10776]
+- Updated dependencies [a3d47c2]
+- Updated dependencies [21c8644]
+  - @objectstack/runtime@18.0.0-next.0
+  - @objectstack/types@18.0.0-next.0
+  - @objectstack/plugin-hono-server@18.0.0-next.0
+
 ## 17.7.0
 
 ### Patch Changes

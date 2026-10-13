@@ -107,7 +107,6 @@ import { validateDatasetMeasureAggregates } from './validate-dataset-measure-agg
 import { validateDashboardActionRefs } from './validate-dashboard-action-refs.js';
 import { validateDashboardWidgetOptions } from './validate-dashboard-widget-options.js';
 import { validateFilterTokens } from './validate-filter-tokens.js';
-import { validateFlowFilterTokens } from './validate-flow-filter-tokens.js';
 import { validatePresetComparands } from './validate-preset-comparands.js';
 import { validateEmptyCombinators } from './validate-empty-combinators.js';
 import { validateReferenceIntegrity } from './reference-integrity-suite.js';
@@ -926,26 +925,6 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateFilterTokens(stack),
   },
-  // #16096 — the FLOW half of the same question, and a different answer,
-  // because a flow node's `config.filter` is evaluated by the automation
-  // template evaluator before ObjectQL ever sees it. Reports only the class
-  // NEITHER dialect resolves: a call to a name outside the flow template
-  // dialect's closed function table, where `resolveToken` raises a guard
-  // refusal and the node cannot run. The open arm (bare/dotted identifiers
-  // addressing the run's VariableMap) is deliberately left silent — judging it
-  // against the ObjectQL vocabulary reports 7 findings on this repo's own
-  // examples, all 7 false positives. Reads `flows` alone, so the per-write
-  // snapshot carries everything it needs.
-  {
-    name: 'validateFlowFilterTokens',
-    tier: 'gating',
-    input: 'parsed',
-    commands: ALL,
-    source: 'packages/lint/src/validate-flow-filter-tokens.ts',
-    surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['flow'],
-    run: (stack) => validateFlowFilterTokens(stack),
-  },
   // #8793 (the ruled C half of #8690) — a declared dashboard date-range preset
   // name (`last_30_days`, …) authored as a bare ORDERING comparand resolves in
   // no layer: the engine refuses it on a declared temporal field at query time
@@ -1176,27 +1155,18 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // while a schema error elsewhere in the stack cannot take these findings down
   // with it.
   //
-  // Advisory, deliberately, and this is the whole shape of #5068's first step:
-  // wiring the parse is the precondition for enforcement, not the enforcement
-  // (#5020, one surface over). The live corpus violates the declarations in two
-  // places that are open contract questions — inline i18n label maps on three
-  // published platform pages (#5728) and the record picker's declared-but-unread
-  // `displayField` (#5775) — so gating today would fail the platform's own pages
-  // to enforce declarations the platform does not keep. The error upgrade is a
-  // separate step, once the warning-period inventory is empty.
-  //
-  // #5775 settled the record picker's half: `displayField` is retired in favour
-  // of the `labelField` the renderer actually reads. Its claim that "the rest of
-  // the keys the renderers honour are declared" did NOT hold — #6776 found five
-  // more (`page:header` `recordChrome`/`showStar`/`showCopyId`,
-  // `page:accordion.variant`, and the tab strip's visual style, whose declared
-  // spelling `page:tabs.type` collided with the component node's own dispatch
-  // key and so was unauthorable in the flat and JSX carriers). All five are
-  // declared as of #6776, the last as the renamed `tabStyle`. What remains
-  // before the error upgrade is #5728 and two page rewrites.
+  // Gating since #23026, for ONE class: a `retiredKey()` tombstone's verdict is
+  // an `error`, so `os validate`, `os build` and `os lint` refuse a retired
+  // prop with its prescription. Every other finding stays a `warning`. #5068's
+  // first step was advisory on purpose — wiring the parse is the precondition
+  // for enforcement, not the enforcement (#5020, one surface over) — and the
+  // error upgrade was to be its own step once the warning-period inventory was
+  // empty. Its blockers (#5728, #5775, #6776's undeclared props, two page
+  // rewrites) are all closed, and the inventory measured 0. The rule's module
+  // header records the measurement and why the other classes stay advisory.
   {
     name: 'validateComponentProps',
-    tier: 'advisory',
+    tier: 'gating',
     input: 'normalized',
     commands: ALL,
     source: 'packages/lint/src/validate-component-props.ts',

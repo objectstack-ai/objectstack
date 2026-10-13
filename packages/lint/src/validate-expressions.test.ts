@@ -16,6 +16,7 @@ import {
   ASSIGNMENT_VALUE_ENVELOPE_REFUSAL,
   PREDICATE_SLOT_STRING_REFUSAL,
   STRUCTURAL_CONDITION_SHAPE_REFUSAL,
+  TEXT_SLOT_TEMPLATE_REFUSAL,
   VALUE_SLOT_TEMPLATE_REFUSAL,
   flowNodeConfigRefusals,
   predicateSlotRefusal,
@@ -3855,11 +3856,16 @@ describe('validateStackExpressions — every changed read is reachable from a sp
     // Exactly one master ⇒ `parent` binds ⇒ NO finding. That verdict depends on
     // `masterDetailCount` reading `reference`; if the read were broken the count
     // would be 0 and this would fire.
+    //
+    // [#23100] The sharing model is incidental to the count, so the fixtures
+    // declare `private`: `controlled_by_parent` is spec-valid only with exactly
+    // one REQUIRED master_detail (ADR-0055 §1, enforced at parse), which the
+    // two-master half below can never satisfy.
     expect(
       validateStackExpressions(
         specValid({
           objects: [{
-            name: 'line_item', label: 'Line', sharingModel: 'controlled_by_parent',
+            name: 'line_item', label: 'Line', sharingModel: 'private',
             fields: {
               invoice_ref: { type: 'master_detail', label: 'Invoice', reference: 'invoice' },
               locked: { type: 'text', label: 'Locked', readonlyWhen: 'parent.posted == true' },
@@ -3873,7 +3879,7 @@ describe('validateStackExpressions — every changed read is reachable from a sp
     const issues = validateStackExpressions(
       specValid({
         objects: [{
-          name: 'line_item', label: 'Line', sharingModel: 'controlled_by_parent',
+          name: 'line_item', label: 'Line', sharingModel: 'private',
           fields: {
             invoice_ref: { type: 'master_detail', label: 'Invoice', reference: 'invoice' },
             order_ref: { type: 'master_detail', label: 'Order', reference: 'sales_order' },
@@ -5097,6 +5103,113 @@ describe('the notify literals are refused with the literal remedy (#19939)', () 
     expect(found.map((i) => i.where)).toEqual([`flow 'f' · node 'n' (notify) config.${at}`]);
     expect(found[0]!.message).toContain('a CEL value envelope is not evaluated here; write the value.');
     expect(errorsOf(stackWith(configOf('crm_case')))).toEqual([]);
+  });
+});
+
+/**
+ * [#19939, stage S5] An `http` node reads each key by what it is: `url` and
+ * each `headers` value are text slots, `body` a value slot, and `method`,
+ * `durable`, `timeoutMs` and `signingSecret` literals read as written.
+ * `objectstack validate` refuses a `{…}` token at each with the spelling that
+ * replaces it — except `signingSecret`, whose credential store may hold the
+ * secret the run signs with, so its refusal is the executor's parse.
+ */
+/**
+ * [#19939, stage S6] Each operand of a CRUD node's `filter` is a value slot
+ * (Fork R17 → A): a CEL value envelope evaluated before the query, a query
+ * placeholder the query engine resolves, or a literal. `objectstack validate`
+ * refuses a flow `{…}` token at every operand position with its envelope, and
+ * judges an envelope operand as CEL; a placeholder passes untouched.
+ */
+describe('the CRUD filter operands are value slots; the query placeholders stay (#19939, S6)', () => {
+  const stackWith = (type: string, filter: unknown) => ({
+    flows: [{
+      name: 'f',
+      variables: [{ name: 'owner_id', type: 'text', isInput: true }],
+      nodes: [
+        { id: 'start', type: 'start' },
+        { id: 'n', type, config: { objectName: 'deal', filter, ...(type === 'update_record' ? { fields: { stage: 'x' } } : {}) } },
+      ],
+      edges: [],
+    }],
+  });
+  const errorsOf = (stack: unknown) =>
+    validateStackExpressions(stack as never).filter((i) => (i.severity ?? 'error') === 'error');
+  const TYPES = ['get_record', 'update_record', 'delete_record'] as const;
+
+  it.each(TYPES.flatMap((type) => [
+    [type, 'a field\'s value', { owner: '{owner_id}' }, 'config.filter.owner'],
+    [type, 'an operator\'s comparand', { amount: { $gte: '{owner_id}' } }, 'config.filter.amount.$gte'],
+    [type, 'an `$in` element', { id: { $in: ['d1', '{owner_id}'] } }, 'config.filter.id.$in[1]'],
+    [type, 'a `$or` member', { $or: [{ owner: '{owner_id}' }] }, 'config.filter.$or[0].owner'],
+  ] as const))('%s — %s: a flow token is refused at `error`, at the operand, with its envelope', (type, _what, filter, at) => {
+    const found = errorsOf(stackWith(type, filter));
+    expect(found).toHaveLength(1);
+    expect(found[0]!.where).toContain(`${type} filter operand at ${at}`);
+    expect(found[0]!.message.startsWith(VALUE_SLOT_TEMPLATE_REFUSAL)).toBe(true);
+    expect(found[0]!.message).toContain("{ dialect: 'cel', source: 'owner_id' }: an operand envelope is evaluated before the query.");
+  });
+
+  it.each(TYPES)('%s: an envelope operand, a literal and a query placeholder are clean', (type) => {
+    const CEL = (source: string) => ({ dialect: 'cel', source });
+    expect(errorsOf(stackWith(type, {
+      owner: CEL('owner_id'), amount: { $gt: 3 }, id: { $in: [CEL('owner_id'), 'd2'] },
+      creator: '{current_user_id}', due: { $lt: '{today}', $gte: '{30_days_ago}' }, status: 'open',
+    }))).toEqual([]);
+  });
+
+  it.each(TYPES)('%s: an envelope operand is judged as CEL — an unbound root and a malformed envelope are refused', (type) => {
+    const unbound = errorsOf(stackWith(type, { owner: { dialect: 'cel', source: 'nobody.id' } }));
+    expect(unbound.map((i) => i.where)).toEqual([expect.stringContaining(`${type} filter operand at config.filter.owner`)]);
+    const malformed = errorsOf(stackWith(type, { owner: { $eq: { dialect: 'cel', source: '   ' } } }));
+    expect(malformed).toHaveLength(1);
+    expect(malformed[0]!.where).toContain('config.filter.owner.$eq');
+  });
+});
+
+describe('the http text slots, body and literals are refused with their remedies (#19939)', () => {
+  const stackWith = (config: Record<string, unknown>) => ({
+    flows: [{ name: 'f', nodes: [{ id: 'start', type: 'start' }, { id: 'n', type: 'http', config: { url: 'https://x.test/hook', ...config } }], edges: [] }],
+  });
+  const errorsOf = (stack: unknown) =>
+    validateStackExpressions(stack as never).filter((i) => (i.severity ?? 'error') === 'error');
+
+  it.each([
+    ['url', { url: 'https://x.test/{id}' }, 'http url at config.url', '`https://x.test/{{ id }}`'],
+    ['a headers value', { headers: { 'X-Ref': 'r-{id}' } }, 'http header at config.headers.X-Ref', '`r-{{ id }}`'],
+  ] as const)('%s: a single-brace token is refused at `error` with its hole spelling', (_label, config, where, spelling) => {
+    const found = errorsOf(stackWith(config));
+    expect(found).toHaveLength(1);
+    expect(found[0]!.where).toContain(where);
+    expect(found[0]!.message.startsWith(TEXT_SLOT_TEMPLATE_REFUSAL)).toBe(true);
+    expect(found[0]!.message).toContain(spelling);
+  });
+
+  it('body: a token is refused at `error`, located inside the literal, naming the whole-value envelope', () => {
+    const found = errorsOf(stackWith({ body: { id: '{id}' } }));
+    expect(found).toHaveLength(1);
+    expect(found[0]!.where).toContain('http body at config.body.id');
+    expect(found[0]!.message.startsWith(VALUE_SLOT_TEMPLATE_REFUSAL)).toBe(true);
+    // CONTROL: the envelope that builds the whole body is clean.
+    expect(errorsOf(stackWith({ body: { dialect: 'cel', source: "{'id': 'x' + '1'}" } }))).toEqual([]);
+  });
+
+  it.each([
+    ['method', { method: '{verb}' }],
+    ['durable', { durable: '{flag}' }],
+    ['timeoutMs', { timeoutMs: '{t}' }],
+    ['headers', { headers: '{all}' }],
+  ] as const)('%s (read as written): a `{…}` token is refused at the key in the contract\'s words', (key, config) => {
+    const found = errorsOf(stackWith(config));
+    expect(found.map((i) => i.where)).toEqual([`flow 'f' · node 'n' (http) config.${key}`]);
+    expect(found[0]!.message).toContain(`refused at \`${key}\` by the http contract:`);
+    expect(found[0]!.message).toMatch(/ as written[:,]/);
+    expect(found[0]!.message).not.toContain(VALUE_SLOT_TEMPLATE_REFUSAL);
+  });
+
+  it('signingSecret is left to the run; the literals as written are clean', () => {
+    expect(errorsOf(stackWith({ signingSecret: '{k}' }))).toEqual([]);
+    expect(errorsOf(stackWith({ method: 'POST', durable: true, timeoutMs: 5000, signingSecret: 's', headers: { 'X-Kind': 'probe' } }))).toEqual([]);
   });
 });
 

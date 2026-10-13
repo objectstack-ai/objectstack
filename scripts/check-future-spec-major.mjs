@@ -87,6 +87,28 @@
 // only the literal 18 fails nothing the day after. Above-the-major is the one
 // width that is empty on a correct tree and non-empty on a wrong one.
 //
+// A PRERELEASE LABEL COUNTS. The Version Packages tree that opens a major
+// carries `18.0.0-next.0`: that tree publishes an npm release of major 18 (on
+// the `next` dist-tag), so ADR-0087's own test — "names the npm release it
+// ships in" — reads a citation of 18 there as naming its carrier, and the
+// class above is the majors past 18. What must NOT move with the label is
+// anything this file pins against itself, because the label moves on a tree
+// no author edits — the generated version branch — and a red there can only
+// be fixed on `main`, where the label has not moved yet. Two such pins, each
+// stated against a fixed reference rather than the label:
+//
+//   • `SELF_FIXTURE_FLOOR` counts this file's citations above the major its
+//     self-test fixtures are WRITTEN against (`SELF_FIXTURE_MAJOR`), not above
+//     the tree's — the fixtures do not change when the tree rolls.
+//   • a `QUOTATION_EXEMPTIONS` entry at or below the published major is
+//     DORMANT: such a citation is legitimate and never reaches the ledger, so
+//     the entry can excuse nothing, and it is reported, never judged.
+//
+// The self-test row "the roll adds no problem" drives the REAL corpus one
+// major up, under a prerelease label shaped like the version branch's, and
+// fails when that run is redder than the run at the published major — so a
+// roll-unaware pin reds on `main` before it can red the version branch.
+//
 // The PROTOCOL major is a different number and is deliberately out of reach:
 // `toMajor: 18` in `packages/spec/src/conversions/registry.ts`, `step18` in
 // the migrations registry and the `PROTOCOL_VERSION` ladder are all correct.
@@ -168,11 +190,19 @@ const SKIPPED_BASENAMES = Object.freeze(['pnpm-lock.yaml']);
 //
 // ⛔ That is a hole unless something watches it, so the exclusion comes with a
 // compensating control in the opposite direction: this file MUST still contain
-// at least `SELF_FIXTURE_FLOOR` citations above the published major. Gut the
-// fixtures — the one edit the exclusion would otherwise hide — and the gate
-// REDS on itself instead of going quietly green.
+// at least `SELF_FIXTURE_FLOOR` citations above `SELF_FIXTURE_MAJOR`, the
+// major its self-test fixtures are written against. Gut the fixtures — the one
+// edit the exclusion would otherwise hide — and the gate REDS on itself
+// instead of going quietly green.
+//
+// ⛔ Counted against the FIXTURES' major, never the tree's: the fixtures cite
+// 18 as "above 17" by construction, and they mean that on every tree. Counted
+// against the tree's major, the floor read the version roll to 18 as the
+// fixtures being gutted — 10 left of 12 on the generated `18.0.0-next.0` tree,
+// with not one byte of this file changed.
 const SELF_PATH = 'scripts/check-future-spec-major.mjs';
 const SELF_FIXTURE_FLOOR = 12;
+const SELF_FIXTURE_MAJOR = 17;
 
 // ── The matcher ────────────────────────────────────────────────────────────
 //
@@ -290,6 +320,14 @@ function findCitations(text) {
 //                         is deliberately NOT narrowed to try: a narrower
 //                         matcher is how this class reads a false zero. They
 //                         are declared here instead, one witness each.
+//
+// An entry whose `major` is at or below the published major is DORMANT, and
+// that is a state of the TREE, not of the entry: the citation it names became
+// legitimate when the tree reached that major, so it never reaches the ledger
+// and the entry excuses nothing — neither a hole nor over-broad, so neither
+// refusal below applies to it. It is listed on the pass line instead. Delete
+// it once `main` itself carries that major; the version branch, which reaches
+// it first, cannot be edited, and `main` still needs the entry until then.
 const QUOTATION_EXEMPTIONS = Object.freeze([
   {
     file: 'docs/adr/0087-metadata-protocol-upgrade-contract.md',
@@ -419,7 +457,7 @@ function runAllChecks(files, ledger, manifestRaw, selfPath = null) {
     if (!text.includes(PKG)) continue;
     for (const f of findCitations(text)) {
       if (selfPath !== null && file === selfPath) {
-        if (f.major > spec.major) selfFixtures += 1;
+        if (f.major > SELF_FIXTURE_MAJOR) selfFixtures += 1;
         continue;
       }
       const key = f.dotted ? `${f.major}.x (dotted)` : `${f.major} (bare)`;
@@ -451,7 +489,8 @@ function runAllChecks(files, ledger, manifestRaw, selfPath = null) {
 
   if (selfPath !== null && files.some((f) => f.file === selfPath) && selfFixtures < SELF_FIXTURE_FLOOR) {
     problems.push(
-      `${selfPath} holds ${selfFixtures} citation(s) above the published major, below the floor of `
+      `${selfPath} holds ${selfFixtures} citation(s) above ${SELF_FIXTURE_MAJOR}, the major its fixtures are `
+      + `written against, below the floor of `
       + `${SELF_FIXTURE_FLOOR}. This file is excluded from its own scan because its header documents `
       + 'the class and its self-test table holds the adversarial fixtures — both cite the bad form by '
       + 'necessity. Gutting those fixtures is the one edit that exclusion would otherwise hide, so the '
@@ -473,7 +512,12 @@ function runAllChecks(files, ledger, manifestRaw, selfPath = null) {
     );
   }
 
+  const dormant = [];
   ledger.forEach((entry, i) => {
+    // DORMANT (see the ledger's header): at or below the published major the
+    // citation is legitimate, `continue`d above before any ledger lookup, so
+    // this entry can excuse nothing and has nothing to be judged against.
+    if (entry.major <= spec.major) { dormant.push(entry); return; }
     const hits = exemptHits[i];
     if (hits.length === entry.covers) return;
     problems.push(
@@ -488,7 +532,7 @@ function runAllChecks(files, ledger, manifestRaw, selfPath = null) {
     );
   });
 
-  return { problems, findings: live, census, specMajor: spec.major };
+  return { problems, findings: live, census, specMajor: spec.major, dormant };
 }
 
 // ── Self-test ──────────────────────────────────────────────────────────────
@@ -537,8 +581,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'R2 — a witness that matches nothing → RED (self-invalidating)': 1,
   'R2 — a ledger entry covering more citations than pinned → RED': 1,
   'the class is DERIVED — the same corpus is green once the tree reaches 18': 1,
+  'R2 — an entry at or below the published major is DORMANT, never a matched-NOTHING red → GREEN': 1,
   'the detector excludes its OWN source, which must cite the pattern → GREEN': 1,
   'the detector\'s own source stripped of its fixtures → RED (instrument gutted)': 1,
+  'the self-fixture floor counts above the FIXTURES\' major, so the tree reaching 18 does not gut it → GREEN': 1,
+  'the detector\'s own source stripped of its fixtures is still RED once the tree reaches 18': 1,
+  'the roll adds no problem — the REAL corpus one major up is never redder than at the published major': 1,
   'an empty corpus → RED, never a green skip (#4690)': 1,
   'a corpus that never mentions the package → RED (broken reader)': 1,
   'an unreadable spec manifest → RED': 1,
@@ -549,10 +597,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // duplicate-label refusal: two rows sharing a label collapse to ONE key above,
 // so the roster falls below this number; the table cross-check names WHICH
 // label collided.
-const SELF_TEST_BATTERY_FLOOR = 29;
+const SELF_TEST_BATTERY_FLOOR = 33;
 
-const MANIFEST_17 = JSON.stringify({ name: PKG, version: '17.4.0' });
-const MANIFEST_18 = JSON.stringify({ name: PKG, version: '18.0.0' });
+// The fixtures' reference major, and the tree one major up from it.
+const MANIFEST_17 = JSON.stringify({ name: PKG, version: `${SELF_FIXTURE_MAJOR}.4.0` });
+const MANIFEST_18 = JSON.stringify({ name: PKG, version: `${SELF_FIXTURE_MAJOR + 1}.0.0` });
 
 // The column-aligned table that broke the scratch instrument, verbatim.
 const PARTITION_SHARD_TABLE =
@@ -772,6 +821,28 @@ function selfTest() {
       expect: 'green',
     },
     {
+      // The two quotation sentences the real ledger excuses, verbatim in
+      // shape, on a tree that reached their major: legitimate citations now,
+      // so neither entry has anything to excuse. Before dormancy both read
+      // "matched NOTHING" here — the version branch's red, with the quotations
+      // exactly where they always were.
+      label: 'R2 — an entry at or below the published major is DORMANT, never a matched-NOTHING red → GREEN',
+      files: [
+        {
+          file: 'docs/adr/0087-metadata-protocol-upgrade-contract.md',
+          text: 'The ruling: prose dating it to\n'
+            + '"`@objectstack/spec` 18" is wrong on the day it is written (#18021).\n',
+        },
+        {
+          file: 'docs/v17-docs-sweep.md',
+          text: '- **Fingerprint added:** the `@objectstack/spec` 18 row above. Runs 1-2 matched on\n',
+        },
+      ],
+      ledger: [QUOTATION_EXEMPTIONS[0], QUOTATION_EXEMPTIONS[1]],
+      manifest: MANIFEST_18,
+      expect: 'green',
+    },
+    {
       label: 'the detector excludes its OWN source, which must cite the pattern → GREEN',
       files: [{
         file: SELF_PATH,
@@ -792,6 +863,33 @@ function selfTest() {
       selfPath: SELF_PATH,
       expect: 'red',
       wants: [/below the floor of 12/, /the one edit that exclusion would otherwise hide/],
+    },
+    {
+      // The same intact fixtures on a tree whose label rolled to 18. Counted
+      // against the tree's major they all read "at the major" and the floor
+      // reported a gutted instrument that nobody had touched.
+      label: 'the self-fixture floor counts above the FIXTURES\' major, so the tree reaching 18 does not gut it → GREEN',
+      files: [{
+        file: SELF_PATH,
+        text: Array.from(
+          { length: SELF_FIXTURE_FLOOR },
+          (_, i) => `// fixture ${i}: removed in @objectstack/spec 18 (ADR-0049).`,
+        ).join('\n'),
+      }],
+      selfPath: SELF_PATH,
+      manifest: MANIFEST_18,
+      expect: 'green',
+    },
+    {
+      label: 'the detector\'s own source stripped of its fixtures is still RED once the tree reaches 18',
+      files: [{
+        file: SELF_PATH,
+        text: '// removed in @objectstack/spec 18 (ADR-0049).\n// and nothing else.\n',
+      }],
+      selfPath: SELF_PATH,
+      manifest: MANIFEST_18,
+      expect: 'red',
+      wants: [/holds 1 citation\(s\) above 17, the major its fixtures are written against, below the floor of 12/],
     },
     {
       label: 'an empty corpus → RED, never a green skip (#4690)',
@@ -876,6 +974,41 @@ function selfTest() {
         + `${mentioning.length} mentioning \`${PKG}\``,
       );
     }
+
+    // The roll control — the REAL corpus, the REAL ledger and this REAL file,
+    // judged at the published major and again one major up, under a prerelease
+    // label shaped like the version branch's (`<M+1>.0.0-next.0`). A tree only
+    // ever gains majors, and a citation legitimate at M is legitimate one
+    // major up, so that second run can never hold MORE problems than the
+    // first — unless a pin in this file is stated against the label instead
+    // of against what it pins. That class redded the generated version branch
+    // while `main` stayed green; this row reds it on `main`, where it can be
+    // fixed, before the roll ever reaches it.
+    const rollLabel = 'the roll adds no problem — the REAL corpus one major up is never redder than at the published major';
+    registerCase(rollLabel);
+    const atMajor = runAllChecks(real, QUOTATION_EXEMPTIONS, readManifestRaw(), SELF_PATH);
+    if (atMajor.specMajor === null) {
+      failed += 1;
+      console.error(`  ✗ ${rollLabel}\n      ${SPEC_MANIFEST} gave no major to roll from:\n      ${atMajor.problems.join('\n      ')}`);
+    } else {
+      const nextLabel = `${atMajor.specMajor + 1}.0.0-next.0`;
+      const up = runAllChecks(
+        real, QUOTATION_EXEMPTIONS, JSON.stringify({ name: PKG, version: nextLabel }), SELF_PATH,
+      );
+      if (up.specMajor !== atMajor.specMajor + 1 || up.problems.length > atMajor.problems.length) {
+        failed += 1;
+        console.error(
+          `  ✗ ${rollLabel}\n      ${atMajor.problems.length} problem(s) at ${atMajor.specMajor}, `
+          + `${up.problems.length} at ${nextLabel} (read as major ${up.specMajor}) — a pin here moves with `
+          + `the label:\n      ${up.problems.join('\n      ')}`,
+        );
+      } else {
+        console.log(
+          `  ✓ ${rollLabel} (${atMajor.problems.length} at ${atMajor.specMajor}, `
+          + `${up.problems.length} at ${nextLabel})`,
+        );
+      }
+    }
   }
 
   // Evaluated after every row has had its chance and BEFORE the verdict, so
@@ -936,7 +1069,8 @@ function selfTest() {
     console.error(`\n✗ check-future-spec-major self-test: ${failed} failure(s) (cases and floor).`);
     process.exit(1);
   }
-  console.log(`\n✓ check-future-spec-major self-test: ${cases.length} cases pass.`);
+  const registered = [...batterySeen.values()].reduce((sum, n) => sum + n, 0);
+  console.log(`\n✓ check-future-spec-major self-test: ${registered} cases pass.`);
   selfTestReachedVerdict = true;
 }
 
@@ -956,6 +1090,15 @@ function readCorpus() {
   return files;
 }
 
+/** The text of `packages/spec/package.json`, or `null` when unreadable (which `runAllChecks` REDs). */
+function readManifestRaw() {
+  try {
+    return readFileSync(join(REPO_ROOT, SPEC_MANIFEST), 'utf8');
+  } catch {
+    return null;
+  }
+}
+
 function main() {
   if (process.argv.includes('--self-test')) {
     selfTest();
@@ -971,12 +1114,8 @@ function main() {
   }
 
   const files = readCorpus();
-  const manifestPath = join(REPO_ROOT, SPEC_MANIFEST);
-  let manifestRaw = null;
-  try { manifestRaw = readFileSync(manifestPath, 'utf8'); } catch { manifestRaw = null; }
-
-  const { problems, census, specMajor } = runAllChecks(
-    files, QUOTATION_EXEMPTIONS, manifestRaw, SELF_PATH,
+  const { problems, census, specMajor, dormant } = runAllChecks(
+    files, QUOTATION_EXEMPTIONS, readManifestRaw(), SELF_PATH,
   );
 
   if (process.argv.includes('--census')) {
@@ -1006,9 +1145,15 @@ function main() {
     + `  ${scanned} scanned file(s), ${mentioning} mentioning \`${PKG}\`\n`
     + `  control — bare \`${PKG}\` ${specMajor}: ${atMajor?.sites ?? 0} site(s) / `
     + `${atMajor?.files.size ?? 0} file(s), all legitimate and all read by this same matcher\n`
-    + `  ${QUOTATION_EXEMPTIONS.length} witnessed ledger entr(y|ies), every witness still matching\n`
+    + `  ${QUOTATION_EXEMPTIONS.length - dormant.length} live witnessed ledger entr(y|ies), every witness still matching\n`
+    + (dormant.length === 0
+      ? ''
+      : `  ${dormant.length} DORMANT ledger entr(y|ies) at or below major ${specMajor}, excusing nothing — `
+        + 'delete once `main` itself carries that major: '
+        + `${dormant.map((e) => `${e.file} (major ${e.major})`).join(', ')}\n`)
     + `  ${SELF_PATH} is excluded from its own scan and still carries at least `
-    + `${SELF_FIXTURE_FLOOR} citation(s) above ${specMajor} — its fixtures are intact`,
+    + `${SELF_FIXTURE_FLOOR} citation(s) above ${SELF_FIXTURE_MAJOR}, the major its fixtures are written `
+    + 'against — its fixtures are intact',
   );
 }
 

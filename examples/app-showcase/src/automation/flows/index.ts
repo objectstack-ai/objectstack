@@ -122,7 +122,7 @@ export const ReassignWizardFlow = defineFlow({
       label: 'Apply Reassignment',
       config: {
         objectName: 'showcase_task',
-        filter: { id: '{recordId}' },
+        filter: { id: { dialect: 'cel', source: 'recordId' } },
         // A CEL value envelope — the `{…}` template dialect is retired from
         // value slots. `new_assignee` is a required screen field, so it is
         // always bound here.
@@ -1056,7 +1056,10 @@ export const FanOutNotifyFlow = defineFlow({
                   // `TaskCompletedSlackFlow` uses.
                   url: 'https://hooks.slack.com/services/T000/B000/XXXX',
                   method: 'POST',
-                  body: { channel: '#tasks', text: 'Task done: {record.title}' },
+                  // The body is a value slot (#19939): one CEL envelope builds
+                  // the whole payload. `title` is a required field, so it is
+                  // read unguarded.
+                  body: { dialect: 'cel', source: "{'channel': '#tasks', 'text': 'Task done: ' + record.title}" },
                 },
               },
             ],
@@ -1236,7 +1239,9 @@ export const ResilientSyncFlow = defineFlow({
               config: {
                 url: 'https://api.example.com/v1/tasks',
                 method: 'POST',
-                body: { id: '{record.id}', title: '{record.title}', status: 'done' },
+                // CEL holds a map's values to one type: the literal beside the
+                // field reads is wrapped in `dyn(…)`.
+                body: { dialect: 'cel', source: "{'id': record.id, 'title': record.title, 'status': dyn('done')}" },
               },
             },
           ],
@@ -1250,7 +1255,7 @@ export const ResilientSyncFlow = defineFlow({
               label: 'Flag Sync Failure',
               config: {
                 objectName: 'showcase_task',
-                filter: { id: '{record.id}' },
+                filter: { id: { dialect: 'cel', source: 'record.id' } },
                 // `$error` (this try_catch's `errorVariable`) is not a CEL
                 // identifier, so the envelope reads it through `vars`.
                 fields: { sync_status: 'failed', sync_error: { dialect: 'cel', source: 'vars["$error"].message' } },
@@ -1363,7 +1368,7 @@ export const InvoiceDualSignoffFlow = defineFlow({
       label: 'Flag: Held',
       config: {
         objectName: 'showcase_invoice',
-        filter: { id: '{record.id}' },
+        filter: { id: { dialect: 'cel', source: 'record.id' } },
         fields: { status: 'draft' },
       },
     },
@@ -1441,7 +1446,7 @@ export const ProjectEscalationFlow = defineFlow({
         retry: { maxRetries: 2, backoffMs: 500, backoffMultiplier: 2 },
         errorVariable: '$error',
         try: {
-          nodes: [{ id: 'push', type: 'http', label: 'POST incident', config: { url: 'https://api.example.com/v1/incidents', method: 'POST', body: { project: '{record.id}', severity: 'critical' } } }],
+          nodes: [{ id: 'push', type: 'http', label: 'POST incident', config: { url: 'https://api.example.com/v1/incidents', method: 'POST', body: { dialect: 'cel', source: "{'project': record.id, 'severity': dyn('critical')}" } } }],
           edges: [],
         },
         catch: {

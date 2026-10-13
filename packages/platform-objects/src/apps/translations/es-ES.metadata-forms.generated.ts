@@ -1307,7 +1307,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       isDefault: {
         label: "Predeterminado",
-        helpText: "Establece como página predeterminada para este tipo de página"
+        helpText: "Abre los registros de su objeto con esta página de registro. Una sola página de registro predeterminada por objeto: una segunda se rechaza."
       },
       kind: {
         label: "Modo",
@@ -2230,9 +2230,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       label: {
         label: "Etiqueta"
       },
-      category: {
-        label: "Categoría"
-      },
       locale: {
         label: "Configuración regional",
         helpText: "Etiqueta BCP-47, p. ej. en-US, zh-CN"
@@ -2264,10 +2261,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       active: {
         label: "Activo",
         helpText: "Si no está marcado, sendTemplate() devuelve TEMPLATE_INACTIVE."
-      },
-      isSystem: {
-        label: "Integrado del sistema",
-        helpText: "Plantilla integrada; los tenants pueden sobrescribirla, pero no deberían eliminarla."
       }
     }
   },

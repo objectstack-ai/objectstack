@@ -17,9 +17,22 @@ import {
   rlsProbeSecurity,
   runReferenceShapeProofs,
   formatReferenceShapeReport,
+  runDeleteBehaviorProofs,
+  formatDeleteBehaviorReport,
+  runUniqueScopeProofs,
+  formatUniqueScopeReport,
+  runParentWriteReachProofs,
+  formatParentWriteReachReport,
+  parentWriteReachSecurity,
+  runDashboardWindowProofs,
+  formatDashboardWindowReport,
   type VerifyReport,
   type RlsReport,
   type ReferenceShapeReport,
+  type DeleteBehaviorReport,
+  type UniqueScopeReport,
+  type ParentWriteReachReport,
+  type DashboardWindowReport,
   type RlsProbeDescriptor,
   type RlsPositionPersonaInput,
 } from '@objectstack/verify';
@@ -85,18 +98,39 @@ export function resolveVerifyMultiTenant(flags: { 'multi-tenant'?: boolean }): b
  *        - reference-value shape (--reference-shapes, ADR-0104 D1): every
  *          client-writable reference field refuses a value that is not a
  *          record id, through the REST door and the system door
+ *        - delete behaviour (--delete-behaviors): every `deleteBehavior` a
+ *          reference field declares is what a by-id delete of the referenced
+ *          record does, through the REST door and the system door
+ *        - unique scope (--unique-scopes, ADR-0120 D1): every field declared
+ *          `unique` refuses a second holder within one organization, through
+ *          the REST door and the system door, and — on an org-scoped boot
+ *          (--multi-tenant) — admits or refuses one in another organization
+ *          as its declared scope says
+ *        - parent-derived write reach (--parent-write-reach, ADR-0055 §3):
+ *          for every `controlled_by_parent` object, a persona's edit, delete
+ *          or create of a detail, written through the engine as the persona,
+ *          is admitted exactly when it holds that verb on the detail's object
+ *          and can edit the master
+ *        - dashboard date windows (--dashboard-windows): every widget a
+ *          dashboard's `dateRange` binds counts, under each preset of the
+ *          picker, the fixture rows that window selects, asked of the dataset
+ *          door as the signed-in principal
  *
  * Exits non-zero on either stage's failures so it drops straight into CI.
  */
 export default class Verify extends Command {
   static override description =
-    'Run the author-time rules os validate runs, then boot the app in-process and verify it through the real HTTP stack (CRUD round-trip fidelity, plus the cross-owner RLS invariant and the reference-value shape proofs on request)';
+    'Run the author-time rules os validate runs, then boot the app in-process and verify it through the real HTTP stack (CRUD round-trip fidelity, plus the cross-owner RLS invariant, the reference-value shape proofs, the declared delete-behaviour proofs, the declared unique-scope proofs, the parent-derived write reach proofs and the dashboard date-window proofs on request)';
 
   static override examples = [
     '<%= config.bin %> verify',
     '<%= config.bin %> verify --app ./objectstack.config.ts --rls',
     '<%= config.bin %> verify --rls --multi-tenant --json',
     '<%= config.bin %> verify --reference-shapes',
+    '<%= config.bin %> verify --delete-behaviors',
+    '<%= config.bin %> verify --unique-scopes --multi-tenant',
+    '<%= config.bin %> verify --parent-write-reach',
+    '<%= config.bin %> verify --dashboard-windows',
   ];
 
   static override flags = {
@@ -110,6 +144,22 @@ export default class Verify extends Command {
     }),
     'reference-shapes': Flags.boolean({
       description: 'Also prove every client-writable reference field refuses a value that is not a record id (a boolean, a number, an embedded record), through the REST door and the system door (ADR-0104 value shapes)',
+      default: false,
+    }),
+    'delete-behaviors': Flags.boolean({
+      description: 'Also prove every deleteBehavior a reference field declares (cascade, set_null, restrict) is what a delete of the referenced record does, through the REST door and the system door',
+      default: false,
+    }),
+    'unique-scopes': Flags.boolean({
+      description: "Also prove every field declared unique collides as its scope says (true / 'organization': within one organization only; 'global': across the installation), through the REST door and the system door; the cross-organization half needs --multi-tenant and is reported not run without it (ADR-0120 unique scopes)",
+      default: false,
+    }),
+    'dashboard-windows': Flags.boolean({
+      description: "Also prove, for every dashboard that declares a dateRange, that each widget it binds counts, under each date-range preset of the picker, the rows that window selects: fixture rows written on known days, the widget asked through the dataset door with and without the window (date and datetime fields; count measures)",
+      default: false,
+    }),
+    'parent-write-reach': Flags.boolean({
+      description: "Also prove, for every controlled_by_parent object, that a persona's edit, delete or create of a detail is admitted exactly when it holds that verb on the detail's object and can edit the master, written through the engine as verifier personas and one persona per declared position (ADR-0055 master-detail write reach)",
       default: false,
     }),
     'multi-tenant': Flags.boolean({
@@ -190,6 +240,10 @@ export default class Verify extends Command {
     app?: string;
     rls: boolean;
     'reference-shapes': boolean;
+    'delete-behaviors': boolean;
+    'unique-scopes': boolean;
+    'parent-write-reach': boolean;
+    'dashboard-windows': boolean;
     'multi-tenant': boolean;
     json: boolean;
   }): Promise<void> {
@@ -305,6 +359,61 @@ export default class Verify extends Command {
       }
     }
 
+    // The delete-behaviour proofs run on a fresh stack of their own too: every
+    // `restrict` probe leaves its target and holder behind, and the fixtures
+    // the family creates would collide with the other phases' on a unique field.
+    let deleteBehaviors: DeleteBehaviorReport | undefined;
+    if (flags['delete-behaviors']) {
+      const deleteStack = await bootStack(config, { multiTenant, hostRoot });
+      try {
+        const adminToken = await deleteStack.signIn();
+        deleteBehaviors = await runDeleteBehaviorProofs(deleteStack, adminToken, config);
+      } finally {
+        await deleteStack.stop();
+      }
+    }
+
+    // The unique-scope proofs run on a fresh stack of their own as well: they
+    // write duplicates on purpose, and on an org-scoped boot they sign up a
+    // second organization, neither of which another phase should meet.
+    let uniqueScopes: UniqueScopeReport | undefined;
+    if (flags['unique-scopes']) {
+      const uniqueStack = await bootStack(config, { multiTenant, hostRoot });
+      try {
+        const adminToken = await uniqueStack.signIn();
+        uniqueScopes = await runUniqueScopeProofs(uniqueStack, adminToken, config);
+      } finally {
+        await uniqueStack.stop();
+      }
+    }
+
+    // The parent-derived write reach proofs run on a fresh stack of their own,
+    // booted with the verifier personas' permission sets registered: they
+    // sign up personas, and they edit, delete and create details on purpose.
+    let parentWriteReach: ParentWriteReachReport | undefined;
+    if (flags['parent-write-reach']) {
+      const parentStack = await bootStack(config, { multiTenant, hostRoot, security: parentWriteReachSecurity(config) });
+      try {
+        parentWriteReach = await runParentWriteReachProofs(parentStack, config);
+      } finally {
+        await parentStack.stop();
+      }
+    }
+
+    // The dashboard date-window proofs run on a fresh stack of their own too:
+    // they write fixture rows on known days, which another phase should not
+    // count, and which no other phase's rows should land among.
+    let dashboardWindows: DashboardWindowReport | undefined;
+    if (flags['dashboard-windows']) {
+      const windowStack = await bootStack(config, { multiTenant, hostRoot });
+      try {
+        const adminToken = await windowStack.signIn();
+        dashboardWindows = await runDashboardWindowProofs(windowStack, adminToken, config);
+      } finally {
+        await windowStack.stop();
+      }
+    }
+
     // Failure contract: a "real" runtime break the app's author must see.
     // A degraded RLS probe counts: the run reported verdicts it could not have
     // established, which is worse than no verifier at all.
@@ -325,17 +434,36 @@ export default class Verify extends Command {
       // faulted on one. Inconclusive fields (the probe could not be attributed
       // or written) are reported, not counted, exactly as CRUD's
       // `needs-fixture` is.
-      (referenceShapes?.summary.hardFailures ?? 0);
+      (referenceShapes?.summary.hardFailures ?? 0) +
+      // A declared deleteBehavior a delete contradicted, or a door that
+      // faulted on one. Inconclusive, excluded and not-derivable fields are
+      // reported, not counted.
+      (deleteBehaviors?.summary.hardFailures ?? 0) +
+      // A second holder a declared unique scope met wrongly, or a door that
+      // faulted on one. A leg this boot cannot run is reported on the report's
+      // `boot`, not counted.
+      (uniqueScopes?.summary.hardFailures ?? 0) +
+      // A detail write whose answer disagreed with the conjunction, a door
+      // that faulted on one, or a persona that could not be provisioned.
+      (parentWriteReach?.summary.hardFailures ?? 0) +
+      // A bound widget that went blank or counted other rows than its window
+      // selects, or a windowed query the door refused or faulted. Inconclusive,
+      // unbound and excluded widgets are reported, not counted.
+      (dashboardWindows?.summary.hardFailures ?? 0);
 
     if (flags.json) {
       // `emitJson`, not `this.log`: stdout is reserved (see `run()`), so the
       // report has to leave through the real stream — and awaiting the write
       // drains a report larger than one pipe buffer before `this.exit` below.
-      await emitJson({ app: crud.app, config: absolutePath, multiTenant, crud, rls, referenceShapes, hardFailures });
+      await emitJson({ app: crud.app, config: absolutePath, multiTenant, crud, rls, referenceShapes, deleteBehaviors, uniqueScopes, parentWriteReach, dashboardWindows, hardFailures });
     } else {
       this.log(formatReport(crud));
       if (rls) this.log(formatRlsReport(rls));
       if (referenceShapes) this.log(formatReferenceShapeReport(referenceShapes));
+      if (deleteBehaviors) this.log(formatDeleteBehaviorReport(deleteBehaviors));
+      if (uniqueScopes) this.log(formatUniqueScopeReport(uniqueScopes));
+      if (parentWriteReach) this.log(formatParentWriteReachReport(parentWriteReach));
+      if (dashboardWindows) this.log(formatDashboardWindowReport(dashboardWindows));
       this.log('');
       this.log(
         hardFailures > 0

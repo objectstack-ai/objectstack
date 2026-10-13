@@ -32,7 +32,7 @@ const stackOf = (over: Record<string, unknown> = {}) => ({ objects: [obj(over)] 
 // line of at most 200 characters — every firing variant this suite exercises,
 // not a chosen few. Run the whole file: those cases read what the cases above
 // fired.
-const fired: Array<{ rule: string; message: string; path: string }> = [];
+const fired: Array<{ rule: string; message: string; path: string; hint: string }> = [];
 const validateObjectFieldRefs: typeof validateObjectFieldRefsUnrecorded = (...args) => {
   const findings = validateObjectFieldRefsUnrecorded(...args);
   fired.push(...findings);
@@ -55,8 +55,13 @@ describe('validateObjectFieldRefs — highlightFields', () => {
     // resolved against — a finding that names neither is unactionable.
     expect(findings[0]!.message).toContain('field_10');
     expect(findings[0]!.message).toContain('proj_task');
-    // …and the fields that DO exist, so the fix is one read away.
-    expect(findings[0]!.hint).toContain('health_score');
+    // [#22161] The fix line is the position's remedy alone: a near miss is the
+    // verdict's "Did you mean" (`field_10` has none), and the object's field
+    // list is no longer appended.
+    expect(findings[0]!.hint).toBe(
+      'Fix the field name, or drop the entry. `highlightFields` is ordered — the first entry wins where only ' +
+        'one field fits (ADR-0085).',
+    );
   });
 
   it('passes a list whose every entry names a real field', () => {
@@ -400,8 +405,9 @@ describe('validateObjectFieldRefs — relatedListColumns (addresses the OWNING o
     });
     expect(findings[0]!.message).toContain('"totl" is not a field on object "crm_invoice"');
     expect(findings[0]!.message).toContain('Did you mean "total"?');
-    // The prescription: the addressed object's field list.
-    expect(findings[0]!.hint).toContain('Fields on "crm_invoice": account, issued_on, name, region, total.');
+    // The prescription alone; [#22161] the addressed object's field list is the verdict's "Did you mean".
+    expect(findings[0]!.hint).not.toContain('Fields on');
+    expect(findings[0]!.hint).toContain('a related-list column is a field of the object that declares this relationship');
   });
 
   it('passes columns that are fields of the owning object (the child whose rows the list shows)', () => {
@@ -438,7 +444,7 @@ describe('validateObjectFieldRefs — lookupColumns (addresses the REFERENCED ob
     });
     expect(findings[0]!.message).toContain('"industy" is not a field on object "crm_account"');
     expect(findings[0]!.message).toContain('Did you mean "industry"?');
-    expect(findings[0]!.hint).toContain('Fields on "crm_account": industry, name, region, status.');
+    expect(findings[0]!.hint).toContain('a picker column is a field of the referenced object');
   });
 
   it('REFUSES a misspelt `field` in the object arm, at `.field`', () => {
@@ -509,7 +515,7 @@ describe('validateObjectFieldRefs — lookupFilters[].field (addresses the REFER
       path: 'objects[0].fields.account.lookupFilters[0].field',
     });
     expect(findings[0]!.message).toContain('"statsu" is not a field on object "crm_account"');
-    expect(findings[0]!.hint).toContain('Fields on "crm_account":');
+    expect(findings[0]!.hint).toContain('a picker filter runs on the referenced object');
   });
 
   it('passes a filter over a field of the referenced object', () => {
@@ -621,7 +627,7 @@ describe('validateObjectFieldRefs — indexes[].fields (verbatim physical column
     expect(findings[0]!.message).toContain('"totl" is not a field on object "crm_invoice"');
     expect(findings[0]!.message).toContain('Did you mean "total"?');
     expect(explained()).toContain('`unique` index is then unenforced');
-    expect(findings[0]!.hint).toContain('Fields on "crm_invoice":');
+    expect(findings[0]!.hint).toContain('An index column is a field of this object');
   });
 
   it('passes authored columns and the columns the platform injects', () => {
@@ -756,5 +762,29 @@ describe('[#22161] one-line verdicts — object-field-ref-unknown', () => {
       expect(f.message, f.rule).not.toContain('\n');
       expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
     }
+  });
+});
+
+// [#22161] Slice 16: the `fix:` line is the position's prescription alone — the
+// verdict's "Did you mean" names the nearest field, so the addressed object's
+// field list is no longer appended.
+describe('[#22161] one-line fix — object-field-ref-unknown', () => {
+  it('every `fix:` line the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === OBJECT_FIELD_REF_UNKNOWN);
+    // Coverage control: every position fired (the verdict block above names
+    // them), so the bound reads each prescription.
+    for (const position of ['.highlightFields[', '.publicSharing.redactFields[', '.indexes[', '.relatedListColumns[', '.lookupColumns[', '.lookupFilters[', '.dependsOn[']) {
+      expect(converted.some((f) => f.path.includes(position)), position).toBe(true);
+    }
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+      expect(f.hint, f.rule).not.toContain('Fields on');
+    }
+  });
+
+  it('`os explain` says where the field list went', () => {
+    expect(explained()).toContain('"Did you mean"');
+    expect(explained()).toContain("without listing that object's fields");
   });
 });

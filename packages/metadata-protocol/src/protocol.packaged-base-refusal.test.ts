@@ -369,10 +369,10 @@ describe('packagedBaseRefusal — each Regime C type names its OWN sanctioned pa
 
         it(`\`permission\` — save names its clone and no switch (${environmentId ? 'environment' : 'host-config'} kernel)`, () => {
             const message = expectRegimeC(refusalOn(environmentId, 'permission', 'pkg_perm', 'save'), 'permission', 'pkg_perm', 'save');
-            expect(message).toContain(
-                'Clone it under a new name to customize it (the "Clone" action on the permission set, '
-                + 'or POST /api/v1/data/sys_permission_set with a new name).',
-            );
+            // The clone route's spelling moved with C3 stage 8 (the retired
+            // object's data route → the catalog's clone door); the sentence did not.
+            expect(message).toContain('Clone it under a new name to customize it (the "Clone" action on the permission set, or POST /api/v1/');
+            expect(message).toContain(' with a new name).');
             expect(message.toLowerCase()).not.toContain('switch it off');
             expect(message).not.toContain('_activation');
             expect(message).not.toContain('/automation/');
@@ -411,7 +411,7 @@ describe('packagedBaseRefusal — each Regime C type names its OWN sanctioned pa
             for (const [type, name, path] of [
                 ['flow', 'pkg_flow', 'POST /api/v1/automation/:name/clone'],
                 ['action', 'pkg_action', 'POST /api/v1/actions/_activation/:object/:action'],
-                ['permission', 'pkg_perm', 'POST /api/v1/data/sys_permission_set'],
+                ['permission', 'pkg_perm', 'the "Clone" action on the permission set, or POST /api/v1/'],
             ] as const) {
                 const r: any = p.packagedBaseRefusal({ type, name, operation: 'save', packageId: PACKAGE_ID });
                 expect({ code: r?.code, status: r?.status, lockSource: r?.lockSource, packageId: r?.packageId }, type)

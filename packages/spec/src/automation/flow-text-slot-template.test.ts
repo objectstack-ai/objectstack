@@ -24,17 +24,24 @@ import { NotifyConfigSchema } from './io-node-config.zod';
 import { tmpl } from '../shared/expression.zod';
 
 describe('FLOW_NODE_TEXT_SLOTS — where the `{{ }}` text slots are', () => {
-  it('names exactly the six slots whose rendered value is only ever text', () => {
+  it('names exactly the eight slots whose rendered value is only ever text', () => {
     // [#19939] `notify.actionUrl` joined: the link a person follows, text with
     // holes (`/crm_case/{{ record.id }}`), which the 17.x executor stringified.
+    // Then an `http` node's `url` and each `headers` value (stage S5): the
+    // request line and headers, which the 17.x contract, parsed after the
+    // interpolation, held to strings.
     expect(FLOW_NODE_TEXT_SLOTS.map((s) => `${s.nodeType}.${s.key}`)).toEqual([
       'notify.title',
       'notify.message',
       'notify.actionUrl',
+      'http.url',
+      'http.headers',
       'screen.title',
       'screen.description',
       'end.message',
     ]);
+    // Only `headers` is a map whose every value is a slot of its own.
+    expect(FLOW_NODE_TEXT_SLOTS.filter((s) => s.eachValue).map((s) => `${s.nodeType}.${s.key}`)).toEqual(['http.headers']);
   });
 });
 
@@ -256,9 +263,30 @@ describe('flowNodeTextSlotSources — the text slots one node config carries', (
     expect(flowNodeTextSlotSources('screen', { title: 'T', description: 'D', recordId: '{x}' }).map((s) => s.path))
       .toEqual(['title', 'description']);
     expect(flowNodeTextSlotSources('end', { outcome: 'refused', message: 'M' }).map((s) => s.label)).toEqual(['end message']);
-    expect(flowNodeTextSlotSources('http', { url: '/x/{id}', title: 'T' })).toEqual([]);
     expect(flowNodeTextSlotSources('notify', { title: 42, message: { dialect: 'cel', source: 'x' } })).toEqual([]);
     expect(flowNodeTextSlotSources('notify', undefined)).toEqual([]);
+  });
+});
+
+describe('flowNodeTextSlotSources — an http node\'s url and each headers value (#19939)', () => {
+  it('reads the url, and each headers value at its own path; nothing else on the node', () => {
+    expect(flowNodeTextSlotSources('http', {
+      url: '/x/{id}',
+      headers: { 'X-Ref': 'r-{{ id }}', 'X-Kind': 'probe' },
+      body: '{payload}',
+      method: '{m}',
+      title: 'T',
+    })).toEqual([
+      { path: 'url', label: 'http url', source: '/x/{id}' },
+      { path: 'headers.X-Ref', label: 'http header', source: 'r-{{ id }}' },
+      { path: 'headers.X-Kind', label: 'http header', source: 'probe' },
+    ]);
+  });
+
+  it('a headers value that is no string, and a headers key that holds no map, carry no text', () => {
+    expect(flowNodeTextSlotSources('http', { url: 42, headers: { a: 1, b: null } })).toEqual([]);
+    expect(flowNodeTextSlotSources('http', { headers: '{headers}' })).toEqual([]);
+    expect(flowNodeTextSlotSources('http', { headers: ['x'] })).toEqual([]);
   });
 });
 
