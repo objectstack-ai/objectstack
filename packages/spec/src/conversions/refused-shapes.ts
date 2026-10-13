@@ -23,8 +23,8 @@
  * `onTodo` sink. Two callers pass one: the stored-metadata migration pass
  * (through `applyConversionsToStoredItem`), and the automation engine's
  * `canonicalizeStoredFlow`, which that pass calls for a flow row. Each finding
- * reaches the sink as a {@link ConversionTodoNotice}, under its row, exactly
- * like a site a conversion left as stored. The authoring funnel and the read
+ * reaches the sink as a `ConversionTodoNotice`, under its row, exactly like a
+ * site a conversion left as stored. The authoring funnel and the read
  * seams pass no sink, so for them nothing here runs.
  *
  * ## What it never does
@@ -50,11 +50,7 @@ import {
   type ControlledByParentMasterRefusal,
 } from '../data/controlled-by-parent-master.js';
 import { ViewDataSchema } from '../ui/view.zod.js';
-import {
-  CONVERSION_TODO_CODE,
-  type ConversionTodoDetail,
-  type ConversionTodoNotice,
-} from './types.js';
+import type { ConversionTodoDetail } from './types.js';
 import { mapCollection, mapFlowNodeList, mapViewPayloads } from './walk.js';
 
 type Dict = Record<string, unknown>;
@@ -275,26 +271,18 @@ export const REFUSED_STORED_SHAPES: readonly RefusedStoredShape[] = [
 
 /**
  * Run every {@link REFUSED_STORED_SHAPES} detector over `stack` and hand each
- * finding to `onTodo` as a {@link ConversionTodoNotice}, whose `conversionId`
- * is the refusal's D3 entry id. Reads only.
+ * finding to `report` with the refused shape it belongs to. Reads only.
+ *
+ * The notice itself — its `code`, its `conversionId` (the refusal's D3 entry
+ * id) and its message — is built by the one caller, `applyConversions`, beside
+ * the conversion TODOs it already builds, so the TODO code is
+ * stamped at one site.
  */
 export function reportRefusedStoredShapes(
   stack: Dict,
-  onTodo: (todo: ConversionTodoNotice) => void,
+  report: (refused: RefusedStoredShape, detail: ConversionTodoDetail) => void,
 ): void {
   for (const refused of REFUSED_STORED_SHAPES) {
-    refused.detect(stack, (detail) =>
-      onTodo({
-        code: CONVERSION_TODO_CODE,
-        conversionId: refused.id,
-        surface: refused.surface,
-        from: detail.from,
-        path: detail.path,
-        reason: detail.reason,
-        message:
-          `[protocol] left ${refused.surface} at ${detail.path} as stored — protocol ${refused.toMajor} `
-          + `refuses it (ADR-0087 D3 entry '${refused.id}') and no conversion rewrites it losslessly: `
-          + detail.reason,
-      }));
+    refused.detect(stack, (detail) => report(refused, detail));
   }
 }

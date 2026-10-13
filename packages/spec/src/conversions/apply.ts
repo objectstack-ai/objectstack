@@ -210,7 +210,21 @@ export function applyConversions(
   // [#23269, #23270, #23271] What protocol 18 refuses and nothing converts,
   // judged on the converted stack and listed through the same sink: a row the
   // chain leaves refused must not read as already on protocol.
-  if (onTodo) reportRefusedStoredShapes(current, onTodo);
+  if (onTodo) {
+    reportRefusedStoredShapes(current, (refused, detail) =>
+      onTodo({
+        code: CONVERSION_TODO_CODE,
+        conversionId: refused.id,
+        surface: refused.surface,
+        from: detail.from,
+        path: detail.path,
+        reason: detail.reason,
+        message:
+          `[protocol] left ${refused.surface} at ${detail.path} as stored — protocol ${refused.toMajor} `
+          + `refuses it (ADR-0087 D3 entry '${refused.id}') and no conversion rewrites it losslessly: `
+          + detail.reason,
+      }));
+  }
 
   return current;
 }
