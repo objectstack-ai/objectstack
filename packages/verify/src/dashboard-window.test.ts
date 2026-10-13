@@ -89,6 +89,8 @@ const source = {
         { id: 'closed_tickets', type: 'metric', dataset: 'ticket_metrics', values: ['closed_count'] },
         { id: 'with_assignee', type: 'metric', dataset: 'ticket_metrics', values: ['assigned_count'] },
         { id: 'high_or_low', type: 'metric', dataset: 'ticket_metrics', values: ['ticket_count'], filter: { priority: { $in: ['high', 'low'] } } },
+        // A declared option the condition does not exclude holds the column.
+        { id: 'not_closed', type: 'metric', dataset: 'ticket_metrics', values: ['ticket_count'], filter: { status: { $nin: ['closed'] } } },
         { id: 'mixed', type: 'table', dataset: 'ticket_metrics', dimensions: ['priority'], values: ['ticket_count', 'avg_effort'] },
         // Outside the population, each with its reason.
         { id: 'trend', type: 'line', dataset: 'ticket_metrics', values: ['ticket_count'], filterBindings: { dateRange: false } },
@@ -96,6 +98,7 @@ const source = {
         { id: 'rate', type: 'metric', dataset: 'ticket_metrics', values: ['closed_rate'] },
         { id: 'recent', type: 'metric', dataset: 'ticket_metrics', values: ['ticket_count'], filter: { opened_at: { $gte: '{30_days_ago}' } } },
         { id: 'either', type: 'metric', dataset: 'ticket_metrics', values: ['ticket_count'], filter: { $or: [{ status: 'open' }, { is_closed: true }] } },
+        { id: 'not_x', type: 'metric', dataset: 'ticket_metrics', values: ['ticket_count'], filter: { subject: { $ne: 'x' } } },
         { id: 'by_subject', type: 'metric', dataset: 'ticket_metrics', values: ['ticket_count'], filterBindings: { dateRange: 'subject' } },
         { id: 'ghost', type: 'metric', dataset: 'ticket_metrics', values: ['ticket_count'], filterBindings: { dateRange: 'closed_on' } },
         { id: 'users', type: 'metric', dataset: 'user_metrics', values: ['user_count'] },
@@ -112,7 +115,7 @@ const source = {
   ],
 };
 
-const PROVEN = ['open_tickets', 'by_status', 'due_window', 'mine', 'closed_tickets', 'with_assignee', 'high_or_low', 'mixed', 'all_tickets'];
+const PROVEN = ['open_tickets', 'by_status', 'due_window', 'mine', 'closed_tickets', 'with_assignee', 'high_or_low', 'not_closed', 'mixed', 'all_tickets'];
 
 const widgetOf = (report: DashboardWindowReport, widget: string) => {
   const r = report.results.find((x) => x.widget === widget);
@@ -207,6 +210,8 @@ describe('runDashboardWindowProofs — the fixture app', () => {
     expect(widgetOf(report, 'recent').reason).toMatch(/a condition on opened_at, the field the window lands on/);
     expect(excluded('either')).toEqual(['excluded', 'filter-unmodelled']);
     expect(widgetOf(report, 'either').reason).toMatch(/the operator \$or/);
+    expect(excluded('not_x')).toEqual(['excluded', 'filter-unmodelled']);
+    expect(widgetOf(report, 'not_x').reason).toMatch(/on subject, which declares no options to choose from/);
     expect(excluded('by_subject')).toEqual(['excluded', 'field-type']);
     expect(excluded('ghost')).toEqual(['excluded', 'field-missing']);
     expect(excluded('users')).toEqual(['excluded', 'object-undeclared']);
@@ -217,11 +222,11 @@ describe('runDashboardWindowProofs — the fixture app', () => {
   it('counts every dashboard, widget, measure and window', () => {
     expect(report.summary).toEqual({
       dashboards: { declared: 3, windowed: 2, notWindowed: 1, excluded: 0 },
-      widgets: { total: 17, unbound: 1, excluded: 7, probed: 9, proven: 9, contradicted: 0, failed: 0, inconclusive: 0 },
-      excludedBy: { 'no-count-measure': 2, 'filter-unmodelled': 2, 'field-type': 1, 'field-missing': 1, 'object-undeclared': 1 },
-      measures: { probed: 9, excluded: 1, excludedBy: { 'not-a-count': 1 } },
-      probes: 9 * DATE_RANGE_PRESETS.length,
-      held: 9 * DATE_RANGE_PRESETS.length,
+      widgets: { total: 19, unbound: 1, excluded: 8, probed: 10, proven: 10, contradicted: 0, failed: 0, inconclusive: 0 },
+      excludedBy: { 'no-count-measure': 2, 'filter-unmodelled': 3, 'field-type': 1, 'field-missing': 1, 'object-undeclared': 1 },
+      measures: { probed: 10, excluded: 1, excludedBy: { 'not-a-count': 1 } },
+      probes: 10 * DATE_RANGE_PRESETS.length,
+      held: 10 * DATE_RANGE_PRESETS.length,
       blank: 0,
       contradictions: 0,
       faults: 0,

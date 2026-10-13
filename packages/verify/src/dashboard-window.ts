@@ -403,17 +403,24 @@ function derive(config: any): { cases: DashboardWindowCase[]; dashboards: Dashbo
 
 // ── Held columns: what the widget's own selection asks of a row ─────────────
 
+/** A field's declared option values (`select` and its kin), in declaration order. */
+function optionValues(def: any): unknown[] {
+  return (Array.isArray(def?.options) ? def.options : []).map((o: any) => (isPlainObject(o) ? o.value : o)).filter((v: unknown) => v != null);
+}
+
 /**
  * Collect the equality every row must satisfy for `filter` to select it, into
  * `held`. Understood: a field compared with a scalar (bare or `$eq`), an `$in`
- * list (its first member), `{current_user_id}` (the principal), and `$and` of
+ * list (its first member), a `$nin` list or a `$ne` on a field that declares
+ * its options (the first declared option the condition does not exclude, so
+ * no row is NULL there), `{current_user_id}` (the principal), and `$and` of
  * those. Anything else is a selection the ground truth cannot model, and the
  * reason is returned — never a guess.
  */
 function holdColumns(
   filter: unknown,
   held: Map<string, unknown>,
-  ctx: { fields: Set<string>; windowField: string; principal: string; object: string },
+  ctx: { fields: Record<string, any>; windowField: string; principal: string; object: string },
 ): string | undefined {
   if (filter == null) return undefined;
   if (!isPlainObject(filter)) return `a filter that is not an object (${clip(JSON.stringify(filter), 80)})`;
@@ -429,13 +436,21 @@ function holdColumns(
     if (key.startsWith('$')) return `the operator ${key}`;
     if (key.includes('.')) return `the relationship path ${key}`;
     if (key === ctx.windowField) return `a condition on ${key}, the field the window lands on`;
-    if (!ctx.fields.has(key)) return `${key}, which is not a field of ${ctx.object}`;
+    if (!(key in ctx.fields)) return `${key}, which is not a field of ${ctx.object}`;
     let value: unknown = cond;
     if (isPlainObject(cond)) {
       const ops = Object.keys(cond);
+      const excluding = ops.length === 1 && ops[0] === '$nin' && Array.isArray(cond.$nin)
+        ? cond.$nin
+        : ops.length === 1 && ops[0] === '$ne' && cond.$ne !== null && typeof cond.$ne !== 'object' ? [cond.$ne] : undefined;
       if (ops.length === 1 && ops[0] === '$eq') value = cond.$eq;
       else if (ops.length === 1 && ops[0] === '$in' && Array.isArray(cond.$in) && cond.$in.length > 0) value = cond.$in[0];
-      else return `the condition ${clip(JSON.stringify({ [key]: cond }), 100)}`;
+      else if (excluding) {
+        const options = optionValues(ctx.fields[key]);
+        if (options.length === 0) return `the condition ${clip(JSON.stringify({ [key]: cond }), 100)} on ${key}, which declares no options to choose from`;
+        value = options.find((o) => !excluding.some((x: unknown) => String(x) === String(o)));
+        if (value === undefined) return `the condition ${clip(JSON.stringify({ [key]: cond }), 100)}, which excludes every option ${key} declares`;
+      } else return `the condition ${clip(JSON.stringify({ [key]: cond }), 100)}`;
     }
     if (typeof value === 'string' && /^\$?\{.*\}$/.test(value)) {
       if (value !== CURRENT_USER_TOKEN && value !== `$${CURRENT_USER_TOKEN}`) return `the placeholder ${value} on ${key}`;
@@ -731,8 +746,7 @@ export async function runDashboardWindowProofs(
     }
 
     const ownerColumn = 'owner_id' in fields;
-    const fieldNames = new Set(Object.keys(fields));
-    const holdCtx = { fields: fieldNames, windowField: c.field!, principal, object: c.object! };
+    const holdCtx = { fields, windowField: c.field!, principal, object: c.object! };
     const objectHeld = new Map<string, unknown>();
     const objectReason = holdColumns(c.datasetFilter, objectHeld, holdCtx) ?? holdColumns(c.filter, objectHeld, holdCtx);
     if (objectReason) {
