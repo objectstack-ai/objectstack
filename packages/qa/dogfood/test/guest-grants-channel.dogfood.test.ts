@@ -355,11 +355,17 @@ describe('ADR-0138 E1 — a bound read set grants that object only (D3 item 1, D
 describe('ADR-0138 E1 — the guest\'s row scope for each sharing model (D3 item 6)', () => {
   beforeAll(() => bindAnchor('guest', [GUEST_SET]));
 
-  // Measured on this boot. The row-level pipeline is the one every caller
-  // runs; the guest carries no user id and no external audience, so it is
-  // judged against the INTERNAL dial (`sharingModel`), and `externalSharingModel`
-  // is not read for it. See the E1 report: this reading is held for a ruling
-  // against ADR-0090 D9's division of labour and D11.
+  // Measured on this boot, and pinned AS MEASURED: ADR-0138 D3 item 6 executed
+  // as written. The row-level pipeline is the one every caller runs; the guest
+  // carries no user id and no external audience, so it is judged against the
+  // INTERNAL dial (`sharingModel`), and `externalSharingModel` is not read for
+  // it (that dial has no runtime reader for any principal: #23268).
+  //
+  // ⚠️ PENDING RULING: #23266. This reading departs from ADR-0090 D9's division
+  // of labour and D11 (the guest is not an OWD audience), and which row scope
+  // the guest gets is the maintainer's decision there. These numbers are the
+  // one place that decision lands: a ruling other than the measured reading
+  // changes them HERE, in the same change as the runtime work it orders.
   const cases: Array<[keyof typeof OBJ, number]> = [
     ['private', 0],
     ['publicRead', 2],
