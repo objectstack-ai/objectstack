@@ -1800,11 +1800,11 @@ function selfTest() {
       'TypeScript that writes a retired member no longer compiles.\n';
     check(
       "#23112 objectui#12242's changeset body reads breaking (`## ⚠️ BREAKING, …`)",
-      body12242.includes('## ⚠️ BREAKING') && hasBreakingAnnotation(body12242),
+      body12242.includes('## \u26A0\uFE0F BREAKING') && hasBreakingAnnotation(body12242),
     );
     check(
       '#23112 the plain-heading control still reads breaking (`## BREAKING, …`)',
-      hasBreakingAnnotation(body12242.replace('## ⚠️ BREAKING', '## BREAKING')),
+      hasBreakingAnnotation(body12242.replace('## \u26A0\uFE0F BREAKING', '## BREAKING')),
     );
     check(
       '#23112 a decorated PROSE sentence containing "breaking" does not read breaking',
@@ -1814,7 +1814,13 @@ function selfTest() {
     );
     check(
       '#23112 the sign BEFORE the emphasis mark reads breaking (`⚠️ **BREAKING (…)**`)',
-      hasBreakingAnnotation('a\n\n⚠️ **BREAKING (scored `minor` per the version-alignment rule)** — x'),
+      // Wrapped as objectui `10719-retire-phase35-validation-types.md` wraps it, so
+      // the label's run crosses a line and `BREAKING_EMPHASIS_LABEL` cannot see it:
+      // only the opener can answer.
+      hasBreakingAnnotation(
+        "a\n\n⚠️ **BREAKING (scored `minor` per this repository's version-alignment\n" +
+          'convention) — x.**',
+      ),
     );
     check(
       '#23112 the sign INSIDE the emphasis mark reads breaking (`**⚠️ Breaking …**`)',
@@ -1826,7 +1832,7 @@ function selfTest() {
     );
     check(
       '#23112 the sign without its variation selector reads breaking (`## ⚠ BREAKING`)',
-      hasBreakingAnnotation('a\n\n## ⚠ BREAKING'),
+      hasBreakingAnnotation('a\n\n## \u26A0 BREAKING'),
     );
     check(
       '#23112 the rule is the pictograph CLASS, not the one sign (`- 🚨 BREAKING:` behind a bullet)',
@@ -1870,11 +1876,12 @@ function selfTest() {
         "---\n'@object-ui/types': minor\n---\n\n" + body12242,
       'src/types.ts': 'a\n',
     });
-    commitDeco('fix(core): retire the phase-3.5 validation types (#10719)', {
+    commitDeco('fix(types): retire the phase-3.5 validation types (#10719)', {
       '.changeset/10719-retire-phase35-validation-types.md':
-        "---\n'@object-ui/core': minor\n---\n\n" +
-        '⚠️ **BREAKING (scored `minor` per the version-alignment rule)** — the phase-3.5 ' +
-        'validation types are retired.\n',
+        "---\n'@object-ui/types': minor\n---\n\n" +
+        "⚠️ **BREAKING (scored `minor` per this repository's version-alignment\n" +
+        'convention) — `@object-ui/types` no longer exports the eight "Phase 3.5"\n' +
+        'validation types (objectui#10719).**\n',
       'src/core.ts': 'b\n',
     });
     commitDeco('fix(fields): a picker note (#3336)', {
@@ -1902,7 +1909,12 @@ function selfTest() {
     );
     check(
       "#23112 a summary opening with a decorated label renders it verbatim, never restated",
-      decorated.body.includes('- **minor** — ⚠️ **BREAKING (scored `minor` per the version-alignment rule)** —') &&
+      // The `breaking` clause is load-bearing: an UNFLAGGED entry renders this
+      // same line, so the text clauses alone would pass for an empty reason.
+      decorated.releasing.find((r) => r.path.includes('10719'))?.breaking === true &&
+        decorated.body.includes(
+          "- **minor** — ⚠️ **BREAKING (scored `minor` per this repository's version-alignment convention)",
+        ) &&
         !decorated.body.includes('**BREAKING** — ⚠️ **BREAKING'),
       decorated.body,
     );
