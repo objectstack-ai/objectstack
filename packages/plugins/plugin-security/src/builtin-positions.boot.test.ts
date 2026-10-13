@@ -403,7 +403,7 @@ async function grantsByPrincipal(engine: ObjectQL, posture: 'single' | 'isolated
  * that show the refusals are not blanket: a write through the data door by the
  * organization administrator (superuser wildcard, not a system context).
  */
-async function tenantPositionWrites(engine: ObjectQL, existingRows: boolean): Promise<Record<string, WriteOutcome>> {
+async function tenantPositionWrites(engine: ObjectQL, existingRows: boolean, walled: boolean): Promise<Record<string, WriteOutcome>> {
   const tenant = { userId: 'usr_orgadmin', positions: [], permissions: ['qa_admin'], tenantId: ORG };
   const own = async (name: string) => {
     const rows = (await engine.find('sys_position', { where: { name }, limit: 5, context: { isSystem: true, tenantId: ORG } })) as any[];
@@ -412,13 +412,17 @@ async function tenantPositionWrites(engine: ObjectQL, existingRows: boolean): Pr
   };
   const everyone = await own('everyone');
   const platformAdmin = await own('platform_admin');
+  const dangling = await outcome(engine.insert(
+    'sys_user_position', { user_id: 'usr_member', position: 'zz_dangling' }, { context: tenant } as any,
+  ));
+  const created = await outcome(engine.insert(
+    'sys_position', { name: 'zz_tenant_post', label: 'Tenant Post' }, { context: tenant } as any,
+  ));
   return {
-    'assign a position the security catalog does not hold': await outcome(engine.insert(
-      'sys_user_position', { user_id: 'usr_member', position: 'zz_dangling' }, { context: tenant } as any,
-    )),
-    'control: create a position row': await outcome(engine.insert(
-      'sys_position', { name: 'zz_tenant_post', label: 'Tenant Post' }, { context: tenant } as any,
-    )),
+    'assign a position the security catalog does not hold': dangling,
+    // Under a wall the tenant's create is not judged here: the walled create
+    // refusal is pinned at the `/meta` wall (`wall-catalog-refusal.dogfood.test.ts`).
+    ...(walled ? {} : { 'control: create a position row': created }),
     // [ADR-0131 D3/D4] This harness mounts no metadata door, so the row gets
     // no definition: a position only a row carries grants nothing, and an
     // assignment naming it is refused like a dangling name.
@@ -529,7 +533,8 @@ for (const name of Object.keys(SCENARIOS) as ScenarioName[]) {
         // A fresh database holds no built-in row to delete or relabel; the two
         // refusals are read where the rows are, on an existing database.
         const { engine } = booted.get(name)!;
-        expect(await tenantPositionWrites(engine, scenario.existingRows)).toEqual(refusalGoldenFor(scenario));
+        expect(await tenantPositionWrites(engine, scenario.existingRows, scenario.posture !== 'single'))
+          .toEqual(refusalGoldenFor(scenario));
       });
     }
   });
@@ -541,7 +546,7 @@ for (const name of Object.keys(SCENARIOS) as ScenarioName[]) {
  * the position catalog refusal's envelope (`reference_not_found` at
  * `position`); a stack-declared position is assigned with no row; the two
  * built-in rows an existing database holds are refused on their `platform`
- * provenance. Under a wall the tenant's position create is refused as well
+ * provenance. Under a wall the tenant's position create is not judged here
  * ({@link refusalGoldenFor}).
  */
 const REFUSAL_GOLDEN: Record<string, WriteOutcome> = {
@@ -575,15 +580,16 @@ const REFUSAL_GOLDEN: Record<string, WriteOutcome> = {
 
 /**
  * {@link REFUSAL_GOLDEN} for a scenario: the built-in row cases need an existing
- * database's rows. [ADR-0131 D3] Under a wall the tenant's position CREATE is
- * refused (`walled-catalog-data-door.ts`): the catalog is the platform
- * operator's, and a tenant may only assign it. The assignment cases do not
- * move, and the built-in row refusals keep their `403 PERMISSION_DENIED`.
+ * database's rows. [ADR-0131 D3] Under a wall the tenant's position create is
+ * left out: the data-door create refusal pinned here retires with the
+ * `sys_position` object (C3 stage 8), and the walled create refusal is pinned at
+ * the `/meta` wall (`wall-catalog-refusal.dogfood.test.ts`). The assignment
+ * cases do not move, and the built-in row refusals keep their
+ * `403 PERMISSION_DENIED`.
  */
 function refusalGoldenFor(scenario: Scenario): Record<string, WriteOutcome> {
-  const golden: Record<string, WriteOutcome> = scenario.posture === 'single'
-    ? REFUSAL_GOLDEN
-    : { ...REFUSAL_GOLDEN, 'control: create a position row': { ok: false, code: 'PERMISSION_DENIED', status: 403 } };
+  const { 'control: create a position row': _create, ...walledGolden } = REFUSAL_GOLDEN;
+  const golden: Record<string, WriteOutcome> = scenario.posture === 'single' ? REFUSAL_GOLDEN : walledGolden;
   if (scenario.existingRows) return golden;
   const { 'delete the everyone row': _d, 'relabel the platform_admin row': _r, ...fresh } = golden;
   return fresh;

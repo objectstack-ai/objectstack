@@ -842,7 +842,7 @@ describe('shipped platform record pages -- i18n ownership (#14817)', () => {
     // that the pages went monolingual. [#15204 B2] The user page's two grant
     // lists dropped their `add` pickers, and with them two label maps.
     // (`sys_position_detail` retired with the `sys_position` object, C3 stage 8.)
-    expect(maps.length).toBeGreaterThanOrEqual(39);
+    expect(maps.length).toBeGreaterThanOrEqual(38);
 
     const incomplete = maps
       .filter((m) => SHIPPED_LOCALES.some((locale) => !m.locales.includes(locale)))
