@@ -211,10 +211,10 @@ describe('[ADR-0131 D3] 5. the Default Organization, kept by the plugin that reg
   it('under single, without AuthPlugin: a system insert on a tenant-scoped object is stamped with the Default Organization', async () => {
     const ql = await boot([createIdentityObjectsPlugin(), new SecurityPlugin()]);
 
-    const orgs = await organizations(ql);
-    expect(orgs.map((o) => o.slug)).toEqual(['default']);
     // The seed loader's and a hook's shape: system context, no organization named.
     const row = await ql.insert('kit_account', { name: 'Seeded by the system' }, { context: SYS });
+    const orgs = await organizations(ql);
+    expect(orgs.map((o) => o.slug)).toEqual(['default']);
     const stored = await ql.findOne('kit_account', { where: { id: row.id }, context: SYS });
     expect(stored?.organization_id).toBe(orgs[0].id);
   });
