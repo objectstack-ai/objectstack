@@ -310,6 +310,10 @@ export {
   positionDefinitionFromRow,
   type PositionRowForDefinition,
 } from './position-row-definition.js';
+export {
+  emailTemplateDefinitionFromRow,
+  type EmailTemplateRowForDefinition,
+} from './email-template-row-definition.js';
 
 // [commit f8eb73601] The measured read surface of the administrator derivation — the
 // single source `plugin-auth`'s break-glass standing-key lists correspond to.

@@ -22,10 +22,8 @@
 // Pinned here, under each walled posture: every one of those answers
 // `403 PERMISSION_DENIED`, nothing moves, and B's resolution stays. The commit
 // revert is judged by the commit's own items, whatever package the URL names.
-// CONTROLS: A runs publish-drafts, discard-drafts, revert, rollback, commit
-// revert and duplicate on its own catalog-free package as before. Not
-// adopt-orphans: that verb reads the environment's orphans, not A's package,
-// and this environment carries the operator's catalog orphan. The platform
+// [ADR-0131 D12 items 7–8] A catalog-free package is refused to A the same way
+// (ruling A on #23231 stops special-casing the catalog). CONTROLS: the platform
 // operator runs every door on the catalog-carrying package, adopt-orphans
 // included. And under `single` (CONTROL): the same `manage_metadata` holder
 // runs every door on the operator's package as before.
@@ -223,8 +221,10 @@ for (const posture of ['isolated', 'group'] as const) {
       expect(await bSnapshot()).toBe(before);
     });
 
-    it('commits/:commitId/revert: the commit is judged by its own items, whatever package the URL names', async () => {
-      const own = await call(h.stack, h.tokA, 'POST', '/packages', { id: 'com.w3.a.url', name: 'url', version: '1.0.0', type: 'app' });
+    it('commits/:commitId/revert: the commit is refused whatever package the URL names', async () => {
+      // [ADR-0131 D12 items 7–8] A can no longer create a package under a wall,
+      // so the other package the URL names is the operator's.
+      const own = await call(h.stack, h.operator, 'POST', '/packages', { id: 'com.w3.a.url', name: 'url', version: '1.0.0', type: 'app' });
       expect(own.status, await own.clone().text()).toBe(201);
       const before = await bSnapshot();
       await refused(await call(h.stack, h.tokA, 'POST', `/packages/com.w3.a.url/commits/${h.c2}/revert`, {}));
@@ -236,33 +236,40 @@ for (const posture of ['isolated', 'group'] as const) {
       expect(await rowsOf(h, { package_id: 'com.w3.dup' })).toHaveLength(0);
     });
 
-    it('adopt-orphans: A adopting the environment\'s catalog orphans into its own package is refused, and the orphan stays unbound', async () => {
-      const own = await call(h.stack, h.tokA, 'POST', '/packages', { id: 'com.w3.a.adopt', name: 'adopt', version: '1.0.0', type: 'app' });
+    it('adopt-orphans: A adopting the environment\'s catalog orphans into another package is refused, and the orphan stays unbound', async () => {
+      // [ADR-0131 D12 items 7–8] A can no longer create a package under a wall,
+      // so the adopting package is the operator's.
+      const own = await call(h.stack, h.operator, 'POST', '/packages', { id: 'com.w3.a.adopt', name: 'adopt', version: '1.0.0', type: 'app' });
       expect(own.status, await own.clone().text()).toBe(201);
       await refused(await call(h.stack, h.tokA, 'POST', '/packages/com.w3.a.adopt/adopt-orphans', {}));
       const env = await rowsOf(h, { type: 'permission', name: ENV_SET });
       expect(env.map((r) => r.package_id ?? null)).not.toContain('com.w3.a.adopt');
     });
 
-    it('CONTROL: A runs every door but adopt-orphans on its own catalog-free package as before', async () => {
-      const pkg = 'com.w3.a.free';
+    it('[ADR-0131 D12 items 7–8] a catalog-free package is the platform operator\'s too: A is refused every door on it, and nothing moves', async () => {
+      // Ruling A on #23231 stops special-casing the catalog: what was this
+      // file's catalog-free CONTROL (A runs every door on its own package as
+      // before) is refused now. A cannot create a package under a wall, so the
+      // catalog-free package and its commits are the operator's.
+      const pkg = 'com.w3.op.free';
       const dash = 'w3_free_dash';
       const ok = async (res: Response) => expect(res.status, await res.clone().text()).toBe(200);
-      expect((await call(h.stack, h.tokA, 'POST', '/packages', { id: pkg, name: 'free', version: '1.0.0', type: 'app' })).status).toBe(201);
-      await ok(await call(h.stack, h.tokA, 'PUT', `/meta/dashboard/${dash}?package=${pkg}&mode=draft`, dashboard(dash, 'v1')));
-      await ok(await call(h.stack, h.tokA, 'POST', `/packages/${pkg}/publish-drafts`, {}));
-      const first = (await commitIds(h.stack, h.tokA, pkg))[0]!;
-      await ok(await call(h.stack, h.tokA, 'PUT', `/meta/dashboard/${dash}?package=${pkg}&mode=draft`, dashboard(dash, 'v2')));
-      await ok(await call(h.stack, h.tokA, 'POST', `/packages/${pkg}/publish-drafts`, {}));
-      const second = (await commitIds(h.stack, h.tokA, pkg))[0]!;
-      await ok(await call(h.stack, h.tokA, 'POST', `/packages/${pkg}/commits/${second}/revert`, {}));
-      await ok(await call(h.stack, h.tokA, 'POST', `/packages/${pkg}/rollback`, { commitId: first }));
-      await ok(await call(h.stack, h.tokA, 'PUT', `/meta/dashboard/${dash}?package=${pkg}&mode=draft`, dashboard(dash, 'v3')));
-      await ok(await call(h.stack, h.tokA, 'POST', `/packages/${pkg}/revert`, {}));
-      await ok(await call(h.stack, h.tokA, 'PUT', `/meta/dashboard/${dash}?package=${pkg}&mode=draft`, dashboard(dash, 'v4')));
-      await ok(await call(h.stack, h.tokA, 'POST', `/packages/${pkg}/discard-drafts`, {}));
-      expect(await rowsOf(h, { package_id: pkg, state: 'draft' })).toHaveLength(0);
-      await ok(await call(h.stack, h.tokA, 'POST', `/packages/${pkg}/duplicate`, { targetPackageId: 'com.w3.a.free.copy' }));
+      const created = await call(h.stack, h.tokA, 'POST', '/packages', { id: 'com.w3.a.free', name: 'free', version: '1.0.0', type: 'app' });
+      await refused(created);
+      expect((await call(h.stack, h.operator, 'POST', '/packages', { id: pkg, name: 'free', version: '1.0.0', type: 'app' })).status).toBe(201);
+      await ok(await call(h.stack, h.operator, 'PUT', `/meta/dashboard/${dash}?package=${pkg}&mode=draft`, dashboard(dash, 'v1')));
+      await ok(await call(h.stack, h.operator, 'POST', `/packages/${pkg}/publish-drafts`, {}));
+      const first = (await commitIds(h.stack, h.operator, pkg))[0]!;
+      await ok(await call(h.stack, h.operator, 'PUT', `/meta/dashboard/${dash}?package=${pkg}&mode=draft`, dashboard(dash, 'v2')));
+      await refused(await call(h.stack, h.tokA, 'POST', `/packages/${pkg}/publish-drafts`, {}));
+      await refused(await call(h.stack, h.tokA, 'POST', `/packages/${pkg}/revert`, {}));
+      await refused(await call(h.stack, h.tokA, 'POST', `/packages/${pkg}/discard-drafts`, {}));
+      expect(await rowsOf(h, { package_id: pkg, state: 'draft' })).toHaveLength(1);
+      await refused(await call(h.stack, h.tokA, 'POST', `/packages/${pkg}/rollback`, { commitId: first }));
+      await refused(await call(h.stack, h.tokA, 'POST', `/packages/${pkg}/commits/${first}/revert`, {}));
+      await refused(await call(h.stack, h.tokA, 'POST', `/packages/${pkg}/duplicate`, { targetPackageId: 'com.w3.a.free.copy' }));
+      expect(await rowsOf(h, { package_id: 'com.w3.a.free.copy' })).toHaveLength(0);
+      expect(await commitIds(h.stack, h.operator, pkg)).toHaveLength(1);
     });
 
     it('CONTROL: the platform operator runs every one of these doors on its catalog-carrying package', async () => {

@@ -190,5 +190,7 @@ export const entry: SemanticMigration = {
     + 'variable named like one through an envelope. Re-run '
     + 'the flow paths that write those fields, serve those screens, iterate those lists, send those '
     + 'notifications, make those http calls and run those queries, and compare the stored and served values, the iterations, the '
-    + 'audiences, the request payloads and the rows matched with the ones the template produced.',
+    + 'audiences, the request payloads and the rows matched with the ones the template produced. '
+    + '`os migrate meta --stored` lists each stored flow carrying a refused value as a TODO under this '
+    + 'entry\'s id, before the upgrade and after it, by flow, node and path, and rewrites none of them.',
 };

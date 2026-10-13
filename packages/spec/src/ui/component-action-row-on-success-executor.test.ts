@@ -17,6 +17,12 @@
  *   `'navigation'`, the runner's local alias of `'url'`, with the lossless
  *   rename onto `'url'` — whose `target` the url scheme set judges. Every other
  *   executor name, a host-registered handler included, stays open.
+ * - **`onSuccess` beside the effective executor** (section 3): `ActionSchema`'s
+ *   "`onSuccess` only beside `api` / `script`", carried to the rows on the
+ *   vocabulary the action's closed `ActionType` can see. Refused beside every
+ *   runner built-in other than those two (`url`, `navigation`, `modal`,
+ *   `flow`, `form`) and beside a row with no effective executor; a host
+ *   handler name stays open; the refusal text is the action's own.
  *
  * Each row gets one refusal (its Zod issue path and its first sentence) and one
  * accepted control (a full parse). A page's `properties` bag is outside the
@@ -65,6 +71,8 @@ interface Row {
   readonly at: readonly PropertyKey[];
   readonly executorKey: 'actionType' | 'type';
   readonly navigationSubject: string;
+  /** How a refusal on one of the row's own keys opens ("An `action:button`'s"). */
+  readonly owner: string;
   /** The parsed row's action object. */
   readonly parsed: (data: unknown) => Record<string, unknown>;
 }
@@ -76,6 +84,7 @@ const ROWS: readonly Row[] = [
     at: [],
     executorKey: 'actionType',
     navigationSubject: "An `action:button`'s `actionType: 'navigation'`",
+    owner: "An `action:button`'s",
     parsed: (data) => data as Record<string, unknown>,
   },
   {
@@ -84,6 +93,7 @@ const ROWS: readonly Row[] = [
     at: [],
     executorKey: 'actionType',
     navigationSubject: "An `action:icon`'s `actionType: 'navigation'`",
+    owner: "An `action:icon`'s",
     parsed: (data) => data as Record<string, unknown>,
   },
   {
@@ -92,6 +102,7 @@ const ROWS: readonly Row[] = [
     at: ['actions', 0],
     executorKey: 'type',
     navigationSubject: "An `action:group` member's `type: 'navigation'`",
+    owner: "An `action:group` member's",
     parsed: (data) => (data as { actions: Record<string, unknown>[] }).actions[0],
   },
   {
@@ -100,6 +111,7 @@ const ROWS: readonly Row[] = [
     at: ['actions', 0],
     executorKey: 'type',
     navigationSubject: "An `action:menu` member's `type: 'navigation'`",
+    owner: "An `action:menu` member's",
     parsed: (data) => (data as { actions: Record<string, unknown>[] }).actions[0],
   },
 ];
@@ -199,5 +211,129 @@ describe("a page action row's executor key refuses `'navigation'`, the runner's 
   it.each(ROWS)('CONTROL: $name keeps its executor key open — a host-registered handler name parses', (row) => {
     const r = row.parse({ [row.executorKey]: 'navigate_edit' });
     expect(r.success, JSON.stringify(issuesOf(r))).toBe(true);
+  });
+});
+
+// ===========================================================================
+// 3. onSuccess beside the effective executor — ActionSchema's own rule
+// ===========================================================================
+
+/** The row's subject for an issue on `onSuccess`, given the spelling that resolved its executor. */
+const onSuccessSubject = (row: Row, spelled: string) => `${row.owner} \`onSuccess\` (${spelled})`;
+
+/** A target each executor takes without a refusal of its own. */
+const TARGETS: Readonly<Record<string, string>> = {
+  url: '/apps/crm/tasks',
+  navigation: '/apps/crm/tasks',
+  modal: 'task_modal',
+  flow: 'close_task',
+  form: 'task_form',
+  api: '/api/v1/tasks/clone',
+  script: 'clone_task_fn',
+  run: 'clone_task',
+};
+
+const HOP = { navigate: '/apps/crm/tasks/${result.id}' };
+
+describe("a page action row's `onSuccess` is refused beside a runner built-in other than `api` / `script`", () => {
+  const REFUSED = ['url', 'modal', 'flow', 'form'] as const;
+
+  it.each(ROWS.flatMap((row) => REFUSED.map((executor) => [row.name, executor, row] as const)))(
+    'REFUSAL: %s with `%s` and `onSuccess` is refused at `onSuccess`, naming the row and its executor',
+    (_name, executor, row) => {
+      const issues = issuesOf(row.parse({ [row.executorKey]: executor, target: TARGETS[executor], onSuccess: HOP }));
+      expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', [...row.at, 'onSuccess']]]);
+      expect(issues[0].message.startsWith(onSuccessSubject(row, `\`${row.executorKey}: '${executor}'\``))).toBe(true);
+    },
+  );
+
+  it.each(ROWS.flatMap((row) => REFUSED.map((executor) => [row.name, executor, row] as const)))(
+    'NEGATIVE CONTROL: %s with `%s` and no `onSuccess` parses',
+    (_name, executor, row) => {
+      const r = row.parse({ [row.executorKey]: executor, target: TARGETS[executor] });
+      expect(r.success, JSON.stringify(issuesOf(r))).toBe(true);
+    },
+  );
+
+  it.each(ROWS)("REFUSAL: $name with `'navigation'` and `onSuccess` gets the alias refusal AND the `onSuccess` one", (row) => {
+    const issues = issuesOf(row.parse({ [row.executorKey]: 'navigation', target: TARGETS.navigation, onSuccess: HOP }));
+    expect(issues.map((i) => [i.code, i.path])).toEqual([
+      ['custom', [...row.at, row.executorKey]],
+      ['custom', [...row.at, 'onSuccess']],
+    ]);
+    expect(issues[1].message.startsWith(onSuccessSubject(row, `\`${row.executorKey}: 'navigation'\``))).toBe(true);
+  });
+
+  it.each(ROWS.flatMap((row) => REFUSED.map((executor) => [row.name, executor, row] as const)))(
+    "ONE TEXT: %s with `%s` gives `ActionSchema`'s own refusal, after the subject",
+    (_name, executor, row) => {
+      const rowMessage = issuesOf(row.parse({ [row.executorKey]: executor, target: TARGETS[executor], onSuccess: HOP }))[0].message;
+      const actionIssues = issuesOf(ActionSchema.safeParse({
+        name: 'clone_task', label: 'Clone', type: executor, target: TARGETS[executor], onSuccess: HOP,
+      }));
+      expect(actionIssues.map((i) => [i.code, i.path])).toEqual([['custom', ['onSuccess']]]);
+      const actionSubject = `A \`type: '${executor}'\` action's \`onSuccess\``;
+      expect(actionIssues[0].message.startsWith(actionSubject)).toBe(true);
+      const rowSubject = onSuccessSubject(row, `\`${row.executorKey}: '${executor}'\``);
+      expect(rowMessage.slice(rowSubject.length)).toBe(actionIssues[0].message.slice(actionSubject.length));
+    },
+  );
+
+  it.each(ROWS)('REFUSAL: $name on the name leg — no executor key and `name: \'form\'` — is refused as `form`', (row) => {
+    const issues = issuesOf(row.parse({ name: 'form', target: TARGETS.form, onSuccess: HOP }));
+    expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', [...row.at, 'onSuccess']]]);
+    expect(issues[0].message.startsWith(
+      onSuccessSubject(row, `\`name: 'form'\` and no \`${row.executorKey}\`, so the runner runs \`form\``),
+    )).toBe(true);
+  });
+});
+
+describe("a page action row's `onSuccess` is refused beside no effective executor", () => {
+  it.each(ROWS)('REFUSAL: $name with no executor key and no `name` is refused at `onSuccess`', (row) => {
+    const issues = issuesOf(row.parse({ onSuccess: HOP }));
+    expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', [...row.at, 'onSuccess']]]);
+    expect(issues[0].message.startsWith(onSuccessSubject(row, `no \`${row.executorKey}\` and no \`name\``))).toBe(true);
+    expect(issues[0].message).toContain(`\`${row.executorKey}: 'api'\``);
+  });
+
+  it.each(ROWS)('REFUSAL: $name with an EMPTY executor key and no `name` is refused too — the runner reads `||`', (row) => {
+    const issues = issuesOf(row.parse({ [row.executorKey]: '', onSuccess: HOP }));
+    expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', [...row.at, 'onSuccess']]]);
+    expect(issues[0].message.startsWith(onSuccessSubject(row, `an empty \`${row.executorKey}\` and no \`name\``))).toBe(true);
+  });
+
+  it.each(ROWS)('NEGATIVE CONTROL: $name with no executor and no `onSuccess` parses', (row) => {
+    const r = row.parse({});
+    expect(r.success, JSON.stringify(issuesOf(r))).toBe(true);
+  });
+});
+
+describe("a page action row's `onSuccess` stays open beside `api`, `script` and a host-registered handler", () => {
+  it.each(ROWS.flatMap((row) => (['api', 'script', 'run'] as const).map((executor) => [row.name, executor, row] as const)))(
+    'ACCEPTED: %s with `%s` and `onSuccess` parses, the block resolved as on the action',
+    (_name, executor, row) => {
+      const r = row.parse({ [row.executorKey]: executor, target: TARGETS[executor], onSuccess: HOP });
+      expect(r.success, JSON.stringify(issuesOf(r))).toBe(true);
+      expect(row.parsed(r.data).onSuccess).toEqual({ ...HOP, openIn: 'self' });
+    },
+  );
+
+  it.each(ROWS)('ACCEPTED: $name on the name leg — no executor key and `name: \'api\'` or a host handler name — parses', (row) => {
+    for (const name of ['api', 'script', 'clone_task']) {
+      const r = row.parse({ name, onSuccess: HOP });
+      expect(r.success, `${name}: ${JSON.stringify(issuesOf(r))}`).toBe(true);
+    }
+    const empty = row.parse({ [row.executorKey]: '', name: 'api', onSuccess: HOP });
+    expect(empty.success, JSON.stringify(issuesOf(empty))).toBe(true);
+  });
+
+  it.each(ROWS)('ACCEPTED: $name with a declared executor key outranks its `name` — `api` named `url` parses', (row) => {
+    const r = row.parse({ [row.executorKey]: 'api', name: 'url', target: TARGETS.api, onSuccess: HOP });
+    expect(r.success, JSON.stringify(issuesOf(r))).toBe(true);
+  });
+
+  it.each(ROWS)('NEGATIVE CONTROL: $name with a declared `form` key still refuses its `name: \'api\'` row\'s `onSuccess`', (row) => {
+    const issues = issuesOf(row.parse({ [row.executorKey]: 'form', name: 'api', target: TARGETS.form, onSuccess: HOP }));
+    expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', [...row.at, 'onSuccess']]]);
   });
 });

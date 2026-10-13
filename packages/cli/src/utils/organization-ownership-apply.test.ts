@@ -24,6 +24,7 @@ import { join } from 'node:path';
 import { permissionSetDefinitionFromRow } from '@objectstack/core';
 import {
   applyOrganizationOwnership,
+  TemplateChoiceRefusal,
   type ApplyExecutor,
   type CatalogPort,
   type CeremonyCheckpoint,
@@ -31,6 +32,7 @@ import {
   type ColumnDropPort,
   type MetadataDoorPort,
   type OrganizationOwnershipApplyReport,
+  type TemplatePort,
 } from './organization-ownership-apply.js';
 
 let dir: string;
@@ -62,15 +64,31 @@ function executor(opts: { failOnceOn?: RegExp } = {}): ApplyExecutor {
  * Like the registry, it serves a saved definition only from the next boot on
  * ({@link boot}), never the moment it is saved.
  */
-function catalog(): CatalogPort & MetadataDoorPort & { saved: Map<string, Record<string, unknown>>; boot(): void } {
+function catalog(): CatalogPort & MetadataDoorPort & TemplatePort & {
+  saved: Map<string, Record<string, unknown>>;
+  templates: Map<string, Record<string, unknown>>;
+  boot(): void;
+} {
   const declared = new Map<string, Record<string, unknown>>([
     ['permission|member_default', permissionSetDefinitionFromRow(MEMBER_DEFAULT_ROW)],
     ['position|org_admin', { name: 'org_admin', label: 'Org Admin', delegatable: false, permissionSets: ['member_default'] }],
   ]);
   const saved = new Map<string, Record<string, unknown>>();
+  /** Environment `email_template` items, keyed `name|locale`; a package ships `auth.reset_password`. */
+  const templates = new Map<string, Record<string, unknown>>();
+  const packaged = new Map<string, Record<string, unknown>>([
+    ['auth.reset_password|en-US', { name: 'auth.reset_password', label: 'Reset', locale: 'en-US', subject: 'Reset', bodyHtml: '<p>code</p>' }],
+  ]);
   let hydrated = new Map<string, Record<string, unknown>>();
   return {
     saved,
+    templates,
+    async find(name, locale) {
+      const own = templates.get(`${name}|${locale}`);
+      if (own) return { definition: own, environment: true };
+      const shipped = packaged.get(`${name}|${locale}`);
+      return shipped ? { definition: shipped, environment: false } : undefined;
+    },
     boot() {
       hydrated = new Map(saved);
     },
@@ -79,6 +97,11 @@ function catalog(): CatalogPort & MetadataDoorPort & { saved: Map<string, Record
       return definition ? { definition } : undefined;
     },
     async save(type, name, body) {
+      if (type === 'email_template') {
+        if (!/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/.test(name)) throw new Error(`VALIDATION_ERROR: ${name} is not dotted snake_case`);
+        templates.set(`${name}|${String(body.locale)}`, body);
+        return;
+      }
       if (declared.has(`${type}|${name}`)) throw new Error(`NAMESPACE_CONFLICT: ${type} ${name} is held by a package`);
       saved.set(`${type}|${name}`, body);
     },
@@ -146,14 +169,28 @@ function seed(): void {
       ('bind_3', 'org_default', 'pos_auth', 'ps_auth');
     CREATE TABLE sys_capability (id TEXT PRIMARY KEY, organization_id TEXT, name TEXT, managed_by TEXT);
     INSERT INTO sys_capability VALUES ('cap_seeded', NULL, 'manage_users', 'platform'), ('cap_authored', 'org_default', 'audit_fields', 'admin');
-    -- fate 2: templates — seeded mirrors, one customized, one organization-stamped,
-    -- and one an admin authored (never a mirror: kept for the promotion)
-    CREATE TABLE sys_email_template (id TEXT PRIMARY KEY, organization_id TEXT, name TEXT, customized INTEGER, managed_by TEXT);
+    -- fate 2: templates — a seeded mirror, an organization's seeded copy, a
+    -- customized seeded row, admin-authored rows (with and without an
+    -- organization) and a row of unknown provenance (the last four promoted first)
+    CREATE TABLE sys_email_template (id TEXT PRIMARY KEY, organization_id TEXT, name TEXT, label TEXT, locale TEXT,
+      subject TEXT, body_html TEXT, active INTEGER, variables_json TEXT, customized INTEGER, managed_by TEXT);
     INSERT INTO sys_email_template VALUES
-      ('tpl_seeded', NULL, 'welcome', 0, 'platform'),
-      ('tpl_customized', NULL, 'reset_password', 1, 'platform'),
-      ('tpl_org', 'org_b', 'welcome', 0, 'platform'),
-      ('tpl_admin', NULL, 'crm.note', 0, 'admin');
+      ('tpl_seeded', NULL, 'auth.welcome', 'Welcome', 'en-US', 'Hi', '<p>hi</p>', 1, '[]', 0, 'platform'),
+      ('tpl_customized', NULL, 'auth.reset_password', 'Reset', 'en-US', 'Reset your password', '<p>our code</p>', 1, '[]', 1, 'platform'),
+      ('tpl_org', 'org_b', 'auth.welcome', 'Welcome', 'en-US', 'Hi', '<p>hi</p>', 1, '[]', 0, 'platform'),
+      ('tpl_admin', 'org_b', 'crm.renewal', 'Renewal', 'zh-CN', '续约', '<p>续约</p>', 1, '[]', 0, 'admin'),
+      ('tpl_admin_env', NULL, 'crm.note', 'Note', 'en-US', 'A note', '<p>note</p>', 1, '[]', 0, 'admin'),
+      ('tpl_unknown', NULL, 'crm.memo', 'Memo', 'en-US', 'A memo', '<p>memo</p>', 1, '[]', 0, NULL);
+
+    -- the settings global rung, still in sys_setting, and its new home
+    CREATE TABLE sys_setting (id TEXT PRIMARY KEY, organization_id TEXT, namespace TEXT, key TEXT, scope TEXT, user_id TEXT,
+      value TEXT, encrypted INTEGER, locked INTEGER, locked_reason TEXT, value_enc TEXT);
+    INSERT INTO sys_setting VALUES
+      ('set_global', NULL, 'mail', 'transport', 'global', NULL, '"smtp"', 0, 1, 'ops', NULL),
+      ('set_secret', NULL, 'ai', 'api_key', 'global', NULL, NULL, 1, 0, NULL, 'secret:h_1'),
+      ('set_tenant', 'org_b', 'mail', 'from', 'tenant', NULL, '"b@x.test"', 0, 0, NULL, NULL);
+    CREATE TABLE sys_platform_setting (id TEXT PRIMARY KEY, namespace TEXT, key TEXT, value TEXT, encrypted INTEGER,
+      locked INTEGER, locked_reason TEXT, value_enc TEXT);
 
     -- the references: grants by id (the rewrite names them) and assignments by name
     CREATE TABLE sys_user_permission_set (id TEXT PRIMARY KEY, organization_id TEXT, user_id TEXT,
@@ -248,20 +285,41 @@ async function accessAfter(c: ReturnType<typeof catalog>): Promise<string[]> {
 const apply = (
   c: ReturnType<typeof catalog>,
   l: ReturnType<typeof ledger>,
-  opts: { posture?: string; executor?: ApplyExecutor } = {},
+  opts: { posture?: string; executor?: ApplyExecutor; templateChoices?: string[] } = {},
 ): Promise<OrganizationOwnershipApplyReport> => {
   c.boot();
   return applyOrganizationOwnership({
     executor: opts.executor ?? executor(),
+    ...(opts.templateChoices ? { templateChoices: opts.templateChoices } : {}),
     posture: opts.posture ?? 'single',
     database: file,
     catalog: c,
     door: c,
+    templates: c,
     columnDrops,
     ledger: l,
     now: () => new Date('2026-10-12T00:00:00Z'),
   });
 };
+
+/** Run `body` against a database holding nothing but the given templates, so every step can finish under any posture. */
+async function onlyTemplates(values: string, body: () => Promise<void>): Promise<void> {
+  const only = new Database(join(dir, 'templates.db'));
+  only.exec(`
+    CREATE TABLE sys_organization (id TEXT PRIMARY KEY, slug TEXT);
+    CREATE TABLE sys_email_template (id TEXT PRIMARY KEY, organization_id TEXT, name TEXT, locale TEXT, subject TEXT,
+      customized INTEGER, managed_by TEXT);
+    INSERT INTO sys_email_template VALUES ${values};
+  `);
+  const saved = db;
+  db = only;
+  try {
+    await body();
+  } finally {
+    db = saved;
+    only.close();
+  }
+}
 
 const tableOf = (report: OrganizationOwnershipApplyReport, object: string) => {
   const found = report.tables.find((t) => t.object === object);
@@ -294,6 +352,8 @@ describe('ADR-0131 D10 --apply — the acceptance fixture', () => {
     expect(report.steps.map((s) => [s.step, s.status])).toEqual([
       ['attribution', 'done'],
       ['authored-conversion', 'done'],
+      ['template-promotion', 'done'],
+      ['settings-move', 'done'],
       ['rewrite', 'done'],
       ['mirror-deletion', 'done'],
       ['column-drops', 'done'],
@@ -316,7 +376,22 @@ describe('ADR-0131 D10 --apply — the acceptance fixture', () => {
     expect(rows('SELECT id FROM sys_position').map((r) => r.id)).toEqual(['pos_auth']);
     expect(rows('SELECT id FROM sys_position_permission_set')).toEqual([]);
     expect(rows('SELECT id FROM sys_capability').map((r) => r.id)).toEqual(['cap_authored']);
-    expect(rows('SELECT id FROM sys_email_template ORDER BY id').map((r) => r.id)).toEqual(['tpl_admin', 'tpl_customized', 'tpl_org']);
+    expect(rows('SELECT id FROM sys_email_template')).toEqual([]);
+
+    // Ruling C: the customized, the admin-authored and the unknown-provenance
+    // templates became environment items before any row went; the seeded
+    // copies were not promoted.
+    expect([...c.templates.keys()].sort()).toEqual([
+      'auth.reset_password|en-US', 'crm.memo|en-US', 'crm.note|en-US', 'crm.renewal|zh-CN',
+    ]);
+    expect(c.templates.get('auth.reset_password|en-US')).toMatchObject({ subject: 'Reset your password', bodyHtml: '<p>our code</p>' });
+
+    // The global rung moved to sys_platform_setting, value and secret handle verbatim; the tenant row stayed.
+    expect(rows('SELECT id, scope FROM sys_setting')).toEqual([{ id: 'set_tenant', scope: 'tenant' }]);
+    expect(rows('SELECT * FROM sys_platform_setting ORDER BY id')).toEqual([
+      { id: 'set_global', namespace: 'mail', key: 'transport', value: '"smtp"', encrypted: 0, locked: 1, locked_reason: 'ops', value_enc: null },
+      { id: 'set_secret', namespace: 'ai', key: 'api_key', value: null, encrypted: 1, locked: 0, locked_reason: null, value_enc: 'secret:h_1' },
+    ]);
 
     // Every grant names its set; the id column is still there (C7b's later drop).
     expect(rows('SELECT id, permission_set, permission_set_id FROM sys_user_permission_set ORDER BY id')).toEqual([
@@ -344,13 +419,16 @@ describe('ADR-0131 D10 --apply — the acceptance fixture', () => {
     const countsAfter = counts();
     for (const table of report.tables) {
       if (!table.before || !table.after) continue;
-      expect(table.before.total - table.deleted, table.object).toBe(table.after.total);
+      expect(table.before.total - table.deleted - table.movedOut + table.movedIn, table.object).toBe(table.after.total);
       expect(countsAfter[table.object], table.object).toBe(table.after.total);
       expect(countsBefore[table.object], table.object).toBe(table.before.total);
       if (table.fate !== 'mirror-deletion') expect(table.deleted, table.object).toBe(0);
     }
+    expect(tableOf(report, 'sys_setting').movedOut).toBe(2);
+    expect(tableOf(report, 'sys_platform_setting').movedIn).toBe(2);
+    // Every delete is fate 2's, or the moved rows leaving sys_setting.
     expect(writes.filter((w) => /^DELETE/.test(w)).every((w) =>
-      /sys_permission_set|sys_position|sys_position_permission_set|sys_capability|sys_email_template/.test(w))).toBe(true);
+      /sys_permission_set|sys_position|sys_position_permission_set|sys_capability|sys_email_template|"sys_setting" WHERE \(\("scope" = \?\) AND "organization_id" IS NULL\)/.test(w))).toBe(true);
   });
 
   it('positive control: a grant the rewrite would lose reddens the effective-access pin', async () => {
@@ -376,7 +454,9 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
 
     const again = await apply(c, l);
 
-    expect(again.resumedFrom).toEqual(['attribution', 'authored-conversion', 'rewrite', 'mirror-deletion', 'column-drops']);
+    expect(again.resumedFrom).toEqual([
+      'attribution', 'authored-conversion', 'template-promotion', 'settings-move', 'rewrite', 'mirror-deletion', 'column-drops',
+    ]);
     expect(again.steps.every((s) => s.status === 'checkpointed')).toBe(true);
     expect(again.complete).toBe(true);
     expect(writes).toEqual([]);
@@ -386,15 +466,15 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
   it('a run killed inside mirror deletion resumes there, never re-deriving an owner it already wrote', async () => {
     const c = catalog();
     const l = ledger();
-    await expect(apply(c, l, { executor: executor({ failOnceOn: /^DELETE/ }) })).rejects.toThrow(/killed mid-step/);
-    expect(Object.keys(l.checkpoint!.completed)).toEqual(['attribution', 'authored-conversion', 'rewrite']);
+    await expect(apply(c, l, { executor: executor({ failOnceOn: /^DELETE FROM "sys_capability"/ }) })).rejects.toThrow(/killed mid-step/);
+    expect(Object.keys(l.checkpoint!.completed)).toEqual(['attribution', 'authored-conversion', 'template-promotion', 'settings-move', 'rewrite']);
     expect(rows('SELECT COUNT(*) AS n FROM sys_position_permission_set')).toEqual([{ n: 3 }]);
     writes = [];
 
     const resumed = await apply(c, l);
 
-    expect(resumed.resumedFrom).toEqual(['attribution', 'authored-conversion', 'rewrite']);
-    expect(resumed.steps.map((s) => s.status)).toEqual(['checkpointed', 'checkpointed', 'checkpointed', 'done', 'done']);
+    expect(resumed.resumedFrom).toEqual(['attribution', 'authored-conversion', 'template-promotion', 'settings-move', 'rewrite']);
+    expect(resumed.steps.map((s) => s.status)).toEqual(['checkpointed', 'checkpointed', 'checkpointed', 'checkpointed', 'checkpointed', 'done', 'done']);
     expect(writes.some((w) => /^UPDATE/.test(w))).toBe(false);
     expect(resumed.complete).toBe(true);
     expect(rows('SELECT COUNT(*) AS n FROM sys_position_permission_set')).toEqual([{ n: 0 }]);
@@ -403,7 +483,7 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
   it('reads the gate again before the first delete: a grant written between runs keeps every mirror', async () => {
     const c = catalog();
     const l = ledger();
-    await expect(apply(c, l, { executor: executor({ failOnceOn: /^DELETE/ }) })).rejects.toThrow(/killed mid-step/);
+    await expect(apply(c, l, { executor: executor({ failOnceOn: /^DELETE FROM "sys_capability"/ }) })).rejects.toThrow(/killed mid-step/);
     db.exec(`INSERT INTO sys_user_permission_set VALUES ('grant_late', 'org_default', 'usr_8', 'ps_gone', NULL)`);
     const countsBefore = counts();
 
@@ -414,6 +494,66 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     expect(deletion.blockers.join('\n')).toMatch(/grant_late/);
     expect(counts()).toEqual(countsBefore);
     expect(resumed.complete).toBe(false);
+  });
+
+  it('promotes again before deleting a template: a row customized between runs is promoted, never deleted unpromoted', async () => {
+    const c = catalog();
+    const l = ledger();
+    await expect(apply(c, l, { executor: executor({ failOnceOn: /^DELETE FROM "sys_capability"/ }) })).rejects.toThrow(/killed mid-step/);
+    expect(l.checkpoint!.completed['template-promotion']).toBeDefined();
+    db.exec(`INSERT INTO sys_email_template VALUES
+      ('tpl_late', NULL, 'crm.late', 'Late', 'en-US', 'Edited late', '<p>late</p>', 1, '[]', 1, 'platform')`);
+
+    const resumed = await apply(c, l);
+
+    expect(c.templates.get('crm.late|en-US')).toMatchObject({ subject: 'Edited late' });
+    expect(rows(`SELECT id FROM sys_email_template`)).toEqual([]);
+    expect(resumed.complete).toBe(true);
+    expect(resumed.blocking).toBe(0);
+  });
+
+  it('a customized template with no name blocks: kept, named, and verified_at stays null', async () => {
+    db.exec(`INSERT INTO sys_email_template VALUES
+      ('tpl_nameless', NULL, NULL, 'Untitled', 'en-US', 'S', '<p>s</p>', 1, '[]', 1, 'platform')`);
+    const l = ledger();
+    const report = await apply(catalog(), l);
+
+    const promotion = report.steps.find((s) => s.step === 'template-promotion')!;
+    expect(promotion.status).toBe('blocked');
+    expect(promotion.blockers.join('\n')).toMatch(/tpl_nameless/);
+    expect(rows(`SELECT id FROM sys_email_template WHERE id = 'tpl_nameless'`)).toHaveLength(1);
+    expect(report.complete).toBe(false);
+    expect(l.verdicts.at(-1)).toMatchObject({ complete: false });
+  });
+
+  it('moves no setting over a different value the new table already serves, and deletes nothing for it', async () => {
+    db.exec(`INSERT INTO sys_platform_setting VALUES ('ps_1', 'mail', 'transport', '"ses"', 0, 0, NULL, NULL)`);
+    const report = await apply(catalog(), ledger());
+
+    const move = report.steps.find((s) => s.step === 'settings-move')!;
+    expect(move.status).toBe('blocked');
+    expect(move.blockers.join('\n')).toMatch(/mail\.transport/);
+    expect(rows(`SELECT id FROM sys_setting WHERE scope = 'global' ORDER BY id`).map((r) => r.id)).toEqual(['set_global']);
+    expect(rows(`SELECT value FROM sys_platform_setting WHERE key = 'transport'`)).toEqual([{ value: '"ses"' }]);
+    expect(report.steps.find((s) => s.step === 'mirror-deletion')!.status).toBe('not-reached');
+  });
+
+  it('never overwrites a template the environment already holds, keeps every template row, and certifies nothing', async () => {
+    const c = catalog();
+    c.templates.set('crm.renewal|zh-CN', { name: 'crm.renewal', label: 'Renewal', locale: 'zh-CN', subject: '新的', bodyHtml: '<p>新的</p>' });
+    const l = ledger();
+    const report = await apply(c, l);
+
+    // A blocked promotion: the ceremony stops there, verified_at stays null.
+    expect(report.complete).toBe(false);
+    expect(report.blocking).toBeGreaterThan(0);
+    expect(l.verdicts.at(-1)).toMatchObject({ complete: false });
+
+    const promotion = report.steps.find((s) => s.step === 'template-promotion')!;
+    expect(promotion.status).toBe('blocked');
+    expect(promotion.blockers.join('\n')).toMatch(/crm\.renewal \(zh-CN\)/);
+    expect(c.templates.get('crm.renewal|zh-CN')).toMatchObject({ subject: '新的' });
+    expect(rows('SELECT COUNT(*) AS n FROM sys_email_template')).toEqual([{ n: 6 }]);
   });
 
   it('deletes nothing while a reference does not resolve by name — the gate of fate 2', async () => {
@@ -431,14 +571,17 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     expect(rewrite.status).toBe('blocked');
     expect(rewrite.blockers.join('\n')).toMatch(/grant_x/);
     expect(report.steps.find((s) => s.step === 'mirror-deletion')!.status).toBe('not-reached');
-    expect(writes.filter((w) => /^DELETE/.test(w))).toEqual([]);
-    expect(counts()).toEqual(countsBefore);
+    // The only rows that left are the settings rung, which moved before the rewrite.
+    expect(writes.filter((w) => /^DELETE/.test(w) && !/^DELETE FROM "sys_setting"/.test(w))).toEqual([]);
+    const { sys_setting: _s, sys_platform_setting: _p, ...after } = counts();
+    const { sys_setting: _sb, sys_platform_setting: _pb, ...before } = countsBefore;
+    expect(after).toEqual(before);
     expect(report.complete).toBe(false);
     expect(report.blocking).toBeGreaterThan(0);
     expect(l.verdicts.at(-1)!.complete).toBe(false);
   });
 
-  it('under a wall: an anchorless row is reported, never assigned, and authored rows are not converted', async () => {
+  it('under a wall: an anchorless row is reported, never assigned, authored rows are not converted, templates are promoted', async () => {
     const c = catalog();
     const report = await apply(c, ledger(), { posture: 'isolated' });
 
@@ -448,24 +591,105 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     expect(c.saved.size).toBe(0);
     expect(report.steps.find((s) => s.step === 'mirror-deletion')!.status).toBe('not-reached');
     expect(rows('SELECT COUNT(*) AS n FROM sys_permission_set')).toEqual([{ n: 3 }]);
+    // The promotion runs under every posture; nothing is deleted before mirror deletion.
+    expect([...c.templates.keys()].sort()).toEqual(['auth.reset_password|en-US', 'crm.memo|en-US', 'crm.note|en-US', 'crm.renewal|zh-CN']);
+    expect(rows('SELECT COUNT(*) AS n FROM sys_email_template')).toEqual([{ n: 6 }]);
   });
 
-  it('does not certify a ceremony whose departures have not left: the global settings rung keeps verified_at null', async () => {
+  it('does not certify a ceremony whose departures have not left: the declared sharing-rule mirrors keep verified_at null', async () => {
     db.exec(`
-      CREATE TABLE sys_setting (id TEXT PRIMARY KEY, organization_id TEXT, namespace TEXT, key TEXT, scope TEXT);
-      INSERT INTO sys_setting VALUES ('set_global', NULL, 'mail', 'transport', 'global'), ('set_tenant', 'org_b', 'mail', 'from', 'tenant');
+      CREATE TABLE sys_sharing_rule (id TEXT PRIMARY KEY, organization_id TEXT, name TEXT, managed_by TEXT, customized INTEGER);
+      INSERT INTO sys_sharing_rule VALUES ('rule_declared', NULL, 'share_deals', 'package', 0), ('rule_org', 'org_b', 'mine', 'admin', 0);
     `);
     const l = ledger();
     const report = await apply(catalog(), l);
 
+    // Every step ran, and the moved settings rung reads zero; the rule mirror
+    // is D2's to remove, so it still counts and is named.
     expect(report.complete).toBe(true);
     expect(report.blocking).toBe(1);
     expect(l.verdicts.at(-1)).toMatchObject({ complete: true, blocking: 1 });
-    const setting = tableOf(report, 'sys_setting');
-    expect(setting.remaining).toBe(1);
-    expect(setting.departures).toEqual([expect.objectContaining({ id: 'global-rung-move', as: 'moved', rows: 1 })]);
-    expect(setting.notNull.willReceive).toBe(false);
-    expect(rows(`SELECT id FROM sys_setting ORDER BY id`).map((r) => r.id)).toEqual(['set_global', 'set_tenant']);
+    expect(tableOf(report, 'sys_setting').departures).toEqual([]);
+    const rule = tableOf(report, 'sys_sharing_rule');
+    expect(rule.remaining).toBe(1);
+    expect(rule.departures).toEqual([expect.objectContaining({ id: 'declared-rule-mirrors', as: 'mirror-deletion', rows: 1 })]);
+    expect(rule.notNull.willReceive).toBe(false);
+    expect(rows(`SELECT id FROM sys_sharing_rule ORDER BY id`).map((r) => r.id)).toEqual(['rule_declared', 'rule_org']);
+  });
+
+  it('promotes under a wall too: a template with no conflict ends verified, its seeded mirror and its row gone', async () => {
+    await onlyTemplates(
+      `('tpl_seeded', NULL, 'auth.welcome', 'en-US', 'Hi', 0, 'platform'), ('tpl_admin', 'org_b', 'crm.note', 'en-US', 'A note', 0, 'admin')`,
+      async () => {
+        const c = catalog();
+        const l = ledger();
+        const report = await apply(c, l, { posture: 'isolated' });
+        expect(report.complete).toBe(true);
+        expect(report.blocking).toBe(0);
+        expect(l.verdicts.at(-1)).toMatchObject({ complete: true, blocking: 0 });
+        expect(c.templates.get('crm.note|en-US')).toMatchObject({ name: 'crm.note', subject: 'A note' });
+        expect(tableOf(report, 'sys_email_template').departures).toEqual([]);
+        expect(rows('SELECT id FROM sys_email_template')).toEqual([]);
+      },
+    );
+  });
+
+  it('under a wall, rows of one template that differ are a conflict: listed with each candidate, kept, and blocking', async () => {
+    await onlyTemplates(
+      `('tpl_a', 'org_a', 'crm.note', 'en-US', 'From A', 1, 'platform'), ('tpl_b', 'org_b', 'crm.note', 'en-US', 'From B', 1, 'platform')`,
+      async () => {
+        const c = catalog();
+        const l = ledger();
+        const report = await apply(c, l, { posture: 'group' });
+        const promotion = report.steps.find((s) => s.step === 'template-promotion')!;
+        expect(promotion.status).toBe('blocked');
+        expect(promotion.summary).toMatchObject({ conflicts: 1, promoted: 0 });
+        expect(promotion.blockers.join('\n')).toMatch(/crm\.note \(en-US\).*tpl_a \(organization org_a\), tpl_b \(organization org_b\).*--template-choice/);
+        expect(tableOf(report, 'sys_email_template').templateConflicts).toEqual([
+          { name: 'crm.note', locale: 'en-US', candidates: [{ id: 'tpl_a', organizationId: 'org_a' }, { id: 'tpl_b', organizationId: 'org_b' }] },
+        ]);
+        expect(report.complete).toBe(false);
+        expect(l.verdicts.at(-1)).toMatchObject({ complete: false });
+        expect(c.templates.size).toBe(0);
+        expect(rows('SELECT id FROM sys_email_template ORDER BY id').map((r) => r.id)).toEqual(['tpl_a', 'tpl_b']);
+      },
+    );
+  });
+
+  it('a chosen conflict promotes the chosen body, verifies, and only then deletes every candidate', async () => {
+    await onlyTemplates(
+      `('tpl_a', 'org_a', 'crm.note', 'en-US', 'From A', 1, 'platform'), ('tpl_b', 'org_b', 'crm.note', 'en-US', 'From B', 1, 'platform')`,
+      async () => {
+        const c = catalog();
+        const l = ledger();
+        const report = await apply(c, l, { posture: 'isolated', templateChoices: ['tpl_b'] });
+        expect(report.complete).toBe(true);
+        expect(report.blocking).toBe(0);
+        expect(l.verdicts.at(-1)).toMatchObject({ complete: true, blocking: 0 });
+        expect(c.templates.get('crm.note|en-US')).toMatchObject({ subject: 'From B' });
+        expect(rows('SELECT id FROM sys_email_template')).toEqual([]);
+        expect(tableOf(report, 'sys_email_template').deleted).toBe(2);
+      },
+    );
+  });
+
+  it('refuses a template choice that names no candidate, or two candidates of one conflict, before anything is written', async () => {
+    await onlyTemplates(
+      `('tpl_a', 'org_a', 'crm.note', 'en-US', 'From A', 1, 'platform'), ('tpl_b', 'org_b', 'crm.note', 'en-US', 'From B', 1, 'platform')`,
+      async () => {
+        const c = catalog();
+        await expect(apply(c, ledger(), { posture: 'isolated', templateChoices: ['tpl_nope'] })).rejects.toThrow(
+          new TemplateChoiceRefusal(
+            '--template-choice tpl_nope names no candidate row of a listed template conflict. The conflicts are: crm.note (en-US): tpl_a, tpl_b.',
+          ),
+        );
+        await expect(apply(c, ledger(), { posture: 'isolated', templateChoices: ['tpl_a', 'tpl_b'] })).rejects.toThrow(
+          /tpl_a and tpl_b both choose for the template crm\.note \(en-US\)/,
+        );
+        expect(writes).toEqual([]);
+        expect(c.templates.size).toBe(0);
+      },
+    );
   });
 
   it('holds a column whose rows another stage owns, and reports it', async () => {

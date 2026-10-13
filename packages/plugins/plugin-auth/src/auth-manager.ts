@@ -6486,6 +6486,18 @@ export class AuthManager {
   }
 
   /**
+   * The public reader of {@link getConsolePageUrl}: the absolute URL of a
+   * Console page, `${origin}${uiBasePath}${path}`. It returns exactly what the
+   * private composer computes and composes nothing of its own, so a caller
+   * outside this class (the identity import's invitation, which hands it to
+   * better-auth as the reset request's `redirectTo`) gets the same link every
+   * email and SMS this class sends, and no second link builder exists.
+   */
+  getConsoleUrl(path: string): string {
+    return this.getConsolePageUrl(path);
+  }
+
+  /**
    * The OAuth issuer identifier: better-auth's `baseURL` INCLUDING `basePath`
    * (e.g. `https://acme.example.com/api/v1/auth`) — this is the `iss` claim
    * the jwt plugin stamps on access tokens and what the AS metadata reports.
