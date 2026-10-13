@@ -55,8 +55,8 @@ import type { SharingEngine } from './sharing-service.js';
  * [#23184] One scrypt derivation per distinct input, per file.
  *
  * Every password here is hashed and verified by the production code at the
- * production parameters (N=16384, r=16): about 0.1 s of CPU per derivation on
- * an idle box and over three times that on a loaded `Test Core` shard. The
+ * production parameters (N=16384, r=16): about 0.1 s per derivation on a dev
+ * container and over three times that on a loaded `Test Core` shard. The
  * cases asked for 96 derivations, most of them an input this file had already
  * derived (the same password against the same salt), and the file sat at
  * 34-41 s of wall in the hourly full battery.
@@ -194,8 +194,10 @@ const PASSWORD = 'correct horse 21839 $ battery';
 
 /**
  * [#23184] Every case boots its own engine, service, routes and logger, and
- * reads no state another case writes (a case that edits an object's sharing
- * policy edits its own engine's copy of the schema). So the suites below run
+ * reads no state another case writes beyond the two derivation caches in this
+ * file, whose entries never change once written (a case that edits an
+ * object's sharing policy edits its own engine's copy of the schema; a second
+ * engine was measured not to see the edit). So the suites below run
  * their cases concurrently, and the scrypt derivations a case cannot share,
  * the ones minting or re-hashing under a fresh salt, overlap on the libuv
  * pool instead of queueing one behind another. The engines are therefore
@@ -478,8 +480,9 @@ describe.concurrent.each([
 });
 
 describe.concurrent('[#21839] the legacy upgrade', () => {
-  // [#23184] These mint with no password where the legacy hash below is the
-  // row's only password state (see the legacy-row case above).
+  // [#23184] The two cases on the default hasher mint with no password: the
+  // legacy hash each seeds is the row's only password state (see the
+  // legacy-row case above). The injected pair's mint costs no derivation.
   it('is not attempted for a switched-off object, whose redemption is refused', async () => {
     const { engine, service } = await boot();
     const link = await service.createLink({ object: 'pin_doc', recordId: 'doc_1' }, CREATOR);
