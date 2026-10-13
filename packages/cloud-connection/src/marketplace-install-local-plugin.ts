@@ -113,7 +113,7 @@ import {
     resolveAuthzContext,
     isAuthzStoreUnavailableError,
     // ADR-0069 — the authentication-policy gate's ONE decision, asked of the
-    // session `resolveInstallPrincipal` reads (see `admitInstallCaller`).
+    // session `resolveInstallPrincipal` reads (see `refuseHeldSession`).
     evaluateAuthGate,
     type AuthGate,
     // [#16013] The ADMISSION seam's posture derivation, in ONE call — the same
@@ -547,9 +547,26 @@ interface InstallPrincipal {
     /**
      * ADR-0069: the authentication-policy posture of the session this
      * admission resolved, present only for a session the policy holds.
-     * `admitInstallCaller` refuses on it.
+     * `refuseHeldSession` refuses on it.
      */
     authGate?: AuthGate;
+}
+
+/**
+ * ADR-0069: the refusal every install-local door gives a session the
+ * authentication policy HOLDS (an expired password, enforced MFA not yet
+ * enrolled), right after the 401 and before the caller's capabilities are
+ * consulted or the ledger is read. Such a session is gated out of every
+ * protected resource until it remediates, so it gets REST's answer: `403`
+ * with the gate's own `code` and `message`, in this plugin's envelope. The
+ * consult itself happens once, in `resolveInstallPrincipal`; this only
+ * answers on it, in one place, so a door added later cannot copy a weaker
+ * answer. `null` when the session is not held.
+ */
+function refuseHeldSession(c: any, principal: InstallPrincipal): Response | null {
+    if (!principal.authGate) return null;
+    const { code, message } = principal.authGate;
+    return c.json({ success: false, error: { code, message } }, 403);
 }
 
 /**
@@ -1742,9 +1759,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // Before the ledger is touched, exactly as the mutating doors refuse
         // before any work: a refused caller must not be able to learn what is
         // installed from timing or from a downstream storage error.
-        const admitted = await this.admitInstallCaller(c, ctx);
-        if (!admitted.ok) return admitted.response;
-        const { principal } = admitted;
+        const principal = await this.resolveInstallPrincipal(c, ctx);
+        if (!principal) return this.refuseUnauthenticated(c);
+        const held = refuseHeldSession(c, principal);
+        if (held) return held;
         const operator = principal.systemPermissions.includes(INSTALL_LOCAL_CAPABILITY);
 
         const { entries, skipped } = this.readAll();
@@ -3390,29 +3408,6 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     }, 401);
 
     /**
-     * ADR-0069: the floor all five doors open with, the listing included.
-     * Nobody authenticated is `401` ({@link refuseUnauthenticated}). A session
-     * the authentication policy HOLDS (an expired password, enforced MFA not
-     * yet enrolled) is gated out of every protected resource until it
-     * remediates, so it gets REST's answer: `403` with the gate's own `code`
-     * and `message`, in this plugin's envelope, before its capabilities are
-     * consulted and before the ledger is read. One helper for the same reason
-     * the 401 is one literal: a door added later cannot copy a weaker answer.
-     */
-    private admitInstallCaller = async (
-        c: any,
-        ctx: PluginContext,
-    ): Promise<{ ok: true; principal: InstallPrincipal } | { ok: false; response: Response }> => {
-        const principal = await this.resolveInstallPrincipal(c, ctx);
-        if (!principal) return { ok: false, response: this.refuseUnauthenticated(c) };
-        if (principal.authGate) {
-            const { code, message } = principal.authGate;
-            return { ok: false, response: c.json({ success: false, error: { code, message } }, 403) };
-        }
-        return { ok: true, principal };
-    };
-
-    /**
      * [#8976] The shared refusal for the four mutating routes: 401 when nobody
      * is authenticated, 403 when somebody is but holds no authoring capability,
      * otherwise the acting `userId`.
@@ -3436,9 +3431,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         ctx: PluginContext,
         action: string,
     ): Promise<InstallAdmission | { ok: false; response: Response }> => {
-        const admitted = await this.admitInstallCaller(c, ctx);
-        if (!admitted.ok) return admitted;
-        const { principal } = admitted;
+        const principal = await this.resolveInstallPrincipal(c, ctx);
+        if (!principal) return { ok: false, response: this.refuseUnauthenticated(c) };
+        const held = refuseHeldSession(c, principal);
+        if (held) return { ok: false, response: held };
         if (!principal.systemPermissions.includes(INSTALL_LOCAL_CAPABILITY)) {
             ctx.logger?.warn?.(
                 `[MarketplaceInstallLocal] refused ${action} for ${principal.userId} — `

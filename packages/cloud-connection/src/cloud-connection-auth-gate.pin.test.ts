@@ -12,8 +12,8 @@
  *    (`sessionFromAuthService`, under both resolution modes). Seven of its
  *    eight doors call it; `/status` reads no session at all.
  *  - `MarketplaceInstallLocalPlugin` reads it in ONE place
- *    (`resolveInstallPrincipal`), and all five doors open with the same
- *    admission (`admitInstallCaller`).
+ *    (`resolveInstallPrincipal`), and all five doors answer a held session
+ *    through the same refusal (`refuseHeldSession`).
  *
  * Each consults `evaluateAuthGate` (`@objectstack/core`) once, with no request
  * path, so the shared allow-list can grant no exemption. No route either plugin
