@@ -23,6 +23,20 @@
 //      refused, because a sweep whose every probe names nothing can only ever
 //      observe the refusal half of a door.
 //
+// ## The matrix rows this file is the proof for
+//
+// ADR-0138 card E2 records the six classes in the authorization conformance
+// matrix (`authz-conformance.matrix.ts`), one row per class, and every one of
+// them cites this file: the admitted leg of each class below is that row's
+// pin, and its refused leg is the row's standing negative control.
+//
+// authz-row: anonymous-door-public-form
+// authz-row: anonymous-door-share-link
+// authz-row: anonymous-door-public-book
+// authz-row: anonymous-door-endpoint-object-operation
+// authz-row: anonymous-door-endpoint-flow
+// authz-row: anonymous-door-public-read-file
+//
 // ## Where the population comes from — three sources, each guarded
 //
 //   - `port`: `IHttpServer.getMountedRoutes()`, every route registered through

@@ -439,9 +439,18 @@ describe('HttpDispatcher extracted domains (PR-3: keys/storage/ui)', () => {
 
 describe('HttpDispatcher extracted domains (PR-4: share-links)', () => {
     it('/share-links responds 501 when the shareLinks service is absent', async () => {
-        const result = await makeDispatcher().dispatch('GET', '/share-links', undefined, {}, {} as any);
+        // Signed in: since ADR-0138 D2 moved the domain's anonymous decision to
+        // its first statement, an anonymous caller is refused 401 before the
+        // service is probed — asserted beside it.
+        const signedIn = { request: { headers: {} }, executionContext: { userId: 'u1', isSystem: false, positions: [], permissions: [] } };
+        const result = await makeDispatcher().handleShareLinks('', 'GET', undefined, {}, signedIn as any);
         expect(result.handled).toBe(true);
         expect(result.response?.status).toBe(501);
+
+        const anonymous = await makeDispatcher().dispatch('GET', '/share-links', undefined, {}, {} as any);
+        expect(anonymous.handled).toBe(true);
+        expect(anonymous.response?.status).toBe(401);
+        expect(anonymous.response?.body?.error?.code).toBe('UNAUTHENTICATED');
     });
 
     it('/share-linksfoo is NOT claimed (segment semantics)', async () => {

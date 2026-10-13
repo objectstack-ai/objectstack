@@ -302,7 +302,13 @@ export interface ProbeTableReading {
 // `webhook-redeliver-session` row covers one more key, the
 // `/webhooks/redeliver` dispatcher-domain key, which arrived classified rather
 // than through the baseline (the baseline still holds 30, its ceiling unmoved).
-export const PROBE_TABLE: ProbeTableReading = { entries: 20, files: 15, keys: 22 };
+// [ADR-0138 E2] 20 / 15 / 22 -> 23 / 18 / 29: the `/notifications`, `/keys` and
+// `/share-links` domain gates joined the table as GATE_PINs on their three
+// domain files, once each domain's anonymous decision moved to its first
+// statement; the three `anonymous-deny-*` rows cover each gate key plus its
+// dispatcher-domain key, and `anonymous-door-public-form` covers the `forms`
+// REST family key — four keys that left the shrink-only baseline (30 -> 26).
+export const PROBE_TABLE: ProbeTableReading = { entries: 23, files: 18, keys: 29 };
 
 /**
  * The probe count `authz-conformance.matrix.ts`'s header states.
@@ -325,8 +331,10 @@ export const PROBE_TABLE: ProbeTableReading = { entries: 20, files: 15, keys: 22
  * probe it counts, which is exactly what the inverted pin asks for.
  * [#22432] 19 -> 20, the same way: the `/i18n` gate pin and the header
  * sentence moved together.
+ * [ADR-0138 E2] 20 -> 23, the same way: the three domain gate pins and the
+ * header sentence moved together.
  */
-export const MATRIX_HEADER_PROBE_CLAIM = 20;
+export const MATRIX_HEADER_PROBE_CLAIM = 23;
 
 export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
   // ── the two LEDGER files: the population source since 2026-08-31 ───────
@@ -711,6 +719,51 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     note: 'Same shape as domains/actions.ts.',
   },
   {
+    // [ADR-0138 E2] The three domains whose anonymous decision moved from a
+    // face to the handler's first statement; each row has the actions.ts
+    // shape. The handler-name control counts every occurrence of the name as a
+    // substring: notifications.ts carries it twice (the declaration and the
+    // DomainRoute call site); keys.ts four times (those two and two comment
+    // mentions in the mint body); share-links.ts six times, because the body it
+    // delegates to is `handleShareLinksRequestBody` and two comments name it.
+    file: 'packages/runtime/src/domains/notifications.ts',
+    kinds: ['GATE_PIN'],
+    probes: 1,
+    keys: 1,
+    population: 1,
+    reachable: 1,
+    blindSpot: 0,
+    populationRule: '`export async function handle*Request` entry points',
+    controls: { 'shouldDenyAnonymous(': 1, handleNotificationRequest: 2 },
+    note: 'Same shape as domains/actions.ts.',
+  },
+  {
+    file: 'packages/runtime/src/domains/keys.ts',
+    kinds: ['GATE_PIN'],
+    probes: 1,
+    keys: 1,
+    population: 1,
+    reachable: 1,
+    blindSpot: 0,
+    populationRule: '`export async function handle*Request` entry points',
+    controls: { 'shouldDenyAnonymous(': 1, handleKeysRequest: 4 },
+    note: 'Same shape as domains/actions.ts.',
+  },
+  {
+    file: 'packages/runtime/src/domains/share-links.ts',
+    kinds: ['GATE_PIN'],
+    probes: 1,
+    keys: 1,
+    population: 1,
+    reachable: 1,
+    blindSpot: 0,
+    populationRule: '`export async function handle*Request` entry points',
+    controls: { 'shouldDenyAnonymous(': 1, handleShareLinksRequest: 6 },
+    note:
+      'Same shape as domains/actions.ts, with the one exception ADR-0138 D2 names for this domain: the two ' +
+      'token faces (class 2) are selected past the floor by the predicate that marks them public.',
+  },
+  {
     file: 'packages/runtime/src/domains/mcp.ts',
     kinds: ['GATE_PIN'],
     probes: 1,
@@ -1054,7 +1107,7 @@ export function deriveProbeFileCensus(): {
     });
   }
 
-  // ── the six runtime domain files (GATE_PIN) ─────────────────────────────
+  // ── the eight runtime domain files whose floor is a GATE_PIN ─────────────
   //
   // [#22432] The handler-name class admits digits: `handleI18nRequest` is a
   // `handle*Request` entry point like the others, and a letters-only class
@@ -1067,6 +1120,9 @@ export function deriveProbeFileCensus(): {
     ['packages/runtime/src/domains/packages.ts', 'shouldDenyAnonymous(', 'handlePackagesRequest'],
     ['packages/runtime/src/domains/analytics.ts', 'shouldDenyAnonymous(', 'handleAnalyticsRequest'],
     ['packages/runtime/src/domains/i18n.ts', 'shouldDenyAnonymous(', 'handleI18nRequest'],
+    ['packages/runtime/src/domains/notifications.ts', 'shouldDenyAnonymous(', 'handleNotificationRequest'],
+    ['packages/runtime/src/domains/keys.ts', 'shouldDenyAnonymous(', 'handleKeysRequest'],
+    ['packages/runtime/src/domains/share-links.ts', 'shouldDenyAnonymous(', 'handleShareLinksRequest'],
   ];
   for (const [rel, gate, handler] of domains) {
     const src = read(rel);

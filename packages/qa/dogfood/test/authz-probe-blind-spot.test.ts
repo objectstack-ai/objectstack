@@ -43,8 +43,8 @@ describe('authz probe blind-spot census (#13260)', () => {
     expect(derived.table).toEqual(PROBE_TABLE);
   });
 
-  it('every classified key is accounted for — 22 `covers` keys, no more', () => {
-    // The matrix's `covers` keys number 22 today: the 9 probe-minted keys this
+  it('every classified key is accounted for — 29 `covers` keys, no more', () => {
+    // The matrix's `covers` keys number 29 today: the 9 probe-minted keys this
     // census was first measured against, plus the 6 ledger family/domain keys
     // classified when the population moved (2026-08-31), plus the `/analytics`
     // domain's gate-pin key and its dispatcher-domain key (#21061), plus the
@@ -52,15 +52,18 @@ describe('authz probe blind-spot census (#13260)', () => {
     // key and its dispatcher-domain key (#22432), plus the `/approvals/act`
     // dispatcher-domain key, classified by `approval-action-token` (#22576),
     // plus the `/webhooks/redeliver` dispatcher-domain key, classified by
-    // `webhook-redeliver-session` (#22755). If a probe
+    // `webhook-redeliver-session` (#22755), plus — under ADR-0138 card E2 —
+    // the `/notifications`, `/keys` and `/share-links` domains' gate-pin keys
+    // and dispatcher-domain keys, and the `forms` REST family key, classified
+    // by the D2 class 1 row. If a probe
     // starts minting a key no row covers, the ratchet itself goes red as
     // UNCLASSIFIED — that is its job, and this pin does not duplicate it. What
     // this asserts is only that the census's key count is current.
     //
-    // ⚠️ This is NOT the size of the population. The ledgers mint 41 keys; 11
-    // are classified here and 30 are enumerated in the shrink-only baseline,
+    // ⚠️ This is NOT the size of the population. The ledgers mint 41 keys; 15
+    // are classified here and 26 are enumerated in the shrink-only baseline,
     // which `authz-conformance.test.ts` holds to its own four rules.
-    expect(PROBE_TABLE.keys).toBe(22);
+    expect(PROBE_TABLE.keys).toBe(29);
   });
 
   it.each(PROBE_FILE_CENSUS.map((r) => [r.file, r] as const))(
