@@ -1413,7 +1413,7 @@ export const UNRESOLVED_CODE_HELPERS: readonly UnresolvedCodeHelper[] = [
         why:
             'The caught-fault sibling of `sendError`: `sendServerFault(res, status, code: ErrorCode, ' +
             'message, thrown, request?)` types the parameter to the same CLOSED union, so an unregistered ' +
-            'spelling fails the build before it reaches the fault log or the envelope. Like `sendError` it has ' +
+            'literal fails the build; an `any`-typed value is not checked, so callers pass literals. Like `sendError` it has ' +
             'zero in-file callers: the route families that answer a caught fault import it, and their own ' +
             'call sites spell the codes.',
     },

@@ -275,8 +275,9 @@ export function registerShareLinkRoutes(
    * ({@link refuseHeldSession}); then the route's own work with that context.
    * A throw from any of them is answered by the route's own `catch` arm, as
    * before — an authorization-store outage the resolver raises keeps its
-   * declared status and code. A throw that declares no status answers `500`
-   * with the route's `failure` text, never its own (#23174).
+   * declared status and code. A throw that declares no status answers
+   * `500 INTERNAL` with the route's `failure` text, never its own text or
+   * code (#23174).
    */
   const mountFamilyRoute = (verb: 'get' | 'post' | 'delete', path: string, route: ShareLinkFamilyRoute): void => {
     http[verb](path, (async (req, res) => {
@@ -289,11 +290,20 @@ export function registerShareLinkRoutes(
         // [#23174] A throw that declares its own status keeps the envelope its
         // producer declared: a coded 4xx refusal, the branded authorization-
         // store outage, an authored 5xx. A throw that declares none is the
-        // catch-all fault, and its own text is not the caller's to read: the
-        // route's `failure` text goes on the wire and the caught error, with
-        // its stack, to the fault log.
+        // catch-all fault, and neither its text nor its `code` is the caller's
+        // to read: the route's `failure` text and the family's `INTERNAL` go on
+        // the wire, and the caught error, with its stack, to the fault log.
+        //
+        // The code is the literal, never `err.code`. The throws that reach
+        // this arm are engine and driver throws, whose string `code` names the
+        // backend (`42P01`, `SQLITE_ERROR`, `ECONNREFUSED`) and lies outside
+        // the closed `error.code` vocabulary (ADR-0112) — `err` is `any`, so
+        // the parameter type cannot refuse it. Nor `resolveThrownHttpError`'s
+        // code: it keeps a registered spelling, and a caught `NOT_IMPLEMENTED`
+        // or `SERVICE_UNAVAILABLE` passed here would take `logServerFault`'s
+        // capability-absence branch and cost the fault its `error` line.
         if (err?.status === undefined || err?.status === null) {
-          sendServerFault(res, 500, err?.code ?? 'INTERNAL', route.failure, err);
+          sendServerFault(res, 500, 'INTERNAL', route.failure, err);
           return;
         }
         sendError(res, err.status, err?.code ?? 'INTERNAL', err?.message ?? route.failure);

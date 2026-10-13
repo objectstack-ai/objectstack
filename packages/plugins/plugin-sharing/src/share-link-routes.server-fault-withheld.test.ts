@@ -128,6 +128,41 @@ describe('[#23174] share-link door — a throw that declares no status withholds
   });
 });
 
+describe('[#23174] share-link door — a throw that declares no status withholds its code too', () => {
+  /**
+   * The throws that reach the catch-all are engine and driver throws, and they
+   * carry a string `code` and no status: Postgres `42P01`, SQLite
+   * `SQLITE_ERROR`, a Node `ECONNREFUSED`. That spelling names the backend and
+   * is outside the closed `error.code` vocabulary, so a body carrying it fails
+   * `BaseResponseSchema`. The two token routes are the public ones.
+   */
+  const TOKEN_ROUTES = ROUTES.filter((route) => route.key.includes(':token'));
+  const driverThrow = () => Object.assign(new Error(FAULT), { code: '42P01' });
+
+  it.each(TOKEN_ROUTES)('$key answers INTERNAL for a 42P01 throw, and 42P01 is nowhere in the body', async (route) => {
+    quietConsole();
+    const res = await drive(mount(driverThrow), route);
+
+    expect(res.status).toBe(500);
+    expect(res.body?.error?.code).toBe('INTERNAL');
+    expect(BaseResponseSchema.safeParse(res.body).success).toBe(true);
+    expect(JSON.stringify(res.body)).not.toContain('42P01');
+  });
+
+  it('a caught registered code with no status still costs one ERROR line, never the capability-absence warn', async () => {
+    const spy = quietConsole();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const res = await drive(mount(() => Object.assign(new Error(FAULT), { code: 'SERVICE_UNAVAILABLE' })), TOKEN_ROUTES[0]);
+
+    expect(res.status).toBe(500);
+    expect(res.body?.error?.code).toBe('INTERNAL');
+    const lines = faultLines(spy);
+    expect(lines).toHaveLength(1);
+    expect(String((lines[0][1] as Record<string, unknown>).stack)).toContain(FAULT);
+    expect(warn).not.toHaveBeenCalled();
+  });
+});
+
 describe('[#23174] share-link door — a throw that declares its status keeps its envelope', () => {
   it('a coded 4xx refusal still answers its own status, code and message', async () => {
     quietConsole();
