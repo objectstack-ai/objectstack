@@ -76,8 +76,9 @@
 //   * It changes no gate's command and judges nothing about the tree. A gate's
 //     own output is in its own step's log; this prints only which ones failed.
 //   * It does not call the jobs API. The `steps` context is final for every
-//     step before this one when this runs, which the API is not (the reporter
-//     this replaces disclosed NOT MEASURED on 24 of 42 red jobs for that reason).
+//     step before this one when this runs, which the API is not: the
+//     unmeasured-tail reporter this replaces had to race the API's own
+//     bookkeeping for the same facts (#18874).
 //   * It writes the job summary only when the verdict is not green, so a green
 //     lane's summary page stays as it was.
 

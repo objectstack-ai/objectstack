@@ -513,6 +513,18 @@ jobs:
 
       # ── THE LANE'S VERDICT (#23191): the last step, and the one that keeps a
       # red gate red. The EVERY GATE RUNS note above `jobs:` argues it. ─────
+      #
+      # This is where the unmeasured-tail reporter pair stood, and its note
+      # said the fix for the gates a red skipped was not to run them, and ⛔ not
+      # `continue-on-error`, "which trades a red for silence". What holds now:
+      # the skipped gates DO run — every gate step above carries
+      # `continue-on-error` — and the trade is refused HERE: this step reads
+      # every gate's `outcome`, names the red ones and exits 1, so the job's
+      # conclusion is still red, never silent. The tail behind a red gate is
+      # empty by construction; behind a failed setup step this step lists the
+      # gates that never ran, from the `steps` context — final for every
+      # earlier step when this runs — rather than from the jobs API the
+      # reporter had to race (#18874), so no `actions: read` is needed any more.
       - name: Lane verdict
         if: ${{ !cancelled() }}
         env:
