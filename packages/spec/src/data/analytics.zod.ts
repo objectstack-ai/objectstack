@@ -101,7 +101,8 @@ export const DimensionType = z.enum([
 export type DimensionType = z.input<typeof DimensionType>;
 
 /**
- * The three sub-day names this enum declared until protocol 18 (#17296).
+ * The three sub-day names this enum declared through @objectstack/spec 17.4.0;
+ * 17.5.0 removed them (#17296).
  *
  * They were never a capability any backend could offer, and not because the
  * backends lag the contract — the rest of the contract never declared them:

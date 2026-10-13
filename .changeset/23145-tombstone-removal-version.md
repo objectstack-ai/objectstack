@@ -17,6 +17,8 @@ Clause-②: no
 | `public` in `StorageScope` | removed in @objectstack/spec 17.8.0 | removed in @objectstack/spec 18 |
 | `MetadataTypeRegistryEntry.allowOrgOverride` → `allowEnvironmentOverlay` | renamed (no release named) | renamed in @objectstack/spec 18 |
 
+The `18.0.0-next.0` release notes quoted the two `email_template` prescriptions with the earlier version, 17; from this release on they name 18.
+
 One prescription was wrong the other way. 17.4.0 accepts the sub-day `TimeUpdateInterval` members `second`, `minute` and `hour`, and 17.5.0 refuses them, but the refusal said "retired in protocol 18". It now says "removed in @objectstack/spec 17.5.0".
 
 The `os migrate meta --from 17` sentence in each prescription is unchanged and was already right: `--from 17` replays the protocol-18 conversions. A prescription for a key that a 17.x release already refuses keeps naming 17. Text only: no key, value or shape is accepted or refused differently.
