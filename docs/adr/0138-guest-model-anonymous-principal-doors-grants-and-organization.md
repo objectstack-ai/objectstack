@@ -15,6 +15,11 @@ criterion-2 ruling the re-measurement is a test in the repository, green on `mai
 ([Execution plan](#execution-plan-after-acceptance)), and every change this record decides lands
 through them. The four defect cards landed before it: they enforce ADR-0056 D2 and ADR-0104, which
 were already Accepted.
+· **Amended** (2026-10-13, ruling C on [#23266](https://github.com/objectstack-ai/objectstack/issues/23266),
+[`6148183570`](https://github.com/objectstack-ai/objectstack/issues/23266#issuecomment-6148183570),
+maintainer 「同意」) — D3 item 6: the guest reaches rows only through share links (and, when it
+exists, an explicit guest sharing rule), never through the object's sharing model; ADR-0090 D9 and
+D11 are unchanged.
 **Decided by**: the maintainer's ruling on [#22146](https://github.com/objectstack-ai/objectstack/issues/22146)
 (comment [`6054113537`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6054113537),
 decision batch #290 item 1, 2026-10-08, 「22146 同意」): **A on all eight questions, and G2 on the
@@ -365,12 +370,18 @@ unchanged. **Card**: E2.
    (`packages/plugins/plugin-security/src/suggested-audience-bindings.ts#confirmAudienceBindingSuggestion`).
    Packages suggest; they never bind (ADR-0090 D9).
 6. **Row scope: one pipeline.** The guest's grant is evaluated by the same row-level pipeline as
-   every caller, with no guest special case. The guest owns nothing (D1), so it reaches rows only
-   through the object's declared sharing model and through share links — ADR-0090 D9's division of
-   labour (the guest position answers which object classes are reachable at all, share links answer
-   which records), and D11's statement that the guest is not an OWD audience. Card E1 pins the
-   guest's row scope for each sharing model before it lands; a result that departs from that
-   division of labour is that card's finding to raise, not a choice to make silently.
+   every caller, except that the guest never takes the pipeline's sharing-model (OWD) branch:
+   neither `sharingModel` nor `externalSharingModel`. The guest owns nothing (D1), so it reaches
+   rows only through share links (and, when it exists, an explicit guest sharing rule), never
+   through the object's sharing model — ADR-0090 D9's division of labour (the guest position
+   answers which object classes are reachable at all, share links answer which records), and D11's
+   statement that the guest is not an OWD audience. Card E1 pins the guest's row scope for each
+   sharing model before it lands: with a bound read set and no share link, `private`,
+   `public_read`, `public_read_write` and `controlled_by_parent` each read zero rows. This scope is
+   the maintainer's ruling C on [#23266](https://github.com/objectstack-ai/objectstack/issues/23266)
+   ([`6148183570`](https://github.com/objectstack-ai/objectstack/issues/23266#issuecomment-6148183570)),
+   which answered the finding E1 raised under this item; the explicit guest sharing rule is named
+   by that ruling and not built.
 7. **The organization comes first.** Bindings are organization-scoped today. With no organization
    resolved, the binding read would gather every organization's bindings, the class the grant rule
    in `resolveUserAuthzGrants` exists to stop. So D3 never resolves a binding without D4's
