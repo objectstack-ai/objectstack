@@ -236,6 +236,7 @@ import { firstPartyModuleClosure, stageFirstPartyClosure } from './first-party-c
 const SELF_TEST_BATTERIES = Object.freeze({
   'and one in RC pre-mode': 15,
   '#6099: the `minor` + prose-annotation family': 17,
+  '#23112: a DECORATED annotation — a pictograph before the word': 16,
   'end-to-end through the shell driver': 5,
   'an unwalkable range: REFUSE, loudly (#14178)': 1,
   'the INITIAL pin still degrades, and says so': 1,
@@ -254,7 +255,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 16;
+const SELF_TEST_BATTERY_FLOOR = 17;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -438,16 +439,48 @@ export function clampSummary(summary, limit = 180) {
  */
 const BREAKING_EMPHASIS_LABEL = /(\*\*|__)[ \t]*breaking\b[^*_\n]{0,48}\1/i;
 
+/**
+ * A DECORATION an author may put in front of the word (#23112): a run of
+ * pictographic symbols, each with its optional variation selector — `⚠️` is
+ * U+26A0 WARNING SIGN + U+FE0F, and `⚠` without the selector is the same sign.
+ * It sits AFTER the heading or bullet mark, on either side of the emphasis mark
+ * (`## ⚠️ BREAKING`, `⚠️ **BREAKING`, `**⚠️ Breaking`), and admits nothing else:
+ * no letter, no digit, no ASCII punctuation, so the line-start anchor below is
+ * exactly as strict as it was for every line that carries no pictograph.
+ *
+ * Measured over objectui's whole changeset history (every blob under
+ * `.changeset/` on every head of a full clone, objectui `main` at `5595aabca30b`:
+ * 5678 blobs, 704 block-head lines carrying the word), the ONLY decoration that
+ * occurs is `⚠️`, in four placements on 51 blobs, and 47 of those were read as
+ * not breaking — objectui#12242's `## ⚠️ BREAKING, priced as minor …` among them.
+ *
+ * Why a CLASS rather than the one sign the corpus shows, and why not "any
+ * non-word run": ASCII punctuation in front of the word is a PROSE shape in that
+ * same corpus — `(breaking …)`, `"Breaking for TypeScript readers" below`,
+ * `— breaking for a top-level logo` — and a code span (`` `breaking` ``) names
+ * an identifier, so admitting it would trade this miss for false positives. A
+ * pictograph in front of the word at the head of a block is never prose; closing
+ * the class keeps the next author's `🚨 BREAKING` from being the same miss again.
+ */
+const DECORATION = String.raw`(?:\p{Extended_Pictographic}[\u{FE0E}\u{FE0F}]?[ \t]*)*`;
+
 /** The same label, but required to OPEN the text — used to avoid restating it. */
-const OPENS_WITH_BREAKING_LABEL = /^[ \t]*(?:\*\*|__)[ \t]*breaking\b/i;
+const OPENS_WITH_BREAKING_LABEL = new RegExp(
+  String.raw`^[ \t]*${DECORATION}(?:\*\*|__)[ \t]*${DECORATION}breaking\b`,
+  'iu',
+);
 
 /**
  * A block (paragraph, heading or top-level bullet) that OPENS with the word
  * "breaking" — `## Breaking note …`, `Breaking for anyone reading \`node.ui\` …`,
  * `BREAKING CHANGE: …` (the conventional-commit footer needs no separate rule;
- * it opens a block by construction).
+ * it opens a block by construction) — optionally behind a `DECORATION`
+ * (`## ⚠️ BREAKING, priced as minor …`).
  */
-const BREAKING_BLOCK_OPENER = /^[ \t]*(?:#{1,6}[ \t]+)?(?:[-*+][ \t]+)?(?:\*\*|__|\*|_)?[ \t]*breaking\b/i;
+const BREAKING_BLOCK_OPENER = new RegExp(
+  String.raw`^[ \t]*(?:#{1,6}[ \t]+)?(?:[-*+][ \t]+)?${DECORATION}(?:\*\*|__|\*|_)?[ \t]*${DECORATION}breaking\b`,
+  'iu',
+);
 
 /**
  * Did the AUTHOR annotate this change as breaking, in the changeset body?
@@ -1747,6 +1780,157 @@ function selfTest() {
       '#6099 nothing was downgraded — there was no major to downgrade',
       annotated.bump === 'minor' && annotated.downgradedMajor === false,
       `bump=${annotated.bump} downgraded=${annotated.downgradedMajor}`,
+    );
+
+    // --- #23112: a DECORATED annotation — a pictograph before the word -------
+    // objectui#12242's changeset opens its annotation `## ⚠️ BREAKING, priced as
+    // minor …`, and the opener used to admit nothing between the heading mark and
+    // the word, so the digest read it as not breaking. Every positive below is a
+    // placement measured in objectui's own changeset history (see `DECORATION`);
+    // every negative is a line the decoration must NOT turn into a declaration.
+    battery('#23112: a DECORATED annotation — a pictograph before the word');
+    // Verbatim heading of `.changeset/12242-types-field-metadata-family.md` at
+    // objectui `1fb1ced36243`, with its paragraphs trimmed.
+    const heading12242 = "## ⚠️ BREAKING, priced as minor under the fixed group's version policy";
+    const body12242 =
+      'The exported field metadata types stop declaring the members `FieldSchema` refuses by name ' +
+      '(objectui#12242).\n\n' +
+      '- `BaseFieldMetadata`: FROM `filterable?: boolean` → TO refused.\n\n' +
+      `${heading12242}\n\n` +
+      'TypeScript that writes a retired member no longer compiles.\n';
+    check(
+      "#23112 objectui#12242's changeset body reads breaking (`## ⚠️ BREAKING, …`)",
+      body12242.includes('## \u26A0\uFE0F BREAKING') && hasBreakingAnnotation(body12242),
+    );
+    check(
+      '#23112 the plain-heading control still reads breaking (`## BREAKING, …`)',
+      hasBreakingAnnotation(body12242.replace('## \u26A0\uFE0F BREAKING', '## BREAKING')),
+    );
+    check(
+      '#23112 a decorated PROSE sentence containing "breaking" does not read breaking',
+      !hasBreakingAnnotation('⚠️ Upgrade note: nothing in this change is breaking for an existing author.') &&
+        !hasBreakingAnnotation('## ⚠️ Read before upgrading — this is not breaking') &&
+        !hasBreakingAnnotation('⚠️ Non-breaking cleanup; a groundbreaking refactor.'),
+    );
+    check(
+      '#23112 the sign BEFORE the emphasis mark reads breaking (`⚠️ **BREAKING (…)**`)',
+      // Wrapped as objectui `10719-retire-phase35-validation-types.md` wraps it, so
+      // the label's run crosses a line and `BREAKING_EMPHASIS_LABEL` cannot see it:
+      // only the opener can answer.
+      hasBreakingAnnotation(
+        "a\n\n⚠️ **BREAKING (scored `minor` per this repository's version-alignment\n" +
+          'convention) — x.**',
+      ),
+    );
+    check(
+      '#23112 the sign INSIDE the emphasis mark reads breaking (`**⚠️ Breaking …**`)',
+      hasBreakingAnnotation('a\n\n**⚠️ Breaking for consumers that read `result.data`.** `validateSchema` x'),
+    );
+    check(
+      '#23112 the sign opening a plain paragraph reads breaking (`⚠️ Breaking in places, …`)',
+      hasBreakingAnnotation("a\n\n⚠️ Breaking in places, marked `minor` under this repo's rule."),
+    );
+    check(
+      '#23112 the sign without its variation selector reads breaking (`## ⚠ BREAKING`)',
+      hasBreakingAnnotation('a\n\n## \u26A0 BREAKING'),
+    );
+    check(
+      '#23112 the rule is the pictograph CLASS, not the one sign (`- 🚨 BREAKING:` behind a bullet)',
+      hasBreakingAnnotation('a\n\n- 🚨 BREAKING: `onReorder` is retired.'),
+    );
+    check(
+      '#23112 ASCII punctuation is NOT decoration — a code span and a quotation stay prose',
+      !hasBreakingAnnotation('a\n\n`breaking` joins `ChangeEntry` as an optional boolean.') &&
+        !hasBreakingAnnotation('a\n\n"Breaking for TypeScript readers", below, lists the members.'),
+    );
+    check(
+      "#23112 markBreaking keeps an author's DECORATED label verbatim — never restated",
+      markBreaking('⚠️ **BREAKING (scored `minor`)** — x') === '⚠️ **BREAKING (scored `minor`)** — x' &&
+        markBreaking('**⚠️ Breaking for consumers.** y') === '**⚠️ Breaking for consumers.** y' &&
+        markBreaking('⚠️ An ordinary summary.') === '**BREAKING** — ⚠️ An ordinary summary.',
+    );
+
+    // Through the real digest, in a repo of its own so the #6099 counts above
+    // stay pinned. Commit (A) is the 12242 shape, (B) opens its SUMMARY with a
+    // decorated label (objectui `10719-retire-phase35-validation-types.md`), (C)
+    // is decorated prose.
+    const uiDeco = join(tmp, 'objectui-decorated');
+    mkdirSync(join(uiDeco, '.changeset'), { recursive: true });
+    const gDeco = (...args) => git(uiDeco, args);
+    gDeco('init', '-q', '-b', 'main');
+    gDeco('config', 'user.email', 'selftest@objectstack.ai');
+    gDeco('config', 'user.name', 'self test');
+    gDeco('config', 'commit.gpgsign', 'false');
+    const commitDeco = (subject, files) => {
+      for (const [path, content] of Object.entries(files)) {
+        mkdirSync(dirname(join(uiDeco, path)), { recursive: true });
+        writeFileSync(join(uiDeco, path), content);
+      }
+      gDeco('add', '-A');
+      gDeco('commit', '-q', '-m', subject);
+      return gDeco('rev-parse', 'HEAD').trim();
+    };
+    const baseDeco = commitDeco('chore: base', { 'README.md': 'base\n' });
+    const shaA = commitDeco('fix(types): field metadata family (#12242)', {
+      '.changeset/12242-types-field-metadata-family.md':
+        "---\n'@object-ui/types': minor\n---\n\n" + body12242,
+      'src/types.ts': 'a\n',
+    });
+    commitDeco('fix(types): retire the phase-3.5 validation types (#10719)', {
+      '.changeset/10719-retire-phase35-validation-types.md':
+        "---\n'@object-ui/types': minor\n---\n\n" +
+        "⚠️ **BREAKING (scored `minor` per this repository's version-alignment\n" +
+        'convention) — `@object-ui/types` no longer exports the eight "Phase 3.5"\n' +
+        'validation types (objectui#10719).**\n',
+      'src/core.ts': 'b\n',
+    });
+    commitDeco('fix(fields): a picker note (#3336)', {
+      '.changeset/picker-note.md':
+        "---\n'@object-ui/fields': patch\n---\n\n" +
+        '⚠️ Upgrade note: nothing in this change is breaking for an existing author.\n',
+      'src/fields.ts': 'c\n',
+    });
+    const headDeco = gDeco('rev-parse', 'HEAD').trim();
+    const decorated = buildDigest({ objectuiRoot: uiDeco, frameworkRoot: fwPlain, from: baseDeco, to: headDeco });
+    check(
+      '#23112 exactly the two decorated annotations are counted, the decorated prose is not',
+      decorated.releasing.length === 3 && decorated.breaking === 2 && decorated.breakingByAnnotation === 2,
+      `releasing=${decorated.releasing.length} breaking=${decorated.breaking} byAnnotation=${decorated.breakingByAnnotation}`,
+    );
+    check(
+      '#23112 the count line reads 2, by annotation',
+      decorated.body.includes("⚠️ 2 of these carry a breaking change: 2 by the author's own breaking annotation"),
+      decorated.body,
+    );
+    check(
+      '#23112 the heading-annotated entry GETS the marker on its line',
+      decorated.body.includes('- **minor** — **BREAKING** — The exported field metadata types stop declaring'),
+      decorated.body,
+    );
+    check(
+      "#23112 a summary opening with a decorated label renders it verbatim, never restated",
+      // The `breaking` clause is load-bearing: an UNFLAGGED entry renders this
+      // same line, so the text clauses alone would pass for an empty reason.
+      decorated.releasing.find((r) => r.path.includes('10719'))?.breaking === true &&
+        decorated.body.includes(
+          "- **minor** — ⚠️ **BREAKING (scored `minor` per this repository's version-alignment convention)",
+        ) &&
+        !decorated.body.includes('**BREAKING** — ⚠️ **BREAKING'),
+      decorated.body,
+    );
+    check(
+      '#23112 the decorated prose entry is NOT marked',
+      decorated.body.includes('- **patch** — ⚠️ Upgrade note: nothing in this change is breaking'),
+      decorated.body,
+    );
+    // The card's second consequence: a range whose ONLY breaking entry is the
+    // decorated heading used to raise no count at all, and so no ADR-0087
+    // disposition prompt.
+    const onlyA = buildDigest({ objectuiRoot: uiDeco, frameworkRoot: fwPlain, from: baseDeco, to: shaA });
+    check(
+      '#23112 a range whose ONLY breaking entry is the decorated heading still raises the ADR-0087 question',
+      onlyA.breaking === 1 && onlyA.adr0087Scaffold === true && onlyA.body.includes(ADR_0087_SCAFFOLD),
+      `breaking=${onlyA.breaking} scaffold=${onlyA.adr0087Scaffold}`,
     );
 
     // --- end-to-end through the shell driver -------------------------------

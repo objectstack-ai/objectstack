@@ -521,6 +521,12 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
   { object: 'sys_secret', census: P1, fate: 'attribution', citation: `re-verification 6018712820: sys_secret is tenant-attributed by one producer (moved here from C6); ${D10_SINGLE}`, anchors: [] },
   { object: 'sys_scim_connection_credential', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; ${D10_SINGLE}`, anchors: [] },
   { object: 'sys_flow_credential', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
+  // Inbound mail (`@objectstack/service-mailbox`): every row is written by the
+  // system with the mailbox's organization stamped (ADR-0131 D9), so a NULL
+  // row has no producer today; the parents below are where one would take it.
+  { object: 'sys_mailbox', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
+  { object: 'sys_mail_message', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); the message's mailbox carries the organization`, anchors: [parent('mailbox_id', 'sys_mailbox')] },
+  { object: 'sys_mail_association', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); the association's message carries the organization`, anchors: [parent('mail_message_id', 'sys_mail_message')] },
   { object: 'sys_import_job', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; ${D10_SINGLE}`, anchors: [] },
   { object: 'sys_user_preference', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; ${D10_SINGLE}`, anchors: [] },
 

@@ -1,0 +1,37 @@
+// The SCRIPTS-layer type-check program for this package (#11351).
+//
+// `scripts/i18n-extract.config.ts` is the input to this package's i18n
+// extraction: it composes the package's own objects and translation bundles
+// into an `ObjectStackDefinition`. It is real source, and until this file
+// existed no tsc program read a line of it -- `tsconfig.json` selects only
+// `src`, so the package passed `check:type-check-coverage` as COVERED with
+// the directory unread. It was carried as an UNCHECKED_SOURCE_DEBT entry
+// (#10756); that entry is deleted in the same change that adds this file,
+// which RECONCILED forces anyway.
+//
+// A SIBLING rather than a wider `include` on `tsconfig.json`, the
+// distinction #5475 drew for `packages/spec` and #10756 for
+// `packages/objectql/scripts`: that config emits, so widening it to reach
+// `scripts/` would put the directory in front of the emit. This program
+// emits nothing.
+//
+// STRICTNESS IS INHERITED and deliberately not relaxed: `strict`,
+// `noUnusedLocals`, `noUnusedParameters`, `noImplicitReturns` and the rest
+// come from the root config through `tsconfig.json`. The directory
+// type-checks clean under them -- it enters with ZERO recorded debt, and
+// there is no ledger here to record any in. Module semantics are inherited
+// too (NodeNext): these configs spell their relative imports with `.js`
+// extensions already, so nothing here needs `packages/spec`'s bundler
+// resolution or `allowImportingTsExtensions`.
+//
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // `.` rather than the inherited `src`, because the file this program
+    // checks is the one outside `src`. Safe precisely because nothing is
+    // emitted from here -- see the header.
+    "rootDir": "."
+  },
+  "include": ["scripts/**/*"]
+}

@@ -156,19 +156,19 @@ the dialect you are actually running.
 **Partial index (`CREATE INDEX … WHERE <predicate>`).** Supported on Postgres
 and SQLite (≥ 3.8.9), absent on MySQL. Because it cannot be expressed
 portably — and because knex's index builders have no way to emit a predicate —
-it is issued as raw SQL from a runtime migration. The platform does exactly
-this for its own overlay uniqueness: `metadata-protocol`'s `ensureOverlayIndex`
-runs
+it is issued as raw SQL from a runtime migration, falling back to a plain
+index on a dialect that rejects it. One *active* subscription per account,
+the coarse `{ fields: ['account_id'] }` declared in metadata:
 
 ```sql
-CREATE UNIQUE INDEX IF NOT EXISTS idx_sys_metadata_overlay_active
-  ON sys_metadata (type, name, organization_id, COALESCE(package_id, ''))
-  WHERE state = 'active';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_subscription_account_active
+  ON subscription (account_id)
+  WHERE status = 'active';
 ```
 
-with a plain-index fallback for dialects that reject the predicate. Follow that
-shape: declare the coarse index (or none) in metadata, and build the partial
-form in a migration.
+Follow that shape: declare the coarse index (or none) in metadata, and build
+the partial form in a migration, as the platform does for its own overlay
+uniqueness.
 
 **Benefits of a partial index, when you do build one:**
 - Smaller index size
