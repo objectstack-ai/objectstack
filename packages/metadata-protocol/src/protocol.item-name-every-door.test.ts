@@ -6,6 +6,12 @@
  * every type, through the one judge (`savedItemNameRefusal`,
  * `@objectstack/metadata/view-container-name`).
  *
+ * Section 4 pins the second half of the body against its address, with the
+ * same envelope at the save door and the draft promotion: a permission set
+ * whose body `packageId` disagrees with the package the row is written into
+ * (ADR-0086 D3, `permissionSetOwnerBindingRefusal`). It shares this file's
+ * double and its staging of a stored body.
+ *
  * ---------------------------------------------------------------------------
  * The defect, measured on `origin/main` `e9dec3dab` before this change
  * ---------------------------------------------------------------------------
@@ -501,5 +507,188 @@ describe('[#21470] the draft promotion refuses a stored draft whose `name` is no
         expect(res.outcome).toBe('published');
         expect(res.publishedCount).toBe(2);
         expect(keys(h, 'dashboard').sort()).toEqual(['dash_d', 'dash_ok']);
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 4. The body's `packageId` against the row's binding (ADR-0086 D3)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The second half of "the body against its address": a permission set whose
+// body `packageId` disagrees with the package the row is written into is
+// refused at the save door (draft and publish mode) and at the draft
+// promotion (the per-item publish and the package publish), with the name
+// judge's envelope. Measured on `origin/main` `175e8d414` before the change:
+// every refused case below was accepted, and the stored row's `package_id`
+// then decided the owner everywhere it is read, silently overriding the body.
+// A disagreeing STORED draft is staged as `residue()` stages a name: written
+// clean through the real door, its stored body then rewritten in the double.
+
+const BOUND = 'app.probe_bound';
+const OTHER = 'app.probe_other';
+const perm = (name: string, packageId?: string) =>
+    ({ name, label: 'Probe', objects: {}, ...(packageId === undefined ? {} : { packageId }) });
+
+/** Every stored permission row as `{ row, state, binding, body }` (`body` = the body's `packageId`). */
+const storedSets = (h: Harness) => Array.from(h.rows.values())
+    .filter((r) => r.type === 'permission')
+    .map((r) => ({ row: r.name, state: r.state, binding: r.package_id ?? null, body: JSON.parse(r.metadata).packageId }));
+
+/** Rewrite a stored permission body's `packageId` in place — a row stored before this change. */
+function residuePackageId(h: Harness, where: { name: string; state: string }, packageId: string) {
+    const row = Array.from(h.rows.values())
+        .find((r) => r.type === 'permission' && r.name === where.name && r.state === where.state);
+    if (!row) throw new Error(`no ${where.state} permission row ${where.name}`);
+    row.metadata = JSON.stringify({ ...JSON.parse(row.metadata), packageId });
+}
+
+/** The refusal this section pins: the envelope, the key located, both values named. */
+function expectOwnerRefusal(error: any, declared: string, binding: string | null) {
+    expectEnvelope(error);
+    expect(error.issues).toEqual([expect.objectContaining({ path: 'packageId', code: 'custom' })]);
+    expect(error.message).toContain(`declares \`packageId\` '${declared}'`);
+    expect(error.message).toContain(binding === null ? 'into no package' : `into package '${binding}'`);
+}
+
+describe('[ADR-0086 D3] the save door refuses a permission set whose body `packageId` disagrees with its binding', () => {
+    it.each(['publish', 'draft'] as const)('%s mode: saved into one package, declaring another, is refused; nothing stored, nothing registered', async (mode) => {
+        const h = makeProtocol();
+        const { error } = await attempt(() => h.protocol.saveMetaItem({
+            type: 'permission', name: 'probe_member', item: perm('probe_member', OTHER), packageId: BOUND, mode,
+        }));
+        expectOwnerRefusal(error, OTHER, BOUND);
+        // The prescription comes first: both remedies, before the 500-character REST bound can cut it.
+        expect(error.message.indexOf('Drop `packageId`')).toBe(0);
+        expect(error.message).toContain(`or save the set into package '${OTHER}'`);
+        expect(storedSets(h)).toEqual([]);
+        expect(keys(h, 'permission')).toEqual([]);
+    });
+
+    it.each(['publish', 'draft'] as const)('%s mode: a body `packageId` on a save into no package is refused (absent = environment-authored)', async (mode) => {
+        const h = makeProtocol();
+        const { error } = await attempt(() => h.protocol.saveMetaItem({
+            type: 'permission', name: 'probe_member', item: perm('probe_member', OTHER), mode,
+        }));
+        expectOwnerRefusal(error, OTHER, null);
+        expect(storedSets(h)).toEqual([]);
+        expect(keys(h, 'permission')).toEqual([]);
+    });
+
+    it('an empty-string `packageId` on a save into no package is refused too: the key is present', async () => {
+        const h = makeProtocol();
+        const { error } = await attempt(() => h.protocol.saveMetaItem({
+            type: 'permission', name: 'probe_member', item: perm('probe_member', ''),
+        }));
+        expectOwnerRefusal(error, '', null);
+        // No package to save into is offered for a value that names none.
+        expect(error.message).not.toContain('or save the set into package');
+        expect(storedSets(h)).toEqual([]);
+    });
+
+    it('a draft that names no package is judged against the package it INHERITS, not the request\'s spelling', async () => {
+        // The active row is bound to BOUND, so a package-less draft save lands
+        // in BOUND (#11087): the refusal names BOUND, and an agreeing body passes.
+        const h = makeProtocol();
+        await h.protocol.saveMetaItem({ type: 'permission', name: 'probe_member', item: perm('probe_member'), packageId: BOUND });
+
+        const { error } = await attempt(() => h.protocol.saveMetaItem({
+            type: 'permission', name: 'probe_member', item: perm('probe_member', OTHER), mode: 'draft',
+        }));
+        expectOwnerRefusal(error, OTHER, BOUND);
+
+        await h.protocol.saveMetaItem({ type: 'permission', name: 'probe_member', item: perm('probe_member', BOUND), mode: 'draft' });
+        expect(storedSets(h)).toEqual([
+            { row: 'probe_member', state: 'active', binding: BOUND, body: undefined },
+            { row: 'probe_member', state: 'draft', binding: BOUND, body: BOUND },
+        ]);
+    });
+
+    it('CONTROL: a body `packageId` equal to the binding is accepted in both modes, and an absent one with or without a package', async () => {
+        const h = makeProtocol();
+        await h.protocol.saveMetaItem({ type: 'permission', name: 'agree_live', item: perm('agree_live', BOUND), packageId: BOUND });
+        await h.protocol.saveMetaItem({ type: 'permission', name: 'agree_draft', item: perm('agree_draft', BOUND), packageId: BOUND, mode: 'draft' });
+        await h.protocol.saveMetaItem({ type: 'permission', name: 'bare_bound', item: perm('bare_bound'), packageId: BOUND });
+        await h.protocol.saveMetaItem({ type: 'permission', name: 'bare_env', item: perm('bare_env') });
+        expect(storedSets(h)).toEqual([
+            { row: 'agree_live', state: 'active', binding: BOUND, body: BOUND },
+            { row: 'agree_draft', state: 'draft', binding: BOUND, body: BOUND },
+            { row: 'bare_bound', state: 'active', binding: BOUND, body: undefined },
+            { row: 'bare_env', state: 'active', binding: null, body: undefined },
+        ]);
+        expect(keys(h, 'permission').sort()).toEqual(['agree_live', 'bare_bound', 'bare_env']);
+    });
+});
+
+describe('[ADR-0086 D3] the draft promotion refuses a permission-set draft whose body `packageId` disagrees with its binding', () => {
+    it('publishMetaItem: a stored draft bound to one package declaring another is refused; the draft is kept, nothing goes live', async () => {
+        const h = makeProtocol();
+        await h.protocol.saveMetaItem({ type: 'permission', name: 'probe_member', item: perm('probe_member', BOUND), packageId: BOUND, mode: 'draft' });
+        residuePackageId(h, { name: 'probe_member', state: 'draft' }, OTHER);
+        h.saveDoor.mockClear();
+
+        const { error } = await attempt(() => h.protocol.publishMetaItem({ type: 'permission', name: 'probe_member' }));
+
+        expectOwnerRefusal(error, OTHER, BOUND);
+        expect(error.message.indexOf('Save the draft')).toBe(0);
+        expect(error.message).toContain('Nothing was published.');
+        expect(storedSets(h)).toEqual([{ row: 'probe_member', state: 'draft', binding: BOUND, body: OTHER }]);
+        expect(keys(h, 'permission')).toEqual([]);
+        expect(h.saveDoor).not.toHaveBeenCalled();
+    });
+
+    it('publishPackageDrafts: the refused draft aborts the batch, reported with the envelope\'s code; nothing goes live', async () => {
+        const h = makeProtocol();
+        await h.protocol.saveMetaItem({ type: 'permission', name: 'probe_ok', item: perm('probe_ok'), packageId: BOUND, mode: 'draft' });
+        await h.protocol.saveMetaItem({ type: 'permission', name: 'probe_member', item: perm('probe_member'), packageId: BOUND, mode: 'draft' });
+        residuePackageId(h, { name: 'probe_member', state: 'draft' }, OTHER);
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+        const res = await h.protocol.publishPackageDrafts({ packageId: BOUND });
+
+        expect(res.outcome).toBe('refused');
+        expect(res.publishedCount).toBe(0);
+        const refused = res.failed.find((f: any) => f.name === 'probe_member');
+        expect(refused).toMatchObject({ type: 'permission', code: 'VALIDATION_ERROR' });
+        expect(refused.error).toContain(`declares \`packageId\` '${OTHER}'`);
+        expect(refused.error).toContain(`into package '${BOUND}'`);
+        expect(storedSets(h).every((r) => r.state === 'draft')).toBe(true);
+        expect(keys(h, 'permission')).toEqual([]);
+    });
+
+    it('CONTROL: the same batch with an agreeing body publishes both, under the binding', async () => {
+        const h = makeProtocol();
+        await h.protocol.saveMetaItem({ type: 'permission', name: 'probe_ok', item: perm('probe_ok'), packageId: BOUND, mode: 'draft' });
+        await h.protocol.saveMetaItem({ type: 'permission', name: 'probe_member', item: perm('probe_member', BOUND), packageId: BOUND, mode: 'draft' });
+
+        const res = await h.protocol.publishPackageDrafts({ packageId: BOUND });
+
+        expect(res.outcome).toBe('published');
+        expect(res.publishedCount).toBe(2);
+        expect(storedSets(h).filter((r) => r.state === 'active')).toEqual([
+            { row: 'probe_ok', state: 'active', binding: BOUND, body: undefined },
+            { row: 'probe_member', state: 'active', binding: BOUND, body: BOUND },
+        ]);
+    });
+});
+
+describe('[ADR-0086 D3] duplicatePackage copies a set that declares its source package as declaring the target', () => {
+    const SRC = 'app.dupsrc';
+    const DST = 'app.dupdst';
+
+    it('the copy declares the package it is saved into; a source row that already disagreed is reported in failed[]', async () => {
+        const h = makeProtocol();
+        await h.protocol.saveMetaItem({ type: 'permission', name: 'dupsrc_member', item: perm('dupsrc_member', SRC), packageId: SRC });
+        await h.protocol.saveMetaItem({ type: 'permission', name: 'dupsrc_stray', item: perm('dupsrc_stray', SRC), packageId: SRC });
+        residuePackageId(h, { name: 'dupsrc_stray', state: 'active' }, OTHER);
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+        const res = await h.protocol.duplicatePackage({ sourcePackageId: SRC, targetPackageId: DST });
+
+        expect(res.copied).toEqual([{ type: 'permission', name: 'dupdst_member' }]);
+        expect(res.failed).toEqual([expect.objectContaining({ type: 'permission', name: 'dupsrc_stray' })]);
+        expect(res.failed[0].error).toContain(`declares \`packageId\` '${OTHER}'`);
+        expect(storedSets(h).filter((r) => r.binding === DST)).toEqual([
+            { row: 'dupdst_member', state: 'active', binding: DST, body: DST },
+        ]);
     });
 });

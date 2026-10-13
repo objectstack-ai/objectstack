@@ -696,3 +696,70 @@ describe('manifest `permissions` in the ADR-0025 reading is reported, never drop
     await expect(syncAudienceBindingSuggestions(ql)).resolves.toMatchObject({ created: 0 });
   });
 });
+
+// [ADR-0086 D3] The owner a suggestion is offered, accepted and derived under
+// is the set's binding, read from the catalog entry and nothing else. A package
+// with no manifest id is served by `makeQl` WITHOUT `_packageId` — the shape
+// the catalog serves for a set bound to no package (a stored set saved into
+// none, ADR-0086 D3 "absent ⇒ env-authored"). Its body names a package; before
+// this change all three readers took that as the owner when the binding was
+// absent. The metadata save and publish doors now refuse such a body, so the
+// readers read the binding only.
+describe('[ADR-0086 D3] a set\'s owner is its binding — a body `packageId` on an unbound set names no owner', () => {
+  const CLAIMED = 'com.example.claimed';
+  const unboundClaiming = () => ({
+    enabled: true,
+    manifest: {
+      permissions: [
+        { name: 'claimed_default', isDefault: true, packageId: CLAIMED, objects: { crm_account: { allowRead: true } } },
+      ],
+    },
+  });
+  const claimedRow = (status: 'pending' | 'confirmed') => ({
+    id: `sug_claimed_${status}`, package_id: CLAIMED, permission_set_name: 'claimed_default', anchor: 'everyone',
+    status, organization_id: DEFAULT_ORG, ...(status === 'confirmed' ? { deployment_decision: true } : {}),
+  });
+
+  it('collect + sync: no suggestion is offered under the package the body names', async () => {
+    const ql = makeQl([unboundClaiming()]);
+    const out = await syncAudienceBindingSuggestions(ql);
+    expect(out.created).toBe(0);
+    expect(rows(ql)).toEqual([]);
+  });
+
+  it('the derivation withholds an acceptance recorded under that package, saying the set is declared by no package', async () => {
+    const ql = makeQl([unboundClaiming()]);
+    rows(ql).push(claimedRow('confirmed'));
+    const derived = await readAcceptedEveryoneSets(ql);
+    expect(derived.accepted).toEqual([]);
+    expect(derived.withheld).toEqual([
+      expect.objectContaining({ set: 'claimed_default', packageId: CLAIMED, forbidden: false }),
+    ]);
+    expect(derived.withheld[0].reason).toContain("declared by 'no package'");
+  });
+
+  it('the accept refuses a pending suggestion under that package; the row stays pending', async () => {
+    const ql = makeQl([unboundClaiming()]);
+    rows(ql).push(claimedRow('pending'));
+    await expect(confirmAudienceBindingSuggestion(makeDeps(ql), ADMIN_CTX, 'sug_claimed_pending'))
+      .rejects.toBeInstanceOf(SuggestionStateError);
+    expect(rows(ql)[0].status).toBe('pending');
+    expect(everyoneSets(ql)).toEqual(BASELINE);
+  });
+
+  it('CONTROL: a bound set is offered under its binding whether its body agrees or (a stored row) disagrees', async () => {
+    const agreeing = { enabled: true, manifest: { id: 'com.example.agree', permissions: [
+      { name: 'agree_default', isDefault: true, packageId: 'com.example.agree', objects: { crm_account: { allowRead: true } } },
+    ] } };
+    const disagreeing = { enabled: true, manifest: { id: 'com.example.bound', permissions: [
+      { name: 'stray_default', isDefault: true, packageId: CLAIMED, objects: { crm_account: { allowRead: true } } },
+    ] } };
+    const ql = makeQl([agreeing, disagreeing]);
+    const out = await syncAudienceBindingSuggestions(ql);
+    expect(out.created).toBe(2);
+    expect(rows(ql).map((r: any) => [r.permission_set_name, r.package_id]).sort()).toEqual([
+      ['agree_default', 'com.example.agree'],
+      ['stray_default', 'com.example.bound'],
+    ]);
+  });
+});
