@@ -96,10 +96,11 @@ beforeAll(async () => {
 
   // The route the console's Localization page and the prompt read, mounted on
   // the service that boot registered, for an administrator holding the
-  // namespace's read capability.
+  // namespace's read capability. Signed in: a context with no `userId` is
+  // refused 401 by the family's anonymous floor (ADR-0056 D2).
   const http = new MockHttp();
   registerSettingsRoutes(http, kernel.getService<SettingsService>('settings'), {
-    contextFromRequest: () => ({ enforced: true, permissions: ['setup.access'] }),
+    contextFromRequest: () => ({ enforced: true, permissions: ['setup.access'], userId: 'usr_admin' }),
   });
   const state: { status: number; body?: any } = { status: 200 };
   const res = {

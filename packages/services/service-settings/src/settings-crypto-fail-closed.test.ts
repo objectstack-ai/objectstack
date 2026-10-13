@@ -382,7 +382,8 @@ describe('#8026 — the refusal on the REST boundary', () => {
     const { svc, rowFor } = await bootProviderless();
     const http = new MockHttp();
     registerSettingsRoutes(http, svc, {
-      contextFromRequest: () => ({ enforced: true, permissions: ['setup.access', 'setup.write'] }),
+      // Signed in — the family's anonymous floor refuses a context with no `userId`.
+      contextFromRequest: () => ({ enforced: true, permissions: ['setup.access', 'setup.write'], userId: 'usr_admin' }),
     });
 
     const state: { status: number; body?: any } = { status: 200 };

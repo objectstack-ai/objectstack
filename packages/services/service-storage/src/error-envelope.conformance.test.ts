@@ -364,7 +364,7 @@ describe('storage error envelope (#3675)', () => {
     },
     {
       name: 'raw download with a forged token signature',
-      status: 403,
+      status: 401,
       code: 'INVALID_TOKEN',
       run: async () => {
         const routes = mount(await tmpAdapter(), new StorageMetadataStore(null));

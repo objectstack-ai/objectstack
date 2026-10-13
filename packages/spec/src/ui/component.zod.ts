@@ -285,10 +285,10 @@ import { INLINE_GRID_SORT_FIELD_LIST } from '../data/inline-grid-sort-fields';
 //     `saveMetaItem` / REST `/meta` write still stores an unvalidated props bag
 //     (#4463's fourth wall). That is recorded, not fixed, by #5068.
 //
-// The gate is WARNING-level in this first step. The live corpus violated these
+// The gate was WARNING-level in this first step. The live corpus violated these
 // declarations in places that were open contract questions rather than
-// authoring mistakes, and the inventory is the acceptance baseline for the
-// error upgrade. Two of the three entries are now cleared:
+// authoring mistakes, and the inventory was the acceptance baseline for the
+// error upgrade. Two of the three entries were cleared here:
 //
 //  - #5775 declared the keys objectui's renderers honour and tombstoned the
 //    four nothing read.
@@ -300,9 +300,11 @@ import { INLINE_GRID_SORT_FIELD_LIST } from '../data/inline-grid-sort-fields';
 //    same ruling and moved onto it. That retired all 42 `component-props-invalid`
 //    findings this gate reported on the platform pages (34 label + 8 content).
 //
-// What remains before the upgrade to error is the page rewrites
-// (`page:card.visible` → the component-level `visibleWhen`, #5776's tab `key`
-// → `value`), not a declaration in this file.
+// The page rewrites (`page:card.visible` → the component-level `visibleWhen`,
+// #5776's tab `key` → `value`) closed the third, and #23026 took the upgrade
+// for one class once the inventory measured empty: a `retiredKey()`
+// tombstone's verdict is an `error` at `os validate` / `os build` / `os lint`.
+// Every other finding of the gate stays a warning (#23147 carries the rest).
 //
 // ⚠️ One inventory item batch A ADDED rather than closed, because measuring the
 // renderers turned it up: objectui's Studio block designer publishes inputs that
@@ -655,8 +657,9 @@ export const PageHeaderProps = strictObject({
    * inside `/apps/:appName/*`), so a page-level renderer would duplicate it
    * rather than supply something missing. The default `true` was never
    * materialized into a built artifact: `PageComponentSchema.properties` is an
-   * open bag, and this row is parsed only by the advisory props lint, which
-   * writes nothing back — so no retired-default residue stage is owed.
+   * open bag, and this row is parsed only by the props lint (advisory in every
+   * release that shipped the default), which writes nothing back — so no
+   * retired-default residue stage is owed.
    *
    * Stored and built pages that carry the key (`true` or `false`) are stripped
    * by the D2 conversion `page-header-breadcrumb-removed`, with a notice.
@@ -4934,8 +4937,11 @@ export type ElementRepeaterPropsParsed = z.infer<typeof ElementRepeaterPropsSche
  * inventory, exactly like the #5068 → #4001-batch-A sequence above.
  *
  * The warning→error upgrade is untouched by this section: findings on these
- * entries are advisory, still gated on the #5068 inventory (the ruling:
- * 「warning 层先行,error 升级仍以 inventory 为闸,本裁定不改那个闸」).
+ * entries were advisory, gated on the #5068 inventory (the ruling:
+ * 「warning 层先行,error 升级仍以 inventory 为闸,本裁定不改那个闸」). Once
+ * that inventory measured empty, #23026 made one class an `error` — a
+ * `retiredKey()` tombstone's verdict, such as a retired key these rows carry;
+ * every other finding on them stays advisory (#23147 carries the rest).
  *
  * Deliberately NOT declared, each with its reason:
  *
