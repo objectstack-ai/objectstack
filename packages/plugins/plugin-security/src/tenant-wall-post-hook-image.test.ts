@@ -52,8 +52,6 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
-import { SysPermissionSet } from './objects/index.js';
-import { defaultPermissionSets } from './objects/default-permission-sets.js';
 
 /** The organization the caller holds (its active organization). */
 const OWN_ORG = 'org_a';
@@ -452,74 +450,7 @@ for (const [driverName, makeDriver] of DRIVERS) {
       expect((await b.table('qa_account'))[0]).toEqual({ id: 'r1', name: 'one', organization_id: OTHER_ORG });
     });
   });
-
-  describe(`[#20013] the ADR-0094 permission-set data door — ${driverName}`, () => {
-    // The data door executes an insert/update of `sys_permission_set` ITSELF,
-    // through the metadata protocol, and never calls `next()`: no engine
-    // write, so no hook chain and no seam. Measured on the base: a platform
-    // administrator's insert under the `isolated` posture is admitted while
-    // Layer 0 walls the object (`organization_id = <active org>`).
-    it('⭐ a platform administrator’s permission-set insert under a walled posture is still admitted', async () => {
-      const engine = new ObjectQL();
-      engine.registerDriver(makeDriver() as never, true);
-      await engine.init();
-      engine.registerApp({
-        id: 'com.objectstack.qa.tenant-wall-post-hook-image.data-door',
-        name: 'Data door under a walled posture',
-        version: '1.0.0',
-        type: 'plugin',
-        scope: 'system',
-        objects: [SysPermissionSet],
-      } as never);
-      await engine.syncSchemas();
-      engines.push(engine);
-      const saved = new Map<string, unknown>();
-      const protocol = {
-        registerMutationProjector() { /* not exercised here */ },
-        async saveMetaItem(req: { name: string; item: unknown }) { saved.set(req.name, req.item); return { success: true }; },
-        async deleteMetaItem() { return { success: true }; },
-        async getMetaItemLayered(req: { name: string }) {
-          const body = saved.get(req.name) ?? null;
-          return { type: 'permission', name: req.name, code: null, overlay: body, overlayScope: null, effective: body };
-        },
-      };
-      const services: Record<string, unknown> = {
-        manifest: { register: vi.fn() },
-        objectql: engine,
-        protocol,
-        metadata: {
-          get: async (_type: string, name: string) => engine.getSchema(name) ?? null,
-          list: async () => [...defaultPermissionSets],
-        },
-        'org-scoping': { name: 'com.objectstack.org-scoping' },
-        tenancy: { posture: 'isolated' },
-      };
-      const ctx = {
-        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-        registerService: vi.fn(),
-        getService: (name: string) => {
-          if (!(name in services)) throw new Error(`service not registered: ${name}`);
-          return services[name];
-        },
-      };
-      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
-      await plugin.init(ctx as never);
-      await plugin.start(ctx as never);
-      vi.spyOn((engine as unknown as { logger: { warn: () => void } }).logger, 'warn').mockImplementation(() => undefined);
-      let engineWriteRan = false;
-      engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
-        if (opCtx.object === 'sys_permission_set' && opCtx.operation === 'insert' && !opCtx.context?.isSystem) {
-          engineWriteRan = true;
-        }
-        await next();
-      });
-
-      const outcome = await attempt(() =>
-        engine.insert('sys_permission_set', { name: 'door_set', label: 'Door set' } as never, { context: ADMIN_CTX } as never));
-
-      expectAdmitted(outcome);
-      expect(engineWriteRan, 'the data door executed the write itself').toBe(false);
-      expect(saved.has('door_set'), 'the definition reached the metadata store').toBe(true);
-    });
-  });
+  // [C3 stage 8] The ADR-0094 permission-set data door this file also pinned
+  // is unwired with the retired `sys_permission_set` object (ADR-0131 D3): a
+  // permission set is written through the metadata door alone.
 }

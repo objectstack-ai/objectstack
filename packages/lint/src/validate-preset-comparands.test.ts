@@ -435,8 +435,9 @@ describe('validatePresetComparands — arm 2, the FIELD-TYPED equality / members
         ],
       }],
       views: [
-        // A non-`object` provider names no fields on any object graph.
-        { name: 'api', data: { provider: 'api', object: 'crm_opportunity' }, filter: [{ field: 'close_date', operator: 'equals', value: 'last_30_days' }] },
+        // A non-`object` provider names no fields on any object graph (the
+        // `value` arm; the view-level `api` arm is retired).
+        { name: 'static', data: { provider: 'value', items: [] }, filter: [{ field: 'close_date', operator: 'equals', value: 'last_30_days' }] },
         // No binding at all.
         { name: 'unbound', filter: [{ field: 'close_date', operator: 'in', value: ['last_30_days'] }] },
       ],

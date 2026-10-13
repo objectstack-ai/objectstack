@@ -34,10 +34,10 @@ import type { PermissionSet } from '@objectstack/spec/security';
 
 import { SecurityPlugin } from './security-plugin.js';
 import { SysUser, SysMember } from '@objectstack/platform-objects/identity';
-import { SysPosition } from './objects/sys-position.object.js';
+import { SysPosition } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
-import { SysPermissionSet } from './objects/sys-permission-set.object.js';
-import { SysPositionPermissionSet } from './objects/sys-position-permission-set.object.js';
+import { SysPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
+import { SysPositionPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 
 const MEMBER_DEFAULT = { name: 'member_default', label: 'Member', objects: {} } as unknown as PermissionSet;

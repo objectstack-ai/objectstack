@@ -38,10 +38,10 @@ import { bootstrapPlatformAdmin, findExistingPlatformAdmin } from './bootstrap-p
 import { seedLegacyPlatformBucket } from './__tests__/legacy-catalog-rows.testkit.js';
 import { backfillOrgAdminGrants, reconcileOrgAdminGrant } from './auto-org-admin-grant.js';
 import { buildContextForUser } from './explain-engine.js';
-import { SysPosition } from './objects/sys-position.object.js';
+import { SysPosition } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
-import { SysPermissionSet } from './objects/sys-permission-set.object.js';
-import { SysPositionPermissionSet } from './objects/sys-position-permission-set.object.js';
+import { SysPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
+import { SysPositionPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 

@@ -1729,16 +1729,30 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                                 : Array.isArray((appsRes as any)?.items) ? (appsRes as any).items : [];
                             for (const app of apps) {
                                 if (app && typeof app === 'object' && app._unpublished === true && typeof app.name === 'string') {
+                                    // `false`, not a delete: ADR-0045 §3 makes
+                                    // publish/unpublish symmetric ("unpublish =
+                                    // re-hide"), so the gate stays a two-state
+                                    // flag rather than a key whose absence has
+                                    // to be re-derived. Whatever `hidden` the
+                                    // app carries is copied through untouched.
+                                    const item: Record<string, unknown> = { ...app, _unpublished: false };
+                                    // [#23120, ADR-0010 §3.5] …but not a
+                                    // `protection` block. This body is the
+                                    // server's, built from the stored row, and
+                                    // a row stored before the metadata save door
+                                    // refused the block can still carry one: the
+                                    // save would be refused with
+                                    // `400 VALIDATION_ERROR` and the app left
+                                    // `_unpublished`. Only the package loader
+                                    // translates the block into a lock, so it
+                                    // never bound and dropping it changes no
+                                    // verdict. Dropped from this copy only — the
+                                    // row the read returned is not mutated.
+                                    delete item.protection;
                                     await protocol.saveMetaItem({
                                         type: 'app',
                                         name: app.name,
-                                        // `false`, not a delete: ADR-0045 §3 makes
-                                        // publish/unpublish symmetric ("unpublish =
-                                        // re-hide"), so the gate stays a two-state
-                                        // flag rather than a key whose absence has
-                                        // to be re-derived. Whatever `hidden` the
-                                        // app carries is copied through untouched.
-                                        item: { ...app, _unpublished: false },
+                                        item,
                                         packageId: id,
                                         ...(body?.actor ? { actor: body.actor } : {}),
                                     });

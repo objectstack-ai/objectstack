@@ -46,9 +46,9 @@
 // lives only inside this test's stack — the showcase's committed metadata is
 // untouched, so what the stock app declares is unchanged.
 //
-// Why a private boot rather than the worker-shared showcase: this file inserts a
-// `sys_permission_set` row, which the shared harness's eligibility rules exclude
-// outright (no permission-set metadata edits — see `shared-showcase.ts`).
+// Why a private boot rather than the worker-shared showcase: this file saves a
+// permission set, which the shared harness's eligibility rules exclude outright
+// (no permission-set metadata edits — see `shared-showcase.ts`).
 //
 // ── One thing measured here and deliberately NOT asserted ────────────────────
 //
@@ -117,25 +117,22 @@ describe('showcase FLS read side: a readable:false field is STRIPPED, not masked
     // would come back readable and every assertion here would fail as if the
     // strip were broken. Deactivation is the activation ledger's (ADR-0131 D3);
     // this set has no ledger row, so it is in effect.
-    // [ADR-0131 D3/D4] Authored through the data door, as Setup authors it: the
-    // write-through stores the definition the security catalog resolves. A
-    // system-context row insert has no definition and grants nothing.
-    const authored = await stack.apiAs(adminTok, 'POST', '/data/sys_permission_set', {
+    // [ADR-0131 D3/D4] Authored through the metadata door, the security
+    // catalog's write path: the definition it stores is what the resolver reads.
+    const authored = await stack.apiAs(adminTok, 'PUT', `/meta/permission/${SCRATCH_SET}`, {
         name: SCRATCH_SET,
         label: 'Scratch: FLS read deny on showcase_project.budget',
         description:
           'Test-authored (#9481). Stock showcase authors no readable:false grant — see #9308.',
-        object_permissions: JSON.stringify({}),
+        objects: {},
         // Object-QUALIFIED key. A bare `budget` key silently enforces nothing:
         // the evaluator matches `<object>.<field>` prefixes, which is the exact
         // defect the permission-zoo audit found on the write half.
-        field_permissions: JSON.stringify({
+        fields: {
           [`showcase_project.${DENIED}`]: { readable: false, editable: false },
-        }),
-        system_permissions: JSON.stringify([]),
-        active: true,
+        },
       });
-    expect(authored.status, 'scratch set authored through the data door').toBeLessThan(300);
+    expect(authored.status, 'scratch set authored through the metadata door').toBeLessThan(300);
     const ps = await catalogPermissionSet(ql, SCRATCH_SET);
     expect(ps, 'scratch permission set authored').toBeTruthy();
     const memberId = (await ql.findOne('sys_user', { where: { email: MEMBER }, context: SYS }))?.id;
