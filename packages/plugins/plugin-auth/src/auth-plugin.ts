@@ -2200,13 +2200,14 @@ export class AuthPlugin implements Plugin {
       // above; real sign-ups never pass through here. `isSystem` exempts the
       // statically-readonly `email_verified` column, the same doorway the
       // better-auth adapter's own verification write uses.
+      let seededId: string | undefined;
       try {
         const seededRows = await ql.find(
           SystemObjectName.USER,
           { where: { email }, limit: 1 },
           { context: { isSystem: true } },
         );
-        const seededId = (Array.isArray(seededRows) ? seededRows[0] : undefined)?.id;
+        seededId = (Array.isArray(seededRows) ? seededRows[0] : undefined)?.id;
         if (seededId) {
           await ql.update(
             SystemObjectName.USER,
@@ -2221,6 +2222,11 @@ export class AuthPlugin implements Plugin {
         // stays unverified and walled elevation refuses it loudly.
         ctx.logger.warn(`[auth] dev admin email_verified stamp failed: ${stampErr?.message ?? stampErr}`);
       }
+      // [#23175] Complete the workspace this admin lands in with the host's
+      // zone, as the console's own workspace-creation paths do with the
+      // creator's — see the method. Only on the seeding boot: a later boot
+      // takes the database as it finds it.
+      if (seededId) await this.seedDevWorkspaceTimezone(ctx, ql, seededId);
       ctx.logger.info(`🔑 Dev admin seeded: ${email} / ${password}`);
       // Surface the credentials in the `serve` startup banner. The
       // ctx.logger line above is swallowed by serve's boot-quiet window
@@ -2232,6 +2238,132 @@ export class AuthPlugin implements Plugin {
       // Best-effort. The common benign case is a race where a real sign-up
       // landed first (unique-email violation) — treat as "already seeded".
       ctx.logger.warn(`[auth] dev admin seed skipped: ${err?.message ?? err}`);
+    }
+  }
+
+  /**
+   * [#23175] Give the workspace the dev seed's admin lands in the HOST's time
+   * zone, so a fresh `os dev` database opens on the shell and not on the
+   * console's "Set the workspace timezone" dialog.
+   *
+   * The dialog asks an administrator once while the workspace's
+   * `localization.timezone` still resolves from the manifest default — the
+   * `source: 'default'` the console reads off `GET /api/settings/localization`
+   * — and the console's own workspace-creation paths send the creator's
+   * browser zone so a workspace they create is never asked about. This seed
+   * mints its admin outside those paths, so it completes the workspace the
+   * same way. The creator here is the machine running `os dev`, which is
+   * where the browser opening the console usually runs too.
+   *
+   * - **The value** is the host's resolved zone,
+   *   `Intl.DateTimeFormat().resolvedOptions().timeZone` (`TZ` included).
+   *   `UTC` is written like any other answer: it IS the host's zone, and the
+   *   console's creation path sends whatever the browser reports. A host that
+   *   reports NO zone gets nothing written, so the dialog still asks — it is
+   *   right whenever no zone is set.
+   * - **The door** is the settings service's own write (`set`), the one the
+   *   dialog's confirm reaches through `PUT /api/settings/localization`: one
+   *   `tenant` row per organization, the key's `iana_time_zone` domain judged
+   *   there, audited there. A zone the door refuses leaves the default, and
+   *   the dialog asks. ⛔ Not `sys_organization.timezone`: that column is a
+   *   different key, which the dialog does not read.
+   * - **The workspace** is each organization the seeded admin is a member of,
+   *   read from `sys_member` — what the admin's session opens in under every
+   *   posture (under `single`, the Default Organization the boot created and
+   *   the default-organization bootstrap bound them to during the sign-up
+   *   above), without this method re-deciding which one that is.
+   * - **Never over a set zone:** only where the key still resolves from the
+   *   default. A value on any rung (this organization's, the global one, an
+   *   env override) is left as it is.
+   *
+   * Best-effort, like the rest of the seed: the admin is seeded whether or not
+   * this lands, and a miss costs the dialog, nothing else.
+   */
+  private async seedDevWorkspaceTimezone(
+    ctx: PluginContext,
+    ql: IDataEngine,
+    userId: string,
+  ): Promise<void> {
+    let zone: string | undefined;
+    try {
+      const reported = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      zone = typeof reported === 'string' && reported.length > 0 ? reported : undefined;
+    } catch {
+      zone = undefined;
+    }
+    if (!zone) {
+      ctx.logger.debug(
+        '[auth] dev seed: this host reports no time zone, so the workspace keeps the default and the console asks for one',
+      );
+      return;
+    }
+
+    // Structural, as `SettingsReadSurface` above is: the slot carries no
+    // `packages/spec` contract and plugin-auth does not depend on
+    // service-settings. Absent, there is no store to write and no dialog to
+    // spare (the dialog reads the same service).
+    type SettingsWriteDoor = {
+      get(
+        namespace: string,
+        key: string,
+        ctx?: Record<string, unknown>,
+      ): Promise<{ source?: string } | undefined>;
+      set(namespace: string, key: string, value: unknown, ctx?: Record<string, unknown>): Promise<unknown>;
+    };
+    let settings: SettingsWriteDoor | undefined;
+    try {
+      settings = ctx.getService<SettingsWriteDoor>('settings');
+    } catch {
+      settings = undefined;
+    }
+    if (!settings || typeof settings.get !== 'function' || typeof settings.set !== 'function') return;
+
+    let organizationIds: string[] = [];
+    try {
+      const memberships = await ql.find(
+        SystemObjectName.MEMBER,
+        { where: { user_id: userId }, limit: 50 },
+        { context: { isSystem: true } },
+      );
+      organizationIds = [
+        ...new Set(
+          (Array.isArray(memberships) ? memberships : [])
+            .map((m: any) => m?.organization_id)
+            .filter((id: unknown): id is string => typeof id === 'string' && id !== ''),
+        ),
+      ];
+    } catch (err: any) {
+      ctx.logger.warn(
+        `[auth] dev seed: the seeded admin's workspace could not be read (${err?.message ?? err}), so its ` +
+          "time zone was not set to this host's zone. The console will ask an administrator for one on first " +
+          'sign-in; it can also be set under Setup → Localization.',
+      );
+      return;
+    }
+    if (organizationIds.length === 0) {
+      ctx.logger.debug(
+        "[auth] dev seed: the seeded admin holds no organization membership yet, so no workspace time zone was set",
+      );
+      return;
+    }
+
+    for (const organizationId of organizationIds) {
+      const scope = { tenantId: organizationId };
+      try {
+        const current = await settings.get('localization', 'timezone', scope);
+        if (current?.source !== 'default') continue;
+        await settings.set('localization', 'timezone', zone, scope);
+        ctx.logger.info(
+          `[auth] dev seed: workspace ${organizationId} takes this host's time zone, ${zone} ` +
+            '(Setup → Localization changes it)',
+        );
+      } catch (err: any) {
+        ctx.logger.warn(
+          `[auth] dev seed: workspace ${organizationId} was not given this host's time zone (${zone}): ` +
+            `${err?.message ?? err}. The console will ask an administrator for one on first sign-in; it ` +
+            'can also be set under Setup → Localization.',
+        );
+      }
     }
   }
 
