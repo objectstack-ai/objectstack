@@ -575,9 +575,11 @@ that card lands; no row is declared without an enforcer.
 - **A multi-organization deployment's anonymous endpoints answer a located refusal** where they need
   an organization, until D5 is built. Today those requests are refused at the CRUD gate with nothing
   granted, so no request that is served today stops being served.
-- **The guest is one principal on one pipeline.** No guest special case enters the row-level
-  evaluator, the CRUD gate or the masker; what differs for the guest is what it holds (D3) and where
-  it acts (D4), both resolved before any gate runs.
+- **The guest is one principal on one pipeline.** The row-level evaluator carries one guest special
+  case: the guest never takes its sharing-model (OWD) branch, so it reaches rows only through share
+  links (and, when it exists, an explicit guest sharing rule; D3 item 6). No guest special case
+  enters the CRUD gate or the masker; what differs for the guest there is what it holds (D3) and
+  where it acts (D4), both resolved before any gate runs.
 - **Class 6 changes nothing that serves today.** `authorizeDownload` already honours ADR-0104's
   opt-in. Listing it in D2 makes the re-measurement read a `public_read` download as a door and
   not as a gap, and [#22431](https://github.com/objectstack-ai/objectstack/issues/22431), the defect
@@ -595,8 +597,12 @@ Stated so that approving this record approves these readings knowingly.
    and reserves no key.
 2. **The indirect path** (record-change flows fired by a guest-written row) lies outside D2b's
    refusal, as stated there: recorded, not decided.
-3. **The guest's row scope** is stated as a contract (one pipeline, no special case, ADR-0090 D9's
-   division of labour); its measured outcome per sharing model is E1's pin.
+3. **The guest's row scope** is no longer open: ruling C on
+   [#23266](https://github.com/objectstack-ai/objectstack/issues/23266)
+   ([`6148183570`](https://github.com/objectstack-ai/objectstack/issues/23266#issuecomment-6148183570))
+   settled it as share links only, never the object's sharing model (D3 item 6), and E1 pins it: with
+   a bound read set and no share link, `private`, `public_read`, `public_read_write` and
+   `controlled_by_parent` each read zero rows.
 
 ## Alternatives considered
 
