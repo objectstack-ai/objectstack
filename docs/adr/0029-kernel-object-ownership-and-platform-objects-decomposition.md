@@ -666,9 +666,10 @@ binding `P` against the packaged owner's id `O`:
 
 The last row is a real decision, not bookkeeping, and the reason is a store
 asymmetry worth recording: the overlay-uniqueness index keys on
-`(type, name, organization_id, COALESCE(package_id, ''))` (ADR-0005 amendment
-2026-08-09, #6825), so `sys_metadata` can legitimately hold two active rows for
-one `(type, name)` bound to two packages. For every other type that is fine —
+`(type, name, organization_id, COALESCE(package_id, ''), COALESCE(bundle_member, ''))`
+(ADR-0005, amended 2026-08-09 by #6825 and 2026-10-12 by #22877 ruling A — see its
+"What delivers overlay uniqueness today"), so `sys_metadata` can legitimately hold
+two active rows for one `(type, name)` bound to two packages. For every other type that is fine —
 two packages really can ship `page/home`. For `object` it is not representable:
 `computeFQN` is identity, so the registry holds exactly one entry per object name
 and could never serve two. Refusing the mis-bound row is what keeps the two

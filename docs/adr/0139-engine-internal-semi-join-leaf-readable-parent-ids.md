@@ -60,7 +60,7 @@ classes stay on today's bounded fail-closed probe, by name. ⛔ Not a general su
 
 One module decides which rows are judged and turns the answer into a WHERE
 (`packages/plugins/plugin-audit/src/parent-record-read-gate.ts#computeParentRecordFilter`); readability itself is one
-caller-scoped engine read per parent object (`packages/plugins/plugin-audit/src/comment-access-hooks.ts#resolveReadableParentIds`),
+caller-scoped engine read per parent object (`packages/core/src/security/readable-parent-ids.ts#resolveReadableParentIds`),
 so the parent's own CRUD grant, OWD/sharing and RLS decide and no second derivation exists. The bound is
 `packages/plugins/plugin-audit/src/parent-record-read-gate.ts#PARENT_GATE_SCAN_LIMIT` (2,000), the comment gate's
 `packages/plugins/plugin-audit/src/comment-access-hooks.ts#READ_SCAN_LIMIT` reused. The consumers, as read on
