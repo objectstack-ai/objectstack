@@ -720,8 +720,11 @@ describe('[#23198] the orphan adoption rebinds runtime-created items only, and t
         expect(await doors(protocol, RT_DEFAULT, RT_OBJ)).toEqual(servedOnEveryDoor('All Tickets', 2));
         expect(await doors(protocol, DEFAULT_VIEW)).toEqual(servedOnEveryDoor('All Tasks (X)', 6));
 
+        // After a restart, the views it expands to are the base's too. (The
+        // boot hydrates the container's own body as stored, without the
+        // binding stamped on it, as it hydrates every bound row.)
         const next = await restart(rows);
-        for (const name of [RT_OBJ, RT_DEFAULT, RT_OPEN]) {
+        for (const name of [RT_DEFAULT, RT_OPEN]) {
             expect(next.registry.bare('view', name)?._packageId, name).toBe(BASE);
         }
         expect(await doors(next.protocol, RT_OPEN, RT_OBJ)).toEqual(servedOnEveryDoor('Open', 1));
