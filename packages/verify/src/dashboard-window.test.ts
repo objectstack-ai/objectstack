@@ -3,12 +3,12 @@
 // The dashboard date-window family — what it reads from the metadata, what it
 // proves on a real stack, and the controls that keep its green honest:
 //
-//   • two NEGATIVE controls, each a deployment whose analytics bridge does not
-//     honour the window — built with `AnalyticsServicePlugin`'s published
-//     `executeAggregate` option, no engine change: one drops the window from
-//     the query that reaches storage (a floor that matches every row), one
-//     answers nothing whenever a window is present (a window that zeroes the
-//     widget). Both are found, and the first is named inert;
+//   • two NEGATIVE controls, each an app whose own plugin keeps the window
+//     from reaching storage — an aggregate middleware on the engine's
+//     published seam (`registerMiddleware`), no engine change: one drops the
+//     window from the query (a floor that matches every row), one makes a
+//     windowed query match nothing (a window that zeroes the widget). Both are
+//     found, and the first is named inert;
 //   • the ATTRIBUTION control: an app hook that rewrites the window's field on
 //     write makes the probe not run, never contradicted — the family judges a
 //     window only over rows that read back as written.
@@ -17,7 +17,6 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 import { defineStack } from '@objectstack/spec';
 import { DATE_RANGE_PRESETS } from '@objectstack/spec/data';
-import { AnalyticsServicePlugin } from '@objectstack/service-analytics';
 
 import { bootStack, type VerifyStack } from './harness.js';
 import {
@@ -246,6 +245,7 @@ const controlSource = {
         subject: { type: 'text', label: 'Subject', required: true },
         opened_at: { type: 'datetime', label: 'Opened at' },
         logged_at: { type: 'datetime', label: 'Logged at' },
+        audited_at: { type: 'datetime', label: 'Audited at', internal: true },
       },
     },
   ],
@@ -258,6 +258,7 @@ const controlSource = {
       widgets: [
         { id: 'cases', type: 'metric', dataset: 'case_metrics', values: ['case_count'] },
         { id: 'logged', type: 'metric', dataset: 'case_metrics', values: ['case_count'], filterBindings: { dateRange: 'logged_at' } },
+        { id: 'audited', type: 'metric', dataset: 'case_metrics', values: ['case_count'], filterBindings: { dateRange: 'audited_at' } },
       ],
     },
   ],
@@ -283,35 +284,34 @@ function without(filter: unknown, field: string): unknown {
 const mentions = (filter: unknown, field: string): boolean => JSON.stringify(filter ?? {}).includes(`"${field}"`);
 
 /**
- * An analytics service whose bridge to storage does what a broken one would:
- * `drop` hands the engine the query with the window's field removed (every row
- * passes the window), `zero` answers no row whenever a window is present.
+ * The app's own plugin, as `os serve` and `bootStack` compose it: an aggregate
+ * middleware on `wnc_case` (the engine's published seam, `registerMiddleware`,
+ * read by `ctx.operation === 'aggregate'` and `ctx.ast.where`) that does what
+ * a broken storage path would — `drop` removes the window's condition from the
+ * query (every row passes the window), `zero` makes a windowed query match no
+ * row (the window zeroes the widget).
  */
-function brokenBridge(mode: 'drop' | 'zero', holder: { engine?: any }): AnalyticsServicePlugin {
-  return new AnalyticsServicePlugin({
-    queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
-    executeAggregate: async (objectName, { groupBy, aggregations, filter, timezone, context }) => {
-      if (mode === 'zero' && mentions(filter, 'opened_at')) return [];
-      return holder.engine.aggregate(objectName, {
-        where: mode === 'drop' ? without(filter, 'opened_at') : filter,
-        groupBy,
-        aggregations: aggregations?.map((a) => ({ function: a.method, field: a.field, alias: a.alias, ...(a.filter ? { filter: a.filter } : {}) })),
-        timezone,
-        context,
-      });
-    },
-  });
-}
+const windowBreaker = (mode: 'drop' | 'zero') => ({
+  name: `com.example.wnc.window-${mode}`,
+  version: '1.0.0',
+  init: async () => {},
+  start: async (ctx: { getService: (name: string) => any }) => {
+    ctx.getService('objectql').registerMiddleware(async (op: { operation: string; ast?: { where?: unknown } }, next: () => Promise<void>) => {
+      if (op.operation === 'aggregate' && op.ast && mentions(op.ast.where, 'opened_at')) {
+        op.ast.where = mode === 'drop' ? without(op.ast.where, 'opened_at') : { $and: [op.ast.where, { subject: '__no_row__' }] };
+      }
+      await next();
+    }, { object: 'wnc_case' });
+  },
+});
 
-describe.each(['drop', 'zero'] as const)('NEGATIVE CONTROL — an analytics bridge that does not honour the window (%s)', (mode) => {
+describe.each(['drop', 'zero'] as const)("NEGATIVE CONTROL — an app plugin that keeps the window from storage (%s)", (mode) => {
   let stack: VerifyStack;
   let report: DashboardWindowReport;
-  const app = defineStack(controlSource as never) as unknown as typeof controlSource;
-  const holder: { engine?: any } = {};
+  const app = defineStack({ ...controlSource, plugins: [windowBreaker(mode)] } as never) as unknown as typeof controlSource;
 
   beforeAll(async () => {
-    stack = await bootStack(app as never, { analytics: brokenBridge(mode, holder) });
-    holder.engine = await stack.kernel.getServiceAsync('data');
+    stack = await bootStack(app as never);
     report = await runDashboardWindowProofs(stack, await stack.signIn(), app);
   }, BOOT_TIMEOUT + RUN_TIMEOUT);
 
@@ -343,5 +343,10 @@ describe.each(['drop', 'zero'] as const)('NEGATIVE CONTROL — an analytics brid
     expect(r.status).toBe('inconclusive');
     expect(r.reason).toMatch(/reads back logged_at = "2020-01-01T00:00:00\.000Z", not \d{4}-\d{2}-\d{2}T12:00:00\.000Z: something rewrote it on write/);
     expect(r.measures[0]!.presets.every((p) => p.outcome === 'not-run')).toBe(true);
+    // A column the read does not return (`internal: true`) is not called rewritten: it is unconfirmed.
+    const audited = widgetOf(report, 'audited');
+    expect(audited.status).toBe('inconclusive');
+    expect(audited.reason).toMatch(/reads back no audited_at \(the read does not return that field\), so what was written there cannot be confirmed$/);
+    expect(report.summary.widgets).toMatchObject({ contradicted: 1, inconclusive: 2, proven: 0 });
   });
 });

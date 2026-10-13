@@ -872,13 +872,17 @@ export async function runDashboardWindowProofs(
         ? String(stamped ?? '').slice(0, 10) === day
         : Date.parse(String(stamped)) === Date.parse(stamp(day));
       const drifted = [...held].find(([k, v]) => !Array.isArray(v) && !sameValue(v, got?.[k]));
+      const misread = (field: string, value: unknown, wrote: unknown): string =>
+        value === undefined
+          ? `the fixture row for ${day} reads back no ${field} (the read does not return that field), so what was written there cannot be confirmed`
+          : `the fixture row for ${day} reads back ${field} = ${clip(JSON.stringify(value), 60)}, not ${typeof wrote === 'string' ? wrote : JSON.stringify(wrote)}: something rewrote it on write`;
       if (!got || !stampHolds || drifted) {
         notRun(
           !got
             ? `the fixture row for ${day} does not read back`
             : !stampHolds
-              ? `the fixture row for ${day} reads back ${c.field} = ${clip(JSON.stringify(stamped), 60)}, not ${stamp(day)}: something rewrote it on write`
-              : `the fixture row for ${day} reads back ${drifted![0]} = ${clip(JSON.stringify(got[drifted![0]]), 60)}, not ${JSON.stringify(drifted![1])}: something rewrote it on write`,
+              ? misread(c.field!, stamped, stamp(day))
+              : misread(drifted![0], got[drifted![0]], drifted![1]),
         );
         return;
       }
