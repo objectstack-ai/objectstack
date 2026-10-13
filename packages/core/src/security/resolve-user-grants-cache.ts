@@ -118,9 +118,6 @@ export const GRANTS_CACHE_WATCHED_OBJECTS: ReadonlySet<string> = new Set([
   'sys_member',
   'sys_user_position',
   'sys_user_permission_set',
-  'sys_position',
-  'sys_position_permission_set',
-  'sys_permission_set',
   'sys_user',
   // [ADR-0131 D3, ADR-0126 §4] The activation ledger: a position or permission
   // set switched off there stops granting (`readDisabledCatalogNames`).

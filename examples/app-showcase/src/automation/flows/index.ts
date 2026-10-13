@@ -3,6 +3,7 @@
 import { defineFlow } from '@objectstack/spec';
 import { DynamicApprovalFlow } from './dynamic-approval.flow';
 import { ApproverBindingsFlow } from './approver-bindings.flow';
+import { RecalcEstimatesFlow, RecalcTaskEstimateFlow } from './recalc-estimate.flow';
 
 /**
  * Task Completed → Notify — an autolaunched, record-triggered flow that fires
@@ -2012,4 +2013,8 @@ export const allFlows = [
   // designer's Value control has a specimen for each. Draft on purpose — see
   // the module docstring.
   ApproverBindingsFlow,
+  // The recalc behind the two `api` actions, served by the declared
+  // `showcase_recalc_estimates_api` endpoint (src/system/apis/).
+  RecalcEstimatesFlow,
+  RecalcTaskEstimateFlow,
 ];

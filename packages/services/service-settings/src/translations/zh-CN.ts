@@ -288,7 +288,7 @@ export const zhCN: PlatformTranslationData = {
         },
         audience_self_registration_permission_set: {
           label: '自助注册权限集',
-          help: '每个自助注册用户获得的 sys_permission_set 名称(可显式声明 member_default;admin_full_access 会被拒绝)。',
+          help: '每个自助注册用户获得的权限集名称(可显式声明 member_default;admin_full_access 会被拒绝)。',
         },
         password_min_length: { label: '密码最小长度' },
         password_max_length: { label: '密码最大长度', help: '防止超长密码哈希导致的拒绝服务。' },

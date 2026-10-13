@@ -16,8 +16,10 @@ export const entry: SemanticMigration = {
     + 'caller below the platform operator (an ADR-0090 D12 delegate whose scope authors environment '
     + 'sets included): PUT, DELETE, publish and rollback of /meta/position, /meta/permission and '
     + '/meta/capability on @objectstack/rest, and PUT on the runtime dispatcher; the permission-set '
-    + 'clone door (POST /security/permission-sets/:name/clone); and a data-door insert, update or '
-    + 'delete on sys_position, sys_permission_set and sys_capability through @objectstack/plugin-security',
+    + 'clone door (POST /security/permission-sets/:name/clone). A data-door insert, update or delete '
+    + 'on sys_position, sys_permission_set and sys_capability through @objectstack/plugin-security was '
+    + 'refused the same way only while those row objects were registered; catalog-row-objects-retired '
+    + 'retires them, so the data door now answers 404 OBJECT_NOT_FOUND to every caller',
   replacement:
     'the platform operator (the `PLATFORM_ADMIN` rung, the deployment\'s declared '
     + '`OS_PLATFORM_OWNER_EMAIL` owner) defines the catalog, in Studio or through a managed package; '
@@ -37,7 +39,8 @@ export const entry: SemanticMigration = {
     + '(403 PERMISSION_DENIED on the runtime dispatcher), the message names the posture and the '
     + 'manage_metadata capability, and another organization\'s holder of that set resolves exactly '
     + 'what it resolved before. A data-door create on sys_position or sys_permission_set by the same '
-    + 'caller answers 403 PERMISSION_DENIED and stores nothing. The platform operator saves the same '
+    + 'caller answers 404 OBJECT_NOT_FOUND (the row objects are retired by catalog-row-objects-retired) '
+    + 'and stores nothing. The platform operator saves the same '
     + 'item with 200, the same organization owner still assigns a catalog permission set to its own '
     + 'member with 201, and on a single deployment a manage_metadata holder saves catalog items '
     + 'exactly as before. Items saved before this change keep their bytes.',

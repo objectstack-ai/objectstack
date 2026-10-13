@@ -42,7 +42,7 @@ export const entry: SemanticMigration = {
     + 'declares a `filter` the tile never reads and refuses a `report` it draws, and the dashboard widget\'s '
     + 'comparison declares a `dimension` this path never reads, so each waits on a ruling between the '
     + 'reference and the read. It is read where every page component\'s props are: the component-props gate '
-    + 'reports a refused value as an advisory `component-props-invalid` / `component-props-unknown-key` finding '
+    + 'reports a refused value as a `component-props-invalid` / `component-props-unknown-key` error '
     + 'on `objectstack validate`, `objectstack build` and `objectstack lint`, and a stored page still saves and '
     + 'loads, because a page component\'s `properties` is not parsed on the metadata save or load path. No '
     + 'conversion is registered: nothing on the load path refuses the shape, and an off-shape value has no '

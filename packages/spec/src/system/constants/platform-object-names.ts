@@ -105,10 +105,6 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
   /** `@objectstack/plugin-security` — ADR-0090 permission model v2. */
   'plugin-security': [
     'sys_audience_binding_suggestion',
-    'sys_capability',
-    'sys_permission_set',
-    'sys_position',
-    'sys_position_permission_set',
     'sys_user_permission_set',
     'sys_user_position',
   ],

@@ -49,7 +49,7 @@ describe('validateComponentProps — undeclared keys', () => {
     );
     expect(unknownKeys(findings)).toHaveLength(1);
     const [f] = unknownKeys(findings);
-    expect(f.severity).toBe('warning');
+    expect(f.severity).toBe('error');
     expect(f.path).toBe('pages[0].regions[0].components[0].properties.titel');
     expect(f.where).toBe('page "probe_page" · page:header');
     // ⚠️ The rename PHRASING moved at #4001 batch A and the assertion follows
@@ -211,7 +211,7 @@ describe('validateComponentProps — value verdicts', () => {
       ]),
     );
     expect(invalid(findings)).toHaveLength(1);
-    expect(invalid(findings)[0].severity).toBe('warning');
+    expect(invalid(findings)[0].severity).toBe('error');
     expect(invalid(findings)[0].path).toBe('pages[0].regions[0].components[0].properties.limit');
     expect(invalid(findings)[0].message).toContain('expected number, received string');
   });
@@ -297,7 +297,7 @@ describe('validateComponentProps — value verdicts', () => {
    * binding keys of the three data-source-bound elements are retired now, and
    * the requirement sits on the binding the renderers actually read. One of
    * the three with no `dataSource.object` is a `component-props-invalid`
-   * finding AT that path — the rule's existing finding, not a new rule.
+   * error AT that path — the rule's existing finding, not a new rule.
    */
   describe('the data-source-bound elements owe `dataSource.object` (#11509)', () => {
     const BOUND = ['element:record_picker', 'element:number', 'element:repeater'] as const;
@@ -318,7 +318,7 @@ describe('validateComponentProps — value verdicts', () => {
     it.each(BOUND)('%s with no binding: one finding, at `dataSource.object`', (type) => {
       const findings = validateComponentProps(stackWith([{ type, properties: PROPS[type] }]));
       expect(findings.map((f) => [f.rule, f.path, f.severity])).toEqual([
-        [COMPONENT_PROPS_INVALID, 'pages[0].regions[0].components[0].dataSource.object', 'warning'],
+        [COMPONENT_PROPS_INVALID, 'pages[0].regions[0].components[0].dataSource.object', 'error'],
       ]);
       expect(findings[0]!.message).toContain(`\`${type}\` reads its records from the node-level \`dataSource\` binding`);
       expect(findings[0]!.hint).toContain('dataSource: {');
@@ -622,7 +622,7 @@ describe('validateComponentProps — unregistered types are skipped', () => {
  * the new entries are reachable by construction. What must be pinned from THIS
  * side is behaviour through the real door:
  *
- *  1. anti-vacuity — the warning FIRES on the #7750 specimen shape (an
+ *  1. anti-vacuity — the finding FIRES on the #7750 specimen shape (an
  *     `object-grid` authored with plural `filters`), with the rename named;
  *  2. the clean-corpus control — the showcase pages' actual authored nodes
  *     (copied, not imported) stay finding-free, so registering the family did
@@ -642,13 +642,12 @@ describe('validateComponentProps — object-* blocks are dispatched (#7751)', ()
     );
     expect(unknownKeys(findings)).toHaveLength(1);
     const [f] = unknownKeys(findings);
-    expect(f.severity).toBe('warning');
+    expect(f.severity).toBe('error');
     expect(f.path).toBe('pages[0].regions[0].components[0].properties.filters');
     expect(f.where).toBe('page "probe_page" · object-grid');
     expect(f.message).toContain('`filters`');
     expect(f.message).toContain('Did you mean `filters` → `filter`?');
-    // Warning tier only — an undeclared key is not the retired-key class
-    // #23026 moved to `error`.
+    // An undeclared key only — no value verdict rides beside it.
     expect(invalid(findings)).toEqual([]);
   });
 
@@ -743,7 +742,7 @@ describe('validateComponentProps — reads the post-conversion (normalized) tier
 });
 
 describe('validateComponentProps — wiring', () => {
-  it('is registered as a gating rule on all three authoring commands (#23026: a retired key is an error)', () => {
+  it('is registered as a gating rule on all three authoring commands (every finding is an error)', () => {
     const entry = AUTHORING_RULES.find((r) => r.name === 'validateComponentProps');
     expect(entry).toBeDefined();
     expect(entry?.tier).toBe('gating');
@@ -756,19 +755,19 @@ describe('validateComponentProps — wiring', () => {
     });
     const mine = findings.filter((f) => f.rule.startsWith('component-props'));
     expect(mine).toHaveLength(1);
-    expect(mine[0].severity).toBe('warning');
+    expect(mine[0].severity).toBe('error');
     expect(mine[0].rule).toBe(COMPONENT_PROPS_UNKNOWN_KEY);
   });
 });
 
 /**
- * #23026 — the error upgrade the module header planned, for ONE class: a value
- * verdict a `retiredKey()` tombstone raises is an `error`; every other finding
- * stays a `warning`. Asserted on rule id, severity and path — the prescription
- * is asserted as CARRIED (read back from the spec's own tombstone), never as
- * prose copied here.
+ * #23026 — the error upgrade the module header planned, for its first class: a
+ * value verdict a `retiredKey()` tombstone raises is an `error` carrying the
+ * tombstone's prescription. Asserted on rule id, severity and path — the
+ * prescription is asserted as CARRIED (read back from the spec's own
+ * tombstone), never as prose copied here.
  */
-describe('validateComponentProps — a retired key is an error, nothing else is (#23026)', () => {
+describe('validateComponentProps — a retired key is an error (#23026)', () => {
   /** The prescription the spec's own tombstone raises for `type.key`, read from the schema. */
   const prescription = (type: string, key: string): string => {
     const schema = (ComponentPropsMap as unknown as Record<string, { safeParse: (v: unknown) => { error?: { issues: Array<{ path: PropertyKey[]; message: string }> } } }>)[type];
@@ -837,65 +836,117 @@ describe('validateComponentProps — a retired key is an error, nothing else is 
     ]);
   });
 
-  it('leaves that union verdict a warning when the same arm also rejects a value for another reason', () => {
-    const findings = validateComponentProps(
-      stackWith([{
-        type: 'object-form',
-        properties: { objectName: 'task', sections: [{ label: 'S', fields: [{ field: 'owner', publicPicker: true, colSpan: 'wide' }] }] },
-      }]),
-    );
-    expect(findings.map((f) => [f.rule, f.severity])).toEqual([[COMPONENT_PROPS_INVALID, 'warning']]);
-  });
-
-  it('classifies per issue: a retired key beside a wrongly-typed prop is one error and one warning', () => {
-    const findings = validateComponentProps(
-      stackWith([{ type: 'object-grid', properties: { objectName: 'task', defaultFilters: [], pageSize: 'ten' } }]),
-    );
-    const base = 'pages[0].regions[0].components[0].properties';
-    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
-      [COMPONENT_PROPS_INVALID, 'error', `${base}.defaultFilters`],
-      [COMPONENT_PROPS_INVALID, 'warning', `${base}.pageSize`],
-    ]);
-  });
-
-  // The two closed-set refusals that landed beside this change reach the rule
-  // as `component-props-invalid` too, and are not the retired-key class.
-  it('keeps a url action\'s refused `target` scheme a warning', () => {
-    const findings = validateComponentProps(
-      stackWith([{ type: 'element:button', properties: { label: 'Go', action: { type: 'url', target: 'javascript:alert(1)' } } }]),
-    );
-    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
-      [COMPONENT_PROPS_INVALID, 'warning', 'pages[0].regions[0].components[0].properties.action.target'],
-    ]);
-  });
-
-  it('keeps a `record:details` section `count` whose heading binds no hole a warning', () => {
-    const findings = validateComponentProps(
-      stackWith([{ type: 'record:details', properties: { sections: [{ label: 'Tags', fields: ['tags'], count: { field: 'tags' } }] } }]),
-    );
-    expect(findings.length).toBeGreaterThan(0);
-    expect(findings.every((f) => f.rule === COMPONENT_PROPS_INVALID && f.severity === 'warning')).toBe(true);
-  });
-
-  it('keeps an undeclared key and a missing `dataSource.object` binding warnings', () => {
-    const findings = validateComponentProps(
-      stackWith([
-        { type: 'page:header', properties: { title: 'T', titel: 'typo' } },
-        { type: 'element:number', properties: { aggregate: 'count' } },
-      ]),
-    );
-    expect(findings.map((f) => [f.rule, f.severity])).toEqual([
-      [COMPONENT_PROPS_UNKNOWN_KEY, 'warning'],
-      [COMPONENT_PROPS_INVALID, 'warning'],
-    ]);
-  });
-
   it('reaches the shared pipeline as an error — the run `os validate` / `os build` / `os lint` refuse on', () => {
     const findings = runAuthoringRules('validate', {
       normalized: stackWith([{ type: 'object-grid', properties: { objectName: 'task', defaultFilters: [] } }]) as never,
     });
     const mine = findings.filter((f) => f.rule.startsWith('component-props'));
     expect(mine.map((f) => [f.rule, f.severity])).toEqual([[COMPONENT_PROPS_INVALID, 'error']]);
+  });
+});
+
+/**
+ * #23147 — the rest of the plan: every other finding of the rule is an `error`
+ * too, after an inventory of 0 in this repository and in one corpus authored
+ * outside it (the module header records both). One pin per class and per
+ * code route that files it, so reverting any one severity reds exactly its
+ * own pin. Asserted on rule id, severity and path; the text is not pinned.
+ */
+describe('validateComponentProps — every other class is an error too (#23147)', () => {
+  const at = (rest: string) => `pages[0].regions[0].components[0].${rest}`;
+  const verdicts = (node: unknown) =>
+    validateComponentProps(stackWith([node])).map((f) => [f.rule, f.severity, f.path]);
+
+  describe('class: `component-props-unknown-key`', () => {
+    it('an undeclared key on a strict props schema (the parse\'s `unrecognized_keys`)', () => {
+      expect(verdicts({ type: 'page:header', properties: { title: 'T', titel: 'typo' } })).toEqual([
+        [COMPONENT_PROPS_UNKNOWN_KEY, 'error', at('properties.titel')],
+      ]);
+    });
+
+    it('an undeclared key on a strip-mode object below the bag (the walker)', () => {
+      expect(verdicts({
+        type: 'object-grid',
+        properties: { objectName: 'task', sort: [{ field: 'name', order: 'asc', directoin: 'x' }] },
+      })).toEqual([
+        [COMPONENT_PROPS_UNKNOWN_KEY, 'error', at('properties.sort.0.directoin')],
+      ]);
+    });
+
+    it('an undeclared key on the one union arm that judged keys (`record:highlights` `fields[]`)', () => {
+      expect(verdicts({ type: 'record:highlights', properties: { fields: [{ name: 'status', readOnly: true }] } })).toEqual([
+        [COMPONENT_PROPS_UNKNOWN_KEY, 'error', at('properties.fields.0.readOnly')],
+      ]);
+    });
+  });
+
+  describe('class: `component-props-invalid` that is not a retired key', () => {
+    it('a wrongly-typed prop', () => {
+      expect(verdicts({ type: 'record:related_list', properties: { objectName: 'task', relationshipField: 'p', limit: 'five' } }))
+        .toEqual([[COMPONENT_PROPS_INVALID, 'error', at('properties.limit')]]);
+    });
+
+    it('a missing required prop', () => {
+      expect(verdicts({ type: 'record:related_list', properties: { objectName: 'task' } }))
+        .toEqual([[COMPONENT_PROPS_INVALID, 'error', at('properties.relationshipField')]]);
+    });
+
+    it('a closed-set refusal — a url action\'s `target` scheme', () => {
+      expect(verdicts({ type: 'element:button', properties: { label: 'Go', action: { type: 'url', target: 'javascript:alert(1)' } } }))
+        .toEqual([[COMPONENT_PROPS_INVALID, 'error', at('properties.action.target')]]);
+    });
+
+    it('a closed-set refusal — a `record:details` section `count` whose heading binds no hole', () => {
+      const findings = validateComponentProps(
+        stackWith([{ type: 'record:details', properties: { sections: [{ label: 'Tags', fields: ['tags'], count: { field: 'tags' } }] } }]),
+      );
+      expect(findings.length).toBeGreaterThan(0);
+      expect(findings.every((f) => f.rule === COMPONENT_PROPS_INVALID && f.severity === 'error')).toBe(true);
+    });
+
+    it('a retired enum VALUE — an enum issue, not a tombstone (`object-grid` `exportOptions.formats` `pdf`)', () => {
+      expect(verdicts({ type: 'object-grid', properties: { objectName: 'task', exportOptions: { formats: ['pdf'] } } }))
+        .toEqual([[COMPONENT_PROPS_INVALID, 'error', at('properties.exportOptions.formats.0')]]);
+    });
+
+    it('a missing `dataSource.object` binding on a data-source-bound element', () => {
+      expect(verdicts({ type: 'element:number', properties: { aggregate: 'count' } }))
+        .toEqual([[COMPONENT_PROPS_INVALID, 'error', at('dataSource.object')]]);
+    });
+
+    it('a union verdict where the tombstone\'s arm also rejects a value for another reason', () => {
+      expect(verdicts({
+        type: 'object-form',
+        properties: { objectName: 'task', sections: [{ label: 'S', fields: [{ field: 'owner', publicPicker: true, colSpan: 'wide' }] }] },
+      }).map(([rule, severity]) => [rule, severity])).toEqual([[COMPONENT_PROPS_INVALID, 'error']]);
+    });
+  });
+
+  it('classifies per issue for the FIX, not the severity: a retired key beside a wrongly-typed prop', () => {
+    const findings = validateComponentProps(
+      stackWith([{ type: 'object-grid', properties: { objectName: 'task', defaultFilters: [], pageSize: 'ten' } }]),
+    );
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [COMPONENT_PROPS_INVALID, 'error', at('properties.defaultFilters')],
+      [COMPONENT_PROPS_INVALID, 'error', at('properties.pageSize')],
+    ]);
+    // The retired key's fix is its prescription, the other's a props change:
+    // two different hints for one rule id and one type.
+    expect(findings[0].hint).not.toBe(findings[1].hint);
+  });
+
+  it('reaches the shared pipeline as errors — the run `os validate` / `os build` / `os lint` refuse on', () => {
+    const findings = runAuthoringRules('validate', {
+      normalized: stackWith([
+        { type: 'page:header', properties: { title: 'T', titel: 'typo' } },
+        { type: 'element:number', properties: { aggregate: 'count' } },
+      ]) as never,
+    });
+    const mine = findings.filter((f) => f.rule.startsWith('component-props'));
+    expect(mine.map((f) => [f.rule, f.severity])).toEqual([
+      [COMPONENT_PROPS_UNKNOWN_KEY, 'error'],
+      [COMPONENT_PROPS_INVALID, 'error'],
+    ]);
   });
 });
 

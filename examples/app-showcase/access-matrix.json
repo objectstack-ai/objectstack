@@ -201,26 +201,6 @@
     },
     {
       "permissionSet": "showcase_field_ops_delegate",
-      "object": "sys_permission_set",
-      "create": false,
-      "read": true,
-      "edit": false,
-      "delete": false,
-      "viewAllRecords": false,
-      "modifyAllRecords": false
-    },
-    {
-      "permissionSet": "showcase_field_ops_delegate",
-      "object": "sys_position",
-      "create": false,
-      "read": true,
-      "edit": false,
-      "delete": false,
-      "viewAllRecords": false,
-      "modifyAllRecords": false
-    },
-    {
-      "permissionSet": "showcase_field_ops_delegate",
       "object": "sys_user",
       "create": false,
       "read": true,

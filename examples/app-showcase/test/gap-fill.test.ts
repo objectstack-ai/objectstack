@@ -1,7 +1,5 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { existsSync } from 'node:fs';
-
 import { describe, it, expect } from 'vitest';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { CubeSchema } from '@objectstack/spec/data';
@@ -146,7 +144,7 @@ describe('[#5112] showcase declares its api endpoints again (#5040 E8)', () => {
   it('is wired into the stack definition', () => {
     const apis = (stack as { apis?: Array<{ name: string }> }).apis ?? [];
     expect(apis.map((a) => a.name)).toEqual(
-      expect.arrayContaining(['showcase_task_feed', 'showcase_inquiry_purge_api']),
+      expect.arrayContaining(['showcase_task_feed', 'showcase_inquiry_purge_api', 'showcase_recalc_estimates_api']),
     );
   });
 
@@ -202,15 +200,37 @@ describe('[#5112] showcase declares its api endpoints again (#5040 E8)', () => {
     }
   });
 
-  it('still demonstrates HTTP endpoints in code as well', () => {
-    // The code-mounted counterpart the coverage note points at. If this file
-    // ever disappears the note is lying too, so pin it here rather than
-    // trusting the prose alone. (vitest runs with cwd = the package root, as
-    // test/coverage.test.ts also relies on.)
-    expect(
-      existsSync(`${process.cwd()}/src/system/server/recalc-endpoint.ts`),
-      'the code-mounted endpoint is the showcase’s other live HTTP proof',
-    ).toBe(true);
+  it('the two recalc `api` actions post to the declared recalc endpoint, whose flows run as the caller', () => {
+    // The app mounts no route handler of its own, so an `api` action's target
+    // is reachable only if this stack DECLARES it — an undeclared path is a
+    // bare 404 on click, which no build step can see (the target is just a
+    // string). The coverage note says the recalc is declared and writes as its
+    // caller; this keeps both halves of that sentence true statically. Whether
+    // the write is really judged as the caller is a runtime fact, pinned on a
+    // real boot in showcase-declarative-endpoints.dogfood.test.ts.
+    type Endpoint = { name: string; path: string; method: string; type: string; target?: string };
+    const apis = (stack as { apis?: Endpoint[] }).apis ?? [];
+    const actions = (stack as { actions?: Array<{ name: string; type?: string; target?: unknown }> }).actions ?? [];
+    const flows = (stack as { flows?: Array<{ name: string; runAs?: string; nodes?: Array<{ type: string; config?: { flowName?: string } }> }> }).flows ?? [];
+
+    const recalc = actions.filter((a) => a.name === 'showcase_recalc_estimate' || a.name === 'showcase_recalc_selection');
+    expect(recalc.map((a) => a.name).sort()).toEqual(['showcase_recalc_estimate', 'showcase_recalc_selection']);
+    for (const action of recalc) {
+      expect(action.type).toBe('api');
+      const endpoint = apis.find((e) => e.path === action.target && e.method === 'POST');
+      expect(endpoint, `action '${action.name}' posts to '${String(action.target)}', which this stack does not declare`)
+        .toMatchObject({ name: 'showcase_recalc_estimates_api', type: 'flow', target: 'showcase_recalc_estimates' });
+    }
+
+    // ⛔ Not a system context: the entry flow and the per-task flow its `map`
+    // runs both declare the caller's identity. `system` would let anyone who
+    // can reach the endpoint write rows they may not edit.
+    const entry = flows.find((f) => f.name === 'showcase_recalc_estimates');
+    const perTask = entry?.nodes?.find((n) => n.type === 'map')?.config?.flowName;
+    expect(perTask).toBe('showcase_recalc_task_estimate');
+    for (const name of ['showcase_recalc_estimates', perTask]) {
+      expect(flows.find((f) => f.name === name)?.runAs, `flow '${String(name)}' must run as the caller`).toBe('user');
+    }
   });
 });
 

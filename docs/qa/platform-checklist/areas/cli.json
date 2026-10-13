@@ -391,7 +391,7 @@
       "title": "The published first-run closes: create-objectstack scaffold → install → validate → build → boot → health, with the skills boundary holding",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["new user (published-registry consumer)"],
@@ -409,7 +409,7 @@
         "in a scratch dir: `npx -y create-objectstack@latest qa-first-run -t blank --skip-skills; echo $?` (or the repo's bin against the local registry, for the pre-release variant in fixtures.requires) — the scaffolder runs the install ITSELF (pnpm when its probe finds pnpm, npm otherwise), so its exit code and its install output are the install step's evidence. ⛔ Do not follow it with a second `npm install`: on a pnpm-installed scaffold that fails (17.6.0 and 17.7 alike) and the failure is the extra step's, not the product's",
         "cd qa-first-run && npm run validate; echo $? — then npm run build; echo $?",
         "boot from the artifact exactly as the workflow does: `npx os start --artifact ./dist/objectstack.json --port 8080 > server.log 2>&1 &`, poll /api/v1/health up to 60s, then `curl -fsS http://localhost:8080/api/v1/ready`",
-        "repeat scaffold + validate + build across the template matrix (variants) — remote templates always ship build; run validate where the script exists",
+        "repeat scaffold + validate + build across the template matrix (variants — `blank` only since revision 2: create-objectstack's catalog, packages/create-objectstack/src/template-registry.ts, holds the one bundled template); run validate where the script exists",
         "skills boundary probe: in a fresh scaffold run `npx -y skills add <objectstack checkout>/skills --all --copy` and compare the installed set to the curated skills/ catalog; then list repo-root discovery and assert no internal skill (dogfood-verification) surfaces",
         "capture server.log for any boot error"
       ],
@@ -423,7 +423,7 @@
         {
           "clause": "every published template validates and builds — per-variant, no template inferred from a sibling",
           "oracle": "build",
-          "verify": "validate (where present) and build exit 0 for each of the six templates",
+          "verify": "validate (where present) and build exit 0 for each template in variants — one, `blank`: the five remote content templates were retired from the catalog (revision 2), and the published scaffolder offers only blank",
           "evidence": "per-template exit codes"
         },
         {
@@ -461,7 +461,8 @@
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: the published first-run experience mirrored step-for-step from scaffold-e2e.yml, template matrix as variants, RC-window protocol refusal recorded as gate-working instead of failure", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-14", "change": "variants narrowed to [blank]: the five remote content templates were delisted from the marketplace and retired from the create-objectstack catalog, and the scaffold-e2e registry-canary matrix this item mirrors was trimmed with them", "ref": "claude/issue-8677-retire-remote-template-catalog" },
-        { "revision": 3, "date": "2026-10-05", "change": "three corrections from run #21845. (1) The separate `npm install` step is dropped: the scaffolder already installs (pnpm when found, npm otherwise), and a trailing npm install fails on the pnpm layout on 17.6.0 and 17.7 alike, so the step measured itself rather than the product. The scaffolder's own exit code is now the install evidence, which is also what the published canary job in scaffold-e2e.yml does. Of the card's three options this one was picked as the least ambiguous: it does not depend on which package manager the host has, as `pnpm install` would, and it does not change the published scaffold command, as `--skip-install` would. (2) fixtures.requires gains a pre-release variant: pack the workspace to a localhost registry with no upstream for @objectstack/* and create-objectstack, run the repo's bin against it, and prove the candidate via lockfile integrity. The published path measures only what is released. (3) The skills-boundary clause compares unique skill names, not a raw count (card #21851 entries 8 and 9)", "ref": "#21845" }
+        { "revision": 3, "date": "2026-10-05", "change": "three corrections from run #21845. (1) The separate `npm install` step is dropped: the scaffolder already installs (pnpm when found, npm otherwise), and a trailing npm install fails on the pnpm layout on 17.6.0 and 17.7 alike, so the step measured itself rather than the product. The scaffolder's own exit code is now the install evidence, which is also what the published canary job in scaffold-e2e.yml does. Of the card's three options this one was picked as the least ambiguous: it does not depend on which package manager the host has, as `pnpm install` would, and it does not change the published scaffold command, as `--skip-install` would. (2) fixtures.requires gains a pre-release variant: pack the workspace to a localhost registry with no upstream for @objectstack/* and create-objectstack, run the repo's bin against it, and prove the candidate via lockfile integrity. The published path measures only what is released. (3) The skills-boundary clause compares unique skill names, not a raw count (card #21851 entries 8 and 9)", "ref": "#21845" },
+        { "revision": 4, "date": "2026-10-13", "change": "acceptance[1].verify and steps[3] stop naming six templates (stale wording, #23166 C2; parked on #23121, carried by #23169). The variants have been [blank] since revision 2, when the five remote content templates were retired, and create-objectstack's template registry holds blank alone. QA run #23166 scored the published 17.7.0 path's one template. No clause's assertion changed", "ref": "#23169" }
       ]
     },
     {

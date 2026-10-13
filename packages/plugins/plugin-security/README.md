@@ -9,7 +9,7 @@
 
 `plugin-security` hooks into the ObjectQL pipeline and applies authorization on every read and write:
 
-1. **Resolve permission sets** — expand the user's positions and direct grants against `SysPermissionSet` metadata.
+1. **Resolve permission sets** — expand the user's positions and direct grants against the permission sets the security catalog serves by name.
 2. **Check object CRUD** — `allowRead`, `allowCreate`, `allowEdit`, `allowDelete`.
 3. **Inject RLS** — compile row-level policy expressions into query filters.
 4. **Mask fields** — remove non-readable fields from results; flag non-editable fields on writes.
@@ -74,18 +74,21 @@ In CLI / dev-server mode the `OS_MULTI_ORG_ENABLED` environment variable (defaul
 | `PermissionEvaluator` | class | Evaluates object-level CRUD permissions across the held permission sets (most-permissive merge). |
 | `RLSCompiler` | class | Compiles RLS expressions into ObjectQL filter AST. |
 | `FieldMasker` | class | Strips non-readable fields and identifies non-editable ones. |
-| `SysPosition`, `SysPermissionSet` | objects | Metadata objects registered by the plugin. |
+| `SysUserPosition`, `SysUserPermissionSet` | objects | Assignment objects registered by the plugin. |
 
 ## System objects
+
+Positions, permission sets and capabilities are not objects: they live in the security catalog, fed by package declarations and by environment metadata saved through `/api/v1/meta/position`, `/api/v1/meta/permission` and `/api/v1/meta/capability` (ADR-0131 D3). A position names its permission sets in its definition's `permissionSets`.
 
 The plugin contributes these system objects to the kernel:
 
 | Object | Purpose |
 |:---|:---|
-| `sys_position` | Position (岗位) definitions — the flat permission-set distribution layer (ADR-0090 D3). |
-| `sys_permission_set` | Bundles object and field permissions; can include RLS expressions and a delegated-admin `admin_scope` (ADR-0090 D12). |
+| `sys_user_position` | Assigns a position (岗位) to a user, by the position's name (ADR-0090 D3). |
+| `sys_user_permission_set` | Grants a permission set to a user directly, by the set's name (ADR-0131 D4). |
+| `sys_audience_binding_suggestion` | A package's install-time suggestion to grant one of its permission sets to the `everyone` anchor, and the decision on it (ADR-0090 D5/D9). |
 
-Assignment tables (position ↔ user, position ↔ permission_set, user ↔ permission_set) are registered alongside and governed by the delegated-admin and audience-anchor gates.
+The assignment objects are governed by the delegated-admin and audience-anchor gates.
 
 ## RLS expression language
 

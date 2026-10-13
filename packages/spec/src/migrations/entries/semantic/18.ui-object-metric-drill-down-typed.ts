@@ -34,7 +34,7 @@ export const entry: SemanticMigration = {
     + 'shape is not taken whole, because it declares `filter`. The drill `report` stays open: the tile draws a '
     + 'dataset-bound report through the shared drawer, but no spec drill shape declares a `report` member yet. '
     + 'It is read where every page component\'s props are: the component-props gate reports a refused value as '
-    + 'an advisory `component-props-invalid` / `component-props-unknown-key` finding on `objectstack validate`, '
+    + 'a `component-props-invalid` / `component-props-unknown-key` error on `objectstack validate`, '
     + '`objectstack build` and `objectstack lint`, and a stored page still saves and loads, because a page '
     + 'component\'s `properties` is not parsed on the metadata save or load path. No conversion is registered: '
     + 'nothing on the load path refuses the shape, and a drill `filter` has no rewrite that keeps the scope the '

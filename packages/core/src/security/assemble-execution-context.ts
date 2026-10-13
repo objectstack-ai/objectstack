@@ -29,6 +29,25 @@
  *
  * ## Two named entries — the anonymous face is genuinely divergent (commit f586f1a89)
  *
+ * ⭐ The record of this decision is ADR-0138 D9
+ * (`docs/adr/0138-guest-model-anonymous-principal-doors-grants-and-organization.md`),
+ * which transcribes the ruling below; until it was accepted, the ruling lived
+ * only in this comment. Read the record before changing either entry. ADR-0138
+ * D2 closes the adoption rule this section states: an unauthenticated request
+ * is served by exactly six door classes — the public form doors, share links,
+ * the public book and doc metadata reads, `authRequired: false` endpoints of
+ * `type: 'object_operation'`, `authRequired: false` endpoints of
+ * `type: 'flow'`, and the `acl: 'public_read'` file download. Only the two
+ * endpoint classes serve the guest envelope {@link assembleExecutionContextOrGuest}
+ * builds (the runtime face assembles it for every sessionless request, and
+ * every other domain refuses it, since it carries no `userId`); the other four
+ * derive their own narrow authorization from a declaration; everything else
+ * answers 401, decided once per domain. A surface
+ * adopting the guest entry outside that list is an amendment of ADR-0138, never
+ * a call site added here. The list itself is recorded and ratcheted in the
+ * authorization conformance matrix
+ * (`packages/qa/dogfood/test/authz-conformance.matrix.ts`).
+ *
  * The maintainer ruling of 2026-08-08 (Option A, landed as commit f586f1a89) settled the one
  * question that blocked convergence: what an anonymous request yields.
  *

@@ -120,7 +120,7 @@ const manifest = {
       label: 'Self-registration permission set',
       required: false,
       description:
-        'sys_permission_set name granted to each self-registrant (declaring member_default explicitly is fine; admin_full_access is refused). Required whenever the posture permits self-registration.',
+        'Name of the permission set granted to each self-registrant (declaring member_default explicitly is fine; admin_full_access is refused). Required whenever the posture permits self-registration.',
       visible: "${data.audience_posture === 'email_domain' || data.audience_posture === 'open'}",
     },
 

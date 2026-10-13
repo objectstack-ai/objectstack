@@ -43,8 +43,8 @@ export const entry: SemanticMigration = {
     + 'and a bare string, a number or an empty list has no mapping that says what grouping was '
     + 'meant. Metadata AT REST is left exactly as stored — `properties` on a page component is '
     + 'not parsed on the save path, so a stored page keeps loading and renders as it does today; '
-    + 'the component-props gate reports such a value as an advisory `component-props-invalid` '
-    + 'finding at the offending path on `os validate`, `os build` and `os lint`, a padded name '
+    + 'the component-props gate reports such a value as a `component-props-invalid` '
+    + 'error at the offending path on `os validate`, `os build` and `os lint`, a padded name '
     + 'with the received value and the unpadded name to write. ADR-0049 / ADR-0087.',
   acceptanceCriteria:
     'Every `object-grid` and `object-kanban` node in your pages either omits `grouping` or '

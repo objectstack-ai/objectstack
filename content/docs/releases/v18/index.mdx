@@ -37,6 +37,28 @@ under the same rules.
   v18 prerelease's handshake admits `engines.protocol: '^18'` and refuses
   `'^17'`. Read [Upgrading](/docs/upgrading) before you move an app's declared
   range.
+- **The AI skills move with the packages.** From v18 the skills catalog is the
+  `@objectstack/skills` package, on the same version as every other
+  `@objectstack/*` package, and it moves only with them. A 17.x project has no
+  such dependency — its skills were installed with `skills add` from the
+  repository's `main` — and the sync from the package skips every skill a
+  `skills add` installed (`Skipped … installed with skills add`, exit 0), so
+  bumping the packages alone keeps the 17.x-era skill text. After moving the
+  `@objectstack/*` dependencies to 18, remove those skills, then add the
+  catalog at the new `@objectstack/spec`'s version and copy it into your
+  agent's directory ([Upgrading](/docs/upgrading#moving-the-dependency-pins),
+  step 4):
+
+  ```bash
+  npx skills remove objectstack-ai objectstack-api objectstack-automation \
+    objectstack-data objectstack-formula objectstack-i18n objectstack-platform \
+    objectstack-pm-dispatch objectstack-query objectstack-ui objectstack-upgrade -y
+  npm install --save-dev "@objectstack/skills@$(node -p "require('@objectstack/spec/package.json').version")"
+  npx skills@1.7.2 experimental_sync --agent claude-code --copy -y
+  ```
+
+  `npx skills remove --all` replaces the first command when these are the only
+  skills the project has.
 - **GA ends the prerelease.** Reaching GA exits pre mode and publishes the line
   to `latest`. Curated notes for the line's releases are compiled at release
   time and are not written yet; until then, the changesets are the record.

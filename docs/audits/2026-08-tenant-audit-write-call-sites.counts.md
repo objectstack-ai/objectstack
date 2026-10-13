@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 229 |
+| Write call sites | 228 |
 | Object name statically decidable | 155 |
-| Object name chosen at run time | 74 |
-| Against a tenancy-enabled object | 154 |
+| Object name chosen at run time | 73 |
+| Against a tenancy-enabled object | 151 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 168 |
+| Threading a tenant context | 167 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 53 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 124 |
+| Threading a decidably elevated context | 123 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 97 |
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-13 at `bf2f23134`.
+Measured on 2026-10-13 at `7c01d30c9`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 656 |
-| engine-shaped types recognised | 74 |
-| declared objects in the registry | 120 |
-| same-named calls subtracted as non-engine | 162 |
+| tracked non-test sources scanned | 650 |
+| engine-shaped types recognised | 73 |
+| declared objects in the registry | 116 |
+| same-named calls subtracted as non-engine | 160 |
 
 ## Every site
 
@@ -163,10 +163,10 @@ Measured on 2026-10-13 at `bf2f23134`.
 | `packages/plugins/plugin-security/src/invitation-placement.ts` | `insert` | `sys_user_position` | enabled | elevated | 1 |
 | `packages/plugins/plugin-security/src/permission-set-projection.ts` | `insert` | `object` | undecidable | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/permission-set-projection.ts` | `update` | `object` | undecidable | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-security/src/permission-set-projection.ts` | `delete` | `sys_permission_set` | enabled | elevated | 1 |
+| `packages/plugins/plugin-security/src/permission-set-projection.ts` | `delete` | `sys_permission_set` | undeclared-name | elevated | 1 |
 | `packages/plugins/plugin-security/src/position-environment-backfill.ts` | `insert` | `DATA_MIGRATION_FLAG_OBJECT` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-security/src/position-write-through.ts` | `delete` | `sys_position` | enabled | elevated | 1 |
-| `packages/plugins/plugin-security/src/position-write-through.ts` | `update` | `sys_position` | enabled | elevated | 1 |
+| `packages/plugins/plugin-security/src/position-write-through.ts` | `delete` | `sys_position` | undeclared-name | elevated | 1 |
+| `packages/plugins/plugin-security/src/position-write-through.ts` | `update` | `sys_position` | undeclared-name | elevated | 1 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `delete` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `insert` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `update` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 3 |
@@ -211,7 +211,6 @@ Measured on 2026-10-13 at `bf2f23134`.
 | `packages/services/service-mailbox/src/ingest/mail-ingest-service.ts` | `insert` | `MAIL_ASSOCIATION_OBJECT` | undecidable | elevated | 1 |
 | `packages/services/service-mailbox/src/ingest/mail-ingest-service.ts` | `insert` | `MAIL_MESSAGE_OBJECT` | undecidable | elevated | 1 |
 | `packages/services/service-mailbox/src/ingest/mail-ingest-service.ts` | `update` | `MAIL_MESSAGE_OBJECT` | undecidable | elevated | 1 |
-| `packages/services/service-mailbox/src/sync/mailbox-sync-service.ts` | `update` | `MAILBOX_OBJECT` | undecidable | elevated | 1 |
 | `packages/services/service-messaging/src/inbox-channel.ts` | `insert` | `objectName` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-messaging/src/inbox-channel.ts` | `insert` | `receiptObject` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-messaging/src/messaging-service.ts` | `insert` | `RECEIPT_OBJECT` | undecidable | context, elevation undecidable | 1 |

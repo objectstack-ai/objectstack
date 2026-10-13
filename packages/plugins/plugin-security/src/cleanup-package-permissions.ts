@@ -5,20 +5,22 @@
  * data-plane permission rows (ADR-0086 D3, #2747).
  *
  * ADR-0090 D5 promises: "uninstalling the package (removing its sets by
- * `packageId`) revokes it everywhere at once. No ghost grants." The
- * `package_id`/`managed_by` provenance columns (and the `package_id` index on
- * `sys_permission_set`) exist precisely for this query; this module is the
- * wiring that consumes them. Registered with the protocol's uninstall-cleanup
- * seam (the mirror of the publish materializer) so `deletePackage` triggers it
- * without the protocol layer learning `sys_permission_set`'s shape.
+ * `packageId`) revokes it everywhere at once. No ghost grants." Registered
+ * with the protocol's uninstall-cleanup seam so `deletePackage` (and
+ * install-local's uninstall door) trigger it without the protocol layer
+ * learning the grant table's shape.
  *
- * Scope — provenance rules identical to the seeder's (ADR-0086 D4):
- *  - ONLY rows `managed_by: 'package'` with `package_id` = the uninstalled
- *    package are touched. Env-authored sets (`platform`/`user`/absent) and
- *    other packages' sets are never removed, even on a name collision.
- *  - Bindings referencing a removed set (`sys_position_permission_set`,
- *    `sys_user_permission_set`) are deleted first, so no dangling grant rows
- *    survive and re-resolution never sees a half-removed state.
+ * Scope:
+ *  - [ADR-0131 D3/D4, C3 stage 8] The package's permission sets are the names
+ *    it declared in the security catalog. The uninstalling door captures them
+ *    before it withdraws the package (`declared` on the cleanup's arguments,
+ *    `captureUninstallDeclared` in `@objectstack/metadata-protocol`), and every
+ *    grant naming one of them is revoked. No catalog row is read: the row
+ *    objects are retired, and the package withdrawal already took the
+ *    definitions themselves out of the catalog. A grant written before the
+ *    name column existed names nothing, so it cannot be reached here; the
+ *    organization-ownership migration's id-to-name rewrite (ADR-0131 D10)
+ *    owns it.
  *  - `sys_audience_binding_suggestion` rows for the package are removed in
  *    every status: with the sets gone, confirmed/dismissed history points at
  *    nothing, and a fresh reinstall should re-prompt (D5 — admin confirms).
@@ -82,11 +84,11 @@ async function deleteRows(
 }
 
 export interface PackagePermissionCleanupOutcome {
-  /** Package-owned sys_permission_set rows removed. */
+  /** Always 0 since C3 stage 8: a permission set is a catalog definition, and no row is removed. */
   sets: number;
-  /** sys_position_permission_set rows referencing those sets. */
+  /** Always 0 since C3 stage 8: a position's sets are part of its definition, and no binding row exists. */
   positionBindings: number;
-  /** sys_user_permission_set rows referencing those sets. */
+  /** sys_user_permission_set rows naming those sets. */
   userGrants: number;
   /** sys_audience_binding_suggestion rows for the package (any status). */
   suggestions: number;
@@ -123,41 +125,11 @@ export async function cleanupPackagePermissions(
   // consequence.
   const refusals = createSeedWriteRefusals();
 
-  // Provenance-scoped: only the package door's own rows (ADR-0086 D4).
-  // `managed_by` is filtered in JS — a multi-column where on the readonly
-  // provenance columns doesn't match through the engine's query layer
-  // (verified empirically), while the single-column package_id filter does.
-  const sets = (await tryFind(ql, 'sys_permission_set', { package_id: packageId }))
-    .filter((r) => r?.managed_by === 'package');
-
-  // Bindings first — a set row must never outlive its grants in reverse.
-  for (const set of sets) {
-    if (!set?.id) continue;
-    out.positionBindings += await deleteRows(
-      ql, 'sys_position_permission_set',
-      await tryFind(ql, 'sys_position_permission_set', { permission_set_id: set.id }),
-      refusals,
-    );
-    // [ADR-0131 D4] A grant names its set BY NAME, so the grants of this set
-    // are the rows naming it; a grant written before the name column existed
-    // is still reached through its legacy id, to revoke only.
-    const grants = new Map<string, any>();
-    const byName = typeof set.name === 'string' && set.name !== ''
-      ? await tryFind(ql, 'sys_user_permission_set', { permission_set: set.name })
-      : [];
-    for (const g of [...byName, ...(await tryFind(ql, 'sys_user_permission_set', { permission_set_id: set.id }))]) {
-      if (g?.id && !grants.has(String(g.id))) grants.set(String(g.id), g);
-    }
-    out.userGrants += await deleteRows(ql, 'sys_user_permission_set', [...grants.values()], refusals);
-  }
-  out.sets = await deleteRows(ql, 'sys_permission_set', sets, refusals);
-
   // [ADR-0131 D3/D4, ADR-0090 D5] The package's sets are served from the
-  // registry, so no row above stands for them: the grants naming them are
-  // reached by the names the uninstall door captured before it withdrew the
-  // package. A name belongs to one holder (the registry refuses a second at
-  // install), so every grant naming it was a grant of this package's set.
-  // Position bindings have no name column; a legacy one is reached above.
+  // registry, so no row stands for them: the grants naming them are reached by
+  // the names the uninstall door captured before it withdrew the package. A
+  // name belongs to one holder (the registry refuses a second at install), so
+  // every grant naming it was a grant of this package's set.
   for (const name of new Set(declared?.permission ?? [])) {
     if (typeof name !== 'string' || name === '') continue;
     out.userGrants += await deleteRows(
@@ -201,20 +173,19 @@ export async function cleanupPackagePermissions(
         `package — those rows SURVIVE the uninstall, and nothing else reports it: the package door ` +
         `has already answered "success" and the count it reported is a count of the rows that were ` +
         `actually removed. ADR-0090 D5 promises that removing a package's sets "revokes it ` +
-        `everywhere at once. No ghost grants." Where a sys_position_permission_set or ` +
-        `sys_user_permission_set row survived, that promise is BROKEN and the grant is still live: ` +
-        `every principal holding it keeps the uninstalled package's permissions until the row goes. ` +
-        `Where a sys_permission_set row survived, the set remains resolvable by name and a reinstall ` +
-        `collides with it. What the store actually said is in the query engine's "Delete operation ` +
+        `everywhere at once. No ghost grants." Where a sys_user_permission_set row survived, that ` +
+        `promise is BROKEN and the grant is still live should the name ever resolve again: a reinstall, ` +
+        `or another holder of the same name, hands its permissions straight back to every principal ` +
+        `holding it. What the store actually said is in the query engine's "Delete operation ` +
         `failed" entries logged just before this one. Remedy: re-run the uninstall once the store ` +
-        `accepts writes again — this sweep is idempotent and re-selects by package_id, so a second ` +
+        `accepts writes again — this sweep is idempotent and re-selects by name, so a second ` +
         `pass removes whatever the first could not. Until then, treat the package as still ` +
         `installed for authorization purposes.`,
       { packageId, refused: out.refused, refusals: refusals.report() },
     );
   }
-  if (out.sets + out.positionBindings + out.userGrants + out.suggestions > 0) {
-    logger?.info?.('[security] package permission rows revoked on uninstall — removed by package_id, so no grant outlives the package (ADR-0090 D5)', {
+  if (out.userGrants + out.suggestions > 0) {
+    logger?.info?.('[security] package permission rows revoked on uninstall — every grant naming a set the package declared, so no grant outlives the package (ADR-0090 D5)', {
       packageId, ...out,
     });
   }

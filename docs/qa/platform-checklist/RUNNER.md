@@ -236,6 +236,22 @@ contradicts it, and correct it here when it does.
   record a connector clause as `blocked(environment)` on the strength of `fetch failed`
   alone.
 
+- **A per-boot `OS_HOME` and `OS_STORAGE_LOCAL_ROOT` do NOT isolate a package install —
+  boot every item that installs a package from a scratch copy of the app, never from the
+  shared tree.** install-local caches each installed manifest under the server's
+  **working directory**, `.objectstack/installed-packages/`
+  (`packages/cloud-connection/src/local-manifest-source.ts`, `DEFAULT_INSTALLED_PACKAGES_DIR`
+  resolved against `process.cwd()`; the CLI mounts the plugin with no `storageDir`), so
+  a boot started in `examples/app-showcase` writes into the checked-out tree, and every
+  later boot from that tree rehydrates the package. **Check:** `ls
+  examples/app-showcase/.objectstack/installed-packages/` after the install leg — any
+  file there means the install escaped. ⚠️ `git status` cannot see it: `.objectstack` is
+  in the root `.gitignore`, so a clean status is no evidence either way. Items this applies to:
+  `platform-core.marketplace-install-local-lifecycle` and
+  `platform-core.marketplace-console-honesty`. A QA run that installed from the tree
+  wrote a CRM manifest there for 25 s before removing it through
+  `DELETE /api/v1/marketplace/install-local/<id>` (#23163).
+
 - **`ss` is not installed in these containers — read liveness with `curl`, never a socket
   table.** `ss` and `netstat` are both absent (`command not found`); `lsof` and `fuser`
   are present. The trap is that the usual spelling hides the cause: `ss -ltn | grep`

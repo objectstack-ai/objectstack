@@ -2303,7 +2303,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       description: {
         label: "描述",
-        helpText: "在 Setup 中展示的可读描述（持久化为 sys_permission_set.description）。"
+        helpText: "在 Setup 中展示的可读描述。"
       },
       isDefault: {
         label: "默认权限集",
