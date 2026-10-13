@@ -13,7 +13,12 @@
  * kernel, real ObjectQL, real AuditPlugin, real SQLite driver), as the author:
  * a body edit stored `is_edited: false` / `edited_at: null`; an update carrying
  * `{ is_edited: true, edited_at: <forged> }` stored both; a create carrying them
- * stored both. Every pin below was red there for the reason it names.
+ * stored both. Run against that base's implementation, seven of the pins
+ * below were red. The other three — the two no-stamp pins and the
+ * `preserveAudit` one — are green there by construction (nothing stamped, and
+ * nothing was read-only), so they carry no weight on their own; the no-stamp
+ * pins were ablated against the stamp instead (stamping without the `body`
+ * guard, or without the unchanged-body comparison, turns them red).
  *
  * Which shape "read-only" takes was measured too, on the `created_at` precedent:
  * on update the engine hides a non-system caller's `readonly` value from the
