@@ -944,12 +944,12 @@ describe('CRUD `filter` operands — value slots; the query placeholders stay (#
   };
 
   it.each(contracts.flatMap(([type, schema]) => [
-    [type, schema, 'a field\'s value', { id: '{record.id}' }, 'filter.id'],
-    [type, schema, 'an operator\'s comparand', { amount: { $gt: '{record.amount}' } }, 'filter.amount.$gt'],
-    [type, schema, 'an `$in` element', { id: { $in: ['r1', '{record.id}'] } }, 'filter.id.$in.1'],
-    [type, schema, 'a `$or` member\'s value', { $or: [{ status: 'open' }, { owner: '{record.owner}' }] }, 'filter.$or.1.owner'],
-    [type, schema, 'a nested relation\'s value', { account: { industry: '{record.industry}' } }, 'filter.account.industry'],
-  ] as const))('%s REFUSES a flow token at %s — code `custom`, at the operand, with its envelope', (_type, schema, _where, filter, path) => {
+    [type, 'a field\'s value', schema, { id: '{record.id}' }, 'filter.id'],
+    [type, 'an operator\'s comparand', schema, { amount: { $gt: '{record.amount}' } }, 'filter.amount.$gt'],
+    [type, 'an `$in` element', schema, { id: { $in: ['r1', '{record.id}'] } }, 'filter.id.$in.1'],
+    [type, 'a `$or` member\'s value', schema, { $or: [{ status: 'open' }, { owner: '{record.owner}' }] }, 'filter.$or.1.owner'],
+    [type, 'a nested relation\'s value', schema, { account: { industry: '{record.industry}' } }, 'filter.account.industry'],
+  ] as const))('%s REFUSES a flow token at %s — code `custom`, at the operand, with its envelope', (_type, _where, schema, filter, path) => {
     const issues = issuesOf(schema, filter);
     expect(issues.map((i) => [i.code, ['filter', ...i.path.slice(1)].join('.')])).toEqual([['custom', path]]);
     expect(issues[0]!.message.startsWith(VALUE_SLOT_TEMPLATE_REFUSAL)).toBe(true);
@@ -991,7 +991,9 @@ describe('CRUD `filter` operands — value slots; the query placeholders stay (#
     const extra = type === 'update_record' ? { fields: { stage: 'x' } } : {};
     // The envelope pass (`registerFlow`, `objectstack validate`) refuses the
     // malformed envelope, and the value-slot judge the token; the contract arm
-    // must not report either a second time.
+    // must not report either a second time. What holds it: the `filter` ledger
+    // rows make every issue under the filter one inside a value slot, which the
+    // contract arm leaves to those judges.
     expect(flowNodeConfigRefusals(type, { objectName: 'deal', filter: { owner: { $eq: { dialect: 'cel', source: '   ' } } }, ...extra })).toEqual([]);
     expect(flowNodeConfigRefusals(type, { objectName: 'deal', filter: { owner: '{record.owner}' }, ...extra })).toEqual([]);
     // CONTROL: a filter that is not a map is still the contract's to refuse.

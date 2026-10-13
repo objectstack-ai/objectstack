@@ -33,7 +33,7 @@ import { NON_BLANK_STRING } from '../shared/refinement-projection';
 // so this module's import graph gains nothing. ⛔ Never restate either here.
 import { STORED_METADATA_BODY_PRESCRIPTION, isStoredMetadataBodyObject } from '../kernel/stored-metadata-body-objects';
 import { FLOW_REGION_SLOTS_BY_TYPE } from './region-slots';
-import { FLOW_NODE_EXPRESSION_PATHS, flowFilterOperands, isExpressionEnvelopeShaped } from './flow-node-expression-paths';
+import { FLOW_NODE_EXPRESSION_PATHS, isExpressionEnvelopeShaped } from './flow-node-expression-paths';
 import { READ_AS_WRITTEN_PARAM } from './flow-template-token';
 import type { FlowNodeConfigRefusal, FlowSlotRefusalParams, NodeConfigValueKind } from './flow-node-expression-paths';
 // The executor contracts. Read only inside `getBuiltinNodeConfigContracts`,
@@ -346,13 +346,6 @@ function startsWithLedgerSlot(segments: readonly string[], path: ReadonlyArray<P
  * refused only for a malformed envelope (the envelope pass's, at the element)
  * or a token (the judge's), so it is skipped too; a list holding any other
  * element (`42`, `null`, a nested list) stays this arm's, its only judge.
- *
- * A query filter whose operands are value slots (the CRUD `filter`, the
- * ledger's `filterOperands`, #19939) is judged per operand: an issue at or
- * inside an operand that is an envelope is the envelope pass's, and a `{…}`
- * token in a literal operand is the judge's (the token carve-out skips it). An
- * issue at the filter itself — the contract refusing a filter that is not a
- * map — stays this arm's, as it was before the operands were value slots.
  */
 function atOrInsideJudgedLedgerSlot(
   nodeType: string,
@@ -365,13 +358,6 @@ function atOrInsideJudgedLedgerSlot(
     if (!startsWithLedgerSlot(segments, path)) return false;
     if (entry.role !== 'value') return true;
     const slotValue = authoredAt(authored, path.slice(0, segments.length));
-    if (entry.filterOperands) {
-      const inner = path.slice(segments.length);
-      return flowFilterOperands(slotValue).some((operand) =>
-        isExpressionEnvelopeShaped(operand.value)
-        && operand.path.length <= inner.length
-        && operand.path.every((segment, i) => segment === inner[i]));
-    }
     if (entry.eachElement && Array.isArray(slotValue)) {
       const at = path[segments.length];
       if (typeof at === 'number') return isExpressionEnvelopeShaped(slotValue[at]);

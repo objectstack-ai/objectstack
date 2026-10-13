@@ -229,12 +229,13 @@ describe('crud nodes — refuse a filter whose operand evaluated to nothing (#38
     });
 
     it('get_record: an envelope that evaluates to null refuses the read', async () => {
-        const { result } = await runRefused('get_record', {
+        const { result, step } = await runRefused('get_record', {
             objectName: 'deal',
             filter: { owner: CEL('record.owner') },
         }, { owner: null });
 
         expect(result.success).toBe(false);
+        expect(step?.error?.code).toBe('NODE_FAILURE');
         expect(result.error).toContain('get_record: refusing to run');
         expect(data.seen.find).toBeUndefined();
     });
