@@ -2263,12 +2263,22 @@ describe('DeleteMetaItemRequestSchema declares the contract members the reset do
       actor: 'admin@objectos.ai',
       state: 'draft',
       dropStorage: true,
+      packageId: 'com.acme.crm',
     };
     const result = DeleteMetaItemRequestSchema.safeParse(full);
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data).toEqual(full);
     }
+  });
+
+  it('[ADR-0048] packageId names the row the delete removes; null names no package, as on the save', () => {
+    for (const packageId of ['com.acme.crm', null] as const) {
+      const result = DeleteMetaItemRequestSchema.safeParse({ ...base, packageId });
+      expect(result.success).toBe(true);
+      if (result.success) expect(result.data.packageId).toBe(packageId);
+    }
+    expect(DeleteMetaItemRequestSchema.safeParse({ ...base, packageId: 42 }).success).toBe(false);
   });
 
   it('requires type AND name — the reset addresses one item', () => {
@@ -2348,6 +2358,7 @@ describe('MetadataProtocol.deleteMetaItem types against the caught-up request sc
       actor: 'admin',
       state: 'draft',
       dropStorage: true,
+      packageId: 'com.acme.crm',
     };
     expect(good.type).toBe('view');
     // @ts-expect-error `environmentId` is transport-level (commit 2a29caa53) — not a declared request member; the REST door layers it on via TransportScopedMetaRequest.
