@@ -205,6 +205,26 @@ describe.each(TOPOLOGIES)('%s kernel — a page saved as a second default record
         expect(storedPages()).toEqual(['env_task_a']);
     });
 
+    it('a draft is judged again when it is published: another page took the default in between', async () => {
+        const { protocol, save } = await boot(topology);
+        const draft = await protocol
+            .saveMetaItem({ type: 'page', name: 'env_task_a', item: recordPage('env_task_a', 'acme_task'), mode: 'draft' })
+            .then(() => true, (e: any) => e);
+        expect(draft, String(draft?.message)).toBe(true);
+        expect((await save('env_task_b', recordPage('env_task_b', 'acme_task'))).ok).toBe(true);
+        const published = await protocol.publishMetaItem({ type: 'page', name: 'env_task_a' }).then(
+            (result: any) => ({ ok: true as const, result }),
+            (error: any) => ({ ok: false as const, error }),
+        );
+        expect(published.ok, 'the publish was refused').toBe(false);
+        const err = (published as { error: any }).error;
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'DEFAULT_RECORD_PAGE_CONFLICT', status: 422 });
+        expect(String(err.message).split('. ')[0]).toBe(
+            "Default record page conflict: page 'env_task_a' cannot be published as the default record page of object "
+            + "'acme_task': page 'env_task_b', authored in this environment already is",
+        );
+    });
+
     it('a page that leaves `type` out is a record page, and is refused too', async () => {
         const { save } = await boot(topology);
         const { type: _omit, ...untyped } = recordPage('env_org_detail', 'acme_org');

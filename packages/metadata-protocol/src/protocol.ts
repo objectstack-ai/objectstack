@@ -20160,6 +20160,11 @@ export class ObjectStackProtocolImplementation implements
      *    every registry slot of that name, as it does on every read
      *    (ADR-0005), so its own body decides for the name.
      *
+     * Asked twice: by `saveMetaItem` on the body it is about to store (draft or
+     * publish mode), and by the draft publish (`promoteDraftForPublish`) on the
+     * draft body it is about to promote — the save judged only the pages
+     * active at that moment, and another may have taken the default since.
+     *
      * The page saved under `saveName` is never its own holder: a save under the
      * existing default's own name is an overlay of that page (ADR-0005), not a
      * second default, and stays accepted. A registry with no such reading (a
@@ -20184,6 +20189,7 @@ export class ObjectStackProtocolImplementation implements
         type: string,
         item: unknown,
         saveName: string,
+        verb: 'saved' | 'published' = 'saved',
     ): Promise<(Error & { code: 'DEFAULT_RECORD_PAGE_CONFLICT'; status: 422 }) | undefined> {
         if (type !== 'page') return undefined;
         const object = defaultRecordPageObject(item);
@@ -20240,7 +20246,7 @@ export class ObjectStackProtocolImplementation implements
             : `Save '${saveName}' with \`isDefault: false\`, or first save ${unique.map((h) => `'${h.page}'`).join(' and ')} `
               + `with \`isDefault: false\` to make '${saveName}' the default instead.`;
         const err = new Error(
-            `Default record page conflict: page '${saveName}' cannot be saved as the default record page of object `
+            `Default record page conflict: page '${saveName}' cannot be ${verb} as the default record page of object `
             + `'${object}': ${others}. ${remedy} At most one \`isDefault: true\` record page may exist for an object `
             + `in a deployment: the record view opens that page with no tie-break.`,
         ) as Error & { code: 'DEFAULT_RECORD_PAGE_CONFLICT'; status: 422; object: string; holders: readonly Holder[] };
@@ -22845,6 +22851,16 @@ export class ObjectStackProtocolImplementation implements
         if (draftForGate) {
             const nameRefusal = savedItemNameRefusal(singularType, draftForGate.body, request.name, 'publish');
             if (nameRefusal) throw nameRefusal;
+        }
+        // [#23015] …and one default record page per object per deployment: a
+        // draft saved while no other page held its object's default can meet
+        // one by the time it is published, since the save door judged only the
+        // ACTIVE pages of that moment. Judged again here, on the draft body and
+        // with the save door's own predicate and envelope, before
+        // `repo.promoteDraft` writes — so a batch publish aborts on it too.
+        if (draftForGate) {
+            const defaultPageRefusal = await this.defaultRecordPageSaveRefusal(singularType, draftForGate.body, request.name, 'published');
+            if (defaultPageRefusal) throw defaultPageRefusal;
         }
         // [#9176] The gate's return is its advisory half (#4717): captured and
         // handed out so `publishMetaItem` can attach it to the 2xx this
