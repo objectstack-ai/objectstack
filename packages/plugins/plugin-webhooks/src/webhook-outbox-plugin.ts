@@ -1,6 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
+// ADR-0069 — the authentication-policy gate's ONE decision, asked by the
+// redeliver door on the session it already reads (see `serveRedeliver`).
+import { evaluateAuthGate } from '@objectstack/core';
 import type {
     IDataEngine,
     II18nService,
@@ -525,6 +528,22 @@ export class WebhookOutboxPlugin implements Plugin {
         c: RedeliverDoorContext<R>,
     ): Promise<R> {
         const session = await this.resolveSession(ctx, c);
+        // ADR-0069 — a session the authentication policy HOLDS (an expired
+        // password, enforced MFA not yet enrolled) is gated out of every
+        // protected resource until it remediates, and replaying a delivery is
+        // one. Asked first, as REST's `enforceAuth` asks it, on the session
+        // this door reads once for everything below; the answer is REST's:
+        // `403` with the gate's own `code` and `message`, in this door's
+        // envelope. Both faces (the raw mount and `handleRedeliver`) pass here.
+        //
+        // No request path is passed: the allow-list exempts remediation and
+        // bootstrap routes, this door is neither, and its service face has no
+        // route of its own (the host chooses the URL), so a path would only
+        // let a host's choice exempt it. An empty path earns no exemption.
+        const gate = evaluateAuthGate(session?.user, '');
+        if (gate) {
+            return c.json({ success: false, error: { code: gate.code, message: gate.message } }, 403);
+        }
         const userId = session?.user?.id;
         if (typeof userId !== 'string' || userId.length === 0) {
             return c.json(
