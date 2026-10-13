@@ -125,7 +125,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       approval_approve: {
         label: "承認",
         description: "このリクエストを承認しますか？あなたの承認が記録され、このステップに必要な承認がそろうとリクエストは次に進みます。",
-        successMessage: "承認しました。",
+        successMessage: "「${result.request.record_title}」を承認しました",
         params: {
           comment: {
             label: "コメント"

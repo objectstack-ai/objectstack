@@ -125,7 +125,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       approval_approve: {
         label: "Approve",
         description: "Approve this request? Your approval is recorded, and the request moves on once this step has the approvals it requires.",
-        successMessage: "Approved.",
+        successMessage: "Approved \"${result.request.record_title}\"",
         params: {
           comment: {
             label: "Comment"
