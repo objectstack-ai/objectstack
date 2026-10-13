@@ -101,8 +101,10 @@ function makeStubEngine(opts: {
         // from `sys_metadata_history`, which holds nothing in this double.
         // [#23165] `sys_metadata` answers from the rows: the delete reads the
         // item's rows to resolve its address.
-        async find(table: string, query: { where?: Record<string, unknown> } = {}) {
-            return table === 'sys_metadata' ? rows.filter((r) => matches(r, query.where)) : [];
+        async find(table: string, query: { where?: Record<string, unknown>; limit?: number } = {}) {
+            if (table !== 'sys_metadata') return [];
+            const hit = rows.filter((r) => matches(r, query.where));
+            return typeof query.limit === 'number' ? hit.slice(0, query.limit) : hit;
         },
         async insert(_table: string, data: Record<string, unknown>) {
             return { id: 'inserted', ...data };
