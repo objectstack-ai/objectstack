@@ -19581,17 +19581,15 @@ export class ObjectStackProtocolImplementation implements
         const registry: any = (this.engine as any)?.registry;
         if (!registry || typeof registry !== 'object') return;
 
-        // 1. The set the stored row implies now.
+        // 1. The set the stored row implies now. A non-empty expansion comes
+        // only from the hydrator, past its `registerItem` capability probe.
         const registered = new Set<string>();
-        const expansion = 'expansion' in write ? write.expansion : [];
-        if (expansion.length > 0 && typeof registry.registerItem === 'function') {
-            let shipping: ShippingPackages | undefined;
-            for (const item of expansion) {
-                shipping ??= this.shippingPackagesOf(type);
-                if (this.anotherPackageShips(type, String(item.name), item._packageId, shipping)) continue;
-                registry.registerItem(type, item, 'name' as any);
-                registered.add(String(item.name));
-            }
+        let shipping: ShippingPackages | undefined;
+        for (const item of 'expansion' in write ? write.expansion : []) {
+            shipping ??= this.shippingPackagesOf(type);
+            if (this.anotherPackageShips(type, String(item.name), item._packageId, shipping)) continue;
+            registry.registerItem(type, item, 'name' as any);
+            registered.add(String(item.name));
         }
 
         // 2. The record: the addressed rows' old names out, the new set in.

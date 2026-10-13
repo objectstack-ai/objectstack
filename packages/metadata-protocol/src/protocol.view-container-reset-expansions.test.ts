@@ -578,10 +578,11 @@ describe('[#23198] after every write the registry holds the expansion set the st
         const { protocol, registry, rows } = boot();
         const A_ONLY = `${OBJ}.a_only`;
         const B_ONLY = `${OBJ}.b_only`;
-        const body = (key: string, label: string) => ({
-            name: OBJ, ...shippedContainer(), listViews: { [key]: { label, type: 'grid', data, columns: [{ field: 'title' }] } },
-        });
-        // A package-less overlay row and a row bound to the package, of one name (ADR-0048).
+        const SHARED = `${OBJ}.shared`;
+        const member = (label: string) => ({ label, type: 'grid', data, columns: [{ field: 'title' }] });
+        const { list } = shippedContainer();
+        // A package-less overlay row and a row bound to the package, of one name
+        // (ADR-0048). Each has a member of its own, and both have `shared`.
         const seed = (packageId: string | null, item: Record<string, unknown>) => {
             const row: Row = {
                 id: `seed_${packageId ?? 'none'}`, type: 'view', name: OBJ, organization_id: null,
@@ -590,8 +591,8 @@ describe('[#23198] after every write the registry holds the expansion set the st
             rows.set(keyOf(row), row);
             return row;
         };
-        const unbound = seed(null, body('a_only', 'A only'));
-        seed(PKG, body('b_only', 'B only'));
+        const unbound = seed(null, { name: OBJ, list, listViews: { a_only: member('A only'), shared: member('A shared') } });
+        seed(PKG, { name: OBJ, list, listViews: { b_only: member('B only'), shared: member('B shared') } });
 
         // Each list read hydrates both rows. Neither row's names are healed by
         // the other's hydration, however often the list is read.
@@ -599,19 +600,27 @@ describe('[#23198] after every write the registry holds the expansion set the st
             await listItems(protocol);
             expect(labelOf(registry.bare('view', A_ONLY)), `read ${read}`).toBe('A only');
             expect(labelOf(registry.bare('view', B_ONLY)), `read ${read}`).toBe('B only');
+            expect(registry.bare('view', SHARED), `read ${read}`).toBeDefined();
         }
 
-        // The package-less row is republished without its member: the write
+        // The package-less row is republished without its members: the write
         // the door makes after persisting it.
-        const republished = { name: OBJ, ...shippedContainer() };
+        const republished = { name: OBJ, list };
         unbound.metadata = JSON.stringify(republished);
         await (protocol as any).applyRegistryWriteThrough({
             type: 'view', name: OBJ, item: republished, packageId: null, organizationId: null,
         });
 
+        // Its own member is retired, and the member both rows had leaves the
+        // registry with it. The other row's own member is untouched.
         expect(registry.bare('view', A_ONLY)).toBeUndefined();
+        expect(registry.bare('view', SHARED)).toBeUndefined();
         expect(labelOf(registry.bare('view', B_ONLY))).toBe('B only');
+        // The first read after it: every door serves the other row's `shared`
+        // from its stored row, and the read registers it again.
+        expect(await doors(protocol, SHARED)).toEqual(servedOnEveryDoor('B shared', 1));
+        expect(labelOf(registry.bare('view', SHARED))).toBe('B shared');
         expect(await doors(protocol, A_ONLY)).toEqual(NOT_SERVED);
-        expect((await doors(protocol, B_ONLY)).list).toEqual([['B only', 1]]);
+        expect(await doors(protocol, B_ONLY)).toEqual(servedOnEveryDoor('B only', 1));
     });
 });
