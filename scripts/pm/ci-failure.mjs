@@ -2683,6 +2683,12 @@ async function selfTest() {
     { name: 'Fixture · lane AB', status: 'completed', conclusion: 'failure', details_url: runUrl(7) },
   ];
   const lanes = memberLanes(fixtureRoster[0], fixtureChecks, { runId: '7' });
+  // Lanes are attached only to a step that DID resolve as a roster verdict: a
+  // regression must be REPORTED by this harness, not crash it (see the job-log
+  // battery). Measured while ablating the roster read — spreading an absent
+  // verdict built a truthy one with no members, and the renderer threw.
+  const withLanes = (resolved, l) =>
+    resolved.rosterVerdict ? { ...resolved, rosterVerdict: { ...resolved.rosterVerdict, lanes: l } } : resolved;
   t(
     'memberLanes: the members that did not succeed, by job name and run — not the aggregator, not another run, not a prefix',
     [lanes.matched, lanes.notSucceeded.map((l) => [l.member, l.name, l.conclusion])],
@@ -2699,7 +2705,7 @@ async function selfTest() {
     ],
     [true, false, true, false, false],
   );
-  const laneLines = renderSubstitute([{ ...rosterResolved, rosterVerdict: { ...rosterResolved.rosterVerdict, lanes } }]);
+  const laneLines = renderSubstitute([withLanes(rosterResolved, lanes)]);
   t(
     'the substitute never offers the heredoc, and says it has none of its own',
     [
@@ -2717,7 +2723,7 @@ async function selfTest() {
     ],
     [true, true, true],
   );
-  const lanesSay = (l) => renderSubstitute([{ ...rosterResolved, rosterVerdict: { ...rosterResolved.rosterVerdict, lanes: l } }]);
+  const lanesSay = (l) => renderSubstitute([withLanes(rosterResolved, l)]);
   t(
     'no member found is NONE found, never "all green"',
     [
@@ -2759,15 +2765,14 @@ async function selfTest() {
     roster: realRoster,
     checkName: 'Lint & Repo Gates',
   });
-  lintVerdict.rosterVerdict &&= {
-    ...lintVerdict.rosterVerdict,
-    lanes: memberLanes(lintVerdict.rosterVerdict, [
-      { name: 'Lint & Repo Gates', status: 'completed', conclusion: 'failure', details_url: runUrl(specimenRun) },
-      { name: 'Lint · repo & tooling gates', status: 'completed', conclusion: 'failure', details_url: runUrl(specimenRun) },
-      { name: 'Lint · ESLint', status: 'completed', conclusion: 'success', details_url: runUrl(specimenRun) },
-    ], { runId: specimenRun }),
-  };
-  const lintLines = renderSubstitute([lintVerdict]);
+  const specimenChecks = [
+    { name: 'Lint & Repo Gates', status: 'completed', conclusion: 'failure', details_url: runUrl(specimenRun) },
+    { name: 'Lint · repo & tooling gates', status: 'completed', conclusion: 'failure', details_url: runUrl(specimenRun) },
+    { name: 'Lint · ESLint', status: 'completed', conclusion: 'success', details_url: runUrl(specimenRun) },
+  ];
+  const lintLines = renderSubstitute([
+    withLanes(lintVerdict, memberLanes(lintVerdict.rosterVerdict, specimenChecks, { runId: specimenRun })),
+  ]);
   t(
     'the specimen: the lint verdict names `Lint · repo & tooling gates` and prints no line of its heredoc',
     [
