@@ -30,6 +30,7 @@ import { describe, expect, it } from 'vitest';
 import {
   NO_DEFAULT,
   authorableDefaultsShardTexts,
+  authorisingMajors,
   authoriseDefaultChanges,
   carryDefaultsThroughRenames,
   collectAuthorableDefaults,
@@ -38,9 +39,11 @@ import {
   formatDefaultEntry,
   parseDefaultEntries,
   parseDefaultEntry,
+  readProtocolMajorAtRev,
   type DeclaredDefaultChange,
 } from './lib/authorable-defaults';
 import { DEFAULT_CHANGES_BY_MAJOR } from './lib/default-changes';
+import type { GitRun } from './lib/sharded-artifacts';
 
 /** Authorable keys as the gate models them: `key -> isRetired`. */
 const live = (...keys: string[]) => new Map(keys.map((k) => [k, false] as const));
@@ -270,6 +273,8 @@ describe('carryDefaultsThroughRenames — a declared def rename moves no default
 });
 
 describe('authoriseDefaultChanges — the acknowledged-change exit stays honest', () => {
+  /** A baseline read at the build's own major — the window is that major alone. */
+  const AT_17 = { baseline: 17, current: 17 } as const;
   const change = { key: RETRY, kind: 'changed', from: '0', to: '3' } as const;
   const declare = (over: Partial<DeclaredDefaultChange> = {}): DeclaredDefaultChange => ({
     key: RETRY,
@@ -280,7 +285,7 @@ describe('authoriseDefaultChanges — the acknowledged-change exit stays honest'
   });
 
   it('refuses a change nobody declared', () => {
-    const out = authoriseDefaultChanges([change], {}, 17, new Map([[RETRY, '3']]), live(RETRY));
+    const out = authoriseDefaultChanges([change], {}, AT_17, new Map([[RETRY, '3']]), live(RETRY));
     expect(out.unauthorised).toEqual([change]);
     expect(out.authorised).toEqual([]);
   });
@@ -289,7 +294,7 @@ describe('authoriseDefaultChanges — the acknowledged-change exit stays honest'
     const out = authoriseDefaultChanges(
       [change],
       { 17: [declare()] },
-      17,
+      AT_17,
       new Map([[RETRY, '3']]),
       live(RETRY),
     );
@@ -304,7 +309,7 @@ describe('authoriseDefaultChanges — the acknowledged-change exit stays honest'
     const out = authoriseDefaultChanges(
       [change],
       { 17: [declare({ from: '1', to: '3' })] },
-      17,
+      AT_17,
       new Map([[RETRY, '3']]),
       live(RETRY),
     );
@@ -315,7 +320,7 @@ describe('authoriseDefaultChanges — the acknowledged-change exit stays honest'
     const out = authoriseDefaultChanges(
       [change],
       { 16: [declare()] },
-      17,
+      AT_17,
       new Map([[RETRY, '3']]),
       live(RETRY),
     );
@@ -327,12 +332,12 @@ describe('authoriseDefaultChanges — the acknowledged-change exit stays honest'
     // The property that separates this from an allowlist. The default was moved
     // again (or reverted) and the row was left behind — it now pre-approves a
     // value nobody wrote down, so it goes red instead of covering it.
-    const reverted = authoriseDefaultChanges([], { 17: [declare()] }, 17, new Map([[RETRY, '0']]), live(RETRY));
+    const reverted = authoriseDefaultChanges([], { 17: [declare()] }, AT_17, new Map([[RETRY, '0']]), live(RETRY));
     expect(reverted.stale).toEqual([
       { key: RETRY, claims: '3', emits: '0', why: 'chain-tip-mismatch' },
     ]);
 
-    const movedAgain = authoriseDefaultChanges([], { 17: [declare()] }, 17, new Map([[RETRY, '5']]), live(RETRY));
+    const movedAgain = authoriseDefaultChanges([], { 17: [declare()] }, AT_17, new Map([[RETRY, '5']]), live(RETRY));
     expect(movedAgain.stale[0]).toMatchObject({ claims: '3', emits: '5' });
   });
 
@@ -344,7 +349,7 @@ describe('authoriseDefaultChanges — the acknowledged-change exit stays honest'
     const fromStart = authoriseDefaultChanges(
       [{ key: RETRY, kind: 'changed', from: '0', to: '5' }],
       { 17: chain },
-      17,
+      AT_17,
       live5,
       live(RETRY),
     );
@@ -355,7 +360,7 @@ describe('authoriseDefaultChanges — the acknowledged-change exit stays honest'
     const fromMiddle = authoriseDefaultChanges(
       [{ key: RETRY, kind: 'changed', from: '3', to: '5' }],
       { 17: chain },
-      17,
+      AT_17,
       live5,
       live(RETRY),
     );
@@ -365,7 +370,7 @@ describe('authoriseDefaultChanges — the acknowledged-change exit stays honest'
     const gapped = authoriseDefaultChanges(
       [],
       { 17: [declare({ from: '0', to: '3' }), declare({ from: '4', to: '5' })] },
-      17,
+      AT_17,
       live5,
       live(RETRY),
     );
@@ -375,8 +380,116 @@ describe('authoriseDefaultChanges — the acknowledged-change exit stays honest'
   it('leaves a declaration about a key this build no longer emits alone', () => {
     // The expected end state once the key is retired — the surface gate owns
     // that verdict, exactly as check (b2) does for RETIRED_KEYS_BY_MAJOR.
-    const out = authoriseDefaultChanges([], { 17: [declare()] }, 17, new Map(), new Map());
+    const out = authoriseDefaultChanges([], { 17: [declare()] }, AT_17, new Map(), new Map());
     expect(out.stale).toEqual([]);
+  });
+});
+
+describe('the authorising window spans a major roll — anchored on the BASELINE major', () => {
+  // The version pass rolls `package.json` to the next major inside the branch
+  // under test, and a shallow checkout's re-anchored baseline lags by design.
+  // Both put the baseline at an OLDER major than the build: the shape of the
+  // `18.0.0-next.0` version branch, where every change main had declared under
+  // 17 was refused as undeclared by a window of major 18 alone.
+  const change = { key: RETRY, kind: 'changed', from: '0', to: '3' } as const;
+  const declare = (over: Partial<DeclaredDefaultChange> = {}): DeclaredDefaultChange => ({
+    key: RETRY,
+    from: '0',
+    to: '3',
+    reason: 'retry became opt-out; write `maxRetries: 0` to keep the old behaviour',
+    ...over,
+  });
+  const ROLLED = { baseline: 17, current: 18 } as const;
+
+  it('runs from the baseline major up to the build major, and never below the build major alone', () => {
+    expect(authorisingMajors({ baseline: 17, current: 17 })).toEqual([17]);
+    expect(authorisingMajors({ baseline: 17, current: 18 })).toEqual([17, 18]);
+    expect(authorisingMajors({ baseline: 15, current: 18 })).toEqual([15, 16, 17, 18]);
+    // A branch that has not merged a roll main already made: this build's major only.
+    expect(authorisingMajors({ baseline: 18, current: 17 })).toEqual([17]);
+  });
+
+  it('refuses a major it cannot read rather than guessing a window', () => {
+    expect(() => authorisingMajors({ baseline: Number.NaN, current: 18 })).toThrow(/integers/);
+    expect(() => authorisingMajors({ baseline: 17, current: 17.5 })).toThrow(/integers/);
+  });
+
+  it('accepts a row from the baseline major when the build has rolled past it', () => {
+    const out = authoriseDefaultChanges([change], { 17: [declare()] }, ROLLED, new Map([[RETRY, '3']]), live(RETRY));
+    expect(out.unauthorised).toEqual([]);
+    expect(out.stale).toEqual([]);
+    expect(out.authorised[0].declared[0].reason).toContain('opt-out');
+  });
+
+  it('still refuses the same row once the baseline itself has rolled — history stays history', () => {
+    const out = authoriseDefaultChanges(
+      [change],
+      { 17: [declare()] },
+      { baseline: 18, current: 18 },
+      new Map([[RETRY, '3']]),
+      live(RETRY),
+    );
+    expect(out.unauthorised).toEqual([change]);
+  });
+
+  it('authorises nothing from a major OLDER than the baseline', () => {
+    const out = authoriseDefaultChanges([change], { 16: [declare()] }, ROLLED, new Map([[RETRY, '3']]), live(RETRY));
+    expect(out.unauthorised).toEqual([change]);
+    expect(out.stale).toEqual([]);
+  });
+
+  it('chains hops across the roll in major order, and they must still meet', () => {
+    const live5 = new Map([[RETRY, '5']]);
+    const spanning = { 17: [declare({ from: '0', to: '3' })], 18: [declare({ from: '3', to: '5' })] };
+    const fromStart = authoriseDefaultChanges(
+      [{ key: RETRY, kind: 'changed', from: '0', to: '5' }],
+      spanning,
+      ROLLED,
+      live5,
+      live(RETRY),
+    );
+    expect(fromStart.unauthorised).toEqual([]);
+    expect(fromStart.authorised[0].declared.map((hop) => hop.to)).toEqual(['3', '5']);
+
+    const gapped = authoriseDefaultChanges(
+      [],
+      { 17: [declare({ from: '0', to: '3' })], 18: [declare({ from: '4', to: '5' })] },
+      ROLLED,
+      live5,
+      live(RETRY),
+    );
+    expect(gapped.stale.map((s) => s.why)).toContain('chain-not-contiguous');
+  });
+
+  it('holds a carried row to the chain-tip rule too — it dies when it stops being true', () => {
+    const reverted = authoriseDefaultChanges([], { 17: [declare()] }, ROLLED, new Map([[RETRY, '0']]), live(RETRY));
+    expect(reverted.stale).toEqual([{ key: RETRY, claims: '3', emits: '0', why: 'chain-tip-mismatch' }]);
+  });
+});
+
+describe('readProtocolMajorAtRev — the baseline major is read out of git at the baseline rev', () => {
+  const REV = '85c6d76ec42a879f219436eaa58bda06c68298b2';
+  const gitAnswering = (status: number, stdout: string) => {
+    const calls: string[][] = [];
+    const git: GitRun = (...args) => {
+      calls.push(args);
+      return { status, stdout, stderr: '' };
+    };
+    return { git, calls };
+  };
+
+  it('reads package.json at that rev, prerelease label included', () => {
+    const { git, calls } = gitAnswering(0, JSON.stringify({ name: '@objectstack/spec', version: '18.0.0-next.0' }));
+    expect(readProtocolMajorAtRev(git, REV)).toBe(18);
+    expect(calls).toEqual([['show', `${REV}:./package.json`]]);
+    expect(readProtocolMajorAtRev(gitAnswering(0, '{"version":"17.4.0"}').git, REV)).toBe(17);
+  });
+
+  it('answers null — never a guessed major — when the file or its version is unreadable', () => {
+    expect(readProtocolMajorAtRev(gitAnswering(128, '').git, REV)).toBeNull();
+    expect(readProtocolMajorAtRev(gitAnswering(0, 'not json').git, REV)).toBeNull();
+    expect(readProtocolMajorAtRev(gitAnswering(0, '{"name":"@objectstack/spec"}').git, REV)).toBeNull();
+    expect(readProtocolMajorAtRev(gitAnswering(0, '{"version":"next"}').git, REV)).toBeNull();
   });
 });
 

@@ -241,19 +241,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "カスタマイズ済み",
         help: "このパッケージ権限セットには環境カスタマイズのオーバーレイがあります（ADR-0094）。リセット（データドア経由で削除）すると出荷時のベースラインに戻ります。"
       },
-      drift_status: {
-        label: "Declaration Drift",
-        help: "Cause of a declared≠enforced mismatch for this package-declared set. 'overlay_shadow' = a Studio-authored environment overlay is shadowing the packaged declaration. 'provenance_skip' = this row predates package provenance tracking, so boot sync treats it as environment-authored and never reconciles it with the package (no automated fix — file an issue / see the ops runbook for the manual adoption recipe). Absent = enforced grants match the shipped artifact, or this set is not currently package-declared.",
-        options: {
-          overlay_shadow: "Overlay shadow",
-          provenance_skip: "Provenance skip",
-          other: "Drift (other)"
-        }
-      },
-      drift_detail: {
-        label: "Drift Detail",
-        help: "Human-readable detail for `drift_status` — names the grant-count mismatch and its cause."
-      },
       id: {
         label: "権限セット ID"
       },
@@ -273,9 +260,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       all_permsets: {
         label: "すべて"
-      },
-      drifted: {
-        label: "Needs Attention"
       }
     },
     _actions: {

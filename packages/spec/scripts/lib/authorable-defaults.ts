@@ -55,7 +55,7 @@
  */
 
 import { RENAMED_DEFS, carryAuthorableKey } from './renamed-defs.js';
-import { categoryOfDefKey, serializeShard } from './sharded-artifacts.js';
+import { categoryOfDefKey, serializeShard, type GitRun } from './sharded-artifacts.js';
 
 /** `packages/spec/authorable-defaults/<category>.json` — the #4666 default ratchet. */
 export const AUTHORABLE_DEFAULTS_DIR_NAME = 'authorable-defaults';
@@ -344,8 +344,68 @@ export interface DefaultAuthorisation {
   authorised: Array<{ change: ObservedDefaultChange; declared: DeclaredDefaultChange[] }>;
   /** Changes with no declaration that covers them. Fatal. */
   unauthorised: ObservedDefaultChange[];
-  /** Declarations at the current major that no longer describe reality. Fatal. */
+  /** Declarations at an authorising major that no longer describe reality. Fatal. */
   stale: StaleDeclaration[];
+}
+
+/**
+ * The two protocol majors one adjudication spans: the major of the tree the
+ * BASELINE fingerprints were read from, and the major this build is.
+ */
+export interface DefaultChangeMajors {
+  /** Protocol major of the baseline's tree — its own `packages/spec/package.json`. */
+  baseline: number;
+  /** Protocol major of this build — this tree's `packages/spec/package.json`. */
+  current: number;
+}
+
+/**
+ * The majors whose `DEFAULT_CHANGES_BY_MAJOR` rows authorise, ascending: every
+ * major from the baseline's up to this build's.
+ *
+ * A row is written under the major whose development line made the change (the
+ * gate prescribes this build's major). The change needs cover for exactly as
+ * long as a baseline can predate it — while the baseline's own major is not past
+ * the row's. Rows older than the baseline's major are the historical record: a
+ * baseline at major N already carries every value declared before N, so they
+ * cover nothing. A baseline at a NEWER major than this build (a branch that has
+ * not merged a major roll) authorises this build's major alone — never fewer
+ * rows than a same-major baseline would.
+ *
+ * Throws on a non-integer major rather than guessing a window: an empty window
+ * would refuse every declared change, and a guessed one could bless one.
+ */
+export function authorisingMajors(majors: DefaultChangeMajors): number[] {
+  const { baseline, current } = majors;
+  if (!Number.isInteger(baseline) || !Number.isInteger(current)) {
+    throw new Error(
+      `authorisingMajors: protocol majors must be integers (baseline ${baseline}, current ${current})`,
+    );
+  }
+  const out: number[] = [];
+  for (let major = Math.min(baseline, current); major <= current; major++) out.push(major);
+  return out;
+}
+
+/**
+ * The protocol major of the tree at `rev`, read out of git exactly as that
+ * tree's defaults are: `git show <rev>:./package.json`, run in the package
+ * directory. Null when the file cannot be read there or carries no version that
+ * parses to an integer major — the caller then says so and falls back to its
+ * own major, the narrowest window.
+ */
+export function readProtocolMajorAtRev(git: GitRun, rev: string): number | null {
+  const show = git('show', `${rev}:./package.json`);
+  if (show.status !== 0) return null;
+  let version: unknown;
+  try {
+    version = (JSON.parse(show.stdout) as { version?: unknown }).version;
+  } catch {
+    return null;
+  }
+  if (typeof version !== 'string') return null;
+  const major = Number.parseInt(version, 10);
+  return Number.isInteger(major) ? major : null;
 }
 
 /**
@@ -363,8 +423,8 @@ export interface DefaultAuthorisation {
  *      which is read out of git at the merge base (or, before this ratchet
  *      exists upstream, the committed artifact); `to` is compared against what
  *      THIS BUILD emits. Neither is a field the declaration's author can set.
- *   2. **The chain tip must still be true.** For every key declared at the
- *      current major, the last hop's `to` must equal the live fingerprint. Move
+ *   2. **The chain tip must still be true.** For every key declared at an
+ *      authorising major, the last hop's `to` must equal the live fingerprint. Move
  *      the default again — or revert it — and the declaration goes RED instead
  *      of silently covering the new value. This is the property that makes a
  *      declaration die when it stops being true, and it is the exact mirror of
@@ -372,10 +432,19 @@ export interface DefaultAuthorisation {
  *   3. **The chain must be contiguous.** Two hops of one key must meet
  *      (`hop[i].to === hop[i+1].from`), so a chain cannot skip a value that was
  *      really shipped in between.
- *   4. **Only the CURRENT major authorises.** Past majors' entries are the
- *      historical record and cover nothing, so an authorisation cannot outlive
- *      the major it was written for. By the time a major rolls, the baseline
- *      already carries the new value, so nothing is left needing cover.
+ *   4. **Only the majors the baseline has not rolled past authorise** —
+ *      {@link authorisingMajors}: the baseline's major up to this build's, each
+ *      major's rows chained in ascending order, so a key's hops may span a roll
+ *      and must still meet. Older majors' entries are the historical record and
+ *      cover nothing, so an authorisation cannot outlive the major it was
+ *      written for: once the baseline itself has rolled, it already carries the
+ *      new value. The window is anchored on the BASELINE's major, not this
+ *      build's, because the two differ exactly where a current-only window
+ *      refuses honest rows: the version pass rolls the major inside the branch
+ *      under test, and a shallow checkout's re-anchored baseline (`baseRev`)
+ *      lags by design. On the `18.0.0-next.0` version branch (#23113) both
+ *      held — a major-17 baseline, a major-18 build — and the ten changes main
+ *      had declared under 17 were refused as undeclared.
  *
  * A declaration naming a key this build does not emit at all is NOT an error:
  * that is the expected end state once the key is retired, and the surface gate
@@ -384,15 +453,17 @@ export interface DefaultAuthorisation {
 export function authoriseDefaultChanges(
   changes: readonly ObservedDefaultChange[],
   declaredByMajor: Readonly<Record<number, readonly DeclaredDefaultChange[]>>,
-  currentMajor: number,
+  majors: DefaultChangeMajors,
   current: ReadonlyMap<string, string>,
   currentKeys: ReadonlyMap<string, boolean>,
 ): DefaultAuthorisation {
   const chains = new Map<string, DeclaredDefaultChange[]>();
-  for (const declared of declaredByMajor[currentMajor] ?? []) {
-    const chain = chains.get(declared.key);
-    if (chain) chain.push(declared);
-    else chains.set(declared.key, [declared]);
+  for (const major of authorisingMajors(majors)) {
+    for (const declared of declaredByMajor[major] ?? []) {
+      const chain = chains.get(declared.key);
+      if (chain) chain.push(declared);
+      else chains.set(declared.key, [declared]);
+    }
   }
 
   const stale: StaleDeclaration[] = [];

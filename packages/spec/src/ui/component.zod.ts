@@ -59,6 +59,7 @@ import { AggregationFunction } from '../data/query.zod';
 import { ListViewExportOptionsSchema } from './list-view-export-options';
 import { InlineActionSchema, ActionLocationSchema } from './action.zod';
 import { ACTION_TARGET_ALIASES } from './action-target-aliases';
+import { navigationTargetRefusal } from './navigation-target';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 // [#21464] `object-metric.aggregate.groupBy` is the chart aggregate's own
 // `groupBy` union, by reference — the tile routes it exactly as the chart does.
@@ -3959,6 +3960,31 @@ const ACTION_NODE_ALIASES = {
 } as const;
 
 /**
+ * The scheme set of a page action row's url `target` — on `action:button` and
+ * `action:icon` (`actionType: 'url'`) and on an `action:group` /
+ * `action:menu` member (`type: 'url'`). Every one of them forwards `target` to
+ * the console's action runner, which navigates to it on a click and refuses a
+ * target outside the set (`classifyNavigationTarget`). The grammar is
+ * `navigation-target.ts`'s, the one the url-action doors apply (ruling A+ on
+ * objectstack-ai/objectui#12191: the scheme set is stated once in the contract
+ * and the runtime fulfils exactly that); this only scopes it to the url
+ * executor. ⛔ No second URL grammar here.
+ *
+ * On every other executor `target` names a script, flow, page, endpoint or
+ * form and is untouched. A row with no `target` is not judged here: nothing
+ * was written for the set to judge. Because `os validate`'s props gate parses
+ * `properties` against these same rows (`ComponentPropsMap`), it reports this
+ * refusal at the same path with the same text — one rule, two doors.
+ */
+function refuseUnopenableRowUrlTarget(executorKey: 'actionType' | 'type', subject: string) {
+  return (row: { actionType?: string; type?: string; target?: string }, ctx: z.RefinementCtx): void => {
+    if (row[executorKey] !== 'url' || typeof row.target !== 'string') return;
+    const refusal = navigationTargetRefusal(row.target, subject);
+    if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: ['target'], message: refusal });
+  };
+}
+
+/**
  * Read-but-not-authorable keys shared by `action:button` and `action:icon`,
  * each read by the renderer and each refused here with what to write instead.
  */
@@ -4065,7 +4091,7 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
   description: z.string().optional()
     .describe('Action description, forwarded to the runner — the parameter dialog shows it under its title'),
   target: z.string().optional()
-    .describe('Executor target, forwarded to the runner: the URL, script name, flow name or API endpoint, per `actionType`'),
+    .describe('Executor target, forwarded to the runner: the URL, script name, flow name or API endpoint, per `actionType`. For `actionType: \'url\'`: an http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ — every other scheme and a protocol-relative //host are refused'),
   openIn: z.enum(['self', 'new-tab']).optional()
     .describe('For a `url` action: `self` navigates in place, `new-tab` opens a new browser tab'),
   method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
@@ -4086,7 +4112,7 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
   onSuccess: z.unknown().optional().describe('Declared post-success navigation, forwarded to the runner'),
   objectName: z.string().optional()
     .describe('Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page\'s object. Omit to act on the page\'s object'),
-}));
+}).superRefine(refuseUnopenableRowUrlTarget('actionType', "An `action:button`'s `target` (`actionType: 'url'`)")));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ActionButtonProps = z.input<typeof ActionButtonPropsSchema>;
 /**
@@ -4162,7 +4188,7 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
   params: z.unknown().optional()
     .describe('Action parameters, forwarded to the runner: an array is the list of inputs to collect from the user; an object is forwarded as the static parameter values'),
   target: z.string().optional()
-    .describe('Executor target, forwarded to the runner: the URL, script name, flow name or API endpoint, per `actionType`'),
+    .describe('Executor target, forwarded to the runner: the URL, script name, flow name or API endpoint, per `actionType`. For `actionType: \'url\'`: an http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ — every other scheme and a protocol-relative //host are refused'),
   openIn: z.enum(['self', 'new-tab']).optional()
     .describe('For a `url` action: `self` navigates in place, `new-tab` opens a new browser tab'),
   method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
@@ -4181,7 +4207,7 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
   onSuccess: z.unknown().optional().describe('Declared post-success navigation, forwarded to the runner'),
   objectName: z.string().optional()
     .describe('Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page\'s object. Omit to act on the page\'s object'),
-}));
+}).superRefine(refuseUnopenableRowUrlTarget('actionType', "An `action:icon`'s `target` (`actionType: 'url'`)")));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ActionIconProps = z.input<typeof ActionIconPropsSchema>;
 /**
@@ -4348,7 +4374,7 @@ function actionContainerMemberShape() {
     description: z.string().optional()
       .describe('Action description, forwarded to the runner — the parameter dialog shows it under its title'),
     target: z.string().optional()
-      .describe('Executor target, forwarded to the runner: the URL, script name, flow name or API endpoint, per `type`'),
+      .describe('Executor target, forwarded to the runner: the URL, script name, flow name or API endpoint, per `type`. For `type: \'url\'`: an http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ — every other scheme and a protocol-relative //host are refused'),
     openIn: z.enum(['self', 'new-tab']).optional()
       .describe('For a `url` action: `self` navigates in place, `new-tab` opens a new browser tab'),
     method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
@@ -4451,7 +4477,8 @@ function buildActionGroupMember() {
     ...actionContainerMemberShape(),
     size: z.enum([...BUTTON_PRIMITIVE_SIZES, 'md']).optional()
       .describe('Inline button size — the Button primitive\'s vocabulary, plus `md` (drawn as `default`), falling back to the group\'s `size`. A dropdown item reads no size'),
-  }).superRefine(actionContainerMemberParamsFitType('action:group'));
+  }).superRefine(actionContainerMemberParamsFitType('action:group'))
+    .superRefine(refuseUnopenableRowUrlTarget('type', "An `action:group` member's `target` (`type: 'url'`)"));
 }
 let actionGroupMemberOnce: ReturnType<typeof buildActionGroupMember> | undefined;
 /** The one {@link buildActionGroupMember} instance. */
@@ -4470,7 +4497,8 @@ function buildActionMenuMember() {
         + 'button (the menu\'s own `size`). Remove it, or put the action in an `action:group`, whose inline buttons '
         + 'read a member\'s `size`.',
     },
-  }, actionContainerMemberShape()).superRefine(actionContainerMemberParamsFitType('action:menu'));
+  }, actionContainerMemberShape()).superRefine(actionContainerMemberParamsFitType('action:menu'))
+    .superRefine(refuseUnopenableRowUrlTarget('type', "An `action:menu` member's `target` (`type: 'url'`)"));
 }
 let actionMenuMemberOnce: ReturnType<typeof buildActionMenuMember> | undefined;
 /** The one {@link buildActionMenuMember} instance. */

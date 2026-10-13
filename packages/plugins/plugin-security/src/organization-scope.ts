@@ -2,9 +2,9 @@
 
 /**
  * Organization scoping for the RBAC catalog's per-organization passes: the
- * system context one pass runs under, the organizations a boot sweep
- * enumerates, the one read that tells an organization's own row apart from
- * organization-less residue, and the loud guard that stands in place of a reap.
+ * system context one pass runs under and the one read that tells an
+ * organization's own row apart from organization-less residue (the sweep and
+ * the reap guard retired with their one caller, the seeder; #15204 stage 6b-2).
  *
  * ## Why the catalog is materialized per organization
  *
@@ -66,8 +66,8 @@
  *   because it never touched a junction table; here the junctions ARE the
  *   grants.
  *
- * So the pass says so instead. {@link warnOrganizationLessRows} names the
- * rows and names the remedy, and — this is the load-bearing half — the pass
+ * So the pass said so instead. Its guard (retired with the seeder) named the
+ * rows and named the remedy, and — this is the load-bearing half — the pass
  * still CREATES the organization's own copy. The failure shape it exists to
  * prevent is the silent no-op: a tenant-threaded pass sees the pre-fix
  * organization-less row through the driver's compatibility arm, reads the name
@@ -77,9 +77,6 @@
  * organization has its row" from "somebody's organization-less row is visible
  * here", and every seeder in this catalog routes through it.
  */
-
-import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
-import type { SeedLogger } from './write-refusals.js';
 
 /**
  * How many organizations one boot-time seeding sweep enumerates.
@@ -92,8 +89,6 @@ import type { SeedLogger } from './write-refusals.js';
  */
 export const SEED_ORGANIZATION_SCAN_LIMIT = 500;
 
-const ORGANIZATION_OBJECT = 'sys_organization';
-
 /**
  * The system context ONE seeding pass runs under.
  *
@@ -105,52 +100,6 @@ const ORGANIZATION_OBJECT = 'sys_organization';
  */
 export function seedCtx(organizationId?: string): { isSystem: true; tenantId?: string } {
   return organizationId ? { isSystem: true, tenantId: organizationId } : { isSystem: true };
-}
-
-/** Does this posture want per-organization catalog rows? */
-export function catalogIsPerOrganization(posture: TenancyPosture): boolean {
-  return postureEnforcesWall(posture);
-}
-
-/**
- * Enumerate the organizations whose catalog needs seeding.
- *
- * Returns `null` — not `[]` — when the read FAILS, because the two mean
- * opposite things: zero organizations is "nothing to seed", an unreadable
- * `sys_organization` is "we do not know". Conflating them turns an outage into
- * a silent empty sweep, so a failure is warned and the caller must not proceed
- * as though the installation had no tenants.
- */
-export async function listSeedOrganizationIds(
-  ql: any,
-  logger?: SeedLogger,
-): Promise<string[] | null> {
-  let rows: any;
-  try {
-    rows = await ql.find(ORGANIZATION_OBJECT, {
-      fields: ['id'],
-      limit: SEED_ORGANIZATION_SCAN_LIMIT,
-      context: seedCtx(),
-    });
-  } catch (e) {
-    logger?.warn?.(
-      '[security] could not enumerate organizations — the RBAC catalog was NOT seeded per ' +
-        'organization at this call; seeding retries on the next boot and on organization creation',
-      { object: ORGANIZATION_OBJECT, error: (e as Error)?.message },
-    );
-    return null;
-  }
-  const ids = (Array.isArray(rows) ? rows : [])
-    .map((r: any) => r?.id)
-    .filter((id: unknown): id is string => typeof id === 'string' && id !== '');
-  if (ids.length >= SEED_ORGANIZATION_SCAN_LIMIT) {
-    logger?.warn?.(
-      '[security] organization scan hit its bound — organizations past it are seeded when they are ' +
-        'created and on the next boot sweep',
-      { scanned: ids.length, limit: SEED_ORGANIZATION_SCAN_LIMIT },
-    );
-  }
-  return ids;
 }
 
 /** The organization a stored row belongs to, `null` for an organization-less one. */
@@ -187,100 +136,4 @@ export function resolveOwnOrganizationRow(
   const own = list.find((r) => rowOrganizationId(r) === organizationId) ?? null;
   const residue = list.find((r) => rowOrganizationId(r) === null) ?? null;
   return { own, organizationLessResidue: residue };
-}
-
-/**
- * The machine-readable half of the guard below: WHY this organization-less row
- * is visible to a per-organization pass. The two answers take opposite
- * remedies, so the classification is a field rather than something a reader has
- * to infer from prose (#11532).
- */
-export type OrganizationLessRowOrigin = 'platform-bucket' | 'pre-fix-residue';
-
-/**
- * The loud guard that stands in place of a reap — and the ONE place that tells
- * the platform bucket apart from a genuine pre-fix leftover.
- *
- * Called once per pass with everything the pass found, so an operator gets ONE
- * actionable line per class rather than a warning per name.
- *
- * ## The two classes, and why conflating them was a defect (#11532)
- *
- * - **`pre-fix-residue`** — a row from before the per-organization conversion.
- *   Nothing regenerates it, so the ruled remedy holds: re-initialize the
- *   deployment (correct while it is pre-launch, which is the premise this whole
- *   repair was ruled on), or adopt each row by hand.
- *
- * - **`platform-bucket`** — a name `bootstrapPlatformAdmin` still seeds
- *   organization-less on EVERY boot (`platformBucketNames`). Calling one of
- *   these "pre-fix" tells an operator they are carrying legacy state they never
- *   had: on the measured fresh walled rig they were minted 1.3 s before the
- *   first organization existed, by the very code that then warned about them.
- *   And the pre-fix remedy does not terminate here — re-initializing recreates
- *   exactly these rows on the next boot, so the only branch that ends is hand
- *   adoption, which is also the branch an operator is least likely to pick and
- *   which hands a platform-wide bucket to one tenant.
- *
- * Membership is decided by NAME, not by `managed_by`, because the question the
- * remedy turns on is "will a re-initialized deployment have this row again?" —
- * and for these names it will, whatever provenance the current row carries (a
- * pre-ruling install (before commit 712e185db) stores `'admin'` on the very same names).
- *
- * The pass that emits either warning has ALREADY created the organization's own
- * copies — both describe rows beside that catalog, never a refusal to seed.
- */
-export function warnOrganizationLessRows(
-  logger: SeedLogger | undefined,
-  object: string,
-  names: string[],
-  organizationId: string,
-  platformBucketNames?: Iterable<string>,
-): void {
-  if (names.length === 0) return;
-  const bucketNames = new Set(platformBucketNames ?? []);
-  const bucket = names.filter((n) => bucketNames.has(n));
-  const residue = names.filter((n) => !bucketNames.has(n));
-
-  if (bucket.length > 0) {
-    logger?.warn?.(
-      `[security] organization-less ${object} rows for the PLATFORM BUCKET are visible to this ` +
-        `organization's pass. They are not leftovers from an older release: bootstrapPlatformAdmin ` +
-        `seeds these names without an organization on every boot, including the one that just ran, ` +
-        `and the ruling of 2026-08-20 keeps it that way (unreaped, reported, outside the ` +
-        `per-organization conversion) because the platform-admin grant points at the ` +
-        `admin_full_access row by id. This organization's own copies WERE created, so its catalog ` +
-        `is complete and no action is required. Re-initializing the deployment does NOT clear ` +
-        `them — the next boot mints them again. Adopting one by hand (stamping it with an ` +
-        `organization) does remove it from this list, but hands a platform-wide row to a single ` +
-        `tenant, so do that only if that is what you mean.`,
-      {
-        object,
-        organization: organizationId,
-        origin: 'platform-bucket' satisfies OrganizationLessRowOrigin,
-        names: [...bucket].sort(),
-        count: bucket.length,
-      },
-    );
-  }
-
-  if (residue.length > 0) {
-    logger?.warn?.(
-      `[security] pre-fix organization-less ${object} rows are still present for names this ` +
-        `organization seeds — under a walled posture a row that belongs to no organization is ` +
-        `invalid state, not a platform-wide default. This organization's own rows WERE created, so ` +
-        `its catalog is complete; the leftovers below are readable through the driver's ` +
-        `compatibility arm and belong to nobody. Remedy: re-initialize the deployment, or adopt each ` +
-        `row by hand by stamping it with the organization that should own it. They are NOT deleted ` +
-        `automatically — grants (sys_user_position, sys_position_permission_set, ` +
-        `sys_user_permission_set) point at these row ids, so reaping them would revoke standing ` +
-        `access with no signal at the moment of loss.`,
-      {
-        object,
-        organization: organizationId,
-        origin: 'pre-fix-residue' satisfies OrganizationLessRowOrigin,
-        names: [...residue].sort(),
-        count: residue.length,
-      },
-    );
-  }
 }
