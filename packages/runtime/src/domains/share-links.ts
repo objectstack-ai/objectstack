@@ -127,13 +127,12 @@ export async function handleShareLinksRequest(
     // token admits. It used to sit inside the body, below the service probe, as
     // the management faces' own `!userId` check, so a deployment without the
     // share-link service answered an anonymous caller the 501 capability
-    // disclosure instead of the 401. A link is managed BY a user, so past this
-    // statement a non-public face always has a user id: the `!userId` arm
-    // refuses an internal system context that carries none, with the answer it
-    // always had.
+    // disclosure instead of the 401. A link is managed BY a user, so the
+    // decision is asked about the user id alone: these faces have no
+    // system-context arm (an internal system context was refused here before
+    // as it is now).
     if (!isPublic) {
-        const ec = context.executionContext;
-        if (shouldDenyAnonymous({ userId: ec?.userId, isSystem: ec?.isSystem }) || !ec?.userId) {
+        if (shouldDenyAnonymous({ userId: context.executionContext?.userId })) {
             return {
                 handled: true,
                 response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),

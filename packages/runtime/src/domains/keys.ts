@@ -75,11 +75,12 @@ export async function handleKeysRequest(
     // below the method check, so an anonymous caller using any verb but POST
     // was answered the 405 describing the route's shape instead of the 401
     // every domain off the closed list of doors answers. A key is minted FOR a
-    // user, so past this statement a caller always has a user id: the
-    // `!ec.userId` arm refuses an internal system context that carries none,
-    // with the same answer it always had.
+    // user, so the decision is asked about the user id alone: this domain has
+    // no system-context arm (an internal system context was refused here before
+    // as it is now), and the `!ec` / `!ec.userId` arms only narrow the type for
+    // the compiler.
     const ec = context.executionContext;
-    if (!ec || shouldDenyAnonymous({ userId: ec.userId, isSystem: ec.isSystem }) || !ec.userId) {
+    if (shouldDenyAnonymous({ userId: ec?.userId }) || !ec || !ec.userId) {
         return {
             handled: true,
             response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),

@@ -123,11 +123,12 @@ export async function handleNotificationRequest(
     // an anonymous caller learns nothing about the deployment, and a face added
     // below inherits the refusal instead of having to remember its own.
     //
-    // The inbox is per user, so past this one statement a caller always has a
-    // user id: the `!userId` arm refuses an internal system context that carries
-    // none (it has no inbox to read), with the same answer it always had.
+    // The inbox is per user, so the decision is asked about the user id alone:
+    // this domain has no system-context arm (an internal system context carries
+    // no inbox to read, and was refused here before as it is now), and the
+    // `!userId` arm only narrows the type for the compiler.
     const userId: string | undefined = context.executionContext?.userId;
-    if (shouldDenyAnonymous({ userId, isSystem: context.executionContext?.isSystem }) || !userId) {
+    if (shouldDenyAnonymous({ userId }) || !userId) {
         return {
             handled: true,
             response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
