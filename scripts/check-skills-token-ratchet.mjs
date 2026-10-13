@@ -823,8 +823,8 @@ function run() {
     const segment = stamped ? stampPrerelease(text) : '';
     // Empty on a stable tree, so `main`'s lines are byte-identical to before.
     const note = segment
-      ? ` (the \`${segment}\` prerelease segment of its metadata.version stamp, `
-        + `${Buffer.byteLength(segment, 'utf8')} bytes, is not priced)`
+      ? ` The \`${segment}\` prerelease segment of its metadata.version stamp `
+        + `(${Buffer.byteLength(segment, 'utf8')} bytes) is not priced.`
       : '';
     const ceiling = CEILINGS.get(rel);
     const generated = generatorOwning(rel);
