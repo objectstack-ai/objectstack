@@ -96,7 +96,8 @@ let artifactOnDisk: Record<string, unknown>;
  * through `extraPlugins`, because the harness composed none; it no longer does,
  * so the endpoints below are the ones a deployment of this configuration
  * serves, booted with nothing the harness does not compose itself. The
- * artifact door's `apis:` ingestion keeps its own proofs
+ * artifact door's `apis:` → `api` ingestion (`ARTIFACT_FIELD_TO_TYPE` in
+ * `packages/metadata/src/plugin.ts`) keeps its own proofs
  * (`declarative-endpoint-policy.dogfood.test.ts`,
  * `declarative-endpoint-anonymous-guest.dogfood.test.ts`).
  *
