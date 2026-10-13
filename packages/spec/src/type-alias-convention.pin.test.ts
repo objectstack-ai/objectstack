@@ -273,7 +273,7 @@ import type * as M187 from './shared/duration.zod.js';
 import type * as M188 from './ai/build-progress.zod.js';
 
 // ---------------------------------------------------------------------------
-// 776 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 778 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -566,6 +566,8 @@ export type Iso_api_protocol__DeleteDataResponseSchema = Assert<Eq< z.input< typ
 export type Iso_api_protocol__DeleteMetaItemRequestSchema = Assert<Eq< z.input< typeof M28.DeleteMetaItemRequestSchema >, z.infer< typeof M28.DeleteMetaItemRequestSchema > >>;
 export type Iso_api_protocol__DeleteMetaItemResponseSchema = Assert<Eq< z.input< typeof M28.DeleteMetaItemResponseSchema >, z.infer< typeof M28.DeleteMetaItemResponseSchema > >>;
 export type Iso_api_protocol__FindDataResponseSchema = Assert<Eq< z.input< typeof M28.FindDataResponseSchema >, z.infer< typeof M28.FindDataResponseSchema > >>;
+export type Iso_api_protocol__FlowRegistrationRefusalSchema = Assert<Eq< z.input< typeof M28.FlowRegistrationRefusalSchema >, z.infer< typeof M28.FlowRegistrationRefusalSchema > >>;
+export type Iso_api_protocol__FlowRegistrationSchema = Assert<Eq< z.input< typeof M28.FlowRegistrationSchema >, z.infer< typeof M28.FlowRegistrationSchema > >>;
 export type Iso_api_protocol__GetDataRequestSchema = Assert<Eq< z.input< typeof M28.GetDataRequestSchema >, z.infer< typeof M28.GetDataRequestSchema > >>;
 export type Iso_api_protocol__GetDataResponseSchema = Assert<Eq< z.input< typeof M28.GetDataResponseSchema >, z.infer< typeof M28.GetDataResponseSchema > >>;
 export type Iso_api_protocol__GetDiscoveryRequestSchema = Assert<Eq< z.input< typeof M28.GetDiscoveryRequestSchema >, z.infer< typeof M28.GetDiscoveryRequestSchema > >>;
@@ -1678,7 +1680,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 776 isomorphic pins', () => {
+  it('still declares all 778 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2484,7 +2486,15 @@ describe('ADR-0122 type-alias convention', () => {
     // strings and optional `method` literal carry no default and no transform, so
     // it is pinned here (Iso_ui_page__ElementApiDataSourceSchema) rather than
     // given an `ElementApiDataSourceParsed` synonym. +1 added.
-    expect(pins).toHaveLength(776);
+    //
+    // 776 -> 778 is #23316: the flow meta read's engine verdict, the new
+    // exported `FlowRegistrationSchema` (a discriminated union of three closed
+    // literal arms) and `FlowRegistrationRefusalSchema` (two plain strings, one
+    // optional) — no default and no transform anywhere in either tree, so both
+    // are pinned here (Iso_api_protocol__FlowRegistrationSchema,
+    // Iso_api_protocol__FlowRegistrationRefusalSchema) rather than given
+    // `…Parsed` synonyms. +2 added.
+    expect(pins).toHaveLength(778);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either
