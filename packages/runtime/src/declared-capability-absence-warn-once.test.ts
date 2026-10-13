@@ -65,6 +65,10 @@ import { sendError } from '@objectstack/types';
 // `resolveExecutionContext` reads, answering a session for every request. Only
 // identity is stubbed; the route, the service and every expectation are
 // unchanged. Anonymity is pinned in `domains/analytics-anonymous-deny.test.ts`.
+// [ADR-0138 D2] The `/notifications` domain refuses an anonymous caller first
+// too, ahead of the declared 501 this file is about, so its boots register the
+// same slot; anonymity there is pinned in
+// `domains/domain-floor-anonymous-deny.test.ts`.
 const SIGNED_IN_AUTH = { api: { getSession: async () => ({ user: { id: 'usr_analytics_caller' } }) } };
 
 // This budget was raised when every test re-executed the dispatcher's module
@@ -184,7 +188,7 @@ const throwingAnalytics = (message: string) => ({
 
 describe('#14656 — the dispatcher door', () => {
     it('reports a declared 501 ONCE across N requests, at warn, naming the missing service', async () => {
-        const { route, path, logger } = await boot({});
+        const { route, path, logger } = await boot({ auth: SIGNED_IN_AUTH });
 
         for (const _ of [0, 1, 2, 3, 4]) {
             await route('GET /notifications')({ ...REQ }, makeRes());
@@ -209,7 +213,7 @@ describe('#14656 — the dispatcher door', () => {
     });
 
     it('a SECOND, DIFFERENT route still reports — the dedupe key is the route', async () => {
-        const { route, path, logger } = await boot({});
+        const { route, path, logger } = await boot({ auth: SIGNED_IN_AUTH });
 
         await route('GET /notifications')({ ...REQ }, makeRes());
         await route('GET /notifications')({ ...REQ }, makeRes());
@@ -258,7 +262,7 @@ describe('#14656 — the dispatcher door', () => {
 
 describe('#14656 — both doors read ONE predicate, on one fixture envelope', () => {
     it('the envelope the dispatcher answers is classified identically by the REST envelope writer', async () => {
-        const { route, logger, sendError } = await boot({});
+        const { route, logger, sendError } = await boot({ auth: SIGNED_IN_AUTH });
 
         // ── Door 1: the runtime dispatcher, on the real route ──────────────
         const res = makeRes();
@@ -311,7 +315,7 @@ describe('#14656 — the wire does not move', () => {
      * report» — is a measurement, and this is the instrument.
      */
     it('answers the same bytes it answered before this change, on every request', async () => {
-        const { route } = await boot({});
+        const { route } = await boot({ auth: SIGNED_IN_AUTH });
 
         const seen: string[] = [];
         for (const _ of [0, 1, 2]) {

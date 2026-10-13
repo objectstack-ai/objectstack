@@ -373,13 +373,15 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     controls: { "route: '": 81, "family: '": 81, RestRouteLedgerEntry: 2 },
     // [#22430] The `openapi` family is the second classified one, by the
     // `anonymous-deny-api-description` row; the note's 2 / 16 counts it.
+    // [ADR-0138 E2] The `forms` family is the third, by the D2 class 1 row
+    // `anonymous-door-public-form` (both of its routes are the class): 3 / 15.
     note:
       'The audited disposition of every route @objectstack/rest mounts, enumerated through ' +
       'RestServer.getRoutes() on a booted server and guarded per route by rest-route-ledger.conformance.test.ts. ' +
       'That guard is why this file can be a population source and a regex table cannot: a mounted route with no ' +
       'row here is already RED in another package, so a new family cannot be silently absent from this file, ' +
-      'and therefore cannot be silently absent from the authz ratchet either. 18 families; 2 classified by ' +
-      'matrix rows (metadata and openapi), 16 enumerated in the shrink-only baseline. Re-measured 82 -> 81 when the permission-set ' +
+      'and therefore cannot be silently absent from the authz ratchet either. 18 families; 3 classified by ' +
+      'matrix rows (metadata, openapi and forms), 15 enumerated in the shrink-only baseline. Re-measured 82 -> 81 when the permission-set ' +
       'overlay-discard row left with its route; it carried `family: security`, which the surviving security rows still carry. ' +
       'Earlier re-measured 83 -> 82 when the anonymous ' +
       'public-form lookup-picker row left with its route; it carried `family: forms`, which the surviving form rows ' +
@@ -472,15 +474,19 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // [#22755] `domains/webhooks.ts` is a seventeenth domain file with an
     // eighteenth plain prefix, named by no probe, and its key is the ninth
     // classified: 23 domains, 14 still in the baseline.
+    // [ADR-0138 E2] `domains/notifications.ts`, `domains/keys.ts` and
+    // `domains/share-links.ts` are now named by a probe (their domain floors'
+    // gate pins), and their three keys are the tenth to twelfth classified:
+    // 23 domains, 11 still in the baseline, 8 domain files no probe names.
     note:
       'The dispatcher half. Its machine contract is DOMAIN-level by live registry introspection ' +
       '(domainRegistry.list()), guarded in BOTH directions by route-ledger.conformance.test.ts: every ' +
       'registered domain needs a row, and every ledger domain must be a live prefix or a pinned legacy / ' +
       'non-dispatch branch. That two-way guard is what settles the FILE-SELECTION layer by ' +
       'construction — all 18 DomainRoute prefixes declared across the 17 domain files that declare one are ' +
-      'ledger domains today, including the 11 files no probe names. 23 domains; 9 classified ' +
+      'ledger domains today, including the 8 files no probe names. 23 domains; 12 classified ' +
       '(/meta, /actions, /automation, /packages, /mcp, /analytics, /i18n, /approvals/act, ' +
-      '/webhooks/redeliver), 14 in the shrink-only baseline.',
+      '/webhooks/redeliver, /notifications, /keys, /share-links), 11 in the shrink-only baseline.',
   },
   {
     file: 'packages/rest/src/rest-server.ts',
