@@ -33,6 +33,7 @@ import { PermissionSetSchema } from '@objectstack/spec/security';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { SysUser } from '@objectstack/platform-objects/identity';
 import { assertArmed, armedWhen } from './armed.js';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const SYS = { isSystem: true } as const;
 const DOMAIN = 'withheld-update-21388.verify.test';
@@ -112,8 +113,8 @@ describe('[#21388] an org peer is withheld the activity rows of a colleague’s 
       uid[who] = String((await plain('sys_user', { email }, 1))[0]?.id ?? '');
       await memberOf(uid[who], 'member');
     }
-    const [activitySet] = await plain('sys_permission_set', { name: activityReadSet.name }, 1);
-    expect(activitySet, 'fixture permission set seeded').toBeTruthy();
+    const activitySet = await catalogPermissionSet(ql, activityReadSet.name);
+    expect(activitySet, 'fixture permission set served by the security catalog').toBeTruthy();
     for (const who of ['member', 'admin']) {
       await ql.insert('sys_user_permission_set', { user_id: uid[who], permission_set: activitySet.name }, { context: SYS });
     }

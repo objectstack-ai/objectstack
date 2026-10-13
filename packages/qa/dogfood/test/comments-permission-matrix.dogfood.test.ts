@@ -70,6 +70,7 @@ import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { AuditPlugin } from '@objectstack/plugin-audit';
 import { commentsFixtureStack, commentsFixtureSecurity } from './fixtures/comments-fixture.js';
 import { assertArmed, principalArmed } from './armed.js';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const SYS = { isSystem: true } as const;
 
@@ -135,8 +136,8 @@ describe('sys_comment permission matrix (#4630)', () => {
 
     // Domain grant (see commentManagerSet): both members may DELETE comments;
     // the everyone-anchor baseline carries no delete bit.
-    const managerSet = await ql.findOne('sys_permission_set', { where: { name: 'cmt_comment_manager' }, context: SYS });
-    expect(managerSet?.id, 'fixture permission set seeded').toBeTruthy();
+    const managerSet = await catalogPermissionSet(ql, 'cmt_comment_manager');
+    expect(managerSet, 'fixture permission set served by the security catalog').toBeTruthy();
     for (const userId of [memberAId, memberBId]) {
       await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: managerSet.name }, { context: { ...SYS } });
     }

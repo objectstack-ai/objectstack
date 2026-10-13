@@ -508,5 +508,31 @@ describe('#22200 — each listDrafts row carries the draft body\'s own label, or
       }
       expect(response.drafts[0]!.label).toBe('Account');
     });
+
+    it('[#23073] two languages of one email_template are two drafts with distinct `member`, read off the stored column; a name-only type carries no `member` key', async () => {
+      // The body says `en-US` on BOTH rows: the served member is the row's
+      // stored `bundle_member` (NULL = the canonical member), never the body's.
+      const body = JSON.stringify({ name: 'acme.welcome', label: 'Welcome', locale: 'en-US' });
+      const engine = makeFakeEngine([
+        draftRow({ type: 'email_template', name: 'acme.welcome', metadata: body, bundle_member: null }),
+        draftRow({ type: 'email_template', name: 'acme.welcome', metadata: body, bundle_member: 'zh-CN' }),
+        draftRow({ type: 'object', name: 'account', metadata: JSON.stringify({ name: 'account' }) }),
+      ]);
+      const protocol = new ObjectStackProtocolImplementation(engine as never);
+
+      const response = await protocol.listDrafts();
+      const templates = response.drafts.filter((d) => d.type === 'email_template');
+      expect(templates.map((d) => [d.name, d.member])).toEqual([
+        ['acme.welcome', 'en-US'],
+        ['acme.welcome', 'zh-CN'],
+      ]);
+      const account = response.drafts.find((d) => d.name === 'account')!;
+      expect(Object.keys(account).sort()).toEqual(HEADER_KEYS);
+      expect(account).not.toHaveProperty('member');
+
+      const parsed = ListDraftsResponseSchema.safeParse(response);
+      expect(parsed.success).toBe(true);
+      if (parsed.success) expect(parsed.data).toEqual(response);
+    });
   });
 });

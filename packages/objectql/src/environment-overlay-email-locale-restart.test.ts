@@ -525,9 +525,11 @@ describe('the package-batch doors and the cluster fan-out carry the member (#228
         expect(reverted, JSON.stringify(reverted)).toMatchObject({ success: true, revertedCount: 1 });
         expect(overlayRows(stores).map((r) => r.bundle_member ?? null)).toEqual([null]);
         expect(await servedSubjects(protocol)).toEqual({ 'en-US': 'ADMIN en', 'zh-CN': 'PKG zh' });
-        // The timeline serves the declared item, with no `member` key.
-        const commits: any[] = await (protocol as any).listCommits({ packageId: PKG });
-        for (const c of commits) for (const it of c.items) expect(Object.keys(it).sort()).toEqual(['existedBefore', 'name', 'prevVersion', 'type']);
+        // [#23073] The timeline serves each item's member: the publish and its revert, zh-CN both.
+        const commits = await protocol.listCommits({ packageId: PKG });
+        expect(commits.map((c) => c.items.map((it) => [it.type, it.name, it.member]))).toEqual([
+            [[T, NAME, 'zh-CN']], [[T, NAME, 'zh-CN']],
+        ]);
     });
 
     it('discardPackageDrafts: the zh-CN draft is discarded as zh-CN', async () => {
@@ -537,9 +539,34 @@ describe('the package-batch doors and the cluster fan-out carry the member (#228
         expect(out, JSON.stringify(out)).toMatchObject({ success: true, discardedCount: 1, failedCount: 0 });
         expect(draftRows(stores)).toEqual([]);
         expect(await servedSubjects(protocol)).toEqual({ 'en-US': 'ADMIN en', 'zh-CN': 'PKG zh' });
-        // The public draft list keeps its declared header (no `member`).
-        const listed: any = await protocol.listDrafts({ packageId: PKG });
+        const listed = await protocol.listDrafts({ packageId: PKG });
         expect(listed.drafts).toEqual([]);
+    });
+
+    it('[#23073] the draft list and the commit timeline tell two languages of one template apart, and each listed member addresses its own item by name', async () => {
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const { protocol } = await boot(stores);
+        await protocol.saveMetaItem({ type: T, name: NAME, item: template('en-US', 'DRAFT en'), mode: 'draft', packageId: PKG });
+        await protocol.saveMetaItem({ type: T, name: NAME, item: template('zh-CN', 'DRAFT zh'), mode: 'draft', packageId: PKG });
+        const wording: Record<string, string> = { 'en-US': 'DRAFT en', 'zh-CN': 'DRAFT zh' };
+
+        // Two drafts of one `type` and `name`, told apart by `member` alone.
+        const listed = await protocol.listDrafts({ packageId: PKG });
+        expect(listed.drafts.map((d) => [d.type, d.name, d.member]).sort()).toEqual([[T, NAME, 'en-US'], [T, NAME, 'zh-CN']]);
+        // The listed member round-trips through the by-name door: each reads its own draft.
+        for (const d of listed.drafts) {
+            const read: any = await protocol.getMetaItem({ type: d.type, name: d.name, state: 'draft', member: d.member });
+            expect(read?.item?.subject).toBe(wording[d.member!]);
+        }
+
+        const published: any = await protocol.publishPackageDrafts({ packageId: PKG });
+        expect(published, JSON.stringify(published)).toMatchObject({ success: true, publishedCount: 2, failedCount: 0 });
+        const [commit] = await protocol.listCommits({ packageId: PKG });
+        expect(commit!.items.map((it) => [it.type, it.name, it.member]).sort()).toEqual([[T, NAME, 'en-US'], [T, NAME, 'zh-CN']]);
+        for (const it of commit!.items) {
+            const read: any = await protocol.getMetaItem({ type: it.type, name: it.name, member: it.member });
+            expect(read?.item?.subject).toBe(wording[it.member!]);
+        }
     });
 
     it('the cluster fan-out: a peer converges on the member a write changed, and a member reset heals only that member', async () => {

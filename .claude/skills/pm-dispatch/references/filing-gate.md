@@ -1,7 +1,6 @@
 # 立卡门与定级判据
 
-见 triage-duties.md 与 reading-discipline.md 的指针行;本文是「什么才算一张卡」与
-定级、读数三组判据的执行说明。
+见 triage-duties.md 与 reading-discipline.md 的指针行。
 
 ## 立卡门
 
@@ -22,6 +21,7 @@
 - ⛔ 不是卡:三类外或无 `reach:` 的 `finding`,它们进 Acceptance notes 带 `carrier:`。
 - ⛔ 不是卡:丢卡重建(除非自身即 ①–④)、sweep 每 fire 重导的 pin/bump/卫生提醒。
 - ⛔ 不是卡:既有卡一条评论能承载的指针/知会/请求;那条评论即其记录。
+- UI 卡写明所需通用块或 spec 契约门;要产品命名 widget/dialog/hook/命名空间的卡退回重立。
 - POST 前正文答三件:类别 ①–④、动手的读者(哪席哪步)、查重查询与命中数(含 closed)。
 - 缺任一件的卡由分诊首触即关、不定级,关单一行点名缺的是哪一件。
 - 「动手的读者」与 Acceptance notes 同一问:说得出具体 PR 或人 ⇒ 写进去,说不出 ⇒ 不立卡。
