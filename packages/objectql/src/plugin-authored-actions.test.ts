@@ -294,7 +294,8 @@ describe('ObjectQLPlugin.resyncAuthoredActions (#2605)', () => {
 
 describe('ObjectQLPlugin protocol-mutation subscription (#2605)', () => {
   it('re-syncs authored actions on action AND object mutations (skips drafts and hooks)', async () => {
-    const ql = makeQlMock({ registerApp: vi.fn(), setDatasourceMapping: vi.fn() });
+    // `registerSecurityServiceSource`: init hands the engine its `security` source (ADR-0139 D2).
+    const ql = makeQlMock({ registerApp: vi.fn(), setDatasourceMapping: vi.fn(), registerSecurityServiceSource: vi.fn() });
     const plugin = new ObjectQLPlugin({ ql: ql as unknown as ObjectQL, environmentId: 'env_t' });
     const registered = new Map<string, any>();
     const ctx = {

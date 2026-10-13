@@ -197,7 +197,8 @@ describe('ObjectQLPlugin.resyncAuthoredHooks (#2588)', () => {
 
 describe('ObjectQLPlugin protocol-mutation subscription (#2588)', () => {
   it('re-syncs authored hooks when a hook row mutation lands (skips drafts and other types)', async () => {
-    const ql = makeQlMock({ registerApp: vi.fn(), setDatasourceMapping: vi.fn() });
+    // `registerSecurityServiceSource`: init hands the engine its `security` source (ADR-0139 D2).
+    const ql = makeQlMock({ registerApp: vi.fn(), setDatasourceMapping: vi.fn(), registerSecurityServiceSource: vi.fn() });
     const plugin = new ObjectQLPlugin({ ql: ql as unknown as ObjectQL, environmentId: 'env_t' });
     const registered = new Map<string, any>();
     const ctx = {

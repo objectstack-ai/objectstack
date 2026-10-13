@@ -451,6 +451,12 @@ describe('[ADR-0139 D1, D5] what the engine never composes is refused by name â€
     const err = await refusalOf(engine.find('rid_child', { where: { note: 'x' } }));
     expect(envelopeOf(err)).toEqual(REFUSED);
     expect(err!.message).toContain('where.record_id.$in holds a COMPOSED ReadableIds leaf');
+    // The caller's own is a plain object in a list slot to the comparand door,
+    // which admits the uncomposed leaf only.
+    const callers = await refusalOf(engine.find('rid_child', {
+      where: { record_id: { $in: ReadableIds.compose(leafOf(), undefined) } },
+    }));
+    expect(envelopeOf(callers)).toEqual({ code: 'INVALID_FILTER', status: 400 });
     expect(calls).toHaveLength(0);
   });
 });
