@@ -242,15 +242,39 @@ const stopImpersonating = (
   );
 
 /**
+ * [#23184] The two sign-ups `arrangeAdminAndTarget` starts from, made ONCE per
+ * file through the real `/sign-up/email` route, on an engine and manager of
+ * their own.
+ *
+ * A sign-up is the costly step here (one production-parameter scrypt
+ * derivation under a fresh salt), and no case is about it: each case is about
+ * what the admin's bearer resolves to after impersonating. So every case
+ * starts from a deep copy of the tables these sign-ups wrote, on the case's
+ * own engine and its own manager, and every step from the promotion on runs
+ * per case as before. The copy is `structuredClone`, so no case's write
+ * reaches the template or another case, and the admin's sign-in verifies the
+ * password against the very hash the sign-up stored (a memo hit, not a
+ * derivation).
+ */
+let signedUpTables: Promise<Map<string, any[]>> | undefined;
+const signedUpOnce = (): Promise<Map<string, any[]>> =>
+  (signedUpTables ??= (async () => {
+    const template = createMemoryEngine();
+    const templateManager = makeManager(template);
+    await signUp(templateManager, 'admin@example.com', 'Impersonating Admin');
+    await signUp(templateManager, 'target@example.com', 'Impersonation Target');
+    return template.tables as Map<string, any[]>;
+  })());
+
+/**
  * A signed-in platform admin plus a target to impersonate, with the admin's
  * bearer in hand — the state every test below starts from.
  */
 const arrangeAdminAndTarget = async () => {
   const engine = createMemoryEngine();
+  for (const [name, rows] of await signedUpOnce()) engine.tables.set(name, structuredClone(rows));
   const manager = makeManager(engine);
 
-  await signUp(manager, 'admin@example.com', 'Impersonating Admin');
-  await signUp(manager, 'target@example.com', 'Impersonation Target');
   makePlatformAdmin(engine, 'admin@example.com');
 
   const adminId = userIdFor(engine, 'admin@example.com');
@@ -277,17 +301,19 @@ afterEach(() => vi.restoreAllMocks());
  * `createMemoryEngine` from this file (the import re-registers its `describe`s
  * there; `admin-impersonate-endpoint.test.ts` records that trade at its own
  * import), so their wall is paid once per importer, and in several importers
- * it was most of the wall. Two things keep it small, and neither touches what
- * a case asserts:
+ * it was most of the wall. Three things keep it small, and none touches what a
+ * case asserts:
  *
- *  - each sign-in verifies the password its own sign-up just hashed, against
- *    the same salt, so the scrypt memo answers that second derivation from the
- *    bytes the first one produced (`__tests__/scrypt-memo.testkit.ts`); every
- *    fresh salt is still a real derivation;
- *  - every case builds its own engine, manager and users and reads no state
- *    another case writes, so the three suites run their cases concurrently and
- *    the sign-ups' derivations overlap on the libuv pool instead of queueing.
- *    The console stubs above are the only state the cases share. A finishing
+ *  - the two sign-ups `arrangeAdminAndTarget` starts from are made once per
+ *    file (`signedUpOnce` above), and each case starts from its own deep copy;
+ *  - a sign-in verifies the password against the hash its sign-up stored, the
+ *    same password against the same salt, so the scrypt memo answers it from
+ *    the bytes the sign-up's derivation produced
+ *    (`__tests__/scrypt-memo.testkit.ts`); every fresh salt is still a real
+ *    derivation;
+ *  - every case has its own engine and manager and reads no state another
+ *    case writes, so the three suites run their cases concurrently. The
+ *    console stubs above are the only state the cases share. A finishing
  *    case's `restoreAllMocks` can lift them while another case still runs,
  *    which costs at most log output: no case here reads them.
  */

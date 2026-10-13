@@ -240,6 +240,30 @@ const seedTenantAdmin = async (engine: any, userId: string) => {
 };
 
 /**
+ * [#23184] The two sign-ups every case starts from, made ONCE per file through
+ * the real `/sign-up/email` route, on an engine and manager of their own.
+ *
+ * A sign-up is the costly step here (one production-parameter scrypt
+ * derivation under a fresh salt), and no case is about it: each case is about
+ * what the gates answer for a standing seeded AFTER the users exist and BEFORE
+ * they sign in. So `arrange` starts each case from a deep copy of the tables
+ * these sign-ups wrote, on the case's own engine and its own manager, and
+ * every step from the seed on runs per case as before. The copy is
+ * `structuredClone`, so no case's write reaches the template or another case,
+ * and the sign-in that follows verifies the password against the very hash the
+ * sign-up stored (a memo hit, not a derivation).
+ */
+let signedUpTables: Promise<Map<string, any[]>> | undefined;
+const signedUpOnce = (): Promise<Map<string, any[]>> =>
+  (signedUpTables ??= (async () => {
+    const template = createMemoryEngine();
+    const templateManager = makeManager(template);
+    await signUp(templateManager, 'caller@example.com', 'Caller');
+    await signUp(templateManager, 'target@example.com', 'Target');
+    return template.tables as Map<string, any[]>;
+  })());
+
+/**
  * Two signed-in principals over one engine: `caller` (the one under test) and
  * `target` (an ordinary user for the impersonation body). The caller's standing
  * is seeded by `seed` BEFORE sign-in, so the session it gets is the one the
@@ -247,10 +271,8 @@ const seedTenantAdmin = async (engine: any, userId: string) => {
  */
 const arrange = async (seed?: (engine: any, callerId: string) => Promise<void>) => {
   const engine = createMemoryEngine();
+  for (const [name, rows] of await signedUpOnce()) engine.tables.set(name, structuredClone(rows));
   const manager = makeManager(engine);
-
-  await signUp(manager, 'caller@example.com', 'Caller');
-  await signUp(manager, 'target@example.com', 'Target');
 
   const callerId = userIdFor(engine, 'caller@example.com');
   const targetId = userIdFor(engine, 'target@example.com');
@@ -276,17 +298,16 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 /**
- * [#23184] Every case signs up two users (two production-parameter scrypt
- * derivations under fresh salts) and signs both in again (the same password
- * against the same salt, answered by the memo from the bytes the sign-up
- * produced: `__tests__/scrypt-memo.testkit.ts`). Each case builds its own
- * engine, manager and users and reads no state another case writes, so the
- * suites below run their cases concurrently and the fresh derivations overlap
- * on the libuv pool. The one exception is the fail-closed floor, which stays
- * sequential: its first case asserts a `vi.spyOn` spy saw NO call, and another
- * case's `restoreAllMocks` lifting that spy mid-case would make the assertion
- * pass on a dead spy. The console stubs above are the only other shared state;
- * lifted early, they cost log output and no assertion.
+ * [#23184] Every case's two sign-ins verify the password against the hash the
+ * shared sign-ups stored (`signedUpOnce` above): the same password against the
+ * same salt, which the memo answers from the bytes the sign-up's derivation
+ * produced (`__tests__/scrypt-memo.testkit.ts`). Each case has its own engine
+ * and manager and reads no state another case writes, so the suites below run
+ * their cases concurrently. The one exception is the fail-closed floor, which
+ * stays sequential: its first case asserts a `vi.spyOn` spy saw NO call, and
+ * another case's `restoreAllMocks` lifting that spy mid-case would make the
+ * assertion pass on a dead spy. The console stubs above are the only other
+ * shared state; lifted early, they cost log output and no assertion.
  */
 const scrypt = memoizeScrypt();
 afterAll(scrypt.restore);
