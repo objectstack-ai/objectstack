@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { EmailTemplateDefinitionSchema } from '@objectstack/spec/system';
+import { EMAIL_TEMPLATE_FLOOR_LOCALE, EmailTemplateDefinitionSchema } from '@objectstack/spec/system';
 import { emailTemplateDefinitionFromRow } from './email-template-row-definition.js';
 
 /** A row as `sys_email_template` stores it, its state and provenance riding along. */
@@ -80,7 +80,7 @@ describe('emailTemplateDefinitionFromRow', () => {
     expect(body).toStrictEqual({
       name: 'auth.reset',
       label: 'auth.reset',
-      locale: 'en-US',
+      locale: EMAIL_TEMPLATE_FLOOR_LOCALE,
       subject: '',
       bodyHtml: '',
       variables: [],

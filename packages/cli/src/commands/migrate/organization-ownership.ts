@@ -29,6 +29,7 @@ import {
   applyOrganizationOwnership,
   checkpointFromDetails,
   ORGANIZATION_OWNERSHIP_MIGRATION_ID,
+  TemplateChoiceRefusal,
   type ApplyExecutor,
   type CeremonyLedgerPort,
   type ColumnDropOutcome,
@@ -142,6 +143,13 @@ export default class MigrateOrganizationOwnership extends Command {
         'none; without this flag the run asks, and a non-interactive run is refused',
       default: false,
     }),
+    'template-choice': Flags.string({
+      description:
+        'With --apply: the sys_email_template row id the environment keeps for a listed template conflict ' +
+        '(rows of one name and locale that differ). Repeat once per conflict; the other rows of that conflict are ' +
+        'deleted only after the chosen body is promoted and verified',
+      multiple: true,
+    }),
   };
 
   async run(): Promise<void> {
@@ -172,6 +180,10 @@ export default class MigrateOrganizationOwnership extends Command {
 
     if (flags.apply) {
       await this.runApply(flags, posture, refuse);
+      return;
+    }
+    if (flags['template-choice']?.length) {
+      await refuse({ reason: 'flag-without-apply', detail: '--template-choice is only meaningful with --apply' }, '--template-choice is only meaningful with --apply.');
       return;
     }
     if (flags['backup-taken']) {
@@ -263,6 +275,15 @@ export default class MigrateOrganizationOwnership extends Command {
           `${table.notNull.willReceive ? chalk.green(' NOT NULL') : ''}`,
       );
     }
+    for (const table of plan.tables) {
+      for (const conflict of table.templateConflicts ?? []) {
+        printWarning(
+          `Template conflict ${conflict.name} (${conflict.locale}): ` +
+            conflict.candidates.map((c) => `${c.id} (organization ${c.organizationId ?? 'none'})`).join(', ') +
+            ' differ. --apply blocks on it until one row is chosen with --template-choice ROW_ID.',
+        );
+      }
+    }
     console.log('');
     const { summary } = plan;
     printInfo(
@@ -278,7 +299,7 @@ export default class MigrateOrganizationOwnership extends Command {
 
   /** `--apply`: the backup precondition, the boot, the ceremony, the report file. */
   private async runApply(
-    flags: { 'database-url'?: string; out?: string; json?: boolean; 'backup-taken'?: boolean },
+    flags: { 'database-url'?: string; out?: string; json?: boolean; 'backup-taken'?: boolean; 'template-choice'?: string[] },
     posture: string,
     refuse: (payload: Record<string, unknown>, message: string) => Promise<void>,
   ): Promise<void> {
@@ -374,6 +395,7 @@ export default class MigrateOrganizationOwnership extends Command {
       const liveStack = stack;
       report = await applyOrganizationOwnership({
         executor,
+        ...(flags['template-choice']?.length ? { templateChoices: flags['template-choice'] } : {}),
         posture,
         database: stack.dbLabel,
         catalog,
@@ -437,6 +459,10 @@ export default class MigrateOrganizationOwnership extends Command {
       });
     } catch (error: unknown) {
       if (isExitSignal(error)) throw error;
+      if (error instanceof TemplateChoiceRefusal) {
+        await refuse({ reason: 'template-choice-refused', detail: error.message }, `Refused: ${error.message}`);
+        return;
+      }
       if (error instanceof OrganizationOwnershipPlanRefusal) {
         await refuse(
           { reason: error.reason, ...(error.table ? { table: error.table } : {}), detail: error.message },
@@ -480,15 +506,24 @@ export default class MigrateOrganizationOwnership extends Command {
     console.log('');
     for (const table of report.tables) {
       if (!table.before) continue;
-      if (table.attributed + table.deleted + table.unattributable.length + table.remaining + table.departures.length === 0 && !table.columnDropped) continue;
+      if (table.attributed + table.deleted + table.movedOut + table.movedIn + table.unattributable.length + table.remaining + table.departures.length === 0 && !table.columnDropped) continue;
       console.log(
         `  ${chalk.white(table.object.padEnd(34))} ${table.fate.padEnd(16)} attributed ${String(table.attributed).padStart(6)}  ` +
-          `deleted ${String(table.deleted).padStart(6)}  ${table.columnDropped ? chalk.green('column dropped  ') : ''}` +
+          `deleted ${String(table.deleted).padStart(6)}  ` +
+          `${table.movedOut ? `moved out ${table.movedOut}  ` : ''}${table.movedIn ? `moved in ${table.movedIn}  ` : ''}` +
+          `${table.columnDropped ? chalk.green('column dropped  ') : ''}` +
           `${table.unattributable.length ? chalk.yellow(`reported ${table.unattributable.length}  `) : ''}` +
           `${table.remaining ? chalk.red(`remaining ${table.remaining}`) : ''}`,
       );
       for (const departure of table.departures) {
         console.log(chalk.yellow(`      ${departure.rows} row(s) still to leave by a step not yet run — ${departure.label}`));
+      }
+      for (const conflict of table.templateConflicts ?? []) {
+        console.log(chalk.yellow(
+          `      template conflict ${conflict.name} (${conflict.locale}): ` +
+            conflict.candidates.map((c) => `${c.id} (organization ${c.organizationId ?? 'none'})`).join(', ') +
+            ' — choose one with --template-choice ROW_ID',
+        ));
       }
     }
     console.log('');

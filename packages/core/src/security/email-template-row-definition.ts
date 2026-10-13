@@ -11,15 +11,15 @@
  * upgrade ceremony (`os migrate`, C7b) reads the row, calls this function and
  * saves the answer through the metadata door. ⛔ Never at boot.
  *
- * The function is pure: one row in, one body out — no engine, no I/O, and no
- * import, so the lean entry carries it as it stands. The mapping is the
+ * The function is pure: one row in, one body out — no engine, no I/O. Its one
+ * import is the spec's floor-locale constant, a plain string. The mapping is the
  * inverse of the row shape the retired projector wrote, which is also the
  * render input the email service reads (`EmailTemplateRow`):
  *
  *  - `name` → `name`; `label` → `label`, falling back to the name when the
  *    column is empty or absent;
- *  - `locale` → `locale`, falling back to `en-US` (the schema's default and
- *    the bundle floor) when empty or absent;
+ *  - `locale` → `locale`, falling back to `EMAIL_TEMPLATE_FLOOR_LOCALE` (the
+ *    schema's default and the bundle floor) when empty or absent;
  *  - `subject` → `subject` and `body_html` → `bodyHtml`, each `''` when empty
  *    or absent (both are required strings);
  *  - `body_text` → `bodyText`, `reply_to` → `replyTo` and `description` →
@@ -40,6 +40,8 @@
  * answers a body; the metadata door refuses it, and reporting that refusal is
  * the ceremony's.
  */
+
+import { EMAIL_TEMPLATE_FLOOR_LOCALE } from '@objectstack/spec/system';
 
 /**
  * One `sys_email_template` row, as the mapping reads it. Every other column a
@@ -85,7 +87,7 @@ export function emailTemplateDefinitionFromRow(row: EmailTemplateRowForDefinitio
   const body: Record<string, unknown> = {
     name: row.name,
     label: filled(row.label) ?? row.name,
-    locale: filled(row.locale) ?? 'en-US',
+    locale: filled(row.locale) ?? EMAIL_TEMPLATE_FLOOR_LOCALE,
     subject: filled(row.subject) ?? '',
     bodyHtml: filled(row.body_html) ?? '',
   };

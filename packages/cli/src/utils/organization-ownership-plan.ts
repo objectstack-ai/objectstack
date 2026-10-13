@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { createHash } from 'node:crypto';
+import { emailTemplateDefinitionFromRow } from '@objectstack/core';
 import { hasPlatformObjectPrefix } from '@objectstack/spec/system';
 import {
   APPLICATION_OBJECT_FATE,
@@ -147,6 +148,100 @@ export interface TablePlan {
   cloudCarried?: true;
   external?: true;
   note?: string;
+  /**
+   * `sys_email_template` only: the `(name, locale)` groups of the promotion
+   * population whose candidate rows define the template differently. Fate 4
+   * until the operator chooses one row per group; nothing is guessed.
+   */
+  templateConflicts?: TemplateConflict[];
+}
+
+/** One `(name, locale)` the promotion cannot carry without the operator's choice. */
+export interface TemplateConflict {
+  name: string;
+  locale: string;
+  candidates: Array<{ id: string; organizationId: string | null }>;
+}
+
+/** The table whose customized and authored rows the ceremony promotes (ruling C on ADR-0131 §6 Q1). */
+export const TEMPLATE_OBJECT = 'sys_email_template';
+
+/** Provenance the seeders stamped: only such a row can be a copy of code. */
+export const SEEDED_BY: readonly string[] = ['package', 'platform', 'system'];
+
+/**
+ * The `sys_email_template` rows the promotion carries: a customized row (or one
+ * whose `customized` is unknown), and every row no seeder wrote (`managed_by`
+ * NULL or outside package / platform / system), with or without an
+ * organization. Every other row — seeded and uncustomized, NULL residue or an
+ * organization's copy — is a copy of code: a mirror, never promoted.
+ */
+export function templatePromotionSql(sql: Sql, cols: ReadonlySet<string>): { text: string; params: unknown[] } {
+  const t = TEMPLATE_OBJECT;
+  const c = sql.q('customized', t);
+  const customized = cols.has('customized') ? `${c} = ? OR ${c} IS NULL` : '1 = 0';
+  const params: unknown[] = cols.has('customized') ? [sql.bind(true)] : [];
+  if (!cols.has('managed_by')) return { text: '1 = 1', params: [] };
+  const managed = sql.q('managed_by', t);
+  return {
+    text: `${customized} OR ${managed} IS NULL OR ${managed} NOT IN (${SEEDED_BY.map(() => '?').join(', ')})`,
+    params: [...params, ...SEEDED_BY],
+  };
+}
+
+/** The JSON of a definition's own keys, for comparing two bodies. */
+export const definitionKey = (body: Readonly<Record<string, unknown>>, keys: readonly string[]): string =>
+  JSON.stringify(keys.map((k) => [k, body[k] ?? null]));
+
+/** One `(name, locale)` of the promotion population, its rows and the bodies they define. */
+export interface TemplateGroup {
+  name: string;
+  locale: string;
+  rows: Record<string, unknown>[];
+  bodies: Record<string, unknown>[];
+  /** The rows define the template differently. */
+  conflict: boolean;
+}
+
+/** Group population rows by `(name, locale)`; a row whose mapped body carries no name is listed apart. */
+export function groupTemplateRows(rows: readonly Record<string, unknown>[]): { groups: TemplateGroup[]; nameless: string[] } {
+  const byKey = new Map<string, TemplateGroup>();
+  const nameless: string[] = [];
+  for (const row of rows) {
+    const body = emailTemplateDefinitionFromRow(row);
+    const name = typeof body.name === 'string' && body.name !== '' ? body.name : null;
+    if (name === null) {
+      nameless.push(String(row.id));
+      continue;
+    }
+    const locale = String(body.locale);
+    const key = `${name}\u0000${locale}`;
+    const group = byKey.get(key) ?? { name, locale, rows: [], bodies: [], conflict: false };
+    group.rows.push(row);
+    group.bodies.push(body);
+    byKey.set(key, group);
+  }
+  for (const group of byKey.values()) {
+    const keys = [...new Set(group.bodies.flatMap(Object.keys))];
+    group.conflict = new Set(group.bodies.map((b) => definitionKey(b, keys))).size > 1;
+  }
+  return { groups: [...byKey.values()], nameless };
+}
+
+const nonEmptyId = (value: unknown): string | null =>
+  value === null || value === undefined || String(value) === '' ? null : String(value);
+
+/** The conflicts among the promotion population of one physical template table. */
+async function readTemplateConflicts(sql: Sql, table: string, columns: ReadonlySet<string>): Promise<TemplateConflict[]> {
+  const where = templatePromotionSql(sql, columns);
+  const rows = await sql.read(table, `SELECT * FROM ${sql.q(table, table)} WHERE ${where.text} ORDER BY ${sql.q('id', table)}`, where.params);
+  return groupTemplateRows(rows)
+    .groups.filter((g) => g.conflict)
+    .map((g) => ({
+      name: g.name,
+      locale: g.locale,
+      candidates: g.rows.map((r) => ({ id: String(r.id), organizationId: nonEmptyId(r[ORG]) })),
+    }));
 }
 
 export interface OrganizationOwnershipPlan {
@@ -621,6 +716,11 @@ async function planPresentTable(ctx: PlanContext, entry: InventoryEntry, source:
       if (counted.groups !== undefined) groups = (groups ?? 0) + counted.groups;
     }
     plan.categories.push({ id: category.id, label: category.label, citation: category.citation, rows, ...(groups !== undefined ? { groups } : {}) });
+  }
+  if (entry.object === TEMPLATE_OBJECT) {
+    const conflicts: TemplateConflict[] = [];
+    for (const table of tables) conflicts.push(...(await readTemplateConflicts(sql, table, ctx.catalog.columns.get(table)!)));
+    plan.templateConflicts = conflicts;
   }
 
   const rows = plan.rows!;
