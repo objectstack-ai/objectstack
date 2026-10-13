@@ -2403,6 +2403,20 @@ function stateTenantAuthorship(data: unknown): unknown {
 }
 
 /**
+ * [#23233] A stored row's body with its package binding stated as `_packageId`,
+ * the way `getMetaItems` stamps a row from its `package_id` column. The binding
+ * is read, never derived: a row bound to no package ({@link boundPackageOf}),
+ * or a body that already names a `_packageId`, is returned as it is. A copy,
+ * so the caller's body is never written.
+ */
+function withRowBinding(data: unknown, packageId: unknown): unknown {
+    const binding = boundPackageOf(packageId);
+    if (binding === undefined || !data || typeof data !== 'object' || Array.isArray(data)) return data;
+    if ((data as { _packageId?: unknown })._packageId !== undefined) return data;
+    return { ...(data as Record<string, unknown>), _packageId: binding };
+}
+
+/**
  * [#21639, #21638] Is this artifact a view ITEM — a view a package ships under
  * its own name, `viewKind` set (the spec's ViewItem) — rather than a container
  * or anything else? The save door's "a view item a package ships" and the
@@ -19250,6 +19264,24 @@ export class ObjectStackProtocolImplementation implements
      * package-less view row, and a view row of a name only its own package
      * ships or no package ships, register as before too.
      *
+     * ## [#23233] The entry carries the row's package binding
+     *
+     * The registered body is stamped with the row's package binding as
+     * `_packageId` ({@link withRowBinding}), as `getMetaItems` stamps it from
+     * the row's `package_id` before it hydrates. This hydrator is the one the
+     * boot and the write-through share, so every registration of a stored row
+     * now names the package the row is bound to, not only the one a list read
+     * makes. Before this, the write-through and the boot registered a runtime
+     * package's body with no `_packageId`, and every registry reader that takes
+     * the owner from it (the security catalog, and through it the `everyone`
+     * suggestion of an `isDefault` set) saw the item as unowned: on a host
+     * kernel until the next list read, and on an environment kernel that
+     * hydrates its own store until never. ⛔ No owner is derived: the binding is
+     * only read, a body that already names a `_packageId` keeps it, a row with
+     * no binding stays unowned, and an artifact's envelope still wins over the
+     * stamp ({@link mergeArtifactProtection}). The expansions of a view
+     * container are registered from the unstamped row, as before.
+     *
      * ## [#9111] `type` is an ASSERTED input, not a silently-trusted one
      *
      * The spelling handed in is the spelling the registry entry is minted
@@ -19397,7 +19429,11 @@ export class ObjectStackProtocolImplementation implements
         // and its receipt rendered both as the package. Registered as the
         // tenant row it is, it is reported as one and never armed.
         const envelope = canonicalType === 'flow' ? undefined : artifact;
-        registry.registerItem(type, mergeArtifactProtection(type, stateTenantAuthorship(data), envelope), 'name' as any);
+        registry.registerItem(
+            type,
+            mergeArtifactProtection(type, stateTenantAuthorship(withRowBinding(data, options.packageId)), envelope),
+            'name' as any,
+        );
         await this.hydrateExpandedViewItems(type, data, options);
         return true;
     }

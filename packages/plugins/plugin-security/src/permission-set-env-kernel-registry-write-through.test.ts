@@ -1,36 +1,37 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #23298 — on an environment kernel that hydrates its own `sys_metadata`, a
- * permission set published through the metadata door is in the security
- * catalog at once: the engine registry holds it, the catalog resolves it, and
- * an `isDefault` set declared by its package records its `everyone`
- * suggestion. No list read and no rebuild happen in between.
+ * #23298 and #23233 — a permission set published through the metadata door is
+ * in the security catalog at once, under the package it is bound to, on a host
+ * kernel and on an environment kernel that hydrates its own `sys_metadata`. The
+ * engine registry holds it, the catalog resolves it with its owner, and an
+ * `isDefault` set records its one `everyone` suggestion. No list read and no
+ * rebuild happen in between.
  *
  * ## Why this lives here
  *
  * The suggestion collector (`syncAudienceBindingSuggestions`) is this
- * package's. The write that feeds it is `metadata-protocol`'s registry
- * write-through (aliased to source in `vitest.config.ts`), so the suite runs
- * the protocol in this checkout. The engine is the real `ObjectQL` (aliased to
- * source too) with its real `SchemaRegistry`, over an in-memory driver.
+ * package's. The writes that feed it are `metadata-protocol`'s (aliased to
+ * source in `vitest.config.ts`), so the suite runs the protocol in this
+ * checkout. The engine is the real `ObjectQL` (aliased to source too) with its
+ * real `SchemaRegistry`, over an in-memory driver.
  *
- * ## The topology
+ * ## The two halves of the write
  *
- * An ENVIRONMENT kernel (`environmentId` set) booted as `ObjectQLPlugin.start()`
- * boots one with `hydrateMetadataFromDb`: the protocol's own store hydrated
- * into the engine's own registry (`loadMetaFromDb`). The catalog reads that
- * registry first, and the door's own registry write-through is what puts a
- * saved set there. Before #23298 that write-through skipped every type but
- * `object` on any kernel with an `environmentId`; with the plugin's
- * permission-set echo no longer registered, a set published after boot was
- * then in no reader at all.
- *
- * The set's body declares the spec's `packageId` (ADR-0086 D3), as the input
- * that was measured does. A set whose body names no package is served by the
- * catalog without an owner, because the registry entry carries no
- * `_packageId`: that is the open host-kernel remainder of the permission-set
- * owner card, which this suite neither pins nor changes.
+ *  - **#23298, the body.** The registry write-through skipped every type but
+ *    `object` on any kernel with an `environmentId`, so on an environment
+ *    kernel a set published after boot was in no reader at all (the plugin's
+ *    permission-set echo is no longer registered). It now registers wherever
+ *    the registry takes the kernel's stored rows: an unscoped kernel, or an
+ *    environment kernel that hydrated its own store (`loadMetaFromDb`, which
+ *    `ObjectQLPlugin.start()` calls under `hydrateMetadataFromDb`).
+ *  - **#23233, the owner.** The hydrator the boot and the write-through share
+ *    registered the body without the row's package binding, so the catalog
+ *    served a runtime package's set unowned (on a host kernel until a list
+ *    read stamped it), and the suggestion collector, which reads the owner
+ *    from the catalog entry alone, skipped it. The hydrator now stamps the
+ *    binding as `_packageId`. The bodies below name no `packageId` of their
+ *    own: the owner comes from the binding only.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -137,12 +138,23 @@ function makeMetadataService() {
   return { get: (_type: string, _name: string) => undefined, list: (_type: string) => [] };
 }
 
+/** An installed code package that ships its own default set. */
+const CODE_PKG = 'com.example.crm';
+const CODE_SET = 'crm_readonly';
+
+type Kernel = 'host' | 'environment';
+
 /**
- * One environment kernel: the engine with the tables this flow writes, the
- * protocol's own store hydrated into the engine's own registry, the catalog
- * bound to the engine, and the built-in `everyone` position declared.
+ * One kernel: the engine with the tables this flow writes and a code package
+ * installed, the protocol (an `environmentId` for an environment kernel),
+ * booted as `ObjectQLPlugin.start()` boots it (`loadMetaFromDb`: a host
+ * kernel always, an environment kernel under `hydrateMetadataFromDb`), the
+ * catalog bound to the engine, and the built-in `everyone` position declared.
  */
-async function bootEnvironmentKernel(stores: Stores) {
+async function boot(kind: Kernel) {
+  const stores: Stores = new Map([
+    ['sys_organization', new Map([[DEFAULT_ORG, { id: DEFAULT_ORG, slug: 'default', name: 'Default' }]])],
+  ]);
   const engine = new ObjectQL();
   engine.registerDriver(makeMemoryDriver(stores), true);
   await engine.init();
@@ -152,32 +164,40 @@ async function bootEnvironmentKernel(stores: Stores) {
   ]) {
     engine.registry.registerObject(o as any, 'test-package');
   }
+  engine.registerApp({
+    id: CODE_PKG,
+    name: 'example_crm',
+    version: '1.0.0',
+    permissions: [{ name: CODE_SET, label: 'CRM read-only', isDefault: true, objects: {} }],
+  });
   const metadata = makeMetadataService();
   const protocol = new ObjectStackProtocolImplementation(
     engine as never,
     () => new Map<string, unknown>([['metadata', metadata]]),
-    ENV,
+    kind === 'environment' ? ENV : undefined,
   );
-  // `ObjectQLPlugin.start()` on a kernel with `hydrateMetadataFromDb`.
   expect(await protocol.loadMetaFromDb()).toMatchObject({ errors: 0, storeUnavailable: false });
   const catalog = createSecurityCatalogReader({ registry: engine.registry as never, metadata });
   bindSecurityCatalogReader(engine, catalog);
   declareEveryoneBaseline(engine.registry, SECURITY_PACKAGE, ['member_default']);
-  return { engine, protocol, catalog };
+  return { stores, engine, protocol, catalog };
 }
 
 const suggestionRows = (stores: Stores, set: string) =>
   Array.from(stores.get('sys_audience_binding_suggestion')?.values() ?? [])
     .filter((row) => row.permission_set_name === set);
 
-/** A new default set, its body declaring the package it is published into. */
-const newDefaultSet = (): Row => ({
-  name: SET,
-  label: 'Workspace member',
-  isDefault: true,
-  packageId: RUNTIME_PKG,
-  objects: {},
-});
+/** A runtime package's new default set. Its body names no `packageId`: the owner is the row's binding. */
+const newDefaultSet = (): Row => ({ name: SET, label: 'Workspace member', isDefault: true, objects: {} });
+
+/** The metadata-door publish of the set, bound to the runtime package. */
+async function publishIntoRuntimePackage(protocol: ObjectStackProtocolImplementation) {
+  const body = newDefaultSet();
+  expect(body, 'precondition: the body names no package').not.toHaveProperty('packageId');
+  expect(await protocol.saveMetaItem({
+    type: 'permission', name: SET, item: body, packageId: RUNTIME_PKG, mode: 'publish',
+  })).toMatchObject({ success: true });
+}
 
 const savedWritable = process.env.OS_METADATA_WRITABLE;
 beforeEach(() => {
@@ -193,22 +213,16 @@ afterEach(() => {
 });
 
 describe('#23298 — a NEW permission set published on an environment kernel is in the security catalog at once', () => {
-  it('the registry holds it, the catalog resolves it, and its isDefault records one pending everyone suggestion', async () => {
-    const stores: Stores = new Map([
-      ['sys_organization', new Map([[DEFAULT_ORG, { id: DEFAULT_ORG, slug: 'default', name: 'Default' }]])],
-    ]);
-    const { engine, protocol, catalog } = await bootEnvironmentKernel(stores);
+  it('the registry holds it, the catalog resolves it under its package, and its isDefault records one pending everyone suggestion', async () => {
+    const { stores, engine, protocol, catalog } = await boot('environment');
     expect(await catalog.resolve('permission', SET), 'precondition: a new set').toBeUndefined();
 
-    expect(await protocol.saveMetaItem({
-      type: 'permission', name: SET, item: newDefaultSet(), packageId: RUNTIME_PKG, mode: 'publish',
-    })).toMatchObject({ success: true });
+    await publishIntoRuntimePackage(protocol);
 
     // No list read, no rebuild: straight to the readers.
     expect(engine.registry.getItem('permission', SET)).toMatchObject({ name: SET, isDefault: true });
     expect(await catalog.resolve('permission', SET)).toMatchObject({
-      source: 'registry',
-      definition: { name: SET, isDefault: true, packageId: RUNTIME_PKG },
+      source: 'registry', packageId: RUNTIME_PKG, definition: { name: SET, isDefault: true },
     });
 
     await syncAudienceBindingSuggestions(engine);
@@ -217,5 +231,60 @@ describe('#23298 — a NEW permission set published on an environment kernel is 
         package_id: RUNTIME_PKG, anchor: 'everyone', status: 'pending', deployment_decision: false,
       }),
     ]);
+  });
+});
+
+describe('#23233 — on a host kernel, the set is owned from the publish onward, with no list read in between', () => {
+  it('records exactly one pending everyone suggestion, under the package the set is bound to', async () => {
+    const { stores, engine, protocol } = await boot('host');
+    await publishIntoRuntimePackage(protocol);
+
+    await syncAudienceBindingSuggestions(engine);
+    expect(suggestionRows(stores, SET)).toEqual([
+      expect.objectContaining({
+        package_id: RUNTIME_PKG, anchor: 'everyone', status: 'pending', deployment_decision: false,
+      }),
+    ]);
+  });
+
+  it('the catalog read and the protocol read name the same owner', async () => {
+    const { protocol, catalog } = await boot('host');
+    await publishIntoRuntimePackage(protocol);
+
+    // The catalog first: the protocol's by-name read is not a list read, but
+    // it is read second so nothing it does can stand in for the publish.
+    const resolved = await catalog.resolve('permission', SET);
+    const served: any = await protocol.getMetaItem({ type: 'permission', name: SET });
+
+    expect(resolved).toMatchObject({ source: 'registry', packageId: RUNTIME_PKG });
+    expect(served?.item?._packageId).toBe(RUNTIME_PKG);
+  });
+});
+
+describe('#23233 — controls: the owner is the binding, never invented', () => {
+  it.each(['host', 'environment'] as const)(
+    'a code package\'s default set is unchanged (%s kernel): its artifact, its owner and its suggestion',
+    async (kind) => {
+      const { stores, engine, catalog } = await boot(kind);
+
+      expect(await catalog.resolve('permission', CODE_SET)).toMatchObject({ source: 'registry', packageId: CODE_PKG });
+      await syncAudienceBindingSuggestions(engine);
+      expect(suggestionRows(stores, CODE_SET)).toEqual([
+        expect.objectContaining({ package_id: CODE_PKG, anchor: 'everyone', status: 'pending' }),
+      ]);
+    },
+  );
+
+  it('a set saved into no package stays unowned and records no suggestion', async () => {
+    const { stores, engine, protocol, catalog } = await boot('host');
+    expect(await protocol.saveMetaItem({
+      type: 'permission', name: 'org_member_default', item: { ...newDefaultSet(), name: 'org_member_default' },
+    })).toMatchObject({ success: true });
+
+    const resolved = await catalog.resolve('permission', 'org_member_default');
+    expect(resolved).toMatchObject({ source: 'registry' });
+    expect(resolved).not.toHaveProperty('packageId');
+    await syncAudienceBindingSuggestions(engine);
+    expect(suggestionRows(stores, 'org_member_default')).toEqual([]);
   });
 });
