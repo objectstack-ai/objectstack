@@ -202,8 +202,8 @@ conversion 是消费者跟的;D3 条目是升级方的 agent 读的。三个都�
       仍用恰好 `' / '` 连接子句(tool 清扫以来的 house style)。下游不再有任何东西
       从它解析归属 —— 那个职责移给了上面的条目。
 - [ ] **`retiredFromLoadPath: true` 与 `retiredAfter: 'x.y.z'`** —— 后者必填(缺则 `tsc` 拒),新退役填
-      `packages/spec/package.json` 的当前版本标签(`retired-after.census.test.ts` 逐值钉;artifact 门据它
-      逐条开窗)。前者退役恒真,但管辖权只有 authoring 漏斗
+      落地时最新 stable 发布(标签为 `x.y.z-next.N` 时永不填它或 `x.y.z`;`retired-after.census.test.ts`
+      逐值钉;artifact 门据它逐条开窗;TSDoc 为准)。前者退役恒真,但管辖权只有 authoring 漏斗
       `normalizeStackInput`;三处 data-at-rest seam 以 `includeRetired: true` 故意重放退役
       条目,它**一处也拦不住**:`applyConversionsToStoredItem`(钉死)、automation
       engine 的 flow rehydration、`applyArtifactForwardConversions`。对*改名*它意味着
