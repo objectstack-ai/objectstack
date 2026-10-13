@@ -127,12 +127,11 @@
  * stroke — the validator writes `permission_actions=write` for it and an empty
  * value for every other stroke, and the mint action skips an empty
  * `permission-*` input, so every other stroke's token is what it was before
- * this row. `REFUSED_PATH_FAMILIES`
- * refuses every other `actions/*` path, and `validate.mjs --self-test` pins
- * that the dispatch call is the only one the table reaches. The dispatch
- * answers 204 with no body, so the run it starts is read back by the SEAT
- * (`dispatch.mjs`): the newest `workflow_dispatch` run of that file created
- * since the dispatch.
+ * this row. `REFUSED_PATH_FAMILIES` refuses every other `actions/*` path, and
+ * `validate.mjs --self-test` pins that the dispatch call is the only one the
+ * table reaches. The dispatch answers 204 with no body, so the run it starts
+ * is read back by the SEAT (`dispatch.mjs`): the newest `workflow_dispatch`
+ * run of that file created since the dispatch.
  *
  * ## A workflow's inputs are CLOSED per file — `WORKFLOW_DISPATCH_INPUTS`
  *
@@ -155,12 +154,13 @@
  * `{ refresh_version_pr: true }`: the `version-pr` job runs on a dispatch
  * carrying it, and `release-integrity`, `stale-prompts`, `full-battery` and
  * `publish` refuse such a dispatch in their own `if:` (`docker` runs only on a
- * publish those two report). `force` is not in the entry and
- * `refresh_version_pr: false` is not its value, so the publish-repair lane —
- * a dispatch WITHOUT `refresh_version_pr` — is unreachable from the relay.
- * `validate.mjs --self-test` reads the workflow from disk and pins every
- * input here declared there, and every job of that file classified by its
- * guard, so a job added there reds until it is classified.
+ * publish `release-integrity` or `publish` reports). `force` is not in the
+ * entry and `refresh_version_pr: false` is not its value, so the
+ * publish-repair lane — a dispatch WITHOUT `refresh_version_pr` — is
+ * unreachable from the relay. `validate.mjs --self-test` reads the workflow
+ * from disk: it pins every input here declared there, and evaluates every
+ * job's `if:` for the relay's dispatch, so a guard edited there, or a job
+ * added there, that the dispatch would start reds that self-test.
  *
  * On the wire every value is a STRING (`dispatchInputsOnTheWire`): `"true"`
  * is the spelling measured to start the bookkeeping lane alone (runs
