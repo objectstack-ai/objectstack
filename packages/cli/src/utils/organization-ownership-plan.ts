@@ -85,6 +85,27 @@ export interface UnattributableRow {
   shard?: string;
 }
 
+/**
+ * One NULL-organization row the walk derived an owner for. The plan only
+ * counts these; `--apply` hands a sink to the same walk so the owner it writes
+ * is the owner the plan reported, derived once ({@link AttributionSink}).
+ */
+export interface AttributionAssignment {
+  id: string;
+  /** The physical table the row lives in (a rotation shard, or the object's own table). */
+  table: string;
+  organizationId: string;
+  /** The anchor that answered, as the plan's `attribution` counts label it. */
+  via: string;
+}
+
+/**
+ * Receives each page of derived owners, after the page is classified and
+ * before the walk reads the next. The plan itself never writes; a sink is the
+ * one place a caller may.
+ */
+export type AttributionSink = (batch: { object: string; assignments: AttributionAssignment[] }) => Promise<void>;
+
 export interface PlannedCategory {
   id: string;
   label: string;
@@ -176,7 +197,8 @@ export function inventoryDigest(inventory: readonly InventoryEntry[] = ORGANIZAT
   return createHash('sha256').update(JSON.stringify(inventory)).digest('hex');
 }
 
-class Sql {
+/** Identifier quoting, value binding and refusing reads, shared with the apply step. */
+export class Sql {
   constructor(
     private readonly reader: PlanReader,
     readonly dialect: PlanDialect,
@@ -231,7 +253,7 @@ function firstValue(row: Record<string, unknown>): unknown {
   return Object.values(row)[0];
 }
 
-function columnNameOf(row: Record<string, unknown>): string | null {
+export function columnNameOf(row: Record<string, unknown>): string | null {
   for (const key of ['column_name', 'COLUMN_NAME', 'name']) {
     const value = row[key];
     if (typeof value === 'string' && value) return value;
@@ -247,7 +269,7 @@ function tableNameOf(row: Record<string, unknown>): string | null {
   return null;
 }
 
-function columnListSql(dialect: PlanDialect): string {
+export function columnListSql(dialect: PlanDialect): string {
   if (dialect === 'sqlite') return 'SELECT name AS column_name FROM pragma_table_info(?)';
   if (dialect === 'postgres') {
     return 'SELECT column_name FROM information_schema.columns WHERE table_schema = ANY (current_schemas(false)) AND table_name = ?';
@@ -256,7 +278,7 @@ function columnListSql(dialect: PlanDialect): string {
 }
 
 /** The SQL of one predicate, its columns required present on `table`. */
-function predicateSql(sql: Sql, table: string, columns: ReadonlySet<string>, predicate: RowPredicate): { text: string; params: unknown[] } {
+export function predicateSql(sql: Sql, table: string, columns: ReadonlySet<string>, predicate: RowPredicate): { text: string; params: unknown[] } {
   const parts: string[] = [];
   const params: unknown[] = [];
   for (const condition of predicate) {
@@ -281,7 +303,7 @@ function predicateSql(sql: Sql, table: string, columns: ReadonlySet<string>, pre
   return { text: parts.length ? parts.join(' AND ') : '1 = 1', params };
 }
 
-function requireColumn(table: string, columns: ReadonlySet<string>, column: string): void {
+export function requireColumn(table: string, columns: ReadonlySet<string>, column: string): void {
   if (!columns.has(column)) {
     throw new OrganizationOwnershipPlanRefusal(
       'missing-column',
@@ -378,6 +400,7 @@ interface PlanContext {
   catalog: Catalog;
   posture: string;
   defaultOrganizationId: string | null;
+  onAttribution?: AttributionSink;
 }
 
 /** The organization of each id in `ids` on `object`'s own table, or a reason it cannot be read. */
@@ -412,9 +435,19 @@ interface PendingRow {
 }
 
 /** Resolve rows through one anchor; returns the rows it could not derive. */
-async function applyAnchor(ctx: PlanContext, anchor: Anchor, rows: PendingRow[], derived: Record<string, number>): Promise<PendingRow[]> {
+async function applyAnchor(
+  ctx: PlanContext,
+  anchor: Anchor,
+  rows: PendingRow[],
+  derived: Record<string, number>,
+  assigned: AttributionAssignment[],
+): Promise<PendingRow[]> {
   const label = anchorLabel(anchor);
   const left: PendingRow[] = [];
+  const derive = (row: PendingRow, organizationId: string): void => {
+    derived[label] = (derived[label] ?? 0) + 1;
+    assigned.push({ id: row.id, table: row.shard, organizationId, via: label });
+  };
   if (anchor.kind === 'parent') {
     const keys = [...new Set(rows.map((r) => nonEmpty(r.values[anchor.childKey])).filter((k): k is string => k !== null))];
     const orgs = keys.length ? await organizationsById(ctx, anchor.parentObject, keys) : new Map<string, string | null>();
@@ -424,7 +457,7 @@ async function applyAnchor(ctx: PlanContext, anchor: Anchor, rows: PendingRow[],
       else if (typeof orgs === 'string') left.push({ ...row, reason: orgs });
       else if (!orgs.has(key)) left.push({ ...row, reason: `${anchor.parentObject} row ${key} not found` });
       else if (orgs.get(key) === null) left.push({ ...row, reason: `${anchor.parentObject} row ${key} has no organization` });
-      else derived[label] = (derived[label] ?? 0) + 1;
+      else derive(row, orgs.get(key)!);
     }
     return left;
   }
@@ -450,7 +483,7 @@ async function applyAnchor(ctx: PlanContext, anchor: Anchor, rows: PendingRow[],
         if (typeof orgs === 'string') left.push({ ...row, reason: orgs });
         else if (!orgs.has(id)) left.push({ ...row, reason: `${object} row ${id} not found` });
         else if (orgs.get(id) === null) left.push({ ...row, reason: `${object} row ${id} has no organization` });
-        else derived[label] = (derived[label] ?? 0) + 1;
+        else derive(row, orgs.get(id)!);
       }
     }
     return left;
@@ -482,7 +515,7 @@ async function applyAnchor(ctx: PlanContext, anchor: Anchor, rows: PendingRow[],
     const orgs = holders.get(row.id);
     if (!orgs) left.push({ ...row, reason: `no stamped ${anchor.holderObject} holder` });
     else if (orgs.size > 1) left.push({ ...row, reason: `${anchor.holderObject} holders disagree (${orgs.size} organizations)` });
-    else derived[label] = (derived[label] ?? 0) + 1;
+    else derive(row, [...orgs][0]!);
   }
   return left;
 }
@@ -669,16 +702,21 @@ async function walkNullRows(
       }
       pending.push({ id: String(row.row_id), values: row, reason: entry.fate === 'report' ? 'fate 4: reported, never guessed' : 'no anchor names the owner', shard: table });
     }
+    const assigned: AttributionAssignment[] = [];
     if (entry.fate === 'attribution') {
       for (const anchor of entry.anchors ?? []) {
         if (pending.length === 0) break;
-        pending = await applyAnchor(ctx, anchor, pending, derived);
+        pending = await applyAnchor(ctx, anchor, pending, derived, assigned);
       }
       if (pending.length > 0 && ctx.posture === 'single' && ctx.defaultOrganizationId !== null) {
         derived['default-organization'] = (derived['default-organization'] ?? 0) + pending.length;
+        for (const row of pending) {
+          assigned.push({ id: row.id, table: row.shard, organizationId: ctx.defaultOrganizationId, via: 'default-organization' });
+        }
         pending = [];
       }
     }
+    if (ctx.onAttribution && assigned.length > 0) await ctx.onAttribution({ object: entry.object, assignments: assigned });
     for (const row of pending) {
       plan.unattributable.push({
         id: row.id,
@@ -725,6 +763,11 @@ export async function buildOrganizationOwnershipPlan(opts: {
   database: string;
   now?: Date;
   inventory?: readonly InventoryEntry[];
+  /**
+   * `--apply`'s attribution step: receives every owner the walk derives. The
+   * plan's own run passes none and stays SELECT-only.
+   */
+  onAttribution?: AttributionSink;
 }): Promise<OrganizationOwnershipPlan> {
   const inventory = opts.inventory ?? ORGANIZATION_OWNERSHIP_INVENTORY;
   const dialect = dialectOf(opts.reader.client);
@@ -754,7 +797,13 @@ export async function buildOrganizationOwnershipPlan(opts: {
     );
     defaultOrganizationId = rows.length > 0 ? nonEmpty(rows[0]!.id) : null;
   }
-  const ctx: PlanContext = { sql, catalog, posture: opts.posture, defaultOrganizationId };
+  const ctx: PlanContext = {
+    sql,
+    catalog,
+    posture: opts.posture,
+    defaultOrganizationId,
+    ...(opts.onAttribution ? { onAttribution: opts.onAttribution } : {}),
+  };
 
   const tables: TablePlan[] = [];
   let outsideCeremony = 0;

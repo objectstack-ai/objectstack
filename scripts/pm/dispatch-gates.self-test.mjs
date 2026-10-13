@@ -10204,6 +10204,91 @@ export function selfTest({ tier = 'full' } = {}) {
       tierScan.sites[0] === `${tierOwnRel}:${tierDefLine}`,
   );
 
+  // ── A DECLARATION is not a directory-creating site (#23294) ───────────────
+  //
+  // The class sweep in the slow section below reads every directory-creating
+  // name followed by a paren as a call, and resolves its first argument as the
+  // base of a directory. A module shim's type declaration spells the same name
+  // and the same paren, and read as a call its base is a parameter with a type
+  // annotation, which nothing can resolve — so a correct declaration redded the
+  // whole-tree case on main. These are in-process fixtures, so they sit in the
+  // FAST tier, the one a pull request's lane runs; the live-tree reading they
+  // protect stays where it is, in the slow tier.
+  //
+  // Each rule is pinned on a fixture only it can clear, so neither one passes
+  // on the strength of the other; the CONTROLS after them keep both honest.
+  const shimDeclarationScan = scratchDirSitesInSource(
+    'examples/thing/types/node-shim.d.ts',
+    [
+      "declare module 'node:fs' {",
+      '  export function mkdirSync(path: string, options: { recursive: true }): string | undefined;',
+      '  export function mkdtempSync(prefix: string): string;',
+      '}',
+    ].join('\n'),
+  );
+  t(
+    "a module shim's two signatures in a .d.ts are no directory-creating site at all",
+    shimDeclarationScan.scanned === 0 && shimDeclarationScan.unresolved.length === 0 && shimDeclarationScan.inTree.length === 0,
+    shimDeclarationScan,
+  );
+  const ambientMethodScan = scratchDirSitesInSource(
+    'packages/thing/src/fs-like.d.mts',
+    ['export interface FsLike {', '  mkdtempSync(prefix: string): string;', '}'].join('\n'),
+  );
+  t(
+    'the FILE rule alone: a declaration file is read for no site, even where no function keyword marks the signature',
+    ambientMethodScan.scanned === 0,
+    ambientMethodScan,
+  );
+  const keywordDeclarationScan = scratchDirSitesInSource(
+    'packages/thing/src/fs-shim.ts',
+    [
+      'declare function mkdtempSync(prefix: string): string;',
+      'export function mkdirSync(path: string): void;',
+      'export function mkdirSync(path: string, options: { recursive: true }): void;',
+    ].join('\n'),
+  );
+  t(
+    'the KEYWORD rule alone: in a .ts source, a name the function keyword declares (ambient, exported, overloaded) is no site',
+    keywordDeclarationScan.scanned === 0,
+    keywordDeclarationScan,
+  );
+  // The CONTROLS. A real call whose base the scan cannot read is UNRESOLVED in
+  // a .ts source — alone, beside a declaration of the very same name, and in
+  // the body of a wrapper that shares the name. Without them both rules above
+  // pass just as happily against a scan that clears every site in the file.
+  const realCallScan = scratchDirSitesInSource('packages/thing/test/f.test.ts', 'const dir = mkdtempSync(someUnreadableBase);');
+  t(
+    'CONTROL: a real mkdtempSync(someUnreadableBase) call in a .ts source is still UNRESOLVED',
+    realCallScan.scanned === 1
+      && realCallScan.unresolved.length === 1
+      && realCallScan.unresolved[0].call === 'mkdtempSync'
+      && realCallScan.unresolved[0].expr === 'someUnreadableBase',
+    realCallScan,
+  );
+  const besideDeclarationScan = scratchDirSitesInSource(
+    'packages/thing/test/g.test.ts',
+    ['declare function mkdtempSync(prefix: string): string;', 'const dir = mkdtempSync(someUnreadableBase);'].join('\n'),
+  );
+  t(
+    'and beside a declaration of the same name, that call is still the one site, UNRESOLVED on its own line',
+    besideDeclarationScan.scanned === 1
+      && besideDeclarationScan.unresolved.length === 1
+      && besideDeclarationScan.unresolved[0].line === 2,
+    besideDeclarationScan,
+  );
+  const wrapperBodyScan = scratchDirSitesInSource(
+    'packages/thing/test/h.test.ts',
+    ['function mkdirSync(dir) {', '  fs.mkdirSync(dir, { recursive: true });', '}'].join('\n'),
+  );
+  t(
+    "and a wrapper's head is a declaration while the call in its body is a site, UNRESOLVED on the body's line",
+    wrapperBodyScan.scanned === 1
+      && wrapperBodyScan.unresolved.length === 1
+      && wrapperBodyScan.unresolved[0].line === 2,
+    wrapperBodyScan,
+  );
+
   slow("the change set derived from git — temporary repositories with real history", () => {
   // ── The change set derived from git (#9320) ───────────────────────────────
   //
@@ -10460,6 +10545,9 @@ export function selfTest({ tier = 'full' } = {}) {
       'nor is one spelled inside a string — which is what this very self-test plants',
       scratchDirSitesInSource('packages/thing/test/e.test.ts', 'const src = "fs.mkdtempSync(join(HERE, x))";\n').scanned === 0,
     );
+    // Nor is a DECLARATION a site — a `.d.ts` signature or the `function`
+    // keyword's own parameter list. Those cases and their controls are in the
+    // fast tier, above this section, so a pull request's lane runs them (#23294).
 
     // The CONTROL for the whole verdict, on a repo carrying the REAL ignore file
     // — an excerpt would pin the excerpt. Two fixture sources are planted, one

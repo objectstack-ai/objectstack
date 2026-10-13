@@ -106,6 +106,33 @@ The plugin accepts configuration via `AuthConfig` schema from `@objectstack/spec
 - `plugins` - Enable additional auth features (organization, backend 2FA, passkeys, magic link)
 - `session` - Session configuration (expiry, update frequency)
 
+### Shipping your own organization record page
+
+`AuthPlugin` registers the platform's default record page for `sys_organization`:
+`sys_organization_detail`, the Members / Invitations / Teams tab strip. A deployment holds at
+most one `isDefault: true` record page per object, and a second one is refused at registration
+with `DEFAULT_RECORD_PAGE_CONFLICT`. A host that ships its own default record page for
+`sys_organization` turns the platform page off, so the host's page is the only default:
+
+```typescript
+new AuthPlugin({
+  secret: process.env.AUTH_SECRET,
+  baseUrl: 'http://localhost:3000',
+  // The host registers its own `isDefault: true` record page for sys_organization.
+  registerOrganizationRecordPage: false,
+})
+```
+
+- `registerOrganizationRecordPage` (default `true`): only an explicit `false` leaves out
+  `sys_organization_detail`. Nothing else changes: the identity objects, the `sys_user_detail`
+  record page, the System Overview dashboard, and the auth routes and services are registered
+  as before.
+- Neither plugin order nor any precedence rule decides which page is the default. Without the
+  option, the platform page and the host's page conflict, and the boot is refused whichever
+  plugin starts first.
+- With the option set and no default page of the host's own, the organization record view
+  opens the synthesized default layout, without the Members / Invitations / Teams tabs.
+
 ## API Routes
 
 The plugin forwards all requests under `/api/v1/auth/*` directly to better-auth's universal handler, so **better-auth's own route table is the route table** — the plugin does not hand-register a `login` / `register` / `logout` / `session` route set.
