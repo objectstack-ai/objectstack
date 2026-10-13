@@ -46,7 +46,7 @@
  * page in it at all.
  *
  * ⭐ The answer comes from the engine's SchemaRegistry instead — the same
- * source `bootstrapDeclaredPermissions`' {@link readDeclared} already uses,
+ * source {@link readDeclared} (the retired `bootstrapDeclaredPermissions`' read) uses,
  * so this plugin keeps ONE spelling of "package-declared" rather than two (Prime
  * Directive #8). That read is an in-memory array: no page, no cap, no `$in`,
  * no driver. Truncation is not a failure mode it HAS, which is a structural

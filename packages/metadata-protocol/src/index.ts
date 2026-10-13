@@ -118,7 +118,8 @@ export type {
     SeedTenancySplit,
     SeedTenancyCollision,
 } from './migrations/seed-tenancy-backfill.js';
-export type { UninstallCleanup, UninstallCleanupOutcome } from './protocol.js';
+export type { UninstallCleanup, UninstallCleanupOutcome, UninstallDeclared } from './protocol.js';
+export { captureUninstallDeclared } from './protocol.js';
 // [#9960] The ONE declared shape of the `deletePackage` seam, exported so the
 // two consumers that speak it (`@objectstack/rest`'s direct-mount package
 // registrar and the `@objectstack/runtime` dispatcher twin) type the seam

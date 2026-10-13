@@ -95,11 +95,13 @@ import {
 import {
   AUTHORABLE_DEFAULTS_DIR_NAME,
   authorableDefaultsShardTexts,
+  authorisingMajors,
   authoriseDefaultChanges,
   carryDefaultsThroughRenames,
   collectAuthorableDefaults,
   diffAuthorableDefaults,
   parseDefaultEntries,
+  readProtocolMajorAtRev,
 } from './lib/authorable-defaults';
 import { DEFAULT_CHANGES_BY_MAJOR } from './lib/default-changes';
 // The nested half of check (b2)'s question (#17969). Its own module because the
@@ -3215,8 +3217,18 @@ try {
 // staleness check below runs unconditionally, so a tree with no
 // authorable-defaults/ fails there in `--check` mode whatever this block
 // decided. Which anchor was used is PRINTED, every run.
-let defaultsBaseline: { defaults: Map<string, string>; keys: Map<string, boolean>; label: string } | null =
-  null;
+//
+// Each baseline also carries the protocol MAJOR of the tree it was read from:
+// that major, not this build's, is where the authorising window of
+// DEFAULT_CHANGES_BY_MAJOR starts (`authorisingMajors`, #23113). The upstream
+// major is read out of git at the same rev as its defaults; the in-tree
+// baseline IS this tree, so its major is this build's.
+let defaultsBaseline: {
+  defaults: Map<string, string>;
+  keys: Map<string, boolean>;
+  label: string;
+  major: number;
+} | null = null;
 if (resolvedSurfaceBase) {
   const upstream = readSurfaceKeysAtRev(
     gitInPackage,
@@ -3234,10 +3246,19 @@ if (resolvedSurfaceBase) {
     for (const entry of resolvedSurfaceBase.doc.keys ?? []) {
       keys.set(carryAuthorableKey(entry.replace(RETIRED_MARK, '')), entry.endsWith(RETIRED_MARK));
     }
+    const upstreamMajor = readProtocolMajorAtRev(gitInPackage, resolvedSurfaceBase.rev);
+    if (upstreamMajor === null) {
+      console.log(
+        `ℹ️  ${DEFAULTS_DIR_LABEL}: no protocol major is readable from package.json at ${resolvedSurfaceBase.rev.slice(0, 12)},\n` +
+          `   so only DEFAULT_CHANGES_BY_MAJOR rows at this build's major ${CURRENT_MAJOR} authorise this run —\n` +
+          `   the narrowest window; it can refuse a declared change, never bless an undeclared one.`,
+      );
+    }
     defaultsBaseline = {
       defaults: carryDefaultsThroughRenames(parseDefaultEntries(upstream.entries)),
       keys,
       label: `upstream ${resolvedSurfaceBase.rev.slice(0, 12)}`,
+      major: upstreamMajor ?? CURRENT_MAJOR,
     };
   }
 }
@@ -3250,6 +3271,7 @@ if (!defaultsBaseline && committedDefaults && surfaceDoc) {
     defaults: carryDefaultsThroughRenames(committedDefaults),
     keys,
     label: 'in-tree (this commit owns these bytes — no upstream baseline was reachable)',
+    major: CURRENT_MAJOR,
   };
 }
 
@@ -3261,6 +3283,22 @@ if (!defaultsBaseline) {
       `   \`check:authorable-surface\` regardless of what this block decided.`,
   );
 } else {
+  const majors = { baseline: defaultsBaseline.major, current: CURRENT_MAJOR };
+  const authorising = authorisingMajors(majors);
+  const windowLabel =
+    authorising.length === 1
+      ? `major ${authorising[0]}`
+      : `majors ${authorising[0]}–${authorising[authorising.length - 1]}`;
+  if (authorising.length > 1) {
+    // Printed whenever the window is wider than this build's own major, so a
+    // row from an earlier major that authorises below never does so unannounced.
+    console.log(
+      `\nℹ️  ${DEFAULTS_DIR_LABEL} baseline (${defaultsBaseline.label}) was read at protocol major ${defaultsBaseline.major},\n` +
+        `   and this build is major ${CURRENT_MAJOR}, so DEFAULT_CHANGES_BY_MAJOR rows at ${windowLabel} authorise:\n` +
+        `   a change that landed after the baseline was declared under the major it landed in, and\n` +
+        `   this baseline does not carry it yet. Rows older than major ${authorising[0]} stay the historical record.`,
+    );
+  }
   const changes = diffAuthorableDefaults({
     baseline: defaultsBaseline.defaults,
     current: currentDefaults,
@@ -3270,7 +3308,7 @@ if (!defaultsBaseline) {
   const { authorised, unauthorised, stale } = authoriseDefaultChanges(
     changes,
     DEFAULT_CHANGES_BY_MAJOR,
-    CURRENT_MAJOR,
+    majors,
     currentDefaults,
     currentKeys,
   );
@@ -3281,7 +3319,7 @@ if (!defaultsBaseline) {
   // change below looks unauthorised.
   if (stale.length > 0) {
     console.error(
-      `\n❌ ${stale.length} DEFAULT_CHANGES_BY_MAJOR declaration(s) at major ${CURRENT_MAJOR} no longer describe reality:`,
+      `\n❌ ${stale.length} DEFAULT_CHANGES_BY_MAJOR declaration(s) at ${windowLabel} no longer describe reality:`,
     );
     for (const s of stale) {
       console.error(
