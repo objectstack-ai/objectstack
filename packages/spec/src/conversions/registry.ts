@@ -5133,8 +5133,10 @@ const pageHeaderSubtitleAlias: MetadataConversion = {
  * conversion can honour at a nested site, not only at region level.
  *
  * All three are **retired from the load path**: each key is tombstoned in
- * `ui/component.zod.ts`, so the loader rejects it loudly with the prescription
- * and only `os migrate meta` lists the mechanical edits for existing sources.
+ * `ui/component.zod.ts`, so `os validate`, `os build` and `os lint` refuse it
+ * with the prescription (the component-props gate, `@objectstack/lint`; the
+ * load path keeps the open `properties` bag as written) and only
+ * `os migrate meta` lists the mechanical edits for existing sources.
  */
 const RECORD_PICKER_COMPONENT_TYPE = 'element:record_picker';
 
@@ -9818,7 +9820,8 @@ function gridFilterHasContent(value: unknown): boolean {
  * Zero authored occurrences in this repository (the showcase pins it at zero),
  * so the entry exists for stored `sys_metadata` rows and for authors outside
  * the repo. Retired from the load path: an author writing the key is refused
- * at the parse with the prescription.
+ * by `os validate`, `os build` and `os lint` (the component-props gate) with
+ * the prescription.
  */
 const objectGridDefaultFiltersRemoved: MetadataConversion = {
   id: 'object-grid-default-filters-removed',
