@@ -166,7 +166,9 @@ through the seed door on each preset's first and last day and the day either
 side (never after today), each stamped at UTC noon (a `date` field takes the
 day), owned by the caller, with every column the widget's filter, the
 dataset's filter and the measure's filter compare held to a value they select,
-and read back before anything is judged. Every count is a difference (after
+and read back before anything is judged. A row is the smallest record the CRUD
+derivation offers (its required fields); if the seed door refuses that (an app
+rule that requires a field only in some state), every field it synthesizes. Every count is a difference (after
 the fixtures minus before, under the same window), so the app's own rows
 cancel out, and the widget with no window must count every fixture row before
 any window is judged. A count measure is probed (a `count` of a named field

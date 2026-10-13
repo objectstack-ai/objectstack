@@ -2027,7 +2027,8 @@ os verify --dashboard-windows                  # Also prove each dashboard date 
    on every preset's first and last day and the day either side (never after
    today), stamped at UTC noon, owned by the caller and holding every column
    the widget's own filter, the dataset's filter and the measure's filter
-   compare, and read back. The widget is then asked through
+   compare (the smallest record first, every synthesized field if the seed
+   door refuses it), and read back. The widget is then asked through
    `POST /analytics/dataset/query` as the signed-in admin with no window and
    under each of the 13 presets, before and after the fixtures. A preset is
    handed as the spec's `{date-macro}` window for it (`{ $gte: '{7_days_ago}' }`

@@ -47,6 +47,19 @@ const ticket = {
 
 const source = {
   manifest: { id: 'com.example.dashboard-window', namespace: 'wnd', version: '0.0.1', type: 'app', name: 'Dashboard Window Fixture' },
+  hooks: [
+    {
+      // An app rule requiring a field only in some state: a closed ticket needs its effort.
+      name: 'wnd_closed_needs_effort',
+      object: 'wnd_ticket',
+      events: ['beforeInsert'],
+      handler: async (ctx: { input: Record<string, unknown> }) => {
+        if (ctx.input.is_closed === true && ctx.input.effort == null) {
+          throw Object.assign(new Error('Effort is required on a closed ticket'), { code: 'VALIDATION_FAILED', status: 400 });
+        }
+      },
+    },
+  ],
   objects: [
     { name: 'wnd_agent', label: 'Agent', fields: { name: { type: 'text', label: 'Name', required: true } } },
     ticket,
@@ -197,6 +210,9 @@ describe('runDashboardWindowProofs — the fixture app', () => {
       }
     }
     expect(widgetOf(report, 'open_tickets').fieldType).toBe('datetime');
+    // The closed tickets meet the app's own rule only with every synthesized field.
+    expect(widgetOf(report, 'closed_tickets').measures[0]!.fixture).toBe('every-field');
+    expect(widgetOf(report, 'open_tickets').measures[0]!.fixture).toBe('smallest');
     expect(widgetOf(report, 'due_window').fieldType).toBe('date');
     expect(widgetOf(report, 'all_tickets').fieldType).toBe('datetime');
   });

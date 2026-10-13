@@ -193,6 +193,8 @@ export interface DashboardWindowMeasureResult {
   excludedKind?: DashboardWindowExclusion;
   /** The fixture days written (UTC calendar days). */
   days?: string[];
+  /** `smallest` — the required fields only; `every-field` — the seed door refused that, so every field the CRUD derivation synthesizes. */
+  fixture?: 'smallest' | 'every-field';
   /** The control leg: the widget with no window must count every fixture row. */
   unwindowed?: { expected: number; answered?: number; answer?: DashboardWindowAnswer };
   presets: DashboardWindowPresetProbe[];
@@ -515,18 +517,19 @@ function uniqueFields(objectDef: any): Set<string> {
 }
 
 /**
- * The smallest record the CRUD derivation can offer (the shape the sibling
- * families use): its values for the fields the object REQUIRES, so every
- * optional field takes the app's own default; each `date` / `datetime` one day
- * after the one declared before it, and each unique-constrained value made
- * distinct by `n`.
+ * A record the CRUD derivation can offer: by default the smallest (the shape
+ * the sibling families use) — its values for the fields the object REQUIRES,
+ * so every optional field takes the app's own default; with `full`, every
+ * field it synthesizes (what a rule that requires a field only in some state
+ * asks for). Each `date` / `datetime` is one day after the one declared before
+ * it, and each unique-constrained value is made distinct by `n`.
  */
-function fixtureBody(body: Record<string, unknown>, objectDef: any, n: number): Record<string, unknown> {
+function fixtureBody(body: Record<string, unknown>, objectDef: any, n: number, full = false): Record<string, unknown> {
   const unique = uniqueFields(objectDef);
   const out: Record<string, unknown> = {};
   let dates = 0;
   for (const [name, def] of Object.entries<any>(objectDef?.fields ?? {})) {
-    if (def?.required !== true || !(name in body)) continue;
+    if ((!full && def?.required !== true) || !(name in body)) continue;
     let value = body[name];
     if ((def?.type === 'date' || def?.type === 'datetime') && typeof value === 'string') value = laterBy(value, dates++);
     if (unique.has(name) && (typeof value === 'string' || typeof value === 'number')) value = vary(value, n);
@@ -860,17 +863,32 @@ export async function runDashboardWindowProofs(
     const days = fixtureDays(presets, day0);
     const stamp = (day: string) => (fieldType === 'date' ? day : `${day}T12:00:00.000Z`);
     const written: Array<{ day: string; id: string }> = [];
+    // The smallest record first; if the seed door refuses it (an app rule that
+    // requires a field in the state the held columns put the row in), every
+    // field the CRUD derivation synthesizes, and that shape for the rest.
+    let full = false;
     for (const day of days) {
-      const row: Record<string, unknown> = {
-        ...fixtureBody(body, objectDefs.get(c.object!), ++counter),
+      const row = (wide: boolean): Record<string, unknown> => ({
+        ...fixtureBody(body, objectDefs.get(c.object!), ++counter, wide),
         ...(ownerColumn ? { owner_id: principal } : {}),
         ...Object.fromEntries(held),
         [c.field!]: stamp(day),
+      });
+      const seedOne = async (wide: boolean): Promise<string> => {
+        const [made] = await stack.seed(c.object!, [row(wide)]);
+        if (made?.id == null) throw new Error(`the seed of ${c.object} returned no id`);
+        return String(made.id);
       };
       try {
-        const [made] = await stack.seed(c.object!, [row]);
-        if (made?.id == null) throw new Error(`the seed of ${c.object} returned no id`);
-        written.push({ day, id: String(made.id) });
+        let id: string;
+        try {
+          id = await seedOne(full);
+        } catch (first) {
+          if (full || written.length > 0) throw first;
+          full = true;
+          id = await seedOne(true);
+        }
+        written.push({ day, id });
       } catch (e) {
         r.days = days;
         notRun(`the fixture row for ${day} was refused by the seed door: ${clip((e as Error)?.message, 160)}`);
@@ -878,6 +896,7 @@ export async function runDashboardWindowProofs(
       }
     }
     r.days = days;
+    r.fixture = full ? 'every-field' : 'smallest';
     // Read back: the stamp and every held column must read as written.
     for (const { day, id } of written) {
       const [got] = await stack.rows(c.object!, { id });
