@@ -3,8 +3,7 @@
 '@objectstack/platform-objects': minor
 '@objectstack/spec': minor
 '@objectstack/core': minor
-'@objectstack/metadata-protocol': minor
-'@objectstack/cloud-connection': patch
+'@objectstack/metadata-protocol': patch
 '@objectstack/objectql': patch
 '@objectstack/plugin-sharing': patch
 '@objectstack/lint': patch
@@ -35,7 +34,8 @@ What else changes:
 - `sys_user_permission_set.permission_set_id` is a plain text column now, not a lookup: same column, same stored ids, same indexes. It is not written and grants nothing; a grant names its set by `permission_set`.
 - A permission set saved through the metadata door is written to no row: the `permission` mutation projector, the `sys_permission_set` and `sys_position` data-door write-throughs and the row-only position backfill are no longer registered.
 - On a fresh `single`-posture database the first human is promoted to platform administrator without reading any catalog row. An unscoped grant written before `sys_user_permission_set.permission_set` existed (it names no set) still withholds the promotion until the organization-ownership migration names it.
-- Uninstalling a package revokes every grant naming a permission set the package declared. The uninstalling door reads those names off the package before withdrawing it and hands them to each uninstall cleanup as `declared` (`UninstallCleanup`, `@objectstack/metadata-protocol`; `declaredCatalogItemsOf` is exported).
+- Uninstalling a package still revokes every grant naming a permission set the package declared, by the names the uninstalling door captures before the withdrawal (`declared`, `captureUninstallDeclared`), and now by those names alone: the cleanup reads and removes no `sys_permission_set` or `sys_position_permission_set` row, so the `sets` and `positionBindings` counts on its outcome are always 0. A grant written before `sys_user_permission_set.permission_set` existed names no set and is not reached; the organization-ownership migration names it.
+- On a `group` or `isolated` deployment the data-door half of the walled catalog refusal goes with the objects: a data-door insert, update or delete on `sys_position`, `sys_permission_set` or `sys_capability` answers `404 OBJECT_NOT_FOUND` for every caller instead of `403 PERMISSION_DENIED` below the platform operator. The refusal at the `/meta` write doors, the permission-set clone door and the `/packages` write doors is unchanged.
 - `capability-reference-unknown` no longer counts a `sys_capability` seed row as a declared capability — no runtime reader consults one. Declare the capability with `defineCapability`.
 
 Removed exports, no replacement:
