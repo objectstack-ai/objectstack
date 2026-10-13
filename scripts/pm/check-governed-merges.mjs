@@ -105,6 +105,32 @@
  *      5 of that battery's 7 cases and prescribed a hunt through the generator
  *      for deleted code that was never deleted.
  *
+ * ## The register is scoped per row (ruled B2, 2026-10-13)
+ *
+ * The maintainer's word 「两仓加治理行」 put `.github/workflows/**` on the
+ * governed surface of the two public repositories; this register is read for
+ * five, so a plain row would have governed `objectos` and `hotcrm` too, which
+ * no ruling names. The ruling (letter B2, 「同意」) gives the register a
+ * per-row repository scope instead: a row's `repos` key names the ids it
+ * governs, a row with none governs every repository in `GOVERNED_REPOS`, and
+ * the `workflows` row lists `objectstack`, `objectui` and `cloud` — the two
+ * ruled, plus cloud because its own table already carries the row, so the
+ * central audit and cloud's table agree.
+ *
+ * Consequence for every reader: the register's question has a repository in
+ * it. `governedPathsIn(paths, repo)`, `governedTierFor`, `testVerdict` and
+ * `classifyCommit` all REQUIRE one and refuse a call without it
+ * (`assertGovernedRepo`) — ⛔ never a silent "all": a scoped row answers
+ * differently per repository, so a default is a wrong answer in one of them.
+ * Where each caller gets its repository: the sweep iterates `GOVERNED_REPOS`
+ * and has it; `--pr` names one inline and resolves it (`repoIdForSlug`);
+ * `--test` and `--branch` read the checkout at `--root` (`checkoutRepoFor`) —
+ * the same "this checkout's own repository" a bare `--pr <n>` already means —
+ * and print which one they judged; the queue guard resolves the repository
+ * its workflow runs in; the half-states patrol binds its swept board at load.
+ * The verdict carries `repo`, and `surfacesChecked` counts the rows that
+ * govern it rather than the whole table.
+ *
  * ## The argv is closed (#21675)
  *
  * Each mode reads a closed set of flags (`ARGV_MODES`) and refuses every other
@@ -994,11 +1020,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ #19036: the sweep lists an OVERSIZED landing beside the governed ones': 20,
   '⭐ the FORK predicate: head repo ≠ base repo is a proposal, never a delivery': 6,
   '⭐ the argv is CLOSED: a flag the mode does not read, or a second repository beside a bare --pr, is refused': 22,
+  'the per-row repository scope (ruled B2, 2026-10-13)': 20,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 32;
+const SELF_TEST_BATTERY_FLOOR = 33;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1123,8 +1150,19 @@ export const HUMAN_MERGE_LINE_THRESHOLD = 3000;
  * his word as the law above `AGENTS.md`; the PM skill cites it by section). One
  * path hit governs a whole PR — 「混合 diff 一条命中即整 PR 分叉」; proportion is
  * never a question, and `tier` decides only what the landing waits for, never
- * whether the path is governed. The register is repo-agnostic: it applies in
- * all of `GOVERNED_REPOS`.
+ * whether the path is governed.
+ *
+ * The register is scoped PER ROW (maintainer ruling B2, 2026-10-13, header
+ * section "The register is scoped per row"): by default a row governs every
+ * repository in `GOVERNED_REPOS`, and a row may be scoped by a `repos` key
+ * naming the subset it governs — ids from `GOVERNED_REPOS`, never slugs. A row
+ * that declares no `repos` key carries the default; `surfaceRepos` is the one
+ * reader of that default. The `workflows` row is scoped to the two public
+ * repositories the ruling 「两仓加治理行」 names plus `cloud`, whose own table
+ * already carries the same row: `objectos` and `hotcrm` are NOT governed by
+ * it — no ruling names them, and a new gate defaults to no. Every reader of
+ * this table therefore asks for ONE repository (`governedPathsIn(paths,
+ * repo)`), and a call that names none is refused, never answered for "all".
  */
 export const GOVERNED_SURFACES = Object.freeze([
   Object.freeze({ id: 'adr', prefix: 'docs/adr/', glob: 'docs/adr/**', tier: GOVERNED_TIER_H, what: 'architecture decision records' }),
@@ -1133,6 +1171,7 @@ export const GOVERNED_SURFACES = Object.freeze([
   Object.freeze({ id: 'agents-md', exact: 'AGENTS.md', glob: 'AGENTS.md', tier: GOVERNED_TIER_H, what: 'the repo-root agent instruction file' }),
   Object.freeze({ id: 'claude-md', exact: 'CLAUDE.md', glob: 'CLAUDE.md', tier: GOVERNED_TIER_H, what: 'the repo-root Claude instruction file' }),
   Object.freeze({ id: 'north-star', exact: 'docs/NORTH-STAR.md', glob: 'docs/NORTH-STAR.md', tier: GOVERNED_TIER_H, what: "the maintainer's North Star — the law above AGENTS.md" }),
+  Object.freeze({ id: 'workflows', prefix: '.github/workflows/', glob: '.github/workflows/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack', 'objectui', 'cloud']), what: 'CI, deploy and release workflows: what runs on every push, what deploys, what gates the queue' }),
 ]);
 
 /**
@@ -1340,13 +1379,67 @@ export const GOVERNED_REPOS = Object.freeze([
 
 export const SELF_REPO_ID = 'objectstack';
 
+/** The `GOVERNED_REPOS` id whose `slug` is `owner/name` (case-insensitive), or null for a repository outside the register. Pure. */
+export function repoIdForSlug(slug) {
+  const wanted = String(slug ?? '').trim().toLowerCase();
+  if (wanted === '') return null;
+  return GOVERNED_REPOS.find((r) => r.slug.toLowerCase() === wanted)?.id ?? null;
+}
+
 /**
- * The governed slice of a path list, grouped by surface. Surfaces with no hit
- * are absent — `matched.length === 0` IS the clean path.
+ * The repositories ONE register row governs: its `repos` key when it declares
+ * one, else every id in `GOVERNED_REPOS` — the default the B2 ruling gives a
+ * row that names no scope. Pure, and the only reader of that default.
  */
-export function governedPathsIn(paths) {
+export function surfaceRepos(surface) {
+  return Array.isArray(surface?.repos) ? [...surface.repos] : GOVERNED_REPOS.map((r) => r.id);
+}
+
+/**
+ * The register's question has a repository in it, or it has no answer. Throws
+ * on a missing or unknown id — loudly, naming the ids this register knows —
+ * rather than answering for every repository: a scoped row answers differently
+ * per repository, so "all" is not a default, it is a wrong answer in one of
+ * them. `caller` names the function whose contract was missed.
+ */
+export function assertGovernedRepo(repo, caller = 'governedPathsIn') {
+  const ids = GOVERNED_REPOS.map((r) => r.id);
+  if (typeof repo !== 'string' || repo === '') {
+    throw new TypeError(
+      `${caller} wants the repository the paths belong to, as a GOVERNED_REPOS id (${ids.join(', ')}); it got ` +
+        `${JSON.stringify(repo ?? null)}. The register is scoped per row, so a call that names no repository has no ` +
+        `answer — pass the id of the repository the paths are in (a slug resolves through repoIdForSlug).`,
+    );
+  }
+  if (!ids.includes(repo)) {
+    throw new TypeError(
+      `${caller} got repository ${JSON.stringify(repo)}, which is not a GOVERNED_REPOS id (${ids.join(', ')}). ` +
+        'A slug resolves through repoIdForSlug; a repository outside the register is outside the governed regime and ' +
+        'is refused, never answered as clear.',
+    );
+  }
+  return repo;
+}
+
+/**
+ * The register's rows that govern `repo`, in report order — the per-repository
+ * view every matcher reads. Refuses a missing or unknown repository.
+ */
+export function governedSurfacesFor(repo) {
+  assertGovernedRepo(repo, 'governedSurfacesFor');
+  return GOVERNED_SURFACES.filter((surface) => surfaceRepos(surface).includes(repo));
+}
+
+/**
+ * The governed slice of a path list in `repo`, grouped by surface. Surfaces
+ * with no hit are absent — `matched.length === 0` IS the clean path. `repo`
+ * is REQUIRED: the rows consulted are the ones that govern it, and a call
+ * without one is refused (`assertGovernedRepo`).
+ */
+export function governedPathsIn(paths, repo) {
+  assertGovernedRepo(repo, 'governedPathsIn');
   const list = Array.isArray(paths) ? paths : [];
-  return GOVERNED_SURFACES.map((surface) => ({
+  return governedSurfacesFor(repo).map((surface) => ({
     ...surface,
     files: list.filter((p) =>
       typeof p === 'string' && (surface.prefix ? p.startsWith(surface.prefix) : p === surface.exact),
@@ -1377,10 +1470,11 @@ export function landingTierOf(matched) {
  * "which surfaces land on a record" exists anywhere (the queue guard imports
  * THIS function). Ungoverned riders in the list are not consulted and cannot
  * demote a Tier H list or promote a Tier S one; an empty or wholly ungoverned
- * list answers `H` (see `landingTierOf`).
+ * list answers `H` (see `landingTierOf`). `repo` is required, as for
+ * `governedPathsIn`: the rows consulted are the ones that govern it.
  */
-export function governedTierFor(paths) {
-  return landingTierOf(governedPathsIn(paths));
+export function governedTierFor(paths, repo) {
+  return landingTierOf(governedPathsIn(paths, assertGovernedRepo(repo, 'governedTierFor')));
 }
 
 /** `owner/name` out of any git remote spelling, or null. Pure. */
@@ -1494,9 +1588,14 @@ export function parseSince(arg, now = new Date()) {
  * invisible to this audit. With no size handed in the size limb is NOT
  * MEASURED and can fire nothing, so every pre-#19036 caller gets the entry it
  * always got, now carrying `size.measured: false` rather than a phantom zero.
+ *
+ * `repo` is REQUIRED since the register became scoped per row: it is the
+ * `GOVERNED_REPOS` entry the commit landed in, and the rows consulted are the
+ * ones that govern that repository. A call without one is refused by the
+ * predicate, never classified against every row.
  */
-export function classifyCommit({ sha, date, subject }, changedPaths, repo = null, size = null) {
-  const verdict = testVerdict(changedPaths, { size });
+export function classifyCommit({ sha, date, subject }, changedPaths, repo, size = null) {
+  const verdict = testVerdict(changedPaths, { repo: assertGovernedRepo(repo?.id, 'classifyCommit'), size });
   if (!landsByHumanMerge(verdict)) return null;
   return {
     repoId: repo?.id ?? null,
@@ -1514,23 +1613,28 @@ export function classifyCommit({ sha, date, subject }, changedPaths, repo = null
 // ── the --test predicate (#9550): "would a PR touching these be governed?" ───
 
 /**
- * The pre-arm answer, as data. Pure and repo-agnostic — the register is the
- * same in all five governed repos, so a seat can run this from anywhere with
- * the file list of any PR in any of them.
+ * The pre-arm answer, as data. Pure, and answered for ONE repository: `repo`
+ * (a `GOVERNED_REPOS` id) is required, because the register is scoped per row
+ * and a scoped row answers differently per repository. A seat can still run
+ * this from anywhere with the file list of any PR in any governed repository —
+ * it names which one, and the verdict carries it (`repo`, and
+ * `surfacesChecked` counts the rows that govern it, not the whole table).
  */
-export function testVerdict(paths, { size = null, fork = null, checks = null, approval = null } = {}) {
+export function testVerdict(paths, { repo, size = null, fork = null, checks = null, approval = null } = {}) {
+  assertGovernedRepo(repo, 'testVerdict');
   const list = (Array.isArray(paths) ? paths : []).filter((p) => typeof p === 'string' && p !== '');
-  const matched = governedPathsIn(list);
+  const matched = governedPathsIn(list, repo);
   const hit = new Set(matched.flatMap((s) => s.files));
   const sized = sizeVerdict(size, approval);
   const forked = fork && typeof fork === 'object' ? fork : forkVerdict(null); // the FORK limb, or NOT MEASURED
   return {
+    repo,
     governed: matched.length > 0,
     // The landing tier (#19133): `H` / `S` while governed, `null` when nothing
     // is — a `--json` reader never sees a tier for a diff that has none.
     tier: matched.length > 0 ? landingTierOf(matched) : null,
     checked: list.length,
-    surfacesChecked: GOVERNED_SURFACES.length,
+    surfacesChecked: governedSurfacesFor(repo).length,
     matched,
     hitPaths: [...hit],
     clearPaths: list.filter((p) => !hit.has(p)),
@@ -1656,7 +1760,7 @@ export function renderTestVerdict(verdict) {
   const head =
     `governed-surface predicate: ${verdict.hitPaths.length} of ${verdict.checked} path(s) hit the register` +
     (liftedCount > 0 ? ` after ${liftedCount} generated-artifact lift(s)` : '') +
-    ` (${verdict.surfacesChecked} surfaces, repo-agnostic).`;
+    ` (${verdict.surfacesChecked} surfaces govern ${verdict.repo}).`;
   const size = verdict.size ?? sizeVerdict(null);
   const intake = renderForkLines(verdict.fork, verdict.checks);
   if (!verdict.governed) {
@@ -1802,8 +1906,9 @@ export const CALLER_DERIVED_NOTE =
 
 /**
  * `--pr`'s argument, as data. `16997` means this checkout's own repo; the
- * qualified spelling names any of the governed repos, because the register is
- * repo-agnostic and the PM audits five of them. Pure.
+ * qualified spelling names any of the governed repos, because the PM audits
+ * five of them from one checkout — and since the register is scoped per row,
+ * the repository named here is also the one the verdict answers for. Pure.
  */
 export function parsePullTarget(value, selfSlug = null) {
   const raw = typeof value === 'string' ? value.trim() : '';
@@ -3430,8 +3535,8 @@ function rootFromArgs(args) {
  * leave two readings of the same register in circulation, which is the shape
  * the card is about. `--self-test` pins the identity end to end.
  */
-async function emitVerdict(paths, args, derivation = null, size = null, intake = null) {
-  let verdict = testVerdict(paths, { size, ...(intake ?? {}) });
+async function emitVerdict(paths, args, derivation = null, size = null, intake = null, repo = undefined) {
+  let verdict = testVerdict(paths, { repo, size, ...(intake ?? {}) });
   // The provenance-aware exceptions (#9866 + #11705): recompute only when a
   // registered path is actually among the hits, so every other run stays the
   // zero-git, zero-cost read it always was. The driver applies each row's
@@ -3495,6 +3600,42 @@ function refuseSizeFlagsIn(args, mode, reads) {
   return EXIT_CANNOT_SWEEP;
 }
 
+/**
+ * The repository a `--test` / `--branch` run answers for: the one the checkout
+ * at `--root` belongs to, read off its `origin` remote and resolved to a
+ * `GOVERNED_REPOS` id — the same reading a bare `--pr <n>` already makes of
+ * "this checkout's own repository". The register is scoped per row, so the
+ * question has a repository in it; this tool takes none from a flag (the
+ * closed-argv ruling: one spelling, `--pr <owner>/<repo>#<n>`, no `--repo`)
+ * and none from the environment, so the checkout is the only honest source. A
+ * path list from another governed repository is judged from THAT repository's
+ * checkout (`--root <its path>`); an origin that parses to no governed
+ * repository is a refusal, never a default. Pure given `origin` (the
+ * `remote.origin.url` read, or null). Returns `{ repo, slug }` or `{ error }`.
+ */
+export function checkoutRepoFor(origin, mode) {
+  const slug = slugFromRemote(origin);
+  const repo = slug ? repoIdForSlug(slug) : null;
+  if (repo) return { repo, slug };
+  const ids = GOVERNED_REPOS.map((r) => r.id).join(', ');
+  const read = typeof origin === 'string' && origin.trim() !== '' ? JSON.stringify(origin.trim()) : 'no origin remote';
+  return {
+    error:
+      `${mode} answers for the repository the checkout at --root belongs to, and that checkout's origin (${read}) ` +
+      `${slug ? `names ${slug}, which is not a governed repository` : 'parses to no owner/name'} — the governed ` +
+      `repositories are ${ids}. The register is scoped per row, so the question has a repository in it: run from a ` +
+      'checkout of the repository the paths are in, or point --root at one.',
+  };
+}
+
+/** The stderr line naming the repository a checkout-derived verdict answers for, beside the caller notes. */
+export function checkoutRepoNote({ repo, slug }) {
+  return (
+    `ℹ️  judged for ${repo} (${slug}, the checkout at --root): the register is scoped per row, so a list from another\n` +
+    '    governed repository is judged from that repository\'s own checkout — `--root <its path>`.'
+  );
+}
+
 async function runTestMode(args) {
   const i = args.indexOf('--test');
   const paths = [];
@@ -3521,13 +3662,22 @@ async function runTestMode(args) {
     );
     return EXIT_CANNOT_SWEEP;
   }
+  // The repository (ruling B2): the checkout at --root, or a refusal.
+  const root = rootFromArgs(args);
+  const origin = tryGit(root, ['config', '--get', 'remote.origin.url']);
+  const where = checkoutRepoFor(origin.ok ? origin.out : null, '--test');
+  if (where.error) {
+    console.error(`❌  ${where.error}`);
+    return EXIT_CANNOT_SWEEP;
+  }
   // #17003: on STDERR, so this mode's STDOUT stays byte-identical in both
   // renderings for any consumer that parses it (the `--json` form is a
   // machine-read surface). A predicate that changes what it hands its callers in
   // order to warn its humans has broken something in order to say something.
   console.error(CALLER_DERIVED_NOTE);
   if (flags.size) console.error(CALLER_SIZED_NOTE);
-  return await emitVerdict(paths, args, null, flags.size);
+  console.error(checkoutRepoNote(where));
+  return await emitVerdict(paths, args, null, flags.size, null, where.repo);
 }
 
 /** `--branch <ref>` (#17003): the three-dot list from a local checkout, or a refusal. */
@@ -3540,6 +3690,13 @@ async function runBranchMode(args) {
   const refusedFlags = refuseSizeFlagsIn(args, `--branch ${ref}`, '`git diff --numstat` on the merge-base range');
   if (refusedFlags !== null) return refusedFlags;
   const root = rootFromArgs(args);
+  // The repository (ruling B2): the checkout the branch is read from, or a refusal.
+  const origin = tryGit(root, ['config', '--get', 'remote.origin.url']);
+  const where = checkoutRepoFor(origin.ok ? origin.out : null, `--branch ${ref}`);
+  if (where.error) {
+    console.error(`❌  ${where.error}`);
+    return EXIT_CANNOT_SWEEP;
+  }
   const derived = deriveBranchPaths({ ref, run: (argv) => tryGit(root, argv) });
   if (!derived.ok) {
     console.error(renderDerivationRefusal({ mode: `--branch ${ref}`, reason: derived.reason, remedy: derived.remedy }));
@@ -3553,7 +3710,8 @@ async function runBranchMode(args) {
     return EXIT_CANNOT_SWEEP;
   }
   if (!args.includes('--json')) console.log(renderDerivation(derived.derivation));
-  return await emitVerdict(derived.paths, args, derived.derivation, derived.size);
+  console.error(checkoutRepoNote(where));
+  return await emitVerdict(derived.paths, args, derived.derivation, derived.size, null, where.repo);
 }
 
 /** `--pr <n>` (#17003): the API's changed-files list — three-dot by construction — or a refusal. */
@@ -3576,6 +3734,18 @@ async function runPullMode(args) {
     console.error(ambiguous);
     return EXIT_CANNOT_SWEEP;
   }
+  // The repository (ruling B2): the one `--pr` names, resolved to its register
+  // id. A slug outside GOVERNED_REPOS has no rows scoped to it, so the answer
+  // is a refusal — never "not governed", which reads as a clearance.
+  const repo = repoIdForSlug(target.slug);
+  if (repo === null) {
+    console.error(
+      `❌  --pr ${target.slug}#${target.pull} names a repository outside the governed register ` +
+        `(${GOVERNED_REPOS.map((r) => r.id).join(', ')}). The register is scoped per row and has no row for it, so ` +
+        'there is no governed answer for that pull request — this predicate judges the governed repositories only.',
+    );
+    return EXIT_CANNOT_SWEEP;
+  }
   const derived = await fetchPullFiles({
     ...apiContext(process.env),
     slug: target.slug,
@@ -3596,7 +3766,7 @@ async function runPullMode(args) {
     return EXIT_CANNOT_SWEEP;
   }
   if (!args.includes('--json')) console.log(renderDerivation(derived.derivation));
-  return await emitVerdict(derived.paths, args, derived.derivation, derived.size, { fork: derived.fork, checks: derived.checks });
+  return await emitVerdict(derived.paths, args, derived.derivation, derived.size, { fork: derived.fork, checks: derived.checks }, repo);
 }
 
 /**
@@ -3709,9 +3879,11 @@ const PREDICATE_MODES = ['--test', '--pr', '--branch'];
 // through to that refusal rather than replacing it.
 //
 // ⛔ No mode reads a repository from anywhere but its own spelling: `--pr`
-// names one inline (`<owner>/<repo>#<n>`), the sweep narrows by `--repos`.
-// There is no `--repo` here, by ruling — one spelling, the documented one —
-// and the environment's half is `bareTargetRefusal`.
+// names one inline (`<owner>/<repo>#<n>`), the sweep narrows by `--repos`,
+// and `--test` / `--branch` answer for the checkout at `--root` (its origin —
+// `checkoutRepoFor`), which is what the per-row scope of the register makes
+// them need. There is no `--repo` here, by ruling — one spelling, the
+// documented one — and the environment's half is `bareTargetRefusal`.
 export const ARGV_MODES = Object.freeze({
   sweep: Object.freeze({
     name: 'the sweep',
@@ -4179,6 +4351,10 @@ async function selfTest() {
     checked++;
     if (!cond) failures.push(`${name}: ${detail ?? ''}`);
   };
+  // The repository every register question below is asked for, unless a case
+  // is ABOUT the scope and names another one: this checkout's own. The scope
+  // battery pins that the matchers refuse a call that names none.
+  const REPO = SELF_REPO_ID;
   // Report fixtures take a REAL window from the real resolver, never a
   // hand-built object: a shape drifting from `resolveWindow`'s would render
   // green here and print nothing an operator could read.
@@ -4186,8 +4362,8 @@ async function selfTest() {
 
   // ── the governed predicate: the 2026-08-18 unified list, exactly ──────────
   battery('the governed predicate: the 2026-08-18 unified list, exactly');
-  const ids = (paths) => governedPathsIn(paths).map((s) => s.id);
-  assert('all-six-surfaces-declared-in-order', GOVERNED_SURFACES.map((s) => s.id).join(',') === 'adr,claude-tree,skills-catalog,agents-md,claude-md,north-star', GOVERNED_SURFACES.map((s) => s.id).join(','));
+  const ids = (paths) => governedPathsIn(paths, REPO).map((s) => s.id);
+  assert('all-seven-surfaces-declared-in-order', GOVERNED_SURFACES.map((s) => s.id).join(',') === 'adr,claude-tree,skills-catalog,agents-md,claude-md,north-star,workflows', GOVERNED_SURFACES.map((s) => s.id).join(','));
   assert('adr-prefix', ids(['docs/adr/0001-x.md']).join() === 'adr');
   assert('whole-claude-tree-not-only-skills', ids(['.claude/hooks/guard-main-checkout.sh', '.claude/agents/os-dev.md', '.claude/settings.json']).join() === 'claude-tree');
   assert('published-skills-catalog-is-governed', ids(['skills/objectstack-ui/SKILL.md']).join() === 'skills-catalog');
@@ -4198,6 +4374,48 @@ async function selfTest() {
   // exact entries are the repo-root files only (see header).
   assert('near-misses-stay-out', ids(['docs/adrs/z.md', '.claude-x/y.md', 'skillsx/a.md', 'examples/AGENTS.md', 'packages/create-objectstack/src/templates/AGENTS.md', 'apps/CLAUDE.md.bak', 'docs/north-star.md', 'docs/NORTH-STAR.md.bak', 'examples/docs/NORTH-STAR.md', 'docs/NORTH-STAR.mdx', 'content/docs/concepts/north-star.mdx']).length === 0, JSON.stringify(ids(['examples/AGENTS.md'])));
   assert('a-mixed-diff-groups-by-surface', ids(['docs/adr/0001.md', 'AGENTS.md', 'package.json']).join() === 'adr,agents-md');
+
+  // ── the per-row repository scope (maintainer ruling B2, 2026-10-13) ──────
+  //
+  // The workflows row is the first SCOPED row, and the scope is a new axis of
+  // the register, so every direction is pinned: which rows carry the default
+  // and which a scope, that a scope is a subset of the roster, that each of
+  // the three named repositories answers GOVERNED Tier H and each of the two
+  // unnamed ones answers NOT governed, and that every front door REFUSES a
+  // call naming no repository rather than answering for all of them.
+  battery('the per-row repository scope (ruled B2, 2026-10-13)');
+  const everyRepo = GOVERNED_REPOS.map((r) => r.id);
+  const workflowsRow = GOVERNED_SURFACES.find((s) => s.id === 'workflows');
+  assert('the-six-pre-existing-rows-declare-no-scope-and-so-govern-every-repository', GOVERNED_SURFACES.filter((s) => s.id !== 'workflows').every((s) => s.repos === undefined && surfaceRepos(s).join() === everyRepo.join()), JSON.stringify(GOVERNED_SURFACES.map((s) => [s.id, s.repos ?? null])));
+  assert('the-workflows-row-is-scoped-to-objectstack-objectui-and-cloud-exactly', surfaceRepos(workflowsRow).join() === 'objectstack,objectui,cloud' && workflowsRow.tier === GOVERNED_TIER_H && workflowsRow.glob === '.github/workflows/**', JSON.stringify(workflowsRow));
+  assert('every-declared-scope-is-a-non-empty-duplicate-free-subset-of-GOVERNED_REPOS-ids', GOVERNED_SURFACES.every((s) => s.repos === undefined || (Array.isArray(s.repos) && s.repos.length > 0 && new Set(s.repos).size === s.repos.length && s.repos.every((id) => everyRepo.includes(id)))), JSON.stringify(GOVERNED_SURFACES.map((s) => [s.id, s.repos ?? null])));
+  assert('the-workflows-row-is-a-prefix-row-with-a-separator-so-it-reaches-dispatch-gates-as-written-and-declares-no-hint', workflowsRow.prefix === '.github/workflows/' && !ROOT_FILE_WATCH_HINTS.some((h) => h.startsWith('.github/')));
+  const wf = '.github/workflows/lint.yml';
+  assert('an-objectstack-workflow-path-is-governed-Tier-H', ids([wf]).join() === 'workflows' && governedTierFor([wf], 'objectstack') === GOVERNED_TIER_H && testVerdict([wf], { repo: 'objectstack' }).tier === GOVERNED_TIER_H);
+  assert('an-objectui-workflow-path-is-governed-Tier-H', governedPathsIn([wf], 'objectui').map((s) => s.id).join() === 'workflows' && governedTierFor([wf], 'objectui') === GOVERNED_TIER_H);
+  assert('a-cloud-workflow-path-is-governed-Tier-H', governedPathsIn([wf], 'cloud').map((s) => s.id).join() === 'workflows' && governedTierFor([wf], 'cloud') === GOVERNED_TIER_H && testVerdict([wf], { repo: 'cloud' }).governed === true);
+  assert('an-objectos-workflow-path-is-NOT-governed', governedPathsIn([wf], 'objectos').length === 0 && testVerdict([wf], { repo: 'objectos' }).governed === false && testVerdict([wf], { repo: 'objectos' }).clearPaths.join() === wf);
+  assert('a-hotcrm-workflow-path-is-NOT-governed', governedPathsIn([wf], 'hotcrm').length === 0 && testVerdict([wf], { repo: 'hotcrm' }).governed === false);
+  assert('the-default-rows-still-govern-objectos-and-hotcrm-the-scope-narrows-one-row-not-the-register', ['objectos', 'hotcrm'].every((r) => governedPathsIn(['AGENTS.md', 'docs/adr/0001-x.md', '.claude/agents/os-dev.md'], r).map((s) => s.id).join() === 'adr,claude-tree,agents-md'));
+  assert('the-near-misses-for-the-workflows-row-stay-out', ids(['.github/ISSUE_TEMPLATE/bug.md', '.github/workflows.bak/x.yml', '.github/workflowsx/y.yml', 'github/workflows/z.yml', '.github/CODEOWNERS', 'packages/x/.github/workflows/w.yml']).length === 0);
+  assert('surfacesChecked-counts-the-rows-that-govern-the-repository-not-the-table', testVerdict(['README.md'], { repo: 'objectstack' }).surfacesChecked === 7 && testVerdict(['README.md'], { repo: 'objectos' }).surfacesChecked === 6 && governedSurfacesFor('cloud').length === 7 && governedSurfacesFor('hotcrm').map((s) => s.id).join() === 'adr,claude-tree,skills-catalog,agents-md,claude-md,north-star');
+  assert('the-verdict-carries-the-repository-it-answered-for', testVerdict([wf], { repo: 'cloud' }).repo === 'cloud' && JSON.parse(JSON.stringify(testVerdict([wf], { repo: 'objectui' }))).repo === 'objectui');
+  const refuses = (fn) => { try { fn(); return null; } catch (error) { return error; } };
+  const noRepo = refuses(() => governedPathsIn([wf]));
+  assert('⛔ no-repository-is-an-ERROR-never-an-answer-for-every-repository', noRepo instanceof TypeError && /governedPathsIn wants the repository/.test(noRepo.message) && /objectstack, objectui, cloud, objectos, hotcrm/.test(noRepo.message), String(noRepo?.message));
+  assert('⛔ and-every-front-door-refuses-alike', [() => governedTierFor([wf]), () => testVerdict([wf]), () => testVerdict([wf], {}), () => classifyCommit({ sha: 'a'.repeat(40), date: 'd', subject: 'x (#1)' }, [wf]), () => governedSurfacesFor(undefined), () => governedPathsIn([wf], ''), () => governedPathsIn([wf], null)].every((fn) => refuses(fn) instanceof TypeError));
+  const unknownRepo = refuses(() => governedPathsIn([wf], 'objectstack-ai/objectstack'));
+  assert('⛔ a-slug-or-any-unknown-id-is-refused-and-the-words-point-at-repoIdForSlug', unknownRepo instanceof TypeError && /not a GOVERNED_REPOS id/.test(unknownRepo.message) && /repoIdForSlug/.test(unknownRepo.message) && refuses(() => governedTierFor([wf], 'Objectstack')) instanceof TypeError, String(unknownRepo?.message));
+  assert('the-refusal-names-the-caller-whose-contract-was-missed', /^testVerdict wants/.test(refuses(() => testVerdict([wf])).message) && /^classifyCommit wants/.test(refuses(() => classifyCommit({ sha: 'a'.repeat(40), date: 'd', subject: 'x' }, [wf])).message) && /^governedTierFor wants/.test(refuses(() => governedTierFor([wf])).message));
+  assert('repoIdForSlug-resolves-the-roster-case-insensitively-and-nothing-else', repoIdForSlug('objectstack-ai/cloud') === 'cloud' && repoIdForSlug('ObjectStack-AI/ObjectUI') === 'objectui' && repoIdForSlug(' objectstack-ai/hotcrm ') === 'hotcrm' && repoIdForSlug('someone/objectstack') === null && repoIdForSlug('objectstack') === null && repoIdForSlug('') === null && repoIdForSlug(null) === null);
+  assert('every-GOVERNED_REPOS-slug-resolves-to-its-own-id', GOVERNED_REPOS.every((r) => repoIdForSlug(r.slug) === r.id));
+  const fromThisCheckout = checkoutRepoFor('https://github.com/objectstack-ai/objectstack.git', '--test');
+  assert('--test-and---branch-answer-for-the-checkout-at---root-its-origin-resolved-to-an-id', fromThisCheckout.repo === 'objectstack' && fromThisCheckout.slug === 'objectstack-ai/objectstack' && checkoutRepoFor('git@github.com:objectstack-ai/cloud.git', '--branch x').repo === 'cloud', JSON.stringify(fromThisCheckout));
+  const foreign = checkoutRepoFor('https://github.com/someone/fork.git', '--test');
+  const noOrigin = checkoutRepoFor(null, '--branch x');
+  assert('⛔ a-checkout-outside-the-roster-or-with-no-origin-is-REFUSED-never-defaulted', typeof foreign.error === 'string' && /someone\/fork, which is not a governed repository/.test(foreign.error) && /point --root at one/.test(foreign.error) && typeof noOrigin.error === 'string' && /no origin remote/.test(noOrigin.error) && /parses to no owner\/name/.test(noOrigin.error), `${foreign.error}\n${noOrigin.error}`);
+  assert('the-checkout-note-names-the-repository-judged-and-the---root-remedy', /judged for cloud \(objectstack-ai\/cloud, the checkout at --root\)/.test(checkoutRepoNote({ repo: 'cloud', slug: 'objectstack-ai/cloud' })) && /--root <its path>/.test(checkoutRepoNote({ repo: 'cloud', slug: 'objectstack-ai/cloud' })));
+  assert('the-verdict-head-names-the-repository-and-counts-its-rows', renderTestVerdict(testVerdict([wf], { repo: 'cloud' })).split('\n')[0] === 'governed-surface predicate: 1 of 1 path(s) hit the register (7 surfaces govern cloud).' && renderTestVerdict(testVerdict([wf], { repo: 'objectos' })).split('\n')[0] === 'governed-surface predicate: 0 of 1 path(s) hit the register (6 surfaces govern objectos).', renderTestVerdict(testVerdict([wf], { repo: 'objectos' })).split('\n')[0]);
 
   // ── the dispatch-gates declaration (#9979) ───────────────────────────────
   //
@@ -4236,33 +4454,33 @@ async function selfTest() {
   assert('every-row-carries-a-tier-and-it-is-H-or-S', GOVERNED_SURFACES.every((s) => s.tier === GOVERNED_TIER_H || s.tier === GOVERNED_TIER_S), JSON.stringify(GOVERNED_SURFACES.map((s) => [s.id, s.tier])));
   assert('the-tier-values-are-distinct-single-letters-a-reader-greps', GOVERNED_TIER_H === 'H' && GOVERNED_TIER_S === 'S' && Object.keys(GOVERNED_TIERS).join() === 'H,S');
   assert('Tier-S-is-exactly-the-whole-claude-tree-row', GOVERNED_SURFACES.filter((s) => s.tier === GOVERNED_TIER_S).map((s) => s.id).join() === 'claude-tree');
-  assert('Tier-H-is-the-law-adr-north-star-skills-catalog-agents-md-claude-md', GOVERNED_SURFACES.filter((s) => s.tier === GOVERNED_TIER_H).map((s) => s.id).join() === 'adr,skills-catalog,agents-md,claude-md,north-star');
-  assert('settings-and-hooks-are-Tier-S-by-the-amendment', governedTierFor(['.claude/settings.json', '.claude/hooks/guard-main-checkout.sh']) === GOVERNED_TIER_S);
-  assert('skills-agents-and-the-fact-layer-are-Tier-S', governedTierFor(['.claude/skills/pm-dispatch/SKILL.md', '.claude/agents/os-dev.md', '.claude/skills/pm-dispatch/references/contract-review.md']) === GOVERNED_TIER_S);
-  assert('each-Tier-H-surface-answers-H-alone', ['docs/adr/0001-x.md', 'docs/NORTH-STAR.md', 'skills/objectstack-ui/SKILL.md', 'AGENTS.md', 'CLAUDE.md'].every((p) => governedTierFor([p]) === GOVERNED_TIER_H));
-  assert('ALL-not-ANY-one-Tier-H-path-makes-the-whole-list-Tier-H', governedTierFor(['.claude/agents/os-dev.md', '.claude/settings.json', 'AGENTS.md']) === GOVERNED_TIER_H);
-  assert('an-ungoverned-rider-neither-demotes-a-Tier-H-list-nor-promotes-a-Tier-S-one', governedTierFor(['README.md', 'AGENTS.md']) === GOVERNED_TIER_H && governedTierFor(['README.md', '.claude/agents/os-dev.md']) === GOVERNED_TIER_S);
-  assert('an-EMPTY-or-UNGOVERNED-list-answers-H-fail-closed', governedTierFor([]) === GOVERNED_TIER_H && governedTierFor(undefined) === GOVERNED_TIER_H && governedTierFor(['README.md']) === GOVERNED_TIER_H);
+  assert('Tier-H-is-the-law-adr-north-star-skills-catalog-agents-md-claude-md-and-the-workflows-row', GOVERNED_SURFACES.filter((s) => s.tier === GOVERNED_TIER_H).map((s) => s.id).join() === 'adr,skills-catalog,agents-md,claude-md,north-star,workflows');
+  assert('settings-and-hooks-are-Tier-S-by-the-amendment', governedTierFor(['.claude/settings.json', '.claude/hooks/guard-main-checkout.sh'], REPO) === GOVERNED_TIER_S);
+  assert('skills-agents-and-the-fact-layer-are-Tier-S', governedTierFor(['.claude/skills/pm-dispatch/SKILL.md', '.claude/agents/os-dev.md', '.claude/skills/pm-dispatch/references/contract-review.md'], REPO) === GOVERNED_TIER_S);
+  assert('each-Tier-H-surface-answers-H-alone', ['docs/adr/0001-x.md', 'docs/NORTH-STAR.md', 'skills/objectstack-ui/SKILL.md', 'AGENTS.md', 'CLAUDE.md'].every((p) => governedTierFor([p], REPO) === GOVERNED_TIER_H));
+  assert('ALL-not-ANY-one-Tier-H-path-makes-the-whole-list-Tier-H', governedTierFor(['.claude/agents/os-dev.md', '.claude/settings.json', 'AGENTS.md'], REPO) === GOVERNED_TIER_H);
+  assert('an-ungoverned-rider-neither-demotes-a-Tier-H-list-nor-promotes-a-Tier-S-one', governedTierFor(['README.md', 'AGENTS.md'], REPO) === GOVERNED_TIER_H && governedTierFor(['README.md', '.claude/agents/os-dev.md'], REPO) === GOVERNED_TIER_S);
+  assert('an-EMPTY-or-UNGOVERNED-list-answers-H-fail-closed', governedTierFor([], REPO) === GOVERNED_TIER_H && governedTierFor(undefined, REPO) === GOVERNED_TIER_H && governedTierFor(['README.md'], REPO) === GOVERNED_TIER_H);
   assert('the-published-skills-catalog-stays-Tier-H-the-seat-did-not-propose-moving-it', tierOf('skills-catalog') === GOVERNED_TIER_H);
-  assert('--test-carries-the-tier-and-null-when-nothing-is-governed', testVerdict(['.claude/agents/os-dev.md']).tier === GOVERNED_TIER_S && testVerdict(['AGENTS.md']).tier === GOVERNED_TIER_H && testVerdict(['README.md']).tier === null);
-  const tierSCase = testVerdict(['packages/spec/src/index.ts', '.claude/agents/os-dev.md']);
-  const tierHCase = testVerdict(['packages/spec/src/index.ts', '.claude/agents/os-dev.md', 'AGENTS.md']);
+  assert('--test-carries-the-tier-and-null-when-nothing-is-governed', testVerdict(['.claude/agents/os-dev.md'], { repo: REPO }).tier === GOVERNED_TIER_S && testVerdict(['AGENTS.md'], { repo: REPO }).tier === GOVERNED_TIER_H && testVerdict(['README.md'], { repo: REPO }).tier === null);
+  const tierSCase = testVerdict(['packages/spec/src/index.ts', '.claude/agents/os-dev.md'], { repo: REPO });
+  const tierHCase = testVerdict(['packages/spec/src/index.ts', '.claude/agents/os-dev.md', 'AGENTS.md'], { repo: REPO });
   const tierSText = renderTestVerdict(tierSCase);
   const tierHText = renderTestVerdict(tierHCase);
   assert('a-Tier-S-verdict-renders-its-OWN-block-naming-the-record-on-thread-landing', /Tier S/.test(tierSText) && /## Contract review/.test(tierSText) && /CONTRACT_REVIEW_TIER/.test(tierSText) && !/--pair/.test(tierSText), tierSText);
   assert('and-still-says-GOVERNED-with-the-three-verbs-so-every-grep-reader-keeps-its-answer', /GOVERNED/.test(tierSText) && /arms auto-merge/.test(tierSText) && !/human merge is the review record/.test(tierSText), tierSText);
   assert('a-Tier-H-verdict-keeps-its-wording-word-for-word-and-names-its-tier', /a human merge is the review record for this PR/.test(tierHText) && /landing tier: H/.test(tierHText) && !/Tier S/.test(tierHText), tierHText);
   assert('a-mixed-list-renders-H-the-one-Tier-H-path-decides', tierHCase.tier === GOVERNED_TIER_H && tierHCase.hitPaths.join() === '.claude/agents/os-dev.md,AGENTS.md', JSON.stringify(tierHCase.hitPaths));
-  assert('exit-3-is-SHARED-by-both-tiers-the-tier-lives-in-the-words-and-the-json-never-the-status', runTestModeExitFor(['.claude/agents/os-dev.md']) === EXIT_TEST_GOVERNED && runTestModeExitFor(['AGENTS.md']) === EXIT_TEST_GOVERNED && runTestModeExitFor(['README.md']) === EXIT_TEST_NOT_GOVERNED);
+  assert('exit-3-is-SHARED-by-both-tiers-the-tier-lives-in-the-words-and-the-json-never-the-status', runTestModeExitFor(['.claude/agents/os-dev.md'], REPO) === EXIT_TEST_GOVERNED && runTestModeExitFor(['AGENTS.md'], REPO) === EXIT_TEST_GOVERNED && runTestModeExitFor(['README.md'], REPO) === EXIT_TEST_NOT_GOVERNED);
   // A lift can change the tier: a diff whose only Tier H hit is a certified
   // regeneration under `skills/**` is, post-lift, a Tier S diff — the tier is
   // recomputed on the lifted slice, never read off the pre-lift one.
   const liftPath = 'skills/objectstack-ui/references/_index.md';
   const lifted = new Map([[liftPath, { pureRegeneration: true, reason: 'byte-equal to the generator' }]]);
-  const preLift = testVerdict([liftPath, '.claude/agents/os-dev.md']);
+  const preLift = testVerdict([liftPath, '.claude/agents/os-dev.md'], { repo: REPO });
   const postLift = applyGeneratedExceptions(preLift, lifted);
   assert('the-tier-is-recomputed-on-the-LIFTED-slice', preLift.tier === GOVERNED_TIER_H && postLift.tier === GOVERNED_TIER_S && postLift.governed === true, JSON.stringify([preLift.tier, postLift.tier]));
-  const allLifted = applyGeneratedExceptions(testVerdict([liftPath]), lifted);
+  const allLifted = applyGeneratedExceptions(testVerdict([liftPath], { repo: REPO }), lifted);
   assert('and-null-once-every-hit-is-lifted', allLifted.governed === false && allLifted.tier === null, JSON.stringify(allLifted.tier));
   assert('the-tier-words-name-the-landing-each-waits-for', /GOVERNED_APPROVERS/.test(GOVERNED_TIERS.H.landing) && /Contract review/.test(GOVERNED_TIERS.S.landing) && !/--pair/.test(GOVERNED_TIERS.S.landing));
 
@@ -4309,7 +4527,7 @@ async function selfTest() {
   assert('QS-7-regression-pin-the-budgeted-window-LISTS-the-skewed-governed-entry',
     qs7.commits.some((c) => c.sha === qs7Governed.sha) && qs7.anchorAtEdge === false, JSON.stringify(qs7.commits.map((c) => c.sha.slice(0, 4))));
   assert('and-the-entry-classifies-as-governed-once-it-is-in-the-window',
-    classifyCommit(qs7.commits.find((c) => c.sha === qs7Governed.sha), ['docs/adr/0029-kernel-object-ownership.md']) !== null);
+    classifyCommit(qs7.commits.find((c) => c.sha === qs7Governed.sha), ['docs/adr/0029-kernel-object-ownership.md'], GOVERNED_REPOS[0]) !== null);
   // The second mechanism, free of the budget: an entry dated BELOW the boundary
   // that landed ABOVE something inside it is carried by the topological close,
   // whatever the skew. This is the inversion class the budget cannot bound.
@@ -4449,9 +4667,9 @@ async function selfTest() {
 
   // ── classification + replay fixtures ─────────────────────────────────────
   battery('classification + replay fixtures');
-  assert('ungoverned-commit-classifies-null', classifyCommit({ sha: 'a'.repeat(40), date: '2026-08-18T00:00:00Z', subject: 'fix: x (#1)' }, ['packages/spec/src/index.ts']) === null);
+  assert('ungoverned-commit-classifies-null', classifyCommit({ sha: 'a'.repeat(40), date: '2026-08-18T00:00:00Z', subject: 'fix: x (#1)' }, ['packages/spec/src/index.ts'], GOVERNED_REPOS[0]) === null);
   for (const replay of REPLAYS) {
-    const entry = classifyCommit({ sha: 'b'.repeat(40), date: '2026-08-18T00:00:00Z', subject: replay.subject }, replay.files);
+    const entry = classifyCommit({ sha: 'b'.repeat(40), date: '2026-08-18T00:00:00Z', subject: replay.subject }, replay.files, GOVERNED_REPOS[0]);
     assert(`replay-lists: ${replay.name}`, entry !== null && entry.pr === replay.pr, JSON.stringify(entry));
   }
   const uiEntry = classifyCommit({ sha: 'f'.repeat(40), date: '2026-08-18T00:00:00Z', subject: 'docs: seat protocol (#5188)' }, ['AGENTS.md', 'skills/x/SKILL.md'], GOVERNED_REPOS[1]);
@@ -5147,26 +5365,26 @@ async function selfTest() {
 
   // ── the --test pre-arm predicate (#9550) ──────────────────────────────────
   battery('the --test pre-arm predicate (#9550)');
-  const governedCase = testVerdict(['AGENTS.md']);
+  const governedCase = testVerdict(['AGENTS.md'], { repo: REPO });
   assert('--test-on-the-#9527-file-list-answers-GOVERNED', governedCase.governed === true && governedCase.hitPaths.join() === 'AGENTS.md', JSON.stringify(governedCase));
   assert('--test-governed-renders-the-no-flip-no-enqueue-no-arm-instruction', renderTestVerdict(governedCase).includes('GOVERNED') && renderTestVerdict(governedCase).includes('arms auto-merge'), renderTestVerdict(governedCase));
-  const mixedCase = testVerdict(['packages/spec/src/index.ts', '.claude/agents/os-dev.md', 'README.md']);
+  const mixedCase = testVerdict(['packages/spec/src/index.ts', '.claude/agents/os-dev.md', 'README.md'], { repo: REPO });
   assert('--test-on-a-mixed-diff-answers-GOVERNED-on-one-hit', mixedCase.governed === true && mixedCase.hitPaths.join() === '.claude/agents/os-dev.md', JSON.stringify(mixedCase.hitPaths));
   assert('--test-lists-the-paths-that-are-NOT-on-the-register-too', mixedCase.clearPaths.join() === 'packages/spec/src/index.ts,README.md', JSON.stringify(mixedCase.clearPaths));
-  const clearCase = testVerdict(['packages/spec/src/index.ts', 'scripts/pm/check-governed-merges.mjs']);
+  const clearCase = testVerdict(['packages/spec/src/index.ts', 'scripts/pm/check-governed-merges.mjs'], { repo: REPO });
   assert('--test-on-an-ordinary-diff-answers-NOT-governed', clearCase.governed === false && clearCase.hitPaths.length === 0, JSON.stringify(clearCase));
-  assert('this-very-file-is-not-itself-a-governed-surface', testVerdict(['scripts/pm/check-governed-merges.mjs']).governed === false);
+  assert('this-very-file-is-not-itself-a-governed-surface', testVerdict(['scripts/pm/check-governed-merges.mjs'], { repo: REPO }).governed === false);
   assert('--test-not-governed-renders-the-re-run-on-the-final-list-warning', renderTestVerdict(clearCase).includes('NOT governed') && renderTestVerdict(clearCase).includes('recall'), renderTestVerdict(clearCase));
   // Near misses on the predicate, the class the incident turns on: the seat
   // reasoned about a name, not a register.
-  const nearMiss = testVerdict(['examples/AGENTS.md', 'docs/adrs/x.md', '.claude-x/y', 'skillsx/a.md', 'apps/CLAUDE.md.bak', 'packages/create-objectstack/src/templates/AGENTS.md']);
+  const nearMiss = testVerdict(['examples/AGENTS.md', 'docs/adrs/x.md', '.claude-x/y', 'skillsx/a.md', 'apps/CLAUDE.md.bak', 'packages/create-objectstack/src/templates/AGENTS.md'], { repo: REPO });
   assert('--test-near-misses-answer-NOT-governed', nearMiss.governed === false && nearMiss.clearPaths.length === 6, JSON.stringify(nearMiss.hitPaths));
-  assert('--test-with-an-empty-path-list-is-never-a-not-governed-answer', testVerdict([]).checked === 0 && testVerdict([]).governed === false && runTestModeExitFor([]) === EXIT_CANNOT_SWEEP);
+  assert('--test-with-an-empty-path-list-is-never-a-not-governed-answer', testVerdict([], { repo: REPO }).checked === 0 && testVerdict([], { repo: REPO }).governed === false && runTestModeExitFor([], REPO) === EXIT_CANNOT_SWEEP);
   // Every governed surface answers 3 through its own glob — an uninvoked
   // surface is the phantom shape this self-test exists to refuse.
   for (const surface of GOVERNED_SURFACES) {
     const sample = surface.prefix ? `${surface.prefix}sample.md` : surface.exact;
-    assert(`--test-answers-governed-for-${surface.id}`, testVerdict([sample]).governed === true, sample);
+    assert(`--test-answers-governed-for-${surface.id}`, testVerdict([sample], { repo: REPO }).governed === true, sample);
   }
 
   // ── the generated-artifact exception register (#9866 · #11084 · #11705) ──
@@ -5197,7 +5415,7 @@ async function selfTest() {
       !(e.candidate?.test('.claude/workflows/docs-accuracy-audit.js') ?? false)),
     JSON.stringify(GENERATED_SURFACE_EXCEPTIONS.map((e) => [e.id, e.path ?? String(e.candidate)])));
   assert('the-audit-workflow-is-plainly-governed-again-with-no-provenance-consulted',
-    testVerdict(['.claude/workflows/docs-accuracy-audit.js']).governed === true &&
+    testVerdict(['.claude/workflows/docs-accuracy-audit.js'], { repo: REPO }).governed === true &&
       generatedExceptionFor('.claude/workflows/docs-accuracy-audit.js') === null);
   assert('a-row-matches-either-an-exact-path-or-a-narrowing-candidate-never-neither-and-never-both',
     GENERATED_SURFACE_EXCEPTIONS.every((e) => (typeof e.path === 'string') !== (e.candidate instanceof RegExp)),
@@ -5206,7 +5424,7 @@ async function selfTest() {
     GENERATED_SURFACE_EXCEPTIONS.every((e) => !e.candidate || !e.candidate.global));
   assert('the-exception-names-a-path-its-surface-actually-governs',
     GENERATED_SURFACE_EXCEPTIONS.every((e) => {
-      const m = governedPathsIn([e.path ?? REGISTER_SAMPLES[e.id]]);
+      const m = governedPathsIn([e.path ?? REGISTER_SAMPLES[e.id]], REPO);
       return m.length === 1 && m[0].id === e.surfaceId;
     }), JSON.stringify(GENERATED_SURFACE_EXCEPTIONS.map((e) => e.path ?? REGISTER_SAMPLES[e.id])));
   assert('every-row-names-its-generator-command-and-its-trusted-instrument-tree',
@@ -5229,28 +5447,28 @@ async function selfTest() {
   // what the register DOES with a verdict, not how a verdict is reached.
   const regPath = REGISTER_SAMPLES['spec-skill-refs'];
   const verified = new Map([[regPath, { pureRegeneration: true, reason: 'byte-equal (fixture)' }]]);
-  const liftedVerdict = applyGeneratedExceptions(testVerdict(['content/docs/x.mdx', regPath]), verified);
+  const liftedVerdict = applyGeneratedExceptions(testVerdict(['content/docs/x.mdx', regPath], { repo: REPO }), verified);
   assert('a-verified-pure-regen-lifts-the-only-hit-and-the-pr-is-not-governed',
     liftedVerdict.governed === false && liftedVerdict.hitPaths.length === 0 && liftedVerdict.matched.length === 0, JSON.stringify(liftedVerdict.hitPaths));
   assert('a-lifted-path-is-recorded-as-an-exception-never-as-a-clear-path',
     !liftedVerdict.clearPaths.includes(regPath) && liftedVerdict.exceptions.length === 1 && liftedVerdict.exceptions[0].pureRegeneration === true, JSON.stringify(liftedVerdict.exceptions));
-  const rejectedVerdict = applyGeneratedExceptions(testVerdict([regPath]), new Map([[regPath, { pureRegeneration: false, reason: 'differs (fixture)' }]]));
+  const rejectedVerdict = applyGeneratedExceptions(testVerdict([regPath], { repo: REPO }), new Map([[regPath, { pureRegeneration: false, reason: 'differs (fixture)' }]]));
   assert('a-failed-provenance-keeps-the-path-governed', rejectedVerdict.governed === true && rejectedVerdict.hitPaths.join() === regPath);
-  const absentProvenance = applyGeneratedExceptions(testVerdict([regPath]), new Map());
+  const absentProvenance = applyGeneratedExceptions(testVerdict([regPath], { repo: REPO }), new Map());
   assert('absent-provenance-fails-closed-never-open', absentProvenance.governed === true && /fail closed/.test(absentProvenance.exceptions[0].reason), JSON.stringify(absentProvenance.exceptions));
   // The mixed-diff rule is untouched: one hit on any OTHER governed path
   // still forks the whole PR, provenance verified or not.
-  const mixedGoverned = applyGeneratedExceptions(testVerdict([regPath, '.claude/skills/x/SKILL.md']), verified);
+  const mixedGoverned = applyGeneratedExceptions(testVerdict([regPath, '.claude/skills/x/SKILL.md'], { repo: REPO }), verified);
   assert('one-hit-on-any-OTHER-governed-path-still-forks-the-whole-pr',
     mixedGoverned.governed === true && mixedGoverned.hitPaths.join() === '.claude/skills/x/SKILL.md', JSON.stringify(mixedGoverned.hitPaths));
   assert('and-the-lifted-path-is-still-reported-as-lifted-on-a-mixed-diff', mixedGoverned.exceptions[0].pureRegeneration === true);
   // NAMED rows, not a class: a file the register does not cover never consults
   // provenance, even provenance that claims to be verified.
   const sibling = '.claude/workflows/some-other-workflow.js';
-  const siblingVerdict = applyGeneratedExceptions(testVerdict([sibling]), new Map([[sibling, { pureRegeneration: true, reason: 'x' }]]));
+  const siblingVerdict = applyGeneratedExceptions(testVerdict([sibling], { repo: REPO }), new Map([[sibling, { pureRegeneration: true, reason: 'x' }]]));
   assert('an-unregistered-file-is-not-excepted-named-rows-not-a-class',
     siblingVerdict.governed === true && siblingVerdict.exceptions.length === 0, JSON.stringify(siblingVerdict.exceptions));
-  assert('a-verdict-that-never-consulted-the-exception-carries-no-exceptions-field', testVerdict(['AGENTS.md']).exceptions === undefined);
+  assert('a-verdict-that-never-consulted-the-exception-carries-no-exceptions-field', testVerdict(['AGENTS.md'], { repo: REPO }).exceptions === undefined);
 
   // ── the generator co-edit fence (#11084), pinned in BOTH directions ──────
   //
@@ -5271,7 +5489,7 @@ async function selfTest() {
       (coEdit?.reason ?? '').includes(`${fencePrefix}build-skill-references.ts`), String(coEdit?.reason));
   // A neutered fence must fail LOUD and READABLE here, not crash the run: the
   // absent answer is itself the finding, so it is asserted, never dereferenced.
-  const coEditVerdict = applyGeneratedExceptions(testVerdict(coEditPaths), new Map(coEdit ? [[regPath, coEdit]] : []));
+  const coEditVerdict = applyGeneratedExceptions(testVerdict(coEditPaths, { repo: REPO }), new Map(coEdit ? [[regPath, coEdit]] : []));
   assert('a-generator-co-edit-keeps-the-artifact-governed-the-exception-does-not-lift',
     coEditVerdict.governed === true && coEditVerdict.hitPaths.join() === regPath && coEditVerdict.exceptions[0].pureRegeneration === false,
     JSON.stringify(coEditVerdict.hitPaths));
@@ -5287,12 +5505,12 @@ async function selfTest() {
   const regenOnlyPaths = [regPath, 'packages/spec/src/ui/responsive.zod.ts'];
   assert('an-untouched-generator-abstains-so-the-recompute-runs-exactly-as-before',
     generatorCoEditProvenance(regenOnlyPaths, fenceRow) === null);
-  const regenOnlyVerdict = applyGeneratedExceptions(testVerdict(regenOnlyPaths), verified);
+  const regenOnlyVerdict = applyGeneratedExceptions(testVerdict(regenOnlyPaths, { repo: REPO }), verified);
   assert('a-pure-regen-with-an-untouched-generator-still-lifts-and-the-pr-is-not-governed',
     regenOnlyVerdict.governed === false && regenOnlyVerdict.hitPaths.length === 0 && regenOnlyVerdict.exceptions[0].pureRegeneration === true,
     JSON.stringify(regenOnlyVerdict));
   assert('a-docs-only-pr-that-never-hits-the-register-is-untouched-by-the-fence',
-    generatorCoEditProvenance(['content/docs/a.mdx'], fenceRow) === null && testVerdict(['content/docs/a.mdx']).governed === false);
+    generatorCoEditProvenance(['content/docs/a.mdx'], fenceRow) === null && testVerdict(['content/docs/a.mdx'], { repo: REPO }).governed === false);
   // A prefix on the real directory, not a substring: a sibling directory whose
   // name merely starts the same way is not the trusted generator.
   assert('a-near-miss-sibling-directory-is-not-mistaken-for-the-generator-tree',
@@ -5400,13 +5618,13 @@ async function selfTest() {
   }
 
   // Applied to a verdict: the #11685 shape lifts, and the ruled limit holds.
-  const specPr = applyGeneratedExceptions(testVerdict(['packages/spec/src/ui/responsive.zod.ts', genIndex]), new Map([[genIndex, genuine]]));
+  const specPr = applyGeneratedExceptions(testVerdict(['packages/spec/src/ui/responsive.zod.ts', genIndex], { repo: REPO }), new Map([[genIndex, genuine]]));
   assert('the-#11685-shape-a-spec-pr-carrying-its-own-regenerated-index-is-NOT-governed',
     specPr.governed === false && specPr.hitPaths.length === 0 && specPr.exceptions[0].pureRegeneration === true, JSON.stringify(specPr.hitPaths));
-  const withHandAuthored = applyGeneratedExceptions(testVerdict([genIndex, handAuthored]), new Map([[genIndex, genuine]]));
+  const withHandAuthored = applyGeneratedExceptions(testVerdict([genIndex, handAuthored], { repo: REPO }), new Map([[genIndex, genuine]]));
   assert('but-one-hand-authored-skills-file-beside-it-still-forks-the-whole-pr',
     withHandAuthored.governed === true && withHandAuthored.hitPaths.join() === handAuthored, JSON.stringify(withHandAuthored.hitPaths));
-  const fabricated = applyGeneratedExceptions(testVerdict([handAuthored]), new Map([[handAuthored, { pureRegeneration: true, reason: 'claims to be verified' }]]));
+  const fabricated = applyGeneratedExceptions(testVerdict([handAuthored], { repo: REPO }), new Map([[handAuthored, { pureRegeneration: true, reason: 'claims to be verified' }]]));
   assert('provenance-that-claims-to-be-verified-cannot-lift-an-unregistered-skills-file',
     fabricated.governed === true && fabricated.exceptions.length === 0, JSON.stringify(fabricated.exceptions));
   const grouped = groupHitsByException([genIndex, 'skills/objectstack-data/references/_index.md', 'skills/objectstack-ui/references/react-blocks.md', handAuthored]);
@@ -5450,7 +5668,7 @@ async function selfTest() {
   const rejectedRender = renderTestVerdict(rejectedVerdict);
   assert('a-rejected-render-stays-GOVERNED-and-says-why-the-exception-did-not-lift',
     rejectedRender.includes('GOVERNED') && rejectedRender.includes('did NOT lift') && rejectedRender.includes('differs (fixture)'), rejectedRender);
-  assert('a-verdict-without-exceptions-renders-exactly-as-before', renderExceptionLines(testVerdict(['AGENTS.md'])) === '' && !renderTestVerdict(testVerdict(['AGENTS.md'])).includes('#9866'));
+  assert('a-verdict-without-exceptions-renders-exactly-as-before', renderExceptionLines(testVerdict(['AGENTS.md'], { repo: REPO })) === '' && !renderTestVerdict(testVerdict(['AGENTS.md'], { repo: REPO })).includes('#9866'));
 
   // ── the live battery's prerequisite, and the floor it was misread as ─────
   //
@@ -5663,19 +5881,19 @@ async function selfTest() {
   // The `--test` head line, both directions. `hitPaths` is the post-lift set,
   // so the count itself is right; what was missing is the reason it moved.
   const liftedTest = applyGeneratedExceptions(
-    testVerdict(pr15284Files),
+    testVerdict(pr15284Files, { repo: REPO }),
     new Map([[pr15284ReactBlocks, { pureRegeneration: true, reason: 'byte-equal (fixture)' }]]),
   );
   const liftedHead = renderTestVerdict(liftedTest).split('\n')[0];
   assert(
     '⭐ the-test-head-no-longer-reports-a-post-lift-zero-as-if-nothing-had-hit-the-register',
-    liftedHead === 'governed-surface predicate: 0 of 4 path(s) hit the register after 1 generated-artifact lift(s) (6 surfaces, repo-agnostic).',
+    liftedHead === 'governed-surface predicate: 0 of 4 path(s) hit the register after 1 generated-artifact lift(s) (7 surfaces govern objectstack).',
     liftedHead,
   );
-  const plainHead = renderTestVerdict(testVerdict(['packages/spec/src/ui/view.zod.ts'])).split('\n')[0];
+  const plainHead = renderTestVerdict(testVerdict(['packages/spec/src/ui/view.zod.ts'], { repo: REPO })).split('\n')[0];
   assert(
     'and-a-verdict-with-no-lift-keeps-its-head-line-byte-for-byte',
-    plainHead === 'governed-surface predicate: 0 of 1 path(s) hit the register (6 surfaces, repo-agnostic).',
+    plainHead === 'governed-surface predicate: 0 of 1 path(s) hit the register (7 surfaces govern objectstack).',
     plainHead,
   );
 
@@ -5711,8 +5929,8 @@ async function selfTest() {
   assert('a-rename-yields-the-new-path-AND-the-old-one',
     renameRead.paths.join() === 'docs/AGENTS.md,AGENTS.md' && renameRead.entries === 1, JSON.stringify(renameRead));
   assert('⭐ a-rename-OUT-of-a-governed-path-is-still-a-change-TO-that-path',
-    testVerdict(renameRead.paths).governed === true && testVerdict(['docs/AGENTS.md']).governed === false,
-    JSON.stringify(testVerdict(renameRead.paths).hitPaths));
+    testVerdict(renameRead.paths, { repo: REPO }).governed === true && testVerdict(['docs/AGENTS.md'], { repo: REPO }).governed === false,
+    JSON.stringify(testVerdict(renameRead.paths, { repo: REPO }).hitPaths));
   assert('and-the-pair-is-reported-so-the-operator-sees-which-hit-came-from-a-rename',
     renameRead.renames.length === 1 && renameRead.renames[0].from === 'AGENTS.md' && renameRead.renames[0].to === 'docs/AGENTS.md',
     JSON.stringify(renameRead.renames));
@@ -5730,8 +5948,9 @@ async function selfTest() {
   assert('and-a-walk-still-pending-pages-at-the-cap-refuses-on-the-cap-itself',
     /hit its 40-page cap/.test(String(pullTruncationReason({ collected: 4000, changedFiles: 4000, pages: 40, pageCap: 40, morePages: true }))));
 
-  // `--pr`'s argument. The qualified spelling exists because the register is
-  // repo-agnostic and the PM audits five repos from one checkout.
+  // `--pr`'s argument. The qualified spelling exists because the PM audits
+  // five repos from one checkout; the repository it names is also the one the
+  // scoped register answers for.
   assert('a-bare-number-means-this-checkouts-own-repo',
     JSON.stringify(parsePullTarget('16997', 'objectstack-ai/objectstack')) === JSON.stringify({ slug: 'objectstack-ai/objectstack', pull: 16997 }));
   assert('a-qualified-spelling-names-any-governed-repo',
@@ -5871,7 +6090,7 @@ async function selfTest() {
       fetchImpl: async (url) => (/\/files/.test(url) ? respond(renamedOut, null) : respond({ changed_files: 1, additions: 1, deletions: 0 }, null)),
     });
     assert('and-a-renamed-governed-file-reaches-the-predicate-as-BOTH-of-its-paths',
-      renamedPr.ok === true && testVerdict(renamedPr.paths).governed === true &&
+      renamedPr.ok === true && testVerdict(renamedPr.paths, { repo: REPO }).governed === true &&
         renderDerivation(renamedPr.derivation).includes('AGENTS.md → docs/AGENTS.md'), JSON.stringify(renamedPr.paths));
   }
 
@@ -5888,6 +6107,9 @@ async function selfTest() {
         { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
     const repo = join(derFx, 'repo');
     g2(derFx, 'init', '-q', repo);
+    // The fixture is a checkout OF a governed repository: `--branch` / `--test`
+    // answer for the checkout at --root, read off its origin (ruling B2).
+    g2(repo, 'remote', 'add', 'origin', 'https://github.com/objectstack-ai/objectstack.git');
     const put = (rel, text) => {
       mkdirSync(dirname(join(repo, rel)), { recursive: true });
       writeFileSync(join(repo, rel), text, 'utf8');
@@ -5927,9 +6149,9 @@ async function selfTest() {
     const twoDot = g2(repo, 'diff', '--name-only', 'origin/main', 'feature').trim().split('\n').filter(Boolean);
     const threeDot = deriveBranchPaths({ ref: 'feature', run: (argv) => tryGit(repo, argv) });
     assert('⭐ the-cards-reproduction-two-dot-really-does-carry-mains-own-governed-path',
-      twoDot.includes('.claude/hooks/guard.sh') && testVerdict(twoDot).governed === true, JSON.stringify(twoDot));
+      twoDot.includes('.claude/hooks/guard.sh') && testVerdict(twoDot, { repo: REPO }).governed === true, JSON.stringify(twoDot));
     assert('⭐ and-the-three-dot-derivation-of-the-same-branch-is-NOT-governed',
-      threeDot.ok === true && threeDot.paths.join() === 'src/a.ts' && testVerdict(threeDot.paths).governed === false,
+      threeDot.ok === true && threeDot.paths.join() === 'src/a.ts' && testVerdict(threeDot.paths, { repo: REPO }).governed === false,
       JSON.stringify(threeDot.paths ?? threeDot));
     const branchRun = run('--branch', 'feature', '--root', repo);
     assert('⭐ and-the-CLI-itself-answers-NOT-governed-and-says-how-it-derived-the-list',
@@ -5950,7 +6172,7 @@ async function selfTest() {
     // path, so the same branch reads as ungoverned through the obvious command.
     const renameDefault = g2(repo, 'diff', '--name-only', `${forkPoint}`, 'rename-out').trim().split('\n').filter(Boolean);
     assert('⭐ gits-own-rename-detection-hides-the-old-path-so-the-obvious-command-under-reports',
-      renameDefault.join() === 'docs-AGENTS.md' && testVerdict(renameDefault).governed === false, JSON.stringify(renameDefault));
+      renameDefault.join() === 'docs-AGENTS.md' && testVerdict(renameDefault, { repo: REPO }).governed === false, JSON.stringify(renameDefault));
     const renameRun = run('--branch', 'rename-out', '--root', repo);
     assert('⭐ while---branch-reads-both-paths-and-answers-GOVERNED',
       renameRun.status === EXIT_TEST_GOVERNED && renameRun.out.includes('AGENTS.md'),
@@ -5963,7 +6185,7 @@ async function selfTest() {
         !lonelyRun.out.includes('governed-surface predicate'),
       `status=${lonelyRun.status} out=${lonelyRun.out.slice(0, 300)} err=${lonelyRun.err.slice(0, 300)}`);
     assert('⭐ and-the-collapsed-shell-recipe-it-refuses-to-imitate-really-is-a-superset',
-      collapsed.length > 0 && testVerdict(collapsed).governed === true, JSON.stringify(collapsed));
+      collapsed.length > 0 && testVerdict(collapsed, { repo: REPO }).governed === true, JSON.stringify(collapsed));
     // Silence is not a verdict, in this mode either.
     const emptyRun = run('--branch', 'main', '--root', repo);
     assert('a-branch-that-changes-nothing-is-a-failure-never-a-not-governed-answer',
@@ -6002,11 +6224,11 @@ async function selfTest() {
     sizeVerdict({ additions: -1, deletions: 0 }).measured === false && sizeVerdict({ additions: 1.5, deletions: 0 }).measured === false &&
       sizeVerdict({ additions: '5001', deletions: 0 }).measured === false);
   // Through the verdict: the exit code is the GOVERNED one, the words say SIZE.
-  const bigClean = testVerdict(['packages/spec/src/index.ts'], { size: { additions: 6000, deletions: 0, source: 'a fixture' } });
+  const bigClean = testVerdict(['packages/spec/src/index.ts'], { repo: REPO, size: { additions: 6000, deletions: 0, source: 'a fixture' } });
   assert('⭐ an-oversized-PR-with-no-governed-path-is-NOT-governed-by-path-and-lands-by-HUMAN-MERGE',
     bigClean.governed === false && bigClean.size.exceeds === true && bigClean.humanMerge === true, JSON.stringify(bigClean));
   assert('and-it-exits-on-the-GOVERNED-code-so-every-existing-caller-routes-it-to-the-same-terminal',
-    runTestModeExitFor(['packages/spec/src/index.ts'], bigClean.size) === EXIT_TEST_GOVERNED);
+    runTestModeExitFor(['packages/spec/src/index.ts'], REPO, bigClean.size) === EXIT_TEST_GOVERNED);
   const bigWords = renderTestVerdict(bigClean);
   assert('the-words-say-HUMAN-MERGE-the-number-the-threshold-and-that-generated-files-are-INCLUDED',
     bigWords.includes('HUMAN MERGE') && bigWords.includes('6000 changed line(s)') && bigWords.includes(`> ${HUMAN_MERGE_LINE_THRESHOLD}`) &&
@@ -6014,26 +6236,26 @@ async function selfTest() {
   assert('and-the-provenance-of-the-number-stays-OFF-the-verdict-it-lives-on-the-derivation-line-or-the-stderr-note',
     bigClean.size.source === 'a fixture' && !renderSizeLines(bigClean.size).includes('fixture') && CALLER_SIZED_NOTE.includes('--additions'), renderSizeLines(bigClean.size));
   assert('and-they-never-say-ordinary-queue-landing-applies', !bigWords.includes('ordinary queue landing applies'), bigWords);
-  const smallClean = testVerdict(['packages/spec/src/index.ts'], { size: { additions: 10, deletions: 2 } });
+  const smallClean = testVerdict(['packages/spec/src/index.ts'], { repo: REPO, size: { additions: 10, deletions: 2 } });
   assert('an-ordinary-sized-ordinary-diff-still-answers-NOT-governed-and-says-the-size-is-under',
-    smallClean.humanMerge === false && runTestModeExitFor(['packages/spec/src/index.ts'], smallClean.size) === EXIT_TEST_NOT_GOVERNED &&
+    smallClean.humanMerge === false && runTestModeExitFor(['packages/spec/src/index.ts'], REPO, smallClean.size) === EXIT_TEST_NOT_GOVERNED &&
       renderTestVerdict(smallClean).includes('under the human-merge threshold') && renderTestVerdict(smallClean).includes('12 changed line(s)'),
     renderTestVerdict(smallClean));
-  const unmeasured = testVerdict(['packages/spec/src/index.ts']);
+  const unmeasured = testVerdict(['packages/spec/src/index.ts'], { repo: REPO });
   assert('⭐ with-no-size-handed-in-the-verdict-says-NOT-MEASURED-on-stdout-and-names-the-modes-that-read-it',
     unmeasured.size.measured === false && unmeasured.humanMerge === false && renderTestVerdict(unmeasured).includes('NOT MEASURED') &&
       renderTestVerdict(unmeasured).includes('--pr') && renderTestVerdict(unmeasured).includes('--additions'), renderTestVerdict(unmeasured));
   assert('and-testVerdict-with-no-size-keeps-its-PATH-answer-byte-for-byte-the-queue-guard-imports-it',
     unmeasured.governed === false && JSON.stringify(unmeasured.hitPaths) === '[]' &&
-      JSON.stringify(unmeasured.clearPaths) === '["packages/spec/src/index.ts"]' && testVerdict(['AGENTS.md']).governed === true);
-  const bigGoverned = testVerdict(['AGENTS.md'], { size: { additions: 6000, deletions: 0 } });
+      JSON.stringify(unmeasured.clearPaths) === '["packages/spec/src/index.ts"]' && testVerdict(['AGENTS.md'], { repo: REPO }).governed === true);
+  const bigGoverned = testVerdict(['AGENTS.md'], { repo: REPO, size: { additions: 6000, deletions: 0 } });
   assert('a-governed-path-AND-an-oversized-diff-renders-both-limbs-and-stays-on-the-governed-code',
     bigGoverned.governed === true && bigGoverned.humanMerge === true && renderTestVerdict(bigGoverned).includes('GOVERNED') &&
       renderTestVerdict(bigGoverned).includes('HUMAN MERGE'), renderTestVerdict(bigGoverned));
   // ⛔ No exemption for generated files: the register lifts a PATH, never a line count.
   const regenPath = REGISTER_SAMPLES['spec-skill-refs'];
   const liftedBig = applyGeneratedExceptions(
-    testVerdict([regenPath], { size: { additions: 237706, deletions: 0 } }),
+    testVerdict([regenPath], { repo: REPO, size: { additions: 237706, deletions: 0 } }),
     new Map([[regenPath, { pureRegeneration: true, reason: 'byte-equal to the generator (fixture)' }]]),
   );
   assert('⭐ a-certified-pure-regeneration-lifts-the-PATH-and-lifts-NOTHING-from-the-size',
@@ -6052,7 +6274,7 @@ async function selfTest() {
     state: approvals.length > 0 ? 'approved' : 'unapproved', approvers: approvals.map((a) => a.login), approvals,
     approvalsOnEarlierCommits: [], unauthorizedApprovers: [], changesRequestedBy: [], reviewsRead: 1, headSha: LIFT_SHA, ...extra,
   });
-  const liftedByApproval = testVerdict(['packages/spec/src/index.ts'], { size: { additions: 10764, deletions: 999, source: 'a fixture' }, approval: authorizedVerdict([{ login: 'os-zhuang', commitId: LIFT_SHA }]) });
+  const liftedByApproval = testVerdict(['packages/spec/src/index.ts'], { repo: REPO, size: { additions: 10764, deletions: 999, source: 'a fixture' }, approval: authorizedVerdict([{ login: 'os-zhuang', commitId: LIFT_SHA }]) });
   assert('⭐ an-authorized-APPROVED-review-LIFTS-the-size-limb-exceeds-stays-TRUE-and-the-PR-no-longer-lands-by-human-merge',
     liftedByApproval.size.exceeds === true && liftedByApproval.size.changedLines === 11763 && liftedByApproval.size.lifted !== null &&
       liftedByApproval.size.lifted.approvers.join() === 'os-zhuang' && liftedByApproval.size.lifted.approvals[0].commitId === LIFT_SHA &&
@@ -6066,7 +6288,7 @@ async function selfTest() {
     liftedWords.includes('SIZE LIFTED') && liftedWords.includes('os-zhuang (on e4ead7480000)') && liftedWords.includes('objectstack#20153') &&
       liftedWords.includes('2026-09-27') && liftedWords.includes('OWNING seat lands this PR through the queue') && !liftedWords.includes('HUMAN MERGE OR') &&
       liftedWords.includes('NOT governed'), liftedWords);
-  assert('and-it-exits-on-the-NOT-governed-code-the-queue-lands-it', runTestModeExitFor(['packages/spec/src/index.ts'], { additions: 10764, deletions: 999 }, authorizedVerdict([{ login: 'os-zhuang', commitId: LIFT_SHA }])) === EXIT_TEST_NOT_GOVERNED);
+  assert('and-it-exits-on-the-NOT-governed-code-the-queue-lands-it', runTestModeExitFor(['packages/spec/src/index.ts'], REPO, { additions: 10764, deletions: 999 }, authorizedVerdict([{ login: 'os-zhuang', commitId: LIFT_SHA }])) === EXIT_TEST_NOT_GOVERNED);
   const overSize = { additions: 6000, deletions: 0 };
   assert('⛔ NO-approval-handed-in-still-lands-by-human-merge-or-authorized-approval-the-2026-09-18-reading-unchanged',
     sizeLimbFires(sizeVerdict(overSize, null)) === true && sizeVerdict(overSize, null).lifted === null && sizeVerdict(overSize, null).approvalState === null);
@@ -6082,12 +6304,12 @@ async function selfTest() {
       sizeLiftFrom({ state: 'approved', approvers: ['os-zhuang'], approvals: [] }) === null && sizeLiftFrom({ state: 'approved', approvals: [{ commitId: 'x' }] }) === null);
   assert('an-approval-under-the-line-lifts-nothing-because-there-is-nothing-to-lift',
     sizeVerdict({ additions: 10, deletions: 2 }, authorizedVerdict([{ login: 'hotlong', commitId: LIFT_SHA }])).lifted === null && sizeVerdict(null, authorizedVerdict([{ login: 'hotlong', commitId: LIFT_SHA }])).lifted === null);
-  const liftedGoverned = testVerdict(['AGENTS.md'], { size: overSize, approval: authorizedVerdict([{ login: 'hotlong', commitId: LIFT_SHA }]) });
+  const liftedGoverned = testVerdict(['AGENTS.md'], { repo: REPO, size: overSize, approval: authorizedVerdict([{ login: 'hotlong', commitId: LIFT_SHA }]) });
   assert('⭐ the-lift-moves-the-SIZE-limb-only-a-governed-PATH-still-lands-per-its-tier-and-a-FORK-head-is-untouched',
     liftedGoverned.governed === true && landsByHumanMerge(liftedGoverned) === true && liftedGoverned.size.lifted !== null &&
-      landsByHumanMerge(testVerdict(['x.ts'], { size: overSize, approval: authorizedVerdict([{ login: 'hotlong', commitId: LIFT_SHA }]), fork: forkVerdict({ base: { repo: { full_name: 'o/r' } }, head: { repo: { full_name: 'f/r' } } }) })) === true);
+      landsByHumanMerge(testVerdict(['x.ts'], { repo: REPO, size: overSize, approval: authorizedVerdict([{ login: 'hotlong', commitId: LIFT_SHA }]), fork: forkVerdict({ base: { repo: { full_name: 'o/r' } }, head: { repo: { full_name: 'f/r' } } }) })) === true);
   assert('⭐ the-post-merge-sweep-hands-in-NO-approval-so-an-oversized-landing-is-STILL-listed',
-    classifyCommit({ sha: 'b'.repeat(40), date: '2026-09-27T02:02:33Z', subject: 'feat!: retire the saved-report stack (#20125)' }, ['packages/x.ts'], null, { additions: 10764, deletions: 999 }) !== null);
+    classifyCommit({ sha: 'b'.repeat(40), date: '2026-09-27T02:02:33Z', subject: 'feat!: retire the saved-report stack (#20125)' }, ['packages/x.ts'], GOVERNED_REPOS[0], { additions: 10764, deletions: 999 }) !== null);
   assert('and-the-not-lifted-words-name-BOTH-landings-the-authorized-approval-and-the-maintainers-merge',
     bigWords.includes('until an account in') && bigWords.includes('GOVERNED_APPROVERS has APPROVED it, on ANY commit') && bigWords.includes('objectstack#20153') &&
       bigWords.includes("the maintainer's own merge is the other landing") && !bigWords.includes('lands only by a human merge'), bigWords);
@@ -6143,6 +6365,7 @@ async function selfTest() {
         { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
     const repo = join(sizeFx, 'repo');
     g3(sizeFx, 'init', '-q', repo);
+    g3(repo, 'remote', 'add', 'origin', 'https://github.com/objectstack-ai/objectstack.git'); // the checkout's repository (ruling B2)
     const put = (rel, data) => {
       mkdirSync(dirname(join(repo, rel)), { recursive: true });
       writeFileSync(join(repo, rel), data);
@@ -6209,19 +6432,19 @@ async function selfTest() {
   battery('⭐ the FORK predicate: head repo ≠ base repo is a proposal, never a delivery');
   const pullFrom = (headRepo, sha = 'feedface0001') => ({ head: { sha, repo: headRepo === null ? null : { full_name: headRepo } }, base: { repo: { full_name: 'o/r' } } });
   const forkOf = (headRepo) => forkVerdict(pullFrom(headRepo));
-  const wordsOf = (paths, intake) => renderTestVerdict(testVerdict(paths, intake));
-  const forkPlain = testVerdict(['packages/spec/src/index.ts'], { fork: forkOf('someone/r') });
+  const wordsOf = (paths, intake) => renderTestVerdict(testVerdict(paths, { repo: REPO, ...intake }));
+  const forkPlain = testVerdict(['packages/spec/src/index.ts'], { repo: REPO, fork: forkOf('someone/r') });
   const forkWords = renderTestVerdict(forkPlain);
   assert('⭐ a-fork-head-on-ordinary-paths-is-NOT-governed-by-path-and-lands-by-HUMAN-MERGE-on-the-fork-limb-the-GOVERNED-exit-with-the-fork-sentence-a-PROPOSAL-never-a-delivery-adopted-onto-an-internal-branch',
     forkPlain.governed === false && forkPlain.fork.measured === true && forkPlain.fork.isFork === true && forkPlain.humanMerge === true && landsByHumanMerge(forkPlain) === true &&
       forkWords.includes('FORK PR — head someone/r ≠ base o/r') && forkWords.includes('PROPOSAL, never a delivery') && forkWords.includes('arms auto-merge') && forkWords.includes('approves it') &&
       forkWords.includes('Co-authored-by') && forkWords.includes('HEAD REPO decides') && !forkWords.includes('ordinary queue landing applies'), forkWords);
   assert('⭐ head.repo-null-a-deleted-fork-is-a-FORK-fail-closed',
-    forkOf(null).isFork === true && landsByHumanMerge(testVerdict(['x.ts'], { fork: forkOf(null) })) && wordsOf(['x.ts'], { fork: forkOf(null) }).includes('(deleted fork repo) ≠ base o/r'), wordsOf(['x.ts'], { fork: forkOf(null) }));
+    forkOf(null).isFork === true && landsByHumanMerge(testVerdict(['x.ts'], { repo: REPO, fork: forkOf(null) })) && wordsOf(['x.ts'], { fork: forkOf(null) }).includes('(deleted fork repo) ≠ base o/r'), wordsOf(['x.ts'], { fork: forkOf(null) }));
   const sameRepo = wordsOf(['packages/spec/src/index.ts'], { fork: forkOf('o/r'), size: { additions: 1, deletions: 0 } });
   assert('a-same-repo-head-on-ordinary-paths-is-unchanged-NOT-governed-ordinary-queue-landing-and-no-fork-line',
-    forkOf('o/r').isFork === false && forkOf('o/r').measured === true && landsByHumanMerge(testVerdict(['x.ts'], { fork: forkOf('o/r') })) === false && sameRepo.includes('ordinary queue landing applies') && !sameRepo.includes('head repo') && !sameRepo.includes('FORK'), sameRepo);
-  const forkTierOf = (path, headRepo) => testVerdict([path], { fork: forkOf(headRepo) });
+    forkOf('o/r').isFork === false && forkOf('o/r').measured === true && landsByHumanMerge(testVerdict(['x.ts'], { repo: REPO, fork: forkOf('o/r') })) === false && sameRepo.includes('ordinary queue landing applies') && !sameRepo.includes('head repo') && !sameRepo.includes('FORK'), sameRepo);
+  const forkTierOf = (path, headRepo) => testVerdict([path], { repo: REPO, fork: forkOf(headRepo) });
   const S_PATH = '.claude/agents/os-dev.md';
   assert('a-same-repo-governed-head-keeps-its-tier-H-or-S-word-for-word-while-a-fork-head-on-a-Tier-S-path-still-prints-the-fork-sentence-the-seat-adopts-it-never-lands-it',
     forkTierOf('AGENTS.md', 'o/r').tier === GOVERNED_TIER_H && !wordsOf(['AGENTS.md'], { fork: forkOf('o/r') }).includes('FORK') && wordsOf(['AGENTS.md'], { fork: forkOf('o/r') }).includes('H(人合)') &&
@@ -6276,7 +6499,7 @@ async function selfTest() {
   // would abort the whole run with a TypeError — a self-test that crashes hides
   // every other failure it had already collected. A red case must be a NAMED one.
   assert('⭐ classifyCommit-IS-the-landed-predicate-landsByHumanMerge-on-testVerdict-never-a-restated-comparison',
-    [bigPlain, govSmall, govLegacy, govBig].every((e) => e !== null && landsByHumanMerge(testVerdict(e.surfaces.flatMap((s) => s.files), { size: e.size.measured ? e.size : null })) === true));
+    [bigPlain, govSmall, govLegacy, govBig].every((e) => e !== null && landsByHumanMerge(testVerdict(e.surfaces.flatMap((s) => s.files), { repo: REPO, size: e.size.measured ? e.size : null })) === true));
   // The report an operator reads.
   const bigEntry = bigPlain === null
     ? null
@@ -6719,10 +6942,10 @@ async function selfTest() {
   return SELF_TEST_VERDICT;
 }
 
-/** The exit code `--test` would return for a path list — pinned without spawning. */
-function runTestModeExitFor(paths, size = null, approval = null) {
+/** The exit code `--test` would return for a path list in `repo` — pinned without spawning. */
+function runTestModeExitFor(paths, repo, size = null, approval = null) {
   if (paths.length === 0) return EXIT_CANNOT_SWEEP;
-  return landsByHumanMerge(testVerdict(paths, { size, approval })) ? EXIT_TEST_GOVERNED : EXIT_TEST_NOT_GOVERNED;
+  return landsByHumanMerge(testVerdict(paths, { repo, size, approval })) ? EXIT_TEST_GOVERNED : EXIT_TEST_NOT_GOVERNED;
 }
 
 // `invokedDirectly` for the same reason the main-invocation guard above
