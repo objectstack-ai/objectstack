@@ -25,82 +25,91 @@
  * That is what evicted PRs from the merge queue three times in one afternoon:
  * the dequeue forces every speculative build behind the PR to rebuild.
  *
- * WHY IT READS AS LOAD-DEPENDENT. The window is exactly the duration of
- * `rpcDone()` — the time to drain the RPC round-trips already in flight. Idle
- * that is about a millisecond; on a saturated runner it is wide enough for a
- * leaked timer, poll or fire-and-forget write to log inside it. Nothing about
- * the code under test changes between the green run and the red one, which is
- * why the two reproductions before this one both concluded "cannot reproduce".
- *
  * WHAT THIS PIN ASSERTS, and why it spawns vitest instead of asserting inline.
  * The failure happens during worker teardown, i.e. strictly AFTER every test in
- * the file has finished — no assertion inside the affected file can observe it,
- * and the only visible symptom is the process exit code. So the pin drives a
- * real vitest process over a fixture that deliberately leaks a logging callback
- * (`test/fixtures/late-console-teardown/`) and reads the exit code:
+ * the file has finished — no assertion inside the affected file can observe it.
+ * So the pin drives a real vitest process over a fixture that deliberately
+ * leaks a logging callback (`test/fixtures/late-console-teardown/`):
  *
- *   - the ABLATION leg runs it under vitest's defaults and requires the harm to
- *     still reproduce — a positive control, so this pin can never go quietly
- *     green because the fixture stopped provoking anything;
+ *   - the ABLATION leg runs it under vitest's defaults and requires the
+ *     teardown rejection to still be produced — a positive control, so this
+ *     pin can never go quietly green because the fixture stopped provoking
+ *     anything;
  *   - the GUARDED leg runs the SAME fixture under this app's real
- *     `vitest.config.ts` and requires exit 0.
+ *     `vitest.config.ts` and requires no rejection and exit 0.
  *
  * Delete `disableConsoleIntercept: true` from that config and the guarded leg
  * turns red. Both legs also assert `Test Files  1 passed (1)`, because a run
  * that collected NOTHING exits 0 too and would read as a pass.
  *
- * ⚠️ The ablation is a race, not a certainty, and the rate is a function of the
- * BOX, not of the fixture. Measured on this container — 4 vCPU / 17 GB, every
- * arm serialized under the shared verify lock, each carrying its own control in
- * the same run:
+ * WHY IT READ AS LOAD-DEPENDENT, AND WHY THIS PIN NO LONGER IS. The race has
+ * TWO windows, both vitest's, and a green run exits 1 only when both open:
  *
- *     idle, ablation config          20/20 reproduced, every child exit 1
- *     idle, this app's config         0/6  reproduced, every child exit 0  (control)
- *     under 4 concurrent vitest       3/40 reproduced in the measured arm
- *     those concurrent runs        248/1913 reproduced (~13%) in the same windows
+ *   1. in the WORKER, a console RPC still unacknowledged when the teardown
+ *      sweep runs — created after `rpcDone()` took its snapshot;
+ *   2. in the MAIN process, the worker's report of that rejection arriving
+ *      before vitest reads its unhandled errors for the exit code. The worker
+ *      sends it only AFTER it reports the file finished, so a busy box loses
+ *      this one too.
  *
- * It is NOT a starvation effect. Load average held between 2.8 and 3.4 on 4
- * CPUs with 15 GB free throughout, so nothing was starved — and reproduction
- * still fell from 100% to ~13%. The card's own control had ruled starvation out
- * from the other side (the file alone under 8 synthetic CPU burners, load ~7,
- * stayed green). Nor is it contention on the fixture directory: repeated with
- * every concurrent process on its OWN copy of the fixture root, the suppression
- * survives (3/20). What closes the window is CONCURRENT NODE PROCESSES, which
- * is exactly what a full-repo `turbo run test` is made of — and what a lane
- * inside THIS package therefore cannot isolate the file from.
+ * Idle, both open nearly every time; under concurrent node processes — what a
+ * full-repo `turbo run test` is made of — neither reliably does. This pin used
+ * to live with that: up to eight ablation attempts, four guarded repetitions,
+ * a premise probe to tell "did not fire" from "cannot fire", and a SKIP when
+ * the race stayed shut. That cost 12 child vitest runs on a loaded runner,
+ * which is how this file came to be the slowest in its package (20.8 s).
  *
- * WHY THAT MAKES A RETRY BUDGET THE WRONG INSTRUMENT (#11939). At ~13% per
- * attempt, eight attempts miss (1 - 0.13)^8 ≈ 33% of the time — and the
- * sequentially measured arms came in lower still (3/40), so the rate under a
- * real full-repo run may be worse than that. No budget that finishes inside a
- * test's lifetime makes a race with an environment-dependent rate reliable; it
- * only moves the red further out and pays for the move on every loaded run.
+ * Now both legs run their child with a HARNESS REPORTER
+ * (`test/fixtures/late-console-teardown/hold-console-acks.reporter.ts`) that
+ * replaces both clocks with ordering facts, and its docblock carries the
+ * argument in full:
  *
- * WHAT THIS FILE ACTUALLY CLOSES, then. "The instrument did not fire this time"
- * and "the instrument is permanently dead" are different facts with different
- * responses, and a race that only ever reports "did not reproduce" cannot tell
- * them apart. So the dynamic race is no longer the only evidence: the PREMISE
- * probe below reads the installed vitest and asserts, DETERMINISTICALLY and
- * independently of load, that the shape this pin exploits is still there —
- * mechanising the very instruction the old assertion message gave a human
- * ("check sendLog/rpcDone in its dist chunks"). The two are then graded
- * together:
+ *   - window 1 is HELD OPEN: the main process acknowledges console log N only
+ *     when log N+1 arrives, so the newest console RPC is always unacknowledged
+ *     and the sweep always finds one pending — no load, no luck;
+ *   - window 2 is READ, not raced: at main-process exit every worker has
+ *     answered `stop`, after sending its rejection report on the same ordered
+ *     channel, so the reporter's verdict file records every rejection the run
+ *     produced (`delivered`) beside the ones vitest's exit code saw (`graded`).
  *
- *     premise intact + race fired   → pass
- *     premise intact + race silent  → SKIP, loudly and countably: the window
- *                                     did not open on this box this time
- *     premise BROKEN + race silent  → FAIL: vitest changed underneath us; this
- *                                     pin's defect may be fixed upstream
- *     premise BROKEN + race fired   → FAIL: the probe is stale, not vitest
+ * Measured on this container (4 vCPU), one child run per attempt, each arm
+ * under the shared verify lock with its control in the same window:
  *
- * ⛔ A skip is NOT a pass and must never be able to become one quietly. Two
- * things stop that: it is reported as skipped (so `Tests N passed | 1 skipped`
- * counts it, and the marker below greps out of a job log), and the premise
- * probe is a SEPARATE, always-run, deterministic assertion — the leg's floor is
- * never "measured nothing", it is "measured the mechanism statically".
+ *                                       teardown rejection    exit 1
+ *     idle, vitest defaults, no hold          20/20            20/20
+ *     idle, ablation config + hold            40/40            40/40
+ *     4 concurrent vitest, defaults           4/20             4/20
+ *     4 concurrent vitest, ablation + hold    40/40            32/40
+ *     4 concurrent vitest, app config + hold  0/10             0/10
+ *     4 concurrent vitest, guard removed      20/20            19/20
+ *       (app config + hold, interception re-armed)
+ *
+ * The last column is window 2 doing what it always did; the middle column is
+ * the defect, and it no longer depends on the box. So each leg runs ONCE, the
+ * ablation grades on `delivered`, the exit code is held to `graded`, and there
+ * is no skip: a premise-intact ablation that delivers nothing is a broken
+ * instrument, and fails as one.
+ *
+ * WHAT THE PREMISE PROBE IS FOR NOW. It still reads the installed vitest and
+ * asserts, deterministically, that every link the race walks is there — now
+ * including the main-process link the hold leans on (the console RPC handler
+ * awaiting the reporters). When the ablation fails it says WHICH of the two
+ * moved, vitest or this pin:
+ *
+ *     premise intact + rejection delivered  → pass
+ *     premise intact + nothing delivered    → FAIL: the hold no longer opens
+ *                                             window 1 — repair the instrument
+ *     premise BROKEN + nothing delivered    → FAIL: vitest changed underneath
+ *                                             us; this pin's defect may be
+ *                                             fixed upstream
+ *     premise BROKEN + rejection delivered  → FAIL: the probe is stale
  *
  * ⛔ And none of it relaxes the GUARDED leg, which is the one that protects the
- * merge queue. It still requires exit 0 on every repetition, unconditionally.
+ * merge queue: it requires zero delivered rejections AND exit 0. With the hold
+ * on that leg too, deleting `disableConsoleIntercept: true` from the app
+ * config reddens it on the first run, every run — where four unheld
+ * repetitions used to miss a removed guard on a loaded runner more often than
+ * they caught it.
  *
  * ⚠️ WHY THE CHILD'S OUTPUT IS NORMALISED BEFORE ANYTHING READS IT. Every
  * predicate below is a substring of a REPORTER line, and vitest 4 decides both
@@ -119,8 +128,18 @@
 
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { stripVTControlCharacters } from 'node:util';
+
+import {
+  FORWARDED_METHOD,
+  TEARDOWN_ERROR,
+  TEARDOWN_MESSAGE_TEMPLATE,
+  VERDICT_OUTPUT_KEY,
+  VERDICT_SCHEMA,
+  type HoldVerdict,
+} from './fixtures/late-console-teardown/hold-console-acks.reporter.js';
 
 // `process.cwd()` is this package's established seed for its own files
 // (`test/coverage.test.ts`, `test/inert-wirings.test.ts`) and the one the
@@ -133,6 +152,7 @@ const VITEST_BIN = `${PACKAGE_ROOT}/node_modules/.bin/vitest`;
 const APP_CONFIG = `${PACKAGE_ROOT}/vitest.config.ts`;
 const FIXTURE_ROOT = `${PACKAGE_ROOT}/test/fixtures/late-console-teardown`;
 const ABLATION_CONFIG = `${FIXTURE_ROOT}/vitest.unguarded.config.ts`;
+const HOLD_REPORTER = `${FIXTURE_ROOT}/hold-console-acks.reporter.ts`;
 
 // The premise probe reads the SAME vitest the child runs — reached through this
 // package's own `node_modules`, the way `VITEST_BIN` above is, so the two can
@@ -140,44 +160,30 @@ const ABLATION_CONFIG = `${FIXTURE_ROOT}/vitest.unguarded.config.ts`;
 // names, so each is found by prefix rather than named.
 const VITEST_CHUNKS = `${PACKAGE_ROOT}/node_modules/vitest/dist/chunks`;
 
-/**
- * vitest's rejection wording, verbatim from `init.*.js`, with its interpolation
- * left as source text so the probe can look for the template itself.
- *
- * `TEARDOWN_ERROR` is DERIVED from it rather than written out a second time: it
- * is the string the ablation greps for in the child's output, and the whole
- * failure mode this file guards against is those two drifting apart silently.
- */
-const TEARDOWN_MESSAGE_TEMPLATE = 'Closing rpc while "${method}" was pending';
-const FORWARDED_METHOD = 'onUserConsoleLog';
-
-/** The exact message vitest rejects a pending console RPC with. */
-const TEARDOWN_ERROR = TEARDOWN_MESSAGE_TEMPLATE.replace('${method}', FORWARDED_METHOD);
+// `TEARDOWN_MESSAGE_TEMPLATE`, `FORWARDED_METHOD` and the derived
+// `TEARDOWN_ERROR` come from the hold reporter, which classifies the child's
+// unhandled errors by the very same string this probe and these assertions use
+// — one spelling, so the two can never drift apart silently.
 
 /** The forwarding call whose returned promise `sendLog` throws away. */
 const FORWARDING_CALL = `state().rpc.${FORWARDED_METHOD}(`;
 
 /**
- * Attempts allowed to the ablation leg before the run is declared DEGRADED.
- *
- * Deliberately unchanged at 8 (#11939). With the premise probe carrying the
- * "is the instrument alive" question, more attempts buy only a lower skip rate
- * — and they are paid on every loaded run, which is precisely the run that
- * cannot afford them. The measurement in this file's docblock prices it: no
- * budget makes an environment-dependent race reliable.
+ * The main-process link the hold leans on: the console RPC handler awaits the
+ * test run's log, which awaits every reporter's `onUserConsoleLog`. Both lines
+ * verbatim from `cli-api.*.js`.
  */
-const ABLATION_ATTEMPTS = 8;
-/** Repetitions of the guarded leg. A removed guard reproduces ~80% per run. */
-const GUARDED_REPETITIONS = 4;
-
-/** Greppable, so a chronically degraded leg is countable out of a job log. */
-const DEGRADED_MARKER = 'ABLATION-DEGRADED [#11939]';
+const HANDLER_AWAITS_LOG = 'await vitest._testRun.log(log)';
+const LOG_AWAITS_REPORTERS = `await this.vitest.report("${FORWARDED_METHOD}", log)`;
 
 interface Leg {
   readonly status: number | null;
   /** The child's combined stdout+stderr, ALREADY stripped of ANSI escapes. */
   readonly output: string;
-  readonly reproduced: boolean;
+  /** What the hold reporter wrote at the child's exit; `null` when it wrote nothing readable. */
+  readonly verdict: HoldVerdict | null;
+  /** Teardown rejections the child's main process received, late ones included (0 when no verdict). */
+  readonly delivered: number;
   readonly collectedOneFile: boolean;
 }
 
@@ -203,6 +209,11 @@ interface Leg {
  * Then `stripVTControlCharacters` runs over the captured bytes anyway: belt and
  * braces, so an escape arriving from some other source cannot quietly
  * un-measure this pin the way one already did.
+ *
+ * BOTH legs carry the hold reporter, so the one variable between them stays
+ * the guard. Its verdict file lives in a fresh temporary directory per run and
+ * is removed with it; a run that leaves no verdict, or one in another schema,
+ * reads as `verdict: null` — measured nothing — never as zero rejections.
  */
 function runFixture(config: string): Leg {
   const env: Record<string, string | undefined> = { ...process.env };
@@ -213,38 +224,61 @@ function runFixture(config: string): Leg {
   delete env.FORCE_COLOR;
   env.NO_COLOR = '1';
 
-  const result = spawnSync(
-    VITEST_BIN,
-    ['run', '-c', config, '--root', FIXTURE_ROOT, '--reporter=default'],
-    {
-      encoding: 'utf8',
-      timeout: 120_000,
-      env,
-    },
-  );
+  const scratch = mkdtempSync(`${tmpdir()}/teardown-race-`);
+  const verdictFile = `${scratch}/verdict.json`;
+  try {
+    const result = spawnSync(
+      VITEST_BIN,
+      [
+        'run',
+        '-c',
+        config,
+        '--root',
+        FIXTURE_ROOT,
+        '--reporter=default',
+        `--reporter=${HOLD_REPORTER}`,
+        `--outputFile.${VERDICT_OUTPUT_KEY}=${verdictFile}`,
+      ],
+      {
+        encoding: 'utf8',
+        timeout: 120_000,
+        env,
+      },
+    );
 
-  const output = stripVTControlCharacters(`${result.stdout ?? ''}${result.stderr ?? ''}`);
-  return {
-    status: result.status,
-    output,
-    reproduced: output.includes(TEARDOWN_ERROR),
-    collectedOneFile: /Test Files\s+1 passed \(1\)/.test(output),
-  };
+    const output = stripVTControlCharacters(`${result.stdout ?? ''}${result.stderr ?? ''}`);
+    let verdict: HoldVerdict | null = null;
+    if (existsSync(verdictFile)) {
+      const parsed = JSON.parse(readFileSync(verdictFile, 'utf8')) as Partial<HoldVerdict>;
+      verdict = parsed.schema === VERDICT_SCHEMA ? (parsed as HoldVerdict) : null;
+    }
+    return {
+      status: result.status,
+      output,
+      verdict,
+      delivered: verdict?.delivered ?? 0,
+      collectedOneFile: /Test Files\s+1 passed \(1\)/.test(output),
+    };
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 }
 
 /**
  * THE PREMISE PROBE (#11939).
  *
- * Four facts about the installed vitest, each one a link in the chain the
- * ablation's race walks at run time, each readable without running anything.
- * Together they answer the question the race answers only probabilistically:
- * is the mechanism still there? A broken link is not a flake and no retry
- * budget touches it.
+ * Facts about the installed vitest, each one a link in the chain the ablation
+ * walks at run time, each readable without running anything. Together they
+ * answer the question a silent ablation cannot answer by itself: did vitest
+ * change, or did this pin's instrument break? A broken link is deterministic,
+ * and no retry budget touches it.
  *
  * The chunks are UNMINIFIED in a published vitest, which is why the markers can
  * be this specific. Each is a statement about SHAPE, not formatting: what
  * `sendLog` does with the promise, what `rpcDone` awaits, what runs after it,
- * and how the rejection is worded.
+ * how the rejection is worded — and [#23185] whether the main process still
+ * holds a console RPC open until the reporters settle, which is the one link
+ * the hold reporter adds rather than finds.
  */
 interface ChunkSources {
   readonly consoleFile: string;
@@ -253,6 +287,8 @@ interface ChunkSources {
   readonly rpcSource: string;
   readonly initFile: string;
   readonly initSource: string;
+  readonly cliApiFile: string;
+  readonly cliApiSource: string;
 }
 
 interface PremiseMarker {
@@ -291,6 +327,7 @@ function readChunks(): ChunkSources {
   const consoleChunk = readChunk('console');
   const rpcChunk = readChunk('rpc');
   const initChunk = readChunk('init');
+  const cliApiChunk = readChunk('cli-api');
   return {
     consoleFile: consoleChunk.file,
     consoleSource: consoleChunk.source,
@@ -298,6 +335,8 @@ function readChunks(): ChunkSources {
     rpcSource: rpcChunk.source,
     initFile: initChunk.file,
     initSource: initChunk.source,
+    cliApiFile: cliApiChunk.file,
+    cliApiSource: cliApiChunk.source,
   };
 }
 
@@ -351,6 +390,15 @@ function evaluatePremise(chunks: ChunkSources): Premise {
   //    moved — a one-line repair, and one that is invisible without this check.
   const rejectionWordingUnchanged = chunks.initSource.includes(TEARDOWN_MESSAGE_TEMPLATE);
 
+  // 6. [#23185] The MAIN process answers a console RPC only once every
+  //    reporter's `onUserConsoleLog` has settled: the handler awaits the test
+  //    run's log, and the log awaits the reporters. That is what lets the hold
+  //    reporter keep the newest console RPC unacknowledged — and so what makes
+  //    the ablation deterministic. Answer the RPC first and the hold holds
+  //    nothing: the race is back to the box's mercy.
+  const ackAwaitsReporters =
+    chunks.cliApiSource.includes(HANDLER_AWAITS_LOG) && chunks.cliApiSource.includes(LOG_AWAITS_REPORTERS);
+
   const markers: readonly PremiseMarker[] = [
     {
       name: 'sendLog discards the forwarding promise',
@@ -385,8 +433,17 @@ function evaluatePremise(chunks: ChunkSources): Premise {
       chunk: chunks.initFile,
       holds: rejectionWordingUnchanged,
       meaning:
-        `vitest reworded the rejection, so the ablation's grep for "${TEARDOWN_ERROR}" can ` +
+        `vitest reworded the rejection, so the hold reporter's count of "${TEARDOWN_ERROR}" can ` +
         'never match again — the mechanism may be entirely intact',
+    },
+    {
+      name: 'the console RPC is acknowledged only after the reporters settle',
+      chunk: chunks.cliApiFile,
+      holds: ackAwaitsReporters,
+      meaning:
+        'the main process now answers a console RPC without awaiting its reporters, so the hold ' +
+        "reporter can no longer keep one open across the teardown sweep — the ablation's " +
+        'determinism rests on exactly this',
     },
   ];
 
@@ -408,33 +465,23 @@ function describePremise(premise: Premise): string {
  * therefore never reaches the job log on its own. Saying only "measured
  * nothing" leaves a CI-only failure undiagnosable from the log it fails in —
  * measured, at the cost of one round trip. So every graded run names its exit
- * status and shows the tail of what it actually wrote.
- *
- * Bounded at three runs and fifteen lines each: a leg can grade eight, and when
- * they fail they fail the same way, so an unbounded dump buries the one thing
- * being read in seven copies of itself.
+ * status and its verdict, and shows the tail of what it actually wrote.
  */
-const DESCRIBED_RUNS = 3;
-
-function describeRuns(legs: readonly Leg[]): string {
-  const blocks = legs.slice(0, DESCRIBED_RUNS).map((leg, index) => {
-    const tail = leg.output.trimEnd().split('\n').slice(-15).join('\n');
-    return (
-      `\n--- child run ${index + 1}/${legs.length}: exit=${leg.status}, ` +
-      `collectedOneFile=${leg.collectedOneFile}, reproduced=${leg.reproduced}\n` +
-      `${tail === '' ? '(the child wrote nothing at all)' : tail}`
-    );
-  });
-  const elided = legs.length - blocks.length;
-  if (elided > 0) blocks.push(`\n--- ${elided} further run(s) not shown`);
-  return blocks.join('\n');
+function describeRun(leg: Leg): string {
+  const tail = leg.output.trimEnd().split('\n').slice(-15).join('\n');
+  return (
+    `\n--- child run: exit=${leg.status}, collectedOneFile=${leg.collectedOneFile}, ` +
+    `verdict=${leg.verdict ? JSON.stringify(leg.verdict) : 'NONE (the hold reporter wrote nothing readable)'}\n` +
+    `${tail === '' ? '(the child wrote nothing at all)' : tail}`
+  );
 }
 
 describe('[#10293] vitest console-forwarding teardown race', () => {
-  it('has a fixture and an ablation config to measure against', () => {
+  it('has a fixture, an ablation config and the hold reporter to measure with', () => {
     expect(existsSync(VITEST_BIN), `vitest binary missing at ${VITEST_BIN}`).toBe(true);
     expect(existsSync(`${FIXTURE_ROOT}/leaked-console.test.ts`)).toBe(true);
     expect(existsSync(ABLATION_CONFIG)).toBe(true);
+    expect(existsSync(HOLD_REPORTER)).toBe(true);
   });
 
   it('PREMISE: the installed vitest still has the shape this pin exploits', () => {
@@ -523,6 +570,15 @@ describe('[#10293] vitest console-forwarding teardown race', () => {
           ),
         }),
       },
+      {
+        // The upstream change that would end the hold: report the log without
+        // holding the RPC open for it.
+        marker: 'the console RPC is acknowledged only after the reporters settle',
+        mutate: (chunks) => ({
+          ...chunks,
+          cliApiSource: chunks.cliApiSource.replace(LOG_AWAITS_REPORTERS, LOG_AWAITS_REPORTERS.replace('await ', '')),
+        }),
+      },
     ];
 
     for (const [index, testCase] of cases.entries()) {
@@ -531,7 +587,8 @@ describe('[#10293] vitest console-forwarding teardown race', () => {
       const changed =
         mutated.consoleSource !== real.consoleSource ||
         mutated.rpcSource !== real.rpcSource ||
-        mutated.initSource !== real.initSource;
+        mutated.initSource !== real.initSource ||
+        mutated.cliApiSource !== real.cliApiSource;
       expect(
         changed,
         `case ${index} ("${testCase.marker}") edited nothing — its anchor no longer occurs in ` +
@@ -550,67 +607,61 @@ describe('[#10293] vitest console-forwarding teardown race', () => {
   });
 
   it(
-    'ABLATION: the fixture still reddens a green run under vitest defaults',
+    'ABLATION: the fixture still provokes the teardown rejection under vitest defaults',
     { timeout: 240_000 },
-    (ctx) => {
+    () => {
       const premise = evaluatePremise(readChunks());
+      const leg = runFixture(ABLATION_CONFIG);
 
-      const attempts: Leg[] = [];
-      for (let i = 0; i < ABLATION_ATTEMPTS; i++) {
-        const leg = runFixture(ABLATION_CONFIG);
-        attempts.push(leg);
-        if (leg.reproduced) break;
-      }
-
-      // A run that collected no test file exits 0 and would read as "the harm
-      // is gone". Grade collection before grading the harm.
+      // A run that collected no test file exits 0, and one whose hold reporter
+      // wrote no verdict says nothing about the rejection either way. Grade
+      // both before grading the harm.
       expect(
-        attempts.every((leg) => leg.collectedOneFile),
-        `the fixture was not collected — the ablation measured nothing. What the ` +
-          `child runs actually wrote:${describeRuns(attempts)}`,
+        leg.collectedOneFile && leg.verdict !== null,
+        `the ablation measured nothing — no collected file, or no verdict from the hold reporter. ` +
+          `What the child run actually wrote:${describeRun(leg)}`,
       ).toBe(true);
+      expect(leg.output, 'every assertion in the fixture must pass — the harm is a GREEN run').toContain(
+        'Tests  1 passed (1)',
+      );
 
-      const reproduced = attempts.find((leg) => leg.reproduced);
+      const reproduced = leg.delivered > 0;
 
-      // The grading matrix (#11939). The race alone cannot separate "did not
-      // fire" from "cannot fire ever again"; the premise probe can, so it is
-      // the axis that decides whether a silent race is a failure at all.
+      // The grading matrix. The hold makes the rejection deterministic, so a
+      // silent run is never a load flake: the premise probe says whether vitest
+      // moved or this pin's instrument did.
       expect(
         premise.intact,
         reproduced
-          ? `the PREMISE PROBE IS STALE, not vitest: the race still reproduces — the child ` +
-              `printed "${TEARDOWN_ERROR}" — while the probe reads the mechanism as ` +
-              `changed:${describePremise(premise)}\n\nRepair the probe to match the installed ` +
+          ? `the PREMISE PROBE IS STALE, not vitest: the child's main process received ` +
+              `${leg.delivered} "${TEARDOWN_ERROR}" rejection(s) while the probe reads the mechanism ` +
+              `as changed:${describePremise(premise)}\n\nRepair the probe to match the installed ` +
               `vitest. Nothing about either leg's assertion is in question here.`
-          : `the INSTRUMENT IS DEAD, and this is not the load flake: ${attempts.length} ` +
-              `attempts produced no "${TEARDOWN_ERROR}" AND the mechanism itself no longer ` +
-              `reads as present in the installed vitest:${describePremise(premise)}\n\n` +
-              `Treat it as an upstream change, not as a retry budget to raise. Do NOT relax ` +
-              `the GUARDED leg on the strength of this.`,
+          : `the INSTRUMENT IS DEAD: no "${TEARDOWN_ERROR}" rejection reached the child's main ` +
+              `process AND the mechanism no longer reads as present in the installed ` +
+              `vitest:${describePremise(premise)}\n\nTreat it as an upstream change. Do NOT relax ` +
+              `the GUARDED leg on the strength of this.${describeRun(leg)}`,
+      ).toBe(true);
+      expect(
+        reproduced,
+        `every link of the mechanism reads as INTACT, yet no "${TEARDOWN_ERROR}" rejection reached ` +
+          `the child's main process. With the hold reporter that is not the box being too busy — ` +
+          `it means the hold no longer keeps a console RPC open across the teardown sweep (or the ` +
+          `fixture stopped logging after its test). Repair the instrument; never retry it ` +
+          `green.${describeRun(leg)}`,
       ).toBe(true);
 
-      if (!reproduced) {
-        // Premise intact, race silent: the window did not open on this box.
-        // Loud (it is written straight to the worker's stdout — this app turns
-        // console interception off) and countable (reported as SKIPPED, and the
-        // marker greps out of a job log), because a leg that quietly stops
-        // measuring is the failure mode this file was built to make impossible.
-        const degraded =
-          `${DEGRADED_MARKER} the teardown race did not open in ${attempts.length} attempts, ` +
-          `and the premise probe reads all ${premise.markers.length} markers of the mechanism ` +
-          `as INTACT in the installed vitest. So the instrument is alive and this run simply ` +
-          `did not catch the window — measured cause: concurrent node processes suppress it ` +
-          `(~13% per attempt under load versus 20/20 idle; see this file's docblock). This ` +
-          `leg is SKIPPED, never passed. The GUARDED leg is unaffected and still ran.`;
-        console.warn(degraded);
-        ctx.skip(degraded);
-        return;
+      // Window 2 (see the hold reporter): a rejection vitest's run-end report
+      // saw must have turned the green run red — every assertion passed, and
+      // the run still failed. That conjunction is the whole defect. A rejection
+      // that reached the main process only AFTER vitest graded the run is the
+      // same defect losing vitest's own second race; it is counted in
+      // `delivered` above and owes no exit code.
+      expect(leg.verdict?.graded, `vitest's run never reached its run-end report:${describeRun(leg)}`).not.toBeNull();
+      if ((leg.verdict?.graded ?? 0) > 0) {
+        expect(leg.status, `vitest graded the rejection but exited 0:${describeRun(leg)}`).not.toBe(0);
+        expect(leg.output).toContain(TEARDOWN_ERROR);
       }
-
-      // Every assertion in the fixture passed, and the run still failed. That
-      // conjunction is the whole defect.
-      expect(reproduced.status).not.toBe(0);
-      expect(reproduced.output).toContain('Tests  1 passed (1)');
     },
   );
 
@@ -618,23 +669,24 @@ describe('[#10293] vitest console-forwarding teardown race', () => {
     'GUARDED: the same fixture exits 0 under this app’s real vitest config',
     { timeout: 240_000 },
     () => {
-      const legs = Array.from({ length: GUARDED_REPETITIONS }, () => runFixture(APP_CONFIG));
+      const leg = runFixture(APP_CONFIG);
 
       expect(
-        legs.every((leg) => leg.collectedOneFile),
-        `the fixture was not collected under the app config — this leg measured ` +
-          `nothing. What the child runs actually wrote:${describeRuns(legs)}`,
+        leg.collectedOneFile && leg.verdict !== null,
+        `the guarded leg measured nothing — no collected file, or no verdict from the hold ` +
+          `reporter. What the child run actually wrote:${describeRun(leg)}`,
       ).toBe(true);
 
-      const teardownErrors = legs.filter((leg) => leg.reproduced);
+      // Counted at the child's exit, so a rejection that lost vitest's own
+      // grading race is caught here too — the exit code alone would read it as
+      // a pass.
       expect(
-        teardownErrors.length,
-        `${teardownErrors.length}/${legs.length} runs hit the teardown race under the app's ` +
-          `own config. If disableConsoleIntercept was removed from vitest.config.ts, restore ` +
-          `it — the docblock there explains why.\n${teardownErrors[0]?.output ?? ''}`,
+        leg.delivered,
+        `the teardown race fired under the app's own config: ${leg.delivered} "${TEARDOWN_ERROR}" ` +
+          `rejection(s) reached the child's main process. If disableConsoleIntercept was removed ` +
+          `from vitest.config.ts, restore it — the docblock there explains why.${describeRun(leg)}`,
       ).toBe(0);
-
-      expect(legs.map((leg) => leg.status)).toEqual(legs.map(() => 0));
+      expect(leg.status, `the guarded run exited non-zero:${describeRun(leg)}`).toBe(0);
     },
   );
 });
