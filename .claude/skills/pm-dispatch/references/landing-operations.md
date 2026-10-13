@@ -9,11 +9,12 @@
 - `--tier` 嫌疑行是提示非裁定;双肢命中任一 ⇒ 无达档条款②复核 PASS 在案 ⛔ 禁止入队。
 - 路径肢 = diff 触及契约面 `packages/spec/src/**` 非测试,含 error-code-ledger、`*.zod.ts` 契约 schema。
 - 声明肢 = 认领评论声明 `Clause-②: yes`,与路径无关;错误的 `no` 是可审计的假申报。
-- 交付后复核按面欠 ⛔ 不按车道(三面见 `references/contract-review.md`);双肢命中即 spec 车道。
 - 子代理起不来 ⇒ 复核缺席,PR 带 `needs:contract-review` 留 draft 队列外;旁路仅维护者逐次亲审
 - PASS ⇒ ready、auto-merge;FAIL ⇒ 补丁轮;⛔ 免复核不放行。
-- DELIBERATE CORRECTION 红(`check-empty-changeset`):同 head 达档复核 PASS 记录即确认,⛔ 不等维护者。
-- 记录须点名被改 note、逐句判改写句,缺一不算;算即按 SKILL.md 三条件带红入队,门禁不改。
+- DELIBERATE CORRECTION 红(`check-empty-changeset`)⛔ 不等维护者;确认件皆须点名每个被改 note:
+- diff 只改 release 文字或注释者:派发席 ACCEPT 确认,逐句引改前与改后,免第二次同 head 复核。
+- 其余(含改代码)照全套:同 head 达档复核 PASS 记录即确认,记录逐句判改写句。
+- 两类缺一不算;算即按 SKILL.md 三条件带红入队,门禁不改。
 - 真正设计分叉照旧进决策箱,席内复核 ⛔ 不替代维护者裁定。
 - 外部评审链降为可选事后审计,非放行前提。
 - 默认分支 push 即触发对外部署的仓,只在验证层存在时才合并;无验证层 ⛔ 不合并。
