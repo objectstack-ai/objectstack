@@ -327,8 +327,9 @@ function refuseNotVisible(
  * [#23124, maintainer ruling A] The platform marks a comment edited: when an
  * update's `body` differs from the stored body, set `is_edited: true` and
  * `edited_at` to the server clock. Both fields are `readonly` on
- * `sys_comment`, so this hook is their one writer for a non-system caller
- * (`objects/sys-comment.object.ts`, "Platform-written").
+ * `sys_comment`, so on an update by a non-system caller this hook is their one
+ * writer, as the create hook is on a create (`objects/sys-comment.object.ts`,
+ * "Platform-written").
  *
  * What counts as an edit is the BODY and nothing else: an update that does not
  * name `body`, or names the stored text again (the console rewrites `mentions`
