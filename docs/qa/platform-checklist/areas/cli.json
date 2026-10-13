@@ -204,7 +204,7 @@
       "title": "os migrate: bare command is a read-only plan, apply is safe-by-default, re-runs are idempotent, and --json exits 0 on success (#4873)",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator (local shell)"],
@@ -285,14 +285,17 @@
         "account-issuer",
         "audit-metadata-bodies",
         "multi-value-columns",
-        "unmapped-columns"
+        "unmapped-columns",
+        "organization-ownership",
+        "security-catalog-overlays",
+        "comment-reactions"
       ],
       "traps": ["stale-dist"],
       "automated": { "kind": "unit", "ref": "packages/cli/src/utils/format.exit-code.test.ts" },
       "source": [
         "packages/cli/src/commands/migrate/index.ts + plan.ts (#2186 bare-command-is-plan; #3917 enforced never-mutates; occupancy warning) + apply.ts (--allow-destructive / --force / --yes / in_sync)",
         "packages/cli/src/utils/format.ts#CliExitCode (CliExitCode narrows the emitJson exit slot — the #4873 fix, commit 83df2fd)",
-        "packages/cli/src/commands/migrate/ (the 13 registered subcommands under `os migrate`, besides the bare command, enumerated as variants — oclif pattern strategy, one default-exported Command per non-test file)",
+        "packages/cli/src/commands/migrate/ (the 16 registered subcommands under `os migrate`, besides the bare command, enumerated as variants — oclif pattern strategy, one default-exported Command per non-test file)",
         "sibling item cli.migrate-duplicates-inventory (the duplicates subcommand's own contract — cross-referenced, not duplicated)"
       ],
       "history": [
@@ -303,6 +306,12 @@
           "date": "2026-10-04",
           "change": "A5 / step 4 re-pointed: an in-sync showcase answers in_sync_partial (its federated showcase_external objects have no managed table and are never examined), and plan prints the PARTIAL warning rather than the in-sync line; plain in_sync is the answer only when nothing is unexamined (apply.ts / plan.ts in-sync early returns, schema-migration-plugins.ts coverage). Also the subcommand count: 13 registered under `os migrate`, not nine — the four missing (account-issuer, audit-metadata-bodies, multi-value-columns, unmapped-columns) are added to variants. Stale clause. Source 6c6157af05 (#13057)",
           "ref": "#21735"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-13",
+          "change": "variants re-measured against the tree: `os migrate --help` lists 16 registered subcommands and the item named 13. Added the three it lacked: organization-ownership, security-catalog-overlays and comment-reactions (the v18 conversion of stored sys_comment.reactions into sys_comment_reaction records, whose verified run `apply --allow-destructive` waits for before dropping the column). The source note's count moves from 13 to 16 with them",
+          "ref": "#23281"
         }
       ]
     },
