@@ -187,7 +187,10 @@ export const pageForm = defineForm({
       collapsible: true,
       collapsed: true,
       fields: [
-        { field: 'isDefault', helpText: 'Set as default page for this page type' },
+        // [#23015] One default record page per object per deployment
+        // (`PageSchema.isDefault`); the old "for this page type" stated a rule
+        // nothing enforced.
+        { field: 'isDefault', helpText: 'Open this record page for its object\'s records. One default record page per object: a second is refused.' },
         { field: 'kind', helpText: 'Page override mode: full or slotted (for record pages)' },
         // `assignedProfiles` input removed with the key (ADR-0090 D2 / ADR-0049): a form
         // input for an unwritable key is the false-compliant UI half of a retirement, and

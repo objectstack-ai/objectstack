@@ -57,7 +57,7 @@ import { AggregationFunction } from '../data/query.zod';
 // `{ formats }` while the grid reads `.formats` and lifts nothing. Declared
 // outside the `ui` barrel so the two carriers share it without publishing it.
 import { ListViewExportOptionsSchema } from './list-view-export-options';
-import { InlineActionSchema, ActionLocationSchema } from './action.zod';
+import { ActionSchema, InlineActionSchema, ActionLocationSchema } from './action.zod';
 import { ACTION_TARGET_ALIASES } from './action-target-aliases';
 import { navigationTargetRefusal } from './navigation-target';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
@@ -82,7 +82,10 @@ import { enumWithRetiredValues, retiredKey } from '../shared/retired-key';
 // The retired page-component TYPES' prescriptions — one string per type, three
 // doors (#14159): the enum's error map and the `PageComponentSchema.type` check
 // in page.zod.ts, and the kept `ComponentPropsMap` rows below.
-import { RETIRED_PAGE_COMPONENT_TYPES } from './page.zod';
+// `record:related_list.parentDataSource` is the SAME object binding
+// `PageComponentSchema.dataSource` takes, referenced rather than re-spelled
+// (#23134). `page.zod.ts` imports nothing from this module, so no cycle.
+import { ElementDataSourceSchema, RETIRED_PAGE_COMPONENT_TYPES } from './page.zod';
 // `element:record_picker`'s flat `sort` shorthand is the SAME contract as
 // `ElementDataSourceSchema.sort` (page.zod.ts) — one shape, imported from the
 // shared source rather than re-spelled here (commit 78f0be872).
@@ -996,8 +999,8 @@ export const PageTabsProps = strictObject({
      * evaluator, and that evaluator differs on two points — both renderer
      * behaviour, NOT contract-guaranteed:
      *
-     *   * **`data` is the record ROW here**, where the component-node evaluator
-     *     binds it to the data-source ADAPTER. Same key, two meanings.
+     *   * **`data` is the record ROW here**; the component-node evaluator
+     *     mounts no `data` root at all (see `PageComponentSchema.visibleWhen`).
      *   * **The row's bare fields are spread flat**, so `status` resolves as
      *     well as `record.status`. The ambient scope is spread AFTER the row,
      *     so an ambient root (`features`, `user`, …) wins over a record
@@ -1007,8 +1010,8 @@ export const PageTabsProps = strictObject({
      * `features` / `os.user` roots, which no ADR rules for a UI predicate
      * (ADR-0068's Non-goals: "only the user object is in scope here").
      *
-     * Measured at the `.objectui-sha` pin `190fbd01d061`:
-     * `components/src/renderers/layout/containers.tsx:450-457`.
+     * Measured at the `.objectui-sha` pin `1fb1ced36243`:
+     * `components/src/renderers/layout/containers.tsx:642-649`.
      *
      * Canonical `*When` name per ADR-0089 — this key is new, so the deprecated
      * `visibility` / `visibleOn` aliases are NOT ACCEPTED on tab items: unlike
@@ -1019,7 +1022,7 @@ export const PageTabsProps = strictObject({
      * being pointed AT `visibleWhen` is not the same as being accepted).
      */
     visibleWhen: EvaluatedExpressionInputSchema.optional().describe(
-      'Visibility predicate (CEL) — the whole tab (header + panel) is omitted when FALSE; the renderer falls back to the first visible tab when the active one is hidden. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user`), `page.<var>`. ⚠️ NOT the same environment as page-component `visibleWhen`: this surface\'s own evaluator binds `data` to the record ROW (not the data-source adapter) and also spreads the row\'s bare fields — renderer behaviour, NOT contract-guaranteed. ADR-0089 canonical name — `visible`/`showWhen`/`visibility`/`visibleOn` are all rejected here (not folded in), each with a pointer at this key.',
+      'Visibility predicate (CEL) — the whole tab (header + panel) is omitted when FALSE; the renderer falls back to the first visible tab when the active one is hidden. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user`), `page.<var>`. ⚠️ NOT the same environment as page-component `visibleWhen`: this surface\'s own evaluator binds `data` to the record ROW (the component-node evaluator mounts no `data` root) and also spreads the row\'s bare fields — renderer behaviour, NOT contract-guaranteed. ADR-0089 canonical name — `visible`/`showWhen`/`visibility`/`visibleOn` are all rejected here (not folded in), each with a pointer at this key.',
     ),
     /**
      * Stable URL token for this tab — the value `?tab=` carries and the
@@ -1790,6 +1793,65 @@ export const RecordRelatedListProps = strictObject({
    * parent-side value written by the Add picker.
    */
   relationshipValueField: z.string().default('id').describe("Parent-record field whose value relationshipField stores (default 'id'; e.g. 'name' for name-keyed junctions)."),
+  /**
+   * [#23134] The PARENT record this list hangs off, bound by a query of its
+   * own — the spec half of ruling B on objectstack-ai/objectui#12296 (ruling
+   * comment 6137226306). `record:related_list` is the one record block with
+   * TWO bindings, and they never trade meanings:
+   *
+   *  - the node-level `dataSource` (`PageComponentSchema.dataSource`) is the
+   *    CHILD rows — its published meaning since #6953: objectui's
+   *    `ElementDataSourceGate` maps the binding's `object` onto `objectName`
+   *    and its `view` / `filter` / `sort` / `limit` onto the list's own keys.
+   *    Unchanged here, byte for byte, and never re-read as the parent (the
+   *    ruling refuses that reading, option C, by name);
+   *  - this key is the PARENT record: the object binding
+   *    {@link ElementDataSourceSchema} `{ object, view?, filter?, sort?,
+   *    limit? }`, BY REFERENCE (no second copy), read by the single-record
+   *    rule the three sibling record blocks take for their own `dataSource`
+   *    under objectui#12294 — the FIRST row of the bound set by its `sort`;
+   *    no row ⇒ a loud absence, never an empty list. An empty list would read
+   *    as "this record has no related records", a wrong fact in the silent
+   *    direction. The API arm of `dataSource` is not admitted: the card fixes
+   *    the shape as the object binding's (object, view, filter, sort, limit),
+   *    the one the sibling blocks read, and that arm is still unrendered.
+   *
+   * Absent, the parent is the record page's record context, as it always was
+   * (objectui `RecordRelatedListBody` reads `useRecordContext()`'s `recordId`
+   * / `data`). `relationshipValueField` is read on whichever row is the parent.
+   *
+   * WHY THE PROPS DOOR, NOT A NODE KEY BESIDE `dataSource`.
+   * `PageComponentSchema` is one shape for every component type, so a node
+   * key there would be authorable on all of them. `ComponentPropsMap` is the
+   * per-type door: every other row refuses this key with its own
+   * `unrecognized_keys` (the two retired rows refuse the whole bag), and
+   * `os validate` reports that as `component-props-unknown-key`. objectui's
+   * `SchemaRenderer` hoists `properties` onto the node, so the reader sees the
+   * key on `schema` as it sees every other prop.
+   *
+   * THE NAME, measured on objectui `main` at `f0532d8a` and this repo at
+   * `e540e7ffb`: the three sibling record blocks read their one binding as
+   * `dataSource` (`plugin-detail/src/renderers/recordBinding.tsx`, through
+   * `isElementDataSourceConfig(schema.dataSource)`), and the one other block
+   * with a parent half, `record:line_items` above, spells that half `parent*`
+   * (`parentObject`, `parentId`). `parentDataSource` is both — the `dataSource`
+   * stem, so the two bindings read as one family, and the `parent` prefix, so
+   * it names the parent record and nothing else.
+   *
+   * ⛔ No `os validate` consistency finding against a sibling `record:details`
+   * binding: the ruling's own exclusion (a new gate defaults to no).
+   *
+   * PLANNED, not yet read: at objectui `f0532d8a` no renderer reads this key.
+   * Its reader is the related-list leg of objectui#12294, which lands once a
+   * spec release carrying the key is installable. The liveness record is the
+   * `liveness/page.json` `_note` (a component-level key carries no ledger row:
+   * the walk stops at the undrilled `page/regions` container) and the
+   * `[PLANNED — not yet rendered]` marker the describe opens with; when that
+   * leg lands, the marker leaves and the `_note` sentence is rewritten.
+   */
+  parentDataSource: ElementDataSourceSchema.optional().describe(
+    '[PLANNED — not yet rendered] The PARENT record this related list hangs off, bound by a query of its own: an object binding `{ object, view?, filter?, sort?, limit? }`, the shape `dataSource` takes. Read by the single-record rule: the FIRST row of the bound set by its `sort` is the parent (declare `limit: 1` to say one row is meant), and when no row answers, the block renders a loud absence, never an empty list, which would read as "this record has no related records". `relationshipValueField` is read on that row. When this key is absent, the record page\'s record context remains the parent. The node-level `dataSource` on this block keeps its published meaning, the CHILD rows the list draws (it fills `objectName`, `columns`, `filter`, `sort` and `limit`), and is never read as the parent.',
+  ),
   /**
    * [#18639] The SAME union `listViews[].columns` declares (`view.zod.ts`) —
    * not a lookalike: `ListColumnSchema` is imported from the view face, so two
@@ -3975,8 +4037,15 @@ const ACTION_NODE_ALIASES = {
  * executor. ⛔ No second URL grammar here.
  *
  * On every other executor `target` names a script, flow, page, endpoint or
- * form and is untouched. A row with no `target` is not judged here: nothing
- * was written for the set to judge. Because `os validate`'s props gate parses
+ * form and is untouched; the url executor's alias spelling `'navigation'` is
+ * refused at the executor key ({@link refuseRowUrlExecutorAlias}), so no row
+ * whose EXECUTOR KEY names the url navigator reaches it with its `target`
+ * unjudged. A row with no executor key at all is outside both rules: the
+ * runner then dispatches on the row's `name`, so `name: 'url'` reaches the
+ * same navigator with `target` judged only at the click — that leg is #23168's
+ * question, not settled here. A row with no `target` is not judged here:
+ * nothing was written for the set to judge.
+ * Because `os validate`'s props gate parses
  * `properties` against these same rows (`ComponentPropsMap`), it reports this
  * refusal at the same path with the same text — one rule, two doors.
  */
@@ -3987,6 +4056,78 @@ function refuseUnopenableRowUrlTarget(executorKey: 'actionType' | 'type', subjec
     if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: ['target'], message: refusal });
   };
 }
+
+/**
+ * The url executor's one spelling on a page action row. The console's action
+ * runner keeps `'navigation'` as a local alias of `'url'`: its built-in table
+ * sends the alias to `executeNavigation`, which reads `to || target ||
+ * redirect` and hands off to `navigateTo`, the navigator `executeUrl` calls
+ * with `target || redirect` (`core/src/actions/ActionRunner.ts` at the pin).
+ * On a row the two are the same navigation: the alias's own keys (`to`,
+ * `redirect`, `external`, `newTab`, `replace`) are not row keys, so the strict
+ * row refuses them, and both read the row's `target` and `openIn`. But
+ * {@link refuseUnopenableRowUrlTarget} judges `target` only on `'url'`, so the
+ * alias spelling carried a target the click refuses past the parse. The
+ * executor gets one spelling: the alias is refused at the executor key, with
+ * the lossless rename onto `'url'`, whose `target` the url scheme set judges.
+ *
+ * The key otherwise stays open, as its `describe` says: the runner dispatches a
+ * handler a host registers under any other name before its built-ins, and the
+ * console registers several (`navigate_create`, `navigate_edit`, …), so every
+ * other value is the host's and is not judged here. The rename is lossless,
+ * so the ADR-0087 D2 conversion `page-action-row-navigation-executor-to-url`
+ * (`conversions/registry.ts`, retired from the load path) rewrites a stored row
+ * or a source that wrote the alias; the authoring door teaches with this
+ * refusal. The `element:button` inline action keeps its own declared fold of
+ * `type: 'navigation'` onto `'url'` (`normalizeInlineAction`, `action.zod.ts`),
+ * a bridge for its measured producers.
+ */
+function refuseRowUrlExecutorAlias(executorKey: 'actionType' | 'type', subject: string) {
+  return (row: { actionType?: string; type?: string }, ctx: z.RefinementCtx): void => {
+    if (row[executorKey] !== 'navigation') return;
+    ctx.addIssue({
+      code: 'custom',
+      path: [executorKey],
+      message:
+        `${subject} is the console runner's local alias of \`'url'\`, and the url executor has one spelling. `
+        + `Write \`${executorKey}: 'url'\`: on a page action row the alias runs the same navigator on the same `
+        + '`target` and `openIn`, so nothing else changes, and a `\'url\'` row\'s `target` is judged by the url '
+        + 'scheme set.',
+    });
+  };
+}
+
+/**
+ * A page action row's `onSuccess`: `ActionSchema`'s own post-success block, by
+ * reference — the one `strictObject` `{ navigate, openIn }` that
+ * `ActionSchema.onSuccess` declares, read off the object half of the action's
+ * pipe (the way {@link buildObjectFormSectionFieldEntry} reads
+ * `FormFieldSchema`'s). ⛔ No second shape and no second URL grammar.
+ *
+ * Every row forwards `onSuccess` to the console's action runner whole
+ * (`action-button.tsx`, `action-icon.tsx`, `action-group.tsx` and
+ * `action-menu.tsx` at the pin), and the runner reads exactly this block:
+ * `handlePostExecution` → `readOnSuccessNavigation` (a non-array object with a
+ * non-empty string `navigate`, and nothing else gets a reading) →
+ * `navigateOnSuccess` (interpolates `navigate`, classifies the result with
+ * `classifyNavigationTarget` and performs no navigation for a refused one,
+ * opens a new tab only on `openIn: 'newTab'`). It reads no key the block does
+ * not declare. So the block brings its whole judgement along:
+ * `refuseUnopenableOnSuccessNavigate` judges `navigate` with
+ * `navigation-target.ts`'s grammar, an unknown key gets the block's rename
+ * prescriptions, and `openIn` is the closed `'self' | 'newTab'` enum with its
+ * materialised `'self'` default, which the runner relies on by reading only
+ * `=== 'newTab'`. Until this, the rows declared `z.unknown()`, and a
+ * `navigate` the runner refuses, a misspelled key or a retired callback shape
+ * parsed clean and did nothing after the action succeeded.
+ *
+ * What the block does not bring: `ActionSchema`'s rules ABOUT `onSuccess` — it
+ * is refused beside a `type` other than `api` / `script`, and beside
+ * `opensInNewTab: true` — are refinements of the action, not of the block. The
+ * rows' executor set is open and the runner runs the hop after every executor,
+ * a host handler included, so those rules do not carry over as written.
+ */
+const actionOnSuccessBlock = () => ActionSchema.in.shape.onSuccess.unwrap();
 
 /**
  * Read-but-not-authorable keys shared by `action:button` and `action:icon`,
@@ -4081,7 +4222,7 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
   icon: z.string().optional()
     .describe('Lucide icon name drawn left of the label, resolved through the shared action-icon resolver (an unknown name draws no icon)'),
   actionType: z.string().optional()
-    .describe('Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. Write it here, not as `type`: on a page component `type` is the component itself'),
+    .describe('Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. `navigation`, the runner\'s alias of `url`, is refused: write `url`. Write it here, not as `type`: on a page component `type` is the component itself'),
   variant: z.enum([...BUTTON_PRIMITIVE_VARIANTS, 'primary']).optional()
     .describe('Button variant — the Button primitive\'s vocabulary, plus `primary`, which renders as `default` (renderer default: `default`)'),
   size: z.enum([...BUTTON_PRIMITIVE_SIZES, 'md']).optional()
@@ -4113,16 +4254,19 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
     .describe('Action locations, forwarded to the runner — the console uses them to tell a record-scoped action from an object-level one'),
   toast: z.unknown().optional().describe('Toast behaviour, forwarded to the runner'),
   resultDialog: z.unknown().optional().describe('One-shot result dialog for a value the response shows exactly once, forwarded to the runner'),
-  onSuccess: z.unknown().optional().describe('Declared post-success navigation, forwarded to the runner'),
+  onSuccess: actionOnSuccessBlock().optional()
+    .describe('Post-success navigation, forwarded to the runner: `ActionSchema`\'s own `{ navigate, openIn }` block. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with ${, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab`'),
   objectName: z.string().optional()
     .describe('Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page\'s object. Omit to act on the page\'s object'),
-}).superRefine(refuseUnopenableRowUrlTarget('actionType', "An `action:button`'s `target` (`actionType: 'url'`)")));
+}).superRefine(refuseUnopenableRowUrlTarget('actionType', "An `action:button`'s `target` (`actionType: 'url'`)"))
+  .superRefine(refuseRowUrlExecutorAlias('actionType', "An `action:button`'s `actionType: 'navigation'`")));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ActionButtonProps = z.input<typeof ActionButtonPropsSchema>;
 /**
  * ADR-0122: the parsed state differs from the authored state on `visible` and `disabled` — the
  * bare-string arm of the condition union normalizes to the canonical
- * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform).
+ * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform) — and on
+ * `onSuccess`, whose `openIn` the action's own block resolves to `'self'` when it is omitted.
  */
 export type ActionButtonPropsParsed = z.infer<typeof ActionButtonPropsSchema>;
 
@@ -4180,7 +4324,7 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
   icon: z.string().optional()
     .describe('Lucide icon name, resolved through the shared action-icon resolver (renderer registration default `play`)'),
   actionType: z.string().optional()
-    .describe('Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. Write it here, not as `type`'),
+    .describe('Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. `navigation`, the runner\'s alias of `url`, is refused: write `url`. Write it here, not as `type`'),
   variant: z.enum([...BUTTON_PRIMITIVE_VARIANTS, 'primary']).optional()
     .describe('Button variant — the Button primitive\'s vocabulary, plus `primary`, which renders as `default` (renderer default: `ghost`)'),
   visible: actionCondition().optional()
@@ -4208,16 +4352,19 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
     .describe('Action locations, forwarded to the runner — the console uses them to tell a record-scoped action from an object-level one'),
   toast: z.unknown().optional().describe('Toast behaviour, forwarded to the runner'),
   resultDialog: z.unknown().optional().describe('One-shot result dialog for a value the response shows exactly once, forwarded to the runner'),
-  onSuccess: z.unknown().optional().describe('Declared post-success navigation, forwarded to the runner'),
+  onSuccess: actionOnSuccessBlock().optional()
+    .describe('Post-success navigation, forwarded to the runner: `ActionSchema`\'s own `{ navigate, openIn }` block. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with ${, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab`'),
   objectName: z.string().optional()
     .describe('Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page\'s object. Omit to act on the page\'s object'),
-}).superRefine(refuseUnopenableRowUrlTarget('actionType', "An `action:icon`'s `target` (`actionType: 'url'`)")));
+}).superRefine(refuseUnopenableRowUrlTarget('actionType', "An `action:icon`'s `target` (`actionType: 'url'`)"))
+  .superRefine(refuseRowUrlExecutorAlias('actionType', "An `action:icon`'s `actionType: 'navigation'`")));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ActionIconProps = z.input<typeof ActionIconPropsSchema>;
 /**
  * ADR-0122: the parsed state differs from the authored state on `visible` and `disabled` — the
  * bare-string arm of the condition union normalizes to the canonical
- * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform).
+ * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform) — and on
+ * `onSuccess`, whose `openIn` the action's own block resolves to `'self'` when it is omitted.
  */
 export type ActionIconPropsParsed = z.infer<typeof ActionIconPropsSchema>;
 
@@ -4364,7 +4511,7 @@ function actionContainerMemberShape() {
     icon: z.string().optional()
       .describe('Lucide icon name drawn before the label, resolved through the shared action-icon resolver (an unknown name draws no icon)'),
     type: z.string().optional()
-      .describe('Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. A member is an action entry, so its executor is `type` (on an `action:button` node it is `actionType`)'),
+      .describe('Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. `navigation`, the runner\'s alias of `url`, is refused: write `url`. A member is an action entry, so its executor is `type` (on an `action:button` node it is `actionType`)'),
     variant: z.enum([...BUTTON_PRIMITIVE_VARIANTS, 'primary']).optional()
       .describe('Item variant — the Button primitive\'s vocabulary, plus `primary` (drawn as `default`). An inline `action:group` button draws it (falling back to the group\'s `variant`); a dropdown or `action:menu` item draws `destructive` red and every other variant plainly'),
     visible: actionCondition().optional()
@@ -4394,7 +4541,8 @@ function actionContainerMemberShape() {
       .describe('Action locations, forwarded to the runner — an `action:group` with a `location` draws only the members that list it, and the console uses them to tell a record-scoped action from an object-level one'),
     toast: z.unknown().optional().describe('Toast behaviour, forwarded to the runner'),
     resultDialog: z.unknown().optional().describe('One-shot result dialog for a value the response shows exactly once, forwarded to the runner'),
-    onSuccess: z.unknown().optional().describe('Declared post-success navigation, forwarded to the runner'),
+    onSuccess: actionOnSuccessBlock().optional()
+      .describe('Post-success navigation, forwarded to the runner: `ActionSchema`\'s own `{ navigate, openIn }` block. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with ${, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab`'),
     objectName: z.string().optional()
       .describe('Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page\'s object. Omit to act on the page\'s object'),
   };
@@ -4482,7 +4630,8 @@ function buildActionGroupMember() {
     size: z.enum([...BUTTON_PRIMITIVE_SIZES, 'md']).optional()
       .describe('Inline button size — the Button primitive\'s vocabulary, plus `md` (drawn as `default`), falling back to the group\'s `size`. A dropdown item reads no size'),
   }).superRefine(actionContainerMemberParamsFitType('action:group'))
-    .superRefine(refuseUnopenableRowUrlTarget('type', "An `action:group` member's `target` (`type: 'url'`)"));
+    .superRefine(refuseUnopenableRowUrlTarget('type', "An `action:group` member's `target` (`type: 'url'`)"))
+    .superRefine(refuseRowUrlExecutorAlias('type', "An `action:group` member's `type: 'navigation'`"));
 }
 let actionGroupMemberOnce: ReturnType<typeof buildActionGroupMember> | undefined;
 /** The one {@link buildActionGroupMember} instance. */
@@ -4502,7 +4651,8 @@ function buildActionMenuMember() {
         + 'read a member\'s `size`.',
     },
   }, actionContainerMemberShape()).superRefine(actionContainerMemberParamsFitType('action:menu'))
-    .superRefine(refuseUnopenableRowUrlTarget('type', "An `action:menu` member's `target` (`type: 'url'`)"));
+    .superRefine(refuseUnopenableRowUrlTarget('type', "An `action:menu` member's `target` (`type: 'url'`)"))
+    .superRefine(refuseRowUrlExecutorAlias('type', "An `action:menu` member's `type: 'navigation'`"));
 }
 let actionMenuMemberOnce: ReturnType<typeof buildActionMenuMember> | undefined;
 /** The one {@link buildActionMenuMember} instance. */
@@ -4589,7 +4739,9 @@ export type ActionGroupProps = z.input<typeof ActionGroupPropsSchema>;
 /**
  * ADR-0122: the parsed state differs from the authored state on `visible` — the
  * bare-string arm of the condition union normalizes to the canonical
- * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform).
+ * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform) — and on
+ * a member's `onSuccess`, whose `openIn` the action's own block resolves to `'self'` when it
+ * is omitted.
  */
 export type ActionGroupPropsParsed = z.infer<typeof ActionGroupPropsSchema>;
 
@@ -4646,7 +4798,9 @@ export type ActionMenuProps = z.input<typeof ActionMenuPropsSchema>;
 /**
  * ADR-0122: the parsed state differs from the authored state on `visible` — the
  * bare-string arm of the condition union normalizes to the canonical
- * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform).
+ * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform) — and on
+ * a member's `onSuccess`, whose `openIn` the action's own block resolves to `'self'` when it
+ * is omitted.
  */
 export type ActionMenuPropsParsed = z.infer<typeof ActionMenuPropsSchema>;
 
@@ -5748,7 +5902,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * `object-grid-data-view-data-converged` semantic entry.
    */
   data: ViewDataSchema.optional()
-    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | api | value | schema). Static inline rows live at `{ provider: 'value', items: [...] }`; the bare-array shortcut is refused — see migration `object-grid-data-view-data-converged`"),
+    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | value | schema). Static inline rows live at `{ provider: 'value', items: [...] }`; the bare-array shortcut is refused — see migration `object-grid-data-view-data-converged`"),
   staticData: z.array(z.unknown()).optional().describe("Deprecated bare-array static-rows shortcut the renderer still reads. Prefer `data: { provider: 'value', items: [...] }`"),
 }));
 /** Author state (ADR-0122: the bare name is the author state). */
@@ -8700,7 +8854,7 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
    * props channel alone.
    */
   data: ViewDataSchema.optional()
-    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | api | value | schema), read FIRST by `getDataConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused"),
+    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | value | schema), read FIRST by `getDataConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused"),
   staticData: z.array(z.unknown()).optional()
     .describe("Inline records — read SECOND by `getDataConfig`, wrapped into a `{ provider: 'value' }` config"),
   /**
@@ -9250,7 +9404,7 @@ export const ObjectGanttPropsSchema = lazySchema(() => strictObject({
    * record-source config the fetch resolves through `resolveDataSource`.
    */
   data: ViewDataSchema.optional()
-    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | api | value | schema), read FIRST by `resolveRecordSourceConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused"),
+    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | value | schema), read FIRST by `resolveRecordSourceConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused"),
   staticData: z.array(z.unknown()).optional()
     .describe("Inline records — read SECOND by `resolveRecordSourceConfig`, wrapped into a `{ provider: 'value' }` config"),
   /** Base query filter — the family's one `ViewFilterRule` array orthography (#15449). */
@@ -9826,7 +9980,7 @@ export const ObjectTreePropsSchema = lazySchema(() => strictObject({
    * mirror, which carries no `data` on either face at this pin.
    */
   data: ViewDataSchema.optional()
-    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | api | value | schema), read FIRST by `resolveRecordSourceConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused"),
+    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | value | schema), read FIRST by `resolveRecordSourceConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused"),
   staticData: z.array(z.unknown()).optional()
     .describe("Inline records — read SECOND by `resolveRecordSourceConfig`, wrapped into a `{ provider: 'value' }` config"),
   /** Base query filter — the family's one `ViewFilterRule` array orthography (#15449). */

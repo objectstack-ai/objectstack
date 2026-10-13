@@ -1288,6 +1288,132 @@ describe('ApprovalService (node era)', () => {
     expect(rows[0].record_title).toBe('Snapshot Title');
   });
 
+  // [#23157] Every request action is `type: 'api'` against a route that
+  // answers its service method's result verbatim, and each of those results
+  // carries `request`, the read-back row with its display enrichment. Each
+  // action's success copy interpolates `${result.*}` over that answer (the
+  // scope `ActionSchema.successMessage` declares), so the toast names the
+  // request only while the answer carries the title the copy reads.
+  describe('each request action\'s success copy, filled from its route\'s answer', () => {
+    const copyOf = (name: string): string =>
+      ((SysApprovalRequest as any).actions as any[]).find((a) => a.name === name).successMessage;
+    /** The copy's `${result.<path>}` tokens, each filled from the answer; an unresolved path reads as ''. */
+    const fill = (copy: string, result: unknown): { text: string; unresolved: string[] } => {
+      const unresolved: string[] = [];
+      const text = copy.replace(/\$\{result\.([\w.]+)\}/g, (_m, path: string) => {
+        const v = path.split('.').reduce<any>((acc, k) => (acc == null ? undefined : acc[k]), result);
+        if (v == null || String(v) === '') unresolved.push(path);
+        return v == null ? '' : String(v);
+      });
+      return { text, unresolved };
+    };
+    const named = (action: string, answer: unknown): string => {
+      const { text, unresolved } = fill(copyOf(action), answer);
+      expect(unresolved, `${action}: every token resolves on the answer`).toEqual([]);
+      return text;
+    };
+    /** The id of the request an ordinary open answers (never an auto-outcome in these cells). */
+    const openRequestId = async (...args: Parameters<ApprovalService['openNodeRequest']>): Promise<string> =>
+      ((await svc.openNodeRequest(...args)) as { id: string }).id;
+    /** A flow whose approval node declares the `revise` out-edge send-back needs (#3823). */
+    const REVISE_FLOW = {
+      name: 'deal_approval',
+      nodes: [
+        { id: 'approve_step', type: 'approval' },
+        { id: 'wait_revision', type: APPROVAL_REVISE_NODE_TYPE },
+      ],
+      edges: [{ id: 'e_rev', source: 'approve_step', target: 'wait_revision', label: 'revise' }],
+    };
+
+    beforeEach(() => {
+      engine._tables['opportunity'] = [{ id: 'opp1', name: 'Acme Renewal', amount: 100 }];
+      svc.attachAutomation({
+        async resume() { /* resumed */ },
+        async cancelRun() { /* handed back */ },
+        async getFlow() { return REVISE_FLOW; },
+      } as any);
+    });
+
+    it('reads the answer: every action\'s copy carries a `${result.*}` token', () => {
+      for (const a of (SysApprovalRequest as any).actions as any[]) {
+        expect(a.successMessage, `${a.name}.successMessage`).toMatch(/\$\{result\.[\w.]+\}/);
+      }
+    });
+
+    it('approve, finalizing: the toast names the record, the way the inbox row\'s inline Approve does', async () => {
+      const id = await openRequestId(openInput(['u9']), CTX);
+      const out = await svc.decide(id, { decision: 'approve', actorId: 'u9' }, SYS);
+      expect(out.finalized).toBe(true);
+      expect(named('approval_approve', out)).toBe('Approved "Acme Renewal"');
+    });
+
+    it('approve, leaving the step waiting on others: still names the record', async () => {
+      const id = await openRequestId(openInput(['u1', 'u2'], {}, { behavior: 'unanimous' }), CTX);
+      const out = await svc.decide(id, { decision: 'approve', actorId: 'u1' }, SYS);
+      expect(out.finalized).toBe(false);
+      expect(named('approval_approve', out)).toBe('Approved "Acme Renewal"');
+    });
+
+    it('approve, on a record whose row is gone: named from the payload snapshot, as the inbox names it', async () => {
+      engine._tables['opportunity'] = [];
+      const id = await openRequestId(openInput(['u9'], { record: { id: 'opp1', name: 'Snapshot Title', amount: 1 } }), CTX);
+      const out = await svc.decide(id, { decision: 'approve', actorId: 'u9' }, SYS);
+      expect(named('approval_approve', out)).toBe('Approved "Snapshot Title"');
+    });
+
+    it('reject: names the record, the way the inbox row\'s inline Reject does', async () => {
+      const id = await openRequestId(openInput(['u9']), CTX);
+      const out = await svc.decide(id, { decision: 'reject', actorId: 'u9' }, SYS);
+      expect(out.request.status).toBe('rejected');
+      expect(named('approval_reject', out)).toBe('Rejected "Acme Renewal"');
+    });
+
+    it('reassign: names the record', async () => {
+      const id = await openRequestId(openInput(['u9']), CTX);
+      const out = await svc.reassign(id, { actorId: 'u9', to: 'u7' }, asUser('u9'));
+      expect(named('approval_reassign', out)).toBe('Reassigned "Acme Renewal"');
+    });
+
+    it('send back for revision: names the record', async () => {
+      const id = await openRequestId(openInput(['u9']), CTX);
+      const out = await svc.sendBack(id, { actorId: 'u9', comment: 'split the lines' }, asUser('u9'));
+      expect(out.request.status).toBe('returned');
+      expect(named('approval_send_back', out)).toBe('Sent "Acme Renewal" back for revision');
+    });
+
+    it('request information: names the record', async () => {
+      const id = await openRequestId(openInput(['u9']), CTX);
+      const out = await svc.requestInfo(id, { actorId: 'u9', comment: 'which cost centre?' }, asUser('u9'));
+      expect(named('approval_request_info', out)).toBe('Information requested on "Acme Renewal"');
+    });
+
+    it('remind: names the record', async () => {
+      const id = await openRequestId(openInput(['u9']), CTX);
+      const out = await svc.remind(id, { actorId: 'u1' }, CTX);
+      expect(named('approval_remind', out)).toBe('Reminder sent for "Acme Renewal"');
+    });
+
+    it('recall: names the record', async () => {
+      const id = await openRequestId(openInput(['u9']), CTX);
+      const out = await svc.recall(id, { actorId: 'u1' }, CTX);
+      expect(out.request.status).toBe('recalled');
+      expect(named('approval_recall', out)).toBe('Recalled "Acme Renewal"');
+    });
+
+    it('resubmit: names the record', async () => {
+      const id = await openRequestId(openInput(['u9']), CTX);
+      await svc.sendBack(id, { actorId: 'u9', comment: 'split the lines' }, asUser('u9'));
+      const out = await svc.resubmit(id, { actorId: 'u1', comment: 'split' }, CTX);
+      expect(named('approval_resubmit', out)).toBe('Resubmitted "Acme Renewal"');
+    });
+
+    it('reply: names the record', async () => {
+      const id = await openRequestId(openInput(['u9']), CTX);
+      const out = await svc.comment(id, { actorId: 'u1', comment: 'attached the receipt' }, CTX);
+      expect(named('approval_comment', out)).toBe('Reply posted on "Acme Renewal"');
+    });
+  });
+
   it('enrichment resolves lookup foreign keys in the payload to record titles', async () => {
     (engine as any).getSchema = (name: string) =>
       name === 'opportunity'

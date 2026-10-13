@@ -13,7 +13,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { getSharedShowcase } from './shared-showcase.js';
-import { catalogPermissionSet, ensureLegacyPermissionSetRow } from './catalog-permission-set.js';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const SYS = { isSystem: true } as const;
 
@@ -132,36 +132,10 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
     expect(names, 'the granting set is attributed').toContain('showcase_auditor');
   });
 
-  /**
-   * [ADR-0131 D2] No boot writes a `sys_position` row. The junction-write
-   * gates below judge a write naming a ROW, so each case reads the row an
-   * existing database holds — what the retired seeders wrote — and stages it
-   * when this (shared) stack has none yet.
-   */
-  const existingPositionRow = async (name: string, managedBy: 'platform' | 'package') => {
-    const found = await ql.findOne('sys_position', { where: { name }, context: SYS });
-    if (found) return found;
-    await ql.insert('sys_position', { id: `pos_zoo_${name}`, name, label: name, managed_by: managedBy }, { context: SYS });
-    return ql.findOne('sys_position', { where: { name }, context: SYS });
-  };
-  // [C3 stage 6b-2] The same for a permission-set row: no boot writes one any
-  // more, while the junction writes below (which grant nothing since stage 1)
-  // still name a row by id — the shape an existing database keeps.
-  const existingSetRow = (name: string) => ensureLegacyPermissionSetRow(ql, name, { managedBy: 'package' });
-
   // ── ADR-0090 D12: the delegated-admin gate, positive and negative ────────
   it('a delegate assigns an allowlisted position inside their subtree', async () => {
-    // Bind contributor → showcase_contributor first (admin action; the
-    // delegate has manageBindings: false and must NOT be able to do this).
-    const pos = await existingPositionRow('contributor', 'package');
-    const ps = await existingSetRow('showcase_contributor');
-    expect(pos?.id && ps?.id, 'contributor position + set rows').toBeTruthy();
-    const bind = await stack.apiAs(adminTok, 'POST', '/data/sys_position_permission_set', {
-      position_id: pos.id,
-      permission_set_id: ps.id,
-    });
-    expect(bind.status, 'tenant admin binds set to position').toBeLessThan(300);
-
+    // [ADR-0131 D3/D4] `contributor` binds `showcase_contributor` on its own
+    // definition (`permissionSets`), which the allowlist judges; no binding row.
     const assign = await stack.apiAs(delegateTok, 'POST', '/data/sys_user_position', {
       user_id: targetId,
       position: 'contributor',
@@ -194,38 +168,11 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
     expect(r.status, 'granting an un-allowlisted set (to ANYONE, incl. self) is refused').not.toBeLessThan(300);
   });
 
-  it('the delegate cannot re-compose positions (manageBindings: false)', async () => {
-    const pos = await existingPositionRow('contributor', 'package');
-    const ps = await existingSetRow('showcase_manager');
-    const r = await stack.apiAs(delegateTok, 'POST', '/data/sys_position_permission_set', {
-      position_id: pos.id,
-      permission_set_id: ps.id,
-    });
-    expect(r.status, 'binding writes need manageBindings').not.toBeLessThan(300);
-  });
-
-  // ── ADR-0090 D5/D9: the audience-anchor binding gate ─────────────────────
-  it('binding a high-privilege set to an anchor is rejected even for the admin', async () => {
-    const everyone = await existingPositionRow('everyone', 'platform');
-    expect(everyone, 'built-in everyone position row').toBeTruthy();
-    const auditor = await existingSetRow('showcase_auditor');
-    const r = await stack.apiAs(adminTok, 'POST', '/data/sys_position_permission_set', {
-      position_id: everyone.id,
-      permission_set_id: auditor.id,
-    });
-    expect(r.status, 'viewAllRecords on the everyone anchor is lint-tier blocked at runtime').not.toBeLessThan(300);
-  });
-
-  it('binding the guest-safe set to the guest anchor is accepted', async () => {
-    const guest = await existingPositionRow('guest', 'platform');
-    expect(guest, 'built-in guest position row').toBeTruthy();
-    const ps = await existingSetRow('showcase_guest_portal');
-    const r = await stack.apiAs(adminTok, 'POST', '/data/sys_position_permission_set', {
-      position_id: guest.id,
-      permission_set_id: ps.id,
-    });
-    expect(r.status, 'read-only + create-intake set passes the guest tier').toBeLessThan(300);
-  });
+  // [C3 stage 8] The junction-write gates this file pinned here — a delegate
+  // re-composing a position, a high-privilege set bound to the `everyone`
+  // anchor, the guest-safe set bound to `guest` — judged rows of the retired
+  // `sys_position_permission_set` object (ADR-0131 D3). A position's sets are
+  // its definition's `permissionSets`, written through the metadata door.
 
   // ── FLS enforcement — object-qualified keys (permission-zoo audit) ───────
   // The contributor set masks the project budget figures read-only. The keys

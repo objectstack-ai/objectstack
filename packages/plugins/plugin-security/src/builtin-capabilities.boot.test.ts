@@ -183,8 +183,13 @@ async function boot(filename: string, posture: Posture, declared: Declared): Pro
   return { engine, metadata, warnings, writes };
 }
 
-/** The `sys_capability` rows, one string per row. */
+/**
+ * The `sys_capability` rows, one string per row. [C3 stage 8] Once the row
+ * object is retired (ADR-0131 D3) no such table is registered, so there is no
+ * row to count.
+ */
 async function census(engine: ObjectQL): Promise<string[]> {
+  if (!(engine as any).getObject?.('sys_capability')) return [];
   const rows = (await engine.find('sys_capability', { where: {}, limit: 5000, context: SYS })) as any[];
   return rows
     .map((r) => [r.name, r.managed_by, r.package_id ?? '-', r.label, r.description ?? '-', r.scope, r.active].join(' | '))

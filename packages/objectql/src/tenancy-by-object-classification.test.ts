@@ -134,12 +134,17 @@ describe('#13491 the inventory — a verdict per object, never a namespace', () 
   });
 
   it('#8672 inherits PER OBJECT — the same namespace holds both verdicts', () => {
-    expect(classifyPlatformObjectTenancy('sys_permission_set')).toBe('global');
     expect(classifyPlatformObjectTenancy('sys_file')).toBe('tenant-scoped');
     // The discriminating half: the old blanket predicate answered the SAME
-    // thing for both of these, which is the exemption the ruling withdrew.
-    expect(isPlatformObjectOutOfTenantAuditScope('sys_permission_set')).toBe(true);
+    // thing for every platform object, which is the exemption the ruling
+    // withdrew. Each verdict the inventory records is honoured as recorded —
+    // read off the inventory, since its one `global` entry
+    // (`sys_permission_set`) retired with its object (C3 stage 8).
     expect(isPlatformObjectOutOfTenantAuditScope('sys_file')).toBe(false);
+    for (const [name, entry] of Object.entries(PLATFORM_OBJECT_TENANCY)) {
+      expect(classifyPlatformObjectTenancy(name), name).toBe(entry.tenancy);
+      expect(isPlatformObjectOutOfTenantAuditScope(name), name).toBe(entry.tenancy !== 'tenant-scoped');
+    }
   });
 
   it('the exemption applies to platform namespaces only — an application object was never in it', () => {

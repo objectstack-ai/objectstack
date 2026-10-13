@@ -1,6 +1,7 @@
 # ADR-0090: Permission Model v2 — Concept Convergence, Final Naming, and AI-Authoring Safety
 
 **Status**: Accepted (2026-07-09)
+· **Amended** (2026-10-13, ADR-0138 D3/D4) — D9's `guest` anchor bindings resolve for anonymous requests, in the organization ADR-0138 D4 resolves; an empty set denies all.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove),
 [ADR-0056](./0056-permission-model-landing-verification.md) (permission-model landing verification),

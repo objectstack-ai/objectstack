@@ -24,6 +24,10 @@ export * from './view.zod';
 // [#22934] Which object an aggregated `views` container binds to (moved from
 // `@objectstack/metadata`, which re-exports it under the same name).
 export * from './view-container-object';
+// [#23015] Which object a page is the default record page of — the one
+// reading the stack contract, the registry and the metadata save door judge
+// "one default record page per object per deployment" by.
+export { defaultRecordPageObject } from './default-record-page';
 // [#14556] List-view grouping is SERVER-SIDE (ruling A on objectui#7189): the
 // group header aggregate query and the per-group row page, compiled from the
 // view's `grouping` + column summaries + composed filter in the query AST's

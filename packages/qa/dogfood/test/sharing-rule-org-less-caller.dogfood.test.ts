@@ -138,13 +138,14 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
     // An ORG-SCOPED sharing-admin permission set: `manage_sharing` and
     // deliberately NOT `manage_platform_settings` — the card's exposed class is
     // precisely the caller who holds the org capability and no platform one.
-    const psId = 'ps_8158_sharing_admin';
-    await ql.insert('sys_permission_set', {
-      id: psId,
+    // Saved through the metadata door, the security catalog's one write path
+    // (ADR-0131 D3): a grant names it, and the resolver reads it from there.
+    const protocol = (await stack.kernel.getServiceAsync('protocol')) as any;
+    await protocol.saveMetaItem({
+      type: 'permission',
       name: 'sharing_admin_8158',
-      label: 'Sharing Administrator (org-scoped)',
-      system_permissions: JSON.stringify(['manage_sharing']),
-    }, { context: SYS });
+      item: { name: 'sharing_admin_8158', label: 'Sharing Administrator (org-scoped)', objects: {}, systemPermissions: ['manage_sharing'] },
+    });
 
     // Real sign-ups: better-auth's own path, through every database hook.
     await stack.signUp(ORG_LESS_EMAIL, PASSWORD);

@@ -14,27 +14,31 @@ ObjectStack ships a set of **domain-specific skills** that teach AI assistants (
 
 ## Installing skills
 
-Skills install into a project from the [skills.sh](https://skills.sh) registry, reading the `skills/` directory of the [`objectstack-ai/objectstack`](https://github.com/objectstack-ai/objectstack) repository.
+The catalog ships as the npm package [`@objectstack/skills`](https://www.npmjs.com/package/@objectstack/skills), released together with every other `@objectstack/*` package at one shared version. Install it at the version of the `@objectstack/spec` your project has installed — the catalog's version is then your spec's, so the skills teach what that spec accepts — and sync it from `node_modules` into your coding agent's skills directory:
 
-**New projects — installed automatically.** `create-objectstack` runs the install step for you during scaffolding, for a single agent runtime: the bundle lands once, in `.claude/skills/`, and the scaffolder's closing summary prints the exact command it ran — with a different agent name for any other runtime you use.
+```bash
+# 1 · the catalog, at the version of your installed @objectstack/spec
+npm install --save-dev "@objectstack/skills@$(node -p "require('@objectstack/spec/package.json').version")"
+
+# 2 · link it from node_modules into your agent's skills directory
+npx skills experimental_sync --agent claude-code -y
+```
+
+Step 2 is the [skills CLI](https://www.npmjs.com/package/skills)'s sync from `node_modules`: it finds the skills under `node_modules/@objectstack/skills/dist/skills/`, links each one into `.agents/skills/<skill>` (and, for `claude-code`, `.claude/skills/<skill>` to that), and records the source and version in `skills-lock.json`. Name your own runtime after `--agent` (`codex`, `cursor`, …). Add `--copy` to write real files instead of links — for `claude-code` the catalog then lands once, in `.claude/skills/`, and nowhere else. A bare `npm install --save-dev @objectstack/skills` installs whichever version the registry tags `latest`, not your spec's — keep the version in step 1.
+
+**Updating.** The catalog is versioned as **one bundle**, and it moves only with your ObjectStack version — you never track or update a skill on its own: bump `@objectstack/skills` with the other `@objectstack/*` packages, then re-run the sync (step 2, same flags).
+
+**Which versions exist.** `@objectstack/skills` is published from `18.0.0-next.0` on; there is no 17.x release of it. A project on `@objectstack/spec` 17.x therefore has no catalog bound to its version: step 1 refuses with `ETARGET` (`No matching version found`).
+
+**New projects.** `create-objectstack` installs the skills for one agent runtime while it scaffolds — once, into `.claude/skills/` — and its closing summary prints the command for any other runtime you use.
 
 ```bash
 npm create objectstack@latest my-app
 ```
 
-**Existing projects — install the whole bundle:**
+Through `18.0.0-next.0` the scaffolder takes those skills from the `next` channel below with `skills add`, not from `@objectstack/skills`, and step 2 skips every skill a `skills add` installed (it prints `Skipped … installed with skills add`). To bind a scaffolded project's skills to a version the package is published at, remove them first — `npx skills remove --all` removes every installed skill; name the `objectstack-*` ones instead (`npx skills remove objectstack-data objectstack-ui …`) if you added others — then run steps 1 and 2.
 
-```bash
-npx skills add objectstack-ai/objectstack/skills --skill '*' --agent claude-code -y
-```
-
-Name your own runtime after `--agent` (`codex`, `cursor`, …) — the bundle is byte-identical whichever you name, and it lands **once**, in that agent's own directory (`.claude/skills/` for `claude-code`). Run the same command again at any time to pull the latest versions: re-running is idempotent per destination, so updating is one command regardless of how many skills the bundle contains. To choose which skills to add instead of the full set, run `npx skills add objectstack-ai/objectstack/skills` with neither `--skill` nor `--all` and pick from the list. (The `/skills` subpath scopes discovery to the published catalog — always keep it in the command.)
-
-**The multi-runtime opt-in, and what it costs.** Replacing `--skill '*' --agent claude-code -y` with `--all` installs for every runtime the skills CLI knows. It is the same bundle, but it writes it to **three** destinations instead of one — a full real copy in **both** `.agents/` and `agent/`, plus `.claude/` symlinks pointing into `.agents/`. Inside a git repository that means the first `git add -A` stages the bundle twice over, plus the symlinks. Idempotence does not help here: re-running is idempotent *per destination*, and it is the destination count that grows. Name one `--agent` per runtime you actually use instead.
-
-<Callout type="info">
-Skills are versioned as **one bundle**. You do not track or update each skill individually — `--skill '*'` always installs the matching set for the `@objectstack/spec` version in your project.
-</Callout>
+**The `next` channel.** `npx skills add objectstack-ai/objectstack/skills --skill '*' --agent claude-code -y` reads the catalog straight from the repository's unreleased `main` — for trying the next version's skills, not for a released project.
 
 ---
 

@@ -211,6 +211,15 @@ import type {
 // to the implementation is a governed-surface edit, so it is left to the
 // maintainer; this line goes when that row moves.
 export { filterAppForUser } from './meta-item-read-gate.js';
+// [#23072] What the by-name `/meta` doors read beside the query decision both
+// transports ask (`metaItemQueryRefusal`) — see the re-export above the sets.
+import {
+    META_ITEM_LAYERS_PARAMS,
+    META_ITEM_MEMBER_PARAM,
+    META_ITEM_PUBLISHED_PARAMS,
+    META_ITEM_SAVE_PARAMS,
+    metaMemberSelector,
+} from './meta-item-read-gate.js';
 // [#22141] The `PUT /meta/:type/:name` door's precondition and lifecycle, read
 // through the ONE mapping the runtime dispatcher's `/meta` domain asks too.
 import { metaSaveRequestOptions } from './meta-save-request.js';
@@ -641,32 +650,21 @@ export const GLOBAL_SEARCH_PARAMS: readonly string[] = [
     'q', 'query', 'objects', 'limit', 'perObject',
 ];
 
-/**
- * [#22877] The bundle member selector's query parameter on the by-name `/meta`
- * doors (ruling 6116165299, Q2 i): GET, DELETE, `/history`, `/publish` and
- * `/rollback` on `/meta/:type/:name` each carry it in their closed set below.
- * Named after the discriminator's concept (`sys_metadata.bundle_member`) and
- * type-neutral — ⛔ never `locale`, which on `/meta` already names the
- * response translation locale (`extractLocale`).
- */
-export const META_ITEM_MEMBER_PARAM = 'member';
-
-/**
- * [#22877] The closed query-parameter set of `GET {metaPath}/:type/:name`,
- * which declared none before the selector joined it.
- *
- * **Measured** from the handler's read points and the helpers it calls:
- * `layers` (the deprecated layered spelling, `wantsMetaItemLayers`), `state`
- * and `preview` (the two admitted draft switches), `package` (the cache bypass,
- * `metaItemPackageBinding`, and the layered read's `serveMetaItemLayered`),
- * and `locale` — read a frame down, by `extractLocale` behind the cached arm's
- * validator and every `translateMetaEnvelope` / `createMetaItemAnswer`
- * translation, never in the handler body; omitting it would 400 every
- * `?locale=zh-CN` read that works today. Plus {@link META_ITEM_MEMBER_PARAM}.
- */
-export const META_ITEM_READ_PARAMS: readonly string[] = [
-    'layers', 'state', 'preview', 'package', 'locale', META_ITEM_MEMBER_PARAM,
-];
+// [#22877 · #23072] The member selector's name (`META_ITEM_MEMBER_PARAM`), its
+// one reading (`metaMemberSelector`), the item read's closed set
+// (`META_ITEM_READ_PARAMS`) and the save, `/layers` and `/published` sets
+// (`META_ITEM_SAVE_PARAMS`, `META_ITEM_LAYERS_PARAMS`,
+// `META_ITEM_PUBLISHED_PARAMS`) live in `./meta-item-read-gate.ts`, beside the
+// by-name doors' query decision both transports ask (`metaItemQueryRefusal`,
+// ruling 6138588561). Imported for the doors below, which read them by the
+// names they always did, and re-exported from here unchanged.
+export {
+    META_ITEM_MEMBER_PARAM,
+    META_ITEM_READ_PARAMS,
+    META_ITEM_SAVE_PARAMS,
+    META_ITEM_LAYERS_PARAMS,
+    META_ITEM_PUBLISHED_PARAMS,
+} from './meta-item-read-gate.js';
 
 /**
  * [#22877] The closed set of `DELETE {metaPath}/:type/:name` (the reset).
@@ -706,24 +704,8 @@ export const META_ITEM_ROLLBACK_PARAMS: readonly string[] = ['toVersion', META_I
 // each declares no member selector, so `?member=` is refused with the located
 // 400 like any other name the door does not read — never dropped, which
 // answered the canonical member (or, on `PUT`, wrote the body's) to a request
-// that named another.
-
-/**
- * [#23072] The closed set of `PUT {metaPath}/:type/:name` (the save).
- * **Measured** from the handler and the helper it calls: `force` (the
- * destructive-change acknowledgement), `package` (the saved row's binding,
- * {@link metaItemPackageBinding}) and `mode` — read a frame down, by
- * `metaSaveRequestOptions` (`./meta-save-request.ts`), beside the `If-Match` /
- * `If-None-Match` headers it reads. The capability, walled-catalog and actor
- * gates read the session, not the query. The same three names the door's
- * multiplicity guard declares.
- *
- * ⛔ No member selector: the save is BODY-addressed (ruling 6116165299) — the
- * member it writes is named by the body's own discriminator field
- * (`email_template`'s `locale`), and `SaveMetaItemRequest` declares no
- * selector. A `?member=zh-CN` beside an `en-US` body is refused, not read.
- */
-export const META_ITEM_SAVE_PARAMS: readonly string[] = ['force', 'package', 'mode'];
+// that named another. `PUT`'s, `/layers`' and `/published`' sets are re-exported
+// above, from the module the runtime dispatcher's copies of those doors read.
 
 /**
  * [#23072] The closed set of `GET {metaPath}/:type/:name/references`: EMPTY.
@@ -734,16 +716,6 @@ export const META_ITEM_SAVE_PARAMS: readonly string[] = ['force', 'package', 'mo
  * the reverse sweep has no member to select.
  */
 export const META_ITEM_REFERENCES_PARAMS: readonly string[] = [];
-
-/**
- * [#23072] The closed set of `GET {metaPath}/:type/:name/layers`.
- * **Measured**: `package`, read a frame down by `serveMetaItemLayered` (the
- * layered read's package scope, {@link metaItemPackageBinding}); the masker and
- * the read gate read the session. The layered view shows the canonical
- * member's layers, as the deprecated `?layers=` spelling's refusal of a member
- * on the item read already says.
- */
-export const META_ITEM_LAYERS_PARAMS: readonly string[] = ['package'];
 
 /**
  * [#23072] The closed set of `GET {metaPath}/:type/:name/audit`.
@@ -762,33 +734,6 @@ export const META_ITEM_AUDIT_PARAMS: readonly string[] = ['limit'];
  * per-caller refusals read the session.
  */
 export const META_ITEM_DIFF_PARAMS: readonly string[] = ['from', 'fromVersion', 'to', 'toVersion'];
-
-/**
- * [#23072] The closed set of `GET {metaPath}/:type/:name/published`: EMPTY.
- * **Measured**: the handler reads no query parameter, and neither do the
- * helpers it calls (`resolveObjectMasker`, `resolveProtocol`,
- * `resolveMetadataService`, the read gate); the published document is asked of
- * the type and the name alone.
- */
-export const META_ITEM_PUBLISHED_PARAMS: readonly string[] = [];
-
-/**
- * [#22877] THE reading of the bundle member selector on every by-name `/meta`
- * door, as the spread each door's protocol request takes: `{ member }` when
- * the caller named one, `{}` when not, which the protocol reads as the
- * canonical member. The VALUE is the protocol's to judge, once, for every
- * transport (`resolveBundleMemberSelector` in `@objectstack/metadata-protocol`):
- * a selector on a type with no members, a blank one or an overlong one is
- * answered there with the located 400. A value that is not a string (an
- * adapter's nested-object parse) is handed over as received, so that one
- * reading refuses it — ⛔ never dropped here, which would answer the canonical
- * member to a request that named something. Recognition of the NAME is each
- * route's closed set above; repetition, `refuseRepeatedQueryParams`.
- */
-function metaMemberSelector(query: unknown): { member?: string } {
-    const raw = (query as Record<string, unknown> | null | undefined)?.[META_ITEM_MEMBER_PARAM];
-    return raw === undefined ? {} : { member: raw as string };
-}
 
 /**
  * [#20062 / #20139] The reading of a numeric query parameter on a door whose
@@ -6395,8 +6340,22 @@ export class RestServer {
                         // [#22877] …and RECOGNITION first, over the route's
                         // measured closed set (AGENTS.md route rule 5), which
                         // the bundle member selector joined.
-                        if (refuseUnknownQueryParams(req, res, META_ITEM_READ_PARAMS)) return;
-                        if (refuseRepeatedQueryParams(req, res, ['layers', 'state', 'preview', 'package', META_ITEM_MEMBER_PARAM])) return;
+                        // [#23072] All three of the route's query rules —
+                        // recognition, arity and a member on the layered view —
+                        // are ONE decision, `metaItemQueryRefusal` in
+                        // `./meta-item-read-gate.ts`, which the runtime
+                        // dispatcher's item read asks too (ruling 6138588561).
+                        // The first two are answered here, in the nested body
+                        // their gates always wrote; the third where the layered
+                        // view is chosen, below. ⛔ A rule is added there, never
+                        // here.
+                        const queryRefusal = metaReadGate.metaItemQueryRefusal('item', req.query);
+                        if (queryRefusal && queryRefusal.rule !== 'layered-member') {
+                            res.status(queryRefusal.status).json({
+                                error: { code: queryRefusal.code, message: queryRefusal.message },
+                            });
+                            return;
+                        }
                         const memberSelector = metaMemberSelector(req.query);
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
                         const p = await this.resolveProtocol(environmentId, req);
@@ -6497,13 +6456,15 @@ export class RestServer {
                         const wantLayered = metaReadGate.wantsMetaItemLayers(req.query);
                         // [#22877] The layered view reads no member, so a member
                         // named on it is refused rather than answered with the
-                        // canonical member's layers.
-                        if (wantLayered && memberSelector.member !== undefined) {
-                            throw Object.assign(new Error(
-                                `The "${META_ITEM_MEMBER_PARAM}" selector is not served by the layered view `
-                                + `(\`?layers=\`), which shows the canonical member's layers. Read one member with `
-                                + `\`?${META_ITEM_MEMBER_PARAM}=\` alone.`,
-                            ), { code: 'VALIDATION_ERROR', status: 400 });
+                        // canonical member's layers. [#23072] The decision's
+                        // third rule (`layered-member`), the only one that can
+                        // still be pending here; thrown to `handleRouteError` as
+                        // it always was.
+                        if (queryRefusal) {
+                            throw Object.assign(new Error(queryRefusal.message), {
+                                code: queryRefusal.code,
+                                status: queryRefusal.status,
+                            });
                         }
                         if (wantLayered && typeof (p as any).getMetaItemLayered === 'function') {
                             const requestPath: unknown = req.path;

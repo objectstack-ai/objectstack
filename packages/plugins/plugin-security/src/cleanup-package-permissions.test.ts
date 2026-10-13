@@ -5,6 +5,21 @@
 import { describe, it, expect } from 'vitest';
 import { cleanupPackagePermissions } from './cleanup-package-permissions';
 
+/**
+ * The permission-set names the uninstalling door read off the package before
+ * its withdrawal (`UninstallDeclared`, ADR-0131 D4). Handed to the sweep, they
+ * revoke the same grants whether it also finds the package's sets by their
+ * catalog rows (before C3 stage 8) or by these names alone (after it).
+ */
+const DECLARED = { permission: ['crm_readonly', 'crm_admin'] };
+
+/**
+ * A store holding both shapes a grant has carried: every grant names its set
+ * (ADR-0131 D4) and still carries the legacy id of the set's catalog row. The
+ * catalog rows themselves are here too — what a release before the row objects
+ * were retired (C3 stage 8) wrote — so the sweep revokes the same grants
+ * whether it finds the package's sets by its rows or by its declared names.
+ */
 function makeQl() {
   const tables: Record<string, any[]> = {
     sys_permission_set: [
@@ -17,14 +32,11 @@ function makeQl() {
       { id: 'ps_env', name: 'member_default', managed_by: 'user' },
       { id: 'ps_legacy', name: 'admin_full_access' },
     ],
-    sys_position_permission_set: [
-      { id: 'pps_1', position_id: 'pos_everyone', permission_set_id: 'ps_crm_ro' },
-      { id: 'pps_2', position_id: 'pos_sales', permission_set_id: 'ps_crm_admin' },
-      { id: 'pps_other', position_id: 'pos_sales', permission_set_id: 'ps_other' },
-    ],
     sys_user_permission_set: [
-      { id: 'ups_1', user_id: 'u1', permission_set_id: 'ps_crm_admin' },
-      { id: 'ups_env', user_id: 'u1', permission_set_id: 'ps_env' },
+      { id: 'ups_1', user_id: 'u1', permission_set: 'crm_admin', permission_set_id: 'ps_crm_admin' },
+      { id: 'ups_2', user_id: 'u2', permission_set: 'crm_readonly', permission_set_id: 'ps_crm_ro' },
+      { id: 'ups_env', user_id: 'u1', permission_set: 'member_default', permission_set_id: 'ps_env' },
+      { id: 'ups_other', user_id: 'u2', permission_set: 'other_set', permission_set_id: 'ps_other' },
     ],
     sys_audience_binding_suggestion: [
       { id: 'sug_1', package_id: 'com.example.crm', permission_set_name: 'crm_readonly', anchor: 'everyone', status: 'confirmed' },
@@ -50,39 +62,41 @@ function makeQl() {
   } as any;
 }
 
+const NOTHING = { sets: 0, positionBindings: 0, userGrants: 0, suggestions: 0, refused: 0 };
+
 describe('cleanupPackagePermissions (#2747)', () => {
-  it('removes the package-owned sets, their bindings/grants, and its suggestion rows', async () => {
+  it('revokes every grant naming a set the package declared, and removes its suggestion rows', async () => {
     const ql = makeQl();
-    const out = await cleanupPackagePermissions(ql, 'com.example.crm');
+    const out = await cleanupPackagePermissions(ql, 'com.example.crm', undefined, DECLARED);
 
-    expect(out).toEqual({ sets: 2, positionBindings: 2, userGrants: 1, suggestions: 2, refused: 0 });
+    expect(out).toMatchObject({ userGrants: 2, suggestions: 2, refused: 0 });
 
-    // no ghost grants: nothing referencing the removed sets survives
-    expect(ql.tables.sys_permission_set.map((r: any) => r.id)).toEqual(['ps_other', 'ps_env', 'ps_legacy']);
-    expect(ql.tables.sys_position_permission_set.map((r: any) => r.id)).toEqual(['pps_other']);
-    expect(ql.tables.sys_user_permission_set.map((r: any) => r.id)).toEqual(['ups_env']);
+    // no ghost grants: no grant naming the package's sets survives
+    expect(ql.tables.sys_user_permission_set.map((r: any) => r.id)).toEqual(['ups_env', 'ups_other']);
     expect(ql.tables.sys_audience_binding_suggestion.map((r: any) => r.id)).toEqual(['sug_other']);
   });
 
-  it('never touches env-authored or foreign-package rows (ADR-0086 D4 provenance)', async () => {
+  it('never touches env-authored or foreign-package sets or their grants (ADR-0086 D4 provenance)', async () => {
     const ql = makeQl();
-    await cleanupPackagePermissions(ql, 'com.example.crm');
+    await cleanupPackagePermissions(ql, 'com.example.crm', undefined, DECLARED);
     const names = ql.tables.sys_permission_set.map((r: any) => r.name);
     expect(names).toContain('other_set');
     expect(names).toContain('member_default');
     expect(names).toContain('admin_full_access');
+    const grants = ql.tables.sys_user_permission_set.map((r: any) => r.permission_set);
+    expect(grants).toEqual(['member_default', 'other_set']);
   });
 
-  it('is idempotent — a second run removes nothing', async () => {
+  it('is idempotent — a second run revokes nothing', async () => {
     const ql = makeQl();
-    await cleanupPackagePermissions(ql, 'com.example.crm');
-    const second = await cleanupPackagePermissions(ql, 'com.example.crm');
-    expect(second).toEqual({ sets: 0, positionBindings: 0, userGrants: 0, suggestions: 0, refused: 0 });
+    await cleanupPackagePermissions(ql, 'com.example.crm', undefined, DECLARED);
+    const second = await cleanupPackagePermissions(ql, 'com.example.crm', undefined, DECLARED);
+    expect(second).toMatchObject({ userGrants: 0, suggestions: 0, refused: 0 });
   });
 
   it('no-ops safely on a missing package id or a non-engine handle', async () => {
-    expect(await cleanupPackagePermissions(makeQl(), '')).toEqual({ sets: 0, positionBindings: 0, userGrants: 0, suggestions: 0, refused: 0 });
-    expect(await cleanupPackagePermissions(null, 'x')).toEqual({ sets: 0, positionBindings: 0, userGrants: 0, suggestions: 0, refused: 0 });
+    expect(await cleanupPackagePermissions(makeQl(), '', undefined, DECLARED)).toEqual(NOTHING);
+    expect(await cleanupPackagePermissions(null, 'x', undefined, DECLARED)).toEqual(NOTHING);
   });
 
   // [#12981] The swallow family. `deleteRows` absorbs a refused delete so one
@@ -99,7 +113,7 @@ describe('cleanupPackagePermissions (#2747)', () => {
     }
 
     it('counts the refusals instead of reporting a silent zero', async () => {
-      const refused = await cleanupPackagePermissions(refusingQl(), 'com.example.crm');
+      const refused = await cleanupPackagePermissions(refusingQl(), 'com.example.crm', undefined, DECLARED);
       const nothingToDo = await cleanupPackagePermissions(makeQl(), 'com.unknown.pkg');
 
       // Both revoked nothing. ⛔ Before the repair these two were EQUAL, and
@@ -108,8 +122,8 @@ describe('cleanupPackagePermissions (#2747)', () => {
       expect(nothingToDo.sets + nothingToDo.positionBindings + nothingToDo.userGrants + nothingToDo.suggestions).toBe(0);
       expect(refused).not.toEqual(nothingToDo);
 
-      // 2 sets + 2 position bindings + 1 user grant + 2 suggestion rows.
-      expect(refused.refused).toBe(7);
+      // At least the 2 grants and the 2 suggestion rows.
+      expect(refused.refused).toBeGreaterThanOrEqual(4);
       expect(nothingToDo.refused).toBe(0);
     });
 
@@ -117,7 +131,7 @@ describe('cleanupPackagePermissions (#2747)', () => {
       const warns: Array<{ msg: string; meta?: any }> = [];
       const out = await cleanupPackagePermissions(refusingQl(), 'com.example.crm', {
         warn: (msg: string, meta?: any) => { warns.push({ msg, meta }); },
-      });
+      }, DECLARED);
 
       // ONE line for the whole sweep, not one per refused row.
       expect(warns).toHaveLength(1);
@@ -136,7 +150,7 @@ describe('cleanupPackagePermissions (#2747)', () => {
       const out = await cleanupPackagePermissions(makeQl(), 'com.example.crm', {
         warn: (m: string) => { warns.push(m); },
         info: (m: string) => { infos.push(m); },
-      });
+      }, DECLARED);
       expect(out.refused).toBe(0);
       expect(warns).toEqual([]);
       expect(infos).toHaveLength(1);
@@ -145,8 +159,8 @@ describe('cleanupPackagePermissions (#2747)', () => {
     it('survives a host sink that has no warn at all', async () => {
       // The `?.` on `warn` is the backstop for hosts the TYPE cannot reach.
       // A refusal report must never become the thing that breaks an uninstall.
-      const out = await cleanupPackagePermissions(refusingQl(), 'com.example.crm', {});
-      expect(out.refused).toBe(7);
+      const out = await cleanupPackagePermissions(refusingQl(), 'com.example.crm', {}, DECLARED);
+      expect(out.refused).toBeGreaterThanOrEqual(4);
     });
   });
 });
@@ -166,17 +180,25 @@ describe('[ADR-0131 D4, ADR-0090 D5] the grants naming a set the package declare
 
   it('revokes every user grant naming a declared set, and only those', async () => {
     const ql = withNamedGrants();
-    const out = await cleanupPackagePermissions(ql, 'com.example.crm', undefined, { permission: ['crm_catalog_user'] });
+    const out = await cleanupPackagePermissions(ql, 'com.example.crm', undefined, {
+      permission: [...DECLARED.permission, 'crm_catalog_user'],
+    });
 
-    expect(out.userGrants).toBe(3); // the legacy row's grant (ups_1) and the two naming the declared set
-    expect(ql.tables.sys_user_permission_set.map((r: any) => r.id)).toEqual(['ups_env', 'ups_named_other']);
+    // The two grants naming the package's row-backed sets and the two naming
+    // its registry-only set.
+    expect(out.userGrants).toBe(4);
+    expect(ql.tables.sys_user_permission_set.map((r: any) => r.id)).toEqual(['ups_env', 'ups_other', 'ups_named_other']);
   });
 
-  it('control — handed no names, a grant naming a catalog set survives: the cleanup is as it was', async () => {
+  it('control — handed no names, a grant naming a registry-only set survives', async () => {
     const ql = withNamedGrants();
     const out = await cleanupPackagePermissions(ql, 'com.example.crm');
 
-    expect(out).toEqual({ sets: 2, positionBindings: 2, userGrants: 1, suggestions: 2, refused: 0 });
-    expect(ql.tables.sys_user_permission_set.map((r: any) => r.id)).toEqual(['ups_env', 'ups_named_1', 'ups_named_2', 'ups_named_other']);
+    expect(out).toMatchObject({ suggestions: 2, refused: 0 });
+    // Whatever the row legs reach while the catalog rows still exist, no grant
+    // naming a set the sweep was not handed is revoked.
+    expect(ql.tables.sys_user_permission_set.map((r: any) => r.id)).toEqual(
+      expect.arrayContaining(['ups_env', 'ups_other', 'ups_named_1', 'ups_named_2', 'ups_named_other']),
+    );
   });
 });
