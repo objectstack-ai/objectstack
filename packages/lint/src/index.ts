@@ -399,8 +399,6 @@ export { validateDashboardWidgetOptions } from './validate-dashboard-widget-opti
 export type { DashboardWidgetOptionFinding } from './validate-dashboard-widget-options.js';
 
 export { validateFilterTokens, FILTER_TOKEN_UNKNOWN } from './validate-filter-tokens.js';
-export { classifyFlowTemplateToken, FLOW_TEMPLATE_DATE_FUNCTIONS, FLOW_TEMPLATE_VALUE_FUNCTIONS } from './flow-template-grammar.js';
-export type { FlowTemplateTokenVerdict } from './flow-template-grammar.js';
 export type { FilterTokenFinding, FilterTokenSeverity } from './validate-filter-tokens.js';
 export { validatePresetComparands, FILTER_PRESET_COMPARAND } from './validate-preset-comparands.js';
 export type { PresetComparandFinding, PresetComparandSeverity } from './validate-preset-comparands.js';

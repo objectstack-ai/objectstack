@@ -158,7 +158,7 @@ unauthored) where the widget declares no binding, and a widget with
 the object behind the widget's dataset, as the stack registers it, and must be
 a `date` or `datetime` field. Each preset of `DATE_RANGE_PRESETS` is handed to
 `POST /analytics/dataset/query` as its `{date-macro}` window from the spec
-(`DATE_RANGE_PRESET_MACRO_WINDOWS`, e.g. `{ $gte: '{7_days_ago}' }`), ANDed
+(`DATE_RANGE_PRESET_MACRO_WINDOWS`, e.g. `{ $gte: '{7_days_ago}', $lte: '{today}' }`), ANDed
 with the widget's own filter as `runtimeFilter`, as the signed-in admin; the
 server resolves the tokens, and the ground truth resolves the same window with
 `@objectstack/core`'s `resolveFilterTokens` on the caller's reference timezone

@@ -91,9 +91,9 @@ const MAX_TIMESTAMP_MS = 253_402_300_799_999;
 
 /**
  * The ISO text of a timestamp: `toISOString()`, the UTC calendar, three-digit
- * milliseconds and a `Z`. These are the bytes the flow template dialect writes
- * for `{NOW()}`, and their first ten characters are what it writes for
- * `{TODAY()}` (`service-automation` `builtin/template.ts`, `resolveToken`).
+ * milliseconds and a `Z`. These are the bytes the retired flow template
+ * dialect wrote for `{NOW()}`, and their first ten characters are what it
+ * wrote for `{TODAY()}` (the 17.x `resolveToken`, deleted in #19939).
  *
  * An invalid or out-of-range instant is refused rather than rendered. The
  * refusal is a throw, which the engine reports as a runtime error.
@@ -364,7 +364,7 @@ export function registerStdLib(
     // The string form of a timestamp, the reverse of `date` / `datetime`:
     // `isoDate(t)` is `YYYY-MM-DD` and `isoDatetime(t)` is
     // `YYYY-MM-DDTHH:mm:ss.sssZ`, both on the UTC calendar. They write the
-    // bytes the flow template dialect writes for `{TODAY()}` and `{NOW()}`.
+    // bytes the retired flow template dialect wrote for `{TODAY()}` and `{NOW()}`.
     // `isoDate(today())` is the reference-timezone day, because `today()` is
     // that day at UTC midnight (ADR-0053 D1).
     //

@@ -106,10 +106,10 @@ import { DATE_MACRO_WRAPPED_RE, isDateMacroToken } from './date-macros.zod.js';
  *
  * - `{record_id}` — this filter token. A whole filter VALUE, resolved to the
  *   id of the record the page shows.
- * - `{recordId}` — a URL / flow-template placeholder: an action's
- *   `newTabUrl` (`action.zod.ts`) and the flow template dialect
- *   (`@objectstack/lint`'s `flow-template-grammar.ts`). It is interpolated by
- *   those surfaces' own template engines and is NOT a filter token. Written
+ * - `{recordId}` — a URL placeholder: an action's `newTabUrl`
+ *   (`action.zod.ts`), interpolated by that surface's own template engine,
+ *   and a variable's spelling in the retired flow template dialect (refused
+ *   at every flow position since #19939). It is NOT a filter token. Written
  *   inside a filter it is refused, with `{record_id}` suggested.
  * - `'record_id'` — a page-variable TYPE (`PageVariableSchema.type` in
  *   `page.zod.ts`), naming what a page variable holds, e.g. the selection of
@@ -285,9 +285,8 @@ export const CONTEXT_TOKEN_DESCRIPTIONS: Record<ContextToken, string> = {
  * still see and act on it.
  *
  * The `record_id` rows follow the same rule. `recordid` is `{recordId}`
- * lower-cased, and `{recordId}` is the URL / flow-template placeholder
- * (`newTabUrl`, the flow template dialect), which is a correct spelling
- * somewhere else. `record.id` is the flow template dialect's path to its
+ * lower-cased, and `{recordId}` is the URL placeholder (`newTabUrl`), which
+ * is a correct spelling somewhere else. `record.id` is a flow's path to its
  * triggering record. `record-id` is the kebab shape #5586 recognised, and
  * `current_record_id` is the `current_*` shape the session tokens teach.
  */

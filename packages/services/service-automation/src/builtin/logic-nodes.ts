@@ -4,7 +4,7 @@ import type { PluginContext } from '@objectstack/core';
 import { defineActionDescriptor, flowNodeValueTemplateRefusals, isExpressionEnvelopeShaped } from '@objectstack/spec/automation';
 import { DEFAULT_BRANCH_LABEL, type AutomationEngine } from '../engine.js';
 import { refuseNode } from '../guard-refusal.js';
-import { interpolate } from './template.js';
+import { copyLiteral } from './value-slot-map.js';
 
 /**
  * Logic built-in nodes — decision / assignment.
@@ -106,11 +106,11 @@ export function registerLogicNodes(engine: AutomationEngine, ctx: PluginContext)
         // any variable is set, by the one judge `registerFlow` and `objectstack
         // validate` call (`flowNodeValueTemplateRefusals`) — so the legacy
         // shapes are no way around it, and a flow that registered cannot be
-        // refused here. What reaches `interpolate()` below carries no token —
-        // the retirement keeps none; a date macro is refused with its CEL
-        // string form — so there it is the identity. The run user is
-        // `current_user` in a CEL envelope, bound from the `context` this
-        // executor passes to the evaluator.
+        // refused here. A literal is assigned as it is, a copy of it
+        // (`copyLiteral`) — the single-brace resolver that used to walk it is
+        // deleted (ADR-0032 Sequencing 6). The run user is `current_user` in
+        // a CEL envelope, bound from the `context` this executor passes to the
+        // evaluator.
         //
         // [#15137] …with ONE exception, and only in the canonical map: a value
         // that is envelope-shaped (`isExpressionEnvelopeShaped` — a plain object
@@ -202,7 +202,7 @@ export function registerLogicNodes(engine: AutomationEngine, ctx: PluginContext)
                         variables.set(key, engine.evaluateValueEnvelope(value, variables, `assignments.${key}`, context));
                         continue;
                     }
-                    variables.set(key, interpolate(value, variables, context));
+                    variables.set(key, copyLiteral(value));
                 }
                 return { success: true };
             },

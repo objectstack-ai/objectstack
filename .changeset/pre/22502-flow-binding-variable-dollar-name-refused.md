@@ -30,7 +30,7 @@ Clause-②: no (narrowing)
 
 **The one-line fix: name the variable without the `$`, and rename every read of it with it.**
 
-No D2 conversion rewrites the name: the bare name may already be bound in the flow, and the reads of the old name sit in every dialect a flow string speaks (a text-slot hole, a CEL expression, a single-brace token in a value position), so the rename is the author's.
+No D2 conversion rewrites the name: the bare name may already be bound in the flow, and the reads of the old name sit in every dialect a flow string speaks (a text-slot hole, a CEL expression), so the rename is the author's.
 
 **Who is affected, measured.** The last published spec, `@objectstack/spec@17.7.0` (npm `latest`), types all six keys as plain strings and accepts any `$` name. This repository was measured with `git grep` over `packages`, `examples`, `skills`, `apps`, `content` and `docs`: the only `$`-named `errorVariable` / `outputVariable` other than `$error` were three test fixtures, all renamed here (`errorVariable: '$err'` in two `packages/spec` automation tests, `errorVariable: '$caught'` in a `service-automation` test). Every authored `errorVariable` in examples and docs is `$error`, which stays legal, and no example or doc binds a `$`-named `outputVariable`. The pinned `objectui` checkout uses `errorVariable: '$error'` only. Deployed metadata and other repositories were not measured.
 

@@ -1,50 +1,43 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#19939] The spec's value-slot template judge reads the `{…}` dialect the
- * way THIS package's interpolator does — the drift pin its module docblock
- * names (`@objectstack/spec/automation`, `flow-value-slot-template.ts`).
+ * [#19939] The spec's value-slot template judge, read against what each
+ * refused `{…}` spelling resolved to under the 17.x interpolator — the values
+ * pinned here, which that interpolator answered on these variables while it
+ * lived — and against what its printed remedy evaluates to through THIS
+ * package's CEL evaluator.
  *
- * The spec cannot import the interpolator, so it carries a copy of
- * `resolveToken`'s dispatch: date macro, then `$User.`, then a variable path,
- * then an expression. If the two readings drifted, the judge would print the
- * wrong remedy for a spelling (a date macro read as a path, a path read as an
- * expression), or pass one it should refuse (the dialect surviving in a value
- * slot). So the interpolator itself is driven over the same tokens the judge
- * classifies:
+ * The interpolator is deleted (ADR-0032 Sequencing 6). The spec keeps the
+ * judges' frozen reading of its grammar (`@objectstack/spec/automation`'s
+ * `flow-template-token.ts`): date macro, then `$User.`, then a variable path,
+ * then an expression. That reading decides the remedy a refusal prints, so it
+ * is pinned here by what each remedy evaluates to:
  *
- *  - every date macro (refused since #19939 pass 3) resolves through
- *    `interpolateString` to ISO text, and the judge refuses each with its CEL
- *    string form (`isoDate(…)` / `isoDatetime(…)`) — read as a date macro,
- *    never as a path or an expression (that each form writes the same bytes
- *    over the same instants is the parity pin in
- *    `crud-fields-value-envelope.test.ts`);
- *  - the run user (`$User`, refused since #19939 pass 2) resolves through the
- *    interpolator to the run's `userId` for `$User.Id` and to nothing for every
- *    other path in a shipped run context, and the remedies the judge prints
- *    evaluate through the CEL scope's `current_user` to the same answer — with
- *    a user, and, guarded, without one;
- *  - every REFUSED spelling resolves through the variables (a path), computes
- *    (an expression), or resolves to nothing — and the judge refuses each,
- *    including the dispatch-order edges (`{$User}` with no path, `{NOW}` with
- *    no call, a padded `{ amount }`);
- *  - for a refused PATH, the remedy the judge prints reads the same value
- *    through this package's CEL evaluator (`evaluateValueEnvelope`: the
- *    author-time envelope check, then the built `@objectstack/formula` engine
- *    over the flow's real CEL scope) as the interpolator read from the
- *    template — including a head variable named like an identifier CEL claims
- *    for itself (`{list.0}` → `vars["list"][0]`, #22290), or one the flow
- *    scope binds over it (`{vars.0}` → `vars["vars"][0]`), and inside an
- *    EXPRESSION token (`{int * 2}` → `vars["int"] * 2`) — and the `has()`
- *    guard it prints answers `null`, rather than failing the run, where the
- *    variable itself was never bound (#19939 pass 3).
+ *  - every date macro is refused with its CEL string form (`isoDate(…)` /
+ *    `isoDatetime(…)`) — read as a date macro, never as a path or an
+ *    expression;
+ *  - the run user (`$User`) is refused, and the remedies the judge prints
+ *    evaluate through the CEL scope's `current_user` to the run's `userId` —
+ *    with a user, and, guarded, to `null` without one;
+ *  - every REFUSED spelling — a path, an expression, a path that resolved to
+ *    nothing — is refused, including the dispatch-order edges (`{$User}` with
+ *    no path, `{NOW}` with no call, a padded `{ amount }`);
+ *  - for a refused PATH, the remedy the judge prints reads, through this
+ *    package's CEL evaluator (`evaluateValueEnvelope`: the author-time
+ *    envelope check, then the built `@objectstack/formula` engine over the
+ *    flow's real CEL scope), the value the template read — including a head
+ *    variable named like an identifier CEL claims for itself (`{list.0}` →
+ *    `vars["list"][0]`, #22290), or one the flow scope binds over it
+ *    (`{vars.0}` → `vars["vars"][0]`), and inside an EXPRESSION token
+ *    (`{int * 2}` → `vars["int"] * 2`) — and the `has()` guard it prints
+ *    answers `null`, rather than failing the run, where the variable itself
+ *    was never bound (#19939 pass 3).
  */
 
 import { describe, expect, it } from 'vitest';
 import { VALUE_SLOT_TEMPLATE_REFUSAL, valueSlotTemplateRefusals } from '@objectstack/spec/automation';
 import { AutomationEngine } from '../engine.js';
 import { registerLogicNodes } from './logic-nodes.js';
-import { interpolateString } from './template.js';
 
 const VARIABLES = new Map<string, unknown>([
   ['amount', 1234.5],
@@ -53,9 +46,10 @@ const VARIABLES = new Map<string, unknown>([
   ['$error', { message: 'boom' }],
   ['days', 3],
 ]);
-const CONTEXT = { userId: 'usr_1', user: { email: 'ada@example.com' } } as never;
 
-describe('a date macro resolves through the interpolator to ISO text, and is REFUSED as a date macro', () => {
+describe('a date macro is REFUSED as a date macro, naming its CEL string form', () => {
+  const quiet = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, child: () => quiet } as never;
+  const engine = new AutomationEngine(quiet);
   it.each([
     ['{NOW()}', /^\d{4}-\d{2}-\d{2}T/, 'isoDatetime(now())'],
     ['{TODAY()}', /^\d{4}-\d{2}-\d{2}$/, 'isoDate(today())'],
@@ -63,14 +57,15 @@ describe('a date macro resolves through the interpolator to ISO text, and is REF
     ['{TODAY() - days}', /^\d{4}-\d{2}-\d{2}$/, 'isoDate(addDays(today(), -days))'],
     ['{NOW() + 2}', /^\d{4}-\d{2}-\d{2}T/, 'isoDatetime(addDays(now(), 2))'],
   ])('%s — a date macro', (token, shape, source) => {
-    expect(String(interpolateString(token, VARIABLES, CONTEXT))).toMatch(shape);
+    // The macro wrote ISO text; its CEL string form writes the same shape.
+    expect(String(engine.evaluateValueEnvelope({ dialect: 'cel', source }, VARIABLES, 'w'))).toMatch(shape);
     const refusals = valueSlotTemplateRefusals(token);
     expect(refusals).toHaveLength(1);
     expect(refusals[0]!.message).toContain(`Write \`${token}\` as { dialect: 'cel', source: '${source}' }`);
   });
 });
 
-describe('the run user — `{$User.*}` — is REFUSED, and its remedy reads what the interpolator read', () => {
+describe('the run user — `{$User.*}` — is REFUSED, and its remedy reads what the template read', () => {
   const quiet = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, child: () => quiet } as never;
   const engine = new AutomationEngine(quiet);
   /** A run context the way the trigger doors build one: no `user` object, ever. */
@@ -86,18 +81,15 @@ describe('the run user — `{$User.*}` — is REFUSED, and its remedy reads what
     expect(valueSlotTemplateRefusals('{$User.Id}')).toHaveLength(1);
     const [bare, guarded] = sources('{$User.Id}');
     expect([bare, guarded]).toEqual(['current_user.id', 'current_user != null ? current_user.id : null']);
-    // With a user: all three agree.
-    expect(interpolateString('{$User.Id}', VARIABLES, SHIPPED)).toBe('usr_1');
+    // With a user: both read the run's `userId`, as the template did.
     expect(engine.evaluateValueEnvelope({ dialect: 'cel', source: bare! }, VARIABLES, 'w', SHIPPED)).toBe('usr_1');
     expect(engine.evaluateValueEnvelope({ dialect: 'cel', source: guarded! }, VARIABLES, 'w', SHIPPED)).toBe('usr_1');
-    // Without one: the template read nothing, the bare read fails loudly, the guard reads `null`.
-    expect(interpolateString('{$User.Id}', VARIABLES, USERLESS)).toBeUndefined();
+    // Without one (the template read nothing): the bare read fails loudly, the guard reads `null`.
     expect(() => engine.evaluateValueEnvelope({ dialect: 'cel', source: bare! }, VARIABLES, 'w', USERLESS)).toThrow(/current_user\.id/);
     expect(engine.evaluateValueEnvelope({ dialect: 'cel', source: guarded! }, VARIABLES, 'w', USERLESS)).toBeNull();
   });
 
   it.each(['{$User.Email}', '{$User.Name}', '{$User.id}'])('%s never resolved in a shipped run context — and is refused saying so', (token) => {
-    expect(interpolateString(token, VARIABLES, SHIPPED)).toBeUndefined();
     expect(valueSlotTemplateRefusals(token)[0]!.message).toContain(`\`${token}\` never resolved in any shipped run`);
   });
 
@@ -108,24 +100,12 @@ describe('the run user — `{$User.*}` — is REFUSED, and its remedy reads what
   });
 });
 
-describe('a spelling the retirement REFUSES is one the interpolator reads as template dialect', () => {
-  it.each([
-    ['{amount}', 1234.5],
-    ['{ amount }', 1234.5],
-    ['{record.owner}', 'usr_7'],
-    ['{list.0}', 'a'],
-    ['{$error.message}', 'boom'],
-  ])('%s — a variable path, resolved through the variables', (token, value) => {
-    expect(interpolateString(token, VARIABLES, CONTEXT)).toBe(value);
+describe('a spelling of the retired template dialect is REFUSED', () => {
+  it.each(['{amount}', '{ amount }', '{record.owner}', '{list.0}', '{$error.message}'])('%s — a variable path', (token) => {
     expect(valueSlotTemplateRefusals(token)).toHaveLength(1);
   });
 
-  it.each([
-    ['{amount * 2}', 2469],
-    ['{round(amount)}', 1235],
-    ['{max(amount, 10)}', 1234.5],
-  ])('%s — an expression, computed', (token, value) => {
-    expect(interpolateString(token, VARIABLES, CONTEXT)).toBe(value);
+  it.each(['{amount * 2}', '{round(amount)}', '{max(amount, 10)}'])('%s — an expression', (token) => {
     expect(valueSlotTemplateRefusals(token)).toHaveLength(1);
   });
 
@@ -136,25 +116,21 @@ describe('a spelling the retirement REFUSES is one the interpolator reads as tem
     // No call: not the date macro — a variable path.
     '{NOW}',
     '{missing.key}',
-  ])('%s — a dispatch-order edge: a path that resolves to nothing', (token) => {
-    expect(interpolateString(token, VARIABLES, CONTEXT)).toBeUndefined();
+  ])('%s — a dispatch-order edge: a path that resolved to nothing', (token) => {
     expect(valueSlotTemplateRefusals(token)).toHaveLength(1);
   });
 
-  it('text with holes renders through the interpolator, and is refused as one string', () => {
-    expect(interpolateString('Owner {record.owner} of {record.name}', VARIABLES, CONTEXT)).toBe('Owner usr_7 of Acme');
+  it('text with holes is refused as one string', () => {
     expect(valueSlotTemplateRefusals('Owner {record.owner} of {record.name}')).toHaveLength(1);
   });
 
-  it('a token-free string is the same text to both: no substitution, no refusal', () => {
-    expect(interpolateString('approved', VARIABLES, CONTEXT)).toBe('approved');
-    expect(interpolateString('a {} b', VARIABLES, CONTEXT)).toBe('a {} b');
+  it('a token-free string is no refusal — `{}` holds no token', () => {
     expect(valueSlotTemplateRefusals('approved')).toEqual([]);
     expect(valueSlotTemplateRefusals('a {} b')).toEqual([]);
   });
 });
 
-describe('the remedy a refused path prints reads, through CEL, the value the interpolator read', () => {
+describe('the remedy a refused path prints reads, through CEL, the value the template read', () => {
   const quiet = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, child: () => quiet } as never;
   const engine = new AutomationEngine(quiet);
 
@@ -169,9 +145,8 @@ describe('the remedy a refused path prints reads, through CEL, the value the int
     return [envelope![1] ?? (JSON.parse(envelope![2]!) as string), ...(guard ? [guard[1]!] : [])];
   }
 
-  /** Both readings of `token` over `variables`, and every printed spelling evaluated to the interpolator's value. */
+  /** Every printed spelling of `token`, evaluated over `variables`, is the value the template read there. */
   function expectReadingsAgree(token: string, variables: Map<string, unknown>, value: unknown): void {
-    expect(interpolateString(token, variables, CONTEXT)).toEqual(value);
     for (const source of printedSpellings(token)) {
       expect(engine.evaluateValueEnvelope({ dialect: 'cel', source }, variables, token), source).toEqual(value);
     }
@@ -224,7 +199,6 @@ describe('the remedy a refused path prints reads, through CEL, the value the int
     expect(evaluate(new Map([[root, null]])), `${guard} — ${root} null`).toBeNull();
     if (typeof bound === 'object') expect(evaluate(new Map([[root, {}]])), `${guard} — a key absent`).toBeNull();
     const variables = new Map<string, unknown>([[root, bound]]);
-    expect(interpolateString(token, variables, CONTEXT)).toEqual(value);
     expect(evaluate(variables), `${guard} — bound`).toEqual(value);
   });
 
@@ -299,23 +273,20 @@ describe('an EXPRESSION token\'s remedy evaluates — every variable path in it 
     return m![1] ?? (JSON.parse(m![2]!) as string);
   };
 
-  it('`{int * 2}` — a head CEL claims: `vars["int"] * 2`, the value the interpolator computed', () => {
+  it('`{int * 2}` — a head CEL claims: `vars["int"] * 2`, the value the template computed', () => {
     const variables = new Map<string, unknown>([['int', 5]]);
-    expect(interpolateString('{int * 2}', variables, CONTEXT)).toBe(10);
     expect(remedyOf('{int * 2}')).toBe('vars["int"] * 2');
     expect(engine.evaluateValueEnvelope({ dialect: 'cel', source: remedyOf('{int * 2}') }, variables, 'w')).toBe(10);
   });
 
-  it('`{items.0 * 2}` — an index: `items[0] * 2`, which evaluates (the interpolator computed nothing for it)', () => {
+  it('`{items.0 * 2}` — an index: `items[0] * 2`, which evaluates (the template computed nothing for it)', () => {
     const variables = new Map<string, unknown>([['items', [3, 4]]]);
-    expect(interpolateString('{items.0 * 2}', variables, CONTEXT)).toBeUndefined();
     expect(remedyOf('{items.0 * 2}')).toBe('items[0] * 2');
     expect(engine.evaluateValueEnvelope({ dialect: 'cel', source: remedyOf('{items.0 * 2}') }, variables, 'w')).toBe(6);
   });
 
   it('a `$`-named head and a divisor in one expression', () => {
     const variables = new Map<string, unknown>([['$error', { code: 7 }]]);
-    expect(interpolateString('{$error.code / 2}', variables, CONTEXT)).toBe(3.5);
     expect(remedyOf('{$error.code / 2}')).toBe('vars["$error"].code / 2.0');
     expect(engine.evaluateValueEnvelope({ dialect: 'cel', source: remedyOf('{$error.code / 2}') }, variables, 'w')).toBe(3.5);
   });

@@ -2032,8 +2032,8 @@ os verify --dashboard-windows                  # Also prove each dashboard date 
    door refuses it), and read back. The widget is then asked through
    `POST /analytics/dataset/query` as the signed-in admin with no window and
    under each of the 13 presets, before and after the fixtures. A preset is
-   handed as the spec's `{date-macro}` window for it (`{ $gte: '{7_days_ago}' }`
-   for `last_7_days`, `{ $gte: '{month_start}', $lte: '{month_end}' }` for
+   handed as the spec's `{date-macro}` window for it
+   (`{ $gte: '{7_days_ago}', $lte: '{today}' }` for `last_7_days`, `{ $gte: '{month_start}', $lte: '{month_end}' }` for
    `this_month`), ANDed with the widget's filter, and the server resolves the
    tokens; the ground truth resolves the same window with the platform's
    resolver, on UTC calendar days unless the caller's context names a

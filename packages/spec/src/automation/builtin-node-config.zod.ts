@@ -33,14 +33,14 @@
  * Live execute-time contracts: each executor `parse()`s its config against
  * its schema before running (`service-automation`'s `parse-config.ts`), so
  * type and `required` violations refuse the node as a guard. All of these
- * parse the RAW stored config — their typed slots are strings (or `unknown`
- * where values interpolate), so `{token}` templates pass and resolve at the
- * executor's existing interpolation points. The value slots are the exception
- * since #19939: the `{token}` dialect is retired there (the "value slots"
- * section below), each operand of the CRUD `filter` included, where a query
- * placeholder stays the query engine's. So are the text slots since #22110: a screen `title` /
- * `description` and an `end` `message` render `{{ }}` holes, and a `{token}`
- * there is refused (`flow-text-slot-template.ts`).
+ * parse the RAW stored config, as authored: no executor interpolates one —
+ * the single-brace `{token}` dialect is retired from every flow position and
+ * its interpolator deleted (#19939, ADR-0032 Sequencing 6). The value slots
+ * refuse a `{token}` (the "value slots" section below), each operand of the
+ * CRUD `filter` included, where a query placeholder stays the query engine's;
+ * and the text slots since #22110 — a screen `title` / `description` and an
+ * `end` `message` — render `{{ }}` holes, and a `{token}` there is refused
+ * (`flow-text-slot-template.ts`).
  *
  * ## Unknown keys — closed here too, as of #4001 批 9
  *

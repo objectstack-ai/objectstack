@@ -4,21 +4,24 @@
  * @module automation/flow-template-token
  *
  * **The single-brace `{…}` token grammar of the 17.x flow interpolator** — the
- * one reading of it the spec carries, shared by the two judges that retire it:
- * `flow-value-slot-template.ts` (the value slots, #19939) and
+ * judges' frozen reading of a RETIRED dialect, shared by the two judges that
+ * refuse it: `flow-value-slot-template.ts` (the value slots, #19939) and
  * `flow-text-slot-template.ts` (the text slots, #22110) — and by the two
  * contracts that refuse it at a LITERAL position, a `notify` node's
  * `sourceObject`, `actorId` and `payload` and an `http` node's `method`,
  * `durable`, `timeoutMs` and `signingSecret` (`io-node-config.zod.ts`,
  * #19939).
  *
- * Which `{…}` the interpolator substitutes (`/\{([^{}]+)\}/`), and how it
- * dispatches a token — date macro, then `$User.`, then a variable path, then
- * arithmetic — are the regexes of `resolveToken` in `service-automation`'s
- * `builtin/template.ts`, copied here because the spec cannot import a
- * runtime. `value-slot-template-grammar.test.ts` in that package drives the
- * interpolator over the kept spellings and the refused ones, so the two
- * readings cannot drift apart unnoticed.
+ * Which `{…}` the interpolator substituted (`/\{([^{}]+)\}/`), and how it
+ * dispatched a token — date macro, then `$User.`, then a variable path, then
+ * arithmetic — are the regexes of `resolveToken`, which lived in
+ * `service-automation`'s `builtin/template.ts` until #19939 deleted it with
+ * every call site (ADR-0032 Sequencing 6). The copy here is FROZEN: nothing
+ * reads the dialect any more, and this module exists so a refusal can name
+ * each token's replacement the way the interpolator read that token. It
+ * changes only with a judge's remedy, never to track a runtime.
+ * `value-slot-template-grammar.test.ts` in that package pins what each
+ * remedy evaluates to through the flow's CEL scope.
  *
  * ## ⛔ Package-internal — NOT a public export
  *
@@ -33,7 +36,7 @@
  * token — or an envelope — at a position the executor reads AS WRITTEN (a
  * `notify` node's `sourceObject`, `actorId` and `payload`; an `http` node's
  * `method`, `durable` and `timeoutMs`, and its `headers` map as a whole),
- * never through the interpolator. The build doors' value arm (`flow-node-config-refusals.ts`,
+ * never through an interpolator. The build doors' value arm (`flow-node-config-refusals.ts`,
  * `builtinValueJudged`) leaves every other token-carrying value alone, since
  * only the interpolation decides what the run will see there; at a position
  * read as written the run sees exactly what the build sees, so the
@@ -41,7 +44,7 @@
  */
 export const READ_AS_WRITTEN_PARAM = 'readAsWritten';
 
-/** The interpolator's token — `interpolateString`'s `/\{([^{}]+)\}/g`. */
+/** The 17.x interpolator's token — `interpolateString`'s `/\{([^{}]+)\}/g`. */
 export const TEMPLATE_TOKEN = /\{([^{}]+)\}/g;
 
 /** `resolveToken`'s `dateFnMatch`, verbatim: `NOW()` / `TODAY()` with an optional `± N` day offset. */
@@ -62,10 +65,10 @@ const ARITHMETIC_CHARSET = /^[\w\s+\-*/%().,?:<>=!&|"'$]+$/;
  */
 const EXPRESSION_SHAPE = /[+\-*/%<>=!&|?]|[A-Za-z_$][\w$.]*\s*\(/;
 
-/** What the interpolator does with one token — the dispatch order of `resolveToken`. */
+/** What the 17.x interpolator did with one token — the dispatch order of `resolveToken`. */
 export type TemplateTokenKind = 'date-macro' | 'user' | 'path' | 'expression' | 'unresolvable';
 
-/** Classify one token's inner text the way `resolveToken` dispatches it. */
+/** Classify one token's inner text the way `resolveToken` dispatched it. */
 export function templateTokenKind(inner: string): TemplateTokenKind {
   const trimmed = inner.trim();
   if (!trimmed) return 'unresolvable';
@@ -82,13 +85,13 @@ export interface TemplateToken {
   readonly text: string;
   /** The text between the braces, trimmed. */
   readonly inner: string;
-  /** How the interpolator dispatches it. */
+  /** How the 17.x interpolator dispatched it. */
   readonly kind: TemplateTokenKind;
   /** Offset of {@link text} in the string. */
   readonly index: number;
 }
 
-/** Every `{…}` token the interpolator would substitute in `value`, in order. */
+/** Every `{…}` token the 17.x interpolator substituted in `value`, in order. */
 export function templateTokensOf(value: string): TemplateToken[] {
   const out: TemplateToken[] = [];
   for (const match of value.matchAll(TEMPLATE_TOKEN)) {

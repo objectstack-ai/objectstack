@@ -54,7 +54,7 @@ import { evaluateAnalyticsQueryOverRows, lowerPreviewDateRange } from '../previe
 import { compileDataset } from '../dataset-compiler.js';
 import { DatasetExecutor, lowerDatasetCompareDateRange } from '../dataset-executor.js';
 
-/** Frozen so the three rolling presets, whose bound is NOW, are comparable. */
+/** Frozen so the presets, every one anchored on NOW's calendar day, are comparable. */
 const NOW = new Date('2026-09-09T12:34:56.789Z');
 const CTX = { tenantId: 'org_A' } as ExecutionContext;
 
@@ -225,20 +225,24 @@ const shift = (iso: string, ms: number): string => new Date(Date.parse(iso) + ms
 
 describe('#16322 — the draft-preview evaluator APPLIES the window it reports', () => {
     // The frozen clock is the file-level `beforeEach` above — the rolling
-    // presets' upper bound is NOW, so it has to be the same NOW here.
-    it('a ROLLING preset selects exactly the shared resolver\'s window, upper bound REACHED', () => {
-        // `last_30_days` ends at NOW and includes it (#16179 leaves the rolling
-        // leg inclusive). Before the wiring this selected ZERO rows: the bounds
-        // were the literal name, and no ISO instant sorts inside
+    // presets' window runs through NOW's calendar day, so it has to be the
+    // same NOW here.
+    it('a ROLLING preset selects exactly the shared resolver\'s window, its last day REACHED', () => {
+        // `last_30_days` runs through the whole of today, the inclusive
+        // `{today}` end the spec's table prescribes; the shared resolver states
+        // that end as the instant tomorrow begins, exclusively. So the last
+        // instant of today is inside and tomorrow's first instant is not.
+        // Before the wiring this selected ZERO rows: the bounds were the
+        // literal name, and no ISO instant sorts inside
         // ['last_30_days', 'last_30_days~'].
         const w = resolveAnalyticsDateRangeString('last_30_days', { now: NOW });
-        expect(w.endExclusive).toBe(false);
+        expect(w.endExclusive).toBe(true);
         expect(previewSelects('last_30_days', [
             { id: 'before_start', created_at: shift(w.start, -1) },
             { id: 'at_start', created_at: w.start },
+            { id: 'last_instant_of_today', created_at: shift(w.end, -1) },
             { id: 'at_end', created_at: w.end },
-            { id: 'after_end', created_at: shift(w.end, 1) },
-        ])).toEqual(['at_end', 'at_start']);
+        ])).toEqual(['at_start', 'last_instant_of_today']);
     });
 
     it('a CALENDAR preset stops BEFORE its end instant', () => {
@@ -328,8 +332,8 @@ async function comparePasses(
 }
 
 describe('#17973 — the dataset executor APPLIES the window it reports', () => {
-    // The frozen clock is the file-level `beforeEach`; the rolling presets' upper
-    // bound is NOW, so it has to be the same NOW here.
+    // The frozen clock is the file-level `beforeEach`; the rolling presets'
+    // window runs through NOW's calendar day, so it has to be the same NOW here.
 
     it('a CALENDAR preset is LOWERED, its exclusive end honoured, and the window SHIFTED', async () => {
         // The shared resolver's own answer for the frozen clock: September 2026,
@@ -351,9 +355,11 @@ describe('#17973 — the dataset executor APPLIES the window it reports', () => 
 
     it('a ROLLING preset reaches NOW\'s own day and `previousPeriod` shifts by the window\'s length', async () => {
         const w = resolveAnalyticsDateRangeString('last_30_days', { now: NOW });
-        // Ends at NOW, a moment it REACHES (#16179 leaves the rolling leg inclusive).
+        // Runs through the whole of NOW's own day, the inclusive `{today}` end,
+        // stated in the shared resolver's spelling: the instant tomorrow begins,
+        // exclusively.
         expect([w.start, w.end, w.endExclusive])
-            .toEqual(['2026-08-10T00:00:00.000Z', '2026-09-09T12:34:56.789Z', false]);
+            .toEqual(['2026-08-10T00:00:00.000Z', '2026-09-10T00:00:00.000Z', true]);
 
         // 2026-08-10 through 2026-09-09 inclusive is 31 days; `previousPeriod` is
         // the equal-length window ending the day before this one starts.
