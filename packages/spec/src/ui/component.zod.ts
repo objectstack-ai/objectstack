@@ -3973,8 +3973,12 @@ const ACTION_NODE_ALIASES = {
  * On every other executor `target` names a script, flow, page, endpoint or
  * form and is untouched; the url executor's alias spelling `'navigation'` is
  * refused at the executor key ({@link refuseRowUrlExecutorAlias}), so no row
- * reaches the url navigator with its `target` unjudged. A row with no
- * `target` is not judged here: nothing was written for the set to judge.
+ * whose EXECUTOR KEY names the url navigator reaches it with its `target`
+ * unjudged. A row with no executor key at all is outside both rules: the
+ * runner then dispatches on the row's `name`, so `name: 'url'` reaches the
+ * same navigator with `target` judged only at the click — that leg is #23168's
+ * question, not settled here. A row with no `target` is not judged here:
+ * nothing was written for the set to judge.
  * Because `os validate`'s props gate parses
  * `properties` against these same rows (`ComponentPropsMap`), it reports this
  * refusal at the same path with the same text — one rule, two doors.
@@ -4004,10 +4008,13 @@ function refuseUnopenableRowUrlTarget(executorKey: 'actionType' | 'type', subjec
  * The key otherwise stays open, as its `describe` says: the runner dispatches a
  * handler a host registers under any other name before its built-ins, and the
  * console registers several (`navigate_create`, `navigate_edit`, …), so every
- * other value is the host's and is not judged here. The `element:button`
- * inline action keeps its own declared fold of `type: 'navigation'` onto
- * `'url'` (`normalizeInlineAction`, `action.zod.ts`), a bridge for its measured
- * producers; no page action row writes the alias.
+ * other value is the host's and is not judged here. The rename is lossless,
+ * so the ADR-0087 D2 conversion `page-action-row-navigation-executor-to-url`
+ * (`conversions/registry.ts`, retired from the load path) rewrites a stored row
+ * or a source that wrote the alias; the authoring door teaches with this
+ * refusal. The `element:button` inline action keeps its own declared fold of
+ * `type: 'navigation'` onto `'url'` (`normalizeInlineAction`, `action.zod.ts`),
+ * a bridge for its measured producers.
  */
 function refuseRowUrlExecutorAlias(executorKey: 'actionType' | 'type', subject: string) {
   return (row: { actionType?: string; type?: string }, ctx: z.RefinementCtx): void => {

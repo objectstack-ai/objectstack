@@ -46,6 +46,7 @@ import { ElementApiDataSourceSchema, PageComponentSchema } from './page.zod';
 
 const HERE = path.dirname(url.fileURLToPath(import.meta.url));
 const pageSource = fs.readFileSync(path.resolve(HERE, 'page.zod.ts'), 'utf8');
+const componentSource = fs.readFileSync(path.resolve(HERE, 'component.zod.ts'), 'utf8');
 
 /**
  * The published description of `PageComponentSchema.visibleWhen`.
@@ -153,6 +154,19 @@ describe('a page component `visibleWhen` names no `data` root — the shipping r
     it('states the absence, and carries neither shape the retired claim was written in', () => {
       const doc = visibleWhenDocblock();
       expect(doc).toContain('mounts NO `data` root');
+      for (const shape of RETIRED_CLAIM_SHAPES) expect(doc).not.toMatch(shape);
+    });
+  });
+
+  describe('the `page:tabs` item twin — the TSDoc above its `visibleWhen` in `component.zod.ts`', () => {
+    it('says the component-node evaluator mounts no `data` root, in neither shape the retired claim was written in', () => {
+      const start = componentSource.indexOf('Conditional tab (CEL, #2606)');
+      const end = componentSource.indexOf('visibleWhen: EvaluatedExpressionInputSchema.optional()', start);
+      expect(start, 'docblock anchor not found — the pin has drifted off its site').toBeGreaterThan(-1);
+      expect(end, 'property anchor not found after the docblock').toBeGreaterThan(start);
+      const doc = componentSource.slice(start, end).replace(/\s*\n\s*\*\s*/g, ' ');
+      expect(doc).toContain('the component-node evaluator mounts no `data` root');
+      expect(doc).not.toMatch(/binds it to the data-source ADAPTER/i);
       for (const shape of RETIRED_CLAIM_SHAPES) expect(doc).not.toMatch(shape);
     });
   });

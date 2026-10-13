@@ -17,14 +17,18 @@ export const entry: SemanticMigration = {
     + 'past the parse. The url executor now has one spelling on the rows, and the alias is refused at the executor '
     + 'key with the rename. The key otherwise stays open: a handler a host registers under another name '
     + '(`navigate_create`, `navigate_edit`, …) is still dispatched by name. A page\'s `properties` is not parsed on '
-    + 'the metadata save or load path, so a stored page still saves and loads; `os validate`\'s props gate reports '
-    + 'the alias as a `component-props-invalid` finding. No conversion is registered: the authored census finds no '
-    + 'page action row writing `\'navigation\'` in this repository or in objectui. The `element:button` inline '
-    + 'action keeps its own declared fold of `type: \'navigation\'` onto `\'url\'` for its measured producers. '
-    + 'Deployed metadata NOT MEASURED.',
+    + 'the metadata save or load path, so a stored row written with the alias keeps working only while the runner '
+    + 'keeps it; `os validate`\'s props gate reports the alias as a `component-props-invalid` finding. The rename '
+    + 'is lossless, so the D2 conversion `page-action-row-navigation-executor-to-url` performs it — retired from '
+    + 'the load path, so an author meets the refusal while stored rows and `os migrate meta --write` are rewritten. '
+    + 'What is left to judge is only whether the address the row opens is the one meant: after the rename its '
+    + '`target` is judged by the url scheme set, and a refused target has no lossless rewrite '
+    + '(`ui-page-action-row-url-target-scheme-set-closed`). The `element:button` inline action keeps its own '
+    + 'declared fold of `type: \'navigation\'` onto `\'url\'`, which this entry does not touch.',
   acceptanceCriteria:
     'No `action:button` / `action:icon` `properties.actionType` and no `action:group` / `action:menu` member '
     + '`type` reads `\'navigation\'`; `os validate` reports no `component-props-invalid` finding at '
     + '`properties.actionType` or `properties.actions.N.type`, and each such row navigates to its `target` as '
     + 'before.',
+  conversionIds: ['page-action-row-navigation-executor-to-url'],
 };

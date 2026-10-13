@@ -3065,6 +3065,22 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'conversion is registered. Its D3 record is the semantic entry `ui-object-timeline-mapping-typed`.',
   },
   {
+    id: 'ui-page-action-row-navigation-executor-refused',
+    order: 95,
+    text:
+      'It also closes the fourth door of the url-target family on the page action rows (`action:button`, '
+      + '`action:icon`, and each `action:group` / `action:menu` member). A row\'s `onSuccess` was any value; it is '
+      + 'now `ActionSchema`\'s own post-success block, by reference, so its `navigate` is judged by the one url '
+      + 'grammar and the block\'s renames and closed `openIn` come with it (the semantic entry '
+      + '`ui-page-action-row-on-success-shape-closed`; a refused address has no lossless rewrite). The row\'s '
+      + 'executor key stays open to host-registered handler names, but refuses `\'navigation\'`, the console '
+      + 'runner\'s local alias of `\'url\'`, whose `target` the rows never judged. On a row the two spellings run '
+      + 'one navigator on the same `target`, so the D2 conversion `page-action-row-navigation-executor-to-url` '
+      + 'renames the value, retired from the load path so authors are refused at the door while stored rows and '
+      + '`os migrate meta` replay it. Its D3 record is the semantic entry '
+      + '`ui-page-action-row-navigation-executor-refused`.',
+  },
+  {
     id: 'ui-record-line-items-props-closed',
     order: 57,
     text:
