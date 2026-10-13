@@ -230,11 +230,13 @@ export const COMPONENT_FIELD_SPECS: Readonly<Record<string, ComponentFieldSpec>>
   // NAME against the object) is not the question a retired key raises (commit cd584d559).
   //
   // A non-conformant page that writes one anyway is not left unattended: the
-  // #5068 props gate reports the key with its rename/delete prescription. That
-  // gate is advisory and CLI-only and lives in a different registry
-  // (`authoring-rules`) from this suite, so it neither precedes nor suppresses
-  // this rule — what these two entries actually added was a SECOND finding,
-  // saying a field named by a key that no longer exists does not exist either.
+  // #5068 props gate refuses the key as an `error` at `os validate` /
+  // `os build` / `os lint`, with its rename/delete prescription (it stays
+  // advisory for every other finding). That gate is CLI-only and lives in a
+  // different registry (`authoring-rules`) from this suite, so it neither
+  // precedes nor suppresses this rule — what these two entries actually added
+  // was a SECOND finding, saying a field named by a key that no longer exists
+  // does not exist either.
   // The prescription is the useful half; this half was noise on top of it.
   'element:record_picker': { props: ['labelField'] },
 };

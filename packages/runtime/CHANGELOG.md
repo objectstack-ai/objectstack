@@ -1,5 +1,975 @@
 # @objectstack/runtime
 
+## 18.0.0-next.0
+
+### Minor Changes
+
+- 67b669e: The security catalog's activation door switches a position or permission set the environment authored, and a ledger write it refuses answers with the status its code means
+  
+  Clause-②: yes (widening)
+  
+  - **The door accepts environment-authored items** (`@objectstack/runtime`). `POST /api/v1/security/_activation/:type/:name` switched a position or permission set off and on only when a package shipped it. FROM: an item saved through the metadata door (`PUT /api/v1/meta/position/:name`, `PUT /api/v1/meta/permission/:name`) was refused `503` with `{ code: 'VALIDATION_FAILED', message: 'Package is required' }`, and nothing was written. TO: it is switched like a packaged one, `200`, and the resolver honours the row: a switched-off position stops granting its permission sets, and a switched-off set stops granting by every path. Who may call the door is unchanged (`manage_metadata`; the platform operator under a `group` or `isolated` posture), and so are its other refusals (an undeclared name `404`, a type with no switch or an audience anchor `400`, the last administrator `403`).
+  - **A refused ledger write keeps its code and its status together** (`@objectstack/runtime`, ADR-0112). FROM: the door kept a thrown `code` but answered `503` whenever the error declared no status, so a record validation refusal was served as `503 VALIDATION_FAILED`. TO: the door answers through the dispatcher's one thrown-error rule: a record validation refusal is `400 VALIDATION_FAILED`, a hook's refusal keeps its own pair (the last-admin guard's `403 PERMISSION_DENIED`), and an error that declares no status is `503 SERVICE_UNAVAILABLE`.
+  - **The ledger row of an item no package ships carries no package** (`@objectstack/platform-objects`, `@objectstack/core`). `sys_metadata_activation.package_id` is no longer required. It is empty exactly when no package ships the item. It is not part of the row identity (`metadata_type`, `name`), and no reader decides anything from it. The column was already nullable on disk (ADR-0113: `required` is a write-time check), so there is nothing to migrate.
+  - **One spelling for "no package"** (`@objectstack/core`). `MetadataActivationRow.packageId` is optional. FROM: `packageId: string`, with `''` the only way to say "no package". TO: omit `packageId` for an item no package ships, and the store writes no value. `ObjectStoreMetadataActivationStore.setActive` refuses `packageId: ''` with a `TypeError` before it reads or writes anything, and `list()` returns `packageId` only when the row names a package. If your code passes `''`, omit the key instead.
+  - **The flow row follows the shared row** (`@objectstack/service-automation`). `FlowActivationRow.packageId` is optional to match. Every flow row still names its package, because the flow toggle refuses a flow no package ships before it writes.
+  - **The action activation door's answer for an action no package ships changes; the action is still refused.** `POST /api/v1/actions/_activation/:object/:action` still passes `''` as the package of such an action. The write is still refused and still writes nothing, but the store's `TypeError` refuses it now, with the store's sentence. FROM: `503 VALIDATION_FAILED`. TO: `503 SERVICE_UNAVAILABLE`. An environment-authored action could not be switched on `main` before this change and cannot after it.
+- 45e206e: feat(runtime): `POST /api/v1/security/permission-sets/:name/clone` — clone a permission set by name from the security catalog (ADR-0126 §7.1)
+  
+  Clause-②: yes (widening)
+  
+  - **What is new.** A route that copies a permission set's whole definition under a new machine name. The body is `{ name, label }`: both are required, no other key is accepted, and `name` must be snake_case. The answer is `{ permissionSet, notice }`: the copy that was saved, and a sentence naming what was not copied.
+  - **Where it reads and writes.** The source is read through the security catalog (the engine registry first, then the metadata service), the same read the authorization resolver uses. It never reads a `sys_permission_set` row, so it works on a database with none. The copy is saved through the metadata protocol's `saveMetaItem` as a `permission` item authored in this environment, with no organization and no package. The save is create-only, so a row written under the name meanwhile is refused, not overwritten.
+  - **What is copied, and what is not.** Every facet of the definition is copied. One server-declared list (`PERMISSION_SET_CLONE_DROPPED_KEYS`) is removed: the protection envelope and read decorations (derived from the spec), `packageId`, `managedBy`, `protection`, and the two privilege decisions `adminScope` and `isDefault`. The copy records nothing about its source.
+  - **Who may call it.** A holder of `manage_metadata`, through the same verdict the metadata save door asks (`metaWriteCapabilityVerdict`); `isSystem` bypasses. Anyone else gets `403 PERMISSION_DENIED`, and an anonymous caller `401`.
+  - **Refusals.** `400 VALIDATION_FAILED` for a malformed body or a name failing the name rule; `404` for an unknown source; `409 RESOURCE_CONFLICT` for a name the catalog already holds, including the source's own; `503 SERVICE_UNAVAILABLE` when no catalog is bound or it cannot be read; `501` when no metadata protocol is composed.
+  - **Nothing to migrate.** No existing route changes. The Setup action `clone_permission_set` keeps working as before.
+- cd3d391: feat(runtime): `POST /api/v1/security/_activation/:type/:name` switches a position or a permission set on or off for the deployment (ADR-0126 §3 regime C, as ADR-0131 D6 amends it)
+  
+  Clause-②: yes
+  
+  The authorization resolver reads whether a position or a permission set is switched off from the activation ledger, `sys_metadata_activation` (types `position` and `permission`), and never from the catalog row's `active` column (ADR-0131 D3). Until now nothing wrote that ledger for these two types, so a deactivation switched nothing off. This route is the write half:
+  
+  - **Route:** `POST /api/v1/security/_activation/:type/:name`, with `:type` either `position` or `permission`. It is also mounted under `/api/v1/environments/:environmentId` when project scoping is on, like the action door.
+  - **Body:** `{ enabled?: boolean }`. `enabled` defaults to `true`. Unknown keys and a non-boolean `enabled` are refused `400 VALIDATION_FAILED`, the same body reader `POST /actions/_activation/:object/:action` uses.
+  - **Effect:** one `sys_metadata_activation` row through the engine, carrying the definition's package. Re-enabling updates that row. Switching a position off stops every grant through it for every holder in the deployment. Switching a permission set off stops it granting by every path. No definition and no catalog row is written.
+  - **Authority:** the same as the flow and action activation doors. The caller needs `manage_metadata`. Under a `group` or `isolated` tenancy posture the caller must also be the platform operator (ADR-0126 §5). Refusals are `403 PERMISSION_DENIED`, and nothing is written.
+  - **Refusals:** the audience anchors `position/everyone` and `position/guest` are refused `400` in either direction, before anything is read or written, because one row would switch the authenticated or anonymous baseline off for every principal. A name that does not resolve in the security catalog is `404`. No catalog bound, or a catalog that cannot be read, is `503 SERVICE_UNAVAILABLE`. A composition without the ledger object is `501`. Switching `admin_full_access` off is refused `403 PERMISSION_DENIED` by the last-admin guard's ledger hook.
+  
+  The route is not in the JS SDK. Its caller is the Setup console's Deactivate on the position and permission-set pages, which calls the platform API directly.
+- 4806b18: Under a walled posture a package that carries security catalog items is the platform operator's: tenants are refused installing, upgrading, uninstalling or deleting it
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered walled-catalog-package-writes-retired -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes (ADR-0131 D3: "Shared-DB multi-tenant (`group` / `isolated`): tenant admins cannot create or edit catalog items; the operator defines the catalog for every tenant (managed packages, Studio).").
+  
+  **Why.** A package registers its positions, permission sets and capabilities environment-wide, and every organization resolves them by name. Measured on a booted `isolated` and `group` stack, with an organization owner granted `manage_metadata` inside their own organization (never the platform operator):
+  - the owner re-installed an operator-installed package at a new version through `install-local`, adding `manage_users` to a permission set another organization's member holds, and that member's next resolution carried `manage_users`;
+  - the owner's `install-local` uninstall of that package took the set away from that member;
+  - the owner's `DELETE /api/v1/packages/:id` of a runtime package the operator had saved a permission set into did the same.
+  
+  The existing name-conflict refusal stops only a package that shadows a name another holder has, never a write by the package that holds it.
+  
+  **FROM → TO**, on a `group` or `isolated` deployment, for a caller below the platform operator (the `PLATFORM_ADMIN` rung: the deployment's declared `OS_PLATFORM_OWNER_EMAIL` owner):
+  
+  - `POST /api/v1/marketplace/install-local` (`@objectstack/cloud-connection`) of a package whose incoming version declares a position, permission set or capability, or, on an upgrade, whose installed version does: **FROM** admitted to any `manage_metadata` holder **TO** `403 FORBIDDEN`, before the package is registered or the ledger written. The whole package is refused, since a package installs whole. The message names the posture, and `error.details.catalogItems` lists the items.
+  - `DELETE /api/v1/marketplace/install-local/:id` of a package whose installed version declares one: **FROM** admitted to any `manage_metadata` holder **TO** `403 FORBIDDEN`, before the ledger is touched.
+  - `DELETE /api/v1/packages/:id` on the runtime dispatcher, of a writable package holding stored positions or permission sets: **FROM** admitted to any `manage_metadata` holder **TO** `403 PERMISSION_DENIED`, before anything is deleted.
+  
+  **Unchanged.** A package with no catalog item installs, upgrades and uninstalls as before, for the same callers. The platform operator does all of the above as before. Under `single` (and with no `tenancy` service) nothing changes. Disabling a package is unchanged: it was measured not to change what any organization resolves.
+  
+  **The remedy.** The platform operator installs, upgrades and removes catalog-carrying packages. `@objectstack/spec` registers the change as the ADR-0087 semantic entry `walled-catalog-package-writes-retired`. Both doors ask the one predicate the catalog's other write doors ask, `walledCatalogWriteVerdict` (`@objectstack/metadata-core`), once per catalog type the package declares. `@objectstack/objectql` now exports `declaredSecurityCatalogNames`, the engine's own reading of what a manifest declares, so a package door judges the declarations the engine registers.
+- 1802315: Under a walled posture the `/packages` verbs that publish, discard, roll back, revert, duplicate or adopt security catalog items are the platform operator's
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered walled-catalog-package-verbs-retired -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes (ADR-0131 D3: "Shared-DB multi-tenant (`group` / `isolated`): tenant admins cannot create or edit catalog items; the operator defines the catalog for every tenant").
+  
+  **Why.** A package's positions and permission sets are environment-wide, and every organization resolves them by name. Measured on a booted `isolated` and `group` stack: the operator published a permission set in a writable package, and another organization's member held it. An organization owner granted `manage_metadata` inside their own organization (never the platform operator) then:
+  - published the operator's pending draft adding `manage_users`, and that member's next resolution carried it;
+  - rolled the package back, and the member lost it;
+  - reverted the operator's commit, and the member lost it;
+  - copied the set, under the same name, into a package of their own, and `GET /meta` then served their copy;
+  - discarded the operator's pending draft (through `revert`, and `discard-drafts` is the same discard by a second door);
+  - adopted the environment's catalog rows into their own package.
+  
+  **FROM → TO**, on a `group` or `isolated` deployment, for a caller below the platform operator (the `PLATFORM_ADMIN` rung: the deployment's declared `OS_PLATFORM_OWNER_EMAIL` owner). Every door is on the runtime dispatcher, and each **FROM** is: admitted to any `manage_metadata` holder. Each **TO** is `403 PERMISSION_DENIED`, naming the posture, before the verb runs:
+  
+  - `POST /api/v1/packages/:id/publish-drafts`, when the package has a pending position, permission-set or capability draft.
+  - `POST /api/v1/packages/:id/revert`, when the package has such a draft.
+  - `POST /api/v1/packages/:id/discard-drafts`, when the package has such a draft.
+  - `POST /api/v1/packages/:id/rollback`, when a commit it would undo touched a position, permission set or capability.
+  - `POST /api/v1/packages/:id/commits/:commitId/revert`, when that commit touched one. The commit's own items are judged: the verb takes the commit id alone, so the URL's package segment changes nothing.
+  - `POST /api/v1/packages/:id/duplicate`, when the source package's published environment rows (the ones it copies) hold one.
+  - `POST /api/v1/packages/:id/adopt-orphans`, when the environment's orphaned rows include one.
+  
+  **Unchanged.** A package whose drafts, commits or rows carry no catalog item is handled as before, for the same callers. The platform operator runs every verb as before. Under `single` (and with no `tenancy` service) nothing changes, and no extra read happens: the verdict is asked before the items are read.
+  
+  **The remedy.** The platform operator publishes, discards, rolls back, reverts, duplicates and adopts catalog-carrying packages. `@objectstack/spec` registers the change as the ADR-0087 semantic entry `walled-catalog-package-verbs-retired`. Every door asks the one predicate the catalog's other write doors ask, `walledCatalogWriteVerdict` (`@objectstack/metadata-core`), through the same helper as the package delete.
+- 06cc45d: Under a walled posture the security catalog is the platform operator's: tenants are refused creating, changing or deleting positions, permission sets and capabilities, and may only assign them
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered walled-catalog-tenant-writes-retired -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes (ADR-0131 D3: "Shared-DB multi-tenant (`group` / `isolated`): tenant admins cannot create or edit catalog items; the operator defines the catalog for every tenant … Creation through Setup or the API is refused with a message naming the posture and the capability.").
+  
+  **Why.** The catalog is environment-level, and every organization resolves it by name. Measured on a booted `isolated` and `group` stack: an organization owner granted `manage_metadata` inside their own organization saved `PUT /meta/permission/:name` over a permission set another organization's member holds, and that member's next resolution carried the change. One organization's write changed what another organization's members resolve.
+  
+  **FROM → TO**, on a `group` or `isolated` deployment, for a caller below the platform operator (the `PLATFORM_ADMIN` rung: the deployment's declared `OS_PLATFORM_OWNER_EMAIL` owner):
+  
+  - `PUT /meta/:type/:name`, `DELETE /meta/:type/:name`, `POST /meta/:type/:name/publish` and `POST /meta/:type/:name/rollback` on `@objectstack/rest`, and `PUT /meta/:type/:name` on the runtime dispatcher, for `position` or `permission`: **FROM** admitted to any `manage_metadata` holder **TO** `403 FORBIDDEN` (the dispatcher's `PUT` answers `403 PERMISSION_DENIED`). The message names the posture and the capability.
+  - The same doors for `capability`: admitted where they were admitted. `capability` is a code-only type, so these doors already refused its writes before this change; only the sentence the caller reads changes, to the posture refusal. For `capability`, the accept set narrows at the data door on `sys_capability`, below.
+  - `POST /security/permission-sets/:name/clone` (the permission-set clone door): **FROM** admitted to any `manage_metadata` holder **TO** `403 PERMISSION_DENIED`, before the source is read.
+  - A data-door insert, update or delete on `sys_position`, `sys_permission_set` or `sys_capability`: **FROM** admitted to any caller whose grants admit the table (a `sys_permission_set` create landed in the environment ledger; a `sys_position` create landed as an organization row with no definition) **TO** `403 PERMISSION_DENIED`, before anything is written. This includes an ADR-0090 D12 delegate whose `adminScope` carries `authorEnvironmentSets`: under a wall it can no longer author environment permission sets at the data door. Its assignment and binding paths are untouched.
+  
+  **Unchanged.** Assignments: `sys_user_position` and `sys_user_permission_set` rows stay organization rows that an organization's administrators write for their own members. The platform operator and the engine's own writes (seeders, installers, migrations) write the catalog as before. Every other metadata type is untouched. Under `single` (and with no `tenancy` service), catalog writes stay with `manage_metadata` holders, exactly as before. The catalog activation door already required the platform operator under a wall.
+  
+  **The remedy.** A tenant that needs a position or permission set asks the platform operator to define it in Studio, or through a managed package. The tenant's administrators then assign it to their members. `@objectstack/spec` registers the change as the ADR-0087 semantic entry `walled-catalog-tenant-writes-retired`. `@objectstack/metadata-core` exports the one predicate every door asks, `walledCatalogWriteVerdict`, beside `isSecurityCatalogType`, `SECURITY_CATALOG_TYPES` and `PLATFORM_OPERATOR_POSTURE`. A custom door that writes catalog items asks it after `metaWriteCapabilityVerdict`.
+- 7895671: feat(metadata-core,rest,runtime,plugin-email,spec)!: the `/meta` doors carry no organization; organization-admin metadata authoring closes and `manage_org_presentation` retires (ADR-0131 D6)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered manage-org-presentation-retired, meta-doors-organization-scope-retired -->
+  
+  **BREAKING**, graded `minor` on the v18 prerelease line: Changesets is in pre mode with the tag `next`, and the fixed group is already majored by the line's opening marker, so this ships in an `18.0.0-next.N`.
+  
+  ADR-0131 D6 retires the per-organization overlay axis: environment metadata written by Studio belongs to the whole deployment. The `/meta` doors of both transports (`@objectstack/rest` and the runtime dispatcher's `/meta` branch) used to thread the caller's active organization into writes and reads of the five `allowOrgOverride: true` types (`view`, `dashboard`, `report`, `translation`, `email_template`). They no longer do, for any type, and the read and the write flip together.
+  
+  **What changes.**
+  
+  - **Writes land environment-wide.** `PUT`, `DELETE`, `POST …/publish` and `POST …/rollback` on `/api/v1/meta/:type/:name` hand the protocol no organization, so the row and its audit and history rows carry `organization_id` NULL, whatever the caller's active organization.
+  - **Reads are environment → code.** The item read (both cache arms), the list, the layered view (`/layers` and `?layers=true`), `/published`, `?state=draft`, `GET /meta/_drafts`, `/history`, `/diff`, `/audit` (the environment rows, `organizationId: null`), `GET /meta/diagnostics` and `/references` name no organization.
+  - **An organization admin's metadata write is refused.** `metaWriteCapabilityVerdict` admits `isSystem` or `manage_metadata` only. A caller holding `manage_org_presentation` and not `manage_metadata` is answered `403` on all four item doors (`FORBIDDEN` on REST, `PERMISSION_DENIED` on the dispatcher) with `… requires the \`manage_metadata\` capability.`, for every type and whatever its active organization.
+  - **`manage_org_presentation` retires** from `PLATFORM_CAPABILITIES` (`@objectstack/spec/security`). A permission set naming it still parses and loads, and its other grants still apply; the grant itself admits nothing. The `sys_capability` row seeded for it earlier is not pruned (the seeder upserts only); an operator may delete it in Setup.
+  - **The email-template boot sweep** (`@objectstack/plugin-email`) reads the effective templates environment → code, as the door serves them; it no longer reads in the Default Organization.
+  
+  **What moves for consumers.**
+  
+  - FROM `import { organizationIdForMetaWrite } from '@objectstack/metadata-core'` TO nothing: a `/meta` write carries no organization. Delete the call and the `organizationId` it fed.
+  - FROM `import { ORG_PRESENTATION_AUTHORING_CAPABILITY } from '@objectstack/metadata-core'` TO nothing: delete the import.
+  - FROM `metaWriteCapabilityVerdict({ isSystem, systemPermissions, canonicalType, activeOrganizationId, operation })` TO `metaWriteCapabilityVerdict({ isSystem, systemPermissions, operation })`: drop the two members.
+  - FROM `import { metaReadOrganizationId } from '@objectstack/rest'` TO nothing: a `/meta` read carries no organization. `metaCallerOrganizationId` stays.
+  - FROM `bootstrapEffectiveEmailTemplates(engine, metadataService, { protocol, tenancy })` TO `{ protocol }`: the `tenancy` source is gone.
+  - A permission set granting `manage_org_presentation`: grant `manage_metadata` to whoever must author those five types, and delete the stale grant.
+  
+  **What a deployment observes.** An overlay row an earlier release stored under an organization stays in `sys_metadata` untouched, and is no longer served by any `/meta` read or projected by the email-template sweep until the promotion ceremony (ADR-0131 C7) carries it to the environment layer. Under the `single` posture that is every earlier Studio save of the five types, because it was filed under the Default Organization: on the `/meta` doors such an edit reads as reverted to the environment or code definition. Re-save the item in Studio to make the edit live on the `/meta` doors now. Public forms are the exception: until that ceremony the anonymous form doors read a form `view` in the Default Organization and prefer its overlay for the form's body, while a withdrawal in either layer closes the form, fail-closed. So a legacy organization overlay of a public form keeps serving its body there: a Studio re-save of that body (an environment row) does not change the body the public form serves, and a Studio withdrawal (an environment row) still closes it.
+  
+  **What does not change.** Saves of every other type were already environment-wide. Flow saves, the capability gate's answer for `manage_metadata` holders and `isSystem`, the protocol's own organization-scoped refusals, and the `/packages` doors are untouched by this change.
+- b389e43: feat(metadata-protocol,runtime,service-automation,spec)!: the metadata protocol refuses every organization-scoped write, and an uninstall is environment-wide (ADR-0131 D6/D12)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered metadata-write-organization-scope-refused, package-uninstall-environment-wide -->
+  
+  **BREAKING, in both directions.** It narrows: an organization-scoped metadata write is refused, and request keys retire. It widens one refusal: a package uninstall naming neither `organizationId` nor `allTenants`, refused before with `400 TENANT_SCOPE_REQUIRED`, is now accepted and runs environment-wide. Graded `minor` on the v18 prerelease line: Changesets is in pre mode with the tag `next`, and the fixed group is already majored by the line's opening marker, so this ships in an `18.0.0-next.N`.
+  
+  ADR-0131 D6 retires the per-organization overlay axis. The `/meta` doors already carry no organization; now the metadata protocol itself refuses an organization-scoped write from every door, and the per-organization write path behind it is deleted.
+  
+  **What changes.**
+  
+  - Every protocol write that names an organization is refused with `403 NOT_OVERRIDABLE`, before anything is read or written, for every metadata type and every tenancy posture. This covers `saveMetaItem` (draft and publish), `publishMetaItem`, `deleteMetaItem`, `rollbackMetaItem`, `revertCommit`, `rollbackToPackageCommit`, `publishPackageDrafts`, `discardPackageDrafts`, `revertStoredPackage`, `duplicatePackage` and `reassignOrphanedMetadata`. The message's first sentence names the tenancy posture in force. The five types that declared `allowOrgOverride` (`view`, `dashboard`, `report`, `translation`, `email_template`) and the `OS_METADATA_WRITABLE` hatch no longer open an organization scope.
+  - The audit ledger (`sys_metadata_audit`) and the commit ledger (`sys_metadata_commit`) record `organization_id` NULL.
+  - The `/packages` doors of the runtime dispatcher thread no organization into any verb: publish-drafts, discard-drafts, the commit list, commit revert, rollback, revert, adopt-orphans, duplicate, delete, and the package manifest read.
+  - `deletePackage` retires its `organizationId` and `allTenants` request keys and both `400 TENANT_SCOPE_REQUIRED` refusals. The dispatcher's `DELETE /api/v1/packages/:id` no longer refuses an operator with no active organization. An uninstall removes every row bound to the package in this environment. Who may uninstall is the door's operator gate, as before.
+  - A seed published with a package no longer takes the publisher's active organization: a seed dataset names the organization it populates (ADR-0131 D9).
+  
+  **What moves for consumers.**
+  
+  | From | To |
+  |:--|:--|
+  | `organizationId` on a `SaveMetaItem` / `PublishMetaItem` / `DeleteMetaItem` request (`@objectstack/spec`) | drop it: the write lands environment-wide. The key is stripped at a spec parse (the schemas are not strict) and refused at the protocol: a request still naming one answers `403 NOT_OVERRIDABLE` |
+  | `organizationId` on any other protocol write verb's request | drop it, same refusal |
+  | `deletePackage({ packageId, organizationId })` or `deletePackage({ packageId, allTenants: true })` | `deletePackage({ packageId })`; either retired key answers `400 INVALID_REQUEST` and removes nothing |
+  | `DeletePackageRequest.organizationId` / `.allTenants` (`@objectstack/metadata-protocol`) | gone from the type |
+  | `UninstallCleanup`'s `organizationId` argument | gone; a cleanup receives `{ packageId, actor? }` |
+  | `TENANT_SCOPE_REQUIRED` in the error-code ledger | retired; no producer emits it |
+  | `findPlatformScheduleOrgGaps`' `organizationId` input | gone: every write is platform-level |
+  | a `seed` draft whose records carry no `organization_id`, relying on the publisher's active organization under `group` | set `organization_id` on each record (ADR-0131 D12, item 12); under `group` a seed record that names no organization is refused at load, and under `single` the loader still derives the Default Organization |
+  
+  **What a deployment observes.**
+  
+  - Rows stored organization-scoped before this release are not touched by any write. `POST /meta/_migrate-stored` reports each one as `skipped` and names the promotion ceremony (ADR-0131 C7); the stored-flow credential move reports such a flow as not moved (`NOT_OVERRIDABLE`) and logs that its credential is still in cleartext in that row — rotate it. A legacy organization-scoped draft is no longer promoted, discarded or reverted by a package verb, a commit recorded in a legacy organization layer is refused by `revertCommit`, and `duplicatePackage` and adopt-orphans copy or adopt the environment's rows only.
+  - An uninstall removes the package's legacy organization-scoped rows with it, as the declared cross-tenant uninstall did.
+  
+  **What does not change.** The protocol's reads still accept an organization and still serve legacy organization rows; that narrowing is a later stage. The anonymous form doors' read of the Default Organization's layer is unchanged.
+- 5cfd866: feat(sharing): a share-link password can be sent in the `X-Share-Password` header whatever its characters, under a declared encoding (`X-Share-Password-Encoding: utf-8`)
+  
+  Clause-②: yes (widening)
+  
+  - **What was missing.** A browser cannot put a character above U+00FF in a request header (`Headers` throws a `TypeError` before the request leaves), and it strips leading and trailing spaces. `createLink` accepts any password, so a link whose password has a CJK character or an emoji could not be opened through the header.
+  - **What is now accepted.** A new companion request header, `X-Share-Password-Encoding`, declares how `X-Share-Password` is encoded. Its one value is `utf-8`, compared case-insensitively. Under it, `X-Share-Password` carries the password's UTF-8 bytes percent-encoded, as `encodeURIComponent(password)` produces them, and both public routes (`GET /api/v1/share-links/:token/resolve` and `/:token/messages`) decode it on both mounts: the sharing plugin's routes and the runtime dispatcher's `/share-links` domain. Both read the pair through one helper, `readSharePasswordHeader`, exported from `@objectstack/types` with the header-name constants.
+  - **Unchanged.** Without `X-Share-Password-Encoding`, `X-Share-Password` is read raw, exactly as before, so every value a client sends today resolves as it did. That includes a Latin-1 password and a raw password containing `%`; the server never percent-decodes a value nobody declared encoded. The `?password=` query parameter is still read first, and when it is present the header pair is not read.
+  - **What is refused.** `X-Share-Password-Encoding` naming any other value, or a password header that is not percent-encoded UTF-8 under `utf-8` (a `%` without two hex digits, octets that are not well-formed UTF-8, a character outside visible ASCII), answers `400 VALIDATION_FAILED` before the token is looked up. It is never compared raw instead. The message names the headers and the rule, never the presented value.
+  - **Response headers.** Both public routes now answer `Vary: X-Share-Password, X-Share-Password-Encoding`, still beside `Cache-Control: no-store`.
+  - **Cross-origin clients.** `X-Share-Password-Encoding` is in the default CORS preflight allow-list (`DEFAULT_CORS_ALLOW_HEADERS` in `@objectstack/plugin-hono-server`, which the `@objectstack/hono` adapter also applies). A deployment that passes its own `allowHeaders` must add `X-Share-Password-Encoding` beside `X-Share-Password` to let a cross-origin client send an encoded password.
+- db9cf80: feat(cli): `os migrate security-catalog-overlays` lists, and with `--apply` deletes, the environment-wide rows a v18 cold boot refuses — run it before the first v18 boot
+  
+  Clause-②: yes (widening)
+  
+  - **What it is for.** A v18 cold boot refuses to start when the environment catalog holds a permission-set or position name that a configured package also declares (ADR-0048 N.3). A deployment upgraded from 17.x can carry such rows: a set or position saved in the environment over a package's name before the packaged locks refused that, or over one of the platform security plugin's own sets (`member_default`, `admin_full_access` and the rest). The server cannot clear them, because it does not start. This step is the offline remedy.
+  - **What it lists.** Every active, environment-wide `sys_metadata` row (`organization_id IS NULL`, `state = 'active'`) of type `permission` or `position`, the legacy plurals `permissions` and `positions` included, whose name a configured package holds. That is the population the cold boot refuses: the list is computed from the engine's own reading of who holds a name, not from a copy of it. A draft row and an organization-scoped row are not loaded at boot, so they are never listed. Each row is shown with its stored type, its `package_id` binding and the package that holds its name.
+  - **How it gets there without the refusal.** It composes the deployment as `os serve` does: the host config's plugins, the application or the compiled artifact, and the security plugin behind `serve`'s auth gate. It runs the kernel's first phase for them only, and boots without reading `sys_metadata` back into the registry, so the cold-boot check meets nothing and the boot comes up. No server starts. The security plugin's shipped sets are package-held names only where `serve` composes that plugin, so the step reads the environment `serve` reads. With `OS_AUTH_SECRET` (or `AUTH_SECRET` / `BETTER_AUTH_SECRET`) set, or on a development boot, the plugin is composed and its sets are held, unless the `auth` tier is off. The step takes `os serve`'s `--preset` and `--dev` with `serve`'s meaning, read through the rules `serve` reads them by: `--preset` names the tier preset the auth tier falls back to, and `--dev` composes the config's `devPlugins` and makes the boot a development one (as does `NODE_ENV=development`). The report says which way it went. **Run the step with the flags and environment the deployment boots with.**
+  - **Preview by default.** The preview boots read-only, like `os migrate plan`. It writes nothing, creates no database file, and exits `1` when it lists a row: the next boot would be refused. `--apply` deletes the listed rows, after a `[y/N]` prompt or `--yes`, and prints one audit line per row: what was deleted, through which write path, or why not. It exits `0` when every listed row is gone. `--json` prints one document (`listed`, `deleted`, `failed`, `rows[]` with `outcome`, `securityPlugin` and `serveFlags`). `--force` gets past a busy SQLite file. `--database-url` / `$OS_DATABASE_URL` name the target.
+  - **How it deletes.** A row stored under `permission` or `position` goes through the metadata protocol's own delete, the one `DELETE /api/v1/meta/:type/:name` uses. That writes a `sys_metadata_history` tombstone and a `sys_metadata_audit` row, with actor `os migrate security-catalog-overlays`. A row stored under a legacy plural is out of that door's reach, so it goes through the `sys_metadata` repository beneath it. That delete is addressed by the row's stored type, name, `package_id` and checksum, and writes the same history tombstone.
+  - **The refusal names it.** The cold boot's `NAMESPACE_CONFLICT` message now points at `os migrate security-catalog-overlays` for the environment's rows, in place of "through the metadata API on a boot that leaves the package out of the configuration, or in the database". The envelope (`code`, `status`, `conflicts[]`) is unchanged.
+  - **What it never does.** It adopts nothing: `managed_by` and `package_id` are never rewritten, and no row is renamed. A row the environment needs under its own name must be re-created under a name no package holds. A host config that exists and cannot be loaded is refused before any row is read, because the held names would be incomplete.
+  - **New exports it is built on.**
+    - `@objectstack/objectql` exports `findPackageHeldSecurityCatalogNames(registry)`: every package-held permission-set and position name, with its holder packages. The cold-boot check now reads the same list.
+    - `@objectstack/core` exports the auth gate `os serve` and the step share. `resolvePlatformAuthComposition` answers whether the platform composes `AuthPlugin` and the security plugin beside it, or why not. With it come `resolveStackTiers`, `STACK_TIER_PRESETS`, `CAPABILITY_TO_TIER`, `resolveAuthSecret`, `isDevelopmentBoot`, `DEV_AUTH_SECRET_FALLBACK`, `stackSuppliesAuthPlugin`, `isHostKernelComposition` and the `PlatformAuthComposition` / `PlatformAuthSkipReason` types. `Serve.TIER_PRESETS` and `Serve.CAPABILITY_TO_TIER` are now handles over the core declarations, and `os serve` composes exactly what it composed before.
+    - `@objectstack/runtime`'s `createStandaloneStack` accepts `hydrateMetadataFromDb: false`, which skips the `sys_metadata` read-back. The default stays on.
+    - `@objectstack/spec` registers the ADR-0087 D3 entry `security-catalog-environment-overlay-refused` in its migration registry and `spec-changes.json`, so `os migrate meta --from 17` names the refusal and this step as its remedy. Its projection is the entry under protocol 18 in the upgrade guide (`docs/protocol-upgrade-guide.md`).
+- b53b949: fix(runtime)!: the `/i18n` dispatcher domain refuses a caller without a session with `401 UNAUTHENTICATED`, like every other dispatcher domain
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime authorization narrowing at the dispatcher's /i18n domain handler (handleI18nRequest), not a metadata change. No spec key, export, option, config field, response field or stored shape is removed, renamed or re-shaped, and what a signed-in caller receives is unchanged, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which callers the domain serves: a caller with no session is now refused with the shared anonymous-deny 401 before the domain reads anything. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this domain and this diff adds none (not registered / already-registered); and no published interface or type changes (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  The `/i18n` dispatcher domain serves the application's translations: the locale list, the translation bundle and the field labels. The bundle carries the labels of every object, field, app and page the application declares. Until now the domain served a caller with no session, while the metadata read of the same objects refused one. ADR-0056 D2 denies anonymous callers by default.
+  
+  **What changed.** The domain handler opens with the shared anonymous-deny decision (`shouldDenyAnonymous`), the same floor the `/meta`, `/actions`, `/automation`, `/packages` and `/analytics` domains stand on. It is the handler's first statement:
+  
+  - every face of the domain answers a caller without a session `401` with code `UNAUTHENTICATED`, in the dispatcher's wrapped envelope (`{ success: false, error: { code: 'UNAUTHENTICATED', message, httpStatus: 401 } }`), and serves nothing of the bundle;
+  - it runs before the i18n provider is looked up, so the answer is `401` whether or not a provider is installed, never the `501` an empty slot answers;
+  - it runs before a face reads its parameters, so a request that leaves out its locale is `401`, never the `400` that face answers.
+  
+  **What is not affected.** A signed-in caller, an API-key caller and an internal system context are served exactly as before: the same bundle, the same `400` for a missing locale, the same `501` when no provider is installed. A CORS preflight is unchanged.
+  
+  **The Console.** The Console this release pins renders its sign-in page from its built-in language packs and loads the application's translations after sign-in, with the signed-in session. A signed-in Console user sees the application's labels as before.
+  
+  **If you read `/i18n` from your own client,** send the signed-in user's session or bearer token, or an API key, with the request. Render anything shown before sign-in from strings your client ships, and load the application's translations once the user has signed in.
+- faf6348: feat(i18n): a refused `end` node's message translates in the run's locale (`flows.<flow>.refusals.<node_id>.message`)
+  
+  Clause-②: yes (widening)
+  
+  - **What is new.** An `end` node declaring `outcome: 'refused'` shows its `message` to the person who started the run. Translate it under `flows.<flow_name>.refusals.<node_id>.message`, keyed by the flow's `name` and the `end` node's `id`, the same addressing the `screens` keys use. Before this key, a refusal rendered in the source language on every console.
+  - **Keep the holes.** The translation is a `{{ }}` template like the message it translates (`'已拒绝:{{ record.name }} 是重复记录'`). A single-brace `{token}` in a translation is refused when the bundle is parsed, with the same text-slot refusal the source message gets.
+  - **Where it is read.** The engine picks the translated template before it renders the holes, through the `i18n` service, in the run's locale, and the run stores and returns that text (`refusalMessage`). With no translation for that locale, the authored message renders. `flowRefusalMessageKey(flowName, nodeId)` (`@objectstack/spec/system`) spells the key.
+  - **The run's locale.** `AutomationContext.locale` (`@objectstack/spec/contracts`) is new and optional. The trigger door (`POST /api/v1/automation/:name/trigger`, the legacy trigger route, a `type: 'flow'` endpoint) and the action door (`POST /api/v1/actions/...`, the MCP `run_action` bridge) set it from the request's resolved locale: `Accept-Language` first, then the `localization` settings. It is persisted with a paused run, so a resumed leg renders in the locale the run was started in. A run no person started (a record-change or schedule trigger) has no locale and stores the authored message.
+  - **`objectstack validate`** refuses a refusal key over an unknown flow, an unknown node, a completed `end` node, or a node of another type (`translation-target-unknown`, error).
+  - **`os i18n extract` and the coverage gate** now scaffold and demand the refusal message of every refusing `end` node in the `flow` bucket (`i18n/missing-flow`). A project that declares `supportedLocales` and has a refusing `end` with no translation now gets one missing-key issue per locale for it.
+  - **`AutomationEngine.setI18nServiceSource()`** (`@objectstack/service-automation`) attaches the `i18n` reader. The automation plugin wires it, so a host using `AutomationServicePlugin` needs no change. A host constructing the engine directly gets the authored message until it attaches one.
+- fe58bbc: feat(runtime,core): inbound automation hooks work on a kernel with no raw HTTP app — the dispatcher admits `POST /automation/hooks/:flowName/:hookId` with no session, through to the trigger's own signature check
+  
+  Clause-②: yes
+  
+  On a self-hosted server, `@objectstack/trigger-api` serves a flow's inbound hook by mounting `POST /api/v1/automation/hooks/:flowName/:hookId` on the raw Hono app, where a third-party sender (a payment provider, a code host) posts a signed event with no session. A hosted tenant kernel has no raw app, so on that shape the path belonged to the dispatcher's `/automation` domain, whose anonymous floor refused every sender `401 UNAUTHENTICATED`.
+  
+  **What widens: one route passes the anonymous floor and the ADR-0069 gate with no session.** `@objectstack/core`'s auth-gate allow-list gains its first parameterised row: exactly `POST /automation/hooks/:flowName/:hookId` in the dispatcher's spelling (four segments, optionally under one `/environments/:id` scope), and nothing else. `/automation/hooks`, `/automation/hooks/x`, `/automation/hooks/x/y/z`, every other method on the route and every other `/automation` path stay gated exactly as before.
+  
+  - `@objectstack/core`: `isAuthGateAllowlisted(path, method?)` and `evaluateAuthGate(user, path, method?)` take an optional method. The existing rows are exempt for every method, as before, so a caller that passes no method gets the answer it always got. The new row is exempt for `POST` only, and only when a method is passed. `shouldDenyAnonymous` now passes its `method` to the allow-list beside its `path`. New export: `matchInboundHookRoute(path, method)`, the one reading of the route that the row matches through, returning the two path segments raw.
+  - `@objectstack/runtime`: the `/automation` domain's anonymous floor now asks the allow-list with its path and method. On the very next statement it hands the admitted route to the request kernel's `trigger-api` service (`ITriggerApiService.handleInboundHook`), ahead of every other `/automation` gate and service probe. The request goes with its body unread and the two path parameters decoded, and the service's `Response` comes back as it is. The service verifies the HMAC signature, so a correctly signed post is accepted and a wrongly signed or unsigned one is refused by that service, with its own answer. The membership gate skips the route for `POST` only, so a signed-in caller is judged exactly as an anonymous one, as on the self-hosted mount.
+  - No `trigger-api` service registered, or one without `handleInboundHook`: `501 NOT_IMPLEMENTED`, naming which, never `ROUTE_NOT_FOUND`. A service that throws, or a request whose body a transport already read: a sanitised `500 INTERNAL_ERROR`, logged.
+  
+  Nothing changes on a self-hosted server: the trigger's raw-app mount still serves the path there and never reaches the dispatcher, and the dispatcher mounts nothing that answers it.
+- 51f36e7: The action activation door switches an action no package ships, its row names no package, and a ledger write it refuses answers with the status its code means
+  
+  Clause-②: yes (widening)
+  
+  - **The door accepts an action the environment authored** (`@objectstack/runtime`). `POST /api/v1/actions/_activation/:object/:action` declares that it does not require the action to be packaged. FROM: an object-less action saved through the metadata door (`PUT /api/v1/meta/action/:name`), or one bound to an object no package ships, was refused `503` with `{ code: 'SERVICE_UNAVAILABLE' }` and the store's sentence about an empty package id, and nothing was written. TO: it is switched like a packaged one, `200`, its row carries no package (`package_id` is `null`), and dispatch then refuses it `409 ACTION_DISABLED` like any switched-off action. Who may call the door is unchanged (`manage_metadata`; the platform operator under a `group` or `isolated` posture), and so are its other refusals (an undeclared action `404`, an ambiguous name `409`, an engine with no ledger `501`).
+  - **An action is credited only to the package that ships it** (`@objectstack/runtime`). FROM: an action with no package of its own was credited to its route object's package, so an action the environment saved against a packaged object wrote that object's package into its row. TO: the row names the action's own package; for an action declared inside its object's `actions`, the object's package; otherwise no package. A `sys_metadata` placeholder or a tenant-authored action's package binding is not a shipping package. Rows of shipped actions are unchanged, including the platform's own actions declared inside their objects. No reader decides anything from `package_id`, so nothing that is switched on or off changes.
+  - **A refused ledger write keeps its code and its status together** (`@objectstack/runtime`, ADR-0112). FROM: the door kept a thrown `code` but answered `503` whenever the error declared no status, so a record validation refusal was served as `503 VALIDATION_FAILED`. TO: the door answers through the dispatcher's one thrown-error rule: a record validation refusal is `400 VALIDATION_FAILED`, an error that declares its own pair keeps it (no ledger attached: `503 SERVICE_UNAVAILABLE`), and an error that declares no status is `503 SERVICE_UNAVAILABLE`.
+  - **The in-memory activation store refuses what the durable store refuses** (`@objectstack/core`). FROM: `InMemoryMetadataActivationStore.setActive` (the base of `InMemoryActionActivationStore` and `InMemoryFlowActivationStore`) accepted `packageId: ''`, which `ObjectStoreMetadataActivationStore.setActive` refuses. TO: it refuses `packageId: ''` with the same `TypeError` and the same sentence, before it keeps anything. If a test passes `''`, omit the key instead.
+- 20028df: fix(runtime)!: `callData` asks each nested-relation condition's related object its declared exposure before the engine reads it, on the query fallback and the aggregate arm (#22823)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is one runtime read position at two arms of one door: the runtime dispatcher's `callData` stops handing the engine a filter condition on a lookup's target object whose existing `enable` declaration already refuses a query of it on every data door, and the remedy is a filter the caller can already write. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no exported declaration is removed or narrowed (not runtime-interface-only or type-surface-only): `callData` is not on this package's export surface and its signature is unchanged. -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  A nested-relation filter condition, `{ <lookup>: { <field of the related object>: … } }`, is evaluated on the RELATED object: the engine queries that object for the matching records and keeps the source rows that point at one.
+  
+  **FROM.** The runtime dispatcher's data bridge, `callData`, judged only the object a call addresses against its `enable` block, and then handed the caller's `where` to the ObjectQL engine at two positions:
+  
+  - the `query` / `find` fallback, which serves when no protocol service resolves (an assembly that composes the engine plugin with `registerProtocol: false` and no `MetadataProtocolPlugin`);
+  - the `aggregate` arm, which never takes the protocol service, so on every assembly (the MCP `aggregate_records` tool over HTTP reaches it).
+  
+  At both, such a condition was evaluated whatever the related object's `enable` block declared, including a related object every data door refuses when it is addressed.
+  
+  **TO.** `callData` asks each condition's related object the exposure gate it applies to an addressed object, for `list` (the operation a query of that object is judged as), before the engine is called. A related object the gate does not serve refuses the call with the data door's own exposure answer, the one the protocol path gives the same condition:
+  
+  - `enable.apiEnabled: false` → `404 OBJECT_API_DISABLED`.
+  - an `enable.apiMethods` whitelist without `list` (for example `['get']`, `['create']` or the deny-all `[]`) → `405 OBJECT_API_METHOD_NOT_ALLOWED`, with the effective operation set in `allowed`.
+  
+  The refusal names the related object (`object`) and the condition's position (`param`, `where.<lookup>`), with the remedy. It applies at the top level and under `$and` / `$or` / `$not`. A related object with no `enable` block, or a whitelist that grants `list`, is served exactly as before. With the protocol service present the `query` arm is unchanged: the data door judges the condition, as it has since #22737.
+  
+  **Migration.** Filter on the lookup's stored id (`{ <lookup>: '<id>' }` or `{ <lookup>: { $in: [...] } }`), which is the source object's own column, or remove the condition. To keep the condition, declare `list` on the related object's `enable.apiMethods`.
+  
+  **Bindings.**
+  
+  - **Refused, not withheld.** Dropping a condition would widen the result.
+  - **One gate, one walk.** The gate is the one `callData` already applies to an addressed object, and the conditions are found by `relationConditionSites` from `@objectstack/core`, the walk the data door and the MCP stdio bridge use.
+  - **A system context is not asked**, as it is not asked for the addressed object: these flags govern API exposure, not the engine's own reads. A flow's or a hook's own query calls the engine directly and never passes `callData`.
+  - **No new error code.** `@objectstack/runtime` now stamps the two existing exposure codes, and the error-code ledger lists them under that package too.
+  
+  **Measured producers.** Read on `origin/main` `75b6d6a048`: no shipped composition reaches the `query` fallback. Every non-test `ObjectQLPlugin` construction under `packages/` and `examples/` keeps the built-in protocol (`os serve`, the standalone stack, the dev plugin, the verify harness, the kernel factory), and `registerProtocol: false` appears only in tests. The `aggregate` arm is reached on every assembly that serves the MCP route over HTTP. Deployed compositions were NOT MEASURED.
+
+### Patch Changes
+
+- fec87e7: feat(spec)!: a package manifest's `permissions` no longer takes a flat list of permission strings — the structured `{ services, hooks, network, fs }` block is the only form (#13458)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered manifest-permissions-string-list-removed, manifest-permissions-string-list-retired -->
+  
+  **BREAKING** — an accept-set narrowing on a published authoring surface, shipped as `minor` under the launch-window convention for accept-set narrowings (Changesets pre mode is not yet in on `main`).
+  
+  `ManifestPermissionsSchema` was a union of a flat `string[]` and the structured ADR-0025 §3.2 block. Nothing ever acted on the list: the loader registers the consented `grantedPermissions` set from the environment artifact with the permission enforcer, never the manifest's request, and the only code that met a list on a manifest was two reports saying it had been skipped. The marketplace install disclosure reads only the four lists, so a list was shown to an installer as "Requests no special permissions." (ADR-0049 enforce-or-remove). `ManifestPermissionsSchema` is now the structured block itself.
+  
+  ### FROM → TO
+  
+  | before | what to write instead |
+  | --- | --- |
+  | `permissions: ['system.user.read', 'system.data.write']` | `permissions: { services: [...], hooks: [...], network: [...], fs: [...] }`, naming the platform services the plugin resolves, the lifecycle hooks it registers, the network hosts it reaches and the filesystem paths it touches. |
+  | `permissions: []` | delete `permissions`: absence is the spelling for "requests nothing". |
+  | a list on an app manifest that ships no code | delete `permissions`. An app's record access is its permission SETS, in the stack's own top-level `permissions` collection. |
+  
+  **The one-line fix: replace every manifest `permissions` list with the structured block, or delete it.** A permission string has no mechanical mapping onto the four lists, so the translation is done by hand. `os migrate meta --from 17` lists the mechanical edits for existing sources; apply them by hand.
+  
+  **What an author now sees.** Writing a list fails `tsc` (the key's type is the block), and `os validate`, `os build`, `os plugin build` and `defineStack` refuse it at `manifest.permissions` with the block's own answer: `Expected the plugin permission block { services?, hooks?, network?, fs? }, received a flat list.`, followed by the prescription. Every structured block that parsed before still parses, unchanged.
+  
+  ### The retirement kit
+  
+  - **Schema.** `ManifestPermissionsSchema` is `PluginPermissionsSchema`, by identity, and both export names stay. The block answers a list with its prescription on its own error map, the bare-array pattern `ListViewExportOptionsSchema` uses. The block also carries `EnvironmentArtifactSchema.grantedPermissions` values, so the answer is worded true there too, where a list was never legal.
+  - **D2 conversion `manifest-permissions-string-list-removed`** (step 18, retired from the load path): a lossless delete of an all-string list from the stack's `manifest` and every `packages[].manifest`. The notice carries the dropped strings. A built artifact replays it at the artifact door, so an artifact built while the list was legal still boots. It never touches the structured block, an array of objects, or the top-level ADR-0090 permission-set collection.
+  - **D3 entry `manifest-permissions-string-list-retired`** carries the judgement the delete cannot make: what each dropped string meant in services, hooks, hosts and paths.
+  - **Liveness.** `manifest.permissions` stays `live` on corrected evidence. Its consumer is the marketplace install disclosure, and it refuses nothing at load. The four keys are now drilled.
+  - **The two skip reports reworded.** `AppPlugin`'s security registrar and `@objectstack/plugin-security`'s audience-binding reconciler both report a manifest-stage `permissions` they cannot read as permission sets. They now name the flat list as the retired legacy form. They behave as before.
+  
+  **Measured producers: none outside tests.** On origin/main e67ba80049, no manifest in `examples/`, `apps/`, `packages/`, `skills/` or `content/docs/` writes a list. The exceptions are five `@objectstack/spec` `manifest.test.ts` fixtures, re-triaged here, and the skip-report tests of `@objectstack/runtime` and `@objectstack/plugin-security`, which hand a list to an unparsed bundle on purpose and still pass. The same instrument finds those five fixtures, which is its control. At the objectui pin `a58626c88dc8`, nothing reads `manifest.permissions` (control: 91 `manifest.(id|name|version)` reads), and the install disclosure reads the structured block alone. Deployed and cloud-held manifests NOT MEASURED.
+- 34dba5a: `AppPlugin` starts after the auth plugin when both are composed, so the Default Organization exists before the inline seed loads
+  
+  `AppPlugin` now declares the auth plugin (`com.objectstack.auth`) among its order-if-present dependencies. Under the `single` posture the auth plugin creates the Default Organization in its `start()` (ADR-0131 D3), and every seed row is stamped with it; the declaration makes the kernel start the auth plugin first instead of relying on the order plugins were registered in. A composition without the auth plugin is unaffected.
+- 95a8435: feat(plugin-security): a package's declared capabilities are served by the registry alone — the declared-capability seeder and its collision diagnostic are deleted
+  
+  Clause-②: no
+  
+  `SecurityPlugin` no longer seeds a `sys_capability` row for a capability a package declares (`defineCapability` / a stack's `capabilities`). The registry is that capability's one home (ADR-0131 D3): the security catalog read (`createSecurityCatalogReader`), `GET /api/v1/meta/capability` and the anchor predicates' declared-capability context read the declaration there, as they already did. This change does not alter how the platform's curated capabilities are served.
+  
+  A capability name declared by two packages, or a package declaring a curated platform capability name, is refused at boot by the registry's one-holder rule (`SecurityCatalogNameConflictError`, `422`), which already refused it before the deleted runtime diagnostic could run.
+  
+  In `@objectstack/spec`, `@objectstack/objectql`, `@objectstack/runtime` and `@objectstack/lint`, the shipped comments and the capability liveness evidence (`liveness/capability.json`) now name the registry instead of the retired declared-capability seeder. Their behaviour is unchanged.
+  
+  Removed from `@objectstack/plugin-security`'s public exports, with no replacement:
+  
+  - `CAPABILITY_NAME_COLLISION`
+  - `capabilityNameCollisionDiagnostic`
+  - `formatCapabilityNameCollisionDiagnostic`
+  - `reportCapabilityNameCollisions`
+  - `CapabilityNameCollisionDiagnostic` (type)
+  
+  FROM → TO:
+  
+  - FROM a package's declared capability materialized as a `managed_by: 'package'` `sys_capability` row at boot → TO the declaration served by the registry, with no row written. Read it with `GET /api/v1/meta/capability/:name` or the security catalog read, not from `sys_capability`.
+  - FROM a name collision reported at boot through `reportCapabilityNameCollisions` → TO the same collision refused by the registry's one-holder rule. Delete any import of the five names above; there is nothing to call in their place.
+- 9e9e6f9: feat(cli)!: `os meta resync` is deleted
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A CLI command is removed; it reconciled platform rows no reader uses for authorization, and no key of any spec schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. The package publishes (not unpublished); no ADR-0087 id covers this rule and this diff adds none (not registered / already-registered). -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  `os meta resync` reconciled the platform-default `sys_permission_set` rows (`admin_full_access`, `member_default`, …) to the shipped declaration. Since the authorization resolver reads permission sets from the security catalog (ADR-0131 D3), an edited default set is served from its declaration at the next boot, and the rows the command reconciled decide nothing. The command, its `--yes` / `--json` modes and its skip-count explanation are gone; a script that calls it gets oclif's unknown-command error.
+  
+  In `@objectstack/plugin-security`, `@objectstack/driver-sql` and `@objectstack/runtime`, shipped comments and one warning sentence (the permission-set backfill's re-provision list) no longer name the command. Their behaviour is unchanged.
+- 240890c: The `/packages` refusals of a read-only package name the customisation that works today, instead of the retired organization overlay (ADR-0131 D6)
+  
+  Clause-②: no
+  
+  `DELETE`, `PATCH /disable`, `POST /publish` and `POST /revert` on a package provided by code or an installed app answer `422 WRITABLE_PACKAGE_REQUIRED`, and `POST /packages/:id/duplicate` on one answers `422 DUPLICATE_SOURCE_NOT_A_BASE`. Both refusals told the caller to customise the package "in place, with an ADR-0005 org overlay". ADR-0131 D6 retired the per-organization overlay axis: no metadata write lands organization-scoped any more, and the protocol refuses one that names an organization with `403 NOT_OVERRIDABLE`. The remedy named a mechanism that no longer exists.
+  
+  Both refusals now name the customisation that works: customise what the package provides beside it, as environment-level state. Saving an item under its own name overlays it where the item's type takes an environment overlay and the package's lock does not refuse it. Any other save is refused, and that refusal names the route the item's type has, or the lock. The duplicate refusal also names the editable copy of a whole package: install it unmanaged instead (`installMode: 'unmanaged'`), where its manifest's `installModes` permits that.
+  
+  Only the message text changes. Each refusal's `code`, status, `details`, condition and order are unchanged.
+- 1fb274e: The runtime dispatcher's `GET /meta/datasource/:name/published` serves a code-defined datasource's code definition while a stored row under its name still exists
+  
+  Clause-②: no
+  
+  - This is the dispatcher twin of the `@objectstack/rest` published door, and it now answers the same way. For a datasource name the host registers from code (one an installed package declares in `*.datasource.ts`, or the host's `default`), the door serves the layered read's `effective` layer, which is the code definition, instead of the leftover stored row. It asks the protocol's `declinesStoredRow` in place of `isShippedFlowName`. A shipped flow name is answered as before.
+  - Unchanged: a runtime datasource's stored row, and every stored row of every other type, is served as before. So is every row when the protocol does not provide `declinesStoredRow`.
+- a543e24: `POST /packages/:id/revert` reverts a Studio-authored package instead of answering 404 "No metadata items found"
+  
+  Clause-②: no
+  
+  - The door asked only the metadata service, whose in-memory registry never holds a Studio package's stored rows. So a package with published items and a pending draft answered `404 RESOURCE_NOT_FOUND`, and the draft stayed.
+  - The door now asks the protocol's `revertStoredPackage` first, with the caller's active organization. A package with stored rows answers `200 { success: true }` with its drafts removed, or `409 RESOURCE_CONFLICT` when it has never been published.
+  - A package with no stored row is answered by the metadata service's `revertPackage`, exactly as before. That covers a code-shipped package and an unknown id (`404`). It is also what happens when the protocol does not provide `revertStoredPackage`.
+  - The request and the response shape are unchanged.
+- d0bb78e: fix(runtime,metadata): publishing or reverting a read-only package is refused with `422 WRITABLE_PACKAGE_REQUIRED`, and package membership reads the `_packageId` stamp
+  
+  Clause-②: no
+  
+  ADR-0070 D2 makes a code or installed package read-only. `POST /api/v1/packages/:id/publish` and `POST /api/v1/packages/:id/revert` did not check this. These two answers change:
+  
+  - **Publish of a code or installed package: 200 → 422.** Before, the publish door answered 200. For a package whose items carry an authored `packageId`, for example `com.example.showcase`'s two capabilities, it answered `success: true` and wrote `publishedDefinition`, `state` and `version` onto those read-only items. For every other code package it answered `success: false`, "No metadata items found". It now answers `422 WRITABLE_PACKAGE_REQUIRED` before anything is written, the same refusal that `PATCH /packages/:id/disable` and `DELETE /packages/:id` already give.
+  - **Revert of a code or installed package: 404 or 409 → 422.** Before, the revert door answered `404 RESOURCE_NOT_FOUND` "No metadata items found" (for example `com.objectstack.setup` and the platform packages that ship objects) or `409 RESOURCE_CONFLICT` "Package '…' has never been published" (for example `com.example.showcase`). It now answers `422 WRITABLE_PACKAGE_REQUIRED`. The check runs after the protocol's stored-row answer, so a revert of a code package that has a stored row bound to it, such as an organization overlay draft, keeps its answer.
+  
+  To customise what a code package provides, use an ADR-0005 organization overlay. Overlay drafts publish through `POST /api/v1/packages/:id/publish-drafts` and the per-item publish door, and this change leaves both alone.
+  
+  **Unchanged:** a writable package's publish and revert, and an id that nothing carries (revert 404; publish 200 with `success: false`).
+  
+  `MetadataManager.publishPackage` and `revertPackage` now find a package's members by `packageId`, `package` or the private `_packageId` stamp. The artifact loader writes that stamp through `applyProtection`, and the ObjectQL object bridge copies it onto every object it registers. Before, an item that carried only the stamp was not a member. `MetadataManager` has no notion of package kind; the refusal of read-only packages lives at the two doors above.
+- 3aa0c7b: The runtime dispatcher's `PUT /meta/:type/:name` honours `If-Match`, `If-None-Match: *` and `?mode=draft`, so a host that mounts the `@objectstack/hono` catch-all no longer overwrites a pinned save or publishes a draft save
+  
+  Clause-②: no
+  
+  - Behind `createHonoApp`'s `${prefix}/*` catch-all, this door handed `saveMetaItem` no `parentVersion` and no `mode`. A stale `If-Match` wrote (`200`, not `409`), `If-None-Match: *` over an existing row wrote, and a `?mode=draft` save landed on the ACTIVE row with a receipt saying `state: 'active'`, so every draft edit went live without a publish. The door now reads the request through `metaSaveRequestOptions` from `@objectstack/rest`, the same mapping `RestServer`'s `PUT` door reads it through. It answers as that door does: `409 METADATA_CONFLICT` for a stale token or for `*` over an existing row, a draft row that leaves the active row alone, and `400 VALIDATION_ERROR` for `If-Match` sent beside `If-None-Match` or for an `If-None-Match` other than `*`. Each refusal writes nothing.
+  - A host whose protocol has no `saveMetaItem` falls back to the metadata service's `saveItem(type, name, item)`, which cannot carry a precondition or a lifecycle. A save that asks for one there is now refused `501 NOT_IMPLEMENTED` and is not written.
+  - Unchanged: a save that sends neither header and no `?mode=draft` writes the active row, last writer wins, as before. The refusal envelope is this transport's own (`{ success: false, error: { code, message, httpStatus } }`).
+- fbcbcf1: The runtime dispatcher's `/meta` domain reads `?package=all` as naming no package, as `RestServer` does, so a `PUT ?package=all` through the `@objectstack/hono` catch-all no longer binds the row to a package called `all`
+  
+  Clause-②: no
+  
+  - The dispatcher's `PUT /meta/:type/:name?package=all` stored the row with `package_id: 'all'`. It now stores it env-local (`package_id` null), as `RestServer`'s `PUT` does.
+  - Its layered read (`/meta/:type/:name/layers`), list (`/meta/:type`), book tree (`/meta/book/:name/tree`) and item read forwarded `all` to the store as a package id. The layered read answered `404` and the list `[]` for an item stored in a package. Each now answers `?package=all` as it answers the same request without `?package=`.
+  - Every branch reads `?package=` through `metaItemPackageBinding` from `@objectstack/rest`, the function `RestServer`'s doors read it through.
+  - Unchanged: a real package id still scopes each read and still binds a save.
+- f4069c5: fix(metadata): the object read's `sortability` follows the caller's field permission for every caller class
+  
+  Clause-②: yes (widening)
+  
+  - **What was wrong.** ADR-0106 D4 serves a caller holding `manage_metadata`, `studio.access` or `setup.access` (a platform admin, and an organization admin through `setup.access`) the object schema UNMASKED, because Studio and Setup authoring need the whole definition. The `sortability` projection served beside it on `GET /meta/object/:name` (and the runtime dispatcher's `/metadata/object/:name`) was derived from that unmasked document, so it marked a field `sortable: true` that the same caller's field permission marks unreadable, while the data route refuses a sort or filter on that field with `403 PERMISSION_DENIED`. A client building its sort picker from the projection offered a click the server refuses.
+  - **What changes.** `sortability` is now derived from the caller's runtime view: the served document for every caller the mask projects (unchanged), and for a D4-exempt caller the fields their own field permission reads. The definition (`item.fields`) is unchanged for every class: whole for an exempt caller, masked for everyone else. The data route and `/auth/me/permissions` are unchanged.
+  - **Caching.** On the cached `GET /meta/object/:name` branch an exempt caller's ETag folds a fingerprint of the fields withheld from their projection, and the conditional request is judged after it is folded. An exempt caller whose permission withholds nothing keeps the byte-identical ETag. An exempt caller and a projected caller denied the same field never share a validator.
+  - **Failure posture.** The exempt caller's field permission is asked lazily, only by the item read that serves `sortability`, and never turns their definition read into a fault: if the security service throws or cannot answer, `sortability` is derived from the served document as before, with one `warn`.
+  - **New in `@objectstack/metadata-core`.** `resolveObjectSchemaRuntimeView(document, posture)` returns `{ document, withheld, fingerprint }`, the view the runtime projections beside an object schema are derived from. The types `ObjectSchemaRuntimeView` and `ObjectSchemaRuntimeFieldPosture` are exported with it, and the `passthrough` member of `ObjectSchemaMaskPosture` gains an optional `runtime` (set on an `exempt` posture for a capability-exempt caller in a deployment with a `security` service).
+  - **New in `@objectstack/rest`.** `translateMetaEnvelope` takes an optional fifth argument, `runtimeDocument` (default: the served document), and `MetaItemAnswerSources.translateEnvelope` an optional third. Nothing is removed, renamed or narrowed.
+- a45d5d8: fix(auth): a server-side session read no longer renews a browser session behind its cookie (#22258)
+  
+  **What was wrong.** better-auth's `getSession` renews a session older than `session.updateAge`: it moves `sys_session.expires_at` to `now + expiresIn` and stages the renewed session cookie on that call's own response. Ten doors read the session in-process (`auth.api.getSession`) and answer with their own response, so the renewal landed in the database and its cookie was discarded. The browser kept its old cookie, later `GET /api/v1/auth/get-session` calls found a fresh row and re-issued nothing, and the cookie expired first: a dead cookie beside a live bearer, and every cookie-only path then saw a signed-out user. Measured on a fresh dev stack (better-auth 1.7.3, `expiresIn` 604800 s, `updateAge` 86400 s, a session aged to `now + expiresIn − updateAge − 60 s`): `GET /api/v1/data/:object`, `GET /api/v1/auth/me/permissions`, `GET /api/v1/meta/object`, `GET /api/v1/i18n/locales`, `GET /api/v1/packages`, `GET /api/v1/marketplace/install-local` and the MCP door each moved `expires_at` by +86460 s and set no session cookie.
+  
+  **The rule now, decided by what the request carries.**
+  
+  - **A session cookie** (a browser, including a console that sends its cookie beside its bearer): the in-process read passes `query.disableRefresh`. The session renews only through `GET /api/v1/auth/get-session`, which re-issues the cookie with `Max-Age = expiresIn`, so cookie and session expire together. Measured after the change: every door above leaves `expires_at` unchanged on a cookie request and sets no cookie.
+  - **No session cookie** (a bearer-only client: `@objectstack/client` outside a browser, the `os` CLI): unchanged. A data read past `updateAge` still renews the session (+86460 s, measured on the same doors), so an active bearer client keeps sliding forward without calling `get-session`. No cookie is ever set on a response to a request that sent none.
+  
+  **Upgrading.** Nothing to change. A browser session renews whenever the app calls `GET /api/v1/auth/get-session`; a tab that never calls it now signs out at the session's real expiry instead of keeping a live bearer beside a dead cookie.
+  
+  `@objectstack/types` gains `inProcessSessionReadInput(headers)` (the `getSession` input for an in-process read: the request's own headers, plus `query: { disableRefresh: true }` when they carry a better-auth session cookie), `carriesSessionCookie(headers)` and the `InProcessSessionReadInput` type. A host that calls `auth.api.getSession` itself should read through `inProcessSessionReadInput` for the same reason.
+  
+  The same rule is applied to the in-process `auth.api.getSession` readers in `@objectstack/plugin-auth`, `@objectstack/plugin-webhooks`, `@objectstack/plugin-sharing`, `@objectstack/service-storage`, `@objectstack/service-settings` and `@objectstack/service-datasource` by their own changeset.
+- ca135dc: fix(runtime): the trigger door refuses a self-triggered flow declared to run as system to any caller but the system principal
+  
+  Clause-②: no
+  
+  A self-triggered flow declared to run as system could be started by any signed-in member through the trigger door. `POST /api/v1/automation/:name/trigger` (and the legacy `POST /api/v1/automation/trigger/:name`, and `@objectstack/verify`'s `flows.run`, which answer through the same function) asked only whether the caller was anonymous, so a flow meant to run on its own trigger, or as a sub-flow, also ran elevated for anyone who named it.
+  
+  **What changes.** A caller that is not the system principal now gets `403 PERMISSION_DENIED` (ADR-0112 envelope) when it starts a flow declared `runAs: 'system'` whose `type` is `autolaunched`, `record_change` or `schedule`. Nothing runs: no run record, no node, no side effect. The refusal names no part of the flow. This includes a platform admin's session, which is a signed-in user, not the system principal.
+  
+  **What stays as it was.**
+  
+  - `screen` and `api` flows, elevated or not: doors the author designed (ADR-0073 D2).
+  - Every flow that does not declare `runAs: 'system'`.
+  - A parent flow's `subflow` node calling an elevated flow: the child starts through the engine, never through the door.
+  - The system principal (an in-process caller, such as a job), which starts every flow.
+  
+  **If a call now answers 403.** That flow runs on its own trigger. To start its work on a user's request, call it from a parent flow's `subflow` node, or, if it is meant to be a door, declare it `type: 'screen'` (or `type: 'api'` for a signed inbound hook) so the elevation is a reviewable choice.
+- 746637e: fix(service-automation)!: retire the `RunProvenanceContext` type; `RunDataContext` names only what `resolveRunDataContext` returns
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/services/service-automation/src/runtime-identity.ts#RunDataContext) Two TypeScript-only declarations in one runtime file move, and neither is metadata: `RunDataContext` loses its `RunProvenanceContext` arm, and the `RunProvenanceContext` interface declared beside it in the same file is removed together with its type export. No spec key, authorable spelling, Zod schema or stored shape moves, and no stored row is read or rewritten, so `objectstack migrate meta` has nothing to rewrite. The channel that reaches an affected consumer is the compiler, at the consumer's own import. -->
+  
+  **BREAKING** for TypeScript code that imports from `@objectstack/service-automation`: one type export is removed and one type narrows. It ships as `minor` under the launch-window convention for breaking changes. No runtime behaviour changes in any package.
+  
+  **What is removed.** The `RunProvenanceContext` type export, the `{ flowRunId }`-only "provenance" envelope, and its arm of `RunDataContext`. No code in this repository builds or reads one. Since ADR-0096 D5, the data engine's security middleware refuses a context that carries no principal and is not a system context (`403 PERMISSION_DENIED`, for every verb). So the type described a context the engine refuses, while its docstring said such a context was "indistinguishable from passing no context at all" and was let through.
+  
+  **What `RunDataContext` is now.** Exactly what `resolveRunDataContext` returns: `isSystem: true` for a `runAs: 'system'` run, and the triggering user's principal for a `runAs: 'user'` run. A run that resolves no principal is refused before any data operation (`AUTOMATION_UNSCOPED_RUN_DATA_ACCESS`), as before.
+  
+  **If your code named the type.** There is no replacement, because the context it described is refused. A custom data node builds its context with `resolveRunDataContext(context)`, typed `RunDataContext`.
+  
+  **`@objectstack/plugin-security`, `@objectstack/runtime`, `@objectstack/service-analytics`, `@objectstack/platform-objects`:** comment and docstring text only. Shipped comments that said the security middleware hands through, skips or falls open for a context with no principal now say that it used to, and that ADR-0096 D5 refuses such a context. Nothing these packages do changes.
+- c572fe2: fix(runtime): the action door and the declared flow endpoint refuse a self-triggered flow declared to run as system to any caller but the system principal
+  
+  Clause-②: no
+  
+  The trigger door already refused this start, but two other doors that start a flow by name did not ask: an action of `type: 'flow'` (`POST /api/v1/actions/:object/:action`, and the MCP `run_action` tool, which reaches the same dispatch) and a declared endpoint of `type: 'flow'`. Any signed-in member who was refused at the trigger door could start the same elevated flow through either one, and its elevated write landed.
+  
+  **What changes.** All three doors now apply one rule from one place. A caller that is not the system principal gets `403 PERMISSION_DENIED` (ADR-0112 envelope) when it starts a flow declared `runAs: 'system'` whose `type` is `autolaunched`, `record_change` or `schedule`. Nothing runs: no run record, no node, no side effect. This includes a platform admin's session and the guest principal an `authRequired: false` endpoint admits. The refusal names no part of the flow, and its message is now the same at every door: it no longer names the trigger door.
+  
+  **What stays as it was.**
+  
+  - `screen` and `api` flows, elevated or not: entries the author designed (ADR-0073 D2).
+  - Every flow that does not declare `runAs: 'system'`.
+  - A parent flow's `subflow` node calling an elevated flow: the child starts through the engine, never through a door.
+  - The system principal (an in-process caller, such as a job), which starts every flow.
+  - The action's own `requiredPermissions` gate (ADR-0066 D4) still answers first. Holding that capability does not open a self-triggered elevated target.
+  - A declared endpoint's policy chain: an anonymous caller at an `authRequired: true` endpoint still gets `401` first.
+  
+  **If an action or an endpoint now answers 403.** Its target flow runs on its own trigger. If members are meant to start that elevated work, declare the target `type: 'screen'` (or `type: 'api'` for a signed inbound hook), which states that it is an entry and keeps the elevation reviewable. Or keep it self-triggered and point the action or endpoint at such an entry whose `subflow` node calls it.
+- 0fea05f: `os serve <config>`: a multi-package config now serves the top-level metadata no package declares, under the stack's `manifest.id`, and the boot says so, as an artifact boot of the same project already did
+  
+  Clause-②: yes
+  
+  A config boot (`os serve objectstack.config.ts`, with or without `--dev`, and no compiled artifact) of a stack that carries `packages[]` registers each package body and never the stack's top level. A top-level item that no package body declares was served by no door, and the boot said nothing. Three shapes reached it: flat `src/docs/*.md` pages when the stack's `manifest.id` names no `packages[]` entry, inline `docs` spread onto a composed stack's top level, and any other top-level collection (objects, views, …) that no package carries. `os build` of the same project, booted as an artifact, registered those items under the stack's `manifest.id` and warned.
+  
+  - **What changes.** The config boot now runs the same residual rule as the artifact boot, `MetadataPlugin.registerUnclaimedTopLevel`. Every top-level item no package body declares is registered under the stack's `manifest.id`, and the boot prints one `warn` line with the count: `config stack '<id>' carries N top-level metadata item(s) that none of its M package bodies declare`, followed by the remedy. `GET /api/v1/meta/<type>` lists those items under that id, as on an artifact boot of the same project. This includes the flat `src/docs/` pages of a stack whose `manifest.id` names no package, which a config boot did not list before. This entry supersedes, in the same release, the note in the `os serve <config>` flat `src/docs/` entry that "A config boot of such a stack still does not list them": it now does, under the stack's `manifest.id`, with the warning.
+  - **A new refusal, in one corner.** A residual view container is judged like any other: a top-level `defineView` container that no package declares, and whose own `name` is not the object it binds to, now refuses the config boot with ``Invalid `views:` container from manifest '<manifest id>': the container's own `name` is …``. On the previous release that config booted, because its top level was never read; an artifact boot of the same project already refused it. `os validate` and `os build` refuse the same container first, in the same words, so the refusal is never a boot-time surprise. A divergent container that a package body declares and the top level repeats is refused once, as that package's. **The one-line fix:** drop the container's `name`, or set it to the object it binds to.
+  - **The remedy the line names.** Declare each such item inside the `packages[]` entry of the package that owns it. A flat `src/docs/` page moves under `src/<package>/docs/`, where `<package>` is the package id or its last dot-separated segment.
+  - **What widens, in `@objectstack/metadata`.** Its root entry now exports `unclaimedTopLevel(stack)`, the pure residual decision both boot doors and `os validate` read, with its two types `UnclaimedTopLevel` and `UnclaimedTopLevelItem`, and `MetadataPlugin` gains the public static `registerUnclaimedTopLevel(sink, stack, source)`, the one residual rule both boot doors call.
+  - **What stays the same.** An artifact boot registers the same items and prints the same line, byte for byte. A single-package config (no `packages[]`) has no residual and is unchanged. A composed stack whose top level repeats its package bodies, as `composeStacks([…], { manifest: 'preserve' })` writes it, registers nothing extra and prints nothing.
+  - **What the residual is, on both doors.** It is metadata: a residual object is listed on `GET /api/v1/meta/object` under the stack's `manifest.id`, and `GET /api/v1/data/<object>` still answers `404`. That was already true on an artifact boot, and the config boot now gives the same answer.
+- 26aa999: fix(runtime,hono): approval e-mail links work on a kernel with no raw HTTP app — the dispatcher serves `/approvals/act`, and the Hono catch-all no longer consumes request bodies
+  
+  Clause-②: no
+  
+  On a self-hosted server, `@objectstack/plugin-approvals` serves the ADR-0043 action page (the approve / reject link in an approval e-mail or IM message) by mounting `GET` and `POST /api/v1/approvals/act` on the raw Hono app. A hosted tenant kernel has no raw app, so on that shape the path answered `404 ROUTE_NOT_FOUND` and every action link was dead.
+  
+  **`@objectstack/runtime`.** `HttpDispatcher` now serves exactly `/approvals/act` (no sub-paths) for `GET`, `HEAD` and `POST`. It forwards the request, unread, to the request kernel's `approvals` service (`IApprovalService.handleActionPage`) and returns that `Response` as it is.
+  
+  - `HEAD` answers as the self-hosted mount does: the `GET` page's status and headers, with no body. It renders and never decides.
+  - No `approvals` service registered, or one without `handleActionPage`: `501 NOT_IMPLEMENTED`, naming which. Never `ROUTE_NOT_FOUND`.
+  - A member that throws: a sanitised `500 INTERNAL_ERROR`, with the original error in the server log. The same answer, logged, when a transport hands over a `POST` whose body was already read, instead of an "invalid link" page for a live link.
+  - The token is the only credential, as on the self-hosted mount. The project-membership gate now skips the exact act path (unscoped or `/environments/:id`-scoped), so a signed-in caller who is not a member of the environment reaches the page like an anonymous one instead of getting `403 PROJECT_MEMBERSHIP_REQUIRED`. Every other path, `/approvals/act/...` and `/approvals/requests/...` included, is checked as before.
+  
+  **`@objectstack/hono`.** The `createHonoApp` catch-all (and the `/auth/*` fallback) read the JSON body with `c.req.json()`, which consumed the raw request for every `Content-Type`. A domain that forwarded the request got it empty. The body is now parsed from a clone, so `context.request` reaches the dispatcher unread, byte for byte. The parsed `body` the domains receive is unchanged for every input: JSON values as parsed, and `{}` for an empty, form, text or invalid body. The cost is that a request body is buffered twice for the life of the request.
+  
+  Nothing changes on a self-hosted server: the plugin's raw-app mount still serves the path there and never reaches the dispatcher.
+- cb3bb93: fix: a hook's refusal reached through an action or another hook answers in the hook's own words, and `$top=0` reports the real `total` (#22588)
+  
+  Clause-②: no
+  
+  - **A nested sandboxed refusal keeps its sentence (`@objectstack/runtime`).** A script action whose body writes through `ctx.api` and is refused by a sandboxed hook used to answer with the hook's debug wrapper in front of the sentence: `POST /api/v1/actions/:object/:action/:id` → `400 VALIDATION_ERROR` "`hook 'guard' threw: Error: A finished task cannot be reopened.`". It now answers the hook's sentence alone, as `PATCH /api/v1/data/:object/:id` and a declarative `operation: 'update'` action already did. The same holds for a hook that writes another object through `ctx.api` and is refused there: `/data` answers the inner hook's sentence. Status and `code` do not change. The cause was the sandbox's VM hop: a host error crosses into a body's VM as `name` and `message` only, so the refused write's sentence was left behind and the wrapper became the outer error's caller-facing text. The sentence now travels beside the wrapper and is used when the body lets that error escape unchanged. A body that catches the error and throws its own (or rewrites its message first) is still answered in its own words, a nested crash is still a `500`, and the server log still names every frame.
+  - **The `/actions` door reads its sentence through `sandboxBusinessMessage`** (`@objectstack/types`), the same read `/data`, the bulk doors and `/analytics/dataset/query` make, instead of its own copy. The wire answer is unchanged.
+  - **`$top=0` reports the filtered `total` (`@objectstack/metadata-protocol`).** `limit: 0` asks for no rows, and `findData` treated it as "no limit", so the zero-length page was reported as the total: `GET /api/v1/data/:object?$top=0` answered `total: 0` while `$top=1` answered the real count. The Console reads its list footer's record count from exactly that `$top: 0` request. A zero-row request is now a paged request: it returns no rows and the same `total` as any other page size, filters included. `$count=false` still skips the count and now omits `total` for `$top=0` too, instead of reporting `0`. A `search` query still reports its page-local estimate, as it does at every page size.
+- 5081090: fix(runtime): the `/meta/<objectName>` legacy object exit asks the read gate before it serves the schema (#22639)
+  
+  Clause-②: no
+  
+  - The runtime dispatcher's one-segment `/meta/<objectName>` exit, reached when a host's protocol has no type catalogue and no list for the segment, served the object schema through the field mask alone. It now asks the shared `/meta` read gate first, as every other object exit does, so an object's own `listViews` entries whose `requiredPermissions` the caller does not hold are not served there either. A caller who may edit the object still reads them all.
+- 8558668: fix(runtime): the webhook redeliver button works on a kernel with no raw HTTP app — the dispatcher serves `POST /webhooks/redeliver`
+  
+  Clause-②: no
+  
+  On a self-hosted server, `@objectstack/plugin-webhooks` serves the operator's redeliver button by mounting `POST /api/v1/webhooks/redeliver` on the raw Hono app. A hosted tenant kernel has no raw app, so on that shape the path answered `404 ROUTE_NOT_FOUND`, even though the plugin had registered the `webhooks` service that can serve it.
+  
+  **The door that changes: `HttpDispatcher`, for a kernel with no raw app.** It now serves exactly `POST /webhooks/redeliver` (no sub-paths, no other method). It forwards the request, body unread, to the request kernel's `webhooks` service (`IWebhookService.handleRedeliver`), read on every request, and returns that `Response` as it is. So the hosted door answers what the self-hosted mount answers: `200` with the replayed row, and the same `401`, `400`, `404` and `409` refusals with the same bodies. An anonymous call is refused `401 UNAUTHENTICATED` there exactly as on the mount.
+  
+  - No `webhooks` service registered (plugin-webhooks absent, or present without its redelivery veto), or one without `handleRedeliver`: `501 NOT_IMPLEMENTED`, naming which. Never `ROUTE_NOT_FOUND`.
+  - A member that throws: a sanitised `500 INTERNAL_ERROR`, with the original error in the server log. The same answer, logged, when a transport hands over a request whose body was already read, instead of a "not JSON" refusal for a well-formed request.
+  - Any method other than `POST` is not claimed: it answers the dispatcher's ordinary `404 ROUTE_NOT_FOUND` and never reaches the service.
+  - The dispatcher's two gates apply to this path unchanged: a session that still owes an authentication step, or a signed-in caller who is not a member of the request's environment, is refused `403` before the service runs. This door is therefore stricter than the self-hosted mount, never looser.
+  
+  Nothing changes on a self-hosted server: the plugin's raw-app mount still serves the path there and never reaches the dispatcher.
+- 117817e: fix(runtime): on a `kernel-resolver` host, a dispatcher door resolves a service on the request's own environment kernel before the host kernel. `HttpDispatcher.resolveService` used to ask the host kernel's scoped lookup first, and the host kernel's singleton `protocol` / `metadata` / `objectql` answered it whatever the scope. So `POST /api/v1/actions/:object/:action` loaded its subject row through a protocol that registers none of the environment's objects, and it answered `404 RECORD_NOT_FOUND` for a row the caller can read. Hosts with no request kernel of their own (single-environment, SharedProjectPlugin) resolve exactly as before, and an id that names nothing is still refused with 404.
+  
+  Clause-②: no
+- 0cbfb7c: A stack's declared `apis` endpoints are served on a config boot whose metadata service has an endpoint matcher, as they already were on an artifact boot
+  
+  Clause-②: no
+  
+  The endpoint matcher reads only the metadata service's own `api` items. The artifact door registers them there. A config boot (`os serve objectstack.config.ts` with no compiled artifact) handed them to the engine registry alone, so every declared path answered `404 ENDPOINT_NOT_FOUND`. The built artifact of the same stack matched the same path and answered `401 UNAUTHENTICATED` to a caller with no session. Measured on a stack with no plugin instances that declares one `authRequired` endpoint: `GET` of its path answered 404 from source and 401 after `os build`.
+  
+  `AppPlugin` now registers each declared `api` item into the metadata service's in-memory registry. It uses the route and the package stamp (`_packageId` / `_packageVersion` / `_provenance`) the code-defined datasources already take, and it takes the items from the boot's one forward-converted copy. The same boot now answers 401 from source. The stored item equals the artifact door's copy of it. On a boot that runs the artifact door (`os dev`, an artifact boot), the door stays the only registrar, so each item is registered once.
+  
+  One case is unchanged: a composition whose metadata service is the kernel's in-memory fallback has no endpoint matcher. A config whose `plugins` holds plugin instances, booted with `os serve`, is that composition. It now lists the items and still serves none.
+- 7f2f081: `os serve` of a host config serves the stack's declared `apis` endpoints, and a composition that still cannot serve them says so once
+  
+  Clause-②: no
+  
+  A host config is a stack whose `plugins` holds plugin instances: `examples/app-showcase` and every `create-objectstack` scaffold. On `os serve objectstack.config.ts` (and on `os start`, whose `serve` child boots the same way) such a config never got `@objectstack/metadata`'s `MetadataPlugin`, so its `metadata` service was the kernel's in-memory fallback, which has no endpoint matcher. Every declared `apis` path answered `404 ENDPOINT_NOT_FOUND` there, while `os dev` of the same stack matched it. Measured on the showcase with no session: `GET /api/v1/apps/showcase/tasks` answered 404 and now answers `401 UNAUTHENTICATED`; an undeclared path under the same namespace still answers 404.
+  
+  `os serve` now composes a `MetadataPlugin` with no artifact on a host-config boot that has none (when `os dev`'s artifact door does not compose and `plugins` holds no `MetadataPlugin` of its own). What an upgrading host author meets on that boot, measured on the showcase before and after:
+  
+  - `GET /api/v1/meta/TYPE` answers byte-for-byte the same for every type it served before (22 types read, including `app`, `view`, `page`, `dashboard`, `flow`, `position` and `permission`).
+  - `GET /api/v1/openapi.json` now documents the declared endpoints the boot serves; before, it listed none of them.
+  - No new database table: the `sys_metadata` storage tables were already provisioned, and no row is written at boot.
+  - The door writes nothing into the project directory at boot. Its metadata repository is rooted at the served app's directory, not at the directory the command was run from.
+  - The door reads none of the stack and primes nothing from the filesystem (`bootstrap: 'lazy'`), so `positions` / `permissions` / `capabilities` / `sharingRules` keep exactly one registrar.
+  - The dev-only `GET /api/v1/dev/metadata-events` stays unmounted unless `NODE_ENV=development`. Under `os serve --dev` with no compiled artifact it is now mounted, as it is on every other config's dev boot.
+  - With a remote cluster driver, the metadata service's cross-node cache invalidation (`metadata.changed`) now attaches; the boot warning that it was disabled is gone.
+  - Boot time and memory did not measurably move (median of 7 boots each: 8.47 s → 8.41 s to listening, 461 MB → 459 MB resident).
+  
+  A composition that still has no endpoint matcher (for example a kernel composed without `MetadataPlugin`) now logs one warning at boot per app that declares `apis`, with the count, naming the remedy: compose `@objectstack/metadata`'s `MetadataPlugin`.
+- 4267484: `GET /api/v1/meta/<type>` now lists an artifact's items in their converted shape, the shape `GET /api/v1/meta/<type>/<name>` serves
+  
+  Clause-②: no
+  
+  A compiled artifact built before a spec retirement still carries the retired key, and the ADR-0087 forward conversion rewrites it when the artifact boots. The artifact door converted it, so the item read served the converted copy. `AppPlugin` handed the RAW bundle to the engine registry, which is what the list read, `getMetaItemsForExecution` and the email template loader read. So the list served the retired key with `_diagnostics.valid: false`, and a reader of the list (the email loader is one) was handed an item the current schema refuses. Measured with `os dev -a dist/objectstack.json --fresh` on an artifact that declares no `engines.protocol` and carries a dashboard with `refreshInterval: 300`: the item read served `refreshIntervalSeconds: 300`, valid, and the list served `refreshInterval: 300`, invalid.
+  
+  `AppPlugin` now runs one forward conversion per boot, after the protocol handshake, over the same definition its security registrar already converted. The registry and that registrar both register from its result. An artifact authored in the current spellings registers exactly what it did before, because a conversion that changes nothing returns its input.
+  
+  The security seeders read the same registry copy first, so a boot with an engine now seeds what the conversion produced. Measured on `createStandaloneStack` with a `>=17.1.0` artifact: a sharing rule declared with the legacy recipient type `role` is now seeded as `position`, where it used to be skipped as an unmappable recipient. A seeded permission set no longer stores the retired `allowRestore` / `allowPurge` or the row-level-security `priority`.
+  
+  One case is unchanged: a bundle that carries `packages[]` still hands its package bodies over as authored. No conversion reaches those bodies, at the artifact door either.
+- c5b43b6: fix(metadata-core, runtime): a multi-package artifact built before a retirement boots at `os dev -a` and `os start`. The ADR-0087 forward conversion walks every `packages[].manifest` body, and the runtime's artifact load converts the bundle once, before any reader sees it
+  
+  Clause-②: no
+  
+  **What an operator saw.** A multi-package release artifact (ADR-0130 D4: `os build` of a `composeStacks(…, { manifest: 'preserve' })` project) carries its collections in `packages[i].manifest`. Take such an artifact built before a retirement, for example with a dashboard still spelled `refreshInterval`. `os dev -a dist/objectstack.json` and `os start` exited at boot with "`packages[1]` is not a package entry (ADR-0130 D4): manifest.dashboards.0.refreshInterval: `dashboard.refreshInterval` was renamed to `refreshIntervalSeconds`…". The metadata plugin's artifact door refused the same artifact at its strict parse. The ADR-0087 conversion converted that dashboard when it sat in the artifact's own `dashboards`, but it never read a package body, and the runtime read the bundle raw before any conversion ran.
+  
+  **What an operator sees now.** The same artifact boots at `os dev -a` and at `os start`. Each body's items are served converted (`refreshIntervalSeconds: 300`, valid), each owned by its own package. The boot log names each conversion once, with the body it found it in: `[MetadataPlugin] artifact '…' … converted 2 site(s) forward via ADR-0087 conversion 'dashboard-refresh-interval-to-refresh-interval-seconds' (first at packages[0].manifest.dashboards[0].refreshIntervalSeconds) …`. The artifact file itself is unchanged, so it converts again on every boot until it is rebuilt with `os build`. A body built after the retirement converts nothing and logs nothing. An artifact authored past every retirement is still refused with the tombstone inside its body.
+  
+  - **`@objectstack/metadata-core`.** `applyArtifactForwardConversions` runs the same conversion over each package body as over the artifact's own collections. It uses the same registry and the same window, decided once from the artifact's own `engines.protocol`; a body's own `engines.protocol` is not read. A notice from a body is located from the artifact root (`packages[1].manifest.…`).
+  - **`@objectstack/runtime`.** `loadArtifactBundle` converts the loaded artifact once, before it merges the runtime module and before the stack, `AppPlugin` or the `manifest` service read it. The database resolver reads the artifact file itself, and it runs the same conversion on what it reads. So a multi-package artifact that declares its default datasource in a package body opens that database, not the unified default.
+  
+  **Unchanged.** An artifact without `packages[]` converts exactly as before, with the same notices, paths and messages, and it is served the same way.
+- 6662e3f: A job's `timeout`, a turso datasource's `config.timeout` and a memory datasource's `config.persistence.autoSaveInterval`, authored by 17.x tooling, are honoured again when the bundle reaches `AppPlugin` raw
+  
+  Clause-②: no
+  
+  Protocol 18 renames these three duration keys so their unit is in their name: `jobs[].timeout` to `timeoutMs`, turso `config.timeout` to `config.timeoutMs`, memory `config.persistence.autoSaveInterval` to `autoSaveIntervalMs`. An artifact built earlier still carries the old spelling, and the boot's ADR-0087 forward conversion renames it. `AppPlugin` registered that converted copy with the `manifest` service and the security registrar, but its job scheduling and its datasource registration and auto-connect read the RAW bundle. So the scheduler and the drivers found no `*Ms` key and fell back to their defaults, with no notice.
+  
+  `loadArtifactBundle` converts at load, so an artifact booted with `os start --artifact` or `os dev -a` already arrived converted. A bundle in a host config's `plugins[]` array does not go through it: `os serve` and `os migrate` wrap it into `new AppPlugin(bundle)` as authored. Measured through that route on a bundle that declares no `engines.protocol`: the job was scheduled with no timeout at all, and both datasources were registered and handed to `connectDeclared` with the retired keys.
+  
+  Job scheduling, the code-defined datasource registration, its reserved-name check and `connectDeclared` now read the boot's one forward conversion, the copy every other registrar takes. A bundle authored in the current spellings is read exactly as before: a conversion that changes nothing returns its input, and the registered datasources carry the same `_packageId` / `_packageVersion` / `_provenance` stamps. A handler job's `ctx.bundle` is that converted copy as well.
+- 8c10776: fix(metadata-protocol): a stored-metadata migration records the user who ran it, or nobody, never a label
+  
+  Clause-②: no
+  
+  - **What was wrong.** The stored-metadata migration pass (`os migrate meta --stored`, `POST /api/v1/meta/_migrate-stored`, the runtime dispatcher's `POST /metadata/_migrate-stored`, and `migrateStoredMetadata()` called in process) recorded a label as the writer of every row it rewrote: `'os migrate meta --stored'`, `'<user id> (POST /api/v1/meta/_migrate-stored)'`, `'POST /api/v1/meta/_migrate-stored'`, or `'migrate-stored'`. The writer lands in `sys_metadata_history.recorded_by` and in the row's `updated_by`. Both columns are references to `sys_user`, so the label pointed at no user. Nothing refused it, because metadata writes run as the system.
+  - **What it does now.** The pass records the id of the user who ran it, exactly as every other metadata write does. A REST or runtime call by a signed-in user with `manage_metadata` records that user's id. A run with no user records `null`, which means "system-initiated". That covers the CLI, which opens the database directly with no session, and a system caller. The pass still names itself on each history row's `source` (`migrate-stored`), as it did before.
+  - **What an operator sees.** History rows and rewritten rows written by a migration from this release on name the person who ran it, or nobody. They never name a command or a route. Rows a migration rewrote before this release keep the label they were given.
+  - **Contract text.** `MetadataItem.authoredBy`'s description now gives the same rule as `PutOptions.actor`: the acting user's id, or `null` for a system-initiated write, never a label such as `"system"` or `"cli"`. The schema accepts the same values as before.
+- a3d47c2: fix(metadata-fs, runtime): metadata writes record the acting user's id or nobody, never the label `'fs'`, and a signed-in save through the runtime dispatcher records the user
+  
+  Clause-②: no
+  
+  - **What was wrong (filesystem repository).** `FileSystemRepository` named the label `'fs'` as the writer whenever no user was given. That covered every edit it saw on disk, every file it found that no recorded write produced, and an actor-less `put()`, which read back as `'fs'`. `MetadataPlugin` attaches the repository without naming a user, so this happened on every host that boots it. The contract for these fields (`PutOptions.actor`, `MetadataItem.authoredBy`, `MetadataEvent.actor`) is the acting user's id, or `null` for "nobody".
+  - **What it does now.** With no user named, the repository records `null`. A write that names a user records that user, and a write that records `null` reads back as `null`. The `fsActor` option keeps its type. When it is set, it is the user id reported for changes the repository did not write itself, and it no longer replaces a writer that a write recorded. Every event still names its origin on `source: 'fs'`, as before.
+  - **What was wrong (runtime dispatcher).** `PUT /api/v1/meta/:type/:name` served by the runtime dispatcher (the `@objectstack/hono` catch-all) saved without the caller's identity, so a signed-in author's save recorded `null` in `sys_metadata.updated_by` / `created_by` and `sys_metadata_history.recorded_by`. `RestServer`'s route recorded the user.
+  - **What an operator sees.** Filesystem-backed metadata history and events from this release on no longer name `'fs'` as the writer. A save through the runtime dispatcher records the signed-in user's id, as the REST route does, and a system caller with no user records `null`. Entries written before this release keep what they recorded.
+- 21c8644: A hook's `timeout` authored by 17.x tooling bounds the hook again, and the three retired translation keys are no longer served, when the bundle reaches `AppPlugin` raw
+  
+  Clause-②: no
+  
+  Protocol 18 renames a hook's `timeout` to `timeoutMs`, and retires three translation keys: a per-app `settings` group, a page component's `submitLabel` and a dashboard widget's `subCaption`. An artifact built earlier still carries the old spellings, and the boot's ADR-0087 forward conversion rewrites them. `AppPlugin` bound its hooks and loaded its translation bundles from the RAW bundle, though. So the engine's hook wrapper found no `timeoutMs` and ran the hook with no time limit and no notice, and the i18n service served all three retired keys; the per-app `settings` group still filled the gaps in the platform's own settings copy.
+  
+  `loadArtifactBundle` converts at load, so an artifact booted with `os start --artifact` or `os dev -a` already arrived converted. A bundle in a host config's `plugins[]` array does not go through it: `os serve` and `os migrate` wrap it into `new AppPlugin(bundle)` as authored. Measured through that route on a bundle that declares no `engines.protocol`: the hook reached the engine as `{ timeout: 5000 }` and never timed out, and `getTranslations('zh-CN')` served all three retired keys.
+  
+  The hook binder and `loadTranslations` now read the boot's one forward conversion, the copy every other `AppPlugin` registrar takes. Which lists are read (the stack's own, a legacy `manifest.hooks` or `manifest.translations` list) is decided as before, and a list the conversion lifted from the manifest is read once, converted. A bundle authored in the current spellings is read exactly as before: a conversion that changes nothing returns its input, so the binder and the i18n service are handed the authored hooks and bundles themselves.
+  
+  One more behaviour change, measured on the same `plugins[]` route. A hook body or a script action's body that declares `capabilities: ['crypto.hash']`, reaching `AppPlugin` raw, was refused at bind: an `invalid hook.body shape` or `invalid action.body shape` warn, the hook never fired and the action was not registered. Read from the converted copy, where `hook-body-crypto-hash-removed` (the capability was retired at major 17) strips the token, it now binds and runs, as the `manifest` service already registered it. A body that calls `ctx.crypto.hash` throws when it runs, because the sandbox never installed that call. The remedy: drop the `ctx.crypto.hash` call.
+- Updated dependencies [317cddd]
+- Updated dependencies [fec87e7]
+- Updated dependencies [34dba5a]
+- Updated dependencies [34dba5a]
+- Updated dependencies [34dba5a]
+- Updated dependencies [959c209]
+- Updated dependencies [c28f317]
+- Updated dependencies [17e4425]
+- Updated dependencies [7d7943d]
+- Updated dependencies [aa71c4d]
+- Updated dependencies [19bb55e]
+- Updated dependencies [19bb55e]
+- Updated dependencies [ba8af87]
+- Updated dependencies [99801d8]
+- Updated dependencies [2e10c9a]
+- Updated dependencies [67b669e]
+- Updated dependencies [0253192]
+- Updated dependencies [0253192]
+- Updated dependencies [0253192]
+- Updated dependencies [48cca4a]
+- Updated dependencies [bfc15d2]
+- Updated dependencies [2ff0825]
+- Updated dependencies [e7e6544]
+- Updated dependencies [149294c]
+- Updated dependencies [990341a]
+- Updated dependencies [9646991]
+- Updated dependencies [7aa8d51]
+- Updated dependencies [95a8435]
+- Updated dependencies [c8a9783]
+- Updated dependencies [9e9e6f9]
+- Updated dependencies [2fbe1fd]
+- Updated dependencies [60bcfe7]
+- Updated dependencies [d112087]
+- Updated dependencies [d112087]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [8c5aa50]
+- Updated dependencies [7de0265]
+- Updated dependencies [8c105e3]
+- Updated dependencies [e02833c]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [c8b062f]
+- Updated dependencies [117d34d]
+- Updated dependencies [6729e10]
+- Updated dependencies [1920cf3]
+- Updated dependencies [1920cf3]
+- Updated dependencies [41d0d40]
+- Updated dependencies [c52bfb4]
+- Updated dependencies [c7d6037]
+- Updated dependencies [72b26ed]
+- Updated dependencies [2d21b9c]
+- Updated dependencies [f66fdc7]
+- Updated dependencies [9fdb127]
+- Updated dependencies [615c696]
+- Updated dependencies [968acc8]
+- Updated dependencies [111ffff]
+- Updated dependencies [12b9daf]
+- Updated dependencies [d85615d]
+- Updated dependencies [6a06e3b]
+- Updated dependencies [0e9e7b7]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [9c93ce6]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [b88c356]
+- Updated dependencies [a3bcbcf]
+- Updated dependencies [1abfc58]
+- Updated dependencies [8a399b2]
+- Updated dependencies [db87a02]
+- Updated dependencies [04e776b]
+- Updated dependencies [a7df552]
+- Updated dependencies [6befe19]
+- Updated dependencies [8caa131]
+- Updated dependencies [2f70c22]
+- Updated dependencies [78f841b]
+- Updated dependencies [1fb274e]
+- Updated dependencies [1fb274e]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [f85a83b]
+- Updated dependencies [f85a83b]
+- Updated dependencies [2015c54]
+- Updated dependencies [73a0a6b]
+- Updated dependencies [f2a45db]
+- Updated dependencies [aa9447c]
+- Updated dependencies [3d91885]
+- Updated dependencies [8fc50b7]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [ae97841]
+- Updated dependencies [e67ba80]
+- Updated dependencies [c8d06a9]
+- Updated dependencies [cdeabec]
+- Updated dependencies [4935c66]
+- Updated dependencies [c6fe02d]
+- Updated dependencies [c6fe02d]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [a87d8be]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [a543e24]
+- Updated dependencies [51290bc]
+- Updated dependencies [ad381fd]
+- Updated dependencies [6ff6ed6]
+- Updated dependencies [2b61f2d]
+- Updated dependencies [d0bb78e]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3b49318]
+- Updated dependencies [4e9fe9f]
+- Updated dependencies [fe98cc6]
+- Updated dependencies [3aa0c7b]
+- Updated dependencies [9ad3d24]
+- Updated dependencies [bb4f5cc]
+- Updated dependencies [326a90a]
+- Updated dependencies [9fe7448]
+- Updated dependencies [2e11d90]
+- Updated dependencies [4049cac]
+- Updated dependencies [4578c56]
+- Updated dependencies [fbcbcf1]
+- Updated dependencies [c512c25]
+- Updated dependencies [ffb31fc]
+- Updated dependencies [0b997ea]
+- Updated dependencies [35afb15]
+- Updated dependencies [81bd9fa]
+- Updated dependencies [215e662]
+- Updated dependencies [3d886ee]
+- Updated dependencies [f4069c5]
+- Updated dependencies [d8d0711]
+- Updated dependencies [0ee2d15]
+- Updated dependencies [a45d5d8]
+- Updated dependencies [4f4c4ed]
+- Updated dependencies [f6e1d49]
+- Updated dependencies [b1f7a7a]
+- Updated dependencies [345d3f3]
+- Updated dependencies [f2626c7]
+- Updated dependencies [e9a1f5c]
+- Updated dependencies [40a6ee5]
+- Updated dependencies [e87070e]
+- Updated dependencies [3f80f17]
+- Updated dependencies [5910b5e]
+- Updated dependencies [7098aca]
+- Updated dependencies [97610a5]
+- Updated dependencies [081e6a0]
+- Updated dependencies [c8c803c]
+- Updated dependencies [f05649f]
+- Updated dependencies [e030d43]
+- Updated dependencies [1884948]
+- Updated dependencies [8a995b8]
+- Updated dependencies [3089848]
+- Updated dependencies [e23eccb]
+- Updated dependencies [ac8f2c5]
+- Updated dependencies [746637e]
+- Updated dependencies [00bee27]
+- Updated dependencies [fdfdd7e]
+- Updated dependencies [db9cf80]
+- Updated dependencies [e75dced]
+- Updated dependencies [9af0005]
+- Updated dependencies [9af0005]
+- Updated dependencies [46692c1]
+- Updated dependencies [f66c440]
+- Updated dependencies [440bed6]
+- Updated dependencies [3ca71b6]
+- Updated dependencies [94379f4]
+- Updated dependencies [166a94f]
+- Updated dependencies [b2549a8]
+- Updated dependencies [7806a14]
+- Updated dependencies [ee8751d]
+- Updated dependencies [96e4be4]
+- Updated dependencies [35ef501]
+- Updated dependencies [faf6348]
+- Updated dependencies [ce3d0ad]
+- Updated dependencies [e148ca9]
+- Updated dependencies [557ae7c]
+- Updated dependencies [6a3fe25]
+- Updated dependencies [7731d70]
+- Updated dependencies [da989bb]
+- Updated dependencies [3073b72]
+- Updated dependencies [c76edeb]
+- Updated dependencies [5b12503]
+- Updated dependencies [514bf3c]
+- Updated dependencies [20e7d52]
+- Updated dependencies [b3a3634]
+- Updated dependencies [3e72f93]
+- Updated dependencies [86f53a4]
+- Updated dependencies [f89b5f5]
+- Updated dependencies [d25b187]
+- Updated dependencies [0e00d36]
+- Updated dependencies [d303b3e]
+- Updated dependencies [018b077]
+- Updated dependencies [0fea05f]
+- Updated dependencies [86bf9ed]
+- Updated dependencies [d748ae8]
+- Updated dependencies [dab6bf4]
+- Updated dependencies [25be876]
+- Updated dependencies [ed1de8c]
+- Updated dependencies [a00cf99]
+- Updated dependencies [5fb1746]
+- Updated dependencies [29a163f]
+- Updated dependencies [e223152]
+- Updated dependencies [18d9990]
+- Updated dependencies [9f5eca5]
+- Updated dependencies [9963322]
+- Updated dependencies [b27b894]
+- Updated dependencies [874a38d]
+- Updated dependencies [cb3bb93]
+- Updated dependencies [ad14957]
+- Updated dependencies [02d9f69]
+- Updated dependencies [f53f14b]
+- Updated dependencies [a800912]
+- Updated dependencies [4b7c630]
+- Updated dependencies [87cd458]
+- Updated dependencies [d973c34]
+- Updated dependencies [156ddfa]
+- Updated dependencies [1bb1da1]
+- Updated dependencies [5081090]
+- Updated dependencies [5081090]
+- Updated dependencies [c63028e]
+- Updated dependencies [615cba8]
+- Updated dependencies [b6eb25f]
+- Updated dependencies [165587e]
+- Updated dependencies [3b5475a]
+- Updated dependencies [e04759d]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [b32ee3e]
+- Updated dependencies [b62260c]
+- Updated dependencies [91f46d0]
+- Updated dependencies [e5899a6]
+- Updated dependencies [d7b26df]
+- Updated dependencies [9859e4e]
+- Updated dependencies [490cb6d]
+- Updated dependencies [e865300]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [c74d843]
+- Updated dependencies [6d5191e]
+- Updated dependencies [85edd61]
+- Updated dependencies [e84aeb3]
+- Updated dependencies [322ff1e]
+- Updated dependencies [680a86b]
+- Updated dependencies [d952358]
+- Updated dependencies [7b0a9c9]
+- Updated dependencies [5fc57b3]
+- Updated dependencies [fe58bbc]
+- Updated dependencies [c4e7fa5]
+- Updated dependencies [581ca7d]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [b7cd1af]
+- Updated dependencies [9814035]
+- Updated dependencies [55382dc]
+- Updated dependencies [b1d701b]
+- Updated dependencies [c11b758]
+- Updated dependencies [f9ebb7d]
+- Updated dependencies [efcbac7]
+- Updated dependencies [51f36e7]
+- Updated dependencies [20028df]
+- Updated dependencies [69d4218]
+- Updated dependencies [5ce6773]
+- Updated dependencies [8532783]
+- Updated dependencies [eb20c33]
+- Updated dependencies [9432bac]
+- Updated dependencies [6373952]
+- Updated dependencies [3caae97]
+- Updated dependencies [3f69471]
+- Updated dependencies [8bc7836]
+- Updated dependencies [e5687cb]
+- Updated dependencies [1e62f71]
+- Updated dependencies [ec7f7f8]
+- Updated dependencies [038d4c9]
+- Updated dependencies [5677add]
+- Updated dependencies [3fdb92d]
+- Updated dependencies [8d8f965]
+- Updated dependencies [147a0d1]
+- Updated dependencies [21914c3]
+- Updated dependencies [1959aac]
+- Updated dependencies [e1deaef]
+- Updated dependencies [4663801]
+- Updated dependencies [d294951]
+- Updated dependencies [6a6a4d3]
+- Updated dependencies [1badd31]
+- Updated dependencies [58f5c90]
+- Updated dependencies [55828c5]
+- Updated dependencies [7856110]
+- Updated dependencies [9b37edb]
+- Updated dependencies [a22e67b]
+- Updated dependencies [62ce45d]
+- Updated dependencies [c5b43b6]
+- Updated dependencies [39e93ef]
+- Updated dependencies [0a29bec]
+- Updated dependencies [02bec6c]
+- Updated dependencies [719183f]
+- Updated dependencies [8464380]
+- Updated dependencies [8c10776]
+- Updated dependencies [c4b84ad]
+- Updated dependencies [252a582]
+- Updated dependencies [abf8655]
+- Updated dependencies [f931e76]
+- Updated dependencies [0511341]
+- Updated dependencies [dfb3ba2]
+- Updated dependencies [e5f9f01]
+- Updated dependencies [aa5bfdf]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [8311650]
+- Updated dependencies [de70e97]
+- Updated dependencies [74c4b34]
+- Updated dependencies [e040b8c]
+- Updated dependencies [f451a59]
+- Updated dependencies [ba95607]
+- Updated dependencies [b53b949]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [1e44436]
+- Updated dependencies [2acff87]
+- Updated dependencies [299a2c6]
+- Updated dependencies [e23eccb]
+- Updated dependencies [bf492c8]
+- Updated dependencies [c7a3234]
+  - @objectstack/spec@18.0.0-next.0
+  - @objectstack/plugin-security@18.0.0-next.0
+  - @objectstack/metadata-protocol@18.0.0-next.0
+  - @objectstack/objectql@18.0.0-next.0
+  - @objectstack/plugin-auth@18.0.0-next.0
+  - @objectstack/core@18.0.0-next.0
+  - @objectstack/driver-sql@18.0.0-next.0
+  - @objectstack/rest@18.0.0-next.0
+  - @objectstack/metadata-core@18.0.0-next.0
+  - @objectstack/metadata@18.0.0-next.0
+  - @objectstack/service-datasource@18.0.0-next.0
+  - @objectstack/types@18.0.0-next.0
+  - @objectstack/formula@18.0.0-next.0
+  - @objectstack/driver-turso@18.0.0-next.0
+  - @objectstack/driver-memory@18.0.0-next.0
+  - @objectstack/driver-sqlite-wasm@18.0.0-next.0
+  - @objectstack/observability@18.0.0-next.0
+  - @objectstack/service-cluster@18.0.0-next.0
+  - @objectstack/service-i18n@18.0.0-next.0
+
 ## 17.7.0
 
 ### Minor Changes

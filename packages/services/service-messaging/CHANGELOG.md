@@ -1,5 +1,316 @@
 # @objectstack/service-messaging
 
+## 18.0.0-next.0
+
+### Minor Changes
+
+- 0db5ad5: fix(service-messaging)!: mark-read writes a read receipt only for a notification delivered to that user
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime narrowing on the inbox mark-read path, not a metadata change: no spec key, export, option, response field or stored shape is removed, renamed or re-shaped, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which ids produce a receipt row: an id never delivered to the caller now writes none and is not counted, while every delivered id behaves as before. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this path and this diff adds none (not registered / already-registered); and no published interface or type changes (not runtime-interface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention: `MessagingService.markRead` — the method behind the notifications mark-read door, and behind `markReadAsCaller` — writes a `read` receipt only for a notification that was delivered to that user. A read receipt belongs to a recipient (ADR-0030 keys it by recipient).
+  
+  - **Delivered** means a receipt keyed on that user already exists (it is flipped to `read` in place, as before), or the user's inbox holds a message for that notification. The inbox message is enough on its own, because the inbox channel's `delivered` receipt is best-effort.
+  - **Any other id** writes no receipt, is not counted in `readCount`, and its notification's organization is not read. The response shape `{ success, readCount }` is unchanged.
+  - **`markAllRead`** is unchanged: every id it sweeps comes from the user's own inbox.
+  
+  What changes for you: nothing in what you write. A `readCount` lower than the number of ids sent means some of them were not notifications delivered to that user, and nothing was written for those.
+
+### Patch Changes
+
+- a7a48b7: The storage store's by-id methods and the HTTP outbox's `redeliver` now pass the explicit system opt-in (`{ isSystem: true }`) on their data-engine calls. Until now they reached the engine with no principal and no opt-in, and the security middleware let that through only because of its principal-less hand-off.
+  
+  Clause-②: no
+  
+  - **service-storage.** `StorageMetadataStore.getFile`, `updateFile`, `deleteFile`, `getSession`, `updateSession` and `deleteSession` take the opt-in inside the store. Access stays by id, and the reads stay unscoped by organization, as before. On update and delete the acting organization still reaches the driver beside the opt-in, so a row stamped for another organization is still out of reach of these doors. The doors keep the authorization they already ran.
+  - **service-storage, the update payload.** `updateFile` and `updateSession` now send the caller's patch alone, where they used to send the whole row read back merged with it. The engine's read-only strip, which does not run for a system write, used to take `organization_id` and the four audit columns out of that row; now the store never sends them. The stored row is the same as before, and a column another writer changed between the read and the write is no longer reverted by it.
+  - **service-messaging.** `SqlHttpOutbox.redeliver` takes the opt-in on both of its reads and on its reset write. The caller's `tenantId` stays on every call as the driver-level scope, so a delivery in another organization is still not found. The reset write states `bypassTenantAudit: false`, so a redelivery from a caller with no organization is still reported by the driver's tenant audit.
+  - None of the gates the security middleware runs before its hand-off applies to these calls. ⛔ No new export on either package entry, and no new elevation API.
+- b88c356: The remaining platform producers in these four packages now pass the explicit system opt-in (`{ isSystem: true }`) on their data-engine calls. Until now they reached the engine with no principal and no opt-in, and the security middleware let that through only because of its principal-less hand-off.
+  
+  Clause-②: no
+  
+  - **service-messaging, the inbox read state.** `listInbox` (and its unread total), the receipt read behind it, and mark-read / mark-all-read take the opt-in inside the service. Their scope is unchanged: every read of a user's rows is keyed on the user id the door derived from the session, the receipt a mark-read inserts is stamped with it, and the receipt it updates is one a user-keyed read returned.
+  - **service-messaging, `owner_of:` audiences.** The record read takes the opt-in, the same posture as the email lookup beside it. It reads only `id` and the owner fields, and only the owner id leaves the resolver. An `owner_of:` audience on an object whose sharing model is `private` now resolves its owner; before, it resolved to nobody.
+  - **service-messaging, the rest of the fan-out and the outboxes.** The `role:` and `team:` membership reads, the email and SMS recipient reads, the notification template read, the dedup lookup in `emit()`, and both outboxes' enqueue, ack and list.
+  - **service-storage.** `StorageMetadataStore.createFile` and `createSession` insert under the opt-in. The organization still reaches the driver beside it, so the stored organization is unchanged, and the file's `owner_id` is still the uploading user.
+  - **service-settings.** The `sys_secret` store the plugin builds (insert, get, update), and the read that verifies a rotation before the old secret is reaped. A store `update` now writes the `ciphertext` it is given; without a context the engine's read-only strip dropped it. No caller in this repository uses `update`.
+  - **metadata-protocol.** `SysMetadataRepository.getByHash`, `list`, `history` and the history replay of `watch()`.
+  - None of the gates the middleware runs before its hand-off applies to these calls. ⛔ No new export on any package entry, and no new elevation API.
+- d294951: Boot-time system-table provisioning honours `OS_SKIP_SCHEMA_SYNC` / `skipSchemaSync`
+  
+  Clause-②: no
+  
+  `OS_SKIP_SCHEMA_SYNC=1`, or `ObjectQLPlugin`'s `skipSchemaSync` option, declares that a deployment's DDL is managed out-of-band ("Use after running migrations manually"). The engine's boot honoured it, but `AuditPlugin` and `MessagingServicePlugin` still created their system tables at `kernel:ready`. A deployment that set the flag got tables created behind its back while its boot log said no DDL ran, and a database role without DDL rights got a DDL failure it never asked for.
+  
+  - **What changes.** With the flag set, `AuditPlugin` (`sys_audit_log`, `sys_activity`, `sys_comment`, `sys_comment_reaction`) and `MessagingServicePlugin` (`sys_notification`, `sys_inbox_message`, `sys_notification_receipt`, `sys_notification_delivery`, `sys_notification_preference`, `sys_notification_subscription`, `sys_notification_template`, `sys_http_delivery`) issue no DDL and no existence probe at boot. Each logs one `info` line naming the objects it did not provision and the flag, and pointing at `os migrate apply`, which creates any that are missing (`os migrate plan` lists them as `create_table`). That path was measured to create all twelve tables, on one database, with the telemetry sibling database, and with the flag set in the migrate run's own environment.
+  - **Which value is read.** The one `ObjectQLPlugin` resolved: the option, else the environment variable. An explicit `skipSchemaSync: false` therefore still provisions under `OS_SKIP_SCHEMA_SYNC=1`. `ObjectQLPlugin` publishes that value on the engine instance it registers. It is a property of the instance, not a declared member, so no type or export changes.
+  - **What is unchanged.** With the flag unset, provisioning is exactly as before. `syncObjectSchema` is not gated, so on a flag deployment a runtime publish still gives a new object its table.
+- 6a6a4d3: fix: a refused on-demand schema sync (`syncObjectSchema`) is logged at `error`, naming what was not created and how to fix it (#22985)
+  
+  Three places create an object's storage after the boot's own schema sync has run. When the driver refused that DDL, each of them logged a `warn` and carried on, so the deployment looked healthy while a table did not exist. Each now logs one `error` line that says what was not created, that nothing else will look wrong, and what fixes it. The driver's refusal is kept out of the line itself. Nothing else changes: the boot, the connect and the publish still complete as before.
+  
+  - **`@objectstack/service-messaging`**: boot-time provisioning of the eight notification tables. A refused table logs `[messaging] could not provision <table> storage — its storage was NOT created. …` at `error`, once per table per boot, with the refusal in the record's meta. The fix it names: resolve the refusal, then restart or run `os migrate apply`. This used to be a `warn`. Under `skipSchemaSync` / `OS_SKIP_SCHEMA_SYNC=1` the provisioning still issues no DDL, so this line cannot appear.
+  - **`@objectstack/service-datasource`**: connecting a declared datasource re-runs the schema sync of every object bound to it. A refused object logs `datasource '<name>': object '<object>' has NO working storage here — …` at `error`, once per object per connect, with the refusal in meta. On a logger that has no `error`, the same line is logged at `warn`. The fix it names: resolve the refusal, then restart. This used to be a `warn` reading `syncObjectSchema('<object>') failed`.
+  - **`@objectstack/metadata-protocol`**: publishing an object whose storage sync is refused logs `[Protocol] object '<name>' was published but its storage was NOT created or altered — …` with `console.error`. The driver's refusal is the second argument. The fix it names: resolve the refusal, then publish the object again or restart. The publish still answers success. This replaces the `console.warn` line `[Protocol] table sync failed for object '<name>': …`, so a log search for that text now finds nothing.
+- 5d63c37: The notification and HTTP outboxes read their claim credential back from the store, so `ack()` lands on a Postgres table whose epoch-ms columns are still `real`
+  
+  Clause-②: no
+  
+  Tables created while the `number` field type still mapped to `real` keep those columns as IEEE-754 binary32. Newer tables get an exact numeric column, and existing columns are not migrated. A binary32 `claimed_at` stores a rounding of the claim's `now`, to the nearest 131 072 ms at today's magnitude, and reads back a nearby decimal. `SqlNotificationOutbox` and `SqlHttpOutbox` handed out the in-memory `now` as the claim credential, so it never equalled the stored value. Every `ack()` was refused with `DELIVERY_NOT_ELIGIBLE` as a lost claim, and the dispatcher absorbed the refusal. The row stayed `in_flight` with `attempts = 0`, and every reap handed it to the next claim. The notification was re-delivered about every 131 s, with no end.
+  
+  - **What changes.** `claim()` and `claimDigest()` return `claimedAt` as the `claimed_at` value the store returned after the claiming update. The value written is unchanged. The rows a claim took are identified by candidate id, holder and status. `claimed_at` is no longer compared with the client's `now` in that read. `ack()`'s ownership check and its compare-and-set are unchanged. They now compare that stored value with the stored value, which is exact on any numeric column.
+  - **A stuck row heals by itself.** A row left `in_flight` by a refused ack is reaped by the visibility timeout, claimed again, sent once and acked. No operator act is needed. On a `real` column the reap still runs at binary32 granularity, up to about 131 s after `claimTtlMs`.
+  - **What is unchanged.** A genuinely lost claim is still refused. If another node, or this node's own later claim, reaped and re-claimed the row while a send ran, the late ack gets `DELIVERY_NOT_ELIGIBLE` and writes nothing. The `ClaimedDeliveryRecord` and `HttpClaimCredential` types are unchanged. Existing `real` columns are not migrated, and duplicate inbox rows that were already delivered stay as they are.
+- ef1fcb2: A declared index states its uniqueness scope: bare `unique: true` on `indexes[]` is refused (protocol 18, ADR-0120 D1/D7), stored metadata converts it to `unique: 'global'` with zero drift, and `VISIBILITY_STRICT_OPTIONS` leaves `@objectstack/spec`'s public surface.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered declared-index-bare-unique-true-retired, visibility-strict-options-unexported -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface and one export removal, shipped as `minor` under the launch-window convention for accept-set narrowings (Changesets pre mode is not in on `main`).
+  
+  **Why.** On a declared index, bare `unique: true` was the one `unique` spelling whose scope was positional. It built the index over exactly `fields`, one holder across the whole installation, while reading like "unique per organization" to an author who knew the field-level meaning. 17.x warned (lint `unique/unscoped-declared-index`). Protocol 18 refuses it, so the scope is always stated.
+  
+  **What is refused.** A declared index (`objects[].indexes[]`, `objectExtensions[].indexes[]`) whose `unique` is bare `true`. The refusal names both replacements, and says which one keeps the index bare `true` built. It is raised by:
+  
+  - the schema (`IndexSchema.unique`, now `false | 'global' | 'organization'`), at every door that parses: `ObjectSchema.create()` and `ObjectSchema.parse()`, `defineStack`, `os validate`, `os build`, and the runtime save door (`422 INVALID_METADATA`). `tsc` refuses it too, because the input type no longer admits `true`;
+  - lint `unique/unscoped-declared-index`, now an `error` and a gating rule on all three commands. It is what refuses the spelling under `os lint`, which never parses.
+  
+  **What converts.** The protocol-18 ADR-0087 conversion `declared-index-unique-scope` rewrites a declared index's bare `true` to `'global'` on every data-at-rest seam: stored `sys_metadata` rows (`applyConversionsToStoredItem`), built artifacts inside their declared-floor window, and `os migrate meta --from 17`. `'global'` is exactly the index bare `true` built, so the physical index is byte-identical and the drift plan is empty. It is retired from the authoring funnel, so a live author is refused and taught instead of converted silently.
+  
+  **What stays accepted.** Field-level `unique: true` still means one holder per organization and stays valid indefinitely. On a declared index, `unique: false` or omitted, `'global'` and `'organization'` parse exactly as before.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `indexes: [{ fields: [...], unique: true }]` | `indexes: [{ fields: [...], unique: 'global' }]`: the same index, nothing on disk changes |
+  | …the same, when you meant one holder per organization | `unique: 'organization'`: the driver prepends the NULL-safe organization key part at registration, and `os migrate plan` shows the index change |
+  | `import { VISIBILITY_STRICT_OPTIONS } from '@objectstack/spec/shared'` (or the root entry) | delete the import: it was an internal option bag for the spec's own visibility-carrying schemas, and those schemas are unchanged |
+  
+  **The one-line fix: on every declared index, write `unique: 'global'` where you wrote `unique: true`.** Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.
+  
+  **Who is affected, measured.** At `e67ba80049`, an AST census found 48 declared indexes with bare `unique: true` in 39 source files of this repository, all platform and plugin objects. Every one is respelled `'global'` in this change, and the nine-key S5 corpus is pinned to build byte-identical indexes before and after (`driver-sql`'s `sql-driver-unique-tenancy.test.ts`). `examples/**` and `apps/**` carry none. Deployed metadata and other repositories were not measured.
+  
+  ### The kit
+  
+  - **The refusal.** `IndexSchema.unique` in `data/object.zod.ts`, with its own prescription. The lint rule moved from `warning` to `error` and from advisory to gating.
+  - **The conversion.** `declared-index-unique-scope` (`toMajor: 18`, retired from the load path, `retiredAfter: '17.7.0'`), with its S4/S5 fixture.
+  - **The ledger.** The D3 semantic entries `declared-index-bare-unique-true-retired` (the scope each respelled index really meant is the author's call) and `visibility-strict-options-unexported`, plus a step-18 rationale fragment.
+  - **The export.** `VISIBILITY_STRICT_OPTIONS` moved to the unbarrelled `shared/visibility-strict-options.ts`, beside its type `StrictObjectOptions`. `check:api-surface` counts the removal.
+  - **The pins.** The "`'global'` is a synonym of `true`" driver pin retired with the bare spelling. The verbatim pin is stated in `'global'`.
+- Updated dependencies [317cddd]
+- Updated dependencies [fec87e7]
+- Updated dependencies [c28f317]
+- Updated dependencies [2e10c9a]
+- Updated dependencies [67b669e]
+- Updated dependencies [0253192]
+- Updated dependencies [0253192]
+- Updated dependencies [48cca4a]
+- Updated dependencies [bfc15d2]
+- Updated dependencies [2ff0825]
+- Updated dependencies [7aa8d51]
+- Updated dependencies [95a8435]
+- Updated dependencies [60bcfe7]
+- Updated dependencies [d112087]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [8c5aa50]
+- Updated dependencies [7de0265]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [c8b062f]
+- Updated dependencies [117d34d]
+- Updated dependencies [6729e10]
+- Updated dependencies [1920cf3]
+- Updated dependencies [41d0d40]
+- Updated dependencies [c52bfb4]
+- Updated dependencies [c7d6037]
+- Updated dependencies [72b26ed]
+- Updated dependencies [2d21b9c]
+- Updated dependencies [f66fdc7]
+- Updated dependencies [9fdb127]
+- Updated dependencies [615c696]
+- Updated dependencies [968acc8]
+- Updated dependencies [111ffff]
+- Updated dependencies [12b9daf]
+- Updated dependencies [d85615d]
+- Updated dependencies [6a06e3b]
+- Updated dependencies [0e9e7b7]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [9c93ce6]
+- Updated dependencies [77a94d8]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [879bd38]
+- Updated dependencies [04e776b]
+- Updated dependencies [1c563af]
+- Updated dependencies [a7df552]
+- Updated dependencies [2f70c22]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [a87d8be]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [ad381fd]
+- Updated dependencies [4e4111c]
+- Updated dependencies [2b61f2d]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3b49318]
+- Updated dependencies [4e9fe9f]
+- Updated dependencies [9ad3d24]
+- Updated dependencies [326a90a]
+- Updated dependencies [9fe7448]
+- Updated dependencies [2e11d90]
+- Updated dependencies [0b7ba4d]
+- Updated dependencies [4578c56]
+- Updated dependencies [c512c25]
+- Updated dependencies [215e662]
+- Updated dependencies [3d886ee]
+- Updated dependencies [d8d0711]
+- Updated dependencies [a45d5d8]
+- Updated dependencies [f6e1d49]
+- Updated dependencies [e9a1f5c]
+- Updated dependencies [40a6ee5]
+- Updated dependencies [5910b5e]
+- Updated dependencies [7098aca]
+- Updated dependencies [97610a5]
+- Updated dependencies [081e6a0]
+- Updated dependencies [1884948]
+- Updated dependencies [3089848]
+- Updated dependencies [e23eccb]
+- Updated dependencies [ac8f2c5]
+- Updated dependencies [746637e]
+- Updated dependencies [db9cf80]
+- Updated dependencies [e75dced]
+- Updated dependencies [9af0005]
+- Updated dependencies [440bed6]
+- Updated dependencies [b2549a8]
+- Updated dependencies [ee8751d]
+- Updated dependencies [96e4be4]
+- Updated dependencies [35ef501]
+- Updated dependencies [faf6348]
+- Updated dependencies [557ae7c]
+- Updated dependencies [6a3fe25]
+- Updated dependencies [7731d70]
+- Updated dependencies [3073b72]
+- Updated dependencies [c76edeb]
+- Updated dependencies [5b12503]
+- Updated dependencies [514bf3c]
+- Updated dependencies [20e7d52]
+- Updated dependencies [b3a3634]
+- Updated dependencies [3e72f93]
+- Updated dependencies [f89b5f5]
+- Updated dependencies [d25b187]
+- Updated dependencies [0e00d36]
+- Updated dependencies [d748ae8]
+- Updated dependencies [dab6bf4]
+- Updated dependencies [ed1de8c]
+- Updated dependencies [a00cf99]
+- Updated dependencies [a00cf99]
+- Updated dependencies [5fb1746]
+- Updated dependencies [29a163f]
+- Updated dependencies [e223152]
+- Updated dependencies [9f5eca5]
+- Updated dependencies [9963322]
+- Updated dependencies [b27b894]
+- Updated dependencies [874a38d]
+- Updated dependencies [02d9f69]
+- Updated dependencies [f53f14b]
+- Updated dependencies [a800912]
+- Updated dependencies [d973c34]
+- Updated dependencies [156ddfa]
+- Updated dependencies [5081090]
+- Updated dependencies [b6eb25f]
+- Updated dependencies [165587e]
+- Updated dependencies [e04759d]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [b32ee3e]
+- Updated dependencies [91f46d0]
+- Updated dependencies [e5899a6]
+- Updated dependencies [d7b26df]
+- Updated dependencies [490cb6d]
+- Updated dependencies [e865300]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [c74d843]
+- Updated dependencies [6d5191e]
+- Updated dependencies [85edd61]
+- Updated dependencies [e84aeb3]
+- Updated dependencies [322ff1e]
+- Updated dependencies [7b0a9c9]
+- Updated dependencies [5fc57b3]
+- Updated dependencies [fe58bbc]
+- Updated dependencies [c4e7fa5]
+- Updated dependencies [581ca7d]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [b7cd1af]
+- Updated dependencies [9814035]
+- Updated dependencies [55382dc]
+- Updated dependencies [b1d701b]
+- Updated dependencies [efcbac7]
+- Updated dependencies [51f36e7]
+- Updated dependencies [31b5a5f]
+- Updated dependencies [20028df]
+- Updated dependencies [69d4218]
+- Updated dependencies [5ce6773]
+- Updated dependencies [9432bac]
+- Updated dependencies [3f69471]
+- Updated dependencies [8bc7836]
+- Updated dependencies [e5687cb]
+- Updated dependencies [1e62f71]
+- Updated dependencies [ec7f7f8]
+- Updated dependencies [038d4c9]
+- Updated dependencies [147a0d1]
+- Updated dependencies [1959aac]
+- Updated dependencies [e1deaef]
+- Updated dependencies [3071d3e]
+- Updated dependencies [1badd31]
+- Updated dependencies [55828c5]
+- Updated dependencies [7856110]
+- Updated dependencies [9b37edb]
+- Updated dependencies [a22e67b]
+- Updated dependencies [62ce45d]
+- Updated dependencies [39e93ef]
+- Updated dependencies [02bec6c]
+- Updated dependencies [719183f]
+- Updated dependencies [8464380]
+- Updated dependencies [252a582]
+- Updated dependencies [f931e76]
+- Updated dependencies [e5f9f01]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [8311650]
+- Updated dependencies [de70e97]
+- Updated dependencies [74c4b34]
+- Updated dependencies [e040b8c]
+- Updated dependencies [f451a59]
+- Updated dependencies [ba95607]
+- Updated dependencies [b53b949]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [1e44436]
+- Updated dependencies [2acff87]
+- Updated dependencies [299a2c6]
+- Updated dependencies [e23eccb]
+- Updated dependencies [bf492c8]
+- Updated dependencies [c7a3234]
+  - @objectstack/spec@18.0.0-next.0
+  - @objectstack/core@18.0.0-next.0
+  - @objectstack/platform-objects@18.0.0-next.0
+  - @objectstack/types@18.0.0-next.0
+
 ## 17.7.0
 
 ### Patch Changes

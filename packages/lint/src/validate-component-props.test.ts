@@ -77,26 +77,26 @@ describe('validateComponentProps — undeclared keys', () => {
     expect(findings).toEqual([]);
   });
 
-  // #20758 — `PageHeaderProps.breadcrumb` is a retiredKey tombstone. A page is
-  // never hard-refused for carrying it: this rule is the door where an author
-  // meets the prescription, and every finding it files is a WARNING.
-  it('reports a retired page-header `breadcrumb` as a warning carrying the prescription, for `true` and `false`', () => {
+  // #20758 — `PageHeaderProps.breadcrumb` is a retiredKey tombstone. This rule
+  // is the door where an author meets the prescription, and since #23026 a
+  // retired key is the one class it refuses: an ERROR, whatever the value.
+  it('refuses a retired page-header `breadcrumb` as an error carrying the prescription, for `true` and `false`', () => {
     for (const breadcrumb of [true, false]) {
       const findings = validateComponentProps(
         stackWith([{ type: 'page:header', properties: { title: 'T', breadcrumb } }]),
       );
       expect(findings, `breadcrumb: ${breadcrumb}`).toHaveLength(1);
       const [f] = findings;
-      expect(f.severity).toBe('warning');
+      expect(f.severity).toBe('error');
       expect(f.path).toBe('pages[0].regions[0].components[0].properties.breadcrumb');
       expect(f.message).toContain('`page:header` property `breadcrumb` was removed in @objectstack/spec 17');
     }
   });
 
   // #21589 — an `object-master-detail-form` detail entry's `sortField` is a
-  // retiredKey tombstone, one array level down. The same door, the same
-  // warning: the finding names the entry's key, and the page is never refused.
-  it('reports a retired detail-entry `sortField` as a warning carrying the prescription, at the entry\'s key', () => {
+  // retiredKey tombstone, one array level down. The same door and, since
+  // #23026, the same refusal: an error that names the entry's key.
+  it('refuses a retired detail-entry `sortField` as an error carrying the prescription, at the entry\'s key', () => {
     const findings = validateComponentProps(
       stackWith([
         {
@@ -113,7 +113,7 @@ describe('validateComponentProps — undeclared keys', () => {
     );
     expect(findings).toHaveLength(1);
     const [f] = findings;
-    expect(f.severity).toBe('warning');
+    expect(f.severity).toBe('error');
     expect(f.rule).toBe(COMPONENT_PROPS_INVALID);
     expect(f.path).toBe('pages[0].regions[0].components[0].properties.details.1.sortField');
     expect(f.message).toContain('`object-master-detail-form` property `details[].sortField` was removed in @objectstack/spec 17');
@@ -424,7 +424,7 @@ describe('validateComponentProps — value verdicts', () => {
     );
     const retired = invalid(findings).filter((f) => f.path.endsWith('.displayField'));
     expect(retired).toHaveLength(1);
-    expect(retired[0].severity).toBe('warning');
+    expect(retired[0].severity).toBe('error');
     expect(retired[0].message).toMatch(/removed in @objectstack\/spec 17\.0\.0[\s\S]*`labelField`/);
   });
 
@@ -647,8 +647,8 @@ describe('validateComponentProps — object-* blocks are dispatched (#7751)', ()
     expect(f.where).toBe('page "probe_page" · object-grid');
     expect(f.message).toContain('`filters`');
     expect(f.message).toContain('Did you mean `filters` → `filter`?');
-    // Warning tier only — the error upgrade stays gated on the #5068
-    // inventory; this card did not move that gate (ruling 2026-08-12).
+    // Warning tier only — an undeclared key is not the retired-key class
+    // #23026 moved to `error`.
     expect(invalid(findings)).toEqual([]);
   });
 
@@ -743,10 +743,10 @@ describe('validateComponentProps — reads the post-conversion (normalized) tier
 });
 
 describe('validateComponentProps — wiring', () => {
-  it('is registered as an advisory rule on all three authoring commands', () => {
+  it('is registered as a gating rule on all three authoring commands (#23026: a retired key is an error)', () => {
     const entry = AUTHORING_RULES.find((r) => r.name === 'validateComponentProps');
     expect(entry).toBeDefined();
-    expect(entry?.tier).toBe('advisory');
+    expect(entry?.tier).toBe('gating');
     expect([...(entry?.commands ?? [])].sort()).toEqual(['build', 'lint', 'validate']);
   });
 
@@ -758,6 +758,144 @@ describe('validateComponentProps — wiring', () => {
     expect(mine).toHaveLength(1);
     expect(mine[0].severity).toBe('warning');
     expect(mine[0].rule).toBe(COMPONENT_PROPS_UNKNOWN_KEY);
+  });
+});
+
+/**
+ * #23026 — the error upgrade the module header planned, for ONE class: a value
+ * verdict a `retiredKey()` tombstone raises is an `error`; every other finding
+ * stays a `warning`. Asserted on rule id, severity and path — the prescription
+ * is asserted as CARRIED (read back from the spec's own tombstone), never as
+ * prose copied here.
+ */
+describe('validateComponentProps — a retired key is an error, nothing else is (#23026)', () => {
+  /** The prescription the spec's own tombstone raises for `type.key`, read from the schema. */
+  const prescription = (type: string, key: string): string => {
+    const schema = (ComponentPropsMap as unknown as Record<string, { safeParse: (v: unknown) => { error?: { issues: Array<{ path: PropertyKey[]; message: string }> } } }>)[type];
+    const issue = schema.safeParse({ [key]: 'probe' }).error?.issues.find((i) => i.path.length === 1 && i.path[0] === key);
+    expect(issue, `${type}.${key} raises no issue of its own`).toBeDefined();
+    return issue!.message;
+  };
+
+  it('refuses the card\'s specimen — `object-grid` `defaultFilters` — as an error carrying its prescription', () => {
+    const findings = validateComponentProps(
+      stackWith([{
+        type: 'object-grid',
+        properties: {
+          objectName: 'task',
+          defaultFilters: [{ field: 'status', operator: 'equals', value: 'open' }],
+        },
+      }]),
+    );
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [COMPONENT_PROPS_INVALID, 'error', 'pages[0].regions[0].components[0].properties.defaultFilters'],
+    ]);
+    expect(findings[0].message).toContain(prescription('object-grid', 'defaultFilters'));
+  });
+
+  /**
+   * Every top-level tombstone in the map, found from the SCHEMA GRAPH (a key
+   * whose schema is `optional` over `never`), not from the issue shape the
+   * rule reads — so a tombstone whose verdict stopped classifying reds here,
+   * whichever row it sits on.
+   */
+  it('refuses every top-level tombstoned prop in ComponentPropsMap as an error, at its own key', () => {
+    type Node = { _zod: { def: { type: string; innerType?: Node } } };
+    const tombstones = Object.entries(ComponentPropsMap).flatMap(([type, schema]) => {
+      const shape = (schema as unknown as { shape?: Record<string, Node> }).shape ?? {};
+      return Object.entries(shape)
+        .filter(([, node]) => node._zod.def.type === 'optional' && node._zod.def.innerType?._zod.def.type === 'never')
+        .map(([key]) => [type, key] as const);
+    });
+    // Anti-vacuity: the walk reaches the card's specimen and a fair number besides.
+    expect(tombstones).toContainEqual(['object-grid', 'defaultFilters']);
+    expect(tombstones.length).toBeGreaterThan(30);
+    const missed = tombstones.filter(([type, key]) => {
+      const findings = validateComponentProps(stackWith([{ type, dataSource: { object: 'task' }, properties: { [key]: 'probe' } }]));
+      const at = findings.filter((f) => f.path === `pages[0].regions[0].components[0].properties.${key}`);
+      return !(at.length === 1 && at[0].rule === COMPONENT_PROPS_INVALID && at[0].severity === 'error');
+    });
+    expect(missed).toEqual([]);
+  });
+
+  it('refuses a retired ELEMENT\'s bag (`user:profile`) as an error — the same tombstone shape, one grain wider', () => {
+    const findings = validateComponentProps(stackWith([{ type: 'user:profile', properties: {} }]));
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [COMPONENT_PROPS_INVALID, 'error', 'pages[0].regions[0].components[0].properties'],
+    ]);
+  });
+
+  it('refuses a tombstone inside a union arm when that arm is the only one judging keys (`publicPicker`)', () => {
+    const findings = validateComponentProps(
+      stackWith([{
+        type: 'object-form',
+        properties: { objectName: 'task', sections: [{ label: 'S', fields: ['name', { field: 'owner', publicPicker: true }] }] },
+      }]),
+    );
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [COMPONENT_PROPS_INVALID, 'error', 'pages[0].regions[0].components[0].properties.sections.0.fields.1'],
+    ]);
+  });
+
+  it('leaves that union verdict a warning when the same arm also rejects a value for another reason', () => {
+    const findings = validateComponentProps(
+      stackWith([{
+        type: 'object-form',
+        properties: { objectName: 'task', sections: [{ label: 'S', fields: [{ field: 'owner', publicPicker: true, colSpan: 'wide' }] }] },
+      }]),
+    );
+    expect(findings.map((f) => [f.rule, f.severity])).toEqual([[COMPONENT_PROPS_INVALID, 'warning']]);
+  });
+
+  it('classifies per issue: a retired key beside a wrongly-typed prop is one error and one warning', () => {
+    const findings = validateComponentProps(
+      stackWith([{ type: 'object-grid', properties: { objectName: 'task', defaultFilters: [], pageSize: 'ten' } }]),
+    );
+    const base = 'pages[0].regions[0].components[0].properties';
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [COMPONENT_PROPS_INVALID, 'error', `${base}.defaultFilters`],
+      [COMPONENT_PROPS_INVALID, 'warning', `${base}.pageSize`],
+    ]);
+  });
+
+  // The two closed-set refusals that landed beside this change reach the rule
+  // as `component-props-invalid` too, and are not the retired-key class.
+  it('keeps a url action\'s refused `target` scheme a warning', () => {
+    const findings = validateComponentProps(
+      stackWith([{ type: 'element:button', properties: { label: 'Go', action: { type: 'url', target: 'javascript:alert(1)' } } }]),
+    );
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [COMPONENT_PROPS_INVALID, 'warning', 'pages[0].regions[0].components[0].properties.action.target'],
+    ]);
+  });
+
+  it('keeps a `record:details` section `count` whose heading binds no hole a warning', () => {
+    const findings = validateComponentProps(
+      stackWith([{ type: 'record:details', properties: { sections: [{ label: 'Tags', fields: ['tags'], count: { field: 'tags' } }] } }]),
+    );
+    expect(findings.length).toBeGreaterThan(0);
+    expect(findings.every((f) => f.rule === COMPONENT_PROPS_INVALID && f.severity === 'warning')).toBe(true);
+  });
+
+  it('keeps an undeclared key and a missing `dataSource.object` binding warnings', () => {
+    const findings = validateComponentProps(
+      stackWith([
+        { type: 'page:header', properties: { title: 'T', titel: 'typo' } },
+        { type: 'element:number', properties: { aggregate: 'count' } },
+      ]),
+    );
+    expect(findings.map((f) => [f.rule, f.severity])).toEqual([
+      [COMPONENT_PROPS_UNKNOWN_KEY, 'warning'],
+      [COMPONENT_PROPS_INVALID, 'warning'],
+    ]);
+  });
+
+  it('reaches the shared pipeline as an error — the run `os validate` / `os build` / `os lint` refuse on', () => {
+    const findings = runAuthoringRules('validate', {
+      normalized: stackWith([{ type: 'object-grid', properties: { objectName: 'task', defaultFilters: [] } }]) as never,
+    });
+    const mine = findings.filter((f) => f.rule.startsWith('component-props'));
+    expect(mine.map((f) => [f.rule, f.severity])).toEqual([[COMPONENT_PROPS_INVALID, 'error']]);
   });
 });
 

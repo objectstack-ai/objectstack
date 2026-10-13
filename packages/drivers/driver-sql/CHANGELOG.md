@@ -1,5 +1,259 @@
 # @objectstack/driver-sql
 
+## 18.0.0-next.0
+
+### Patch Changes
+
+- 9e9e6f9: feat(cli)!: `os meta resync` is deleted
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A CLI command is removed; it reconciled platform rows no reader uses for authorization, and no key of any spec schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. The package publishes (not unpublished); no ADR-0087 id covers this rule and this diff adds none (not registered / already-registered). -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  `os meta resync` reconciled the platform-default `sys_permission_set` rows (`admin_full_access`, `member_default`, …) to the shipped declaration. Since the authorization resolver reads permission sets from the security catalog (ADR-0131 D3), an edited default set is served from its declaration at the next boot, and the rows the command reconciled decide nothing. The command, its `--yes` / `--json` modes and its skip-count explanation are gone; a script that calls it gets oclif's unknown-command error.
+  
+  In `@objectstack/plugin-security`, `@objectstack/driver-sql` and `@objectstack/runtime`, shipped comments and one warning sentence (the permission-set backfill's re-provision list) no longer name the command. Their behaviour is unchanged.
+- 3d886ee: A field can declare cell formatting rules: `conditionalFormatting: [{ condition, style }]`, the rule a list view already declares for its rows
+  
+  Clause-②: yes (widening)
+  
+  - **`FieldSchema.conditionalFormatting`** (optional) is an ordered list of `{ condition, style }` rules. The first rule whose CEL `condition` holds applies its CSS `style` map to that field's cell, wherever the field renders. A list view's row rules still style the row, and both may apply to one record. Example: `amount: Field.currency({ conditionalFormatting: [{ condition: P\`value < 0\`, style: { color: '#b91c1c' } }] })`.
+  - **One rule element, no second style vocabulary.** The `{ condition, style }` element moved out of `ListViewSchema` into its own spec module, and both `ListViewSchema.conditionalFormatting` and `FieldSchema.conditionalFormatting` mount it. The list view accepts exactly what it accepted before. Its refusal of an unknown rule key now reads the same on both members: for a `color` written beside `style`, it says to put the colour in `style` first, then points a list view at `rowColor`.
+  - **The scope is `value` and `record`.** `value` is this field's value on the record and `record` is the row. `@objectstack/lint` judges each condition at `objectstack build`, `objectstack validate` and the object save: it must parse, read fields as `record.<field>`, name declared fields, and read no other root (`previous`, `parent` and the user roots are refused, naming the field and the rule).
+  - **For presentation only.** Use it for rules that carry no meaning of their own, such as an amount below zero in red or stock under its safety level in amber. A deadline's overdue state stays a declaration (`dueLike` with `settledWhen`).
+  - **Display only.** Nothing on the write path reads the key, and every metadata that parsed before parses unchanged. Field-level security drops a rule whose condition reads a field the caller cannot read, keeping the other rules in order (`@objectstack/metadata-core`). The SQL driver classifies the key as presentation, so it never reaches column DDL (`@objectstack/driver-sql`).
+  - **Who reads it.** objectui's cell renderers read the rules in a follow-up release, once this spec version is published. Until then a rule is validated when it is authored and styles no cell.
+- 86f53a4: fix(cli): `os migrate plan` / `apply` / `unmapped-columns` examine what `os serve` mounts around the stack, so the retired `sys_account.issuer` is finally a drop (#22506)
+  
+  `os migrate plan` and `os migrate apply` only examine the objects their own boot registers, and that boot stopped at the stack: its config, its metadata and the platform floor. Nothing `os serve` mounts around a stack was there. On an app declaring `requires: ['auth']`, the plan examined 9 of the 68 tables the serving boot had created. `sys_account` read as an undeclared platform table, so its retired `issuer` column (and that column's unique index) was never a destructive drop. `os migrate apply --allow-destructive` dropped nothing, while the boot's drift line and `os migrate account-issuer` kept prescribing exactly that command.
+  
+  The two commands now also compose, each through the rule `os serve` itself reads, and so does `os migrate unmapped-columns`, which reads the plan's own `unmapped_column` findings and therefore needs the plan's object set:
+  
+  - the auth family behind `serve`'s auth gate: plugin-auth's identity objects, the security plugin and the audit plugin, when the stack mounts no `AuthPlugin` of its own, the `auth` tier is on, and an auth secret resolves;
+  - the provider of every capability `serve` mounts: the stack's `requires` and the always-on slate, as `os serve` composes it with no `--preset`;
+  - the REST API plugin;
+  - every `plugins` entry by `serve`'s rule for one: a package name is loaded from the app, and a plain bundle is wrapped as an app;
+  - the pinyin-search decision from the config's locales, so the `__search` companion columns a boot provisions are no longer listed as destructive drops on a config-only project.
+  
+  `os migrate unmapped-columns --object sys_account` (or any platform object the plan now declares) resolves the object and reads its unmapped columns, where it used to answer `OBJECT_NOT_FOUND`.
+  
+  Each piece is composed for its declarations only. Its `init()` runs, and its `start()` and lifecycle hooks do not, so no dispatcher, scheduler or seed runs inside a dry run.
+  
+  **What an operator sees.** On the shape that looped, `os migrate plan` lists `sys_account.issuer` and `uniq_sys_account_issuer_account_id` as destructive drops. `os migrate apply --allow-destructive` drops both, `os migrate account-issuer` reads zero, and the next boot prints no drift line for them. When no auth secret is set and the boot is not a development one, the plan says it did not compose the auth family, and how to compose it: run with the deployment's `OS_AUTH_SECRET` exported. `os migrate` reads no `.env` file.
+  
+  **driver-sql.** The deferred-DDL preview answers a rotation-declared object (`lifecycle.storage.strategy: 'rotation'`, such as `sys_activity`) from the rotator's facts: when the current shard and the read view exist, nothing is pending. It used to list `create_table` for such an object on every plan, and `apply` then created nothing.
+  
+  **Known limit.** A development boot, or one with `OS_TELEMETRY_DB` set, keeps lifecycle-classed objects in a sibling `telemetry` database. The one-shot migration boot does not provision that database, so it examines those objects against the primary one.
+- e5687cb: An `email` field can declare that it identifies a correspondent for inbound mail: `mailAssociation`
+  
+  Clause-②: yes (widening)
+  
+  - **`mailAssociation: boolean`** (optional, no default) on a field definition. TRUE marks this email field as identifying a message correspondent: when a mailbox service ingests a message, it associates the message with every record of the object whose value in this field equals one of the message's participant addresses (From, Sender, Reply-To, To and Cc, plus those of a forwarded message it carries; ASCII case-insensitive; the receiving mailbox's own addresses excluded; only within the mailbox's organization). A message no record matches waits in the mailbox's unassociated pool. Absent or FALSE: the field takes no part in matching.
+  - **The platform learns which fields carry a correspondent's address, never what a contact is.** Every object that flags a field is treated alike; no app code and no resolver service is involved.
+  - **The door that judges it.** `FieldSchema` refuses the key on any type other than `email`, naming the field's type and the fix (change the type to `email`, or drop the key). Every metadata that parsed before parses unchanged.
+  - **Who reads it.** Nothing yet: the mailbox service's ingest is the reader, and it ships separately. Until then `objectstack validate` and `objectstack lint` warn an author who sets it (`liveness-planned-property`) that no mailbox service reads it yet.
+  - **Where to author it.** The field designer offers it on email fields as "Match Inbound Mail".
+  - **`@objectstack/driver-sql`.** `FIELD_KEY_STORAGE_CLASS` classifies `mailAssociation` as `presentation`: the mailbox service reads it, never `createColumn`, so a declaration on a builtin column name is not reported as discarded storage. No behaviour changes.
+  - **`@objectstack/metadata-core`.** `FIELD_REFERENCE_POSITIONS` classifies `mailAssociation` as `keep`: the FLS scrub of a served object definition passes the flag through unchanged, because it names no field.
+  - **`@objectstack/platform-objects`.** The field designer's new row carries its label and help text in the metadata-form translation bundles for en, zh-CN, ja-JP and es-ES.
+- Updated dependencies [317cddd]
+- Updated dependencies [fec87e7]
+- Updated dependencies [c28f317]
+- Updated dependencies [2e10c9a]
+- Updated dependencies [67b669e]
+- Updated dependencies [0253192]
+- Updated dependencies [bfc15d2]
+- Updated dependencies [2ff0825]
+- Updated dependencies [7aa8d51]
+- Updated dependencies [95a8435]
+- Updated dependencies [60bcfe7]
+- Updated dependencies [d112087]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [7de0265]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [c8b062f]
+- Updated dependencies [117d34d]
+- Updated dependencies [6729e10]
+- Updated dependencies [1920cf3]
+- Updated dependencies [41d0d40]
+- Updated dependencies [c52bfb4]
+- Updated dependencies [c7d6037]
+- Updated dependencies [72b26ed]
+- Updated dependencies [2d21b9c]
+- Updated dependencies [f66fdc7]
+- Updated dependencies [9fdb127]
+- Updated dependencies [615c696]
+- Updated dependencies [968acc8]
+- Updated dependencies [111ffff]
+- Updated dependencies [12b9daf]
+- Updated dependencies [d85615d]
+- Updated dependencies [6a06e3b]
+- Updated dependencies [0e9e7b7]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [9c93ce6]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [04e776b]
+- Updated dependencies [a7df552]
+- Updated dependencies [2f70c22]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [a87d8be]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [ad381fd]
+- Updated dependencies [2b61f2d]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3b49318]
+- Updated dependencies [4e9fe9f]
+- Updated dependencies [9ad3d24]
+- Updated dependencies [326a90a]
+- Updated dependencies [9fe7448]
+- Updated dependencies [2e11d90]
+- Updated dependencies [4578c56]
+- Updated dependencies [c512c25]
+- Updated dependencies [215e662]
+- Updated dependencies [3d886ee]
+- Updated dependencies [d8d0711]
+- Updated dependencies [a45d5d8]
+- Updated dependencies [f6e1d49]
+- Updated dependencies [e9a1f5c]
+- Updated dependencies [40a6ee5]
+- Updated dependencies [5910b5e]
+- Updated dependencies [7098aca]
+- Updated dependencies [97610a5]
+- Updated dependencies [081e6a0]
+- Updated dependencies [1884948]
+- Updated dependencies [3089848]
+- Updated dependencies [e23eccb]
+- Updated dependencies [ac8f2c5]
+- Updated dependencies [db9cf80]
+- Updated dependencies [e75dced]
+- Updated dependencies [9af0005]
+- Updated dependencies [440bed6]
+- Updated dependencies [b2549a8]
+- Updated dependencies [ee8751d]
+- Updated dependencies [96e4be4]
+- Updated dependencies [35ef501]
+- Updated dependencies [faf6348]
+- Updated dependencies [557ae7c]
+- Updated dependencies [6a3fe25]
+- Updated dependencies [7731d70]
+- Updated dependencies [3073b72]
+- Updated dependencies [c76edeb]
+- Updated dependencies [5b12503]
+- Updated dependencies [514bf3c]
+- Updated dependencies [20e7d52]
+- Updated dependencies [b3a3634]
+- Updated dependencies [3e72f93]
+- Updated dependencies [f89b5f5]
+- Updated dependencies [d25b187]
+- Updated dependencies [0e00d36]
+- Updated dependencies [d748ae8]
+- Updated dependencies [dab6bf4]
+- Updated dependencies [ed1de8c]
+- Updated dependencies [a00cf99]
+- Updated dependencies [5fb1746]
+- Updated dependencies [29a163f]
+- Updated dependencies [e223152]
+- Updated dependencies [9f5eca5]
+- Updated dependencies [9963322]
+- Updated dependencies [b27b894]
+- Updated dependencies [874a38d]
+- Updated dependencies [02d9f69]
+- Updated dependencies [f53f14b]
+- Updated dependencies [a800912]
+- Updated dependencies [d973c34]
+- Updated dependencies [156ddfa]
+- Updated dependencies [5081090]
+- Updated dependencies [b6eb25f]
+- Updated dependencies [165587e]
+- Updated dependencies [e04759d]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [b32ee3e]
+- Updated dependencies [91f46d0]
+- Updated dependencies [e5899a6]
+- Updated dependencies [d7b26df]
+- Updated dependencies [490cb6d]
+- Updated dependencies [e865300]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [c74d843]
+- Updated dependencies [6d5191e]
+- Updated dependencies [85edd61]
+- Updated dependencies [e84aeb3]
+- Updated dependencies [322ff1e]
+- Updated dependencies [7b0a9c9]
+- Updated dependencies [5fc57b3]
+- Updated dependencies [fe58bbc]
+- Updated dependencies [c4e7fa5]
+- Updated dependencies [581ca7d]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [b7cd1af]
+- Updated dependencies [9814035]
+- Updated dependencies [55382dc]
+- Updated dependencies [b1d701b]
+- Updated dependencies [efcbac7]
+- Updated dependencies [51f36e7]
+- Updated dependencies [20028df]
+- Updated dependencies [69d4218]
+- Updated dependencies [5ce6773]
+- Updated dependencies [9432bac]
+- Updated dependencies [3f69471]
+- Updated dependencies [8bc7836]
+- Updated dependencies [e5687cb]
+- Updated dependencies [1e62f71]
+- Updated dependencies [ec7f7f8]
+- Updated dependencies [038d4c9]
+- Updated dependencies [147a0d1]
+- Updated dependencies [1959aac]
+- Updated dependencies [e1deaef]
+- Updated dependencies [1badd31]
+- Updated dependencies [55828c5]
+- Updated dependencies [7856110]
+- Updated dependencies [9b37edb]
+- Updated dependencies [a22e67b]
+- Updated dependencies [62ce45d]
+- Updated dependencies [39e93ef]
+- Updated dependencies [02bec6c]
+- Updated dependencies [719183f]
+- Updated dependencies [8464380]
+- Updated dependencies [252a582]
+- Updated dependencies [f931e76]
+- Updated dependencies [e5f9f01]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [de70e97]
+- Updated dependencies [74c4b34]
+- Updated dependencies [e040b8c]
+- Updated dependencies [f451a59]
+- Updated dependencies [ba95607]
+- Updated dependencies [b53b949]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [1e44436]
+- Updated dependencies [2acff87]
+- Updated dependencies [299a2c6]
+- Updated dependencies [e23eccb]
+- Updated dependencies [bf492c8]
+- Updated dependencies [c7a3234]
+  - @objectstack/spec@18.0.0-next.0
+  - @objectstack/core@18.0.0-next.0
+  - @objectstack/types@18.0.0-next.0
+  - @objectstack/observability@18.0.0-next.0
+
 ## 17.7.0
 
 ### Minor Changes

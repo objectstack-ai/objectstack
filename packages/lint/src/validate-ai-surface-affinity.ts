@@ -104,10 +104,11 @@ export function validateAiSurfaceAffinity(stack: AnyRec): AiSurfaceAffinityFindi
           `Agent "${agentName}" (surface '${agentSurface}') references skill "${ref}" ` +
           `(surface '${skillSurface}'), so the runtime refuses the binding and chatting with ` +
           `this agent fails at request time`,
+        // [#22161] One remedy line; when `surface: 'both'` is the right
+        // answer (a genuinely shared, read-only capability) is the explanation's.
         hint:
-          `A skill may only attach to an agent whose surface it matches. Move "${ref}" to a ` +
-          `'${skillSurface}'-surface agent, change its \`surface\` to '${agentSurface}', or — ` +
-          `only if it is a genuinely shared, read-only capability — declare \`surface: 'both'\`.`,
+          `Move "${ref}" to a '${skillSurface}'-surface agent, change its \`surface\` to ` +
+          `'${agentSurface}', or declare \`surface: 'both'\` for a shared, read-only skill`,
       });
     }
   }

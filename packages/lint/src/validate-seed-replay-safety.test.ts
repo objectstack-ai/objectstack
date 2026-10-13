@@ -11,7 +11,7 @@ import { explainRule } from './rule-explanations.js';
 // recorded verdict to one line of at most 200 characters — every firing
 // variant this suite exercises, not a chosen few. Run the whole file: those
 // cases read what the cases above fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateSeedReplaySafety: typeof validateSeedReplaySafetyUnrecorded = (...args) => {
   const findings = validateSeedReplaySafetyUnrecorded(...args);
   fired.push(...findings);
@@ -51,11 +51,12 @@ describe('validateSeedReplaySafety (framework#3434 replay-unsafe seed gate)', ()
     });
     expect(findings[0].where).toContain('showcase_project_membership');
     expect(findings[0].message).toContain('replay');
-    // Hint steers to the idempotent modes and the composite externalId the fix added.
+    // Hint steers to the idempotent modes and the composite externalId the fix
+    // added; [#22161] the composite example itself is the explanation's.
     expect(findings[0].hint).toContain('ignore');
     expect(findings[0].hint).toContain('upsert');
     expect(findings[0].hint).toContain('externalId');
-    expect(findings[0].hint).toContain("['team', 'project']");
+    expect(findings[0].hint).toContain('a list of fields for a junction table');
   });
 
   it('flags each insert seed and reports its index in the path; leaves safe seeds alone', () => {
@@ -120,5 +121,33 @@ describe('[#22161] one-line verdicts — seed-insert-mode-duplicates-on-replay',
       expect(f.message, f.rule).not.toContain('\n');
       expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
     }
+  });
+});
+
+// [#22161] Slice 16: the `fix:` line names the two idempotent modes and the
+// match key in one line; what each mode does and the examples are the
+// explanation's (pinned above, and here for what moved).
+describe('[#22161] one-line fix — seed-insert-mode-duplicates-on-replay', () => {
+  it('reads as one remedy', () => {
+    const [f] = validateSeedReplaySafety({ data: [{ object: 'z', mode: 'insert', records: [] }] });
+    expect(f!.hint).toBe(
+      "Use `mode: 'ignore'` or `'upsert'` with an `externalId` to match on (a natural-key field, or a list of " +
+        'fields for a junction table)',
+    );
+  });
+
+  it('every `fix:` line the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === SEED_INSERT_MODE_DUPLICATES_ON_REPLAY);
+    expect(converted.length).toBeGreaterThan(1);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('`os explain` carries the examples the `fix:` line dropped', () => {
+    const text = explainRule(SEED_INSERT_MODE_DUPLICATES_ON_REPLAY)!.paragraphs.join('\n');
+    expect(text).toContain("(`externalId: 'code'`)");
+    expect(text).toContain("(`['team', 'project']`)");
   });
 });

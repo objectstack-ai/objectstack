@@ -1,5 +1,252 @@
 # @objectstack/service-sms
 
+## 18.0.0-next.0
+
+### Minor Changes
+
+- 7098aca: `bootStack` mounts the always-on capability slate `objectstack serve` mounts for every app, and builds each provider from the app's configuration the way `serve` builds it
+  
+  Clause-②: yes (narrowing: a configuration whose mail or SMS settings, or the OS_EMAIL_* / OS_SMS_* environment, name a transport that cannot deliver, now fails bootStack where it booted; widening: bootStack mounts the always-on slate objectstack serve mounts for every app and hands each provider the app's configuration, so the app's analytics cubes now reach the registry, where it mounted fewer and built them with defaults)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling or stored shape is removed, renamed or re-shaped, and no stored row is read, rewritten, converted or dropped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the in-process verification boot of @objectstack/verify: a configuration whose mail or SMS settings (or the OS_EMAIL_* / OS_SMS_* environment) name a transport that cannot deliver now fails the boot where the provider was absent or built with defaults. The other categories are closed on facts: every bumped package publishes (not unpublished); no ADR-0087 id covers these paths and this diff adds none (not registered / already-registered); and the narrowed surface is a runtime boot function, not an interface or a type (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  **`@objectstack/verify` — the composition `serve` mounts, built the way `serve` builds it.** For one configuration, `bootStack(config, opts)` already mounted the providers the app's `requires` names and the plugins in its own `plugins` array. It now also:
+  
+  - **Mounts the always-on slate** `serve` mounts for every app, whether or not `requires` names it: `queue`, `job`, `cache`, `settings`, `email`, `storage`, `sms`, `sharing`, `messaging`, `analytics` and `package-registry`. Before, a slate provider was mounted only where a mounted plugin hard-depended on it, so an app's tests ran without the inbox delivery, the mail service, the file storage and the package registry its users' server has.
+  - **Builds each provider from the app's configuration**, by the same rule `serve` reads: the analytics service gets the app's `analyticsCubes` (the top level, then each package body's), the email service the app's `email` block with `OS_EMAIL_*` over it, the SMS service the `sms` block with `OS_SMS_*` over it, and the storage service the `OS_STORAGE_LOCAL_ROOT` root (`.objectstack/data/uploads` under the working directory by default). Before, each was built with its own defaults: no cubes, no mail configuration. So the app's cubes now reach the analytics registry; a cube the service refuses (one over an object the API does not serve) is warned and skipped by the service, under `bootStack` as under `serve`, and no boot fails on it.
+  - A caller's `extraPlugins`, `security` and `analytics` instances still take precedence by identity, and are not handed the configuration. A suite that needs a provider configured its own way (a temporary storage root, a mail transport) passes its instance in `extraPlugins`.
+  - Not mounted, because they are decisions about a server process rather than about the configuration: `serve`'s MCP endpoint (`OS_MCP_SERVER_ENABLED`) and its pinyin search (`OS_SEARCH_PINYIN_ENABLED`). A suite that exercises either passes the provider in `extraPlugins`.
+  
+  **What now fails that booted before (the narrowing).** A provider `bootStack` constructs and cannot build fails the boot, naming the capability token and the package — whether the app declared the token or the slate appended it. `serve` logs a slate provider it cannot build and boots on; a test boot does not, so an app's tests never pass on a composition its server does not run. In practice:
+  
+  - a configuration whose `email` or `sms` settings, or the `OS_EMAIL_*` / `OS_SMS_*` environment of the test process, name a transport that cannot deliver (`provider: 'smtp'` with no host, `resend` / `postmark` with no API key, an unknown provider tag) is refused with the reader's own remedy. Set `OS_EMAIL_PROVIDER=log` / `OS_SMS_PROVIDER=log` in the test environment if it is not meant to send mail or SMS.
+  
+  **`@objectstack/core`** exports the rule both boots read: `resolveServedCapabilities` (given the tokens a stack declares, which capability tokens a served boot mounts providers for — those, `email` for a declared `auth`, the host's own defaults, the always-on slate unless the preset is `minimal`, and `job` / `queue` ahead of what schedules background work) and `resolveCapabilityArgument` (what each provider is constructed with), with their `ServedCapabilities`, `CapabilityArgumentInput` and `CapabilityArgument` types; and `resolveStorageCapabilityArg`, `resolveStorageLocalRootEnv` and `StorageCapabilityArg`, moved here from the CLI.
+  
+  **`@objectstack/plugin-email`** exports `resolveEmailCapabilityArg`, `resolveDeploymentAppName` and `EmailCapabilityArg`, and **`@objectstack/service-sms`** exports `resolveSmsCapabilityArg` and `SmsCapabilityArg` — the readers that build each provider from the deployment's configuration, moved from the CLI to sit beside the transport vocabulary they refuse against. `resolveCapabilityArgument` reads each off the provider module it is handed.
+  
+  **`@objectstack/cli`**: `serve` reads both rules from `@objectstack/core` and composes exactly what it composed before. `os migrate plan` / `apply`'s declaration boot reads the same token rule for the providers it composes (the same set as before; a declared `auth` now places `email` right after the declared tokens, as `serve` does). `os verify` boots through `bootStack`, so it now mounts the always-on slate and builds the providers from the app's configuration. The moved functions stay importable from the `serve` command module.
+
+### Patch Changes
+
+- f9c7588: A configured SMS provider delivers through its credentials in the environment or in Settings, without `OS_SMS_PROVIDER`
+  
+  Clause-②: no
+  
+  A configuration that named `provider: 'twilio'` (or `'aliyun'`) and kept the provider's keys in the environment, but did not also set `OS_SMS_PROVIDER`, booted on `LogSmsTransport` with `isConfigured() === false`, through `os serve` and `@objectstack/verify`'s `bootStack` alike. The boot logged "SMS will NOT be sent". Two readers missed the credentials:
+  
+  - **`resolveSmsCapabilityArg`** now merges the selected provider's credentials into `providerOptions`, env over `config.sms.providerOptions`, key by key, as the mail resolver does. It reads the variables the `sms` settings namespace is env-locked with: `OS_SMS_TWILIO_ACCOUNT_SID`, `_AUTH_TOKEN`, `_FROM_NUMBER` and `_MESSAGING_SERVICE_SID`, and `OS_SMS_ALIYUN_ACCESS_KEY_ID`, `_ACCESS_KEY_SECRET`, `_SIGN_NAME` and `_TEMPLATE_CODE`.
+  - **`SmsServicePlugin`** honours its constructor's `provider` when the `sms` settings namespace names none, and reads the namespace for that provider's credentials. The namespace's credentials overlay the constructor's `providerOptions`, so a constructor-only option such as `baseUrl` is kept. A provider named in Settings, or by `OS_SMS_PROVIDER`, still wins.
+  
+  Unchanged: a configured provider whose credentials are missing everywhere still boots onto the log transport with a warning and `isConfigured() === false`. The resolver still refuses only a provider tag no transport can deliver through. Signatures and exports are unchanged.
+- Updated dependencies [317cddd]
+- Updated dependencies [fec87e7]
+- Updated dependencies [34dba5a]
+- Updated dependencies [c28f317]
+- Updated dependencies [aa71c4d]
+- Updated dependencies [19bb55e]
+- Updated dependencies [2e10c9a]
+- Updated dependencies [67b669e]
+- Updated dependencies [0253192]
+- Updated dependencies [0253192]
+- Updated dependencies [bfc15d2]
+- Updated dependencies [2ff0825]
+- Updated dependencies [e7e6544]
+- Updated dependencies [7aa8d51]
+- Updated dependencies [95a8435]
+- Updated dependencies [60bcfe7]
+- Updated dependencies [d112087]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [8c5aa50]
+- Updated dependencies [7de0265]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [c8b062f]
+- Updated dependencies [117d34d]
+- Updated dependencies [6729e10]
+- Updated dependencies [1920cf3]
+- Updated dependencies [41d0d40]
+- Updated dependencies [c52bfb4]
+- Updated dependencies [c7d6037]
+- Updated dependencies [72b26ed]
+- Updated dependencies [2d21b9c]
+- Updated dependencies [f66fdc7]
+- Updated dependencies [9fdb127]
+- Updated dependencies [615c696]
+- Updated dependencies [968acc8]
+- Updated dependencies [111ffff]
+- Updated dependencies [12b9daf]
+- Updated dependencies [d85615d]
+- Updated dependencies [6a06e3b]
+- Updated dependencies [0e9e7b7]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [9c93ce6]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [04e776b]
+- Updated dependencies [a7df552]
+- Updated dependencies [2f70c22]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [4935c66]
+- Updated dependencies [c6fe02d]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [a87d8be]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [ad381fd]
+- Updated dependencies [6ff6ed6]
+- Updated dependencies [2b61f2d]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3b49318]
+- Updated dependencies [4e9fe9f]
+- Updated dependencies [9ad3d24]
+- Updated dependencies [326a90a]
+- Updated dependencies [9fe7448]
+- Updated dependencies [2e11d90]
+- Updated dependencies [4578c56]
+- Updated dependencies [c512c25]
+- Updated dependencies [215e662]
+- Updated dependencies [3d886ee]
+- Updated dependencies [d8d0711]
+- Updated dependencies [0ee2d15]
+- Updated dependencies [4f4c4ed]
+- Updated dependencies [f6e1d49]
+- Updated dependencies [e9a1f5c]
+- Updated dependencies [40a6ee5]
+- Updated dependencies [5910b5e]
+- Updated dependencies [7098aca]
+- Updated dependencies [97610a5]
+- Updated dependencies [081e6a0]
+- Updated dependencies [1884948]
+- Updated dependencies [8a995b8]
+- Updated dependencies [3089848]
+- Updated dependencies [e23eccb]
+- Updated dependencies [ac8f2c5]
+- Updated dependencies [db9cf80]
+- Updated dependencies [e75dced]
+- Updated dependencies [9af0005]
+- Updated dependencies [f66c440]
+- Updated dependencies [440bed6]
+- Updated dependencies [b2549a8]
+- Updated dependencies [ee8751d]
+- Updated dependencies [96e4be4]
+- Updated dependencies [35ef501]
+- Updated dependencies [faf6348]
+- Updated dependencies [e148ca9]
+- Updated dependencies [557ae7c]
+- Updated dependencies [6a3fe25]
+- Updated dependencies [7731d70]
+- Updated dependencies [3073b72]
+- Updated dependencies [c76edeb]
+- Updated dependencies [5b12503]
+- Updated dependencies [514bf3c]
+- Updated dependencies [20e7d52]
+- Updated dependencies [b3a3634]
+- Updated dependencies [3e72f93]
+- Updated dependencies [f89b5f5]
+- Updated dependencies [d25b187]
+- Updated dependencies [0e00d36]
+- Updated dependencies [d748ae8]
+- Updated dependencies [dab6bf4]
+- Updated dependencies [ed1de8c]
+- Updated dependencies [a00cf99]
+- Updated dependencies [5fb1746]
+- Updated dependencies [29a163f]
+- Updated dependencies [e223152]
+- Updated dependencies [9f5eca5]
+- Updated dependencies [9963322]
+- Updated dependencies [b27b894]
+- Updated dependencies [874a38d]
+- Updated dependencies [02d9f69]
+- Updated dependencies [f53f14b]
+- Updated dependencies [a800912]
+- Updated dependencies [d973c34]
+- Updated dependencies [156ddfa]
+- Updated dependencies [5081090]
+- Updated dependencies [b6eb25f]
+- Updated dependencies [165587e]
+- Updated dependencies [e04759d]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [b32ee3e]
+- Updated dependencies [91f46d0]
+- Updated dependencies [e5899a6]
+- Updated dependencies [d7b26df]
+- Updated dependencies [490cb6d]
+- Updated dependencies [e865300]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [c74d843]
+- Updated dependencies [6d5191e]
+- Updated dependencies [85edd61]
+- Updated dependencies [e84aeb3]
+- Updated dependencies [322ff1e]
+- Updated dependencies [7b0a9c9]
+- Updated dependencies [5fc57b3]
+- Updated dependencies [fe58bbc]
+- Updated dependencies [c4e7fa5]
+- Updated dependencies [581ca7d]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [b7cd1af]
+- Updated dependencies [9814035]
+- Updated dependencies [55382dc]
+- Updated dependencies [b1d701b]
+- Updated dependencies [f9ebb7d]
+- Updated dependencies [efcbac7]
+- Updated dependencies [51f36e7]
+- Updated dependencies [20028df]
+- Updated dependencies [69d4218]
+- Updated dependencies [5ce6773]
+- Updated dependencies [9432bac]
+- Updated dependencies [3f69471]
+- Updated dependencies [e5687cb]
+- Updated dependencies [1e62f71]
+- Updated dependencies [ec7f7f8]
+- Updated dependencies [038d4c9]
+- Updated dependencies [147a0d1]
+- Updated dependencies [1959aac]
+- Updated dependencies [e1deaef]
+- Updated dependencies [1badd31]
+- Updated dependencies [55828c5]
+- Updated dependencies [7856110]
+- Updated dependencies [9b37edb]
+- Updated dependencies [a22e67b]
+- Updated dependencies [62ce45d]
+- Updated dependencies [39e93ef]
+- Updated dependencies [02bec6c]
+- Updated dependencies [719183f]
+- Updated dependencies [8464380]
+- Updated dependencies [252a582]
+- Updated dependencies [f931e76]
+- Updated dependencies [e5f9f01]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [de70e97]
+- Updated dependencies [74c4b34]
+- Updated dependencies [e040b8c]
+- Updated dependencies [f451a59]
+- Updated dependencies [ba95607]
+- Updated dependencies [b53b949]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [1e44436]
+- Updated dependencies [2acff87]
+- Updated dependencies [299a2c6]
+- Updated dependencies [e23eccb]
+- Updated dependencies [bf492c8]
+- Updated dependencies [c7a3234]
+  - @objectstack/spec@18.0.0-next.0
+  - @objectstack/plugin-auth@18.0.0-next.0
+  - @objectstack/core@18.0.0-next.0
+
 ## 17.7.0
 
 ### Patch Changes
