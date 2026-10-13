@@ -33,7 +33,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { RLS_DENY_FILTER as SPEC_RLS_DENY_FILTER } from '@objectstack/spec/data';
-import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { SecurityPlugin } from './security-plugin.js';
 import { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
 import { RLS_DENY_FILTER as PACKAGE_RLS_DENY_FILTER } from './index.js';
@@ -85,12 +84,7 @@ async function boot(deployment: Deployment) {
     objectql: {
       registerMiddleware: (mw: any) => { if (!middleware) middleware = mw; },
       getSchema: () => schema,
-      // An engine double that holds no rows; its `findOne` refuses what the
-      // real engine refuses (`check:engine-double-contract`).
-      findOne: vi.fn(async (object: string, query: unknown) => {
-        assertEngineFindOnePredicate(object, query as EngineFindOneQueryInput);
-        return null;
-      }),
+      // No row is ever read here: none of the deny paths reaches the store.
       find: vi.fn(async () => [] as Record<string, unknown>[]),
     },
     metadata: { get: async () => schema, list: async () => deployment.sets },
