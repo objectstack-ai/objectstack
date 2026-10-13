@@ -80,7 +80,7 @@ export const EMAIL_TEMPLATE_FLOOR_LOCALE = 'en-US';
  * still owes.
  */
 const EMAIL_TEMPLATE_CATEGORY_REMOVED =
-  '`email_template.category` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
+  '`email_template.category` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — '
   + 'nothing read it: the Studio listing never offered the filter facet it promised, and delivery '
   + 'never depended on it. Delete the key. A template is found by its `name`, so group templates '
   + 'with a dotted namespace prefix instead (`auth.password_reset`, `crm.welcome`). '
@@ -88,7 +88,7 @@ const EMAIL_TEMPLATE_CATEGORY_REMOVED =
   + 'applies the ones it can prove, and you apply the rest by hand.';
 
 const EMAIL_TEMPLATE_IS_SYSTEM_REMOVED =
-  '`email_template.isSystem` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
+  '`email_template.isSystem` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — '
   + 'nothing enforced it: no door refused deleting a template that set it. Delete the key. A '
   + "built-in template is a code package's declaration: a Studio save overrides it for the "
   + "environment, and discarding that save restores the package's copy. "
