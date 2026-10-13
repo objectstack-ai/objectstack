@@ -158,6 +158,14 @@
         "content/docs/ui/forms.mdx"
       ],
       "note": "Newly VISIBLE to this gate at #4001 批 18, not newly authorable: the four variants were always authored on `FormView.submitBehavior`, but the shape was a plain `z.union`, which this walk cannot recognise as discriminated. Batch 18 made it `z.discriminatedUnion('kind')` so a bad key inside one arm reports `unrecognized_keys` at the key's own path instead of an `invalid_union` whose prescription the renderers flatten away (#5014) — and that turned an already-authorable vocabulary into a governed one. GOVERNED rather than exempt: ui/forms.mdx names all four (line 20 lists them together, and the `thank-you` and `redirect` shapes have worked examples)."
+    },
+    {
+      "key": "state:refused|registered|unregistered",
+      "label": "flow registration verdict",
+      "docs": [
+        "content/docs/automation/flows.mdx"
+      ],
+      "note": "The automation engine's verdict the flow meta read serves beside a stored flow (#23316). Not authored — the engine answers it — but GOVERNED rather than exempt: a reader acts on each state differently, and automation/flows.mdx ('Discovery & Registration') names all three in its state table."
     }
   ]
 }
