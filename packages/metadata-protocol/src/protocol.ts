@@ -19639,12 +19639,13 @@ export class ObjectStackProtocolImplementation implements
      * Per row, because one container name can have two stored rows (a
      * package-less row and a package-bound one, ADR-0048), and the list read
      * hydrates both on every call. Keyed on the name alone, each row's
-     * hydration reconciled against the other's set: every list read healed
-     * the names one row has and the other lacks, and a republish of one row
-     * retired the other row's members. A reset addresses every row of the
-     * name, because its heal is handed no binding. The row that remains is
-     * answered from its stored row by both doors and is hydrated again on the
-     * next list read. So is a name that both rows expand to and one row drops.
+     * hydration reconciled against the other row's set, so a list read
+     * retired the members one row has and the other lacks. A view both rows
+     * expand to, which one row drops, leaves the registry with that row; both
+     * doors answer it from the other row's stored row, and the next list read
+     * registers it again. A reset addresses every row of the name, because
+     * its heal is handed no binding, and the row that remains is hydrated
+     * again on the next list read.
      */
     private static readonly registeredViewExpansions =
         new WeakMap<object, Map<string, Map<string, ReadonlySet<string>>>>();

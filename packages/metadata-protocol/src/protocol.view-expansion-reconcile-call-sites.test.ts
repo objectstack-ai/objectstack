@@ -22,6 +22,7 @@
  *  2. THE CHAIN: the write-through reaches the hydrator, every path of the
  *     hydrator that registers the row reaches the expansion hydration, that
  *     reaches the reconcile, and the heal runs the reconcile ahead of its walk.
+ *     Every call into the chain is awaited, so a write answers after it.
  *  3. THE RECORD AND THE VERBS: only the reconcile reads or writes the record;
  *     the heal verbs are called by the heal walk alone. Every `registerItem(`
  *     call is pinned with its member in `protocol.register-item-call-sites.test.ts`,
@@ -212,6 +213,16 @@ describe('[#23198] the write-through and the heal both end in the one reconcile'
             .toEqual(['hydrateExpandedViewItems', 'restoreArtifactRegistryView']);
         expect(codeMatches(/this\.hydrateExpandedViewItems\(/).map((m) => m.member))
             .toEqual(['hydrateOverlayIntoRegistry', 'hydrateOverlayIntoRegistry']);
+    });
+
+    it('every call into the chain is awaited, so a write answers after its reconcile', () => {
+        const CHAIN = /this\.(?:applyRegistryWriteThrough|hydrateOverlayIntoRegistry|hydrateExpandedViewItems|reconcileViewExpansions|restoreArtifactRegistryView)\(/;
+        const calls = codeMatches(CHAIN);
+        expect(calls.length).toBeGreaterThan(0);
+        expect(
+            calls.filter(({ offset }) => !/\bawait\s+$/.test(SOURCE.slice(offset - 12, offset)))
+                .map(({ member, text }) => `${member}: ${text}`),
+        ).toEqual([]);
     });
 
     it('the heal reconciles to the empty set ahead of its tier walk, past the organization gate', () => {
