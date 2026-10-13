@@ -172,6 +172,30 @@ export function unknownQueryParamMessage(
 }
 
 /**
+ * The recognition DECISION, as a pure function of the query: the located
+ * sentence for a query carrying any name outside `allowed`, or `undefined` when
+ * every name is understood (or there is no query object at all).
+ * {@link refuseUnknownQueryParams} writes it; a door with its own envelope —
+ * the by-name `/meta` doors' `metaItemQueryRefusal`, which the runtime
+ * dispatcher asks — takes it and writes its own body (#23072).
+ *
+ * @param query    the request's parsed query (any shape; a non-object has no names)
+ * @param allowed  every parameter name the route accepts
+ */
+export function unknownQueryParamRefusalMessage(
+  query: unknown,
+  allowed: readonly string[],
+): string | undefined {
+  if (!query || typeof query !== 'object') return undefined;
+  const permitted = new Set(allowed);
+  // Sorted so a request carrying several unknown names always produces the
+  // same message, whatever order the adapter happened to build the object in.
+  const unknown = Object.keys(query).filter(k => !permitted.has(k)).sort();
+  if (unknown.length === 0) return undefined;
+  return unknownQueryParamMessage(unknown, [...allowed].sort());
+}
+
+/**
  * Refuse a request carrying any query parameter outside this route's closed
  * set. Returns `true` when it answered the request — the caller `return`s
  * immediately, exactly like {@link refuseRepeatedQueryParams} and the
@@ -192,17 +216,12 @@ export function refuseUnknownQueryParams(
   res: any,
   allowed: readonly string[],
 ): boolean {
-  const query = req?.query;
-  if (!query || typeof query !== 'object') return false;
-  const permitted = new Set(allowed);
-  // Sorted so a request carrying several unknown names always produces the
-  // same message, whatever order the adapter happened to build the object in.
-  const unknown = Object.keys(query).filter(k => !permitted.has(k)).sort();
-  if (unknown.length === 0) return false;
+  const message = unknownQueryParamRefusalMessage(req?.query, allowed);
+  if (message === undefined) return false;
   res.status(400).json({
     error: {
       code: 'VALIDATION_ERROR',
-      message: unknownQueryParamMessage(unknown, [...allowed].sort()),
+      message,
     },
   });
   return true;

@@ -23,6 +23,7 @@ import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { ruleArrayFilterError } from './filter-rule-array';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+import { PAGE_TYPE_DEFAULT } from './default-record-page';
 
 /**
  * Shared history for this file (#4001).
@@ -1504,7 +1505,7 @@ export const PageSchema = lazySchema(() => strictObject({
   icon: z.string().optional().describe('Page icon name'),
   
   /** Page Type */
-  type: PageTypeSchema.default('record').describe('Page type'),
+  type: PageTypeSchema.default(PAGE_TYPE_DEFAULT).describe('Page type'),
   
   /**
    * Page-local state variables (ADR-0049). Runtime-live: the renderer mounts the
@@ -1539,8 +1540,32 @@ export const PageSchema = lazySchema(() => strictObject({
   regions: z.array(PageRegionSchema).optional().default([])
     .describe('Layout regions (header, main, sidebar, footer) with their components. Optional — list pages use interfaceConfig, slotted pages use slots, and an empty full page falls back to the synthesized default layout.'),
   
-  /** Activation */
-  isDefault: z.boolean().default(false),
+  /**
+   * Activation — whether this page is the DEFAULT RECORD PAGE of its `object`:
+   * the page the record view of that object opens.
+   *
+   * **At most one default record page per object per deployment.** A record
+   * page (`type: 'record'`, the default) bound to an `object` and declared
+   * `isDefault: true` is the one the renderer opens for that object's records,
+   * with no tie-break: two defaults for one object would leave the choice to
+   * registration order, which no author wrote. So a second is refused, and the
+   * refusal names both pages — by `defineStack` within one stack (and so by
+   * `os validate` and `os build`), by `composeStacks` across the stacks it
+   * composes, at package registration across packages, and at metadata save.
+   * Saving a page under the existing default's own name (an ADR-0005 overlay
+   * by name) is that same page, not a second default. (Maintainer ruling A on
+   * objectstack#23015, record 6134056653.)
+   *
+   * To change which page opens: set `isDefault: false` on one of the two, or
+   * compose the deployment without the package that ships the other. Shipping
+   * a second default is not an override path.
+   *
+   * `isDefault` on a page that is not a record page bound to an object is
+   * outside this rule. The one reading every door uses is
+   * `defaultRecordPageObject` (`default-record-page.ts`).
+   */
+  isDefault: z.boolean().default(false)
+    .describe('Whether this record page is the default record page of its `object` — the page the record view opens. At most one `isDefault: true` record page may exist for an object in a deployment: a second is refused (by defineStack / os validate, at package registration and at metadata save), naming both pages. Saving a page under the existing default\'s own name is that page, not a second default. Outside this rule for a page that is not a record page bound to an object.'),
   // `assignedProfiles` REMOVED (ADR-0090 D2 / ADR-0049) — it named the concept
   // D2 deleted and nothing anywhere enforced it, so a page that "assigned
   // profiles" was open to everyone who could reach it. Page audience is the

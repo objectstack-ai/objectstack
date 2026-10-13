@@ -134,7 +134,6 @@ describe('[#22738] a lookup title is served only for a target whose declared exp
     const memberId = await userId('lte-member@verify.test');
     const org = (await ql.findOne('sys_member', { where: { user_id: memberId }, ...SYS }))?.organization_id;
     expect(org, 'the member belongs to an organization').toBeTruthy();
-    await ql.insert('sys_position', { id: 'pos_lte', name: POSITION, label: 'Reviewer', active: true, organization_id: org }, SYS);
     for (const id of [await userId('admin@objectos.ai'), memberId]) {
       await ql.insert('sys_user_position', { user_id: id, position: POSITION, organization_id: org }, SYS);
     }

@@ -80,12 +80,11 @@ export function validateRecordTitle(stack: AnyRec): RecordTitleFinding[] {
         message:
           `${objName}: titleFormat is retired (ADR-0079) — migrate to nameField ` +
           `(single field) or a formula field designated nameField`,
+        // [#22161] One remedy line; why the template is retired (render-only,
+        // neither returned nor queryable) is `os explain title-format-retired`.
         hint:
-          `titleFormat is a render-only template the server cannot return or ` +
-          `query, and an explicit nameField now takes precedence. For a ` +
-          `single-field title set nameField: '<field>'. For a composite title, ` +
-          `add a formula field (returnType: 'text') and designate it via ` +
-          `nameField.`,
+          `Set nameField: '<field>' for a single-field title, or add a formula field (returnType: 'text') ` +
+          `and designate it via nameField; then drop titleFormat`,
       });
     }
 
@@ -102,11 +101,11 @@ export function validateRecordTitle(stack: AnyRec): RecordTitleFinding[] {
         message:
           `${objName}: no resolvable record title — records will have no ` +
           `meaningful name (no nameField and no title-eligible field to derive one)`,
+        // [#22161] One remedy line; the runtime's fallback title, and why this
+        // is only a warning, are `os explain title-unresolvable`.
         hint:
-          `Set nameField to a text/email field (or a formula field with ` +
-          `returnType: 'text'), or add a text field named "name"/"title". The ` +
-          `runtime auto-provisions a primary and falls back to "Record #<id>", ` +
-          `but an explicit title is far more useful.`,
+          `Set nameField to a text/email field (or a formula field with returnType: 'text'), or add a ` +
+          `text field named "name"/"title"`,
       });
     }
   }

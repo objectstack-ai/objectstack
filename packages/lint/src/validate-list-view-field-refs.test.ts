@@ -29,7 +29,7 @@ import { explainRule } from './rule-explanations.js';
 // verdict to one line of at most 200 characters — every firing variant this
 // suite exercises, not a chosen few. Run the whole file: those cases read what
 // the cases above fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateListViewFieldRefs: typeof validateListViewFieldRefsUnrecorded = (...args) => {
   const findings = validateListViewFieldRefsUnrecorded(...args);
   fired.push(...findings);
@@ -218,7 +218,8 @@ describe('#14107 — the card\'s five measured positions', () => {
       expect(findings[0].rule).toBe(LIST_VIEW_FIELD_UNKNOWN);
       expect(findings[0].severity).toBe('error');
       expect(findings[0].message).toContain('is not a field on object "duly_task"');
-      expect(findings[0].hint).toContain('Fields on "duly_task"');
+      // [#22161] The remedy alone; the verdict's "Did you mean" replaced the field list.
+      expect(findings[0].hint).toBe('Name a field that exists on "duly_task", or drop the entry');
     });
   }
 });
@@ -506,7 +507,8 @@ describe('#18835 — the four keys with no position row', () => {
       expect(findings[0].rule).toBe(LIST_VIEW_FIELD_UNKNOWN);
       expect(findings[0].severity).toBe(severity);
       expect(findings[0].message).toContain('is not a field on object "duly_task"');
-      expect(findings[0].hint).toContain('Fields on "duly_task"');
+      // [#22161] The remedy alone; the verdict's "Did you mean" replaced the field list.
+      expect(findings[0].hint).toBe('Name a field that exists on "duly_task", or drop the entry');
     });
 
     // The dark half, per key: a real field is silent, so the rows report the
@@ -877,7 +879,9 @@ describe('#14107 — the skips', () => {
   });
 
   it('skips a list view whose provider is not `object`', () => {
-    const stack = stackWith(mutate({ data: { provider: 'api', endpoint: '/x' }, columns: ['nope'] }));
+    // A `value` source: the one non-`object` provider a list view can still
+    // bind (the `api` arm is retired, and `schema` is form-only).
+    const stack = stackWith(mutate({ data: { provider: 'value', items: [] }, columns: ['nope'] }));
     expect(validateListViewFieldRefs(stack)).toEqual([]);
   });
 
@@ -1110,5 +1114,58 @@ describe('[#22161] one-line verdicts — list-view-field-unknown, list-view-fiel
     );
     expect(names.size).toBeGreaterThan(10);
     for (const name of names) expect(text, name).toContain(`\`${name}\``);
+  });
+});
+
+// [#22161] Slice 16: the `fix:` lines. The unknown id prints its remedy alone
+// (the verdict's "Did you mean" names the nearest field, so the object's field
+// list is no longer appended); the dotted id prints one remedy line per door,
+// in the doors' own words, and what a denormalised field is moves to the
+// explanation.
+describe('[#22161] one-line fixes — list-view-field-unknown, list-view-field-dotted', () => {
+  const CONVERTED = [LIST_VIEW_FIELD_UNKNOWN, LIST_VIEW_FIELD_DOTTED];
+  const filterOn = (field: string): AnyRec => ({ filter: [{ field, operator: 'equals', value: 'x' }] });
+  const onlyHint = (patch: AnyRec) => {
+    const findings = validateListViewFieldRefs(stackWith(mutate(patch)));
+    expect(findings).toHaveLength(1);
+    return findings[0]!.hint;
+  };
+
+  it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => CONVERTED.includes(f.rule));
+    // Coverage control: the unknown id plain and on a dotted head; the dotted
+    // id at the projection door and at the filter door.
+    const unknown = converted.filter((f) => f.rule === LIST_VIEW_FIELD_UNKNOWN);
+    expect(unknown.some((f) => f.message.includes('(the head of "'))).toBe(true);
+    expect(unknown.some((f) => !f.message.includes('(the head of "'))).toBe(true);
+    const dotted = converted.filter((f) => f.rule === LIST_VIEW_FIELD_DOTTED);
+    expect(dotted.some((f) => f.message.includes('the query projection refuses it'))).toBe(true);
+    expect(dotted.some((f) => f.message.includes('so no backend serves the path'))).toBe(true);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+      expect(f.hint, f.rule).not.toContain('Fields on');
+    }
+  });
+
+  it('reads as one remedy per arm', () => {
+    expect(onlyHint({ kanban: { groupByField: 'statuss' } })).toBe(
+      'Name a field that exists on "duly_task", or drop the entry',
+    );
+    expect(onlyHint({ columns: [{ field: 'owner.name' }] })).toBe(
+      'Name the whole column "owner" and read into it in the client, read the related record with ' +
+        '`expand`, or denormalise the value onto "duly_task" and name that',
+    );
+    expect(onlyHint(filterOn('owner.name'))).toBe(
+      'Filter on a column of "duly_task" itself, or denormalise the value onto "duly_task" and name that',
+    );
+  });
+
+  it('`os explain` carries what the `fix:` lines no longer say', () => {
+    expect(explainRule(LIST_VIEW_FIELD_UNKNOWN)!.paragraphs.join('\n')).toContain('"Did you mean"');
+    const dotted = explainRule(LIST_VIEW_FIELD_DOTTED)!.paragraphs.join('\n');
+    for (const fact of ['a stored field, written when the source changes', 'read the related record with `expand`', 'filter on a column of the bound object itself']) {
+      expect(dotted, fact).toContain(fact);
+    }
   });
 });

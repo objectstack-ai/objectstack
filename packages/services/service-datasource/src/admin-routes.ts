@@ -21,6 +21,10 @@ import {
   // `resolveAdmissionTenancyPosture` below.
   classifyAdmissionTenancyPosture,
   type TenancyPostureSource,
+  // ADR-0069 — the authentication-policy gate's ONE decision, called at this
+  // family's door on the session user the door already reads (see
+  // `requireDatasourceAdmin`), never re-derived here.
+  evaluateAuthGate,
 } from '@objectstack/core';
 import type { TenancyPosture } from '@objectstack/spec/security';
 import type { ErrorCode } from '@objectstack/spec/api';
@@ -449,6 +453,10 @@ export function registerDatasourceAdminRoutes(
   const requireDatasourceAdmin = async (req: any, res: any): Promise<boolean> => {
     let userId: string | undefined;
     let systemPermissions: string[] = [];
+    // The better-auth session user the identity resolution below read, kept so
+    // the ADR-0069 gate is asked about the SAME session the floor admitted —
+    // one read, both decisions, as for the two below.
+    let sessionUser: unknown;
     try {
       const headers = toWebHeaders(req?.headers);
       if (headers) {
@@ -459,7 +467,14 @@ export function registerDatasourceAdminRoutes(
         // would answer "no auth service" on precisely the deployments that
         // have one but register it later — every session-authenticated caller
         // refused, with nothing in the registry to show for it.
-        const getSession = buildGetSession(ctx);
+        const readSession = buildGetSession(ctx);
+        const getSession = readSession
+          ? async (h: Headers) => {
+              const session = await readSession(h);
+              sessionUser = (session as { user?: unknown } | null | undefined)?.user;
+              return session;
+            }
+          : undefined;
         // `IDataEngine` for both spellings: the resolver reads exactly `find`
         // off this, which is the data plane's own surface, and the same pair
         // is spelled this way where other services resolve the engine. The
@@ -495,6 +510,30 @@ export function registerDatasourceAdminRoutes(
       // Fail closed: an identity that could not be resolved is not an identity.
       userId = undefined;
       systemPermissions = [];
+      sessionUser = undefined;
+    }
+    // ADR-0069 — a session the authentication policy HOLDS (an expired
+    // password, enforced MFA not yet enrolled) is gated out of every protected
+    // resource until it remediates, and this family is one. Asked FIRST, as
+    // REST's `enforceAuth` asks it, so a held caller is told what to remediate
+    // whatever it holds: its capabilities are not consulted.
+    //
+    // No request path is passed. The allow-list exempts remediation and
+    // bootstrap routes, and nothing here is one; this registrar's base path is
+    // the HOST's argument, so passing it would let a family mounted under an
+    // allow-listed prefix inherit an exemption it never declared. An empty
+    // path earns no exemption (the predicate is fail-closed on it, #7898), so
+    // every held session is refused here, on every route.
+    //
+    // The refusal is the REST seam's answer — `403` with the gate's own `code`
+    // and `message` — written through this family's declared envelope.
+    // `code` is declared as a bare string on the envelope's `authGate`; its one
+    // producer (plugin-auth's `customSession` enrichment) writes only
+    // `PASSWORD_EXPIRED` / `MFA_REQUIRED`, both members of the vocabulary.
+    const gate = evaluateAuthGate(sessionUser, '');
+    if (gate) {
+      sendError(res, 403, gate.code as ErrorCode, gate.message);
+      return true;
     }
     // `isSystem` is deliberately not read off anything the wire can reach —
     // `ResolvedAuthzContext` has no such field, and inbound HTTP never carries

@@ -32,9 +32,13 @@ import {
   type DanglingReferenceAuditPort,
 } from './dangling-reference-audit.js';
 
-/** The RBAC link-table shape #4551 calls out as the priority case. */
+/**
+ * The RBAC link-table shape #4551 calls out as the priority case. Named for a
+ * security table that survives the catalog row objects' retirement (C3 stage 8:
+ * `sys_position_permission_set` is gone); the shape is the fixture's own.
+ */
 const binding: AuditableObject = {
-  name: 'sys_position_permission_set',
+  name: 'sys_user_permission_set',
   fields: {
     id: { type: 'text', primaryKey: true },
     position_id: { type: 'lookup', reference: 'sys_position' },
@@ -123,7 +127,7 @@ describe('[#4551] dangling stored references are reported, never rewritten', () 
     const port = makePort({
       objects: [binding],
       rows: {
-        sys_position_permission_set: [
+        sys_user_permission_set: [
           { id: 'ppr_1', position_id: 'pos_real', permission_set_id: 'ps_does_not_exist_at_all' },
         ],
       },
@@ -138,7 +142,7 @@ describe('[#4551] dangling stored references are reported, never rewritten', () 
     // Which object, which record, which field, which id, which target object —
     // the report is addressed to a human who has to go fix it.
     expect(out.dangling[0]).toEqual({
-      objectName: 'sys_position_permission_set',
+      objectName: 'sys_user_permission_set',
       recordId: 'ppr_1',
       field: 'permission_set_id',
       target: 'sys_permission_set',
@@ -150,7 +154,7 @@ describe('[#4551] dangling stored references are reported, never rewritten', () 
     const port = makePort({
       objects: [binding],
       rows: {
-        sys_position_permission_set: [
+        sys_user_permission_set: [
           { id: 'ppr_1', position_id: 'pos_real', permission_set_id: 'ps_real' },
         ],
       },
@@ -170,7 +174,7 @@ describe('[#4551] dangling stored references are reported, never rewritten', () 
     const port = makePort({
       objects: [binding],
       rows: {
-        sys_position_permission_set: [
+        sys_user_permission_set: [
           { id: 'ppr_1', position_id: 'pos_1', permission_set_id: 'ps_1' },
         ],
       },
@@ -189,7 +193,7 @@ describe('[#4551] dangling stored references are reported, never rewritten', () 
     const port = makePort({
       objects: [binding],
       rows: {
-        sys_position_permission_set: [
+        sys_user_permission_set: [
           { id: 'ppr_1', position_id: 'pos_1', permission_set_id: 'ps_1' },
         ],
       },
@@ -205,12 +209,12 @@ describe('[#4551] dangling stored references are reported, never rewritten', () 
     const port = makePort({
       objects: [binding, task],
       rows: { showcase_task: [{ id: 't1', title: 'T', project: 'proj_real' }] },
-      unreadable: new Set(['sys_position_permission_set']),
+      unreadable: new Set(['sys_user_permission_set']),
       existing: new Set(['showcase_project proj_real']),
     });
 
     const out = await auditDanglingReferences(port);
-    expect(out.unreadableObjects).toEqual(['sys_position_permission_set']);
+    expect(out.unreadableObjects).toEqual(['sys_user_permission_set']);
     expect(out.dangling).toEqual([]);
   });
 
@@ -219,7 +223,7 @@ describe('[#4551] dangling stored references are reported, never rewritten', () 
     // the stored data disagree with what actually happened, and the remedy
     // (re-seed the target vs clear the link) is an operator judgement call.
     const rows: Record<string, Array<Record<string, unknown>>> = {
-      sys_position_permission_set: [
+      sys_user_permission_set: [
         { id: 'ppr_1', position_id: 'pos_gone', permission_set_id: 'ps_gone' },
       ],
       showcase_task: [
@@ -305,17 +309,17 @@ describe('[#4551] dangling stored references are reported, never rewritten', () 
       objects: [task, binding],   // registration order puts the business object first
       rows: {
         showcase_task: [{ id: 't1', title: 'T', project: 'p' }],
-        sys_position_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_1' }],
+        sys_user_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_1' }],
       },
     });
     const findSpy = port.find.bind(port);
     port.find = async (o, opts) => { reads.push(o); return findSpy(o, opts); };
 
     await auditDanglingReferences(port);
-    expect(reads[0]).toBe('sys_position_permission_set');
+    expect(reads[0]).toBe('sys_user_permission_set');
     // …and the priority set is DERIVED from the platform-object registry, not
     // hand-listed here, so a new plugin-security table is covered for free.
-    expect(SECURITY_SURFACE_OBJECTS.has('sys_position_permission_set')).toBe(true);
+    expect(SECURITY_SURFACE_OBJECTS.has('sys_user_permission_set')).toBe(true);
     expect(SECURITY_SURFACE_OBJECTS.has('sys_user_permission_set')).toBe(true);
   });
 
@@ -344,7 +348,7 @@ describe('[#4551] dangling stored references are reported, never rewritten', () 
     const port = makePort({
       objects: [binding],
       rows: {
-        sys_position_permission_set: [
+        sys_user_permission_set: [
           { id: 'a', permission_set_id: 'ps_gone' },
           { id: 'b', permission_set_id: 'ps_gone' },
           { id: 'c', permission_set_id: 'ps_gone' },
@@ -362,7 +366,7 @@ describe('[#4551] dangling stored references are reported, never rewritten', () 
   it('the report is logged when there is anything to say, and silent otherwise', async () => {
     const clean = makePort({
       objects: [binding],
-      rows: { sys_position_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_real' }] },
+      rows: { sys_user_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_real' }] },
       existing: new Set(['sys_permission_set ps_real']),
     });
     await auditDanglingReferences(clean);
@@ -370,13 +374,13 @@ describe('[#4551] dangling stored references are reported, never rewritten', () 
 
     const dirty = makePort({
       objects: [binding],
-      rows: { sys_position_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_gone' }] },
+      rows: { sys_user_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_gone' }] },
     });
     await auditDanglingReferences(dirty);
     expect(dirty.warnings).toHaveLength(1);
     expect(dirty.warnings[0][0]).toContain('reported, never rewritten');
     expect((dirty.warnings[0][1] as any).references).toEqual([
-      'sys_position_permission_set#ppr_1.permission_set_id → sys_permission_set#ps_gone',
+      'sys_user_permission_set#ppr_1.permission_set_id → sys_permission_set#ps_gone',
     ]);
   });
 });
@@ -402,7 +406,7 @@ describe('[#4747] a run that was called off is not a finding about the data', ()
   const unreadablePort = () => makePort({
     objects: [binding],
     rows: {},
-    unreadable: new Set(['sys_position_permission_set']),
+    unreadable: new Set(['sys_user_permission_set']),
   });
 
   it('a REAL datasource fault still lands in `unreadableObjects`, loudly', async () => {
@@ -413,7 +417,7 @@ describe('[#4747] a run that was called off is not a finding about the data', ()
 
     const out = await auditDanglingReferences(port);
 
-    expect(out.unreadableObjects).toEqual(['sys_position_permission_set']);
+    expect(out.unreadableObjects).toEqual(['sys_user_permission_set']);
     expect(out.aborted).toBe(false);
     expect(port.warnings.map((w) => w[0])).toContain(
       '[integrity] dangling-reference audit could not list an object',
@@ -448,7 +452,7 @@ describe('[#4747] a run that was called off is not a finding about the data', ()
     const reads: string[] = [];
     const port = makePort({
       objects: [binding, task],
-      rows: { sys_position_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_gone' }] },
+      rows: { sys_user_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_gone' }] },
     });
     const findSpy = port.find.bind(port);
     port.find = async (o, opts) => { reads.push(o); return findSpy(o, opts); };
@@ -471,7 +475,7 @@ describe('[#4747] a run that was called off is not a finding about the data', ()
     const port = makePort({
       objects: [binding, task],   // binding is scanned first (security surface)
       rows: {
-        sys_position_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_gone' }],
+        sys_user_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_gone' }],
         showcase_task: [{ id: 't1', title: 'T', project: 'proj_gone' }],
       },
       unreadable: new Set(['showcase_task']),
@@ -487,7 +491,7 @@ describe('[#4747] a run that was called off is not a finding about the data', ()
 
     const out = await auditDanglingReferences(port, { signal });
 
-    expect(reads).toEqual(['sys_position_permission_set', 'showcase_task']);
+    expect(reads).toEqual(['sys_user_permission_set', 'showcase_task']);
     expect(out.dangling).toHaveLength(1);
     expect(out.dangling[0]).toMatchObject({ recordId: 'ppr_1', value: 'ps_gone' });
     expect(out.aborted).toBe(true);
@@ -507,7 +511,7 @@ describe('[#4747] a run that was called off is not a finding about the data', ()
     const signal = { aborted: false };
     const port = makePort({
       objects: [binding],
-      rows: { sys_position_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_x' }] },
+      rows: { sys_user_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_x' }] },
       throwingTargets: new Set(['sys_permission_set']),
     });
     const probeSpy = port.probe.bind(port);
@@ -528,7 +532,7 @@ describe('[#4747] a run that was called off is not a finding about the data', ()
     // has to guess whether `undefined` meant "finished" or "old report shape".
     const port = makePort({
       objects: [binding],
-      rows: { sys_position_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_real' }] },
+      rows: { sys_user_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_real' }] },
       existing: new Set(['sys_permission_set ps_real']),
     });
 
@@ -673,7 +677,7 @@ describe('[#4743] provenance references are audited, in their OWN bucket', () =>
       rows: {
         showcase_note: [{ id: 'n1', body: 'b', created_by: 'usr_deleted' }],
         showcase_task: [{ id: 't1', title: 'T', project: 'proj_gone' }],
-        sys_position_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_gone' }],
+        sys_user_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_gone' }],
       },
     });
     const findSpy = port.find.bind(port);
@@ -681,7 +685,7 @@ describe('[#4743] provenance references are audited, in their OWN bucket', () =>
 
     await auditDanglingReferences(port);
 
-    expect(reads).toEqual(['sys_position_permission_set', 'showcase_task', 'showcase_note']);
+    expect(reads).toEqual(['sys_user_permission_set', 'showcase_task', 'showcase_note']);
   });
 
   it('provenance ALONE does not raise the summary warning', async () => {
@@ -731,7 +735,7 @@ describe('[#4743] provenance references are audited, in their OWN bucket', () =>
     // guess whether `undefined` meant "clean" or "old report shape".
     const port = makePort({
       objects: [binding],
-      rows: { sys_position_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_real' }] },
+      rows: { sys_user_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_real' }] },
       existing: new Set(['sys_permission_set ps_real']),
     });
 
@@ -764,7 +768,7 @@ describe('[#5718] objects a finite budget never reached are named, not dropped',
   const budgetPort = (objects: AuditableObject[]) => makePort({
     objects,
     rows: {
-      sys_position_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_real' }],
+      sys_user_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_real' }],
       showcase_task: [{ id: 't1', title: 'T', project: 'proj_real' }],
       showcase_note: [{ id: 'n1', body: 'b', created_by: 'usr_alive' }],
     },
@@ -785,7 +789,7 @@ describe('[#5718] objects a finite budget never reached are named, not dropped',
 
     const out = await auditDanglingReferences(port, { maxRows: 1 });
 
-    expect(reads).toEqual(['sys_position_permission_set']);   // budget bought one table
+    expect(reads).toEqual(['sys_user_permission_set']);   // budget bought one table
     expect(out.scanned).toBe(1);
     // …and the report SAYS the other two were never opened, instead of leaving
     // them inside an empty `dangling`.
@@ -825,7 +829,7 @@ describe('[#5718] objects a finite budget never reached are named, not dropped',
 
     const out = await auditDanglingReferences(port, {
       maxRows: 1,
-      objects: ['sys_position_permission_set', 'showcase_task'],
+      objects: ['sys_user_permission_set', 'showcase_task'],
     });
 
     // `showcase_note` was never on this run's list, so it is not something the
@@ -845,7 +849,7 @@ describe('[#5718] objects a finite budget never reached are named, not dropped',
     expect(out.scanned).toBe(0);
     expect(out.dangling).toEqual([]);   // …and this says NOTHING, which is the point
     expect(out.unscannedObjects).toEqual([
-      'sys_position_permission_set', 'showcase_task', 'showcase_note',
+      'sys_user_permission_set', 'showcase_task', 'showcase_note',
     ]);
   });
 
@@ -858,7 +862,7 @@ describe('[#5718] objects a finite budget never reached are named, not dropped',
     const signal = { aborted: false };
     const port = makePort({
       objects: [binding, task, note],
-      rows: { sys_position_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_gone' }] },
+      rows: { sys_user_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_gone' }] },
       unreadable: new Set(['showcase_task']),
     });
     const findSpy = port.find.bind(port);
@@ -884,7 +888,7 @@ describe('[#5718] objects a finite budget never reached are named, not dropped',
     const signal = { aborted: false };
     const port = makePort({
       objects: [binding, task, note],
-      rows: { sys_position_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_x' }] },
+      rows: { sys_user_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_x' }] },
       // The probe blows up because the pool went away under it — the #4747
       // race, which is what makes the answer "withdrawn" rather than a verdict.
       throwingTargets: new Set(['sys_permission_set']),
@@ -896,7 +900,7 @@ describe('[#5718] objects a finite budget never reached are named, not dropped',
 
     expect(out.aborted).toBe(true);
     expect(out.unscannedObjects).toEqual(['showcase_task', 'showcase_note']);
-    expect(out.unscannedObjects).not.toContain('sys_position_permission_set');
+    expect(out.unscannedObjects).not.toContain('sys_user_permission_set');
   });
 
   it('called off BEFORE the registry was enumerated: `aborted` carries it, the list is empty', async () => {
@@ -949,7 +953,7 @@ describe('[#5718] objects a finite budget never reached are named, not dropped',
     const loud = makePort({
       objects: [binding, task, note],
       rows: {
-        sys_position_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_gone' }],
+        sys_user_permission_set: [{ id: 'ppr_1', permission_set_id: 'ps_gone' }],
         showcase_task: [{ id: 't1', title: 'T', project: 'proj_gone' }],
         showcase_note: [{ id: 'n1', body: 'b', created_by: 'usr_deleted' }],
       },

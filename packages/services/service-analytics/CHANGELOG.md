@@ -1,5 +1,341 @@
 # Changelog — @objectstack/service-analytics
 
+## 18.0.0-next.0
+
+### Minor Changes
+
+- c565813: feat(spec,analytics): a dataset answer's measure column states its aggregate, labelled or not (`fields[].aggregate`)
+  
+  Clause-②: yes (widening)
+  
+  - **What a renderer can now read.** Each measure column of a dataset answer (`POST /analytics/dataset/query`) carries `fields[].aggregate`: the aggregate its dataset measure declares, in the closed `AggregationFunction` vocabulary (`count`, `sum`, `avg`, `min`, `max`, `count_distinct`). It is there whether or not the author gave the measure a `label`. So a chart can tell a count from a sum, for example to draw whole-number axis ticks for a count instead of 0.75 / 1.5 / 2.25.
+  - **What was missing.** The only aggregate on the wire was `builtinAggregate`, and it is present only when the measure has no `label`. A labelled measure, such as a `count` named "Tasks", reached the wire as `{ name, type: 'number', label }`, with nothing to say what kind of number it was.
+  - **Where it is set.** `AnalyticsService` writes it in the one step that describes a dataset answer's columns from the dataset's own measures. That step runs for both the live query and the draft-data preview, so the two answers agree. A measure's `__compare` column carries the same aggregate.
+  - **Where it is absent.** Dimension columns. Derived measures, which combine other measures and have no single aggregate (a stray `aggregate` written beside `derived` is ignored when the dataset compiles, so it is not stated here either). And a cube query answer (`POST /analytics/query`), which does not run through the dataset column step.
+  - **Unchanged.** `builtinAggregate` keeps its meaning: present only on a label-less measure column, to mark a header that is the server's default. No authoring key is added; `aggregate` is a response member only. `AnalyticsResultResponseSchema` and the `AnalyticsResult` contract declare the member, and the REST route relays it as it does every other column key.
+- 156ddfa: fix(service-analytics)!: the analytics door judges the two generic-exit declarations every other door judges — an object's `enable` block and a field's `internal: true` (#22634)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a runtime read door: analytics stops serving objects and fields whose existing declarations already withhold them from every other generic exit, and the remedy is the declaration the author already wrote, never a rewrite of anyone's code or metadata. One optional hook, `getObjectDeclaration`, is added to the exported `AnalyticsServiceConfig` type; it is additive, and nothing on the type surface narrows. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no exported declaration is removed or narrowed (not runtime-interface-only or type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Every generic exit judges an object's `enable` block through the spec's one exposure decision, `apiExposureDenialReason`: the REST data routes, the runtime dispatcher, the MCP data tools, and the cross-object search for the off switch. Every generic exit also withholds a field declared `internal: true`: the data door omits it from rows, the write responses strip it, and the engine's `aggregate()` refuses it as a group key. The analytics door read neither declaration.
+  
+  **FROM.** On both strategies (native SQL and ObjectQL), and for a member holding read and an administrator alike:
+  
+  - The ad-hoc query, the SQL face, the configured-cube door and the dataset door served the rows of an object declaring `apiEnabled: false`, and of an object whose `apiMethods` whitelist does not grant `list`.
+  - On the native-SQL strategy, a field declared `internal: true` was served as a group key, as an aggregate input and as a filter operand.
+  - On the ObjectQL strategy, the engine refused the same field as a group key or an aggregate input with an undeclared `500`. It still admitted the field as a filter operand.
+  
+  **TO.** Ahead of strategy selection, the door asks the spec's decision for the `aggregate` operation over every object a query reads: the base object, declared joins and relationship hops. It answers with the data door's codes for the same declaration:
+  
+  - `404 OBJECT_API_DISABLED` for `apiEnabled: false`;
+  - `405 OBJECT_API_METHOD_NOT_ALLOWED` for a whitelist that does not grant the verb.
+  
+  On the ad-hoc doors this happens before any cube is inferred, so a refused request mints nothing. A member that reads a field declared `internal: true` is refused `400 INVALID_FIELD`, naming the object and the field. This holds in every position: dimension, measure input, filter or sort key, dataset filter, and relationship hop.
+  
+  - **Refused, not withheld.** On the data door, the row path omits such a field because a row is a projection. Every analytics member is evaluated instead: a group key, an aggregate input, a predicate. There is nothing to omit, and the data door's own aggregate face already refuses the field as a group key.
+  - **Every caller.** Neither declaration takes a user, so administrators are refused exactly as members are. There is no system carve-out.
+  - **Fails closed.** A declaration lookup that throws refuses the query with `403 PERMISSION_DENIED`, logged at `error`. `AnalyticsServicePlugin` wires the lookup from the data engine and refuses when no engine can answer. A host constructing `AnalyticsService` by hand with no `getObjectDeclaration` hook gets no gate, and is told so once.
+  - **Unchanged.** An ordinary object and an ordinary field are served as before. An object that merely has an `internal` field is still served for every other field, and so is a bare count over it.
+  
+  **Measured producers.** On `origin/main` `f368b7e980`, no authored cube, dataset, dashboard or example in this repository names an `apiEnabled: false` object, an object whose whitelist omits `list`, or an `internal` field. The platform's System Overview datasets count `sys_user`, `sys_organization` and `sys_session`, and group `sys_audit_log` by two ordinary fields. Each of those objects grants `list`, and none of those members is `internal`. Deployed and cloud-held analytics definitions were NOT MEASURED.
+- 3b5475a: fix(metadata-protocol,service-analytics)!: a read that follows a lookup asks the TARGET object its declared exposure — the data door's `$expand` at every level, and the dataset door's dimension-label passes (#22661)
+  
+  Clause-②: no
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is two runtime read doors: each stops serving a lookup's target object whose existing `enable` declaration already refuses the read on every data route, and the remedy is the declaration the author already wrote. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no exported declaration is removed or narrowed (not runtime-interface-only or type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  The data routes judge the ADDRESSED object's `enable` block through the spec's one exposure decision (`apiExposureDenialReason` / `canServeApiOperation`): `enable.apiEnabled: false` answers `404 OBJECT_API_DISABLED`, and an `enable.apiMethods` whitelist that does not grant the verb answers `405 OBJECT_API_METHOD_NOT_ALLOWED`. A read that FOLLOWS a lookup reaches a second object nobody addressed, and two such reads never asked it.
+  
+  **FROM.** For an administrator and a member alike:
+  
+  - **`$expand`** — `GET /api/v1/data/:object?$expand=`, `GET /api/v1/data/:object/:id?expand=`, the relation map on `POST /api/v1/data/:object/query` (every level of the tree), and the export door (which expands every lookup to name it) served the row fields of a lookup's target whose declaration refuses it on every data route.
+  - **Dataset dimension labels** — `POST /api/v1/analytics/dataset/query` rendered a reference-class dimension's grouped id as the target record's display name, and sorted an `order` on that dimension by those names, for the same targets.
+  
+  **TO.** Each read asks the spec's one decision of the TARGET object, for `get` — the read both perform is "turn an id the caller holds into the record it names", the read `GET /api/v1/data/:target/:id` performs:
+  
+  - An `$expand` entry whose target the decision does not serve is withheld at the generic data door (`@objectstack/metadata-protocol`), at every level: the field answers as an UNEXPANDED lookup, its stored id — the answer the door already gives for a related record the caller may not read. Nothing below a withheld entry is read.
+  - A dimension label is not read for such a target (`@objectstack/service-analytics`): the stored id renders, and an `order` on the dimension sorts by it — the answer a target the reader's row scope hides already gets. A declaration that cannot be read withholds the labels too (fail-closed, at `warn`); the query itself still answers.
+  
+  Concretely, a target declaring `apiEnabled: false`, the deny-all `apiMethods: []`, or a whitelist without `get` (for example `['list']` or `['create']`) is withheld from both; a target with no `enable` block, or a whitelist that grants `get`, is served exactly as before.
+  
+  **Bindings.**
+  
+  - **Every caller.** The decision takes no user, so an administrator, a member and a system context get the same tree and the same labels.
+  - **The engine's privileged callers are untouched.** A flow's `config.expand` and a hook's own reads call the engine directly and never pass the generic data door, the same split the write results and the `internal: true` evaluate positions keep.
+  - **No new error code.** Both reads withhold rather than refuse, so no response status changes.
+  
+  **Measured producers.** Read on `origin/main` `eae3368a` over every `.ts` source under `packages/` and `examples/`: ten objects refuse `get` by declaration, and exactly one lookup points into any of them, from an object that is itself `apiEnabled: false`. No example declares `enable.apiEnabled` or `enable.apiMethods`. So no shipped object's served answer changes. Deployed and cloud-held object definitions were NOT MEASURED.
+- 7399080: fix(service-analytics)!: a configured cube, or a dataset `registerDataset` registers, over an object the API does not serve is refused at registration, and `GET /analytics/meta` no longer lists it (#22663)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the analytics registry's accept set: a cube or dataset whose base object or declared join the spec's exposure decision already denies is no longer registered, and every query of such a cube was already refused. The remedy is to point the definition at an object the API serves or remove it, never a rewrite of anyone's code or metadata. `CubeRegistry` gains one optional constructor parameter, which is additive; nothing on the type surface narrows. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no exported declaration is removed or narrowed (not runtime-interface-only or type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Since the analytics door started judging an object's `enable` block, every query over an object whose `enable` the spec's `apiExposureDenialReason` denies for the `aggregate` operation is refused: `404 OBJECT_API_DISABLED` for `apiEnabled: false`, `405 OBJECT_API_METHOD_NOT_ALLOWED` for an `apiMethods` whitelist that does not grant it. The registration doors did not ask the same question.
+  
+  **FROM.** A configured cube (`analyticsCubes`, or `AnalyticsServicePlugin({ cubes })`), or a dataset registered through `registerDataset` (or the service's `datasets` option), whose base object or declared join is such an object registered silently. `GET /analytics/meta` listed it, and every query of it then answered 404 or 405. Nothing told the author at registration time.
+  
+  **TO.** Registration asks the same decision, for the same operation, over the same objects the query door's first check reads: the base object and the declared joins.
+  
+  - **A configured cube** over such an object is not registered. The service logs one warning per cube that names the cube, the object and the declaration (`enable.apiEnabled: false`, or the `enable.apiMethods` whitelist and the operations it grants). Every other cube still registers, and the boot continues. This is the channel a pre-registered dataset that cannot compile already takes.
+  - **`registerDataset`** throws, registering nothing. The error names the dataset, the object and the declaration, and carries the query door's code and status for that declaration (`OBJECT_API_DISABLED` / 404 or `OBJECT_API_METHOD_NOT_ALLOWED` / 405) with the object.
+  - **A cube written straight to the service's public `cubeRegistry`** is refused by the registry's own admission in the same words.
+  - **`GET /analytics/meta`** never lists a refused definition.
+  
+  **Unchanged.**
+  
+  - A cube or dataset over an exposed object registers and lists exactly as before.
+  - A host that wires no `getObjectDeclaration` hook registers every definition as before. `AnalyticsServicePlugin` always wires it.
+  - Registration judges only what is known when it runs, and does not block otherwise. An object that is not registered yet when the analytics plugin's `init()` registers the configured cubes is not refused, and neither is one whose lookup throws. Objects declared by a plugin that inits later, or in a `start()`, fall in this class. Such a cube registers and lists as before, and the query door still refuses every query of it.
+  - A relationship hop that one member walks is judged at query time, per member, and does not refuse the whole cube.
+  
+  **Measured producers.** On `origin/main` `ee3ae0360d`, this repository has one authored cube, `showcase_delivery` (`showcase_task` joined to `showcase_project`), and no `registerDataset` producer outside tests. Neither object declares an `enable` block. The eleven example and platform datasets (six in `examples/**`, five in `platform-objects`) are queried through the request-scoped dataset door and never enter the registry. Deployed and cloud-held definitions were NOT MEASURED.
+
+### Patch Changes
+
+- 036bf1d: fix(service-analytics): a default boot no longer warns that no "security" service is registered; the warning moves to the first query that finds none
+  
+  Clause-②: no
+  
+  - **What changed.** `AnalyticsServicePlugin` used to log a WARN at init, `[Analytics] No admitObjectRead configured and no "security" service registered at init …`, on every default boot. `@objectstack/plugin-security` registers the `security` service in its `start()`, after every plugin's `init()`, and the object-level read bridge resolves that service per query. So the warning described a consequence that did not apply to the running app. Init now logs the same situation at `info`, as the sibling row-scope bridge already did: `[Analytics] admitObjectRead bridged to the "security" service; that service is not registered yet at init and will be resolved per query`.
+  - **Where the warning went.** When an analytics query needs the object-level gate and the plugin context returns no `security` service, the bridge logs one WARN: `[Analytics] No admitObjectRead configured and no "security" service registered when an analytics query needed one (first: "OBJECT") …`. It is logged once per plugin instance, not once per query.
+  - **Unchanged.** What the bridge enforces. When the plugin context answers a lookup for `security` with nothing, the query is admitted, as before. A lookup that throws, or a service that answers neither `canReadObject` nor `explain`, still denies the query fail-closed and logs an `error`, as before. The in-repo kernels (`ObjectKernel`, `LiteKernel`) throw on a lookup for a service nobody registered, so on those kernels a query with no security service ever registered is still denied, with an `error` per query, as before. A deployment that supplies `admitObjectRead` sees no change.
+- 0e9371f: fix(service-analytics): a picklist-bound select dimension now renders its category labels in the request's locale
+  
+  Clause-②: no
+  
+  A select field that references a shared list (`picklist: '<name>'`) is served with the list's options and with `picklist` kept, and its option labels translate under `picklists.<name>.options.<value>`. The analytics label pass translated a dimension's options through a synthetic field that carried `options` only, so the translator never looked at the `picklists` address. Every chart and report category on such a dimension showed the authored (usually English) labels under every `Accept-Language`, while `GET /api/v1/meta/object/:name` showed the same field translated.
+  
+  The synthetic field now carries the dimension field's `picklist`. `POST /api/v1/analytics/dataset/query` answers the same labels the object-metadata endpoint serves for that field: a field-level entry (`objects.<object>.fields.<field>.options.<value>`) wins when one exists, and otherwise the list's label applies. A dimension with inline `options` renders exactly as before.
+  
+  An `order` on a select dimension now sorts by the label the row renders in the request's locale, and a `limit` keeps the first rows in that order. The sort used the authored labels, so under `Accept-Language: zh-CN` or `ja-JP` the order followed the English text, for inline `options` and, once translated, for picklist-bound dimensions too. With no locale, or no translation for it, the order is unchanged.
+  
+  Nothing you author changes: no key, export or parameter is added or removed.
+- e175479: docs(service-analytics): the shipped API docs no longer say a deployment with no security service keeps analytics reads open
+  
+  Clause-②: no
+  
+  The doc comments on `AnalyticsServiceConfig.admitObjectRead` and `AnalyticsServiceConfig.getReadableFields`, and on the service's read gates, said that a missing hook means "the deployment has no security service" and that such a deployment keeps its analytics behaviour. Both parts were wrong. `AnalyticsServicePlugin` always wires both hooks. On `ObjectKernel` and `LiteKernel`, looking up a `security` service that was never registered throws, so the bridges refuse the query, fail-closed: `PERMISSION_DENIED` / 403 naming the object, plus an `error` line. The docs now say so. A missing hook now means only a host that constructs `AnalyticsService` itself without one.
+  
+  Only comments change. No behaviour, export or type moves. The text changes in the published `dist/index.d.ts` and `dist/index.d.cts`, and in the JSDoc kept in `dist/index.js` and `dist/index.cjs`.
+- 746637e: fix(service-automation)!: retire the `RunProvenanceContext` type; `RunDataContext` names only what `resolveRunDataContext` returns
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/services/service-automation/src/runtime-identity.ts#RunDataContext) Two TypeScript-only declarations in one runtime file move, and neither is metadata: `RunDataContext` loses its `RunProvenanceContext` arm, and the `RunProvenanceContext` interface declared beside it in the same file is removed together with its type export. No spec key, authorable spelling, Zod schema or stored shape moves, and no stored row is read or rewritten, so `objectstack migrate meta` has nothing to rewrite. The channel that reaches an affected consumer is the compiler, at the consumer's own import. -->
+  
+  **BREAKING** for TypeScript code that imports from `@objectstack/service-automation`: one type export is removed and one type narrows. It ships as `minor` under the launch-window convention for breaking changes. No runtime behaviour changes in any package.
+  
+  **What is removed.** The `RunProvenanceContext` type export, the `{ flowRunId }`-only "provenance" envelope, and its arm of `RunDataContext`. No code in this repository builds or reads one. Since ADR-0096 D5, the data engine's security middleware refuses a context that carries no principal and is not a system context (`403 PERMISSION_DENIED`, for every verb). So the type described a context the engine refuses, while its docstring said such a context was "indistinguishable from passing no context at all" and was let through.
+  
+  **What `RunDataContext` is now.** Exactly what `resolveRunDataContext` returns: `isSystem: true` for a `runAs: 'system'` run, and the triggering user's principal for a `runAs: 'user'` run. A run that resolves no principal is refused before any data operation (`AUTOMATION_UNSCOPED_RUN_DATA_ACCESS`), as before.
+  
+  **If your code named the type.** There is no replacement, because the context it described is refused. A custom data node builds its context with `resolveRunDataContext(context)`, typed `RunDataContext`.
+  
+  **`@objectstack/plugin-security`, `@objectstack/runtime`, `@objectstack/service-analytics`, `@objectstack/platform-objects`:** comment and docstring text only. Shipped comments that said the security middleware hands through, skips or falls open for a context with no principal now say that it used to, and that ADR-0096 D5 refuses such a context. Nothing these packages do changes.
+- Updated dependencies [317cddd]
+- Updated dependencies [fec87e7]
+- Updated dependencies [c28f317]
+- Updated dependencies [2e10c9a]
+- Updated dependencies [67b669e]
+- Updated dependencies [0253192]
+- Updated dependencies [bfc15d2]
+- Updated dependencies [2ff0825]
+- Updated dependencies [7aa8d51]
+- Updated dependencies [95a8435]
+- Updated dependencies [60bcfe7]
+- Updated dependencies [d112087]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [7de0265]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [c8b062f]
+- Updated dependencies [117d34d]
+- Updated dependencies [6729e10]
+- Updated dependencies [1920cf3]
+- Updated dependencies [41d0d40]
+- Updated dependencies [c52bfb4]
+- Updated dependencies [c7d6037]
+- Updated dependencies [72b26ed]
+- Updated dependencies [2d21b9c]
+- Updated dependencies [f66fdc7]
+- Updated dependencies [9fdb127]
+- Updated dependencies [615c696]
+- Updated dependencies [968acc8]
+- Updated dependencies [111ffff]
+- Updated dependencies [12b9daf]
+- Updated dependencies [d85615d]
+- Updated dependencies [6a06e3b]
+- Updated dependencies [0e9e7b7]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [9c93ce6]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [04e776b]
+- Updated dependencies [a7df552]
+- Updated dependencies [2f70c22]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [a87d8be]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [ad381fd]
+- Updated dependencies [2b61f2d]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3b49318]
+- Updated dependencies [4e9fe9f]
+- Updated dependencies [9ad3d24]
+- Updated dependencies [326a90a]
+- Updated dependencies [9fe7448]
+- Updated dependencies [2e11d90]
+- Updated dependencies [4578c56]
+- Updated dependencies [c512c25]
+- Updated dependencies [215e662]
+- Updated dependencies [3d886ee]
+- Updated dependencies [d8d0711]
+- Updated dependencies [a45d5d8]
+- Updated dependencies [f6e1d49]
+- Updated dependencies [e9a1f5c]
+- Updated dependencies [40a6ee5]
+- Updated dependencies [5910b5e]
+- Updated dependencies [7098aca]
+- Updated dependencies [97610a5]
+- Updated dependencies [081e6a0]
+- Updated dependencies [1884948]
+- Updated dependencies [3089848]
+- Updated dependencies [e23eccb]
+- Updated dependencies [ac8f2c5]
+- Updated dependencies [db9cf80]
+- Updated dependencies [e75dced]
+- Updated dependencies [9af0005]
+- Updated dependencies [440bed6]
+- Updated dependencies [b2549a8]
+- Updated dependencies [ee8751d]
+- Updated dependencies [96e4be4]
+- Updated dependencies [35ef501]
+- Updated dependencies [faf6348]
+- Updated dependencies [557ae7c]
+- Updated dependencies [6a3fe25]
+- Updated dependencies [7731d70]
+- Updated dependencies [3073b72]
+- Updated dependencies [c76edeb]
+- Updated dependencies [5b12503]
+- Updated dependencies [514bf3c]
+- Updated dependencies [20e7d52]
+- Updated dependencies [b3a3634]
+- Updated dependencies [3e72f93]
+- Updated dependencies [f89b5f5]
+- Updated dependencies [d25b187]
+- Updated dependencies [0e00d36]
+- Updated dependencies [d748ae8]
+- Updated dependencies [dab6bf4]
+- Updated dependencies [ed1de8c]
+- Updated dependencies [a00cf99]
+- Updated dependencies [5fb1746]
+- Updated dependencies [29a163f]
+- Updated dependencies [e223152]
+- Updated dependencies [9f5eca5]
+- Updated dependencies [9963322]
+- Updated dependencies [b27b894]
+- Updated dependencies [874a38d]
+- Updated dependencies [02d9f69]
+- Updated dependencies [f53f14b]
+- Updated dependencies [a800912]
+- Updated dependencies [d973c34]
+- Updated dependencies [156ddfa]
+- Updated dependencies [5081090]
+- Updated dependencies [b6eb25f]
+- Updated dependencies [165587e]
+- Updated dependencies [e04759d]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [b32ee3e]
+- Updated dependencies [91f46d0]
+- Updated dependencies [e5899a6]
+- Updated dependencies [d7b26df]
+- Updated dependencies [490cb6d]
+- Updated dependencies [e865300]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [c74d843]
+- Updated dependencies [6d5191e]
+- Updated dependencies [85edd61]
+- Updated dependencies [e84aeb3]
+- Updated dependencies [322ff1e]
+- Updated dependencies [7b0a9c9]
+- Updated dependencies [5fc57b3]
+- Updated dependencies [fe58bbc]
+- Updated dependencies [c4e7fa5]
+- Updated dependencies [581ca7d]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [b7cd1af]
+- Updated dependencies [9814035]
+- Updated dependencies [55382dc]
+- Updated dependencies [b1d701b]
+- Updated dependencies [efcbac7]
+- Updated dependencies [51f36e7]
+- Updated dependencies [20028df]
+- Updated dependencies [69d4218]
+- Updated dependencies [5ce6773]
+- Updated dependencies [9432bac]
+- Updated dependencies [3f69471]
+- Updated dependencies [8bc7836]
+- Updated dependencies [e5687cb]
+- Updated dependencies [1e62f71]
+- Updated dependencies [ec7f7f8]
+- Updated dependencies [038d4c9]
+- Updated dependencies [147a0d1]
+- Updated dependencies [1959aac]
+- Updated dependencies [e1deaef]
+- Updated dependencies [1badd31]
+- Updated dependencies [55828c5]
+- Updated dependencies [7856110]
+- Updated dependencies [9b37edb]
+- Updated dependencies [a22e67b]
+- Updated dependencies [62ce45d]
+- Updated dependencies [39e93ef]
+- Updated dependencies [02bec6c]
+- Updated dependencies [719183f]
+- Updated dependencies [8464380]
+- Updated dependencies [252a582]
+- Updated dependencies [f931e76]
+- Updated dependencies [e5f9f01]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [de70e97]
+- Updated dependencies [74c4b34]
+- Updated dependencies [e040b8c]
+- Updated dependencies [f451a59]
+- Updated dependencies [ba95607]
+- Updated dependencies [b53b949]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [1e44436]
+- Updated dependencies [2acff87]
+- Updated dependencies [299a2c6]
+- Updated dependencies [e23eccb]
+- Updated dependencies [bf492c8]
+- Updated dependencies [c7a3234]
+  - @objectstack/spec@18.0.0-next.0
+  - @objectstack/core@18.0.0-next.0
+  - @objectstack/types@18.0.0-next.0
+
 ## 17.7.0
 
 ### Minor Changes

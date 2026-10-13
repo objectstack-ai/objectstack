@@ -75,7 +75,6 @@ const SHARED_SHOWCASE = [
   'test/showcase-readonly-when-parent.dogfood.test.ts',
   'test/showcase-search.dogfood.test.ts',
   'test/showcase-static-readonly.dogfood.test.ts',
-  'test/two-doors-permission.dogfood.test.ts',
 ];
 
 // Commit 08f5f0e5a / #17978 — say so when a path named on the command line will run no

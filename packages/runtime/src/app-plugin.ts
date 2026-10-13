@@ -126,11 +126,19 @@ export class AppPlugin implements Plugin {
      * `com.objectstack.auth` (ADR-0131 D3): under the `single` posture the
      * auth plugin creates the Default Organization in its `start()`, and that
      * organization must exist before this plugin's `start()` loads the inline
-     * seed — every seed row is stamped with it or refused. Order-if-present:
-     * a composition without the auth plugin registers no organization object,
-     * and its seeds keep today's unstamped branch.
+     * seed — every seed row is stamped with it or refused. A kernel without
+     * the auth plugin that registers plugin-auth's identity objects
+     * (`com.objectstack.auth.identity-objects`, `createIdentityObjectsPlugin()`)
+     * registers the organization object too, and that plugin's `start()` keeps
+     * the same invariant, so it is ordered ahead for the same reason.
+     * Order-if-present: a composition with neither registers no organization
+     * object, and its seeds keep today's unstamped branch.
      */
-    optionalDependencies = ['com.objectstack.engine.objectql', 'com.objectstack.auth'];
+    optionalDependencies = [
+        'com.objectstack.engine.objectql',
+        'com.objectstack.auth',
+        'com.objectstack.auth.identity-objects',
+    ];
     /**
      * The one init-time service this plugin CANNOT degrade without: a
      * non-empty bundle is registered via `getService('manifest').register()`

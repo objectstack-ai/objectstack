@@ -3,7 +3,7 @@
   "measured": {
     "zod": "4.4.3",
     "publishedSchemasWithDroppedRefinements": 234,
-    "droppedRefinementSites": 755,
+    "droppedRefinementSites": 759,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -1319,22 +1319,26 @@
     },
     "ui/ActionButtonProps": {
       "sites": [
-        ""
+        "",
+        "onSuccess"
       ]
     },
     "ui/ActionGroupProps": {
       "sites": [
-        "actions.element"
+        "actions.element",
+        "actions.element.onSuccess"
       ]
     },
     "ui/ActionIconProps": {
       "sites": [
-        ""
+        "",
+        "onSuccess"
       ]
     },
     "ui/ActionMenuProps": {
       "sites": [
-        "actions.element"
+        "actions.element",
+        "actions.element.onSuccess"
       ]
     },
     "ui/ActionParam": {

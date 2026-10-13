@@ -17,9 +17,12 @@ import { SecurityPlugin } from './security-plugin.js';
  * purpose: every enforced ceiling on an identifier is the `maxLength` of the
  * column that stores it (refused at the write seam by ObjectQL's
  * record-validator `max_length` check), and the storing columns DISAGREE —
- * 100 for the three config-object name columns this plugin registers
- * (`sys_permission_set.name`, `sys_position.name`, `sys_capability.name`),
- * 255 for `sys_metadata.name`. A single shared `.max()` therefore cannot
+ * 100 for the two catalog-name columns this plugin registers
+ * (`sys_user_permission_set.permission_set`, `sys_user_position.position`:
+ * a grant and an assignment name their catalog item, ADR-0131 D4), 255 for
+ * `sys_metadata.name`, where the catalog definitions themselves are stored.
+ * [C3 stage 8] The three catalog row objects whose `name` columns this pin
+ * read before are retired (ADR-0131 D3). A single shared `.max()` therefore cannot
  * equal every consumer's enforced ceiling: `.max(100)` would newly refuse
  * `sys_metadata` names in (100, 255] that are legal stored rows today —
  * accept-set narrowing beyond enforced reality, fenced out of commit 3a04b0125's
@@ -82,15 +85,18 @@ async function registeredObjects(): Promise<AnyObject[]> {
   return captured;
 }
 
-/** The three config-object name columns this plugin registers. */
-const PLUGIN_NAME_COLUMNS = ['sys_permission_set', 'sys_position', 'sys_capability'] as const;
+/** The two catalog-name columns this plugin registers, as `[object, field]`. */
+const PLUGIN_NAME_COLUMNS = [
+  ['sys_user_permission_set', 'permission_set'],
+  ['sys_user_position', 'position'],
+] as const;
 
-/** Read `<object>.name`'s declared width, refusing to answer from absence. */
-function nameWidth(o: AnyObject | undefined, label: string): number {
-  const w = o?.fields?.name?.maxLength;
+/** Read `<object>.<field>`'s declared width, refusing to answer from absence. */
+function columnWidth(o: AnyObject | undefined, label: string, field = 'name'): number {
+  const w = o?.fields?.[field]?.maxLength;
   expect(
     typeof w === 'number' && Number.isInteger(w) && w > 0,
-    `${label}.name must declare a positive integer maxLength (got ${String(w)}) — ` +
+    `${label}.${field} must declare a positive integer maxLength (got ${String(w)}) — ` +
       `without it this pin has no width to link the spec schema against`,
   ).toBe(true);
   return w as number;
@@ -99,13 +105,13 @@ function nameWidth(o: AnyObject | undefined, label: string): number {
 /** Every measured storing column, width read off its registration surface. */
 async function measuredColumns(): Promise<Array<{ column: string; width: number }>> {
   const byName = new Map((await registeredObjects()).map((o) => [o.name, o]));
-  const cols = PLUGIN_NAME_COLUMNS.map((n) => ({
-    column: `${n}.name`,
-    width: nameWidth(byName.get(n), n),
+  const cols = PLUGIN_NAME_COLUMNS.map(([n, field]) => ({
+    column: `${n}.${field}`,
+    width: columnWidth(byName.get(n), n, field),
   }));
   cols.push({
     column: 'sys_metadata.name',
-    width: nameWidth(SysMetadataObject as unknown as AnyObject, 'sys_metadata'),
+    width: columnWidth(SysMetadataObject as unknown as AnyObject, 'sys_metadata'),
   });
   return cols;
 }
@@ -126,7 +132,7 @@ describe('shared identifier schemas ↔ the storage columns that bound them (#12
   it('enumerates a real surface and the probes really measure the schemas — the pin is not vacuous', async () => {
     const objects = await registeredObjects();
     expect(objects.map((o) => o.name)).toEqual(
-      expect.arrayContaining([...PLUGIN_NAME_COLUMNS]),
+      expect.arrayContaining(PLUGIN_NAME_COLUMNS.map(([n]) => n)),
     );
 
     // Instrument honesty: a string of the same width that VIOLATES the
@@ -151,9 +157,8 @@ describe('shared identifier schemas ↔ the storage columns that bound them (#12
     // derivable; that is a spec accept-set change to escalate, not a value
     // to tidy here.
     const widths = new Map((await measuredColumns()).map((c) => [c.column, c.width]));
-    expect(widths.get('sys_permission_set.name')).toBe(100);
-    expect(widths.get('sys_position.name')).toBe(100);
-    expect(widths.get('sys_capability.name')).toBe(100);
+    expect(widths.get('sys_user_permission_set.permission_set')).toBe(100);
+    expect(widths.get('sys_user_position.position')).toBe(100);
     expect(widths.get('sys_metadata.name')).toBe(255);
   });
 
@@ -163,7 +168,7 @@ describe('shared identifier schemas ↔ the storage columns that bound them (#12
     // class would newly refuse names that are legal stored rows today —
     // accept-set narrowing beyond enforced reality. `sys_metadata.name`
     // (255) is the widest and therefore the binding case: a blanket
-    // `.max(100)` matching the config-object columns reds here by name.
+    // `.max(100)` matching the catalog-name columns reds here by name.
     for (const { column, width } of await measuredColumns()) {
       for (const [label, schema] of Object.entries(IDENTIFIER_SCHEMAS)) {
         expect(

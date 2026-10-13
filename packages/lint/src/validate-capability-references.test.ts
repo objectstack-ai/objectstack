@@ -44,14 +44,6 @@ describe('validateCapabilityReferences (ADR-0066 ⑨)', () => {
     expect(findings).toEqual([]);
   });
 
-  it('passes a reference to a capability shipped as a sys_capability seed row', () => {
-    const findings = validateCapabilityReferences({
-      data: [{ object: 'sys_capability', records: [{ name: 'approve_invoice' }] }],
-      objects: [{ name: 'inv_invoice', requiredPermissions: ['approve_invoice'] }],
-    });
-    expect(findings).toEqual([]);
-  });
-
   it('warns on an object requiredPermissions typo (registered nowhere)', () => {
     const findings = validateCapabilityReferences({
       objects: [{ name: 'sys_license', requiredPermissions: ['mange_users'] }],
@@ -193,10 +185,11 @@ describe('[#22161] one-line verdicts — capability-reference-unknown', () => {
     const findings = validateCapabilityReferences({
       objects: [{ name: 'sys_license', requiredPermissions: ['mange_users'] }],
     });
-    expect(findings.map((f) => f.message)).toEqual([
-      'requiredPermissions names capability "mange_users", which no built-in, `defineCapability`, '
-        + '`systemPermissions` grant or `sys_capability` seed provides, so this gate fails closed',
-    ]);
+    expect(findings).toHaveLength(1);
+    const [message] = findings.map((f) => f.message);
+    expect(message.startsWith('requiredPermissions names capability "mange_users", which no built-in, `defineCapability`')).toBe(true);
+    expect(message.endsWith('so this gate fails closed')).toBe(true);
+    expect(message.split('\n')).toHaveLength(1);
   });
 
   it('`os explain` carries what the verdict no longer says', () => {
@@ -218,10 +211,10 @@ describe('[#22161] one-line verdicts — capability-reference-unknown', () => {
   });
 
   it('each source of the known set the explanation names silences the rule', () => {
-    // The explanation module imports nothing, so its four sources are held to
+    // The explanation module imports nothing, so its sources are held to
     // the rule by running the rule: each one makes the same reference known.
     const text = explainRule(CAPABILITY_REFERENCE_UNKNOWN)!.paragraphs.join('\n');
-    for (const named of ['built-in platform capability', '`defineCapability`', '`systemPermissions`', '`sys_capability` seed row']) {
+    for (const named of ['built-in platform capability', '`defineCapability`', '`systemPermissions`']) {
       expect(text, named).toContain(named);
     }
     const gated = { objects: [{ name: 'inv_invoice', requiredPermissions: ['approve_invoice'] }] };
@@ -229,7 +222,6 @@ describe('[#22161] one-line verdicts — capability-reference-unknown', () => {
     for (const source of [
       { capabilities: [{ name: 'approve_invoice', label: 'Approve', scope: 'org' }] },
       { permissions: [{ name: 'p', systemPermissions: ['approve_invoice'] }] },
-      { data: [{ object: 'sys_capability', records: [{ name: 'approve_invoice' }] }] },
     ]) {
       expect(validateCapabilityReferencesUnrecorded({ ...gated, ...source }), JSON.stringify(source)).toEqual([]);
     }

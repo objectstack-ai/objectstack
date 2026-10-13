@@ -52,6 +52,13 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// [#23181] Both doors come from ONE module graph, loaded here at module top so
+// the transform is paid during collection, never inside a clocked test (the
+// clocked-window rule, `scripts/check-test-source-alias.mjs`). One graph is
+// also what makes the two-door block below a pin: the dispatcher and
+// `sendError` read the same `@objectstack/types` registry.
+import { createDispatcherPlugin } from './dispatcher-plugin.js';
+import { sendError } from '@objectstack/types';
 
 // [#21061] The analytics domain refuses an anonymous caller first (ADR-0056 D2),
 // so every analytics boot below also registers an `auth` slot in the shape
@@ -60,12 +67,11 @@ import { describe, it, expect, vi } from 'vitest';
 // unchanged. Anonymity is pinned in `domains/analytics-anonymous-deny.test.ts`.
 const SIGNED_IN_AUTH = { api: { getSession: async () => ({ user: { id: 'usr_analytics_caller' } }) } };
 
-// Each test re-executes the dispatcher's module graph (see `boot` below), which
-// the default 5s budget does not cover on a shared box — measured: the FIRST
-// test paid 5s+ and timed out while the rest ran in ~1.4s each off vitest's
-// transform cache. The cost is the price of the per-test isolation the ruling's
-// "per process" key needs, so the budget is raised rather than the isolation
-// dropped.
+// This budget was raised when every test re-executed the dispatcher's module
+// graph (the FIRST test paid the cold transform, 5s+ on a shared box). `boot`
+// below no longer reloads anything (#23181), so no test here pays a load; the
+// value is left as it stands because this change is about the wall a test
+// takes, not about its budget.
 vi.setConfig({ testTimeout: 30_000 });
 
 function makeFakeServer() {
@@ -97,30 +103,43 @@ function makeRes() {
     return res;
 }
 
+/** Mounts made so far in this process: each `boot` takes the next prefix. */
+let mounts = 0;
+
 /**
- * Boot the real plugin over a fake transport, with a spied kernel logger —
- * in a FRESH module graph.
+ * Boot the real plugin over a fake transport, with a spied kernel logger,
+ * mounted under a route prefix no other test in this file mounts.
  *
- * ⚠️ `vi.resetModules()` is the load-bearing line, not boilerplate. The dedupe
- * registry is module state in `@objectstack/types` (that IS the ruling's "per
- * process" half), so without a reset the first test to touch a route would
- * silence it for every later test in this file, and their colour would depend
- * on execution order. Resetting gives each test its own process-equivalent,
- * which is also the only honest way to pin a per-process rule.
+ * ⚠️ The prefix is the load-bearing line, not boilerplate. The dedupe registry
+ * is module state in `@objectstack/types` (that IS the ruling's "per process"
+ * half), keyed `METHOD path` on the mounted route PATTERN, which the route
+ * instrument parks (`observability/instrument.ts`). Under a shared prefix the
+ * first test to touch a route would silence it for every later test in this
+ * file, and their colour would depend on execution order. Under its own
+ * prefix, every route key a test touches is one this process has never
+ * reported, which is the precondition a fresh process gives those keys, so
+ * each test still observes the FIRST occurrence of its routes.
+ *
+ * [#23181] This used to be bought with `vi.resetModules()` and a fresh import
+ * of both doors per test: a re-evaluation of the dispatcher's ~730-module
+ * graph seven times (measured ~0.9s each idle, 1.1-1.4s each inside the full
+ * package run, plus a 17s cold transform inside the first test), which made
+ * this file the slowest in the package. Disjoint route keys give each test the
+ * same untouched registry at none of that cost. No assertion here reads a
+ * route another test mounts, and the registry's ceiling (512 routes) is far
+ * above the 14 keys this file can create.
  *
  * `@objectstack/types` is aliased to its SOURCE for this package
- * (`packages/runtime/vitest.config.ts`), so the reset reaches the registry and
- * an edit to `packages/types/src` is visible here without a rebuild.
+ * (`packages/runtime/vitest.config.ts`), so an edit to `packages/types/src` is
+ * visible here without a rebuild.
  *
- * Both doors are imported INSIDE this window so the dispatcher and `sendError`
- * share one registry — a two-door pin over two registries would prove nothing.
+ * `route('GET /notifications')` answers the handler the dispatcher mounted for
+ * that route under THIS boot's prefix; `path('/notifications')` is the route
+ * pattern the log line must name.
  */
 async function boot(services: Record<string, any>) {
-    vi.resetModules();
-    const [{ createDispatcherPlugin }, { sendError }] = await Promise.all([
-        import('./dispatcher-plugin.js'),
-        import('@objectstack/types'),
-    ]);
+    mounts += 1;
+    const prefix = `/t${mounts}/api/v1`;
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
     const kernel = {
         getService: (n: string) => services[n],
@@ -135,9 +154,16 @@ async function boot(services: Record<string, any>) {
         hook: () => { },
         on: () => { },
     };
-    const plugin = createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false });
+    const plugin = createDispatcherPlugin({ prefix, securityHeaders: false });
     await plugin.start?.(ctx);
-    return { handlers, logger, sendError };
+    const path = (route: string) => `${prefix}${route}`;
+    const route = (verbAndRoute: string) => {
+        const [verb, routePath] = verbAndRoute.split(' ');
+        const handler = handlers[`${verb} ${path(routePath)}`];
+        if (!handler) throw new Error(`no handler mounted for ${verb} ${path(routePath)}`);
+        return handler;
+    };
+    return { route, path, logger, sendError };
 }
 
 const FAULT_PREFIX = '[5xx]';
@@ -158,10 +184,10 @@ const throwingAnalytics = (message: string) => ({
 
 describe('#14656 — the dispatcher door', () => {
     it('reports a declared 501 ONCE across N requests, at warn, naming the missing service', async () => {
-        const { handlers, logger } = await boot({});
+        const { route, path, logger } = await boot({});
 
         for (const _ of [0, 1, 2, 3, 4]) {
-            await handlers['GET /api/v1/notifications']({ ...REQ }, makeRes());
+            await route('GET /notifications')({ ...REQ }, makeRes());
         }
 
         expect(lines(logger.error), 'a configuration fact is not a fault').toHaveLength(0);
@@ -178,23 +204,23 @@ describe('#14656 — the dispatcher door', () => {
             status: 501,
             code: 'NOT_IMPLEMENTED',
             method: 'GET',
-            path: '/api/v1/notifications',
+            path: path('/notifications'),
         });
     });
 
     it('a SECOND, DIFFERENT route still reports — the dedupe key is the route', async () => {
-        const { handlers, logger } = await boot({});
+        const { route, path, logger } = await boot({});
 
-        await handlers['GET /api/v1/notifications']({ ...REQ }, makeRes());
-        await handlers['GET /api/v1/notifications']({ ...REQ }, makeRes());
-        await handlers['POST /api/v1/notifications/read']({ ...REQ, body: { ids: ['n1'] } }, makeRes());
-        await handlers['POST /api/v1/notifications/read']({ ...REQ, body: { ids: ['n1'] } }, makeRes());
+        await route('GET /notifications')({ ...REQ }, makeRes());
+        await route('GET /notifications')({ ...REQ }, makeRes());
+        await route('POST /notifications/read')({ ...REQ, body: { ids: ['n1'] } }, makeRes());
+        await route('POST /notifications/read')({ ...REQ, body: { ids: ['n1'] } }, makeRes());
 
         const warned = lines(logger.warn);
         expect(warned, 'one line per route, not one line per process').toHaveLength(2);
         expect(warned.map((c) => `${(c[1] as any).method} ${(c[1] as any).path}`)).toEqual([
-            'GET /api/v1/notifications',
-            'POST /api/v1/notifications/read',
+            `GET ${path('/notifications')}`,
+            `POST ${path('/notifications/read')}`,
         ]);
         // Same slot, same code, same prose — so nothing but the route could
         // have told the two apart.
@@ -204,10 +230,10 @@ describe('#14656 — the dispatcher door', () => {
     });
 
     it('an UNDECLARED 500 on the same door is still loud, once per request', async () => {
-        const { handlers, logger } = await boot(throwingAnalytics('still-loud-per-request'));
+        const { route, logger } = await boot(throwingAnalytics('still-loud-per-request'));
 
         for (const _ of [0, 1, 2]) {
-            await handlers['POST /api/v1/analytics/query'](
+            await route('POST /analytics/query')(
                 { body: { cube: 'x', measures: ['count'] }, query: {} },
                 makeRes(),
             );
@@ -218,12 +244,12 @@ describe('#14656 — the dispatcher door', () => {
     });
 
     it('a declared absence and a fault coexist in one process without either changing the other', async () => {
-        const { handlers, logger } = await boot(throwingAnalytics('coexist'));
+        const { route, logger } = await boot(throwingAnalytics('coexist'));
 
-        await handlers['GET /api/v1/notifications']({ ...REQ }, makeRes());
-        await handlers['POST /api/v1/analytics/query']({ body: { cube: 'x', measures: ['count'] }, query: {} }, makeRes());
-        await handlers['GET /api/v1/notifications']({ ...REQ }, makeRes());
-        await handlers['POST /api/v1/analytics/query']({ body: { cube: 'x', measures: ['count'] }, query: {} }, makeRes());
+        await route('GET /notifications')({ ...REQ }, makeRes());
+        await route('POST /analytics/query')({ body: { cube: 'x', measures: ['count'] }, query: {} }, makeRes());
+        await route('GET /notifications')({ ...REQ }, makeRes());
+        await route('POST /analytics/query')({ body: { cube: 'x', measures: ['count'] }, query: {} }, makeRes());
 
         expect(lines(logger.warn)).toHaveLength(1);
         expect(lines(logger.error)).toHaveLength(2);
@@ -232,11 +258,11 @@ describe('#14656 — the dispatcher door', () => {
 
 describe('#14656 — both doors read ONE predicate, on one fixture envelope', () => {
     it('the envelope the dispatcher answers is classified identically by the REST envelope writer', async () => {
-        const { handlers, logger, sendError } = await boot({});
+        const { route, logger, sendError } = await boot({});
 
         // ── Door 1: the runtime dispatcher, on the real route ──────────────
         const res = makeRes();
-        await handlers['GET /api/v1/notifications']({ ...REQ }, res);
+        await route('GET /notifications')({ ...REQ }, res);
 
         const fixture = {
             status: res.statusCode as number,
@@ -285,12 +311,12 @@ describe('#14656 — the wire does not move', () => {
      * report» — is a measurement, and this is the instrument.
      */
     it('answers the same bytes it answered before this change, on every request', async () => {
-        const { handlers } = await boot({});
+        const { route } = await boot({});
 
         const seen: string[] = [];
         for (const _ of [0, 1, 2]) {
             const res = makeRes();
-            await handlers['GET /api/v1/notifications']({ ...REQ }, res);
+            await route('GET /notifications')({ ...REQ }, res);
             seen.push(`${res.statusCode} ${JSON.stringify(res.body)}`);
         }
 
@@ -306,10 +332,10 @@ describe('#14656 — the wire does not move', () => {
     });
 
     it('answers the same bytes for a fault, too', async () => {
-        const { handlers } = await boot(throwingAnalytics('wire-unchanged-for-faults'));
+        const { route } = await boot(throwingAnalytics('wire-unchanged-for-faults'));
 
         const res = makeRes();
-        await handlers['POST /api/v1/analytics/query'](
+        await route('POST /analytics/query')(
             { body: { cube: 'x', measures: ['count'] }, query: {} },
             res,
         );

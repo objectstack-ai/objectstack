@@ -39,10 +39,10 @@ import { SysUser, SysAccount, SysMember, SysOrganization } from '@objectstack/pl
 import { SysMigration } from '@objectstack/platform-objects/system';
 
 import { SecurityPlugin } from './security-plugin.js';
-import { SysPosition } from './objects/sys-position.object.js';
+import { SysPosition } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
-import { SysPermissionSet } from './objects/sys-permission-set.object.js';
-import { SysPositionPermissionSet } from './objects/sys-position-permission-set.object.js';
+import { SysPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
+import { SysPositionPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 import {
@@ -393,29 +393,12 @@ describe('[ADR-0131 D4] the catalog reference report — references whose names 
     const report = await b.report();
     expect(report.conflictingPositionNames).toEqual([
       { name: PKG_POSITION, organizationIds: [null, ORG], resolves: true },
-      { name: 'twin_lead', organizationIds: [ORG, OTHER_ORG], resolves: true },
+      // `resolves` for this one is the row-only position backfill's doing,
+      // which C3 stage 8 unwires, so it is not asserted.
+      expect.objectContaining({ name: 'twin_lead', organizationIds: [ORG, OTHER_ORG] }),
     ]);
     const conflictLine = b.logger.error.mock.calls.find(([, , meta]: any[]) => meta?.conflicting);
     expect(conflictLine?.[2]?.conflicting?.items?.map((c: any) => c.name)).toEqual([PKG_POSITION, 'twin_lead']);
-  });
-
-  it('under single, the refused-name class stays listed at every boot, after the row-only backfill has recorded its verdict', async () => {
-    const b = await boot();
-    await insertRows(b, 'sys_position', [
-      { id: 'pos_refused', name: 'Legacy Lead', label: 'Illegal name', organization_id: ORG },
-    ]);
-    await b.bootstrapped();
-    const ledger = (await b.engine.find('sys_migration', {
-      where: { id: 'adr-0131-position-environment-backfill' }, context: SYS,
-    })) as any[];
-    expect(ledger.length, 'the backfill recorded its verdict: the refused-name class is final for it').toBe(1);
-
-    await b.bootstrapped();
-    expect(findings(await b.report())).toEqual([{
-      organizationId: ORG,
-      positionAssignments: [], permissionSetGrants: [], unnamedGrants: [],
-      positionsWithoutDefinition: ['Legacy Lead (refused name)'],
-    }]);
   });
 });
 
@@ -533,14 +516,12 @@ describe('[ADR-0131 D4] a read that did not happen is never "resolves nowhere"',
 });
 
 describe('[ADR-0131 D3/D4] SecurityPlugin runs the report at kernel:bootstrapped', () => {
-  it('after both backfills — a name either one resolved this boot is not reported — and the report writes nothing', async () => {
+  it('after the grant-name backfill — a name it resolved this boot is not reported — and the report writes nothing', async () => {
     const b = await boot();
-    // A row-only legal position the position backfill defines this boot, and
-    // an unnamed grant whose set row's name the catalog resolves, which the
-    // grant-name backfill names this boot. Neither may be reported.
-    await insertRows(b, 'sys_position', [{ id: 'pos_legacy', name: 'legacy_lead', label: 'Legacy lead', organization_id: ORG }]);
+    // An unnamed grant whose set row's name the catalog resolves, which the
+    // grant-name backfill names this boot: it may not be reported. (The
+    // row-only position backfill ran here too until C3 stage 8 unwired it.)
     await insertRows(b, 'sys_user_position', [
-      { id: 'up_legacy', user_id: 'usr_a', position: 'legacy_lead', organization_id: ORG },
       { id: 'up_ghost', user_id: 'usr_a', position: 'ghost_lead', organization_id: ORG },
     ]);
     await insertRows(b, 'sys_permission_set', [{ id: 'ps_auditor', name: AUDITOR.name, label: 'Auditor' }]);
@@ -549,7 +530,7 @@ describe('[ADR-0131 D3/D4] SecurityPlugin runs the report at kernel:bootstrapped
     ]);
 
     const handlers = b.hooks.get('kernel:bootstrapped') ?? [];
-    expect(handlers.length).toBeGreaterThanOrEqual(3);
+    expect(handlers.length).toBeGreaterThanOrEqual(2);
     for (const handler of handlers.slice(0, -1)) await handler();
     const writes = [
       vi.spyOn(b.engine, 'insert'), vi.spyOn(b.engine, 'update'), vi.spyOn(b.engine, 'delete'),
