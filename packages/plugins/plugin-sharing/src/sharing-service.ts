@@ -122,6 +122,15 @@ export function effectiveSharingModel(schema: any): 'private' | 'read' | 'public
 }
 
 /**
+ * [ADR-0138 D1/D3] The anonymous principal the guest entry assembles —
+ * `principalKind: 'guest'` with no user id. A system context is never one: the
+ * bypass is asked first wherever this is.
+ */
+function isGuestPrincipal(context: ExecutionContext): boolean {
+  return context?.principalKind === 'guest' && !context?.userId;
+}
+
+/**
  * [#5859 / #5852] The caller's ACTIVE ORGANIZATION as carried by an execution
  * context — the value `HierarchyScopeContext.organizationId` (the authoritative
  * tenancy field since #5858 / commit abeb3751f) must be filled with.
@@ -456,6 +465,19 @@ export class SharingService implements ISharingService {
 
     const schema = this.engine.getSchema?.(object);
     if (!schema) return null;
+    // [ADR-0138 D3 item 6, as the maintainer's ruling C amends it — comment
+    // 6148183570 on #23266] The GUEST never takes the OWD branch below: not the
+    // object's `sharingModel` (a `public_read` or `public_read_write` object, a
+    // `controlled_by_parent` detail), and not its owner-less or phantom-anchor
+    // fall-throughs, which read as OWD-public. `externalSharingModel` is not
+    // read here for anyone (#23268). The guest owns nothing (ADR-0138 D1), so
+    // it reaches rows only through share links — and a link is redeemed at its
+    // own door, which checks the token and `publicSharing.eligibility` and
+    // reads the one linked record itself (`share-link-routes.ts`), never
+    // through this filter. So for the guest, on every object record sharing
+    // scopes, the answer is deny-all, whatever its bound sets admit at the
+    // object level.
+    if (isGuestPrincipal(context)) return { id: '__deny_all__' };
     if (effectiveSharingModel(schema) !== 'private') return null;
     if (!hasOwnerField(schema)) return null;
     // [#7858] …and an `owner_id` the REGISTRY injected into a FEDERATED object

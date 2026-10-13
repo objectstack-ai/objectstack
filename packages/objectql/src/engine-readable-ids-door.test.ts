@@ -9,13 +9,12 @@
  *   the leaf after a JSON round-trip or a structured clone, and the
  *   plain-object spelling a request could write, are a plain object in a list
  *   slot. That refusal existed before the leaf did; it is THE refusal.
- * - **A branded leaf passes the door and is refused `INTERNAL_ERROR` / 500** —
- *   the engine does not compose the leaf yet (ADR-0139 D2), and no driver
- *   evaluates it as written: measured at `a2e94c2a05` with the leaf handed
- *   straight to each driver, `driver-memory` threw a raw `TypeError`,
- *   `driver-sql` (SQLite) answered `500 DATABASE_ERROR` and
- *   `driver-mongodb`'s `translateFilter` emitted it unchanged. So the leaf
- *   stops at the door's seam, on every verb and at every position.
+ * - **A branded leaf passes the door as the comparand of `$in` on a read
+ *   verb** and is composed at the executor boundary (ADR-0139 D2,
+ *   `engine-readable-ids-composition.test.ts`). Everywhere the engine never
+ *   composes it — a write verb, an aggregation's own filter, any position but
+ *   a `$in` comparand — the door refuses it `INTERNAL_ERROR` / 500, before
+ *   the middleware chain runs.
  * - **A list keeps working** — the lit control: the recording driver IS
  *   reachable, so a refusal's "no read" means the refusal, not a dead harness.
  *
@@ -119,35 +118,33 @@ describe('[ADR-0139 D1] the engine comparand door and a ReadableIds leaf', () =>
     expect(calls).toHaveLength(0);
   });
 
-  it('a branded leaf passes the door and is refused INTERNAL_ERROR / 500 as uncomposed, naming its position and object — no driver call', async () => {
-    const err = await refusalOf(engine.find('rid_child', {
-      where: { object_name: 'rid_parent', record_id: { $in: ReadableIds.of('rid_parent') } },
-    }));
-    expect(envelopeOf(err)).toEqual(UNCOMPOSED);
-    expect(err!.message).toMatch(
-      /^find\('rid_child'\): where\.record_id\.\$in holds a ReadableIds leaf, "the ids of 'rid_parent' this caller may read", and this engine does not compose that leaf yet\. The query was NOT run and no driver was asked/,
-    );
-    expect(calls, 'the leaf never reaches a driver').toHaveLength(0);
+  it('a branded leaf passes the door as the comparand of $in on every read verb, and is composed at the boundary', async () => {
+    // No security service is wired here, so the composition answers every
+    // leaf `$in: []` — no row of the parent (fail closed).
+    const where = () => ({ object_name: 'rid_parent', record_id: { $in: ReadableIds.of('rid_parent') } });
+    await engine.find('rid_child', { where: where() });
+    await engine.findOne('rid_child', { where: where() });
+    await engine.count('rid_child', { where: where() });
+    await engine.aggregate('rid_child', { where: where(), aggregations: [{ function: 'count', alias: 'n' }] });
+    expect(calls.map((c) => c.verb)).toEqual(['find', 'findOne', 'count', 'aggregate']);
+    for (const call of calls) expect(call.ast.where, call.verb).toEqual({ object_name: 'rid_parent', record_id: { $in: [] } });
   });
 
-  it('the uncomposed leaf is refused under $and / $or / $not and on every verb — no driver call', async () => {
+  it('the door refuses the leaf where the engine never composes it — a write verb, an aggregation filter — before the chain', async () => {
+    const chain: string[] = [];
+    engine.registerMiddleware(async (ctx, next) => { chain.push(ctx.operation); await next(); });
     const leaf = () => ReadableIds.of('rid_parent');
     const cases: ReadonlyArray<readonly [string, () => Promise<unknown>, string]> = [
-      ['find $or', () => engine.find('rid_child', { where: { $or: [{ note: 'x' }, { record_id: { $in: leaf() } }] } }), 'where.$or[1].record_id.$in'],
-      ['find $not', () => engine.find('rid_child', { where: { $not: { record_id: { $in: leaf() } } } }), 'where.$not.record_id.$in'],
-      ['find $and', () => engine.find('rid_child', { where: { $and: [{ object_name: 'rid_parent' }, { record_id: { $in: leaf() } }] } }), 'where.$and[1].record_id.$in'],
-      ['findOne', () => engine.findOne('rid_child', { where: { record_id: { $in: leaf() } } }), 'where.record_id.$in'],
-      ['count', () => engine.count('rid_child', { where: { record_id: { $in: leaf() } } }), 'where.record_id.$in'],
-      ['aggregate where', () => engine.aggregate('rid_child', { where: { record_id: { $in: leaf() } }, aggregations: [{ function: 'count', alias: 'n' }] }), 'where.record_id.$in'],
       ['aggregate aggregation filter', () => engine.aggregate('rid_child', { aggregations: [{ function: 'count', alias: 'n', filter: { record_id: { $in: leaf() } } }] }), 'aggregations[0].filter.record_id.$in'],
       ['update multi', () => engine.update('rid_child', { note: 'y' }, { where: { record_id: { $in: leaf() } }, multi: true }), 'where.record_id.$in'],
-      ['delete multi', () => engine.delete('rid_child', { where: { record_id: { $in: leaf() } }, multi: true }), 'where.record_id.$in'],
+      ['delete multi', () => engine.delete('rid_child', { where: { $or: [{ note: 'x' }, { record_id: { $in: leaf() } }] }, multi: true }), 'where.$or[1].record_id.$in'],
     ];
     for (const [label, run, at] of cases) {
       const err = await refusalOf(run());
       expect(envelopeOf(err), label).toEqual(UNCOMPOSED);
       expect(err!.message, label).toContain(`: ${at} holds a ReadableIds leaf`);
     }
+    expect(chain, 'refused before the middleware chain').toEqual([]);
     expect(calls, 'no verb reached the driver').toHaveLength(0);
   });
 
