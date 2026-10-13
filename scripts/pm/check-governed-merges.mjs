@@ -414,9 +414,13 @@
  * them. What moved is the LANDING each row waits for, carried as `tier` on the
  * row and derived per PR by `governedTierFor`:
  *
- *   H  人合 — `docs/adr/**`, `docs/NORTH-STAR.md`, `skills/**`, `AGENTS.md`,
- *      `CLAUDE.md`: the maintainer's hand, or an authorized APPROVED review by
- *      `GOVERNED_APPROVERS` and then the owning seat lands it. Unchanged.
+ *   H  人合 — every register row except `.claude/**` (today: `docs/adr/**`,
+ *      `docs/NORTH-STAR.md`, `skills/**`, `AGENTS.md`, `CLAUDE.md`, and since
+ *      the B2 ruling of 2026-10-13 the `workflows` row, `.github/workflows/**`,
+ *      scoped to objectstack, objectui and cloud): the maintainer's hand, or
+ *      an authorized APPROVED review by `GOVERNED_APPROVERS` and then the
+ *      owning seat lands it. The tier ruling left this landing as it was; the
+ *      list itself grew by one row on 2026-10-13.
  *   S  席内达档复核落地 — the whole `.claude/**` tree: the owning seat lands it
  *      through the queue once the PR thread (or its card) carries a
  *      `## Contract review` record for the PR's CURRENT head with
@@ -540,16 +544,21 @@
  *
  * The same day, asked whether the rule reaches the sibling repos — 「任何对
  * agents.md 等文件的修改…包括 objectui cloud仓库」 — the maintainer answered
- * 「同意」. So the surface register above is REPO-AGNOSTIC: the same five
- * surface globs are governed in `objectstack`, `objectui`, `cloud`,
- * `objectos` and `hotcrm`, and this sweep covers all five repos in one
- * invocation regardless of the working directory it is run from.
+ * 「同意」. So the surface register above reaches every governed repository:
+ * by default each row governs all five — `objectstack`, `objectui`, `cloud`,
+ * `objectos` and `hotcrm` — and since the B2 ruling of 2026-10-13 (header
+ * section "The register is scoped per row") a row may be scoped to a subset:
+ * the `workflows` row names `objectstack`, `objectui` and `cloud`. This sweep
+ * still covers all five repos in one invocation, judging each against the
+ * rows that govern it; `--test` and `--branch` answer for ONE repository, the
+ * checkout at `--root` (`checkoutRepoFor`), and say which one on stderr.
  *
  * ⚠️ The 2026-08-18 quotation above names two sibling repos and the register
  * below holds five, so read that quote as the repos IN VIEW that day — an
  * enumeration, never an exclusion, and never the register. The definition it
- * states (agent instruction files, judged the same across repos) already
- * covered `hotcrm`, a repo agents edit daily; only the CONFIGURATION lagged,
+ * states (agent instruction files, judged the same across repos — still true
+ * of every row that declares no `repos` scope) already covered `hotcrm`, a
+ * repo agents edit daily; only the CONFIGURATION lagged,
  * and it lagged in the direction that reads as safety. Measured cost of the
  * lag, #14867: the `repo:hotcrm` seat treated that repo's `AGENTS.md` chain
  * as governed and paid for hand-merges on it, while this sweep printed no row
