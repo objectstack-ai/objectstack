@@ -66,7 +66,7 @@ export * from './tracing.zod';
 export * from './migration.zod';
 // The host fate supplement `os migrate organization-ownership --fate-supplement`
 // reads (ADR-0131 D10): the fates a host declares for the objects it provides.
-export * from './organization-ownership-supplement.zod';
+export * from './fate-supplement.zod';
 
 // Security & Compliance
 export * from './auth-config.zod';

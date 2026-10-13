@@ -13,7 +13,7 @@ import {
   OrganizationOwnershipFateSchema,
   OrganizationOwnershipSupplementEntrySchema,
   OrganizationOwnershipSupplementSchema,
-} from './organization-ownership-supplement.zod';
+} from './fate-supplement.zod';
 
 const CITE = 'host record: fixture citation';
 

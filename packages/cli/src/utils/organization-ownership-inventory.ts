@@ -78,7 +78,7 @@ import {
 // ── The row vocabulary, declared once in the spec ────────────────────────────
 //
 // Every shape a row is built from is the spec's
-// (`organization-ownership-supplement.zod.ts`): a host authors its rows against
+// (`@objectstack/spec`, `system/fate-supplement.zod.ts`): a host authors its rows against
 // that schema, and the platform's rows below are typed by the same
 // declarations, so the two cannot drift into two dialects. The top-level row
 // keys are the one list kept here (`InventoryEntry` adds what only the platform
