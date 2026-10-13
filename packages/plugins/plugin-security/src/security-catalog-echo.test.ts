@@ -38,7 +38,11 @@ import {
   assertEngineUpdateDispatch,
 } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
-import { echoSecurityCatalogMutation, echoStoredSecurityCatalogOverlays, registerSecurityCatalogEcho } from './security-catalog-echo.js';
+import {
+  echoSecurityCatalogMutation,
+  echoStoredSecurityCatalogOverlays,
+  registerSecurityCatalogEcho,
+} from './security-catalog-echo.js';
 import { syncAudienceBindingSuggestions } from './suggested-audience-bindings.js';
 import { declareEveryoneBaseline } from './builtin-positions.js';
 import { classifyPackagedPermissionSet } from './packaged-permission-set-lock.js';
@@ -335,9 +339,8 @@ describe('[#21789] the echo states the lock\'s verdict as its provenance', () =>
   const body = (over: Row = {}) => ({ name: 'organization_admin', label: 'Organization Administrator', objects: {}, ...over });
 
   it('the echo of a set no code package ships says so: `_provenance: \'org\'`', async () => {
-    // The registry holds the stored row the way a host kernel's hydrator
-    // registers it — a runtime package id stamped on, tenant provenance over it.
-    const engine = engineDeclaring({ permission: [{ ...body(), _packageId: 'app.crm_workspace', _provenance: 'org' }] });
+    // An environment kernel: the registry holds no stored row.
+    const engine = engineDeclaring();
     const metadata = makeMetadataService();
     const protocol = stubProtocol({ 'permission/organization_admin': { body: body() } });
 
@@ -346,40 +349,53 @@ describe('[#21789] the echo states the lock\'s verdict as its provenance', () =>
     expect({ marker: entry?._envProjection, provenance: entry?._provenance }).toEqual({ marker: true, provenance: 'org' });
   });
 
-  it('control: the echo of a legacy overlay of a code-shipped set does NOT claim tenant provenance, nor an owner', async () => {
-    const shipped = { ...body({ systemPermissions: ['declared.only'] }), _packageId: 'com.example.crm', _provenance: 'package' };
-    const engine = engineDeclaring({ permission: [shipped] });
+  it('a set the engine registry already serves is not echoed: a host kernel\'s stored row, a declared artifact', async () => {
+    const hydrated = { ...body(), _packageId: 'app.crm_workspace', _provenance: 'org' };
+    const shipped = { ...body({ name: 'crm_readonly' }), _packageId: 'com.example.crm', _provenance: 'package' };
+    const engine = { ...engineDeclaring({ permission: [hydrated, shipped] }) } as any;
+    engine.registry.getItem = (type: string, name: string) => engine.registry.listItems(type).find((i: Row) => i.name === name);
     const metadata = makeMetadataService();
-    const protocol = stubProtocol(
-      { 'permission/organization_admin': { body: body({ systemPermissions: ['overlaid'] }), packageId: 'com.example.crm' } },
-      { 'permission/organization_admin': shipped },
-    );
+    const protocol = stubProtocol({
+      'permission/organization_admin': { body: body(), packageId: 'app.crm_workspace' },
+      'permission/crm_readonly': { body: body({ name: 'crm_readonly', systemPermissions: ['overlaid'] }) },
+    });
 
-    await echoSecurityCatalogMutation(protocol, { ql: engine, metadata }, { type: 'permission', name: 'organization_admin', state: 'active' });
-    const entry = metadata.store.get('organization_admin');
-    expect(entry?.systemPermissions, 'precondition: the overlay was echoed').toEqual(['overlaid']);
-    expect({ marker: entry?._envProjection, provenance: entry?._provenance ?? null, owner: entry?._packageId ?? null })
-      .toEqual({ marker: true, provenance: null, owner: null });
+    expect(await echoSecurityCatalogMutation(protocol, { ql: engine, metadata }, { type: 'permission', name: 'organization_admin', state: 'active' })).toBe('skipped');
+    expect(await echoSecurityCatalogMutation(protocol, { ql: engine, metadata }, { type: 'permission', name: 'crm_readonly', state: 'active' })).toBe('skipped');
+    expect(metadata.store.size).toBe(0);
   });
 });
 
 describe('the echo follows the overlay: healed, dropped, skipped', () => {
   const body = (over: Row = {}) => ({ name: 'ops_reader', label: 'Ops reader', objects: {}, ...over });
 
-  it('a delete over a DECLARED set heals the echo back to the declared body, unmarked', async () => {
-    const declared = body({ systemPermissions: ['declared.only'] });
-    const engine = engineDeclaring({ permission: [declared] });
+  it('an echo of ours is dropped once the engine registry serves the name, and a copy leaked into the registry goes too', async () => {
+    const items: Row[] = [];
+    const registry = {
+      listItems: (type: string) => (type === 'permission' ? items : []),
+      getItem: (_type: string, name: string) => items.find((i) => i.name === name),
+      unregisterItem: (_type: string, name: string) => { const i = items.findIndex((x) => x.name === name); if (i >= 0) items.splice(i, 1); },
+    };
+    const engine = { registry, find: async () => [] };
     const metadata = makeMetadataService();
-    const overlays: Record<string, { body: Row }> = { 'permission/ops_reader': { body: body({ systemPermissions: ['overlaid'] }) } };
-    const protocol = stubProtocol(overlays, { 'permission/ops_reader': declared });
-    await echoSecurityCatalogMutation(protocol, { ql: engine, metadata }, { type: 'permission', name: 'ops_reader', state: 'active' });
-    expect(metadata.store.get('ops_reader')?.systemPermissions).toEqual(['overlaid']);
+    const overlays: Record<string, { body: Row }> = { 'permission/ops_reader': { body: body() } };
+    const protocol = stubProtocol(overlays);
+    expect(await echoSecurityCatalogMutation(protocol, { ql: engine, metadata }, { type: 'permission', name: 'ops_reader', state: 'active' })).toBe('registered');
 
+    // A registry heal re-registered the metadata service's view (our echo).
+    items.push({ ...metadata.store.get('ops_reader') });
     delete overlays['permission/ops_reader'];
-    expect(await echoSecurityCatalogMutation(protocol, { ql: engine, metadata }, { type: 'permission', name: 'ops_reader', state: 'deleted' })).toBe('healed');
-    const healed = metadata.store.get('ops_reader');
-    expect(healed?.systemPermissions).toEqual(['declared.only']);
-    expect(healed?._envProjection).toBeUndefined();
+    expect(await echoSecurityCatalogMutation(protocol, { ql: engine, metadata }, { type: 'permission', name: 'ops_reader', state: 'deleted' })).toBe('dropped');
+    expect(metadata.store.has('ops_reader')).toBe(false);
+    expect(items).toEqual([]);
+
+    // A real artifact arriving later is what the registry serves; a stale echo is dropped.
+    metadata.registerInMemory('permission', 'ops_reader', { ...body(), _envProjection: true });
+    items.push({ ...body(), _packageId: 'com.example.ops', _provenance: 'package' });
+    overlays['permission/ops_reader'] = { body: body() };
+    expect(await echoSecurityCatalogMutation(protocol, { ql: engine, metadata }, { type: 'permission', name: 'ops_reader', state: 'active' })).toBe('skipped');
+    expect(metadata.store.has('ops_reader')).toBe(false);
+    expect(items).toHaveLength(1);
   });
 
   it('a delete that leaves no body drops the echo', async () => {
@@ -423,14 +439,14 @@ describe('positions are echoed too', () => {
     expect(metadata.store.size, 'nothing lands under permission').toBe(0);
   });
 
-  it('control: an overlay of a declared position claims no tenant provenance', async () => {
+  it('control: a position the engine registry declares is not echoed', async () => {
     const declared = { ...position({ permissionSets: [] }), _packageId: CODE_PKG, _provenance: 'package' };
     const metadata = makeMetadataService();
     const protocol = stubProtocol({ 'position/field_lead': { body: position(), packageId: CODE_PKG } }, { 'position/field_lead': declared });
-    await echoSecurityCatalogMutation(protocol, { ql: engineDeclaring({ position: [declared] }), metadata }, { type: 'position', name: 'field_lead', state: 'active' });
-    const entry = metadata.of('position').get('field_lead');
-    expect(entry?.permissionSets, 'precondition: the overlay was echoed').toEqual(['crm_readonly']);
-    expect({ provenance: entry?._provenance ?? null, owner: entry?._packageId ?? null }).toEqual({ provenance: null, owner: null });
+    const engine = engineDeclaring({ position: [declared] }) as any;
+    engine.registry.getItem = (type: string, name: string) => engine.registry.listItems(type).find((i: Row) => i.name === name);
+    expect(await echoSecurityCatalogMutation(protocol, { ql: engine, metadata }, { type: 'position', name: 'field_lead', state: 'active' })).toBe('skipped');
+    expect(metadata.of('position').size).toBe(0);
   });
 
   it('a position saved through the real environment protocol resolves in the catalog', async () => {
@@ -478,3 +494,4 @@ describe('the boot pass echoes every stored env-wide overlay, and only those', (
     expect(warnings[0]).toContain('grants nothing');
   });
 });
+

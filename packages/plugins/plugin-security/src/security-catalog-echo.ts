@@ -48,18 +48,25 @@
  *    client reads "a code package ships this". For a permission set the
  *    verdict is the packaged-permission-set lock's, the classifier both write
  *    doors ask, so the reported and the enforced state are one judgment. For
- *    a position it is "no artifact in the engine registry declares the name".
+ *    a position it always holds, since only a name no artifact declares is
+ *    echoed (below).
  *  - `_packageId` (#23233): the package the stored row is bound to, as the
  *    protocol's by-name read serves it. The catalog takes an item's owner
  *    from `_packageId` alone, and the suggestion collector skips an unowned
  *    `isDefault: true` set (ADR-0090 D5: packages suggest, admins confirm).
  *    The owner is carried, never derived.
  *
- * When the overlay is gone, an echo of ours is healed back to the declared
- * body the engine registry holds, or dropped.
+ * ## What is not echoed
+ *
+ * A name the engine registry already serves: every stored row on a host
+ * kernel (its metadata door hydrates them there), and a declared artifact on
+ * any kernel. The catalog reads the registry first, so an echo of those would
+ * never be read — and a second copy is what a delete's registry heal or a
+ * package uninstall would strand. When the overlay is gone our echo is
+ * dropped; a package uninstall deletes each of its rows through
+ * `deleteMetaItem`, so the same projector drops those.
  */
 
-import { isTenantAuthored } from '@objectstack/metadata-core';
 import { seedCtx } from './organization-scope.js';
 import {
   ENV_PROJECTION_MARKER,
@@ -83,8 +90,36 @@ export interface SecurityCatalogEchoDeps {
   logger?: SecurityCatalogEchoLogger;
 }
 
+/**
+ * The item the engine registry serves for `name`, unless it is our own echo
+ * (a registry heal can re-register the metadata service's view there).
+ */
+function registryServes(ql: any, type: SecurityCatalogEchoType, name: string): boolean {
+  try {
+    const item = ql?.registry?.getItem?.(type, name);
+    return !!item && typeof item === 'object' && !isProjectionEcho(item);
+  } catch {
+    return false;
+  }
+}
+
+/** Remove our echo of `name` from the metadata service, and from the engine registry if it leaked there. */
+async function dropEcho(ql: any, metadata: any, type: SecurityCatalogEchoType, name: string): Promise<void> {
+  if (typeof metadata?.unregister === 'function') {
+    // unregister() also asks writable loaders to delete — the stored row is
+    // already gone, so this is an in-memory removal.
+    await metadata.unregister(type, name);
+  }
+  try {
+    const leaked = ql?.registry?.getItem?.(type, name);
+    if (isProjectionEcho(leaked) && typeof ql?.registry?.unregisterItem === 'function') {
+      ql.registry.unregisterItem(type, name);
+    }
+  } catch { /* nothing leaked, or nothing to remove it from */ }
+}
+
 /** What one echo did. */
-export type SecurityCatalogEchoOutcome = 'registered' | 'healed' | 'dropped' | 'skipped';
+export type SecurityCatalogEchoOutcome = 'registered' | 'dropped' | 'skipped';
 
 const isEchoType = (type: unknown): type is SecurityCatalogEchoType =>
   type === 'permission' || type === 'position';
@@ -99,24 +134,6 @@ export function stripDecorations(body: any): any {
 /** True when a layered-read layer or a metadata-service item is our own echo, not a real artifact. */
 export const isProjectionEcho = (v: any): boolean =>
   !!(v && typeof v === 'object' && (v as any)[ENV_PROJECTION_MARKER]);
-
-/**
- * The declared (artifact) body for `name` in the engine registry, or `null`.
- * Echoes and stored rows are not artifacts: a registry heal can re-register
- * the metadata service's view (our marked copy) as a plain item, and a host
- * kernel's hydrator registers stored rows wearing `_provenance: 'org'`.
- */
-function readDeclaredBody(ql: any, type: SecurityCatalogEchoType, name: string): any {
-  try {
-    const items = ql?.registry?.listItems?.(type) ?? [];
-    for (const body of items) {
-      if (body?.name !== name || body?._packageId === 'sys_metadata') continue;
-      if (isProjectionEcho(body) || isTenantAuthored(body)) continue;
-      return body;
-    }
-  } catch { /* no readable registry: nothing declared */ }
-  return null;
-}
 
 /**
  * The package the stored row a by-name read SERVES for `name` is bound to:
@@ -165,26 +182,31 @@ export async function echoSecurityCatalogMutation(
     }
   }
 
+  const current = typeof metadata.get === 'function' ? await metadata.get(type, name) : undefined;
   if (!overlay?.name) {
-    // Overlay gone: heal an echo of ours back to the declared body, or drop it.
-    const current = typeof metadata.get === 'function' ? await metadata.get(type, name) : undefined;
+    // Overlay gone: drop an echo of ours. A declared artifact of the name is
+    // in the engine registry, which the catalog reads first.
     if (!isProjectionEcho(current)) return 'skipped';
-    const declared = readDeclaredBody(ql, type, name);
-    if (declared) {
-      metadata.registerInMemory(type, name, stripDecorations(declared));
-      return 'healed';
-    }
-    if (typeof metadata.unregister === 'function') {
-      // unregister() also asks writable loaders to delete — the stored row is
-      // already gone, so this is an in-memory removal.
-      await metadata.unregister(type, name);
-    }
+    await dropEcho(ql, metadata, type, name);
     return 'dropped';
   }
 
+  // The engine registry already serves this name — a host kernel hydrates
+  // every stored row there, and a declared artifact is there on every kernel —
+  // so the catalog never reaches the metadata service for it, and an echo
+  // would only be a second copy for a delete or an uninstall to strand.
+  if (registryServes(ql, type, name)) {
+    if (isProjectionEcho(current)) await dropEcho(ql, metadata, type, name);
+    return 'skipped';
+  }
+
+  // The registry serves nothing for the name, so no artifact declares it: a
+  // position here is tenant-authored. A permission set asks the lock, which
+  // also reads the layered read's `code` layer and answers `unknown` when it
+  // cannot tell.
   const tenantAuthored = type === 'permission'
     ? classifyPackagedPermissionSet(name, ql, { status: 'read', envelope }).status === 'org'
-    : readDeclaredBody(ql, type, name) === null;
+    : true;
   let ownerPackageId: string | undefined;
   if (tenantAuthored) {
     try {

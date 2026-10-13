@@ -151,7 +151,15 @@ function scenario(kind: Kind) {
     ((await state.ql.find('sys_audience_binding_suggestion', { where: { permission_set_name: PKG_SET } }, SYS)) as any[])
       .filter((row) => row.status === 'pending');
 
-  return { dir, dbFile, state, open, close, author, resolve, pendingSuggestions };
+  /** Delete the no-package set, then uninstall the runtime package: neither may still be served. */
+  const retire = async () => {
+    const { protocol } = state as Required<typeof state>;
+    await protocol.deleteMetaItem({ type: 'permission', name: LOOSE_SET });
+    const uninstall = await protocol.deletePackage({ packageId: RUNTIME_PKG });
+    expect(uninstall, JSON.stringify(uninstall)).toBeTruthy();
+  };
+
+  return { dir, dbFile, state, open, close, author, retire, resolve, pendingSuggestions };
 }
 
 describe('environment kernel: a metadata-door permission set or position is in the security catalog', () => {
@@ -215,6 +223,16 @@ describe('environment kernel: a metadata-door permission set or position is in t
     expect(await readAs(s.state.ql, USERS.position, s.state.org!)).toBe('granted');
     expect(await s.pendingSuggestions()).toHaveLength(1);
   }, 180_000);
+
+  it('a deleted set and an uninstalled package\'s set are no longer served, and grant nothing', async () => {
+    await s.retire();
+    expect(await s.resolve('permission', LOOSE_SET)).toBeUndefined();
+    expect(await s.resolve('permission', PKG_SET)).toBeUndefined();
+    expect(await readAs(s.state.ql, USERS.loose, s.state.org!)).toBe('refused');
+    expect(await readAs(s.state.ql, USERS.pkg, s.state.org!)).toBe('refused');
+    // Control: the position, untouched by either, still resolves.
+    expect(await s.resolve('position', POSITION)).toMatchObject({ source: 'metadata' });
+  }, 60_000);
 });
 
 describe('control — host kernel: the same writes resolve from the engine registry', () => {
@@ -238,4 +256,10 @@ describe('control — host kernel: the same writes resolve from the engine regis
     expect(await readAs(s.state.ql, USERS.loose, s.state.org!)).toBe('granted');
     expect(await readAs(s.state.ql, USERS.position, s.state.org!)).toBe('granted');
   });
+
+  it('a deleted set and an uninstalled package\'s set are no longer served', async () => {
+    await s.retire();
+    expect(await s.resolve('permission', LOOSE_SET)).toBeUndefined();
+    expect(await s.resolve('permission', PKG_SET)).toBeUndefined();
+  }, 60_000);
 });
