@@ -819,7 +819,9 @@ export async function buildOrganizationOwnershipPlan(opts: {
         throw new OrganizationOwnershipPlanRefusal(
           'uninventoried-platform-table',
           `${base} carries ${ORG} but the ADR-0131 D10 inventory gives it no fate. The plan refuses rather than ` +
-            'guess one: the inventory (packages/cli/src/utils/organization-ownership-inventory.ts) owes it a row.',
+            'guess one: the inventory (packages/cli/src/utils/organization-ownership-inventory.ts) owes it a row, or, ' +
+            'when the host provides the object, the host declares its fate in a fate supplement passed with ' +
+            '--fate-supplement FILE.',
           base,
         );
       }
