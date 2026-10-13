@@ -17,6 +17,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+// Engine options are DECLARED, never erased to `any` (`pnpm check:query-options-erasure`).
+import type { DataEngineInsertOptions, EngineQueryOptions, EngineUpdateOptions } from '@objectstack/spec/data';
 import { SysMailAssociation, SysMailbox, SysMailMessage } from '../objects/index.js';
 import { MAILBOX_ADMIN_CAPABILITY } from '../mail-read-visibility.js';
 import { MailIngestService, MailboxServiceError, type MailIngestEngine } from './mail-ingest-service.js';
@@ -64,9 +66,9 @@ describe('the ingest seam on a real engine', () => {
   let mailboxSeq = 0;
 
   const find = (object: string, where: Row): Promise<Row[]> =>
-    engine.find(object, { where, limit: 500, context: SYSTEM } as any) as Promise<Row[]>;
+    engine.find(object, { where, limit: 500, context: SYSTEM } satisfies EngineQueryOptions) as Promise<Row[]>;
   const insert = async (object: string, data: Row): Promise<string> =>
-    String(((await engine.insert(object, data, { context: SYSTEM } as any)) as Row).id);
+    String(((await engine.insert(object, data, { context: SYSTEM } satisfies DataEngineInsertOptions)) as Row).id);
 
   /** A fresh mailbox per test, so every count below is that test's own. */
   const newMailbox = async (organization = ORG_A, owner = 'usr_owner') =>
@@ -195,7 +197,7 @@ describe('the ingest seam on a real engine', () => {
                 missed = true;
                 return [];
               }
-              return target.find(object, options as any);
+              return target.find(object, options as EngineQueryOptions);
             };
           }
           const value = Reflect.get(target, prop);
@@ -273,7 +275,10 @@ describe('the ingest seam on a real engine', () => {
         { mailboxId: mailbox, raw: plainMessage({ From: 'shared@acme.test', 'Message-ID': '<additive@acme.test>' }) },
         SYSTEM,
       );
-      await engine.update('mailtest_contact', { email: 'moved@acme.test' }, { where: { id: first }, context: SYSTEM } as any);
+      await engine.update('mailtest_contact', { email: 'moved@acme.test' }, {
+        where: { id: first },
+        context: SYSTEM,
+      } satisfies EngineUpdateOptions);
       const second = await insert('mailtest_contact', { organization_id: ORG_A, name: 'B', email: 'shared@acme.test' });
 
       expect(await service.rematch({ mailboxId: mailbox }, SYSTEM)).toMatchObject({ linksAdded: 1, associated: 0 });

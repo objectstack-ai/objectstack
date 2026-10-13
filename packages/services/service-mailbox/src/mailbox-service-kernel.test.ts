@@ -13,6 +13,7 @@ import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin, type ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import type { DataEngineInsertOptions, EngineQueryOptions } from '@objectstack/spec/data';
 import { MAILBOX_SERVICE, MailIngestService, MailboxServicePlugin } from './index.js';
 import { plainMessage } from './ingest/messages.fixture.js';
 
@@ -58,7 +59,7 @@ describe('the `mailbox` kernel service on a real kernel boot', () => {
     expect(service).toBeInstanceOf(MailIngestService);
 
     const insert = async (object: string, data: Record<string, unknown>) =>
-      String(((await ql.insert(object, data, { context: SYSTEM } as any)) as { id: unknown }).id);
+      String(((await ql.insert(object, data, { context: SYSTEM } satisfies DataEngineInsertOptions)) as { id: unknown }).id);
     const mailbox = await insert('sys_mailbox', { organization_id: ORG, name: 'Inbox', address: 'inbox@corp.test' });
     const contact = await insert('kerneltest_contact', { organization_id: ORG, name: 'C', email: 'customer@acme.test' });
 
@@ -69,7 +70,7 @@ describe('the `mailbox` kernel service on a real kernel boot', () => {
       associationState: 'associated',
       associations: [{ object: 'kerneltest_contact', recordId: contact, matchedField: 'email', matchedAddress: 'customer@acme.test' }],
     });
-    const rows = (await ql.find('sys_mail_message', { where: { mailbox_id: mailbox }, context: SYSTEM } as any)) as unknown[];
+    const rows = (await ql.find('sys_mail_message', { where: { mailbox_id: mailbox }, context: SYSTEM } satisfies EngineQueryOptions)) as unknown[];
     expect(rows).toHaveLength(1);
   });
 });
