@@ -1122,7 +1122,7 @@ export async function selfTest() {
     t('⛔ an empty object, an array, null and a string are refused as the inputs kind, each once', [{}, [], null, 'refresh_version_pr'].map((inputs) => reasons(refresh(inputs)).length === 1 && reasons(refresh(inputs))[0].startsWith('actions[0].inputs must')), [true, true, true, true]);
     t('⛔ a release refresh beside any other op is refused — the stroke carries that one action alone, its token carrying actions write', refuses(fixturePayload({ actions: [refresh(REFRESH), { op: 'comment', issue: 7, body: 'x' }] }), 'actions[1] is `comment` in a stroke that carries a `workflow_dispatch`'));
     const run = validatePayload(one(refresh(REFRESH))).payload;
-    t('…and its stroke mints actions write for ONE repository, as the shard-timings stroke does', [tokenRepositoriesOf(run), tokenPermissionsOf(run).actions, githubOutputLines(run).split('\n').at(-2)], [[REPO], 'write', 'permission_actions=write']);
+    t('…and its stroke mints actions write for ONE repository, as the shard-timings stroke does', run ? [tokenRepositoriesOf(run), tokenPermissionsOf(run).actions, githubOutputLines(run).split('\n').at(-2)] : 'the refresh stroke was refused', [[REPO], 'write', 'permission_actions=write']);
     // The entries against their files on disk: every key declared under the file's `workflow_dispatch` trigger, with the type
     // its value has; a null entry's file declares none (the platform refuses inputs there). The reader is pinned first.
     const repoRoot = resolve(SELF_PATH, '../../../..');
