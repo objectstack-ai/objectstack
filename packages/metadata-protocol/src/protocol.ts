@@ -162,7 +162,7 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSp
 // live transport in through `attachMetadataMutationPubSub`.
 import type { IObjectQLEngine, IPubSub, ISecurityService } from '@objectstack/spec/contracts';
 import { applyConversionsToFlow, applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
-import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer, resolveI18nLabel } from '@objectstack/spec/ui';
+import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer, resolveI18nLabel, defaultRecordPageObject } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
 // structurally mention `FormFieldInput` (FormView `sections[].fields`), and
 // this file imports BOTH `@objectstack/spec` (root, for
@@ -20141,6 +20141,117 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#23015] The save door's half of "one default record page per object per
+     * deployment" (maintainer ruling A, record 6134056653; `PageSchema.isDefault`).
+     *
+     * A `page` body that is the default record page of an object
+     * (`defaultRecordPageObject`, the one reading `defineStack` and the
+     * registry judge by too) is refused when another page already holds that
+     * object's default. The holders are the two sources a deployment serves
+     * pages from, judged by name:
+     *
+     *  - **the stored pages** — the environment-wide active rows
+     *    ({@link readActiveOverlayRows}, parsed by {@link storedOverlayEntries}),
+     *    a row bound to a package naming that package;
+     *  - **the registry's pages** — `SchemaRegistry.defaultRecordPageHoldersOf`
+     *    (the reading the registration refusals judge by: packaged pages, their
+     *    install claims, and the environment items written through), for every
+     *    name no stored row holds. A stored row under a name stands in for
+     *    every registry slot of that name, as it does on every read
+     *    (ADR-0005), so its own body decides for the name.
+     *
+     * The page saved under `saveName` is never its own holder: a save under the
+     * existing default's own name is an overlay of that page (ADR-0005), not a
+     * second default, and stays accepted. A registry with no such reading (a
+     * host engine that is not `SchemaRegistry`) contributes no packaged holder;
+     * the stored rows are still judged.
+     *
+     * An UNPROVISIONED store counts as "no stored pages"; any other read
+     * failure propagates ({@link rethrowUnlessMetadataStoreUnprovisioned}):
+     * answering "no other default" from a read that never happened would
+     * accept the very second default this exists to refuse.
+     *
+     * `DEFAULT_RECORD_PAGE_CONFLICT` / 422 — the envelope the registry's
+     * registration refusal carries for the same condition, so a client reads
+     * one code whether the second default arrived by a save or by an install.
+     * The message names this page and the holder, then the prescription, then
+     * why: a 4xx message crosses the REST boundary truncated at its tail. ⛔ It
+     * never prescribes overlaying a page a package ships by name: the save door
+     * refuses that write (`NOT_OVERRIDABLE`). Runtime words carry no tracker
+     * number.
+     */
+    private async defaultRecordPageSaveRefusal(
+        type: string,
+        item: unknown,
+        saveName: string,
+    ): Promise<(Error & { code: 'DEFAULT_RECORD_PAGE_CONFLICT'; status: 422 }) | undefined> {
+        if (type !== 'page') return undefined;
+        const object = defaultRecordPageObject(item);
+        if (object === undefined) return undefined;
+
+        // `shipped`: a page a package ships through the registry, which no save
+        // can edit; a stored row (bound to a package or not) is editable here.
+        type Holder = { page: string; packageId?: string; shipped: boolean };
+        const holders: Holder[] = [];
+        let records: any[] = [];
+        try {
+            // [ADR-0131 D6] A save lands environment-wide, so the pages it meets
+            // are the environment-wide rows.
+            records = await this.readActiveOverlayRows({ type }, undefined);
+        } catch (error) {
+            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+        }
+        const stored = this.storedOverlayEntries({ type }, records);
+        const storedNames = new Set(stored.map((entry) => entry.name));
+        for (const entry of stored) {
+            if (entry.name === saveName || defaultRecordPageObject(entry.data) !== object) continue;
+            holders.push(entry.packageId
+                ? { page: entry.name, packageId: entry.packageId, shipped: false }
+                : { page: entry.name, shipped: false });
+        }
+        const registry = this.engine.registry;
+        if (typeof registry?.defaultRecordPageHoldersOf === 'function') {
+            const registered = registry.defaultRecordPageHoldersOf(object) as Array<
+                { kind: 'package'; packageId: string; page: string } | { kind: 'environment'; page: string }
+            >;
+            for (const holder of registered) {
+                if (holder.page === saveName || storedNames.has(holder.page)) continue;
+                holders.push(holder.kind === 'package'
+                    ? { page: holder.page, packageId: holder.packageId, shipped: true }
+                    : { page: holder.page, shipped: false });
+            }
+        }
+        if (holders.length === 0) return undefined;
+
+        const seen = new Set<string>();
+        const unique = holders.filter((h) => {
+            const key = `${h.packageId ?? ''}|${h.page}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+        const describe = (h: Holder) =>
+            h.packageId ? `page '${h.page}' of package '${h.packageId}'` : `page '${h.page}', authored in this environment`;
+        const named = unique.map(describe);
+        const others = named.length === 1 ? `${named[0]} already is` : `${named.join(' and ')} already are`;
+        const remedy = unique.some((h) => h.shipped)
+            ? `Save '${saveName}' with \`isDefault: false\`: a page a package ships stays the default unless the `
+              + `deployment is composed without that package.`
+            : `Save '${saveName}' with \`isDefault: false\`, or first save ${unique.map((h) => `'${h.page}'`).join(' and ')} `
+              + `with \`isDefault: false\` to make '${saveName}' the default instead.`;
+        const err = new Error(
+            `Default record page conflict: page '${saveName}' cannot be saved as the default record page of object `
+            + `'${object}': ${others}. ${remedy} At most one \`isDefault: true\` record page may exist for an object `
+            + `in a deployment: the record view opens that page with no tie-break.`,
+        ) as Error & { code: 'DEFAULT_RECORD_PAGE_CONFLICT'; status: 422; object: string; holders: readonly Holder[] };
+        err.code = 'DEFAULT_RECORD_PAGE_CONFLICT';
+        err.status = 422;
+        err.object = object;
+        err.holders = unique;
+        return err;
+    }
+
+    /**
      * [#21639] The save door's ONE collision predicate for a view container:
      * a container is refused when its save name, or any name its expansion
      * produces, is a name already served from elsewhere — the family's rule,
@@ -21143,6 +21254,19 @@ export class ObjectStackProtocolImplementation implements
         {
             const hookRefusal = runtimeHookWithoutBodyRefusal(singularType, request.item, request.name);
             if (hookRefusal) throw hookRefusal;
+        }
+
+        // One default record page per object per deployment (maintainer ruling
+        // A on objectstack#23015): a page saved as the default record page of an
+        // object another page already holds — a stored page, or a page a
+        // package ships — is refused, naming both, in draft and in publish mode,
+        // after the schema (the body is a page) and before the authoring gate
+        // and every write. A save under the existing default's own name is an
+        // overlay of that page, not a second default. See
+        // {@link defaultRecordPageSaveRefusal}.
+        {
+            const defaultPageRefusal = await this.defaultRecordPageSaveRefusal(singularType, request.item, request.name);
+            if (defaultPageRefusal) throw defaultPageRefusal;
         }
 
         // The #4463 runtime authoring gate — the shared author-time rule
