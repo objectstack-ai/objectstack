@@ -3856,11 +3856,16 @@ describe('validateStackExpressions — every changed read is reachable from a sp
     // Exactly one master ⇒ `parent` binds ⇒ NO finding. That verdict depends on
     // `masterDetailCount` reading `reference`; if the read were broken the count
     // would be 0 and this would fire.
+    //
+    // [#23100] The sharing model is incidental to the count, so the fixtures
+    // declare `private`: `controlled_by_parent` is spec-valid only with exactly
+    // one REQUIRED master_detail (ADR-0055 §1, enforced at parse), which the
+    // two-master half below can never satisfy.
     expect(
       validateStackExpressions(
         specValid({
           objects: [{
-            name: 'line_item', label: 'Line', sharingModel: 'controlled_by_parent',
+            name: 'line_item', label: 'Line', sharingModel: 'private',
             fields: {
               invoice_ref: { type: 'master_detail', label: 'Invoice', reference: 'invoice' },
               locked: { type: 'text', label: 'Locked', readonlyWhen: 'parent.posted == true' },
@@ -3874,7 +3879,7 @@ describe('validateStackExpressions — every changed read is reachable from a sp
     const issues = validateStackExpressions(
       specValid({
         objects: [{
-          name: 'line_item', label: 'Line', sharingModel: 'controlled_by_parent',
+          name: 'line_item', label: 'Line', sharingModel: 'private',
           fields: {
             invoice_ref: { type: 'master_detail', label: 'Invoice', reference: 'invoice' },
             order_ref: { type: 'master_detail', label: 'Order', reference: 'sales_order' },
