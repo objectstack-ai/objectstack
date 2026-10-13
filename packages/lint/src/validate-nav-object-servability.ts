@@ -149,19 +149,19 @@ export function validateNavObjectServability(stack: unknown): NavObjectServabili
               // key that condemns it is named in the message, because the fix
               // may belong at either end.
               path: `${navPath}.objectName`,
-              // [#22161] One verdict sentence naming the editable key; the two
-              // refusal envelopes, why no permission on the entry can rescue
-              // it and what the served `/meta` does with it is
+              // [#22161] One verdict sentence naming the editable key, and one
+              // remedy line; the two refusal envelopes, why no permission on
+              // the entry can rescue it, what the served `/meta` does with it,
+              // and why an object API-disabled on purpose (credential
+              // material) makes the entry the mistake, are
               // `os explain nav-object-unservable`.
               message:
                 `Navigation targets object "${target}", which cannot serve a list `
                 + `(\`${offendingKey}\` ${apiDisabled ? 'is false' : 'lacks `list`'}), so the server prunes `
                 + `the entry: its list answers ${apiDisabled ? '404' : '405'} for every user`,
               hint:
-                `Remove the nav entry, or make "${target}" listable by setting \`enable.apiEnabled: true\` `
-                + `and granting \`list\` in \`enable.apiMethods\`. ⛔ Do NOT open the API on an object that `
-                + `is disabled on purpose — several platform objects hold credential material and are `
-                + `API-disabled deliberately; for those the entry is the mistake, not the \`enable\` block.`,
+                `Remove the nav entry, or make "${target}" listable (\`enable.apiEnabled: true\` and \`list\` `
+                + `in \`enable.apiMethods\`) unless it is API-disabled on purpose`,
             });
           }
         }

@@ -16,8 +16,8 @@ Clause-②: yes (narrowing)
 
 **What the build doors still accept, byte for byte.** Every value its contract accepts, and the values this arm holds back:
 
-- a value carrying a `{token}` (also spelled with double braces or a leading `$`) — never refused at the build doors for its pre-interpolation type. That is not a promise it runs: only `http` interpolates its config before it parses, so only an `http` slot sees the token's resolved value. Every other builtin parses its config as authored, so a token in one of its number or boolean slots (`limit: '{n}'`, `maxIterations: '{cap}'`, a screen field `min: '{m}'`, `multi: '{bulk}'`) still fails at its first run, exactly as before — write a literal there;
-- on `http`, any value with a token inside it, and `signingSecret` (the credential channel may supply it);
+- a value carrying a `{token}` (also spelled with double braces or a leading `$`) — never refused at the build doors for its pre-interpolation type. That is not a promise it runs: every builtin parses its config as authored, so a token in one of its number or boolean slots (`limit: '{n}'`, `maxIterations: '{cap}'`, a screen field `min: '{m}'`, `multi: '{bulk}'`) still fails at its first run, exactly as before — write a literal there (an `http` node's `timeoutMs` and `durable` refuse the token itself at the build doors);
+- on `http`, `signingSecret` (the credential channel may supply it);
 - a `loop` with no `body` (its executor does not parse it), and the region slots of `loop`, `parallel` and `try_catch`;
 - an undeclared or retired key, a screen field's `visibleWhen` and a CRUD `fields` value — each keeps the judge it had.
 
@@ -29,7 +29,7 @@ Clause-②: yes (narrowing)
 | a screen field `min: '1'`, `max: '10'` | `min: 1`, `max: 10` |
 | `limit: '10'`, `maxIterations: '5'` (any number slot outside `http`) | `limit: 10`, `maxIterations: 5` — a literal number only: these executors parse the config as authored, so a `{token}` here passes the build and fails every run |
 | `multi: 'true'`, a screen field `required: 'yes'` (any boolean slot outside `http`) | `multi: true`, `required: true` — a literal boolean only, for the same reason |
-| `http` `timeoutMs: '5000'`, `durable: 'yes'` | `timeoutMs: 5000`, `durable: true` — or, on `http` alone, a sole-token template such as `timeoutMs: '{timeout}'`: `http` interpolates before it parses, so the token resolves to its value's type first |
+| `http` `timeoutMs: '5000'`, `durable: 'yes'` | `timeoutMs: 5000`, `durable: true` — a literal only: `http` parses its config as authored, and a `{token}` there is refused at the build doors |
 | `severity: 'loud'`, `mode: 'view'` | one of the declared values (`'info'` / `'warning'` / `'critical'`; `'create'` / `'edit'`) |
 | a `notify` with both `template` and `title` | one content path, as the refusal's sentence says |
 

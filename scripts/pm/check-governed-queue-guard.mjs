@@ -493,13 +493,17 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   GENERATED_SURFACE_EXCEPTIONS,
+  GOVERNED_REPOS,
   GOVERNED_SURFACES,
   GOVERNED_TIER_H,
   GOVERNED_TIER_S,
   HUMAN_MERGE_LINE_THRESHOLD,
+  SELF_REPO_ID,
   applyGeneratedExceptions,
+  assertGovernedRepo,
   generatedExceptionFor,
   governedPathsIn,
+  governedSurfacesFor,
   governedTierFor,
   groupHitsByException,
   landsByHumanMerge,
@@ -507,6 +511,7 @@ import {
   pullSizeFrom,
   recomputeProvenanceFor,
   renderLiftApprovals,
+  repoIdForSlug,
   testVerdict,
 } from './check-governed-merges.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
@@ -552,6 +557,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ #19344: the remedy names a path the ruleset actually offers': 5,
   '⛔ the queued pull-back: the remedy names no dequeue act a seat has': 4,
   '⭐ the 2026-09-20 ruling: a certified PURE REGENERATION carries the record to the queued head': 11,
+  'the per-row repository scope (ruling B2, 2026-10-13)': 14,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -559,7 +565,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // contract-review carrier battery left with the label it read (ruling record
 // 5770886272 on #19061, letter B): the ordinary direction, one battery, one row.
 // Raised 23 → 24 with the queued pull-back battery: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 24;
+const SELF_TEST_BATTERY_FLOOR = 25;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -905,6 +911,30 @@ export function resolveEventContext({ eventName, payload }) {
 }
 
 /**
+ * The repository this guard judges — the one its workflow runs in, read off
+ * `GITHUB_REPOSITORY` and resolved to a `GOVERNED_REPOS` id; this file's own
+ * repository when the variable is unset (a local run). The register is scoped
+ * per row, so every question below carries it: a sibling copy of this guard
+ * running in `objectui` judges objectui's rows, and a run in a repository the
+ * register does not know REFUSES (exit 1) rather than judging it against some
+ * other repository's rows — a wrong scope reads exactly like a clear diff.
+ * Pure. Returns `{ repo, slug, source }` or `{ error }`.
+ */
+export function guardRepository(env = {}) {
+  const raw = String(env?.GITHUB_REPOSITORY ?? '').trim();
+  const self = GOVERNED_REPOS.find((r) => r.id === SELF_REPO_ID);
+  const slug = raw === '' ? self.slug : raw;
+  const repo = repoIdForSlug(slug);
+  if (repo !== null) return { repo, slug, source: raw === '' ? 'this file\'s own repository' : 'GITHUB_REPOSITORY' };
+  return {
+    error:
+      `GITHUB_REPOSITORY names ${slug}, which is not a governed repository (${GOVERNED_REPOS.map((r) => r.id).join(', ')}). ` +
+      'The register is scoped per row, so this guard judges a diff against the rows that govern ONE repository and ' +
+      'has none for this one — it refuses rather than judging the diff against another repository\'s rows.',
+  };
+}
+
+/**
  * Split the work in a diff into the pull requests that touched a governed
  * surface, plus the governed work no pull request can be found for.
  *
@@ -914,11 +944,12 @@ export function resolveEventContext({ eventName, payload }) {
  * that is what makes "a clear diff makes no API call" a property of the data
  * flow rather than a promise in a comment.
  */
-export function decomposeGovernedWork(rows) {
+export function decomposeGovernedWork(rows, repo) {
+  assertGovernedRepo(repo, 'decomposeGovernedWork');
   const byPull = new Map();
   const unattributed = [];
   for (const row of Array.isArray(rows) ? rows : []) {
-    const surfaces = governedPathsIn(row?.paths ?? []);
+    const surfaces = governedPathsIn(row?.paths ?? [], repo);
     if (surfaces.length === 0) continue;
     const paths = surfaces.flatMap((s) => s.files);
     if (typeof row.pr !== 'number' || !Number.isInteger(row.pr) || row.pr <= 0) {
@@ -936,7 +967,7 @@ export function decomposeGovernedWork(rows) {
       // The landing TIER travels with the entry (#18020), derived from the
       // SAME governed path list the verdict is judged on — never from the raw
       // diff, which carries files the register does not govern at all.
-      return { pr: entry.pr, shas: entry.shas, paths, surfaces: governedPathsIn(paths), tier: governedTierFor(paths) };
+      return { pr: entry.pr, shas: entry.shas, paths, surfaces: governedPathsIn(paths, repo), tier: governedTierFor(paths, repo) };
     })
     .sort((a, b) => a.pr - b.pr);
   return { governed, unattributed };
@@ -1089,7 +1120,8 @@ export function entryUnreadable(entry) {
  * The verdict, as data. Pure — every branch of the decision is here, and the
  * renderer and the exit code both read it rather than re-deriving it.
  */
-export function guardVerdict({ event, governed = [], unattributed = [], approvals = new Map(), records = new Map(), apiCalls = 0, headNotes = [], lifted = [] }) {
+export function guardVerdict({ event, repo, governed = [], unattributed = [], approvals = new Map(), records = new Map(), apiCalls = 0, headNotes = [], lifted = [] }) {
+  assertGovernedRepo(repo, 'guardVerdict');
   const entries = governed.map((entry) => ({
     ...entry,
     approval: approvals.get(entry.pr) ?? unreadableApproval('no review reading was recorded for this pull request'),
@@ -1101,7 +1133,7 @@ export function guardVerdict({ event, governed = [], unattributed = [], approval
       ? { record: records.get(entry.pr) ?? { state: 'unreadable', reason: 'no record reading was recorded for this pull request' } }
       : {}),
   }));
-  const base = { event, entries, unattributed, apiCalls, headNotes, lifted, contextName: CHECK_CONTEXT_NAME };
+  const base = { event, repo, entries, unattributed, apiCalls, headNotes, lifted, contextName: CHECK_CONTEXT_NAME };
 
   if (entries.length === 0 && unattributed.length === 0) {
     return { ...base, conclusion: 'clear', exitCode: EXIT_CLEAR, refusalKind: null };
@@ -1180,7 +1212,7 @@ export function renderGuardVerdict(verdict) {
     if (lifted.length === 0) {
       lines.push(
         '  ✅  CLEAR — the diff touches no governed surface, so this guard has nothing to judge.',
-        `      Derived from GOVERNED_SURFACES in scripts/pm/check-governed-merges.mjs (${GOVERNED_SURFACES.length} surfaces),`,
+        `      Derived from GOVERNED_SURFACES in scripts/pm/check-governed-merges.mjs (${governedSurfacesFor(verdict.repo).length} surfaces govern ${verdict.repo}),`,
         '      never from a restated list. ⛔ ZERO review lookups were made: the path test runs first and returns,',
         '      so a GitHub API outage can never block a diff that touches nothing governed.',
       );
@@ -1208,7 +1240,7 @@ export function renderGuardVerdict(verdict) {
       '      and the lift line(s) printed above are that recompute\'s record. Lifted here:',
       ...lifted.slice(0, 12).map((p) => `        - ${p}`),
       ...(lifted.length > 12 ? [`        … and ${lifted.length - 12} more`] : []),
-      `      Derived from GOVERNED_SURFACES in scripts/pm/check-governed-merges.mjs (${GOVERNED_SURFACES.length} surfaces),`,
+      `      Derived from GOVERNED_SURFACES in scripts/pm/check-governed-merges.mjs (${governedSurfacesFor(verdict.repo).length} surfaces govern ${verdict.repo}),`,
       '      never from a restated list. ⛔ ZERO review lookups were made: the approval predicate is reached only',
       '      by a governed path the register did not lift, and there was none.',
     );
@@ -1509,10 +1541,10 @@ export function renderGuardVerdict(verdict) {
  * still governs everything the verdict is derived FROM; it never governed
  * things the verdict merely mentions.
  */
-export async function runGuard({ event, rows, fetchReviews, fetchPull, fetchComments, loadRecognisers = loadRecordRecognisers, lifted = [], runGit = null, baseRef = null }) {
-  const { governed, unattributed } = decomposeGovernedWork(rows);
+export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fetchComments, loadRecognisers = loadRecordRecognisers, lifted = [], runGit = null, baseRef = null }) {
+  const { governed, unattributed } = decomposeGovernedWork(rows, assertGovernedRepo(repo, 'runGuard'));
   if (governed.length === 0 && unattributed.length === 0) {
-    return guardVerdict({ event, governed, unattributed, apiCalls: 0, lifted });
+    return guardVerdict({ event, repo, governed, unattributed, apiCalls: 0, lifted });
   }
   const approvals = new Map();
   const records = new Map();
@@ -1627,7 +1659,7 @@ export async function runGuard({ event, rows, fetchReviews, fetchPull, fetchComm
       records.set(entry.pr, recordVerdict({ pair, recognisers, cardNote }));
     }
   }
-  return guardVerdict({ event, governed, unattributed, approvals, records, apiCalls, headNotes, lifted });
+  return guardVerdict({ event, repo, governed, unattributed, approvals, records, apiCalls, headNotes, lifted });
 }
 
 // ── every queued pull request: the enumeration the SIZE leg reads ──────────
@@ -1681,8 +1713,8 @@ export const SIZE_LEG_NAME = 'Human-Merge Size Line (2026-09-18 ruling)';
  * exceeds: false` for it, which `landsByHumanMerge` would read as clear, and
  * that is precisely the fail-open reading this leg exists to refuse.
  */
-export function sizeReading(pr, size, approval = null) {
-  const verdict = testVerdict([], { size, approval });
+export function sizeReading(pr, size, repo, approval = null) {
+  const verdict = testVerdict([], { repo, size, approval });
   if (verdict.size?.measured !== true) {
     return {
       pr,
@@ -1712,8 +1744,9 @@ export function sizeReading(pr, size, approval = null) {
  * never `within`. A `lifted` reading (over the line, authorized approval on
  * record — 2026-09-27) is a CLEAR, and the entry keeps saying it was lifted.
  */
-export function sizeGuardVerdict({ event, pulls = [], readings = new Map(), apiCalls = 0 }) {
-  const base = { event, entries: [], apiCalls, legName: SIZE_LEG_NAME };
+export function sizeGuardVerdict({ event, repo, pulls = [], readings = new Map(), apiCalls = 0 }) {
+  assertGovernedRepo(repo, 'sizeGuardVerdict');
+  const base = { event, repo, entries: [], apiCalls, legName: SIZE_LEG_NAME };
   if (event !== EVENT_MERGE_GROUP) {
     return { ...base, conclusion: 'not-applicable', exitCode: EXIT_CLEAR, refusalKind: null };
   }
@@ -1725,7 +1758,7 @@ export function sizeGuardVerdict({ event, pulls = [], readings = new Map(), apiC
       readings.get(pr) ?? {
         pr,
         state: 'unreadable',
-        verdict: testVerdict([], { size: null }),
+        verdict: testVerdict([], { repo, size: null }),
         reason: 'no size reading was recorded for this pull request',
       },
   );
@@ -1751,8 +1784,9 @@ export function sizeGuardVerdict({ event, pulls = [], readings = new Map(), apiC
  * count is printed and pinned. A throw is caught into an `unreadable` reading,
  * never a pass and never an escaping rejection.
  */
-export async function runSizeGuard({ event, rows, namedPull = null, fetchPull, fetchReviews = null, approvals = new Map() }) {
-  if (event !== EVENT_MERGE_GROUP) return sizeGuardVerdict({ event });
+export async function runSizeGuard({ event, repo, rows, namedPull = null, fetchPull, fetchReviews = null, approvals = new Map() }) {
+  assertGovernedRepo(repo, 'runSizeGuard');
+  if (event !== EVENT_MERGE_GROUP) return sizeGuardVerdict({ event, repo });
   const pulls = queuedPullsInGroup(rows, namedPull);
   const readings = new Map();
   let apiCalls = 0;
@@ -1760,7 +1794,7 @@ export async function runSizeGuard({ event, rows, namedPull = null, fetchPull, f
     try {
       apiCalls += 1;
       const pull = await fetchPull(pr);
-      let reading = sizeReading(pr, pull?.size ?? null);
+      let reading = sizeReading(pr, pull?.size ?? null, repo);
       if (reading.state === 'oversized') {
         // ⭐ THE LIFT (2026-09-27, #20153): over the line, so the approval is
         // consulted — the SAME verdict the governed leg computed on this build
@@ -1781,19 +1815,19 @@ export async function runSizeGuard({ event, rows, namedPull = null, fetchPull, f
             }
           }
         }
-        reading = sizeReading(pr, pull?.size ?? null, approval);
+        reading = sizeReading(pr, pull?.size ?? null, repo, approval);
       }
       readings.set(pr, reading);
     } catch (error) {
       readings.set(pr, {
         pr,
         state: 'unreadable',
-        verdict: testVerdict([], { size: null }),
+        verdict: testVerdict([], { repo, size: null }),
         reason: String(error?.message ?? error).split('\n')[0],
       });
     }
   }
-  return sizeGuardVerdict({ event, pulls, readings, apiCalls });
+  return sizeGuardVerdict({ event, repo, pulls, readings, apiCalls });
 }
 
 // ── #19344: the remedy's terminal is a RULESET fact, so it is READ ─────────
@@ -2035,7 +2069,8 @@ export function enumerateRows(root, baseSha, headSha, fallbackPull = null) {
  * GOVERNED — the note it pushes states the reason in full rather than implying
  * it.
  */
-export async function liftGeneratedExceptions(root, baseSha, rows, notes, recompute = recomputeProvenanceFor) {
+export async function liftGeneratedExceptions(root, baseSha, rows, notes, recompute = recomputeProvenanceFor, repo = undefined) {
+  assertGovernedRepo(repo, 'liftGeneratedExceptions');
   const registered = (row) => row.paths.filter((p) => generatedExceptionFor(p) !== null);
   if (!rows.some((row) => registered(row).length > 0)) return rows;
   const cache = new Map();
@@ -2051,7 +2086,7 @@ export async function liftGeneratedExceptions(root, baseSha, rows, notes, recomp
       baseRef: baseSha,
       cache,
     });
-    const lifted = applyGeneratedExceptions(testVerdict(row.paths), provenance);
+    const lifted = applyGeneratedExceptions(testVerdict(row.paths, { repo }), provenance);
     for (const e of lifted.exceptions ?? []) {
       notes.push(
         e.pureRegeneration
@@ -2286,6 +2321,16 @@ async function main() {
     }
   }
 
+  // The repository this guard judges (ruling B2): resolved BEFORE the diff is
+  // read, because the lift step below already asks the register a scoped
+  // question. A repository the register does not know is a refusal here.
+  const where = guardRepository(env);
+  if (where.error) {
+    console.error(`⛔ ${CHECK_CONTEXT_NAME}: ${where.error}`);
+    return EXIT_CANNOT_RUN;
+  }
+  const repo = where.repo;
+
   const notes = [];
   let rows;
   let lifted = [];
@@ -2293,17 +2338,16 @@ async function main() {
     const mergeBase = git(repoRoot, ['merge-base', context.baseSha, context.headSha]).trim();
     rows = enumerateRows(repoRoot, mergeBase, context.headSha, context.namedPull);
     const beforeLift = rows;
-    rows = await liftGeneratedExceptions(repoRoot, mergeBase, rows, notes);
+    rows = await liftGeneratedExceptions(repoRoot, mergeBase, rows, notes, recomputeProvenanceFor, repo);
     lifted = liftedPathsBetween(beforeLift, rows);
   } catch (error) {
     console.error(`⛔ ${CHECK_CONTEXT_NAME}: could not read the diff (${String(error?.message ?? error).split('\n')[0]}).`);
     return EXIT_CANNOT_RUN;
   }
 
-  const slug = env.GITHUB_REPOSITORY ?? 'objectstack-ai/objectstack';
   const reader = {
     apiUrl: (env.GITHUB_API_URL ?? 'https://api.github.com').replace(/\/+$/, ''),
-    slug,
+    slug: where.slug,
     token: env.GITHUB_TOKEN || env.GH_TOKEN || null,
   };
   const fetchReviews = makeReviewReader(reader);
@@ -2311,7 +2355,7 @@ async function main() {
   const fetchComments = makeCommentReader(reader);
 
   const runGit = (args, input) => git(repoRoot, args, input);
-  const verdict = await runGuard({ event: context.event, rows, fetchReviews, fetchPull, fetchComments, lifted, runGit, baseRef: context.baseSha ?? null });
+  const verdict = await runGuard({ event: context.event, repo, rows, fetchReviews, fetchPull, fetchComments, lifted, runGit, baseRef: context.baseSha ?? null });
   // The SIZE leg (#19036): every queued pull request, through the same pull
   // reader the governed leg reads heads with. `merge_group` only, '' on the
   // other leg, so the `pull_request` output is byte-identical to what it was.
@@ -2320,6 +2364,7 @@ async function main() {
   // oversized pull request gets one review read through the same reader.
   const size = await runSizeGuard({
     event: context.event,
+    repo,
     rows,
     namedPull: context.namedPull,
     fetchPull,
@@ -2438,6 +2483,9 @@ export async function selfTest() {
     if (!cond) failures.push(`${name}${detail ? `: ${detail}` : ''}`);
   };
   const row = (pr, files, sha = 'a'.repeat(40), subject = `x (#${pr})`) => ({ sha, subject, pr, paths: files });
+  // The repository every register question below is asked for, unless a case
+  // is ABOUT the scope and names another one: this guard's own (ruling B2).
+  const REPO = SELF_REPO_ID;
   const approved = (...logins) => logins.map((login) => ({ state: 'APPROVED', user: { login } }));
   // The queue-predicate fixtures: a head sha, an older sha, and a review
   // carrying the `commit_id` GitHub stamps at submission time. `commit_id` no
@@ -2457,8 +2505,8 @@ export async function selfTest() {
   // the retired sha pin this exact fixture was the REFUSAL case.
   const authorizedPassOnOlder = (login = GOVERNED_APPROVERS[0]) => authorizedApprovalVerdict([approvedAt(login, OLD)], HEAD);
   const run = (event, rows, approvals = new Map(), records = new Map()) => {
-    const { governed, unattributed } = decomposeGovernedWork(rows);
-    return guardVerdict({ event, governed, unattributed, approvals, records, apiCalls: governed.length });
+    const { governed, unattributed } = decomposeGovernedWork(rows, REPO);
+    return guardVerdict({ repo: REPO, event, governed, unattributed, approvals, records, apiCalls: governed.length });
   };
   // The record reading a Tier S entry gets when the thread was READ and held
   // nothing — the incident shape (#19133): "no record" is a refusal of its own
@@ -2473,10 +2521,44 @@ export async function selfTest() {
   battery('the register is READ, never restated (#9840)');
   for (const surface of GOVERNED_SURFACES) {
     const sample = surface.prefix ? `${surface.prefix}sample.md` : surface.exact;
-    const { governed } = decomposeGovernedWork([row(1, [sample])]);
+    const { governed } = decomposeGovernedWork([row(1, [sample])], REPO);
     assert(`the-register-drives-the-verdict-for-${surface.id}`, governed.length === 1 && governed[0].paths.includes(sample), sample);
   }
-  assert('this-file-restates-no-surface-list', GOVERNED_SURFACES.length >= 5 && governedPathsIn(['docs/adrs/z.md', 'examples/AGENTS.md']).length === 0);
+  assert('this-file-restates-no-surface-list', GOVERNED_SURFACES.length >= 5 && governedPathsIn(['docs/adrs/z.md', 'examples/AGENTS.md'], REPO).length === 0);
+
+  // ── the per-row repository scope (ruling B2, 2026-10-13) ──────────────────
+  //
+  // The guard asks the register for ONE repository — its own — and the first
+  // scoped row makes that visible: a workflow path is governed Tier H in this
+  // queue and in objectui's and cloud's, not in objectos's or hotcrm's; and
+  // every front door of this file REFUSES a call that names no repository,
+  // because a wrong scope reads exactly like a clear diff.
+  battery('the per-row repository scope (ruling B2, 2026-10-13)');
+  const WF = '.github/workflows/lint.yml';
+  const wfWork = decomposeGovernedWork([row(23043, [WF])], REPO);
+  assert('a-workflow-path-in-this-queue-decomposes-to-ONE-governed-entry-Tier-H', wfWork.governed.length === 1 && wfWork.governed[0].tier === TIER_H && wfWork.governed[0].surfaces.map((s) => s.id).join() === 'workflows' && wfWork.governed[0].paths.join() === WF, JSON.stringify(wfWork));
+  assert('the-same-path-is-governed-in-objectui-and-cloud', ['objectui', 'cloud'].every((r) => decomposeGovernedWork([row(1, [WF])], r).governed.length === 1 && governedTierFor([WF], r) === TIER_H));
+  assert('and-NOT-in-objectos-or-hotcrm-the-scope-is-the-rows-not-the-guards', ['objectos', 'hotcrm'].every((r) => decomposeGovernedWork([row(1, [WF])], r).governed.length === 0 && governedPathsIn([WF], r).length === 0));
+  assert('a-github-tree-sibling-outside-workflows-is-clear', decomposeGovernedWork([row(2, ['.github/ISSUE_TEMPLATE/bug.md', '.github/CODEOWNERS', '.github/workflowsx/y.yml'])], REPO).governed.length === 0);
+  const wfRefused = run('merge_group', [row(23043, [WF])], new Map([[23043, authorizedApprovalVerdict([], HEAD)]]));
+  assert('an-unapproved-workflow-PR-is-REFUSED-at-the-queue-on-the-Tier-H-terminal', wfRefused.exitCode === EXIT_REFUSED_UNAPPROVED && renderGuardVerdict(wfRefused).includes(WF) && /landing tier: H/.test(renderGuardVerdict(wfRefused)), renderGuardVerdict(wfRefused));
+  assert('and-an-authorized-approval-on-the-head-clears-it', run('merge_group', [row(23043, [WF])], new Map([[23043, authorizedPass()]])).exitCode === EXIT_CLEAR);
+  const wfClearText = renderGuardVerdict(run('merge_group', [row(3, ['.github/ISSUE_TEMPLATE/bug.md'])]));
+  assert('the-clear-words-count-the-rows-that-govern-THIS-repository-and-name-it', /7 surfaces govern objectstack/.test(wfClearText), wfClearText);
+  const threw = (fn) => { try { fn(); return null; } catch (error) { return error; } };
+  assert('⛔ decomposeGovernedWork-without-a-repository-is-an-ERROR-never-a-clear', threw(() => decomposeGovernedWork([row(1, [WF])])) instanceof TypeError && /decomposeGovernedWork wants the repository/.test(threw(() => decomposeGovernedWork([row(1, [WF])])).message));
+  const liftRejects = await liftGeneratedExceptions('/w', 'base', [], []).then(() => null, (error) => error);
+  assert('⛔ and-so-are-the-verdict-builders-the-size-leg-and-the-lift', [() => guardVerdict({ event: 'merge_group' }), () => sizeGuardVerdict({ event: EVENT_MERGE_GROUP, pulls: [1] }), () => sizeReading(1, { additions: 1, deletions: 1 })].every((fn) => threw(fn) instanceof TypeError) && liftRejects instanceof TypeError, String(liftRejects?.message));
+  const guardRejects = await runGuard({ event: 'merge_group', rows: [row(1, [WF])], fetchReviews: async () => [], fetchPull: async () => pull() }).then(() => null, (error) => error);
+  const sizeRejects = await runSizeGuard({ event: EVENT_MERGE_GROUP, rows: [row(1, [WF])], fetchPull: async () => pull() }).then(() => null, (error) => error);
+  assert('⛔ runGuard-and-runSizeGuard-REJECT-without-a-repository', guardRejects instanceof TypeError && sizeRejects instanceof TypeError, `${guardRejects?.message}\n${sizeRejects?.message}`);
+  assert('an-unknown-repository-is-refused-too-with-the-roster-in-the-words', threw(() => decomposeGovernedWork([row(1, [WF])], 'objectstack-ai/objectstack')) instanceof TypeError && /not a GOVERNED_REPOS id/.test(threw(() => decomposeGovernedWork([row(1, [WF])], 'objectstack-ai/objectstack')).message));
+  // Where main() gets the repository: GITHUB_REPOSITORY, resolved; unset means this file's own.
+  assert('guardRepository: an unset GITHUB_REPOSITORY is this file\'s own repository', JSON.stringify(guardRepository({})) === JSON.stringify({ repo: 'objectstack', slug: 'objectstack-ai/objectstack', source: "this file's own repository" }) && guardRepository({ GITHUB_REPOSITORY: '  ' }).repo === 'objectstack');
+  assert('guardRepository: a sibling copy of this guard judges the sibling', guardRepository({ GITHUB_REPOSITORY: 'objectstack-ai/objectui' }).repo === 'objectui' && guardRepository({ GITHUB_REPOSITORY: 'ObjectStack-AI/Cloud' }).repo === 'cloud' && guardRepository({ GITHUB_REPOSITORY: 'objectstack-ai/cloud' }).source === 'GITHUB_REPOSITORY');
+  const foreignGuard = guardRepository({ GITHUB_REPOSITORY: 'someone/fork' });
+  assert('⛔ guardRepository: a repository the register does not know is a REFUSAL naming the roster', typeof foreignGuard.error === 'string' && /someone\/fork, which is not a governed repository/.test(foreignGuard.error) && /objectstack, objectui, cloud, objectos, hotcrm/.test(foreignGuard.error) && foreignGuard.repo === undefined, foreignGuard.error);
+  assert('the-verdict-objects-carry-the-repository-they-were-judged-for', wfRefused.repo === REPO && run('pull_request', [row(1, [WF])]).repo === REPO && sizeGuardVerdict({ event: EVENT_MERGE_GROUP, repo: 'cloud', pulls: [1], readings: new Map([[1, sizeReading(1, { additions: 1, deletions: 0 }, 'cloud')]]) }).repo === 'cloud');
 
   // ── the exit contract as a table ──────────────────────────────────────────
   battery('the exit contract as a table');
@@ -2617,16 +2699,16 @@ export async function selfTest() {
   // ── decomposition, and the multi-PR group trap ────────────────────────────
   battery('decomposition, and the multi-PR group trap');
   const clearRows = [row(1, ['packages/spec/src/index.ts', 'content/docs/x.mdx'])];
-  assert('a-clear-diff-decomposes-to-nothing', decomposeGovernedWork(clearRows).governed.length === 0 && decomposeGovernedWork(clearRows).unattributed.length === 0);
-  const mixed = decomposeGovernedWork([row(5, ['AGENTS.md', 'packages/spec/src/index.ts'])]);
+  assert('a-clear-diff-decomposes-to-nothing', decomposeGovernedWork(clearRows, REPO).governed.length === 0 && decomposeGovernedWork(clearRows, REPO).unattributed.length === 0);
+  const mixed = decomposeGovernedWork([row(5, ['AGENTS.md', 'packages/spec/src/index.ts'])], REPO);
   assert('a-mixed-diff-governs-the-whole-pr-and-lists-only-the-governed-paths', mixed.governed[0].paths.join() === 'AGENTS.md', JSON.stringify(mixed.governed[0].paths));
-  const batched = decomposeGovernedWork([row(11, ['docs/adr/0120-x.md'], 'a'.repeat(40)), row(12, ['packages/core/src/x.ts'], 'b'.repeat(40))]);
+  const batched = decomposeGovernedWork([row(11, ['docs/adr/0120-x.md'], 'a'.repeat(40)), row(12, ['packages/core/src/x.ts'], 'b'.repeat(40))], REPO);
   assert('a-batched-group-attributes-the-governed-diff-to-ITS-OWN-pr-not-the-last-one', batched.governed.length === 1 && batched.governed[0].pr === 11, JSON.stringify(batched.governed.map((g) => g.pr)));
-  const twoGoverned = decomposeGovernedWork([row(11, ['AGENTS.md']), row(12, ['skills/x/SKILL.md'], 'b'.repeat(40))]);
+  const twoGoverned = decomposeGovernedWork([row(11, ['AGENTS.md']), row(12, ['skills/x/SKILL.md'], 'b'.repeat(40))], REPO);
   assert('two-governed-prs-in-one-group-are-both-carried', twoGoverned.governed.map((g) => g.pr).join() === '11,12');
-  const unattributed = decomposeGovernedWork([{ sha: 'c'.repeat(40), subject: 'chore: direct work', pr: null, paths: ['CLAUDE.md'] }]);
+  const unattributed = decomposeGovernedWork([{ sha: 'c'.repeat(40), subject: 'chore: direct work', pr: null, paths: ['CLAUDE.md'] }], REPO);
   assert('a-governed-commit-naming-no-pr-is-UNATTRIBUTED-never-dropped', unattributed.unattributed.length === 1 && unattributed.governed.length === 0);
-  assert('an-UNGOVERNED-commit-naming-no-pr-is-simply-not-our-business', decomposeGovernedWork([{ sha: 'd'.repeat(40), subject: 'x', pr: null, paths: ['README.md'] }]).unattributed.length === 0);
+  assert('an-UNGOVERNED-commit-naming-no-pr-is-simply-not-our-business', decomposeGovernedWork([{ sha: 'd'.repeat(40), subject: 'x', pr: null, paths: ['README.md'] }], REPO).unattributed.length === 0);
 
   // ── the verdict table, both events ────────────────────────────────────────
   battery('the verdict table, both events');
@@ -2691,7 +2773,7 @@ export async function selfTest() {
     // thread carried no record — the reading is ABSENT, and the refusal is the
     // same "unapproved" the incident deserved. A Tier S entry with NO reading
     // at all refuses as UNREADABLE instead: "could not find out" never clears.
-    const tier = governedTierFor(replay.files);
+    const tier = governedTierFor(replay.files, REPO);
     const queued = run('merge_group', rows, new Map([[replay.pr, authorizedApprovalVerdict([], HEAD)]]), tier === TIER_S ? absentRecord(replay.pr) : new Map());
     assert(`replay-REFUSES-at-the-queue: ${replay.name}`, queued.exitCode === EXIT_REFUSED_UNAPPROVED, JSON.stringify([queued.conclusion, tier]));
     if (tier === TIER_S) {
@@ -2701,7 +2783,7 @@ export async function selfTest() {
     const early = run('pull_request', rows, new Map([[replay.pr, approvalVerdict([])]]));
     assert(`replay-only-WARNS-on-the-pr: ${replay.name}`, early.conclusion === 'warned' && early.exitCode === EXIT_CLEAR);
     const text = renderGuardVerdict(queued);
-    assert(`replay-names-its-governed-paths: ${replay.name}`, replay.files.filter((f) => governedPathsIn([f]).length > 0).every((f) => text.includes(f)), text);
+    assert(`replay-names-its-governed-paths: ${replay.name}`, replay.files.filter((f) => governedPathsIn([f], REPO).length > 0).every((f) => text.includes(f)), text);
   }
 
   // ── ⭐ the ordering guarantee, measured with a spy that THROWS ────────────
@@ -2722,7 +2804,7 @@ export async function selfTest() {
   let orderedClear = null;
   let orderedThrow = null;
   try {
-    orderedClear = await runGuard({ event: 'merge_group', rows: clearRows, fetchReviews: explode, fetchPull: explode });
+    orderedClear = await runGuard({ repo: REPO, event: 'merge_group', rows: clearRows, fetchReviews: explode, fetchPull: explode });
   } catch (error) {
     orderedThrow = String(error?.message ?? error);
   }
@@ -2735,6 +2817,7 @@ export async function selfTest() {
   // first — so the case above is proving an ordering, not a dead code path.
   const trace = [];
   const traced = await runGuard({
+    repo: REPO,
     event: 'merge_group',
     rows: [row(1, ['AGENTS.md'])],
     fetchPull: () => {
@@ -2753,6 +2836,7 @@ export async function selfTest() {
     JSON.stringify({ conclusion: traced.conclusion, apiCalls: traced.apiCalls }),
   );
   const tracedOlder = await runGuard({
+    repo: REPO,
     event: 'merge_group',
     rows: [row(1, ['AGENTS.md'])],
     fetchPull: () => pull(),
@@ -2768,6 +2852,7 @@ export async function selfTest() {
   // same rendered line.
   let prHeadReads = 0;
   const prLeg = await runGuard({
+    repo: REPO,
     event: 'pull_request',
     rows: [row(1, ['AGENTS.md'])],
     fetchPull: () => {
@@ -2791,6 +2876,7 @@ export async function selfTest() {
   let thrownEscaped = null;
   try {
     thrown = await runGuard({
+      repo: REPO,
       event: 'merge_group',
       rows: [row(1, ['AGENTS.md'])],
       fetchPull: () => pull(),
@@ -2812,6 +2898,7 @@ export async function selfTest() {
   // both halves are measured — the reviews ARE read, and the verdict is theirs.
   let reviewsAfterHeadFailure = 0;
   const headFailed = await runGuard({
+    repo: REPO,
     event: 'merge_group',
     rows: [row(1, ['AGENTS.md'])],
     fetchPull: () => {
@@ -2957,16 +3044,17 @@ export async function selfTest() {
     [{ ...row(1, ['packages/spec/src/ui/responsive.zod.ts', genIndex]) }],
     liftNotes,
     verified(),
+    REPO,
   );
   assert('a-certified-regeneration-inside-skills-leaves-the-row-with-nothing-governed',
-    governedPathsIn(liftedRows[0].paths).length === 0, JSON.stringify(liftedRows[0].paths));
+    governedPathsIn(liftedRows[0].paths, REPO).length === 0, JSON.stringify(liftedRows[0].paths));
   assert('and-the-note-cites-the-ruling-that-lifted-it', liftNotes.some((n) => n.includes('#11705') && n.includes('LIFTED')), JSON.stringify(liftNotes));
   const mixedNotes = [];
-  const mixedRows = await liftGeneratedExceptions('/w', 'base', [{ ...row(2, [genIndex, handAuthored]) }], mixedNotes, verified());
+  const mixedRows = await liftGeneratedExceptions('/w', 'base', [{ ...row(2, [genIndex, handAuthored]) }], mixedNotes, verified(), REPO);
   assert('but-hand-authored-skill-content-in-the-same-commit-still-governs-the-row',
-    governedPathsIn(mixedRows[0].paths).map((s) => s.files).flat().join() === handAuthored, JSON.stringify(mixedRows[0].paths));
+    governedPathsIn(mixedRows[0].paths, REPO).map((s) => s.files).flat().join() === handAuthored, JSON.stringify(mixedRows[0].paths));
   const refusedNotes = [];
-  const refusedRows = await liftGeneratedExceptions('/w', 'base', [{ ...row(3, [genIndex]) }], refusedNotes, refused());
+  const refusedRows = await liftGeneratedExceptions('/w', 'base', [{ ...row(3, [genIndex]) }], refusedNotes, refused(), REPO);
   assert('a-refused-provenance-keeps-the-generated-path-governed-here-too',
     refusedRows[0].paths.join() === genIndex && refusedNotes.some((n) => n.includes('did NOT lift')), JSON.stringify(refusedNotes));
   // The DEGRADED environment — the job installs dependencies now (#14063), but
@@ -2976,14 +3064,14 @@ export async function selfTest() {
   // be the one a reader sees stated.
   const noToolNotes = [];
   const noToolRows = await liftGeneratedExceptions('/w', 'base', [{ ...row(4, [genIndex]) }], noToolNotes,
-    refused('could not run `pnpm --filter @objectstack/spec gen:skill-refs` on this tree (spawn pnpm ENOENT) — the generator toolchain is not available in this environment'));
+    refused('could not run `pnpm --filter @objectstack/spec gen:skill-refs` on this tree (spawn pnpm ENOENT) — the generator toolchain is not available in this environment'), REPO);
   assert('with-no-generator-toolchain-this-guard-keeps-the-path-governed-and-says-why',
     noToolRows[0].paths.join() === genIndex && noToolNotes.some((n) => /toolchain is not available/.test(n)), JSON.stringify(noToolNotes));
   // A commit that touches no registered path never consults provenance — the
   // recompute is handed a spy that throws if it is called at all.
   const untouched = await liftGeneratedExceptions('/w', 'base', [{ ...row(5, ['AGENTS.md']) }], [], async () => {
     throw new Error('the recompute must not run for a diff with no registered path');
-  });
+  }, REPO);
   assert('an-ordinary-governed-diff-never-pays-for-a-recompute', untouched[0].paths.join() === 'AGENTS.md');
 
   // ── ⭐ #14063 END TO END: what the dependency install actually buys ────────
@@ -3012,8 +3100,8 @@ export async function selfTest() {
   });
   const endToEnd = async (recompute, rows, { head = () => pull(), reviews = () => [] } = {}) => {
     const notes = [];
-    const lifted = await liftGeneratedExceptions('/w', 'base', rows, notes, recompute);
-    return { verdict: await runGuard({ event: 'merge_group', rows: lifted, fetchPull: head, fetchReviews: reviews }), notes };
+    const lifted = await liftGeneratedExceptions('/w', 'base', rows, notes, recompute, REPO);
+    return { verdict: await runGuard({ repo: REPO, event: 'merge_group', rows: lifted, fetchPull: head, fetchReviews: reviews }), notes };
   };
   // ⭐ Zero approvals AND zero API calls: once the row is lifted the diff
   // touches nothing governed, so the guard returns before a request exists —
@@ -3075,7 +3163,7 @@ export async function selfTest() {
   try {
     await liftGeneratedExceptions('/w', 'base', [regenRow()], [], async () => {
       throw new Error('spawn pnpm EACCES');
-    });
+    }, REPO);
   } catch (error) {
     liftThrew = String(error?.message ?? error);
   }
@@ -3127,9 +3215,10 @@ export async function selfTest() {
   // those two, so a helper that skips it cannot see it.
   const asMainDoes = async (recompute, rows, io = {}) => {
     const notes = [];
-    const after = await liftGeneratedExceptions('/w', 'base', rows, notes, recompute);
+    const after = await liftGeneratedExceptions('/w', 'base', rows, notes, recompute, REPO);
     const lifted = liftedPathsBetween(rows, after);
     const verdict = await runGuard({
+      repo: REPO,
       event: 'merge_group',
       rows: after,
       fetchPull: io.head ?? (() => pull()),
@@ -3151,8 +3240,8 @@ export async function selfTest() {
   );
   assert(
     '⭐ the-mixed-diff-rule-DID-match-15284-before-the-lift-one-hit-out-of-eleven-paths',
-    governedPathsIn(pr15284Paths).flatMap((s) => s.files).join() === pr15284ReactBlocks,
-    JSON.stringify(governedPathsIn(pr15284Paths)),
+    governedPathsIn(pr15284Paths, REPO).flatMap((s) => s.files).join() === pr15284ReactBlocks,
+    JSON.stringify(governedPathsIn(pr15284Paths, REPO)),
   );
   const certified15284 = await asMainDoes(
     verified('byte-equal to the react-blocks generator recomputed on this tree (fixture)'),
@@ -3206,7 +3295,7 @@ export async function selfTest() {
   // And the zero-cost clear is untouched, to the byte, on BOTH legs — the
   // 2026-08-27 byte-identity constraint on the pull_request leg included.
   for (const event of [EVENT_MERGE_GROUP, EVENT_PULL_REQUEST]) {
-    const nothing = renderGuardVerdict(guardVerdict({ event, governed: [], unattributed: [], apiCalls: 0 }));
+    const nothing = renderGuardVerdict(guardVerdict({ repo: REPO, event, governed: [], unattributed: [], apiCalls: 0 }));
     assert(
       `a-clear-with-nothing-lifted-keeps-its-pre-15406-wording-byte-for-byte: ${event}`,
       nothing.includes('  ✅  CLEAR — the diff touches no governed surface, so this guard has nothing to judge.') &&
@@ -3289,8 +3378,8 @@ export async function selfTest() {
   // ⭐ #15406's constraint, re-measured for this leg: the merge_group zero-cost
   // clear is SCOPED (this leg reads every queued pull request there), while the
   // pull_request one keeps its 2026-08-27 bytes exactly.
-  const clearMg = renderGuardVerdict(guardVerdict({ event: EVENT_MERGE_GROUP, governed: [], unattributed: [], apiCalls: 0 }));
-  const clearPr = renderGuardVerdict(guardVerdict({ event: EVENT_PULL_REQUEST, governed: [], unattributed: [], apiCalls: 0 }));
+  const clearMg = renderGuardVerdict(guardVerdict({ repo: REPO, event: EVENT_MERGE_GROUP, governed: [], unattributed: [], apiCalls: 0 }));
+  const clearPr = renderGuardVerdict(guardVerdict({ repo: REPO, event: EVENT_PULL_REQUEST, governed: [], unattributed: [], apiCalls: 0 }));
   assert(
     '⭐ the-merge_group-zero-cost-clear-SCOPES-its-outage-promise-because-the-size-leg-reads-every-queued-PR',
     clearMg.includes('Scoped to the GOVERNED-SURFACE leg') && clearMg.includes('An outage there DOES refuse this merge group.'),
@@ -3323,15 +3412,15 @@ export async function selfTest() {
     JSON.stringify(unsizedRow),
   );
   // The reading: the sibling's predicate, size limb alone.
-  const overRead = sizeReading(1, sizePair(LINE, 1));
-  const atRead = sizeReading(1, sizePair(LINE, 0));
-  const underRead = sizeReading(1, sizePair(LINE - 1, 0));
+  const overRead = sizeReading(1, sizePair(LINE, 1), REPO);
+  const atRead = sizeReading(1, sizePair(LINE, 0), REPO);
+  const underRead = sizeReading(1, sizePair(LINE - 1, 0), REPO);
   assert('⭐ threshold-plus-one-changed-line-is-OVERSIZED', overRead.state === 'oversized' && overRead.verdict.size.changedLines === LINE + 1, JSON.stringify(overRead.verdict.size));
   assert('⭐ exactly-the-threshold-is-WITHIN-the-comparison-is-strictly-greater', atRead.state === 'within' && atRead.verdict.size.changedLines === LINE, JSON.stringify(atRead.verdict.size));
   assert('one-under-is-WITHIN', underRead.state === 'within');
   assert(
     '⛔ no-pair-is-UNREADABLE-never-within',
-    sizeReading(1, null).state === 'unreadable' && sizeReading(1, { additions: 3 }).state === 'unreadable' && /never a size of zero/.test(sizeReading(1, null).reason),
+    sizeReading(1, null, REPO).state === 'unreadable' && sizeReading(1, { additions: 3 }, REPO).state === 'unreadable' && /never a size of zero/.test(sizeReading(1, null, REPO).reason),
   );
   assert(
     '⭐ the-reading-IS-the-landed-predicate-landsByHumanMerge-agrees-on-every-branch-and-the-path-limb-stays-out-of-it',
@@ -3345,11 +3434,11 @@ export async function selfTest() {
       readings.set(
         n,
         state === 'unreadable'
-          ? { pr: n, state, verdict: testVerdict([], { size: null }), reason: 'HTTP 403 (fixture)' }
-          : sizeReading(n, state === 'oversized' ? sizePair(LINE, 1) : sizePair(LINE, 0)),
+          ? { pr: n, state, verdict: testVerdict([], { repo: REPO, size: null }), reason: 'HTTP 403 (fixture)' }
+          : sizeReading(n, state === 'oversized' ? sizePair(LINE, 1) : sizePair(LINE, 0), REPO),
       );
     }
-    return sizeGuardVerdict({ event: EVENT_MERGE_GROUP, pulls, readings, apiCalls: pulls.length });
+    return sizeGuardVerdict({ repo: REPO, event: EVENT_MERGE_GROUP, pulls, readings, apiCalls: pulls.length });
   };
   const overOne = sizeRun([5], { 5: 'oversized' });
   assert('an-OVERSIZED-queued-PR-REFUSES-with-code-8', overOne.exitCode === EXIT_REFUSED_OVERSIZED && overOne.conclusion === 'refused' && overOne.refusalKind === 'oversized');
@@ -3359,19 +3448,20 @@ export async function selfTest() {
   assert('⛔ an-UNREADABLE-size-REFUSES-with-its-OWN-code-9-never-passes', unreadOne.exitCode === EXIT_REFUSED_SIZE_UNREADABLE && unreadOne.refusalKind === 'unreadable');
   assert(
     'a-pull-with-NO-recorded-reading-REFUSES-rather-than-defaulting-to-within',
-    sizeGuardVerdict({ event: EVENT_MERGE_GROUP, pulls: [5], readings: new Map(), apiCalls: 1 }).exitCode === EXIT_REFUSED_SIZE_UNREADABLE,
+    sizeGuardVerdict({ repo: REPO, event: EVENT_MERGE_GROUP, pulls: [5], readings: new Map(), apiCalls: 1 }).exitCode === EXIT_REFUSED_SIZE_UNREADABLE,
   );
-  const sizeNoPull = sizeGuardVerdict({ event: EVENT_MERGE_GROUP, pulls: [], readings: new Map(), apiCalls: 0 });
+  const sizeNoPull = sizeGuardVerdict({ repo: REPO, event: EVENT_MERGE_GROUP, pulls: [], readings: new Map(), apiCalls: 0 });
   assert('a-merge-group-naming-NO-pull-request-REFUSES-on-9-with-kind-no-pull', sizeNoPull.exitCode === EXIT_REFUSED_SIZE_UNREADABLE && sizeNoPull.refusalKind === 'no-pull');
   assert('⭐ a-within-sibling-does-NOT-carry-an-oversized-PR-through-the-group', sizeRun([11, 22], { 11: 'oversized', 22: 'within' }).exitCode === EXIT_REFUSED_OVERSIZED);
   // The pull_request leg: not applicable, silent, read-free.
-  const sizePrLeg = sizeGuardVerdict({ event: EVENT_PULL_REQUEST, pulls: [5], readings: new Map() });
+  const sizePrLeg = sizeGuardVerdict({ repo: REPO, event: EVENT_PULL_REQUEST, pulls: [5], readings: new Map() });
   assert(
     'the-pull_request-leg-is-NOT-APPLICABLE-exits-clear-and-renders-NOTHING-so-that-legs-output-stays-byte-identical',
     sizePrLeg.conclusion === 'not-applicable' && sizePrLeg.exitCode === EXIT_CLEAR && renderSizeVerdict(sizePrLeg) === '',
   );
   let sizeReadsOnPr = 0;
   const sizePrRun = await runSizeGuard({
+    repo: REPO,
     event: EVENT_PULL_REQUEST,
     rows: [queuedRow(5)],
     fetchPull: () => {
@@ -3383,6 +3473,7 @@ export async function selfTest() {
   // End to end through the orchestrator: one pull read per queued PR, the enumeration `queuedPullsInGroup`'s.
   const sizeReads = [];
   const e2eSize = await runSizeGuard({
+    repo: REPO,
     event: EVENT_MERGE_GROUP,
     rows: [queuedRow(11), queuedRow(22), queuedRow(11)],
     fetchPull: async (pr) => {
@@ -3398,6 +3489,7 @@ export async function selfTest() {
   );
   let sizeUrl = '';
   const e2eReader = await runSizeGuard({
+    repo: REPO,
     event: EVENT_MERGE_GROUP,
     rows: [queuedRow(42)],
     fetchPull: makePullReader({
@@ -3414,6 +3506,7 @@ export async function selfTest() {
     sizeUrl,
   );
   const e2eSizeThrows = await runSizeGuard({
+    repo: REPO,
     event: EVENT_MERGE_GROUP,
     rows: [queuedRow(11)],
     fetchPull: async () => {
@@ -3425,7 +3518,7 @@ export async function selfTest() {
     e2eSizeThrows.exitCode === EXIT_REFUSED_SIZE_UNREADABLE && /403/.test(renderSizeVerdict(e2eSizeThrows)) && /REFUSED/.test(renderSizeVerdict(e2eSizeThrows)),
     renderSizeVerdict(e2eSizeThrows),
   );
-  const e2eNoPair = await runSizeGuard({ event: EVENT_MERGE_GROUP, rows: [queuedRow(11)], fetchPull: async () => pull() });
+  const e2eNoPair = await runSizeGuard({ repo: REPO, event: EVENT_MERGE_GROUP, rows: [queuedRow(11)], fetchPull: async () => pull() });
   assert(
     '⛔ a-pull-object-with-no-pair-is-exit-9-too',
     e2eNoPair.exitCode === EXIT_REFUSED_SIZE_UNREADABLE && /no `additions` \/ `deletions` pair/.test(renderSizeVerdict(e2eNoPair)),
@@ -3438,8 +3531,9 @@ export async function selfTest() {
   const explodeForSize = () => {
     throw new Error('the governed leg must not read for an ungoverned diff');
   };
-  const g18971 = await runGuard({ event: EVENT_MERGE_GROUP, rows: pr18971, fetchReviews: explodeForSize, fetchPull: explodeForSize, fetchComments: explodeForSize });
+  const g18971 = await runGuard({ repo: REPO, event: EVENT_MERGE_GROUP, rows: pr18971, fetchReviews: explodeForSize, fetchPull: explodeForSize, fetchComments: explodeForSize });
   const s18971 = await runSizeGuard({
+    repo: REPO,
     event: EVENT_MERGE_GROUP,
     rows: pr18971,
     fetchPull: async () => pull(HEAD, { size: sizePair(238310, 119, 'GET /repos/objectstack-ai/objectstack/pulls/18971') }),
@@ -3481,8 +3575,8 @@ export async function selfTest() {
   // A governed path AND oversized: both limbs print, one exit — the governed
   // code, already the top of the table.
   const bothRows = [row(9527, ['AGENTS.md', 'packages/x.ts'])];
-  const gBoth = await runGuard({ event: EVENT_MERGE_GROUP, rows: bothRows, fetchReviews: async () => [], fetchPull: async () => pull(HEAD, { size: sizePair(LINE, 1) }), fetchComments: async () => [] });
-  const sBoth = await runSizeGuard({ event: EVENT_MERGE_GROUP, rows: bothRows, fetchPull: async () => pull(HEAD, { size: sizePair(LINE, 1) }) });
+  const gBoth = await runGuard({ repo: REPO, event: EVENT_MERGE_GROUP, rows: bothRows, fetchReviews: async () => [], fetchPull: async () => pull(HEAD, { size: sizePair(LINE, 1) }), fetchComments: async () => [] });
+  const sBoth = await runSizeGuard({ repo: REPO, event: EVENT_MERGE_GROUP, rows: bothRows, fetchPull: async () => pull(HEAD, { size: sizePair(LINE, 1) }) });
   assert(
     '⭐ governed-AND-oversized-prints-BOTH-limbs-and-exits-on-the-GOVERNED-code',
     gBoth.exitCode === EXIT_REFUSED_UNAPPROVED && sBoth.exitCode === EXIT_REFUSED_OVERSIZED &&
@@ -3491,6 +3585,7 @@ export async function selfTest() {
     JSON.stringify([gBoth.exitCode, sBoth.exitCode]),
   );
   const gApprovedBig = await runGuard({
+    repo: REPO,
     event: EVENT_MERGE_GROUP,
     rows: bothRows,
     fetchReviews: async () => [approvedAt(GOVERNED_APPROVERS[0], HEAD)],
@@ -3502,6 +3597,7 @@ export async function selfTest() {
   // throws) — and the group exits 0 on both limbs.
   let sizeReviewReadsReused = 0;
   const sApprovedBig = await runSizeGuard({
+    repo: REPO,
     event: EVENT_MERGE_GROUP,
     rows: bothRows,
     fetchPull: async () => pull(HEAD, { size: sizePair(LINE, 1) }),
@@ -3521,6 +3617,7 @@ export async function selfTest() {
   // The register's lift lifts a PATH, never the number: rows whose every path
   // the register lifted still pay the size — and with no approval, still refuse.
   const liftedAll = await runSizeGuard({
+    repo: REPO,
     event: EVENT_MERGE_GROUP,
     rows: [{ sha: 'f'.repeat(40), subject: 'x (#77)', pr: 77, paths: [] }],
     fetchPull: async () => pull(HEAD, { size: sizePair(237706, 0) }),
@@ -3532,6 +3629,7 @@ export async function selfTest() {
   const PR20125_SHA = 'e4ead748' + '1'.repeat(32);
   const liftRun = (reviews, { size = sizePair(10764, 999, 'GET /repos/objectstack-ai/objectstack/pulls/20125'), sha = PR20125_SHA } = {}) =>
     runSizeGuard({
+      repo: REPO,
       event: EVENT_MERGE_GROUP,
       rows: bigUngoverned(),
       fetchPull: async () => pull(sha, { size }),
@@ -3585,7 +3683,7 @@ export async function selfTest() {
       /review list could NOT be read \(GET \/repos\/o\/r\/pulls\/20125\/reviews answered HTTP 403\) — fail closed, no lift/.test(renderSizeVerdict(reviewsThrow)),
     renderSizeVerdict(reviewsThrow),
   );
-  const noReader = await runSizeGuard({ event: EVENT_MERGE_GROUP, rows: bigUngoverned(), fetchPull: async () => pull(PR20125_SHA, { size: sizePair(LINE, 1) }) });
+  const noReader = await runSizeGuard({ repo: REPO, event: EVENT_MERGE_GROUP, rows: bigUngoverned(), fetchPull: async () => pull(PR20125_SHA, { size: sizePair(LINE, 1) }) });
   assert(
     '⛔ a-size-leg-run-with-NO-review-reader-at-all-fails-CLOSED-on-8-too',
     noReader.exitCode === EXIT_REFUSED_OVERSIZED && /no review reader was supplied/.test(renderSizeVerdict(noReader)),
@@ -3606,7 +3704,7 @@ export async function selfTest() {
   // End to end, the card's acceptance: an oversized UNGOVERNED group with the
   // approval on record — the governed leg clear at zero reads, the size leg
   // lifted, the group exits 0; the same group with no approval exits 8.
-  const g20125 = await runGuard({ event: EVENT_MERGE_GROUP, rows: bigUngoverned(), fetchReviews: explodeForSize, fetchPull: explodeForSize, fetchComments: explodeForSize });
+  const g20125 = await runGuard({ repo: REPO, event: EVENT_MERGE_GROUP, rows: bigUngoverned(), fetchReviews: explodeForSize, fetchPull: explodeForSize, fetchComments: explodeForSize });
   assert(
     '⭐ #20125-end-to-end-governed-CLEAR-at-zero-reads-size-LIFTED-group-exits-0-and-with-no-approval-8',
     g20125.conclusion === 'clear' && g20125.apiCalls === 0 && groupExitCode({ governed: g20125, size: liftOnHead }) === EXIT_CLEAR &&
@@ -3614,16 +3712,16 @@ export async function selfTest() {
   );
   assert(
     '⭐ sizeReading-has-FOUR-states-and-lifted-is-over-the-line-never-within',
-    sizeReading(1, sizePair(LINE, 1), authorizedApprovalVerdict([approvedAt('hotlong', HEAD)], HEAD)).state === 'lifted' &&
-      sizeReading(1, sizePair(LINE, 0), authorizedApprovalVerdict([approvedAt('hotlong', HEAD)], HEAD)).state === 'within' &&
-      sizeReading(1, sizePair(LINE, 1), authorizedApprovalVerdict([], HEAD)).state === 'oversized' &&
-      sizeReading(1, null, authorizedApprovalVerdict([approvedAt('hotlong', HEAD)], HEAD)).state === 'unreadable',
+    sizeReading(1, sizePair(LINE, 1), REPO, authorizedApprovalVerdict([approvedAt('hotlong', HEAD)], HEAD)).state === 'lifted' &&
+      sizeReading(1, sizePair(LINE, 0), REPO, authorizedApprovalVerdict([approvedAt('hotlong', HEAD)], HEAD)).state === 'within' &&
+      sizeReading(1, sizePair(LINE, 1), REPO, authorizedApprovalVerdict([], HEAD)).state === 'oversized' &&
+      sizeReading(1, null, REPO, authorizedApprovalVerdict([approvedAt('hotlong', HEAD)], HEAD)).state === 'unreadable',
   );
   assert(
     '⭐ the-authorized-verdict-carries-approvals-login-and-commit-the-generic-one-does-NOT-so-only-the-verdict-that-asked-WHO-can-lift',
     JSON.stringify(authorizedApprovalVerdict([approvedAt('os-zhuang', OLD), approvedAt('not-authorized', HEAD)], HEAD).approvals) === JSON.stringify([{ login: 'os-zhuang', commitId: OLD }]) &&
       !('approvals' in approvalVerdict([approvedAt('os-zhuang', HEAD)])) &&
-      sizeReading(1, sizePair(LINE, 1), approvalVerdict([approvedAt('os-zhuang', HEAD)])).state === 'oversized',
+      sizeReading(1, sizePair(LINE, 1), REPO, approvalVerdict([approvedAt('os-zhuang', HEAD)])).state === 'oversized',
   );
   // The exit precedence, the whole table: a group naming NO pull request
   // answers on 9 — both blocks still print their own refusal, and the code is
@@ -3659,7 +3757,7 @@ export async function selfTest() {
   assert('⛔ this-file-declares-NO-threshold-of-its-own', sizeOwnSource !== '' && !/HUMAN_MERGE_LINE_THRESHOLD\s*=/.test(sizeOwnSource));
   assert(
     '⛔ and-spells-NO-size-comparison-the-limb-is-reached-through-testVerdict-and-landsByHumanMerge',
-    !/(changedLines|additions\s*\+\s*deletions)\s*>=?\s*/.test(sizeOwnSource) && /testVerdict\(\[\], \{ size, approval \}\)/.test(sizeOwnSource) && /landsByHumanMerge\(verdict\)/.test(sizeOwnSource),
+    !/(changedLines|additions\s*\+\s*deletions)\s*>=?\s*/.test(sizeOwnSource) && /testVerdict\(\[\], \{ repo, size, approval \}\)/.test(sizeOwnSource) && /landsByHumanMerge\(verdict\)/.test(sizeOwnSource),
   );
   assert(
     '⛔ and-spells-NO-lift-condition-of-its-own-the-lift-is-the-siblings-sizeLiftFrom-read-through-landsByHumanMerge',
@@ -3852,17 +3950,17 @@ export async function selfTest() {
   const RULES_PATH = 'AGENTS.md';
   const TIER_H_PATHS = ['AGENTS.md', 'CLAUDE.md', 'docs/adr/0001-x.md', 'docs/NORTH-STAR.md', 'skills/objectstack-ui/SKILL.md'];
 
-  assert('a-Tier-S-only-path-set-is-Tier-S', governedTierFor([REF_A, REF_B, SKILL_PATH, AGENT_PATH, HOOK_PATH, SETTINGS_PATH]) === TIER_S);
-  assert('⛔ the-old-references-boundary-is-GONE-SKILL-md-and-a-references-draft-sibling-are-Tier-S-alike', governedTierFor([SKILL_PATH]) === TIER_S && governedTierFor(['.claude/skills/pm-dispatch/references-draft/x.md']) === TIER_S);
-  assert('ONE-Tier-H-path-makes-the-WHOLE-entry-Tier-H', governedTierFor([REF_A, REF_B, RULES_PATH]) === TIER_H);
-  assert('each-Tier-H-surface-alone-is-Tier-H', TIER_H_PATHS.every((p) => governedTierFor([p]) === TIER_H), TIER_H_PATHS.join());
-  assert('an-EMPTY-path-set-defaults-to-Tier-H-never-to-S', governedTierFor([]) === TIER_H && governedTierFor(undefined) === TIER_H);
+  assert('a-Tier-S-only-path-set-is-Tier-S', governedTierFor([REF_A, REF_B, SKILL_PATH, AGENT_PATH, HOOK_PATH, SETTINGS_PATH], REPO) === TIER_S);
+  assert('⛔ the-old-references-boundary-is-GONE-SKILL-md-and-a-references-draft-sibling-are-Tier-S-alike', governedTierFor([SKILL_PATH], REPO) === TIER_S && governedTierFor(['.claude/skills/pm-dispatch/references-draft/x.md'], REPO) === TIER_S);
+  assert('ONE-Tier-H-path-makes-the-WHOLE-entry-Tier-H', governedTierFor([REF_A, REF_B, RULES_PATH], REPO) === TIER_H);
+  assert('each-Tier-H-surface-alone-is-Tier-H', TIER_H_PATHS.every((p) => governedTierFor([p], REPO) === TIER_H), TIER_H_PATHS.join());
+  assert('an-EMPTY-path-set-defaults-to-Tier-H-never-to-S', governedTierFor([], REPO) === TIER_H && governedTierFor(undefined, REPO) === TIER_H);
   assert('the-tier-constants-are-the-registers-own-two-distinct-values', TIER_H === GOVERNED_TIER_H && TIER_S === GOVERNED_TIER_S && TIER_H !== TIER_S);
   assert(
     'the-tier-travels-on-the-decomposed-entry-so-the-verdict-never-re-derives-it',
-    decomposeGovernedWork([row(5, [REF_A])]).governed[0].tier === TIER_S &&
-      decomposeGovernedWork([row(5, [AGENT_PATH])]).governed[0].tier === TIER_S &&
-      decomposeGovernedWork([row(5, [REF_A, RULES_PATH])]).governed[0].tier === TIER_H,
+    decomposeGovernedWork([row(5, [REF_A])], REPO).governed[0].tier === TIER_S &&
+      decomposeGovernedWork([row(5, [AGENT_PATH])], REPO).governed[0].tier === TIER_S &&
+      decomposeGovernedWork([row(5, [REF_A, RULES_PATH])], REPO).governed[0].tier === TIER_H,
   );
 
   // The real recognisers, and the tier VALUE read from the constant's one home
@@ -3920,6 +4018,7 @@ export async function selfTest() {
     tierApiCalls = 0;
     tierThreadsRead = [];
     return runGuard({
+      repo: REPO,
       event,
       rows: [row(pr, files, 'c'.repeat(40), `x (#${pr})`)],
       fetchReviews: async () => { tierApiCalls += 1; return reviews; },
@@ -4143,6 +4242,7 @@ export async function selfTest() {
   // references PR an authorized approver approved clears on the approval, and
   // the thread is never read — measured with a spy that THROWS if it is.
   const monotone = await runGuard({
+    repo: REPO,
     event: EVENT_MERGE_GROUP,
     rows: [row(71, [REF_A])],
     fetchReviews: async () => [approvedAt(GOVERNED_APPROVERS[1], REF_HEAD)],
@@ -4196,6 +4296,7 @@ export async function selfTest() {
   // The `pull_request` leg is untouched: no thread read, no record key, and the
   // early warning still never reddens.
   const tierOnPr = await runGuard({
+    repo: REPO,
     event: EVENT_PULL_REQUEST,
     rows: [row(72, [REF_A])],
     fetchReviews: async () => [],
@@ -4209,6 +4310,7 @@ export async function selfTest() {
   );
   // ⭐ The ordering guarantee, extended: a clear diff does not even LOAD them.
   const clearWithSpies = await runGuard({
+    repo: REPO,
     event: EVENT_MERGE_GROUP,
     rows: [row(73, ['packages/spec/src/index.ts'])],
     fetchReviews: async () => { throw new Error('no review lookup may be made on a clear diff'); },
@@ -4278,7 +4380,7 @@ export async function selfTest() {
   );
   assert(
     '⛔ and-this-leg-added-NO-surface-to-the-register-the-tier-is-a-landing-rule-not-a-membership-one',
-    governedPathsIn([REF_A]).length === 1 && governedPathsIn([RULES_PATH]).length === 1,
+    governedPathsIn([REF_A], REPO).length === 1 && governedPathsIn([RULES_PATH], REPO).length === 1,
   );
 
 
@@ -4399,7 +4501,7 @@ export async function selfTest() {
       'throwing spies, an approved references PR never reads a thread and never loads a recogniser — and the ' +
       '#19036 SIZE line (the 2026-09-18 ruling, landed seat-side by #19033 and carried to the queue here): every ' +
       'queued pull request\'s `additions` / `deletions` read off the same pull object the head read uses, one read ' +
-      'per PR, judged by the sibling\'s IMPORTED predicate (`testVerdict([], { size })` + `landsByHumanMerge`; this ' +
+      'per PR, judged by the sibling\'s IMPORTED predicate (`testVerdict([], { repo: REPO, size })` + `landsByHumanMerge`; this ' +
       'file declares no threshold and spells no comparison, pinned against its own source) — the #18971 replay ' +
       '(over the line, nothing governed) REFUSED on exit 8 with the two numbers, the threshold and the human-merge ' +
       'remedy printed; exactly the threshold clear; a governed AND oversized group printing both limbs and exiting ' +

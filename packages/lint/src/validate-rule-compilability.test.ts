@@ -20,7 +20,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import { ObjectStackSchema } from '@objectstack/spec';
-import { ObjectSchema } from '@objectstack/spec/data';
+import { FormatValidationSchema, ObjectSchema } from '@objectstack/spec/data';
 
 import {
   validateRuleCompilability as validateRuleCompilabilityUnrecorded,
@@ -39,7 +39,7 @@ import { explainRule } from './rule-explanations.js';
 // this suite exercises, not a chosen few. Run the whole file: those cases read
 // what the cases above fired.
 const COMPILE_IDS: readonly string[] = [VALIDATION_RULE_REGEX_UNCOMPILABLE, VALIDATION_RULE_SCHEMA_UNCOMPILABLE];
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateRuleCompilability: typeof validateRuleCompilabilityUnrecorded = (...args) => {
   const findings = validateRuleCompilabilityUnrecorded(...args);
   fired.push(...findings);
@@ -1005,5 +1005,56 @@ describe('[#22161] one-line verdicts — the two compile ids', () => {
     expect(explainRule(rule), `no \`os explain ${rule}\` entry`).toBeDefined();
     const text = explanationOf(rule);
     for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
+});
+
+// [#22161] Slice 15: the `fix:` line of the two ids. Each names its remedy in
+// one line; the escaped spellings, the named formats, and the shapes the common
+// JSON Schema keywords take are the explanations'.
+describe('[#22161] one-line fixes — the two compile ids', () => {
+  it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {
+    // Coverage control: both ids fired.
+    expect([...new Set(fired.map((f) => f.rule))].sort()).toEqual([...COMPILE_IDS].sort());
+    for (const f of fired) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint, f.rule).not.toMatch(/\babove\b/);
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('the regex line quotes the source and names both ways out', () => {
+    const [f] = validateRuleCompilabilityUnrecorded(
+      objectWith({ type: 'format', name: 'fmt', field: 'tax_id', regex: '([', message: 'm' }),
+    );
+    expect(f.hint).toBe(
+      "Fix the pattern so `new RegExp('([')` compiles (escape a literal `(`, `[` or `\\`), or drop `regex` and " +
+        'use a named `format`',
+    );
+  });
+
+  const MOVED_FROM_FIX: Record<string, readonly string[]> = {
+    [VALIDATION_RULE_REGEX_UNCOMPILABLE]: ['`\\\\(`, `\\\\[` and `\\\\\\\\`', "`'^\\\\d{2}-\\\\d{7}$'`"],
+    [VALIDATION_RULE_SCHEMA_UNCOMPILABLE]: ['`required` an array of strings', 'every `$ref` must resolve', 'MALFORMED standard keyword'],
+  };
+
+  it.each([...COMPILE_IDS])('`os explain %s` carries what its `fix:` line no longer says', (rule) => {
+    const text = explanationOf(rule);
+    for (const fact of MOVED_FROM_FIX[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
+
+  it("the regex explanation's named formats are the schema's `format` enum, in order", () => {
+    // The explanation module imports nothing, so it spells the list out; this
+    // holds it to `FormatValidationSchema`.
+    const formats = (FormatValidationSchema.shape.format.unwrap() as { options: readonly string[] }).options;
+    expect(formats.length).toBeGreaterThan(0);
+    const spelled = `${formats.slice(0, -1).map((f) => `\`${f}\``).join(', ')} or \`${formats[formats.length - 1]}\`.`;
+    expect(explanationOf(VALIDATION_RULE_REGEX_UNCOMPILABLE)).toContain(`name a \`format\` instead: ${spelled}`);
+  });
+
+  it('the json_schema explanation names every JSON Schema primitive type', () => {
+    const text = explanationOf(VALIDATION_RULE_SCHEMA_UNCOMPILABLE);
+    for (const t of ['null', 'boolean', 'object', 'array', 'number', 'string', 'integer']) {
+      expect(text, t).toContain(`\`${t}\``);
+    }
   });
 });
