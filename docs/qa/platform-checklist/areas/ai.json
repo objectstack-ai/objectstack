@@ -593,10 +593,10 @@
     },
     {
       "id": "ai.console-ai-surface-gating",
-      "title": "Console AI affordances gate on the access-filtered agent catalog: an agent-less boot hides FAB / chat dock / ⌘⇧I / top-bar link and redirects a stale /ai bookmark without flash — with the ungated bare system/ai-approvals route pinned as an expected-fail probe",
+      "title": "Console AI affordances gate on the access-filtered agent catalog: an agent-less boot hides FAB / chat dock / ⌘⇧I / top-bar link and redirects a stale /ai bookmark without flash — and the ungated bare system/ai-approvals route degrades honestly: one 501 read stops the poll, and the error replaces the empty queue (objectui#11736)",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "browser",
       "personas": ["admin (form sign-in — the pending-actions poll sends the COOKIE half only, credentials:'include' with no bearer header, so an injected-token session reads as anonymous there)"],
@@ -620,8 +620,8 @@
         "press ⌘⇧I (the chat-dock toggle) and confirm nothing mounts — ConsoleLayout only arms the listener when dockEnabled",
         "navigate directly to /ai (the stale-bookmark path): capture that a loading fallback holds while the catalog resolves, then the redirect to home lands with the splash preserved — record whether any frame of chat UI flashed",
         "as admin, sweep the surfaces that could advertise AI Approvals — the app sidebars, the settings hub (/apps/setup/system, which forwards to …/system/settings) and Home — and record whether any offers an 'AI Approvals' entry on this agent-less boot (expected: none; the SystemHubPage card wall that carried one was retired by objectui#3743, carried out in objectui#10507)",
-        "navigate directly to the bare /apps/setup/system/ai-approvals route (still registered with no AI-surface gate in the console route table — AppContent systemRoutes); capture the network for ~15s: GET /api/v1/ai/pending-actions?status=pending firing every ~5s and answering 501 each time (poll never stops on error — usePendingActions clears nothing and re-arms)",
-        "capture what the page renders: the destructive alert's text (must carry the Cloud/EE remedy sentence from the 501 body), AND whether the 'No actions waiting / When the AI proposes a sensitive action it will appear here for review' empty state renders beneath it as if a live queue exists",
+        "navigate directly to the bare /apps/setup/system/ai-approvals route (still registered with no AI-surface gate in the console route table — AppContent systemRoutes); capture the network for ~15s: exactly ONE GET /api/v1/ai/pending-actions?status=pending, answering 501, and no re-arm after it — since objectui#11736 usePendingActions stops on a refused read (501, 403, 404, any 4xx but 408 / 429) and backs off only on a transient one",
+        "capture what the page renders: the destructive alert's text (must carry the Cloud/EE remedy sentence from the 501 body), and confirm the 'No actions waiting / When the AI proposes a sensitive action it will appear here for review' empty state does NOT render beneath it — the inbox draws the empty queue only when the read answered",
         "capture the browser console for the whole session"
       ],
       "acceptance": [
@@ -656,16 +656,16 @@
           "evidence": "the alert screenshot + one captured 501 response"
         },
         {
-          "clause": "EXPECTED FAIL at head (defect K2, same row): honest degradation means no fake empty queue and no unbounded dead poll. At head, beneath the error alert the inbox ALSO renders the 'No actions waiting' empty state (rows.length === 0 branch is not error-aware, AiPendingActionsInbox.tsx) — reading as a live, empty approval queue on a deployment that has none — and the 5s poll re-arms forever against the dead endpoint (usePendingActions keeps polling on error). Score against the honest contract; record the observed fake-empty-queue + endless poll as the FAIL evidence, do not tick green",
+          "clause": "honest degradation on the bare route: no fake empty queue and no unbounded dead poll. The inbox renders the destructive alert INSTEAD of the 'No actions waiting' empty state (the empty state is drawn only when the read answered, AiPendingActionsInbox.tsx), and the poll stops after the one 501 (a refused read ends it, usePendingActions.ts). This was expected-fail K2 until objectui#11736 fixed both halves",
           "oracle": "network",
-          "verify": "the ~15s network capture shows the repeated 501s with no backoff/stop; the page screenshot shows the empty-queue panel rendered alongside the error alert",
+          "verify": "the ~15s network capture shows a single 501 read of /api/v1/ai/pending-actions and no further request; the page screenshot shows the error alert with no empty-queue panel beneath it. objectui pins both halves — packages/plugin-chatbot/src/__tests__/usePendingActions.pollFaultPolicy-11736.test.tsx ('a refused read stops the poll') and AiPendingActionsInbox.errorReplacesEmpty-11736.test.tsx ('an errored read shows the error, not an empty queue'); run them from an objectui checkout at the .objectui-sha revision to cite them beside the live read",
           "evidence": "the poll trace + the page screenshot"
         }
       ],
       "negative": [
         "ticking any AI capability as PRESENT from the 200 empty-agents courtesy is a recording error — the empty catalog is the hide signal (same negative as ai.open-edition-honest-degradation)",
         "scoring an affordance ABSENT from a DOM read taken before a settled screenshot is the hydration-race trap — the gated controls are hidden during load BY DESIGN, so a too-early read proves nothing",
-        "the expected-fail clause (clause 6) must not flip to PASS silently: if a run observes the empty-queue panel suppressed under the error and the poll bounded, the defect was fixed — revise this item (drop the expected-fail wording, bump revision) rather than quietly ticking",
+        "a second pending-actions read inside the capture window, or the 'No actions waiting' panel drawn beneath the error, is a REAL fail since objectui#11736 — a regression, not the old expected-fail K2; reproduce it on a fresh load before recording it",
         "an anonymous probe of /ai/pending-actions answering 501 instead of 401 would be a REGRESSION of the #7653 anonymous-deny ordering (auth gate precedes every capability answer) — file it, it is not this item's expected 501"
       ],
       "traps": ["hydration-race", "stale-console-bundle"],
@@ -674,15 +674,16 @@
         "objectui packages/app-shell/src/layout/ConsoleLayout.tsx (FAB + chat dock + ⌘⇧I all gated on showChatbot/dockEnabled)",
         "objectui packages/app-shell/src/layout/AppHeader.tsx (top-bar AI entry gated on the same hook) + console/home/HomeLayout.tsx (Home CTAs)",
         "objectui packages/app-shell/src/console/ConsoleShell.tsx (RequireAiSurface — waits for resolve, splash-preserving redirect, objectui#6507)",
-        "objectui apps/console/src/AppContent.tsx (systemRoutes: system/ai-approvals still registered with no AI-surface gate — the K2 route half; the bare …/system landing forwards to the settings hub since SystemHubPage and its 'AI Approvals' card were retired, objectui#3743 / objectui#10507) + pages/system/AiPendingActionsPage.tsx (thin wrapper, 'Polled every 5 seconds')",
-        "objectui packages/plugin-chatbot/src/usePendingActions.ts,217-300 (cookie-only call(), error → error.message, pollInterval 5000 re-arming regardless of errors) + AiPendingActionsInbox.tsx (destructive alert + the error-blind 'No actions waiting' empty state)",
+        "objectui apps/console/src/AppContent.tsx (systemRoutes: system/ai-approvals still registered with no AI-surface gate, which is why steps 6-7 reach it by URL; the bare …/system landing forwards to the settings hub since SystemHubPage and its 'AI Approvals' card were retired, objectui#3743 / objectui#10507) + pages/system/AiPendingActionsPage.tsx (thin wrapper)",
+        "objectui packages/plugin-chatbot/src/usePendingActions.ts (cookie-only call(), error → error.message; since objectui#11736 the poll follows the answer it last got — a refused read stops it, a transient failure backs it off within a ceiling) + AiPendingActionsInbox.tsx (destructive alert; the empty state renders only when the read answered) + their pins __tests__/usePendingActions.pollFaultPolicy-11736.test.tsx and __tests__/AiPendingActionsInbox.errorReplacesEmpty-11736.test.tsx",
         "packages/runtime/src/domains/ai.ts#capabilityUnavailable (#7653 anonymous-deny first; the /ai/agents empty-catalog courtesy #4058/#4053; every other /ai/* → capabilityUnavailable 501) + domains/unavailable.ts (single-sourced remedy sentence)",
         "ai.open-edition-honest-degradation (the API half this item mirrors in the browser — 501 body/discovery parity is proven THERE, not re-proven here)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-30", "change": "new item (sweep 2026-08-30, cross-angle hit 1+4): the console-side AI gating had no coverage — the catalog-signal design (useAiSurfaceEnabled) hides FAB/dock/⌘⇧I/header/Home affordances and no-flash-redirects /ai on an agent-less boot, while SystemHubPage's 'AI Approvals' card is built ungated and its page polls the dead /ai/pending-actions endpoint every 5s (501) rendering a fake empty queue beside the error alert. Authored as a NEW browser sibling of ai.open-edition-honest-degradation (which keeps the API half) rather than extending it, so neither surface double-covers the other; the two K2 defect clauses are expected-fail probes, the defect row itself is the sweep's FOLLOW-UPS entry", "ref": "#sweep-2026-08-30" },
         { "revision": 2, "date": "2026-10-05", "change": "clause 4, steps 6-7, negative 3, the title and the source re-pointed (stale, #21782 VF4). objectui 9eea12a2b (objectui#10507, fixing objectui#3743) removed SystemHubPage and its 'AI Approvals' card before 17.6.0, so K2's card half is moot. The clause now asserts that no console surface advertises the entry (verifier's wording). The route half of K2 remains: system/ai-approvals is still registered ungated (AppContent systemRoutes), so steps 6-7 reach it by URL and clause 6 keeps its expected-fail scoring. Negative 3 names clause 6 only. Re-read at objectui 9dfaca6543: unchanged", "ref": "#21797" },
-        { "revision": 3, "date": "2026-10-06", "change": "partial-coverage gap of QA run #21782 parked on #22017 (row 9). A2's entitled side was blocked(fixture) as the clause prescribed. Disposition: recorded knownGap. The side cannot be reached in the open framework by design (service-ai is Cloud/Enterprise). The knownGap names the environment it needs, says CI lacks it, and reclassifies the verdict blocked(environment); A2's clause follows. It also names the objectui hook pins as mechanism-only", "ref": "#22017" }
+        { "revision": 3, "date": "2026-10-06", "change": "partial-coverage gap of QA run #21782 parked on #22017 (row 9). A2's entitled side was blocked(fixture) as the clause prescribed. Disposition: recorded knownGap. The side cannot be reached in the open framework by design (service-ai is Cloud/Enterprise). The knownGap names the environment it needs, says CI lacks it, and reclassifies the verdict blocked(environment); A2's clause follows. It also names the objectui hook pins as mechanism-only", "ref": "#22017" },
+        { "revision": 4, "date": "2026-10-13", "change": "acceptance[5] (clause and verify) flipped from expected-fail K2 to the positive contract, with steps[6] and [7], negative[2], the title and source[4] and [5] (stale spec, #23163 C5; parked on #23121, carried by #23169). objectui#11736 made the poll follow its last answer (a refused read stops it, a transient one backs off within a ceiling) and made the inbox draw its empty state only when the read answered. QA run #23163 read one 501, no re-arm, and no empty state under the alert, at objectstack 36b2889c with objectui 1fb1ced36243. Re-read from objectui source at that pin, still this repo's .objectui-sha, including the two pins now named in the clause", "ref": "#23169" }
       ]
     },
     {

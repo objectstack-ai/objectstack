@@ -188,6 +188,5 @@ export const jaJP: TranslationData = {
     // Platform record pages (#15743) -- see `en.ts` for the key set.
     sys_user_detail: { label: 'ユーザー' },
     sys_organization_detail: { label: '組織' },
-    sys_position_detail: { label: 'ポジション' },
   },
 };

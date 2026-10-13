@@ -351,10 +351,20 @@ describe('HttpDispatcher extracted domains (PR-3: keys/storage/ui)', () => {
 
     it('GET /keys answers 405 (mint is POST-only), and /keysfoo is NOT claimed (segment semantics)', async () => {
         const dispatcher = makeDispatcher();
-        const wrongMethod = await dispatcher.dispatch('GET', '/keys', undefined, {}, {} as any);
+        // ADR-0138 D2: the anonymous decision is the domain's FIRST statement,
+        // ahead of the method check, so an anonymous wrong-method request is the
+        // floor's 401, never the 405 describing the route's shape.
+        const anonymousWrongMethod = await dispatcher.dispatch('GET', '/keys', undefined, {}, {} as any);
+        expect(anonymousWrongMethod.response?.status).toBe(401);
+        expect(anonymousWrongMethod.response?.body?.error?.code).toBe('UNAUTHENTICATED');
+        // …and the 405 still answers a signed-in caller.
+        const signedIn = { request: { headers: {} }, executionContext: { userId: 'u1', isSystem: false, positions: [], permissions: [] } };
+        const wrongMethod = await dispatcher.handleKeys('GET', undefined, signedIn as any);
         expect(wrongMethod.response?.status).toBe(405);
+        // A claimed /keysfoo would now answer the floor's 401 (or the 405), so
+        // the segment boundary is asserted as the unclaimed answer itself.
         const lexical = await dispatcher.dispatch('POST', '/keysfoo', { name: 'k' }, {}, {} as any);
-        expect(lexical.response?.status ?? 404).not.toBe(405);
+        expect(lexical.response?.status ?? 404).toBe(404);
     });
 
     it('POST /keys mints a key pinned to the caller (thin delegate carries the extracted body)', async () => {
@@ -429,9 +439,18 @@ describe('HttpDispatcher extracted domains (PR-3: keys/storage/ui)', () => {
 
 describe('HttpDispatcher extracted domains (PR-4: share-links)', () => {
     it('/share-links responds 501 when the shareLinks service is absent', async () => {
-        const result = await makeDispatcher().dispatch('GET', '/share-links', undefined, {}, {} as any);
+        // Signed in: since ADR-0138 D2 moved the domain's anonymous decision to
+        // its first statement, an anonymous caller is refused 401 before the
+        // service is probed — asserted beside it.
+        const signedIn = { request: { headers: {} }, executionContext: { userId: 'u1', isSystem: false, positions: [], permissions: [] } };
+        const result = await makeDispatcher().handleShareLinks('', 'GET', undefined, {}, signedIn as any);
         expect(result.handled).toBe(true);
         expect(result.response?.status).toBe(501);
+
+        const anonymous = await makeDispatcher().dispatch('GET', '/share-links', undefined, {}, {} as any);
+        expect(anonymous.handled).toBe(true);
+        expect(anonymous.response?.status).toBe(401);
+        expect(anonymous.response?.body?.error?.code).toBe('UNAUTHENTICATED');
     });
 
     it('/share-linksfoo is NOT claimed (segment semantics)', async () => {

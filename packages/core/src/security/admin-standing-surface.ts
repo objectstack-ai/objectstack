@@ -112,7 +112,7 @@ export const ADMIN_STANDING_SURFACE: Readonly<Record<string, AdminStandingTable>
       + '(`readDisabledCatalogNames`, §6a): a `permission` row of `admin_full_access` whose `active` '
       + 'is false un-makes every GRANT-derived platform administrator at once (§6b), with no identity '
       + 'table touched; a `position` row switches that position off. Deployment-wide (no tenant '
-      + 'column). The `sys_permission_set` and `sys_position` rows are no longer read at all: the '
+      + 'column). No catalog row is read — the row objects are retired (ADR-0131 D3, C3 stage 8): the '
       + 'set itself — its existence and its body — is the catalog definition (see the '
       + '`security-catalog` non-table input). ⚠️ It does NOT un-make a CONFIG-derived administrator '
       + '(§6b-config), which never reads a set.',

@@ -18,6 +18,8 @@ import type { MetadataProtocol } from '@objectstack/spec/api';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 import { capabilityUnavailable } from './unavailable.js';
+// [#23214] The repo's one sentence for a repeated single-valued parameter.
+import { repeatedQueryParamMessage } from '@objectstack/rest';
 
 /**
  * [#15238] The `protocol` service slot **as this domain reaches it** — one
@@ -98,7 +100,20 @@ export async function handleUiRequest(
     if (parts[0] === 'view' && parts[1]) {
         const objectName = parts[1];
         // Support both path param /view/obj/list AND query param /view/obj?type=list
-        const type = parts[2] || query?.type || 'list';
+        // [#23214] `?type=` is read only when the path names no type, and it is
+        // ONE view type: a repeat reached `getUiView` as an array. Refused with
+        // the multiplicity sentence; a one-element array is one occurrence.
+        let queryType = query?.type;
+        if (!parts[2] && Array.isArray(queryType)) {
+            if (queryType.length > 1) {
+                return {
+                    handled: true,
+                    response: deps.error(repeatedQueryParamMessage('type', queryType.length), 400, { code: 'VALIDATION_ERROR' }),
+                };
+            }
+            queryType = queryType[0];
+        }
+        const type = parts[2] || queryType || 'list';
 
         const protocol = await resolveProtocol(deps, _context);
 

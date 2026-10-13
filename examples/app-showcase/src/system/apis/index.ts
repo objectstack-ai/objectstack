@@ -7,8 +7,8 @@ import type { ApiEndpoint } from '@objectstack/spec/api';
  *
  * ## What these are
  *
- * The metadata-authored counterpart of the code-mounted endpoint in
- * `src/system/server/recalc-endpoint.ts`. The runtime matches a declared
+ * Every HTTP endpoint this app serves, declared as metadata: an app does not
+ * mount raw route handlers of its own. The runtime matches a declared
  * `path` + `method` against the stored `api` items and executes the target
  * with NO handler code: `object_operation` delegates to the same `callData`
  * the built-in `/data` route uses, `flow` to the same automation pipeline
@@ -48,14 +48,17 @@ import type { ApiEndpoint } from '@objectstack/spec/api';
  *
  * ## `authRequired` is deliberate here, not incidental
  *
- * Both endpoints are session-gated. `authRequired` DEFAULTS to `true`, so the
+ * Every endpoint here is session-gated. `authRequired` DEFAULTS to `true`, so the
  * explicit `true` below is documentation rather than protection — but it is
  * the key whose historical value matters most: an explicit `false` is the only
  * thing that opens an anonymous execution entry point, and ADR-0121 D6 then
  * requires it to carry an ARMED `rateLimit` (`enabled: true`; the key defaults
- * to `false`, so a budget written without it meters nothing). Neither of these
+ * to `false`, so a budget written without it meters nothing). None of these
  * endpoints was ever anonymous, and restoring them did not make one anonymous:
- * an example must not demo an anonymous surface it never had.
+ * an example must not demo an anonymous surface it never had. The recalc
+ * endpoint below WRITES, so for it the gate is also the first of two: an
+ * anonymous caller is turned away with `401` before its flow runs, and a
+ * signed-in one is then judged row by row as themselves.
  *
  * Proven end to end, on a real boot, by
  * `packages/qa/dogfood/test/showcase-declarative-endpoints.dogfood.test.ts`.
@@ -114,4 +117,25 @@ export const InquiryPurgeEndpoint: ApiEndpoint = {
   authRequired: true,
 };
 
-export const allApis: ApiEndpoint[] = [TaskFeedEndpoint, InquiryPurgeEndpoint];
+/**
+ * Flow-typed endpoint behind the two `api` actions — `showcase_recalc_estimate`
+ * (one task) and `showcase_recalc_selection` (a whole selection in one call).
+ *
+ * Its target runs `runAs: 'user'`, so the recalculation writes as the caller:
+ * the security layer judges each task's write as that user's own edit, and a
+ * caller without edit rights is refused there with nothing written. The flow
+ * reads both request bodies the actions send, `{ recordId }` and
+ * `{ _selectedIds }` (`src/automation/flows/recalc-estimate.flow.ts`).
+ */
+export const RecalcEstimatesEndpoint: ApiEndpoint = {
+  name: 'showcase_recalc_estimates_api',
+  path: '/api/v1/apps/showcase/recalc',
+  method: 'POST',
+  summary: 'Recalculate task estimates',
+  description: 'Recomputes estimate_hours from each named task’s schedule window (inclusive days × 8h), as the caller. Body: { recordId } for one task, or { _selectedIds } for a selection.',
+  type: 'flow',
+  target: 'showcase_recalc_estimates',
+  authRequired: true,
+};
+
+export const allApis: ApiEndpoint[] = [TaskFeedEndpoint, InquiryPurgeEndpoint, RecalcEstimatesEndpoint];

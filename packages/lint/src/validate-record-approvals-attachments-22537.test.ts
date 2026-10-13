@@ -154,7 +154,7 @@ describe('a prop on either node is a `component-props-unknown-key` finding, nami
     expect(findings).toHaveLength(1);
     const [f] = findings;
     expect(f.rule).toBe(COMPONENT_PROPS_UNKNOWN_KEY);
-    expect(f.severity).toBe('warning');
+    expect(f.severity).toBe('error');
     expect(f.path).toBe(`${TABS}[2].children[0].properties.${key}`);
     expect(f.where).toBe(`page "invoice_record" · ${type}`);
     expect(f.message).toContain(`\`${key}\``);

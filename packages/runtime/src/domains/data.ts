@@ -18,6 +18,9 @@
 import * as actionExec from '../action-execution.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+// [#23214] The `/data` list's filter-slot arity rule (#7390), the one
+// `RestServer`'s list asks, imported rather than restated.
+import { assertFilterParamSuppliedOnce } from '@objectstack/rest';
 
 export function createDataDomain(deps: DomainHandlerDeps): DomainRoute {
     return {
@@ -139,8 +142,22 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
             // condition #3713 described. One fold, one answer; a second copy
             // here could only agree by inspection.
             //
+            // [#23214] …with ONE exception, which is not a fold: the FILTER
+            // slot's arity. A filter AST is an array too, so the normalizer
+            // cannot tell a repeated `?filter=` from one AST; only the
+            // querystring layer can, and `RestServer`'s list asks
+            // `assertFilterParamSuppliedOnce` for exactly that reason. It is
+            // asked here on the copy `findData` receives (it unwraps a
+            // one-element array in place), and its throw is answered in this
+            // transport's envelope with the code and sentence it carries.
+            const listQuery = { ...query };
+            try {
+                assertFilterParamSuppliedOnce(listQuery);
+            } catch (e: any) {
+                return { handled: true, response: deps.error(e.message, 400, { code: e.code }) };
+            }
             // Spec: returns FindDataResponse = { object, records, total?, hasMore? }
-            const result = await actionExec.callData(deps, _context, 'query', { object: objectName, query: { ...query } }, _context.dataDriver, _context.environmentId, _context.executionContext);
+            const result = await actionExec.callData(deps, _context, 'query', { object: objectName, query: listQuery }, _context.dataDriver, _context.environmentId, _context.executionContext);
             return { handled: true, response: deps.success(result) };
         }
 

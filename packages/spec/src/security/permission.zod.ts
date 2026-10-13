@@ -827,7 +827,7 @@ export const PermissionSetSchema = lazySchema(() => strictObject(
    * stripped at parse (the ADR-0078 §3 inverse-drift class); the `.strict()`
    * gate surfaced the gap and it is now declared.
    */
-  description: z.string().optional().describe('Human-readable description shown in Setup (persisted as sys_permission_set.description)'),
+  description: z.string().optional().describe('Human-readable description shown in Setup'),
 
   /**
    * [ADR-0086 D3] Owning package for a package-shipped permission set

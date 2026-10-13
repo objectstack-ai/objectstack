@@ -185,7 +185,7 @@ describe("a page action row's executor key refuses `'navigation'`, the runner's 
     const issues = issuesOf(row.parse({ [row.executorKey]: 'navigation', target: '/apps/crm/tasks' }));
     expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', [...row.at, row.executorKey]]]);
     expect(firstSentence(issues[0].message)).toBe(
-      `${row.navigationSubject} is the console runner's local alias of \`'url'\`, and the url executor has one spelling.`,
+      `${row.navigationSubject} is the console runner's local alias of \`'url'\`, refused on page action rows since @objectstack/spec 18, and the url executor has one spelling.`,
     );
     expect(issues[0].message).toContain(`Write \`${row.executorKey}: 'url'\``);
   });

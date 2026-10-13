@@ -28,12 +28,12 @@
  *     call is pinned with its member in `protocol.register-item-call-sites.test.ts`,
  *     where the expansion's registration sits in the reconcile.
  *
- * One write is recorded as NOT reaching the registry: the orphan adoption's
- * rebinding (`reassignOrphanedMetadata`, `POST /packages/:id/adopt-orphans`).
- * It changes a row's package binding, which changes what a view container
- * expands to, and the registry keeps the old registrations until a restart.
- * It is reported for its own card. The row is shrink-only: when that write is
- * routed, this turns red until the row moves to a route.
+ * Every write is routed; the census has no exception kind. The last one, the
+ * orphan adoption's rebinding (`reassignOrphanedMetadata`,
+ * `POST /packages/:id/adopt-orphans`), now writes each rebound view row
+ * through, with the binding it left, so the reconcile moves the row's record
+ * to its new binding at once. A new write with no route turns this red, and
+ * the only way to green it is to route that write.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -99,9 +99,7 @@ type Route =
     /** The member hands the row to its callers, and each of them calls `then`, which calls the write-through. */
     | { readonly handedTo: 'callers'; readonly then: 'runPublishSideEffects' }
     /** An organization-scoped row, which never enters the registry (#6602): nothing to reconcile. */
-    | { readonly organizationScoped: true }
-    /** ⛔ Not reconciled. Shrink-only: a finding, reported for its own card. */
-    | { readonly bypass: string };
+    | { readonly organizationScoped: true };
 
 const WRITES: ReadonlyArray<{ readonly member: string; readonly verb: string; readonly route: Route }> = [
     { member: 'saveMetaItem', verb: 'repo.put(', route: { sameMember: 'applyRegistryWriteThrough' } },
@@ -112,10 +110,7 @@ const WRITES: ReadonlyArray<{ readonly member: string; readonly verb: string; re
     { member: 'rollbackMetaItem', verb: 'repo.restoreVersion(', route: { sameMember: 'applyRegistryWriteThrough' } },
     { member: 'deleteMetaItem', verb: 'repo.delete(', route: { sameMember: 'restoreArtifactRegistryView' } },
     { member: 'deleteMetaItem', verb: 'this.engine.delete(\'sys_metadata\'', route: { sameMember: 'restoreArtifactRegistryView' } },
-    {
-        member: 'reassignOrphanedMetadata', verb: 'this.engine.update(\'sys_metadata\'',
-        route: { bypass: 'rebinds a row to a package; the registry keeps the old binding\'s registrations until a restart' },
-    },
+    { member: 'reassignOrphanedMetadata', verb: 'this.engine.update(\'sys_metadata\'', route: { sameMember: 'applyRegistryWriteThrough' } },
 ];
 
 /** The verb as `WRITES` spells it: no whitespace after its open paren. */
@@ -164,15 +159,6 @@ describe('[#23198] every stored-row write in protocol.ts reaches the reconcile',
     it('an organization-scoped write reaches only a legacy organization\'s repository', () => {
         for (const row of WRITES.filter((r) => 'organizationScoped' in r.route)) {
             expect(bodyOf(row.member)).toContain('const repo = this.legacyOrganizationRepo(');
-        }
-    });
-
-    it('a recorded bypass still reaches nothing: route it, then move its row', () => {
-        for (const row of WRITES.filter((r) => 'bypass' in r.route)) {
-            const body = bodyOf(row.member);
-            expect(body).not.toContain('this.applyRegistryWriteThrough(');
-            expect(body).not.toContain('this.restoreArtifactRegistryView(');
-            expect(body).not.toContain('this.hydrateOverlayIntoRegistry(');
         }
     });
 

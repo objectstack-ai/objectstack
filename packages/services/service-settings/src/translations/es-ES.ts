@@ -146,7 +146,7 @@ export const esES: PlatformTranslationData = {
         },
         audience_self_registration_permission_set: {
           label: 'Conjunto de permisos de autorregistro',
-          help: 'Nombre del sys_permission_set que recibe cada usuario autorregistrado (declarar member_default explícitamente es válido; admin_full_access se rechaza).',
+          help: 'Nombre del conjunto de permisos que recibe cada usuario autorregistrado (declarar member_default explícitamente es válido; admin_full_access se rechaza).',
         },
         password_min_length: { label: 'Longitud mínima de contraseña' },
         password_max_length: { label: 'Longitud máxima de contraseña', help: 'Un límite superior protege frente a la denegación de servicio por el hasheo de contraseñas muy largas.' },

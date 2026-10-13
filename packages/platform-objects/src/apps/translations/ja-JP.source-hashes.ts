@@ -184,5 +184,4 @@ export const jaJPSourceHashes: Readonly<Record<string, string>> = {
   'pages.connect_agent.subtitle': '2d0f9a000824e78a',
   'pages.sys_user_detail.label': '6c0d22a931e235bd',
   'pages.sys_organization_detail.label': '3e55836156e1c1de',
-  'pages.sys_position_detail.label': '9a24c02e441eb0b4',
 };
