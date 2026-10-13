@@ -354,7 +354,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'assertionStatus: four answers, not two': 11,
   'the job log (#10141)': 34,
   'isRosterJob': 19,
-  'roster verdict: the substitute names the member lanes': 17,
+  'roster verdict: the substitute names the member lanes': 20,
   'runIdOf': 3,
   'stepBodies / resolveStep': 9,
   'Lane verdict: the red gates, not the verdict (#23223)': 22,
@@ -1389,6 +1389,11 @@ export function renderSubstitute(failedSteps) {
     }
   } else if (steps.some((s) => s.laneVerdict)) {
     out.push('    substitute   none — the lane verdict above says why. Its own command is not one.');
+  } else if (steps.some((s) => s.rosterVerdict) && rosterMembersListed(steps) === false) {
+    // #23339: no member row is in this report, so none of them prints a
+    // substitute here; the roster verdict above already says where to go.
+    out.push('    substitute   none of its own, and no member row in this report carries one: the roster');
+    out.push('                 verdict above says where the answer is. The roster verdict\'s command is not one.');
   } else if (steps.some((s) => s.rosterVerdict)) {
     out.push('    substitute   none of its own — the member row(s) named above carry the answer, each');
     out.push('                 with its own substitute. The roster verdict\'s command is not one.');
@@ -1443,6 +1448,42 @@ function renderLaneVerdict(step) {
   return out;
 }
 
+/** A member lane the walk would count as failing: `failure` or `timed_out`, as `walkInto`'s failing list does. */
+function laneRed(lane) {
+  return lane.conclusion === 'failure' || lane.conclusion === 'timed_out';
+}
+
+/**
+ * Whether a member lane's OWN row is in the report's failing list. That list is
+ * the red rows of `kept`, so a member row is listed exactly when it is red and
+ * no later same-name row from another run superseded it on the sha
+ * (`supersededBy`, set by `memberLanes`; #23305).
+ */
+function laneListed(lane) {
+  return laneRed(lane) && !lane.supersededBy;
+}
+
+/**
+ * Whether ANY member row of a roster job is listed in this report (#23339) —
+ * the one reading behind every sentence that points the reader at member rows
+ * above: the ROSTER JOB banner, the roster branch of the job-log row, the
+ * roster `substitute` line, and each lane's "its own row is above".
+ *
+ *   true   at least one member lane is `laneListed`.
+ *   false  the walk attached lanes and none is listed: no member was found,
+ *          every one found succeeded, or each red one was superseded on the
+ *          sha by another run's later same-name row. A sentence that says
+ *          "listed above" here sends the reader to a row the report never
+ *          printed.
+ *   null   no step carries lanes (resolved without a walk). Unknown, so the
+ *          general wording stands, as `renderRosterVerdict`'s own does.
+ */
+function rosterMembersListed(failedSteps) {
+  const lanes = (failedSteps ?? []).map((s) => s.rosterVerdict?.lanes).filter(Boolean);
+  if (lanes.length === 0) return null;
+  return lanes.some((l) => l.notSucceeded.some(laneListed));
+}
+
 /**
  * The reading of one failed roster verdict step, as report lines (#23249).
  *
@@ -1470,7 +1511,7 @@ function renderRosterVerdict(step) {
   } else {
     out.push(`${pad}Member(s) that did not succeed in this walk:`);
     for (const lane of lanes.notSucceeded) {
-      const red = lane.conclusion === 'failure' || lane.conclusion === 'timed_out';
+      const red = laneRed(lane);
       // #23305: a red member whose row another run's later same-name row
       // superseded on the sha is NOT in the failing list above, so pointing
       // there would send the reader to a row that is not printed.
@@ -1487,7 +1528,7 @@ function renderRosterVerdict(step) {
         out.push(`${pad}    Its own annotations carry the answer: ${lane.url ?? `/check-runs/${lane.checkRunId}/annotations`}`);
         continue;
       }
-      const where = red
+      const where = laneListed(lane)
         ? 'its own row is above'
         : lane.status !== 'completed'
           ? 'still running, so it has not answered yet'
@@ -2032,7 +2073,15 @@ function render(result, target) {
   for (const check of result.failing) {
     say(`✗ ${check.name}   (check-run ${check.checkRunId}${check.runId ? ` · run ${check.runId}` : ''})`);
     if (check.url) say(`    ${check.url}`);
-    if (check.roster) {
+    // #23339: whether a member row is in this report decides every sentence
+    // below that points at one — one reading, `rosterMembersListed`.
+    const membersListed = check.roster ? rosterMembersListed(check.failedSteps) : null;
+    if (check.roster && membersListed === false) {
+      say('    ROSTER JOB — its failed step only judges what its declared member jobs concluded, and it');
+      say('    holds no assertion of its own. NONE of its members\' rows is in this report, so the roster');
+      say('    verdict below says where the answer is (a red member that another run superseded on this');
+      say('    sha is named there by its check-run id and URL); this row is kept so the count is honest.');
+    } else if (check.roster) {
       say('    ROSTER JOB — its failed step only judges what its declared member jobs concluded, and it');
       say('    holds no assertion of its own. The answer is in those members\' rows, listed above; this');
       say('    row is kept so the count is honest.');
@@ -2152,6 +2201,10 @@ function render(result, target) {
         say('                 prints prose rather than paths, that IS the assertion.');
       } else if (check.log) {
         say('                 The job log is where that stdout lives, and it was not read (above).');
+      } else if (check.roster && membersListed === false) {
+        say('                 No job log was fetched: a roster job\'s log is a verdict about its member');
+        say('                 jobs, none of whose rows is in this report; the roster verdict below says');
+        say('                 where the answer is.');
       } else if (check.roster) {
         say('                 No job log was fetched: a roster job\'s log is a verdict about the member');
         say('                 jobs listed above, whose own rows already carry their assertions.');
@@ -2860,6 +2913,72 @@ async function selfTest() {
       crossRunLines.some((l) => l.includes('its own row is above')),
     ],
     [true, true, true, false],
+  );
+
+  // #23339: three sentences around the roster verdict — the ROSTER JOB banner,
+  // the roster branch of the job-log row and the substitute line — said the
+  // member rows are "listed above" whatever the lanes read. On the #23305 shape
+  // the red member was superseded on the sha, so the report lists only the
+  // aggregator's row. `render` is driven whole: two of the three live only there.
+  const rosterReport = (l) =>
+    render(
+      {
+        sha: 'f1x7ure0',
+        total: 8,
+        pending: 0,
+        superseded: [],
+        checkRunCount: 8,
+        failing: [
+          {
+            name: 'Fixture Gates',
+            checkRunId: 100,
+            runId: '7',
+            url: crossRunUrl(7, 100),
+            jobsError: null,
+            steps: stepsIntegrity([{ number: 1, name: 'Set up job' }, { number: 2, name: rosterStep.name }]),
+            failedSteps: [withLanes(rosterResolved, l)],
+            roster: true,
+            annotations: [],
+            assertions: [],
+            retrievalError: null,
+            log: null,
+          },
+        ],
+      },
+      { from: 'self-test fixture' },
+    ).text.split('\n');
+  const rowAboveClaims = (lines) => [
+    lines.some((l) => l.includes("The answer is in those members' rows, listed above")),
+    lines.some((l) => l.includes('jobs listed above, whose own rows already carry their assertions')),
+    lines.some((l) => l.includes('the member row(s) named above carry the answer')),
+  ];
+  const rosterVerdictPointers = (lines) => [
+    lines.some((l) => l.includes("NONE of its members' rows is in this report")),
+    lines.some((l) => l.includes('none of whose rows is in this report')),
+    lines.some((l) => l.includes('no member row in this report carries one')),
+  ];
+  const supersededReport = rosterReport(crossRunLanes);
+  t(
+    'the superseded shape: none of the three roster sentences claims a member row above, and each points at the roster verdict',
+    [rowAboveClaims(supersededReport), rosterVerdictPointers(supersededReport)],
+    [[false, false, false], [true, true, true]],
+  );
+  const listedReport = rosterReport(lanes);
+  t(
+    'the control: with a member row listed, the three roster sentences keep their text',
+    [rowAboveClaims(listedReport), rosterVerdictPointers(listedReport)],
+    [[true, true, true], [false, false, false]],
+  );
+  t(
+    'one reading decides them: listed, superseded, none found, all green, not walked',
+    [
+      rosterMembersListed([withLanes(rosterResolved, lanes)]),
+      rosterMembersListed([withLanes(rosterResolved, crossRunLanes)]),
+      rosterMembersListed([withLanes(rosterResolved, { matched: 0, notSucceeded: [] })]),
+      rosterMembersListed([withLanes(rosterResolved, { matched: 3, notSucceeded: [] })]),
+      rosterMembersListed([rosterResolved]),
+    ],
+    [true, false, false, false, null],
   );
   t(
     'a roster row ranks after every other row, both groups keeping walk order',
