@@ -7,26 +7,26 @@ Console (objectui) refreshed to `f0268ad78485`. Frontend changes in this range:
 Derived from the changesets objectui declared over the range — 173 releasing of 175 changesets added across 170 non-merge commits; omitted: 2 release-nothing changesets, 4 commits carrying no changeset (they ship no package code).
 
 - **minor** — The chat build panel reads cloud's post-apply verification loop, and an unknown build phase no longer reads as "Building" (objectui#11988, the receiver objectstack-ai/cloud#2172's… (objectui `6d5eb3430`)
-- **minor** — feat(types)!: a list view's legacy `options` bag is the `@objectstack/spec` list overlay's bag by reference, `ListViewTimelineConfig` is the list view's own `timeline` block, and… (objectui `5d77c099b`)
+- **minor** — **BREAKING** — feat(types)!: a list view's legacy `options` bag is the `@objectstack/spec` list overlay's bag by reference, `ListViewTimelineConfig` is the list view's own `timeline` block, and… (objectui `5d77c099b`)
 - **minor** — The built-in metadata designers leave the console's first load: `@object-ui/app-shell` registers them from a chunk it loads on its own, once the package entry has run (objectui#11… (objectui `4babf4035`)
 - **minor** — The Studio landing (`/studio`) gets the console's own header (objectui#11863). Its old header held one control, the product wordmark linking back to Home. It now mounts `AppHeader… (objectui `7ebff3991`)
-- **minor** — feat(types)!: the list view's `kanban`, `calendar`, `gallery` and `timeline` blocks are the `@objectstack/spec` 17.7.0 `ListViewSchema` slots by reference, and their `.passthrough… (objectui `cf62edf68`)
+- **minor** — **BREAKING** — feat(types)!: the list view's `kanban`, `calendar`, `gallery` and `timeline` blocks are the `@objectstack/spec` 17.7.0 `ListViewSchema` slots by reference, and their `.passthrough… (objectui `cf62edf68`)
 - **minor** — `element:repeater` reads the node-level `dataSource` binding first (objectui#11880, the repeater half of the objectui step of objectstack#11509, ruled A-narrow). (objectui `aaba8655a`)
 - **minor** — The Studio landing (`/studio`) lists the packages the author was last in, above its package cards (objectui#11863). A visit to a package's pillar builder (`/studio/PKG/TAB`) is re… (objectui `054fd8441`)
 - **minor** — The Import Wizard's preview checks a `time` column, and the user import's email column, the way the server's import judges them, so the import button no longer counts rows the ser… (objectui `fbad07885`)
-- **minor** — feat(types)!: `ObjectGridSchema.defaultFilters` and the flat `ObjectGanttSchema` / `ObjectMapSchema` `filter` follow their `@objectstack/spec` rows (objectui#6152, round 10) (objectui `b13ea3c67`)
+- **minor** — **BREAKING** — feat(types)!: `ObjectGridSchema.defaultFilters` and the flat `ObjectGanttSchema` / `ObjectMapSchema` `filter` follow their `@objectstack/spec` rows (objectui#6152, round 10) (objectui `b13ea3c67`)
 - **minor** — A console object list's toolbar grouping is now in the URL, beside its Filter panel conditions, search term and sort, so a grouped list can be shared as a link or bookmarked (obje… (objectui `75bacf93b`)
 - **minor** — **BREAKING** — A form field declares `scale` and `currencyConfig` on both faces, by reference to `@objectstack/spec`'s `FieldSchema`, so the strict authoring face accepts the decimal places and… (objectui `18d7b489c`)
 - **minor** — The list's Sort picker lists a field it keeps only for the current sort as removable, never as a new choice (objectui#11943). (objectui `4f4fc03f7`)
-- **minor** — feat(types)!: the `object-calendar` element's `calendar` container is the `@objectstack/spec` 17.7.0 slot by reference, and its `.passthrough()` is gone (objectui#6152, round 9) (objectui `1473757bf`)
-- **minor** — feat(types)!: `object-grid` `operations` and the `object-grid` / `object-kanban` / `object-calendar` `filter` follow the `@objectstack/spec` 17.7.0 rows (objectui#6152, round 8) (objectui `d7e9e9ab6`)
+- **minor** — **BREAKING** — feat(types)!: the `object-calendar` element's `calendar` container is the `@objectstack/spec` 17.7.0 slot by reference, and its `.passthrough()` is gone (objectui#6152, round 9) (objectui `1473757bf`)
+- **minor** — **BREAKING** — feat(types)!: `object-grid` `operations` and the `object-grid` / `object-kanban` / `object-calendar` `filter` follow the `@objectstack/spec` 17.7.0 rows (objectui#6152, round 8) (objectui `d7e9e9ab6`)
 - **minor** — The metadata designer registries are observable, so a designer registered after a surface rendered now appears in it (objectui#11939, step 1 of objectui#6795). (objectui `a835c3149`)
 - **minor** — **BREAKING** — The `sidebar` node declares `side` on both faces, so the strict authoring face accepts the edge the sidebar is drawn against (objectui#11070). (objectui `172acc313`)
 - **minor** — New SDUI widget `cloud:workspace-timezone-notice`: one line on the Cloud welcome page naming the timezone a workspace was seeded with at creation (objectui#11930, the objectui hal… (objectui `45d585363`)
 - **minor** — A new workspace now takes its creator's browser timezone when it is created, so its first administrator is no longer asked for a zone the browser already knows (objectui#11908). (objectui `dfa15c860`)
 - **minor** — **BREAKING** — The metric sub-caption is retired on the reader side (objectui#11389, ruling C, the objectui half after `@objectstack/spec` 17.7.0). **BREAKING** for any dashboard that drew a cap… (objectui `d92b2a15d`)
 - **minor** — `action:button` delivers `undoable` where a record is in scope, and publishes it (objectui#11168, ruling B on objectui#11754). (objectui `f0496bdf1`)
-- **minor** — feat(types)!: retire `object-grid`'s `resizableColumns` on both faces, and stop `ObjectGrid` reading it (objectui#6152, round 7) (objectui `d73d98770`)
+- **minor** — **BREAKING** — feat(types)!: retire `object-grid`'s `resizableColumns` on both faces, and stop `ObjectGrid` reading it (objectui#6152, round 7) (objectui `d73d98770`)
 - **minor** — A record action greyed out by its declared `disabled` predicate now says why (objectui#11811). It shows the reason "Not available for this record", and the same text is its access… (objectui `455c64665`)
 - **minor** — The list filter builder starts on the view's first column, hides hidden fields, and offers one empty check where "empty" and "null" mean the same records (objectui#11810). (objectui `1e1f09e99`)
 - **minor** — Dates and times render in the time zone the server answers for the signed-in workspace (objectui#11693). (objectui `d50f7241b`)
@@ -108,7 +108,7 @@ Derived from the changesets objectui declared over the range — 173 releasing o
 - **patch** — Studio stops asking questions whose expected answer is an error, so the browser console no longer fills with red lines that hide real failures (objectui#11799). (objectui `5dff0272d`)
 - …and 73 more releasing changesets in this range (list capped at 100; see the objectui range below).
 
-⚠️ 4 of these carry a breaking change: 4 by the author's own breaking annotation in the changeset body — objectui declares no `major` inside a launch window (`scripts/check-changeset-no-major.mjs`). Each is marked **BREAKING** in the list above — read them before compiling the release record.
+⚠️ 10 of these carry a breaking change: 10 by the author's own breaking annotation in the changeset body — objectui declares no `major` inside a launch window (`scripts/check-changeset-no-major.mjs`). Each is marked **BREAKING** in the list above — read them before compiling the release record.
 
 **In this console build, declared nowhere** — objectui merged 4 commits in this range with no `.changeset/*.md`. The code is inside the pin above and ships here, but nothing upstream declared them, so they appear in no objectui CHANGELOG and in no entry above. Listed by subject rather than counted, because a count cannot tell a dependency bump from a form-behaviour change (objectstack#6174); the upstream gate that would prevent this is objectui#3387.
 
