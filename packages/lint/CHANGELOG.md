@@ -77,7 +77,7 @@
   
   **The one-line fix: write each filter operand the flow computes as a CEL value envelope, and keep the query placeholders as they are.**
   
-  **Who is affected, measured.** In this repository, at the base: seven flow tokens at a filter operand in the shipped examples (`app-crm` 2, `app-showcase` 3, `app-todo` 2 — `app-todo`'s two query placeholders stay), five in the docs (`getting-started/common-patterns`, `kernel/runtime-services/examples` 2, the `service-automation` README 2), the flows guide's and the spec's own remedy texts (a `$User.Email` read named `filter: { id: '{uid}' }`; a `recordId` refusal named `filter: { id: '{record.id}' }`) and the `FlowSchema` example; all are migrated in this change. The value-slot retirement's run-user changeset on this line names `filter: { id: '{uid}' }` for a `$User.Email` read; this one supersedes that line: read the user record with `filter: { id: { dialect: 'cel', source: 'current_user.id' } }`. hotcrm was not measured.
+  **Who is affected, measured.** In this repository, at the base: seven flow tokens at a filter operand in the shipped examples (`app-crm` 2, `app-showcase` 3, `app-todo` 2 — `app-todo`'s two query placeholders stay), five in the docs (`getting-started/common-patterns`, `kernel/runtime-services/examples` 2, the `service-automation` README 2), the flows guide's and the spec's own remedy texts (a `$User.Email` read named `filter: { id: '{uid}' }`; a `recordId` refusal named `filter: { id: '{record.id}' }`) and the `FlowSchema` example; all are migrated in this change. hotcrm was not measured.
   
   **Still accepted, unchanged.** Every literal operand, every query placeholder, a filter's keys, operators and combinators, an empty filter, and a filter on `create_record`, which has none. The `filters` alias still converts to `filter` at load.
   
@@ -102,7 +102,7 @@
   
   **Not converted.** No D2 conversion rewrites any spelling: every token spelling authored in flows answers differently under CEL for some input (measured through both engines over the same variables, 13 of 25 probes the same, 12 different), so a rewrite would change what some flow writes. Where a value may be absent, whether the field should take nothing, `null` or a default was decided silently by the template; it is now the author's decision.
   
-  **What is still accepted, unchanged.** A CEL value envelope and every literal (a token-free string, numbers, booleans, `null`, arrays, objects). A `filter` value keeps the template dialect; a text slot (`notify` `title` / `message`, a screen `description`, …) reads `{{ }}` holes and refuses a single-brace token.
+  **What is still accepted, unchanged.** A CEL value envelope and every literal (a token-free string, numbers, booleans, `null`, arrays, objects). A text slot (`notify` `title` / `message`, a screen `description`, …) reads `{{ }}` holes and refuses a single-brace token.
   
   ## FROM → TO
   
@@ -140,7 +140,7 @@
   - **The refusal.** One judge in `@objectstack/spec/automation` (`textSlotTemplateRefusal`, `flowNodeTextSlotSources`, `FLOW_NODE_TEXT_SLOTS`, `TEXT_SLOT_TEMPLATE_REFUSAL`): `NotifyConfigSchema`, `ScreenConfigSchema` and `EndConfigSchema` refuse a single-brace token at the slot's key; `registerFlow` and `objectstack validate` (`expression-invalid`, `error`) refuse it with the same words and also compile every slot's holes, so `{{ a + b }}` or an unknown formatter is refused before a run. A stored flow carrying one is skipped at boot with a warn naming it. Past the doors, a hole that does not compile fails the node with a guard refusal, which a `fault` edge does not route.
   - **`@objectstack/formula`.** A template hole's path may contain `$` (`{{ $error.message }}`): a widening of the hole grammar, so a host scope's `$`-named variable has a template spelling. An unbound one renders nothing, like any unknown path.
   - **`flow-double-brace-interpolation`** no longer flags `{{ }}` on the text slots, and its hint names them as the only `{{ }}` positions; a bare `$ref.x` outside the holes of a text slot is flagged with the hole spelling.
-  - **Unchanged:** a CRUD `filter` value keeps the single-brace dialect, and the value slots are CEL's.
+  - **Unchanged:** the value slots are CEL's.
   
   **Not converted.** No ADR-0087 D2 conversion rewrites `{x}` to `{{ x }}`. The two renderers were run over the same variables: a path renders the same text for a string, a number, a boolean, `null`, an absent key or variable, an ISO date string, an object or an array, but a `Date` value rendered JSON-quoted under the 17.x interpolator (`"2026-10-08T09:30:00.000Z"`, quotes included) and as its ISO text now, and a screen or `end` text that was one token holding an object, an array or a `Date` rendered `String(value)` (`[object Object]`). So the rewrite is the author's to check; the D3 record is the semantic entry `flow-text-slot-single-brace-refused`.
   
@@ -830,7 +830,7 @@
   
   **Newly accepted.** A CEL value envelope at `loop.collection` and `map.collection`: the published JSON Schema for both gains the envelope arm (a list, or the envelope object), and so do the inferred `LoopConfig['collection']` and `MapConfig['collection']`, which lose `string`. `FlowCollectionSlotSchema` (`@objectstack/spec/automation`) is the contract both take.
   
-  **Still accepted, unchanged.** An inline array at both, and on a body-less `loop` any `collection` its legacy form reads. The single-brace dialect keeps resolving where it still lives, a CRUD `filter` value.
+  **Still accepted, unchanged.** An inline array at both, and on a body-less `loop` any `collection` its legacy form reads.
   
   ### The kit
   
@@ -876,7 +876,7 @@
   
   **Newly refused in the body.** An object naming a `dialect` was data before and was sent as written; it is an expression now, evaluated per run, and a malformed one is refused. An envelope nested inside a literal body is still data, sent as written.
   
-  **Still accepted, unchanged.** Every literal at these keys, and the published shapes of `url` (a string), `headers` (a map of strings), `method`, `durable`, `timeoutMs` and `signingSecret`. The single-brace dialect keeps resolving where it still lives, a CRUD `filter` value.
+  **Still accepted, unchanged.** Every literal at these keys, and the published shapes of `url` (a string), `headers` (a map of strings), `method`, `durable`, `timeoutMs` and `signingSecret`.
   
   ### The kit
   
@@ -922,7 +922,7 @@
   
   **Newly refused at the literals.** A `{…}` token in `sourceObject`, in `actorId` or in any string of a `payload` value, and a CEL value envelope written as a `payload` value, which was handed on as the object it spells.
   
-  **Still accepted, unchanged.** Every literal at these positions. The single-brace dialect keeps resolving where it still lives, a CRUD `filter` value.
+  **Still accepted, unchanged.** Every literal at these positions.
   
   ### The kit
   
@@ -971,7 +971,7 @@
   
   **Who is affected, measured.** This repository's examples carry no date macro in a value slot; its own test fixtures and docs that did are migrated in this change. The census taken for this retirement's first change measured 15 date-macro value-slot sites in hotcrm at `c529de2` (8 `{NOW()}`, 3 `{TODAY()}`, 3 `{TODAY() + N}`, 1 `{TODAY() + var}`); they migrate there. Deployed metadata and other repositories were not measured here.
   
-  **Still accepted, unchanged.** A CEL value envelope and every literal. The single-brace dialect, date macros included, keeps resolving where it still lives, a CRUD `filter` value.
+  **Still accepted, unchanged.** A CEL value envelope and every literal.
   
   ### The kit
   
@@ -993,7 +993,7 @@
   
   **The expression remedy.** A refused `{…}` arithmetic token's CEL spelling now reads every variable path in it the way a lone path token's does — `{int * 2}` is `vars["int"] * 2`, `{items.0 * 2}` is `items[0] * 2` — instead of rewriting only its divisors, which printed envelopes that did not evaluate.
   
-  **Still accepted, unchanged.** A CEL value envelope and every literal. `{$User.*}` keeps resolving where the single-brace dialect still lives, a CRUD `filter` value.
+  **Still accepted, unchanged.** A CEL value envelope and every literal.
   
   ## FROM → TO
   
@@ -1001,7 +1001,7 @@
   |:--|:--|:--|
   | `'{$User.Id}'` | `{ dialect: 'cel', source: 'current_user.id' }` | nothing when the run has a user |
   | `'{$User.Id}'`, in a flow that can run without a user | `{ dialect: 'cel', source: 'current_user != null ? current_user.id : null' }` — or skip the node with `current_user != null` as a start condition or a `decision` | the guarded form writes `null` where the template wrote nothing, so on `update_record` it clears a stored value the template left alone |
-  | `'{$User.Email}'`, `'{$User.Name}'`, any other `$User` path | an `assignment` of `uid: { dialect: 'cel', source: 'current_user.id' }`, a `get_record` on `sys_user` with `filter: { id: '{uid}' }` and `outputVariable: 'me'`, then `{ dialect: 'cel', source: 'me.email' }` | these never resolved in any shipped run: they wrote nothing |
+  | `'{$User.Email}'`, `'{$User.Name}'`, any other `$User` path | a `get_record` on `sys_user` with `filter: { id: { dialect: 'cel', source: 'current_user.id' } }` and `outputVariable: 'me'`, then `{ dialect: 'cel', source: 'me.email' }` | these never resolved in any shipped run: they wrote nothing |
   | `'Owner: {$User.Id}'` | `{ dialect: 'cel', source: "'Owner: ' + current_user.id" }` | in a user-less run, write the hole as `(current_user != null ? current_user.id : '')` |
   | a text slot's `assignments: { by: '{$User.Id}' }`, then `'By {{ by }}'` | `assignments: { by: { dialect: 'cel', source: 'current_user.id' } }`, then `'By {{ by }}'` | nothing when the run has a user; where the flow can run without one, compute `current_user != null ? current_user.id : null`, which renders nothing where the template did |
   
@@ -1074,12 +1074,12 @@
   - **`os explain <rule-id>` takes these nine ids**, for example `os explain view/layout-without-binding`. It prints the reasoning the verdicts no longer carry: each view type's measured renderer path, refusal screen and required keys, the exemptions (`user` relationships, `multiselect`, `gallery`), the hex trap behind the two `rowColor` rules, and why an empty `triggers` is not an off switch. The `rule:` line under each of these findings now ends with `` — `os explain <rule-id>` for … ``. The no-argument listing and its `--json` `rules` array list the nine ids, and so does the unknown-id error's `Rules with an explanation:` line. `RULE_EXPLANATIONS` in `@objectstack/lint` gains the nine entries.
   - **Where the new text prints.** On the CLI, `os validate`, `os build` (and `os compile`, which `os dev` runs on every compile), `os lint`, `os verify` and `os init`'s scaffold check print the new `message` on the text face. `os validate --json` and `os build --json` carry it in their `warnings` and author-time `issues`. At the runtime publish gate, the rule runs on `object` writes only (Studio, REST `/meta`, MCP), so only the `field/*` ids reach it. A `summary` field with no `summaryOperations` or a `formula` field with no `expression` is an `error`: the 422 issue's `message` changes, and so does the server's refusal log line under the unlinted-writes hatch. A `checkboxes` field with no `options` is a `warning`: the `message` in the 2xx response's `advisories` changes, and so does the deduped `[Protocol] authoring advisory` server log line. Each issue's `hint` is unchanged. A `lookup`/`master_detail` with no `reference` and a `select`/`radio` with no `options` never reach this gate: the object schema's own parse refuses them first, with its own message, which this change does not touch.
   - **Unchanged doors.** The registry's boot-time line (`[Registry] Object "…" registered with N functionally-incomplete field(s) …`) prints each finding's rule id and `fix`, never its `message`, so it reads as before. The webhook auto-enqueuer's `webhook/without-triggers` boot warning has its own text, also unchanged. The `view/*` and `webhook/*` ids do not run at the runtime publish gate.
-- d8c7d38: fix(lint): the flow-credential, AI skill, flow-filter-token, managed-object API method, organization-axis business-unit grant, retired permission residue, seed and semantic-role provenance findings print one verdict line, `os explain <rule-id>` carries their reasoning, and `field-no-consumers` stops listing every object that shares a field name
+- d8c7d38: fix(lint): the flow-credential, AI skill, managed-object API method, organization-axis business-unit grant, retired permission residue, seed and semantic-role provenance findings print one verdict line, `os explain <rule-id>` carries their reasoning, and `field-no-consumers` stops listing every object that shares a field name
   
   Clause-②: no
   
-  - **Shorter verdicts.** Each finding of these 10 rule ids now prints a `message` of one verdict sentence. Every finding the rules' own test suites fire is at most 194 characters, and the runtime publish gate's suite at most 181; before, the longest of each ran from 222 to 441 characters. The ids:
-    - flows: `flow-credential-literal` (a literal credential in an `http` node's headers or url query, or in a `connectorConfig.input`) and `flow-filter-token-unknown` (a `{NAME()}` filter token neither the flow template dialect nor the filter placeholders define);
+  - **Shorter verdicts.** Each finding of these 9 rule ids now prints a `message` of one verdict sentence. Every finding the rules' own test suites fire is at most 194 characters, and the runtime publish gate's suite at most 181; before, the longest of each ran from 222 to 441 characters. The ids:
+    - flows: `flow-credential-literal` (a literal credential in an `http` node's headers or url query, or in a `connectorConfig.input`);
     - AI agents and skills: `ai-skill-surface-mismatch` and `ai-skill-tool-unresolved`;
     - managed objects: `object/managed-api-method-unaffordable`;
     - sharing rules: `org-axis-cross-org-bu-grant` (its sibling `org-axis-permission-inheritance` already printed one sentence of at most 174 characters and is unchanged);
@@ -1087,10 +1087,12 @@
     - seed datasets: `seed-insert-mode-duplicates-on-replay` and `seed-value-outside-state-machine`;
     - semantic roles: `semantic-role-field-unprovisioned`.
   
+    A tenth id this change shortened, `flow-filter-token-unknown`, is retired in this same release with its rule: a flow filter operand is a value slot, and a token there is refused as `expression-invalid` by `validateStackExpressions` (its `ExprIssue`), with the CEL envelope that replaces it.
+  
     A verdict no longer repeats what the finding's `where` already names: the skill (`ai-skill-tool-unresolved` now opens on the tool), the managed object, the sharing rule's object and the semantic-role object. `flow-credential-literal` keeps a short route (`move it to a connector's \`auth.credentialRef\``, or `drop it` for a connector input) because `os lint` prints the fix only under `--fix`; the route by auth variant stays the fix line's. `seed-value-outside-state-machine` names the first three declared states, then `(and N more)`. `object/managed-api-method-unaffordable` no longer appends the spec's `describeManagedApiMethodConflicts` sentence; it names the refused verbs, the `managedBy` bucket and the affordances they need. The `fix` (the CLI's `fix:` line, the runtime issue's `hint`), every rule id, severity and `path`, and what each rule accepts or refuses are unchanged. A tool that matched the old message text should match on `rule` and `path` instead.
   - **`field-no-consumers`** names the first other object that declares a field of the same name and counts the rest (`a consumer of the same name on "showcase_account" (and 9 more) does not count`), where it listed every one. On `os validate` of the showcase app its longest finding drops from 341 characters to 199, and that 341-character one, which named ten objects, now prints 143. Its `inert` and `carrier-only` verdicts and its explanation are otherwise unchanged.
-  - **`os explain <rule-id>` takes these 10 ids**, for example `os explain flow-credential-literal`. It prints the reasoning the verdicts no longer carry: which flow positions are served to every flow reader and where a credential belongs, by auth variant; how an agent's and a skill's surfaces must match, and why an unresolved skill name is skipped; how a skill's tool name resolves and when an action materialises as a tool; the two vocabularies a flow filter token resolves in, and why a miss stops the node; which affordance each write verb needs and what the registry does with a refused one; why business-unit trees stay inside one organization and which recipients may share a platform-global object; why the retired `allowRestore` / `allowPurge` default is accepted in silence and which channels miss it; why seeds must be safe to replay and which states a seeded value may name; and why an injected column on an external object is blank. The `rule:` line under each of these findings now ends with `` — `os explain <rule-id>` for … ``. The no-argument listing and its `--json` `rules` array list the 10 ids, and so does the unknown-id error's `Rules with an explanation:` line. `RULE_EXPLANATIONS` in `@objectstack/lint` gains the 10 entries.
-  - **Where the new text prints.** On the CLI, all 11 ids: `os validate`, `os build` (and `os compile`, which `os dev` runs when it compiles at startup, and on each watch recompile under `--verbose`), `os lint` (as `where: message`) and the scaffold check `os init` runs print the new `message` on the text face, and `os validate --json` and `os build --json` carry it in their `errors` and author-time `issues`. `os verify` prints the error-severity ids' new text in its refusal list (`ai-skill-surface-mismatch`, `flow-filter-token-unknown`, `object/managed-api-method-unaffordable`, `org-axis-cross-org-bu-grant`) and counts the warnings without printing them. At the runtime publish gate (Studio, REST `/meta`, MCP): a `flow` write's `flow-filter-token-unknown` and an `object` write's `object/managed-api-method-unaffordable` change the 422 issue's `message` and the refusal log line under `OS_ALLOW_UNLINTED_METADATA_WRITES`; a `flow` write's `flow-credential-literal` and a `permission` write's `permission-retired-lifecycle-residue` change the 2xx `advisories` entry and the `[Protocol] authoring advisory` log line. Each issue's `hint` is unchanged.
+  - **`os explain <rule-id>` takes these 9 ids**, for example `os explain flow-credential-literal`. It prints the reasoning the verdicts no longer carry: which flow positions are served to every flow reader and where a credential belongs, by auth variant; how an agent's and a skill's surfaces must match, and why an unresolved skill name is skipped; how a skill's tool name resolves and when an action materialises as a tool; which affordance each write verb needs and what the registry does with a refused one; why business-unit trees stay inside one organization and which recipients may share a platform-global object; why the retired `allowRestore` / `allowPurge` default is accepted in silence and which channels miss it; why seeds must be safe to replay and which states a seeded value may name; and why an injected column on an external object is blank. The `rule:` line under each of these findings now ends with `` — `os explain <rule-id>` for … ``. The no-argument listing and its `--json` `rules` array list the 9 ids, and so does the unknown-id error's `Rules with an explanation:` line. `RULE_EXPLANATIONS` in `@objectstack/lint` gains the 9 entries.
+  - **Where the new text prints.** On the CLI, all 10 ids: `os validate`, `os build` (and `os compile`, which `os dev` runs when it compiles at startup, and on each watch recompile under `--verbose`), `os lint` (as `where: message`) and the scaffold check `os init` runs print the new `message` on the text face, and `os validate --json` and `os build --json` carry it in their `errors` and author-time `issues`. `os verify` prints the error-severity ids' new text in its refusal list (`ai-skill-surface-mismatch`, `object/managed-api-method-unaffordable`, `org-axis-cross-org-bu-grant`) and counts the warnings without printing them. At the runtime publish gate (Studio, REST `/meta`, MCP): an `object` write's `object/managed-api-method-unaffordable` changes the 422 issue's `message` and the refusal log line under `OS_ALLOW_UNLINTED_METADATA_WRITES`; a `flow` write's `flow-credential-literal` and a `permission` write's `permission-retired-lifecycle-residue` change the 2xx `advisories` entry and the `[Protocol] authoring advisory` log line. Each issue's `hint` is unchanged.
   - **Never at the runtime gate:** `org-axis-cross-org-bu-grant`, the two seed ids, `semantic-role-field-unprovisioned` and `field-no-consumers` (CLI-only rules), and the two AI ids, whose rules run at that door only for a `flow` write, whose snapshot carries no agents or skills of their own.
 - 2e11d90: fix(lint): 15 author-time rule ids print a `fix:` line of one remedy sentence, and `os explain <rule-id>` carries what those lines used to enumerate
   
@@ -1170,27 +1172,27 @@
     Studio's save-advisory toast prints an advisory's `hint` after its message, so the credential, readonlyWhen, unknown-object and ungranted-detail toasts shorten, and Studio's draft-changes panel shows the `hint` in place of the message for the two controlled-by-parent errors its in-browser security check finds on object drafts. No Studio, REST or MCP reader in this repository or in objectui matches on `hint` text; a tool that did should match on `rule` and `path` instead.
   - **Never at the runtime gate:** `action-dispatch-contract-mismatch`, `page/visualization-without-binding`, `action-api-update-readonly-when-field` and the two `sharing-rule-object-*` ids run on the CLI only.
   - **Unchanged:** every `message` (the verdict), rule id, severity and `path`, and what each rule accepts or refuses.
-- 63d5db2: fix(lint): 17 more author-time rule ids print a `fix:` line of one remedy sentence, and `os explain RULE_ID` carries what those lines used to explain
+- 63d5db2: fix(lint): 16 more author-time rule ids print a `fix:` line of one remedy sentence, and `os explain RULE_ID` carries what those lines used to explain
   
   Clause-②: no
   
-  - **Shorter fix lines.** Each finding of these 17 rule ids now carries a `hint` (the CLI's `fix:` line, the runtime issue's `hint`) of one remedy sentence of at most 200 characters on every variant the lint suite fires (the lengths here are the `hint` alone; the CLI prints it after `fix: `). The longest of each, before → after:
+  - **Shorter fix lines.** Each finding of these 16 rule ids now carries a `hint` (the CLI's `fix:` line, the runtime issue's `hint`) of one remedy sentence of at most 200 characters on every variant the lint suite fires (the lengths here are the `hint` alone; the CLI prints it after `fix: `). The longest of each, before → after:
     - list-view search: `searchable-field-unknown` (448 → 129), `searchable-field-unprovisioned` (362 → 175) and `searchable-field-unsearchable` (328 → 139);
     - list-view sort: `sort-field-unprovisioned` (378 → 191), `sort-field-unsortable` (332 → 154) and `sort-field-unknown` (301 → 142);
     - visibility predicates: `visibility-predicate-unknown-function` (375 → 165), `visibility-bare-identifier` (221 → 102) and `visibility-predicate-syntax` (214 → 113);
-    - flow filters: `flow-filter-token-unknown` (427 → 182);
     - actions: `action-no-placement` (424 → 171);
     - import mappings: `mapping-target-field-unknown` (405 → 189);
     - dashboards: `unconsumed-widget-option` (396 → 135);
     - app navigation: `nav-object-ungranted` (370 → 118);
     - hook bodies: `hook-body-write-unprovisioned-anchor` (365 → 178), `hook-body-write-unknown-field` (275 → 110) and `hook-body-source-unparseable` (254 → 105).
-  - **One line, one remedy.** Where a fix line explained its remedy, the explanation moved: why a stale or inadmissible `searchableFields` entry is a `400 INVALID_FIELD` on list search, that a view narrows the object's searchable set and never widens it, and that a lookup column stores only an id; that both runtime doors refuse a formula sort with `400 INVALID_SORT`; how to vouch for an unprovisioned anchor (`columnMap`) or opt the object out of the injection (`ownership: 'none'`, `systemFields: { audit: false }`); the two vocabularies a flow filter token resolves in; the other-language operator spellings CEL does not parse, why re-spelling cannot fix an unregistered function, and which namespaces each surface binds; why gating a nav entry does not clear a missing grant; which hook-body write shapes are checked; what a partially parsed body leaves unchecked.
+  
+    A seventeenth id this change shortened, `flow-filter-token-unknown`, is retired in this same release with its rule: a flow filter operand is a value slot, and a token there is refused as `expression-invalid` by `validateStackExpressions` (its `ExprIssue`), with the CEL envelope that replaces it.
+  - **One line, one remedy.** Where a fix line explained its remedy, the explanation moved: why a stale or inadmissible `searchableFields` entry is a `400 INVALID_FIELD` on list search, that a view narrows the object's searchable set and never widens it, and that a lookup column stores only an id; that both runtime doors refuse a formula sort with `400 INVALID_SORT`; how to vouch for an unprovisioned anchor (`columnMap`) or opt the object out of the injection (`ownership: 'none'`, `systemFields: { audit: false }`); the other-language operator spellings CEL does not parse, why re-spelling cannot fix an unregistered function, and which namespaces each surface binds; why gating a nav entry does not clear a missing grant; which hook-body write shapes are checked; what a partially parsed body leaves unchecked.
   - **A list the verdict already covers is not echoed.** `searchable-field-unknown`, `sort-field-unknown` and `mapping-target-field-unknown` no longer list every field of the object: the verdict's "Did you mean" names the near miss. `mapping-target-field-unknown` still lists the object's compound fields and their parts, as every import-mapping refusal does.
   - **`os explain RULE_ID` carries the rest.** What the fix lines stopped saying is each id's `RULE_EXPLANATIONS` entry in `@objectstack/lint`, which `os explain RULE_ID` prints. Two ids had no entry and gain one, so their `rule:` line now ends with the `os explain` pointer: `action-no-placement` ("where an action can be placed") and `unconsumed-widget-option` ("which widget options a renderer reads"). Five entries gain text. The action locations the new entry spells out are held to the spec's `ACTION_LOCATIONS` by the rule's test.
-  - **At the runtime publish gate** (Studio, REST `PUT /api/v1/meta`, and the MCP and AI authors that write through that door), 10 of the 17 fire; the `hint` FROM → TO, measured at the door:
+  - **At the runtime publish gate** (Studio, REST `PUT /api/v1/meta`, and the MCP and AI authors that write through that door), 9 of the 16 fire; the `hint` FROM → TO, measured at the door:
     - a `view` write: `sort-field-unknown` (422 `issues[].hint`, a name / a dotted path 114 / 261 → 47 / 135), `sort-field-unsortable` (422, 318 → 140), `sort-field-unprovisioned` (2xx `advisories[].hint`, 363 → 176), `searchable-field-unknown` (422, a name / a dotted path 281 / 430 → 48 / 129), `searchable-field-unsearchable` (422, a formula / outside the declared set / a lookup / a json column 222 / 142 / 323 / 157 → 110 / 68 / 135 / 64), `searchable-field-unprovisioned` (2xx advisory, 361 → 174), `visibility-predicate-syntax` (422, a recognised spelling / none 106 / 214 → 106 / 107), `visibility-predicate-unknown-function` (422, 371 → 165) and `visibility-bare-identifier` (422, a bare name / an unbound namespace 160 / 215 → 41 / 96);
-    - an `object` write: `searchable-field-unknown` (422, the object's own set / a built-in list view 266 / 261 → 55 / 50), `searchable-field-unsearchable` (422, 222 → 110) and `searchable-field-unprovisioned` (2xx advisory, 361 → 174);
-    - a `flow` write: `flow-filter-token-unknown` (422, `{TOMORROW()}` / `{ROUND(x)}` / `{Math.round(x)}` / `{TODAY() - 45 - 10}` 336 / 358 / 427 / 100 → 91 / 113 / 182 / 100).
+    - an `object` write: `searchable-field-unknown` (422, the object's own set / a built-in list view 266 / 261 → 55 / 50), `searchable-field-unsearchable` (422, 222 → 110) and `searchable-field-unprovisioned` (2xx advisory, 361 → 174).
   
     Studio's save-advisory toast prints an advisory's `hint` after its message, so the two `*-unprovisioned` toasts shorten; Studio renders no 422 issue's `hint`. No Studio, REST or MCP reader in this repository or in objectui matches on `hint` text; a tool that did should match on `rule` and `path` instead.
   - **Never at the runtime gate:** `action-no-placement`, `mapping-target-field-unknown`, `unconsumed-widget-option`, `nav-object-ungranted` and the three `hook-body-*` ids run on the CLI only.
