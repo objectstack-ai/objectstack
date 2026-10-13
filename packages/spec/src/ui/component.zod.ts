@@ -57,7 +57,7 @@ import { AggregationFunction } from '../data/query.zod';
 // `{ formats }` while the grid reads `.formats` and lifts nothing. Declared
 // outside the `ui` barrel so the two carriers share it without publishing it.
 import { ListViewExportOptionsSchema } from './list-view-export-options';
-import { InlineActionSchema, ActionLocationSchema } from './action.zod';
+import { ActionSchema, InlineActionSchema, ActionLocationSchema } from './action.zod';
 import { ACTION_TARGET_ALIASES } from './action-target-aliases';
 import { navigationTargetRefusal } from './navigation-target';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
@@ -3971,8 +3971,11 @@ const ACTION_NODE_ALIASES = {
  * executor. ⛔ No second URL grammar here.
  *
  * On every other executor `target` names a script, flow, page, endpoint or
- * form and is untouched. A row with no `target` is not judged here: nothing
- * was written for the set to judge. Because `os validate`'s props gate parses
+ * form and is untouched; the url executor's alias spelling `'navigation'` is
+ * refused at the executor key ({@link refuseRowUrlExecutorAlias}), so no row
+ * reaches the url navigator with its `target` unjudged. A row with no
+ * `target` is not judged here: nothing was written for the set to judge.
+ * Because `os validate`'s props gate parses
  * `properties` against these same rows (`ComponentPropsMap`), it reports this
  * refusal at the same path with the same text — one rule, two doors.
  */
@@ -3983,6 +3986,75 @@ function refuseUnopenableRowUrlTarget(executorKey: 'actionType' | 'type', subjec
     if (refusal !== undefined) ctx.addIssue({ code: 'custom', path: ['target'], message: refusal });
   };
 }
+
+/**
+ * The url executor's one spelling on a page action row. The console's action
+ * runner keeps `'navigation'` as a local alias of `'url'`: its built-in table
+ * sends the alias to `executeNavigation`, which reads `to || target ||
+ * redirect` and hands off to `navigateTo`, the navigator `executeUrl` calls
+ * with `target || redirect` (`core/src/actions/ActionRunner.ts` at the pin).
+ * On a row the two are the same navigation: the alias's own keys (`to`,
+ * `redirect`, `external`, `newTab`, `replace`) are not row keys, so the strict
+ * row refuses them, and both read the row's `target` and `openIn`. But
+ * {@link refuseUnopenableRowUrlTarget} judges `target` only on `'url'`, so the
+ * alias spelling carried a target the click refuses past the parse. The
+ * executor gets one spelling: the alias is refused at the executor key, with
+ * the lossless rename onto `'url'`, whose `target` the url scheme set judges.
+ *
+ * The key otherwise stays open, as its `describe` says: the runner dispatches a
+ * handler a host registers under any other name before its built-ins, and the
+ * console registers several (`navigate_create`, `navigate_edit`, …), so every
+ * other value is the host's and is not judged here. The `element:button`
+ * inline action keeps its own declared fold of `type: 'navigation'` onto
+ * `'url'` (`normalizeInlineAction`, `action.zod.ts`), a bridge for its measured
+ * producers; no page action row writes the alias.
+ */
+function refuseRowUrlExecutorAlias(executorKey: 'actionType' | 'type', subject: string) {
+  return (row: { actionType?: string; type?: string }, ctx: z.RefinementCtx): void => {
+    if (row[executorKey] !== 'navigation') return;
+    ctx.addIssue({
+      code: 'custom',
+      path: [executorKey],
+      message:
+        `${subject} is the console runner's local alias of \`'url'\`, and the url executor has one spelling. `
+        + `Write \`${executorKey}: 'url'\`: on a page action row the alias runs the same navigator on the same `
+        + '`target` and `openIn`, so nothing else changes, and a `\'url\'` row\'s `target` is judged by the url '
+        + 'scheme set.',
+    });
+  };
+}
+
+/**
+ * A page action row's `onSuccess`: `ActionSchema`'s own post-success block, by
+ * reference — the one `strictObject` `{ navigate, openIn }` that
+ * `ActionSchema.onSuccess` declares, read off the object half of the action's
+ * pipe (the way {@link buildObjectFormSectionFieldEntry} reads
+ * `FormFieldSchema`'s). ⛔ No second shape and no second URL grammar.
+ *
+ * Every row forwards `onSuccess` to the console's action runner whole
+ * (`action-button.tsx`, `action-icon.tsx`, `action-group.tsx` and
+ * `action-menu.tsx` at the pin), and the runner reads exactly this block:
+ * `handlePostExecution` → `readOnSuccessNavigation` (a non-array object with a
+ * non-empty string `navigate`, and nothing else gets a reading) →
+ * `navigateOnSuccess` (interpolates `navigate`, classifies the result with
+ * `classifyNavigationTarget` and performs no navigation for a refused one,
+ * opens a new tab only on `openIn: 'newTab'`). It reads no key the block does
+ * not declare. So the block brings its whole judgement along:
+ * `refuseUnopenableOnSuccessNavigate` judges `navigate` with
+ * `navigation-target.ts`'s grammar, an unknown key gets the block's rename
+ * prescriptions, and `openIn` is the closed `'self' | 'newTab'` enum with its
+ * materialised `'self'` default, which the runner relies on by reading only
+ * `=== 'newTab'`. Until this, the rows declared `z.unknown()`, and a
+ * `navigate` the runner refuses, a misspelled key or a retired callback shape
+ * parsed clean and did nothing after the action succeeded.
+ *
+ * What the block does not bring: `ActionSchema`'s rules ABOUT `onSuccess` — it
+ * is refused beside a `type` other than `api` / `script`, and beside
+ * `opensInNewTab: true` — are refinements of the action, not of the block. The
+ * rows' executor set is open and the runner runs the hop after every executor,
+ * a host handler included, so those rules do not carry over as written.
+ */
+const actionOnSuccessBlock = () => ActionSchema.in.shape.onSuccess.unwrap();
 
 /**
  * Read-but-not-authorable keys shared by `action:button` and `action:icon`,
@@ -4077,7 +4149,7 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
   icon: z.string().optional()
     .describe('Lucide icon name drawn left of the label, resolved through the shared action-icon resolver (an unknown name draws no icon)'),
   actionType: z.string().optional()
-    .describe('Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. Write it here, not as `type`: on a page component `type` is the component itself'),
+    .describe('Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. `navigation`, the runner\'s alias of `url`, is refused: write `url`. Write it here, not as `type`: on a page component `type` is the component itself'),
   variant: z.enum([...BUTTON_PRIMITIVE_VARIANTS, 'primary']).optional()
     .describe('Button variant — the Button primitive\'s vocabulary, plus `primary`, which renders as `default` (renderer default: `default`)'),
   size: z.enum([...BUTTON_PRIMITIVE_SIZES, 'md']).optional()
@@ -4109,16 +4181,19 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
     .describe('Action locations, forwarded to the runner — the console uses them to tell a record-scoped action from an object-level one'),
   toast: z.unknown().optional().describe('Toast behaviour, forwarded to the runner'),
   resultDialog: z.unknown().optional().describe('One-shot result dialog for a value the response shows exactly once, forwarded to the runner'),
-  onSuccess: z.unknown().optional().describe('Declared post-success navigation, forwarded to the runner'),
+  onSuccess: actionOnSuccessBlock().optional()
+    .describe('Post-success navigation, forwarded to the runner: `ActionSchema`\'s own `{ navigate, openIn }` block. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with ${, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab`'),
   objectName: z.string().optional()
     .describe('Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page\'s object. Omit to act on the page\'s object'),
-}).superRefine(refuseUnopenableRowUrlTarget('actionType', "An `action:button`'s `target` (`actionType: 'url'`)")));
+}).superRefine(refuseUnopenableRowUrlTarget('actionType', "An `action:button`'s `target` (`actionType: 'url'`)"))
+  .superRefine(refuseRowUrlExecutorAlias('actionType', "An `action:button`'s `actionType: 'navigation'`")));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ActionButtonProps = z.input<typeof ActionButtonPropsSchema>;
 /**
  * ADR-0122: the parsed state differs from the authored state on `visible` and `disabled` — the
  * bare-string arm of the condition union normalizes to the canonical
- * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform).
+ * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform) — and on
+ * `onSuccess`, whose `openIn` the action's own block resolves to `'self'` when it is omitted.
  */
 export type ActionButtonPropsParsed = z.infer<typeof ActionButtonPropsSchema>;
 
@@ -4176,7 +4251,7 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
   icon: z.string().optional()
     .describe('Lucide icon name, resolved through the shared action-icon resolver (renderer registration default `play`)'),
   actionType: z.string().optional()
-    .describe('Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. Write it here, not as `type`'),
+    .describe('Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. `navigation`, the runner\'s alias of `url`, is refused: write `url`. Write it here, not as `type`'),
   variant: z.enum([...BUTTON_PRIMITIVE_VARIANTS, 'primary']).optional()
     .describe('Button variant — the Button primitive\'s vocabulary, plus `primary`, which renders as `default` (renderer default: `ghost`)'),
   visible: actionCondition().optional()
@@ -4204,16 +4279,19 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
     .describe('Action locations, forwarded to the runner — the console uses them to tell a record-scoped action from an object-level one'),
   toast: z.unknown().optional().describe('Toast behaviour, forwarded to the runner'),
   resultDialog: z.unknown().optional().describe('One-shot result dialog for a value the response shows exactly once, forwarded to the runner'),
-  onSuccess: z.unknown().optional().describe('Declared post-success navigation, forwarded to the runner'),
+  onSuccess: actionOnSuccessBlock().optional()
+    .describe('Post-success navigation, forwarded to the runner: `ActionSchema`\'s own `{ navigate, openIn }` block. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with ${, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab`'),
   objectName: z.string().optional()
     .describe('Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page\'s object. Omit to act on the page\'s object'),
-}).superRefine(refuseUnopenableRowUrlTarget('actionType', "An `action:icon`'s `target` (`actionType: 'url'`)")));
+}).superRefine(refuseUnopenableRowUrlTarget('actionType', "An `action:icon`'s `target` (`actionType: 'url'`)"))
+  .superRefine(refuseRowUrlExecutorAlias('actionType', "An `action:icon`'s `actionType: 'navigation'`")));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ActionIconProps = z.input<typeof ActionIconPropsSchema>;
 /**
  * ADR-0122: the parsed state differs from the authored state on `visible` and `disabled` — the
  * bare-string arm of the condition union normalizes to the canonical
- * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform).
+ * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform) — and on
+ * `onSuccess`, whose `openIn` the action's own block resolves to `'self'` when it is omitted.
  */
 export type ActionIconPropsParsed = z.infer<typeof ActionIconPropsSchema>;
 
@@ -4360,7 +4438,7 @@ function actionContainerMemberShape() {
     icon: z.string().optional()
       .describe('Lucide icon name drawn before the label, resolved through the shared action-icon resolver (an unknown name draws no icon)'),
     type: z.string().optional()
-      .describe('Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. A member is an action entry, so its executor is `type` (on an `action:button` node it is `actionType`)'),
+      .describe('Executor the action runner dispatches to — built in: `script`, `url`, `modal`, `flow`, `api`, `form`; a handler registered under another name is dispatched too. `navigation`, the runner\'s alias of `url`, is refused: write `url`. A member is an action entry, so its executor is `type` (on an `action:button` node it is `actionType`)'),
     variant: z.enum([...BUTTON_PRIMITIVE_VARIANTS, 'primary']).optional()
       .describe('Item variant — the Button primitive\'s vocabulary, plus `primary` (drawn as `default`). An inline `action:group` button draws it (falling back to the group\'s `variant`); a dropdown or `action:menu` item draws `destructive` red and every other variant plainly'),
     visible: actionCondition().optional()
@@ -4390,7 +4468,8 @@ function actionContainerMemberShape() {
       .describe('Action locations, forwarded to the runner — an `action:group` with a `location` draws only the members that list it, and the console uses them to tell a record-scoped action from an object-level one'),
     toast: z.unknown().optional().describe('Toast behaviour, forwarded to the runner'),
     resultDialog: z.unknown().optional().describe('One-shot result dialog for a value the response shows exactly once, forwarded to the runner'),
-    onSuccess: z.unknown().optional().describe('Declared post-success navigation, forwarded to the runner'),
+    onSuccess: actionOnSuccessBlock().optional()
+      .describe('Post-success navigation, forwarded to the runner: `ActionSchema`\'s own `{ navigate, openIn }` block. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with ${, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab`'),
     objectName: z.string().optional()
       .describe('Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page\'s object. Omit to act on the page\'s object'),
   };
@@ -4478,7 +4557,8 @@ function buildActionGroupMember() {
     size: z.enum([...BUTTON_PRIMITIVE_SIZES, 'md']).optional()
       .describe('Inline button size — the Button primitive\'s vocabulary, plus `md` (drawn as `default`), falling back to the group\'s `size`. A dropdown item reads no size'),
   }).superRefine(actionContainerMemberParamsFitType('action:group'))
-    .superRefine(refuseUnopenableRowUrlTarget('type', "An `action:group` member's `target` (`type: 'url'`)"));
+    .superRefine(refuseUnopenableRowUrlTarget('type', "An `action:group` member's `target` (`type: 'url'`)"))
+    .superRefine(refuseRowUrlExecutorAlias('type', "An `action:group` member's `type: 'navigation'`"));
 }
 let actionGroupMemberOnce: ReturnType<typeof buildActionGroupMember> | undefined;
 /** The one {@link buildActionGroupMember} instance. */
@@ -4498,7 +4578,8 @@ function buildActionMenuMember() {
         + 'read a member\'s `size`.',
     },
   }, actionContainerMemberShape()).superRefine(actionContainerMemberParamsFitType('action:menu'))
-    .superRefine(refuseUnopenableRowUrlTarget('type', "An `action:menu` member's `target` (`type: 'url'`)"));
+    .superRefine(refuseUnopenableRowUrlTarget('type', "An `action:menu` member's `target` (`type: 'url'`)"))
+    .superRefine(refuseRowUrlExecutorAlias('type', "An `action:menu` member's `type: 'navigation'`"));
 }
 let actionMenuMemberOnce: ReturnType<typeof buildActionMenuMember> | undefined;
 /** The one {@link buildActionMenuMember} instance. */
@@ -4585,7 +4666,9 @@ export type ActionGroupProps = z.input<typeof ActionGroupPropsSchema>;
 /**
  * ADR-0122: the parsed state differs from the authored state on `visible` — the
  * bare-string arm of the condition union normalizes to the canonical
- * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform).
+ * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform) — and on
+ * a member's `onSuccess`, whose `openIn` the action's own block resolves to `'self'` when it
+ * is omitted.
  */
 export type ActionGroupPropsParsed = z.infer<typeof ActionGroupPropsSchema>;
 
@@ -4642,7 +4725,9 @@ export type ActionMenuProps = z.input<typeof ActionMenuPropsSchema>;
 /**
  * ADR-0122: the parsed state differs from the authored state on `visible` — the
  * bare-string arm of the condition union normalizes to the canonical
- * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform).
+ * `{ dialect, source }` envelope (`EvaluatedExpressionInputSchema`'s transform) — and on
+ * a member's `onSuccess`, whose `openIn` the action's own block resolves to `'self'` when it
+ * is omitted.
  */
 export type ActionMenuPropsParsed = z.infer<typeof ActionMenuPropsSchema>;
 

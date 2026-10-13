@@ -241,7 +241,9 @@ const on = (types: readonly string[], paths: readonly string[], reason: Reason):
   for (const type of types) for (const path of paths) LEDGER.set(`${type} ${path}`, reason);
 };
 
-const ACTION_RUNNER_PATHS = ['params', 'bodyExtra', 'bodyShape', 'operation', 'patch', 'toast', 'resultDialog', 'onSuccess'];
+// `onSuccess` left this list when the rows took `ActionSchema`'s own
+// post-success block (`component-action-row-on-success-executor.test.ts`).
+const ACTION_RUNNER_PATHS = ['params', 'bodyExtra', 'bodyShape', 'operation', 'patch', 'toast', 'resultDialog'];
 const VIEW_DATA_TYPES = ['object-grid', 'object-map', 'object-gantt', 'object-tree'];
 
 // Composition slots.
