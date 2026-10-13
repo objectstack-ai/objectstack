@@ -130,7 +130,11 @@ async function boot() {
     /** The two faces of the one door. */
     const faces: Record<'mount' | 'member', (request: Request) => Promise<Response>> = {
         mount: async (request) => fixture.app.fetch(request),
-        member: (request) => kernel.getService<IWebhookService>('webhooks').handleRedeliver(request),
+        member: (request) => {
+            const svc = kernel.getService<IWebhookService>('webhooks');
+            if (typeof svc?.handleRedeliver !== 'function') throw new Error('the webhooks slot holds no handleRedeliver');
+            return svc.handleRedeliver(request);
+        },
     };
     /** A delivery the dispatcher attempted once and dead-lettered: a row redeliver may replay. */
     const attempted = async (): Promise<string> => {
