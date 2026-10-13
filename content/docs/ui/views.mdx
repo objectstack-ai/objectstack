@@ -294,17 +294,11 @@ writing it by hand would smuggle an action definition past the action registry.
 
 ### Data Source
 
-Views can load data from several sources (`object`, `api`, `value`, and `schema`):
+Views can load data from several sources (`object`, `value`, and `schema`):
 
 ```typescript
 // From an Object (most common)
 data: { provider: 'object', object: 'task' }
-
-// From an external API
-data: {
-  provider: 'api',
-  read: { url: '/api/external/tasks', method: 'GET' },
-}
 
 // Static values
 data: {
@@ -312,6 +306,13 @@ data: {
   items: [{ id: '1', name: 'Item 1' }],
 }
 ```
+
+A view does not call an API. The view-level `api` data source — a `read` / `write`
+request block with its own `url` and `headers` — was retired: it let a credential or
+a cross-origin call be written into metadata and served with the view. A
+metadata-declared API call is a **page element's** `dataSource` binding, which is
+same-origin, carries no credentials and is read with the console's signed-in fetch —
+see [Element data sources](/docs/ui/pages#element-data-sources).
 
 ### Type-Specific Configuration
 

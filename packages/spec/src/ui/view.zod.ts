@@ -160,11 +160,58 @@ export type { HttpRequest } from '../shared/http.zod';
 export type { HttpMethodSubset } from '../shared/http.zod';
 
 /**
+ * Prescription for the retired view-level `api` data source — the
+ * `provider: 'api'` arm of {@link ViewDataSchema} (ADR-0049 enforce-or-remove;
+ * maintainer ruling 2026-10-12, letter C: retire, not align).
+ *
+ * The arm carried `read` / `write` request blocks of any `url` and any
+ * `headers`, so a credential or a cross-origin call written into a view was
+ * stored as metadata, served to every client that read the view and sent by
+ * the console as written. The page element's API binding
+ * (`ElementApiDataSourceSchema`, `ui/page.zod.ts`) is the governed door for a
+ * metadata-declared API call — same-origin, credential-free, read with the
+ * console's own signed-in fetch — and one operation with two implementations
+ * that behave differently keeps the governed one: the view-level source is
+ * re-homed on the page element and removed, not aligned.
+ *
+ * Like the retired bare-string `sort` clause
+ * ({@link LIST_VIEW_SORT_STRING_RETIRED}) this retires a VALUE of the
+ * discriminator, not a key: `data` survives, one arm lighter, so there is no
+ * `retiredKey()` tombstone to hang the prescription on. The union's own
+ * `error` map carries it, keyed on `input.provider === 'api'`, so only the
+ * spelling that used to be legal gets the "was removed" message — every other
+ * invalid discriminator keeps zod's default report, which lists the live arms.
+ *
+ * No D2 conversion, deliberately: the replacement lives on a different surface
+ * (a page component's `dataSource`), and the only mechanical edit a conversion
+ * could make — deleting `data` so the view falls back to its object — would
+ * silently change what the view shows. An author or a stored row still carrying
+ * the arm is refused at parse with this prescription; the D3 semantic entry
+ * `view-data-api-provider-retired` carries the judgement an upgrader owes.
+ */
+const VIEW_DATA_API_PROVIDER_RETIRED =
+  "`view.data.provider: 'api'` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — "
+  + 'a view-level API source took any `url` and any `headers`, so a credential or a cross-origin call '
+  + 'written there was stored with the view, served to every client that read it and sent by the '
+  + "console as written; a metadata-declared API call now has one door, the page element's binding, "
+  + 'which is same-origin and credential-free. '
+  + "Bind the view to its object — `data: { provider: 'object', object: '<object_name>' }` — or to "
+  + "static rows — `data: { provider: 'value', items: [...] }` — and move the API read onto a page "
+  + "component: `dataSource: { provider: 'api', read: { url: '/api/...' } }` (with an optional `path` "
+  + 'into the response) under a page\'s `regions[].components[]`, which the console reads with its '
+  + 'own signed-in fetch.';
+
+/**
  * View Data Source Configuration
  * Supports three modes:
  * 1. 'object': Standard Protocol - Auto-connects to ObjectStack Metadata and Data APIs
- * 2. 'api': Custom API - Explicitly provided API URLs
- * 3. 'value': Static Data - Hardcoded data array
+ * 2. 'value': Static Data - Hardcoded data array
+ * 3. 'schema': Schema-bound - a standalone form shaped by a JSON Schema
+ *
+ * The former fourth mode, `'api'` (custom API URLs in `read` / `write`
+ * request blocks), is RETIRED — refused by name with
+ * {@link VIEW_DATA_API_PROVIDER_RETIRED}. A metadata-declared API call is a
+ * page element's `dataSource` binding (`ui/page.zod.ts`), never a view's.
  */
 export const ViewDataSchema = lazySchema(() => z.discriminatedUnion('provider', [
   strictObject({
@@ -183,23 +230,9 @@ export const ViewDataSchema = lazySchema(() => z.discriminatedUnion('provider', 
     provider: z.literal('object'),
     object: z.string().describe('Target object name'),
   }),
-  strictObject({
-    surface: 'this `api` data source',
-    history: VIEW_HISTORY,
-    // The HTTP verbs are the request BLOCKS' business (`read`/`write` each hold
-    // an `HttpRequestSchema`), so an author who put the whole request inline is
-    // pointed at the block that owns it rather than at a near-miss key.
-    guidance: {
-      url: 'Set the URL inside the request block: `read: { url, method }` (or `write: { … }`) — the data source itself declares only `read` / `write`.',
-      method: 'Set the method inside the request block: `read: { url, method }` (or `write: { … }`).',
-      fetch: 'Use `read` for the fetch request and `write` for the submit request.',
-      submit: 'Use `write` for the submit request (and `read` for the fetch request).',
-    },
-  }, {
-    provider: z.literal('api'),
-    read: HttpRequestSchema.optional().describe('Configuration for fetching data'),
-    write: HttpRequestSchema.optional().describe('Configuration for submitting data (for forms/editable tables)'),
-  }),
+  // The `api` arm — `{ provider: 'api', read?: HttpRequest, write?: HttpRequest }`
+  // — was REMOVED here; see `VIEW_DATA_API_PROVIDER_RETIRED` above for what
+  // replaces it and the union's `error` map below for how an author meets it.
   strictObject({
     surface: 'this `value` data source',
     history: VIEW_HISTORY,
@@ -230,7 +263,20 @@ export const ViewDataSchema = lazySchema(() => z.discriminatedUnion('provider', 
     /** Optional inline JSON Schema; when omitted the runtime resolves schemaId from the server. */
     schema: z.record(z.string(), z.unknown()).optional().describe('Inline JSON Schema (Draft 2020-12). Optional when schemaId is resolvable.'),
   }),
-]));
+], {
+  // The retired `api` arm's prescription, raised at `provider` for exactly the
+  // spelling that used to be legal (an `invalid_union` issue, path
+  // `[..., 'provider']`). `hasOwnProperty`-free on purpose: the lookup is a
+  // literal comparison, so an authored `provider: 'constructor'` meets zod's
+  // own report like every other unknown value.
+  error: (issue) => {
+    const input = issue.input;
+    return typeof input === 'object' && input !== null
+      && (input as { provider?: unknown }).provider === 'api'
+      ? VIEW_DATA_API_PROVIDER_RETIRED
+      : undefined;
+  },
+}));
 
 /**
  * Canonical filter operators for view filter rules.
@@ -2107,7 +2153,7 @@ export const GanttConfigSchema = lazySchema(() => strictObject({
   // optional; each describe says what the renderer does with the key.
   borderColorField: z.string().optional().describe('Field carrying a per-task alert stroke color — any CSS color or semantic palette name (red, orange, …): the bar keeps its fill and gains an outline plus halo in that color (e.g. red for overdue, orange for due-soon; typically a server-computed alert field). Empty or null means no stroke'),
   lockField: z.string().optional().describe('Field marking a row view-only (truthy means locked): a locked bar cannot be dragged or resized, its progress cannot be dragged, no dependency can be drawn from it and its inline-edit and edit/delete menu entries are hidden — clicking it (open drawer, jump) still works. Independent of the global readOnly; freezes individual levels while siblings stay editable'),
-  objectField: z.string().optional().describe("Field carrying the row's OWN object API name, for mixed-object trees (an api provider composing parent-object rows with child-object rows): the detail drawer and its full-page link follow each row's real object instead of the view's bound object. Empty or missing falls back to the bound object"),
+  objectField: z.string().optional().describe("Field carrying the row's OWN object API name, for mixed-object trees (a row set composing parent-object rows with child-object rows): the detail drawer and its full-page link follow each row's real object instead of the view's bound object. Empty or missing falls back to the bound object"),
   summaryExtent: z.enum(['children', 'self']).optional().describe("How a summary bar's span is computed. 'children' (renderer default) rolls the bar up from its children — min start, max end, duration-weighted progress — and ignores the record's own dates; 'self' renders the record's OWN start, end and progress and falls back to rollup only for records without dates (use it when the parent's schedule is authoritative, e.g. a shift plan whose work-order children are locked history)"),
   defaultCollapsedDepth: z.number().int().min(0).optional().describe('Auto-collapse tree nodes at or below this 0-indexed depth on first render (roots are depth 0): every node at that depth or deeper that has children starts folded; the user can still expand them. Omit to start fully expanded'),
   dependencyTypes: z.boolean().optional().describe('Whether the backing store persists dependency link TYPES (fs, ss, ff, sf); renderer default true. Set false when dependencies are bare predecessor ids: the link menu hides the type switcher (a switch would be silently reverted on refetch) and drag-created links are always finish-to-start'),
@@ -4643,8 +4689,9 @@ export const FormViewSchema = lazySchema(() => strictObject({
    * re-verified the entry: `defineForm` (below) writes
    * `data: { provider: 'schema', schemaId }` onto EVERY metadata form, and
    * `metadata-protocol` serves it to the metadata-admin pipeline. The
-   * record-form provider values (`object`/`api`/`value`) may still be
-   * unread — that is a narrower value-subset audit, not a key removal.
+   * record-form provider values (`object`/`value`) may still be unread — that
+   * is a narrower value-subset audit, not a key removal. The former `api`
+   * value is retired on the union itself (`VIEW_DATA_API_PROVIDER_RETIRED`).
    */
   data: ViewDataSchema.optional().describe('Data source configuration (defaults to "object" provider)'),
 
