@@ -227,6 +227,55 @@ describe('SharingService.buildReadFilter', () => {
   });
 });
 
+// [ADR-0138 D3 item 6, as the maintainer's ruling C amends it — comment
+// 6148183570 on #23266] The guest reaches rows through share links only, never
+// through the object's sharing model: its read filter is deny-all on every
+// object record sharing scopes. Share links are redeemed at their own door and
+// never pass through this filter (the door-level control is in
+// `packages/qa/dogfood/test/guest-grants-channel.dogfood.test.ts`).
+describe('SharingService.buildReadFilter — the guest never takes the OWD branch', () => {
+  const GUEST = { principalKind: 'guest', positions: ['guest'], permissions: ['bound_reader'], isSystem: false } as const;
+  const DENY_ALL = { id: '__deny_all__' };
+  let svc: SharingService;
+  beforeEach(() => {
+    svc = new SharingService({
+      engine: makeFakeEngine({
+        account: ACCOUNT_SCHEMA,
+        lead: LEAD_SCHEMA,
+        whiteboard: CANON_PUBLIC_RW_SCHEMA,
+        line_item: {
+          name: 'line_item',
+          sharingModel: 'controlled_by_parent',
+          fields: { id: {}, name: {}, owner_id: {}, account: {} },
+        },
+        note: ORPHAN_SCHEMA,
+        sys_record_share: { name: 'sys_record_share' },
+      }),
+    });
+  });
+
+  for (const [object, model] of [
+    ['account', 'private'],
+    ['lead', 'public_read'],
+    ['whiteboard', 'public_read_write'],
+    ['line_item', 'controlled_by_parent'],
+    ['note', 'private, with no owner column (the OWD-public fall-through)'],
+  ] as const) {
+    it(`${model}: the guest's read filter is deny-all`, async () => {
+      expect(await svc.buildReadFilter(object, { ...GUEST } as any)).toEqual(DENY_ALL);
+    });
+  }
+
+  it('control: a signed-in member still takes the OWD branch — no filter on public_read and public_read_write', async () => {
+    expect(await svc.buildReadFilter('lead', { principalKind: 'human', userId: 'u1' } as any)).toBeNull();
+    expect(await svc.buildReadFilter('whiteboard', { principalKind: 'human', userId: 'u1' } as any)).toBeNull();
+  });
+
+  it('control: the system context is never the guest — no filter', async () => {
+    expect(await svc.buildReadFilter('lead', { principalKind: 'guest', isSystem: true } as any)).toBeNull();
+  });
+});
+
 describe('SharingService.canEdit', () => {
   let engine: ReturnType<typeof makeFakeEngine>;
   let svc: SharingService;
@@ -1046,7 +1095,7 @@ describe('[ADR-0111 D7] no inert grants', () => {
   it('refuses non-user recipient types instead of persisting rows no gate reads', async () => {
     // Every non-`user` member of RecordShareRecipientType — no `as any`
     // needed since #4539 aligned the contract type to the storage select.
-    for (const recipientType of ['group', 'position', 'unit_and_subordinates', 'guest'] as const) {
+    for (const recipientType of ['group', 'position', 'unit_and_subordinates'] as const) {
       await expect(
         svc.grant(
           { object: 'account', recordId: 'a1', recipientId: 'g1', recipientType },
@@ -1054,6 +1103,26 @@ describe('[ADR-0111 D7] no inert grants', () => {
         ),
       ).rejects.toThrow(/VALIDATION_FAILED/);
     }
+    expect(engine._tables.sys_record_share ?? []).toHaveLength(0);
+  });
+
+  it("[ADR-0138 D8] refuses the retired 'guest' recipient with its prescription, never the sharing-rule route", async () => {
+    // `guest` left RecordShareRecipientType, so only an untyped caller (a REST
+    // body) can still send it. The grant's one error channel is the message
+    // prefix (`rest-server.ts`'s `respondSharingError` maps it to a 400); the
+    // pin asserts that prefix, the prescription, and that nothing was written.
+    // A sharing rule cannot deliver a guest either, so the generic sentence
+    // ("delivered via sharing rules") would misdirect the caller.
+    const refusal = await svc.grant(
+      { object: 'account', recordId: 'a1', recipientId: 'anyone', recipientType: 'guest' as never },
+      { userId: 'alice' },
+    ).then(() => null, (e: unknown) => e);
+    expect(refusal).toBeInstanceOf(Error);
+    const message = (refusal as Error).message;
+    expect(message.startsWith("VALIDATION_FAILED: recipientType 'guest' was removed (ADR-0138 D8)")).toBe(true);
+    expect(message).toMatch(/guest access flows through the guest position and share links \(ADR-0090 D11\)/);
+    expect(message).toMatch(/Expose the record through a public form or a share link instead\.$/);
+    expect(message).not.toMatch(/sharing rules/);
     expect(engine._tables.sys_record_share ?? []).toHaveLength(0);
   });
 

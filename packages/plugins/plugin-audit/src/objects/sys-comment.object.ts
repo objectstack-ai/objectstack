@@ -53,13 +53,15 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * NOTHING in its place on the comment row: no stored aggregate and no
  * computed-on-read block. A reader that shows reactions reads the
  * `sys_comment_reaction` rows of the comments on screen (`comment_id` `$in`
- * their ids) and groups them by emoji. Reactions stored in the column are not
- * converted into records; the D3 record is the semantic entry
+ * their ids) and groups them by emoji. The D3 record is the semantic entry
  * `sys-comment-reactions-column-retired`. An existing database keeps the
  * physical column and its values (schema sync is additive): the boot drift
- * report names it orphaned, the data door neither returns nor accepts it
- * (`400 INVALID_FIELD` on a write that names it), and
- * `os migrate apply --allow-destructive` drops it.
+ * report names it orphaned, and the data door neither returns nor accepts it
+ * (`400 INVALID_FIELD` on a write that names it). The reactions stored in it
+ * are carried over, because an upgrade keeps existing data (#23281):
+ * `os migrate comment-reactions --apply` turns each stored reaction into the
+ * reactor's own `sys_comment_reaction` row, and only once it has recorded a
+ * verified run does `os migrate apply --allow-destructive` drop the column.
  *
  * ## Platform-written: `is_edited` / `edited_at` (maintainer ruling A on #23124)
  *
