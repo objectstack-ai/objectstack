@@ -1933,8 +1933,9 @@ function refuseAttachedBlockConflicts(attachedOnRead: unknown, fields: unknown, 
  * `required: true`. The parse refuses the object otherwise — zero such fields,
  * or two or more — naming the object and the rule, at
  * `['sharingModel']` (nothing to derive from) or `['fields']` (more than one
- * candidate), the same two locations `os lint`'s `security-cbp-no-relation` /
- * `security-cbp-ambiguous-relation` report at.
+ * candidate), the same two locations `os lint` reports
+ * `security-controlled-by-parent-no-relation` /
+ * `security-controlled-by-parent-ambiguous-relation` at.
  *
  * Why the parse and not only the builder: the shapes this refuses were
  * reachable through every door that does not run `ObjectSchema.create()` — a

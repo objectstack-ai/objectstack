@@ -11,6 +11,7 @@ import { resolveInjectedSystemColumns } from './injected-system-columns';
 import { projectPublishedJsonSchema } from '../../scripts/lib/refinement-projection';
 import { collectDroppedRefinements } from '../../scripts/lib/dropped-refinements';
 import { Field } from './field.zod';
+import { defineStack } from '../stack.zod';
 import { isMaskedOnReadFieldType } from './masked-field-types';
 import type { StateMachineValidation } from './validation.zod';
 
@@ -1524,22 +1525,21 @@ describe('ObjectSchema.create() forces a required master_detail under controlled
     expect(message).toContain('change its `sharingModel`');
   });
 
-  it('forces EVERY master_detail reference under the object, not just the first', () => {
-    // The prose contract is "exactly one required master_detail", but nothing
-    // enforces the count today (#7474 owns the zero-reference case at publish);
-    // forcing each declared reference keeps every candidate safe rather than
-    // silently blessing only the first.
-    const obj = ObjectSchema.create({
-      name: 'cbp_multi',
-      sharingModel: 'controlled_by_parent',
-      fields: {
-        a: { type: 'master_detail', reference: 'master_a' },
-        b: { type: 'master_detail', reference: 'master_b' },
-      },
-    });
-    const fields = obj.fields as Record<string, { required?: boolean }>;
-    expect(fields.a.required).toBe(true);
-    expect(fields.b.required).toBe(true);
+  it('forces EVERY master_detail reference — so two of them are two masters, and the parse refuses them', () => {
+    // [#23100 ruling B] Replaced, not deleted: this pinned that both references
+    // were forced while "nothing enforces the count today". The count is now
+    // the parse's rule (ADR-0055 §1: exactly one), so forcing both makes the
+    // object a two-master declaration, refused naming both fields.
+    expect(() =>
+      ObjectSchema.create({
+        name: 'cbp_multi',
+        sharingModel: 'controlled_by_parent',
+        fields: {
+          a: { type: 'master_detail', reference: 'master_a' },
+          b: { type: 'master_detail', reference: 'master_b' },
+        },
+      }),
+    ).toThrow(/Object 'cbp_multi' declares sharingModel 'controlled_by_parent' with 2 required `master_detail` fields \(`a`, `b`\)/);
   });
 
   it('leaves master_detail on a NON-controlled_by_parent object alone (scope pin)', () => {
@@ -1557,12 +1557,14 @@ describe('ObjectSchema.create() forces a required master_detail under controlled
     expect((explicit.fields as Record<string, { required?: boolean }>).parent.required).toBe(false);
   });
 
-  it('raw .parse()/.safeParse() stay TOLERANT of the old shape — metadata at rest keeps loading', () => {
-    // The other half of commit 75b7c240a's ruling: the narrowing is authoring-time
-    // only. Stored metadata rehydrated through the schema (never through the
-    // builder) must keep loading, UNREWRITTEN — runtime tolerance for existing
-    // installs stays with the security gate, and the lint rule stays `warning`
-    // until the v18 card (#9139) promotes it.
+  it('raw .parse()/.safeParse() do NOT force the shape — they refuse it (#23100 ruling B)', () => {
+    // Reversed, not deleted: this pinned the raw parse TOLERATING a
+    // non-required master reference "so metadata at rest keeps loading". The
+    // runtime's tolerance it leaned on (any `master_detail`, then a required
+    // `lookup`) retired with ruling B, so the parse now refuses the shape where
+    // an author is present to act; stored rows still register under their
+    // `[metadata_spec_invalid]` diagnostic. And still UNREWRITTEN: the issue
+    // names the object, it does not repair it.
     const atRest = {
       name: 'cbp_stored',
       sharingModel: 'controlled_by_parent',
@@ -1571,11 +1573,92 @@ describe('ObjectSchema.create() forces a required master_detail under controlled
       },
     };
     const result = ObjectSchema.safeParse(atRest);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      const fields = (result.data as { fields: Record<string, { required?: boolean }> }).fields;
-      expect(fields.parent.required).toBe(false);
+    expect(result.success).toBe(false);
+    expect(atRest.fields.parent.required).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((i) => i.path.join('.'))).toEqual(['sharingModel']);
+      expect(result.error.issues[0].message).toMatch(/^Object 'cbp_stored' declares sharingModel 'controlled_by_parent' but no required `master_detail` field\./);
     }
+  });
+});
+
+// ============================================================================
+// controlled_by_parent derives its master from EXACTLY ONE required
+// master_detail — ADR-0055 §1, enforced at the parse (#23100, maintainer
+// ruling B). The runtime's two fallbacks (any master_detail; a required lookup)
+// retired with it.
+// ============================================================================
+
+describe('ObjectSchema refuses a controlled_by_parent object without exactly one required master_detail', () => {
+  const cbp = (fields: Record<string, unknown>) => ({ name: 'cbp_line', sharingModel: 'controlled_by_parent', fields });
+  const issuesOf = (input: unknown) => {
+    const r = ObjectSchema.safeParse(input);
+    return r.success ? [] : r.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message }));
+  };
+
+  it('ACCEPTS one required master_detail — through the raw parse and through the builder', () => {
+    expect(issuesOf(cbp({ parent: { type: 'master_detail', reference: 'cbp_header', required: true } }))).toEqual([]);
+    // The builder forces an omitted `required` on its one master_detail.
+    expect(() => ObjectSchema.create(cbp({ parent: Field.masterDetail('cbp_header', { label: 'Header' }) }))).not.toThrow();
+    // One required master plus any number of lookups — a lookup is not a master.
+    expect(issuesOf(cbp({
+      parent: { type: 'master_detail', reference: 'cbp_header', required: true },
+      owner: { type: 'lookup', reference: 'sys_user', required: true },
+    }))).toEqual([]);
+  });
+
+  it('REFUSES a required lookup as the only relation (the retired third tier), naming the object, the rule and the field', () => {
+    const issues = issuesOf(cbp({ parent: { type: 'lookup', reference: 'cbp_header', required: true } }));
+    expect(issues).toHaveLength(1);
+    expect(issues[0].path).toBe('sharingModel');
+    expect(issues[0].message).toMatch(/^Object 'cbp_line' declares sharingModel 'controlled_by_parent' but no required `master_detail` field\. ADR-0055 §1:/);
+    expect(issues[0].message).toContain("`parent` is a required `lookup`");
+    // The builder path refuses it too — the HotCRM shape.
+    expect(() => ObjectSchema.create(cbp({ parent: Field.lookup('cbp_header', { label: 'Header', required: true }) }))).toThrow(
+      /declares sharingModel 'controlled_by_parent' but no required `master_detail` field/,
+    );
+  });
+
+  it('REFUSES a non-required master_detail as the only relation (the retired second tier) — omitted or false', () => {
+    for (const parent of [
+      { type: 'master_detail', reference: 'cbp_header' },
+      { type: 'master_detail', reference: 'cbp_header', required: false },
+    ]) {
+      const issues = issuesOf(cbp({ parent }));
+      expect(issues.map((i) => i.path)).toEqual(['sharingModel']);
+      expect(issues[0].message).toContain('`parent` is a `master_detail` without `required: true`');
+    }
+  });
+
+  it('REFUSES no relation at all, and two required master_details, at the two lint-shared paths', () => {
+    expect(issuesOf(cbp({ title: { type: 'text' } })).map((i) => i.path)).toEqual(['sharingModel']);
+    const two = issuesOf(cbp({
+      a: { type: 'master_detail', reference: 'master_a', required: true },
+      b: { type: 'master_detail', reference: 'master_b', required: true },
+    }));
+    expect(two.map((i) => i.path)).toEqual(['fields']);
+    expect(two[0].message).toMatch(/^Object 'cbp_line' declares sharingModel 'controlled_by_parent' with 2 required `master_detail` fields \(`a`, `b`\)\. ADR-0055 §1:/);
+  });
+
+  it('judges controlled_by_parent only — every other sharing model keeps its relations as authored', () => {
+    for (const sharingModel of ['private', 'public_read', 'public_read_write', undefined]) {
+      expect(issuesOf({ name: 'plain_line', sharingModel, fields: { parent: { type: 'lookup', reference: 'plain_header', required: true } } })).toEqual([]);
+      expect(issuesOf({ name: 'plain_line', sharingModel, fields: { title: { type: 'text' } } })).toEqual([]);
+    }
+  });
+
+  it('reaches defineStack — a plain object literal is judged like a raw parse, not like the builder', () => {
+    const stack = (fields: Record<string, unknown>) => ({
+      manifest: { id: 'com.example.cbp-one-master', namespace: 'cbpo', version: '0.0.1', type: 'app' as const, name: 'CBP' },
+      objects: [
+        { name: 'cbpo_header', label: 'Header', fields: { name: { type: 'text', label: 'Name' } } },
+        { name: 'cbpo_line', label: 'Line', sharingModel: 'controlled_by_parent', fields },
+      ],
+    });
+    expect(() => defineStack(stack({ header: { type: 'master_detail', label: 'H', reference: 'cbpo_header', required: true } }) as never)).not.toThrow();
+    expect(() => defineStack(stack({ header: { type: 'master_detail', label: 'H', reference: 'cbpo_header' } }) as never)).toThrow(
+      /objects\.1\.sharingModel: Object 'cbpo_line' declares sharingModel 'controlled_by_parent' but no required `master_detail` field/,
+    );
   });
 });
 

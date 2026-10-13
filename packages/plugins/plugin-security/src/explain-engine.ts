@@ -949,7 +949,8 @@ const MASTER_DENIAL_LEG_DETAIL: Record<ControlledByParentWriteDenialLeg, string>
  */
 const MASTER_UNRESOLVED_DETAIL: Record<ControlledByParentWriteUnresolvedReason, { condition: string; answer: string }> = {
   master_detail_relation_missing: {
-    condition: 'the object declares controlled_by_parent with no master_detail relation to derive access from',
+    condition:
+      'the object declares controlled_by_parent without exactly one required master_detail field to derive access from',
     answer: '422 INVALID_METADATA',
   },
   record_not_found: { condition: 'the record does not exist', answer: '404 RECORD_NOT_FOUND' },
