@@ -603,6 +603,22 @@ describe('[ADR-0086 D3] the save door refuses a permission set whose body `packa
         ]);
     });
 
+    it('a direct save that names no package is judged against the one package its address resolves to', async () => {
+        // The item's only active row is bound to BOUND, so a package-less
+        // direct save writes BOUND's row: an agreeing body passes, and a
+        // disagreeing one is refused naming BOUND, not "no package".
+        const h = makeProtocol();
+        await h.protocol.saveMetaItem({ type: 'permission', name: 'probe_member', item: perm('probe_member'), packageId: BOUND });
+
+        const { error } = await attempt(() => h.protocol.saveMetaItem({
+            type: 'permission', name: 'probe_member', item: perm('probe_member', OTHER),
+        }));
+        expectOwnerRefusal(error, OTHER, BOUND);
+
+        await h.protocol.saveMetaItem({ type: 'permission', name: 'probe_member', item: perm('probe_member', BOUND) });
+        expect(storedSets(h)).toEqual([{ row: 'probe_member', state: 'active', binding: BOUND, body: BOUND }]);
+    });
+
     it('CONTROL: a body `packageId` equal to the binding is accepted in both modes, and an absent one with or without a package', async () => {
         const h = makeProtocol();
         await h.protocol.saveMetaItem({ type: 'permission', name: 'agree_live', item: perm('agree_live', BOUND), packageId: BOUND });
