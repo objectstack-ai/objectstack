@@ -36,6 +36,16 @@ export const DEFAULT_IMAP_TIMEOUT_MS = 60_000;
 export const DEFAULT_IMAP_MAX_LITERAL_BYTES = 64 * 1024 * 1024;
 /** The longest response line a session accepts, in bytes. */
 export const IMAP_MAX_LINE_BYTES = 4 * 1024 * 1024;
+/**
+ * The most a session keeps of the untagged responses to ONE command, in
+ * bytes: their lines and literals, plus {@link IMAP_RESPONSE_OVERHEAD_BYTES}
+ * per response for what holding it costs. Listing a 100,000-message folder
+ * keeps about 30 MB; the bound refuses a server that streams untagged
+ * responses before its tagged answer forever, however slowly.
+ */
+export const DEFAULT_IMAP_MAX_COMMAND_BYTES = 128 * 1024 * 1024;
+/** What one kept response is charged beyond its own bytes. */
+export const IMAP_RESPONSE_OVERHEAD_BYTES = 256;
 
 /** How to open a session. */
 export interface ImapSessionOptions {
@@ -45,6 +55,8 @@ export interface ImapSessionOptions {
   timeoutMs?: number;
   /** Largest literal accepted, in bytes. Default {@link DEFAULT_IMAP_MAX_LITERAL_BYTES}. */
   maxLiteralBytes?: number;
+  /** Most kept of one command's responses, in bytes. Default {@link DEFAULT_IMAP_MAX_COMMAND_BYTES}. */
+  maxCommandBytes?: number;
 }
 
 /** A folder as `EXAMINE` reports it. */
@@ -117,6 +129,8 @@ interface CommandResult {
 interface InFlight {
   tag: string;
   untagged: ParsedResponse[];
+  /** What {@link untagged} is charged against the command bound. */
+  keptBytes: number;
   literals: Uint8Array[];
   texts: string[];
   sentLiterals: number;
@@ -255,6 +269,7 @@ class ImapConnection implements ImapSession {
     private readonly socket: Socket,
     maxLiteralBytes: number,
     timeoutMs: number,
+    private readonly maxCommandBytes: number,
   ) {
     this.reader = new ImapResponseReader({ maxLineBytes: IMAP_MAX_LINE_BYTES, maxLiteralBytes });
     socket.setTimeout(timeoutMs, () => {
@@ -311,6 +326,17 @@ class ImapConnection implements ImapSession {
       return;
     }
     if (response.kind === 'untagged') {
+      command.keptBytes += IMAP_RESPONSE_OVERHEAD_BYTES;
+      for (const part of response.parts) command.keptBytes += part.length;
+      if (command.keptBytes > this.maxCommandBytes) {
+        this.fail(
+          new ImapError(
+            'oversized',
+            `The server sent more than ${this.maxCommandBytes} bytes of responses to one command; this session keeps no more.`,
+          ),
+        );
+        return;
+      }
       command.untagged.push(response);
       return;
     }
@@ -370,6 +396,7 @@ class ImapConnection implements ImapSession {
         this.current = {
           tag,
           untagged: [],
+          keptBytes: 0,
           literals,
           texts,
           sentLiterals: 0,
@@ -584,6 +611,7 @@ export async function openImapSession(options: ImapSessionOptions): Promise<Imap
     socket,
     options.maxLiteralBytes ?? DEFAULT_IMAP_MAX_LITERAL_BYTES,
     options.timeoutMs ?? DEFAULT_IMAP_TIMEOUT_MS,
+    options.maxCommandBytes ?? DEFAULT_IMAP_MAX_COMMAND_BYTES,
   );
   try {
     const greeting = await session.awaitGreeting();

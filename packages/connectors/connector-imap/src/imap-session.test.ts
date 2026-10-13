@@ -211,6 +211,50 @@ describe('reading a folder', () => {
   });
 });
 
+describe('bounds against a hostile server', () => {
+  async function openWith(options: ImapServerDoubleOptions, maxCommandBytes?: number) {
+    const { server, account } = await double(options);
+    const session = await openImapSession({
+      account,
+      credentials: staticCredentials({ type: 'password', password: 'secret' }),
+      timeoutMs: 5_000,
+      maxCommandBytes,
+    });
+    sessions.push(session);
+    return { server, session };
+  }
+
+  it('refuses one response that announces empty literal after empty literal, without end, as oversized', async () => {
+    const { server, session } = await openWith({ hostile: 'endless-literals' });
+    server.append('INBOX', MESSAGE);
+    await session.examine('INBOX');
+    const err = await session.listMessages(1).catch((e) => e);
+    expect(refusal(err).kind).toBe('oversized');
+    expect(refusal(err).message).toMatch(/more than 32 literals/);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(server.openConnections).toBe(0);
+  }, 10_000);
+
+  it('refuses an untagged stream that never reaches the tagged answer, at the command bound', async () => {
+    const { server, session } = await openWith({ hostile: 'endless-untagged' }, 64 * 1024);
+    server.append('INBOX', MESSAGE);
+    await session.examine('INBOX');
+    const err = await session.listMessages(1).catch((e) => e);
+    expect(refusal(err).kind).toBe('oversized');
+    expect(refusal(err).message).toMatch(/more than 65536 bytes of responses to one command/);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(server.openConnections).toBe(0);
+  }, 10_000);
+
+  it('control: the same command bound admits an honest folder of 50 messages', async () => {
+    const { server, session } = await openWith({}, 64 * 1024);
+    for (let i = 0; i < 50; i++) server.append('INBOX', MESSAGE);
+    await session.examine('INBOX');
+    expect(await session.listMessages(1)).toHaveLength(50);
+    expect(await session.fetchMessages([1, 2, 3])).toHaveLength(3);
+  });
+});
+
 describe('the connection', () => {
   it('logs out politely and closes', async () => {
     const { server, account } = await double();

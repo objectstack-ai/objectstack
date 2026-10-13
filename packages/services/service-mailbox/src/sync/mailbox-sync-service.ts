@@ -24,6 +24,15 @@
  *    mailbox forever: a message larger than `maxMessageBytes`, and a message
  *    the seam refuses as unreadable (`VALIDATION_ERROR`). Each is logged at
  *    `error`, once, naming its UID; it stays in the IMAP folder.
+ *  - **Bound what one message and one batch may cost, whatever the server
+ *    says.** The listed size (`RFC822.SIZE`) picks the batches — at most
+ *    `batchSize` messages and `maxBatchBytes` listed bytes each — and keeps a
+ *    message listed above `maxMessageBytes` out of every fetch. The session
+ *    refuses any literal above `maxMessageBytes` plus a small framing
+ *    envelope, so a server that omits or understates a size cannot hand over
+ *    more: the refusal (`oversized`) closes the connection, the batch is read
+ *    again one message at a time on a fresh session, and the offending message
+ *    is skipped as `too_large` while the rest of the mailbox keeps arriving.
  *
  * Which account feeds which mailbox, and with what credential, is the host's
  * answer ({@link MailboxAccountResolver}), asked each run: the sync keeps no
@@ -35,7 +44,11 @@
  */
 
 import {
+  DEFAULT_IMAP_MAX_COMMAND_BYTES,
+  ImapError,
   openImapSession,
+  type ImapMessage,
+  type ImapMessageSize,
   type ImapSession,
   type ImapSessionOptions,
   type MailAccount,
@@ -127,6 +140,11 @@ export interface MailboxSyncServiceOptions {
   maxMessagesPerRun?: number;
   /** Larger messages are skipped (and logged). Default {@link DEFAULT_SYNC_MAX_MESSAGE_BYTES}. */
   maxMessageBytes?: number;
+  /**
+   * Listed bytes fetched per IMAP command, at least one message's bound.
+   * Default {@link DEFAULT_SYNC_MAX_BATCH_BYTES}.
+   */
+  maxBatchBytes?: number;
   /** Opens a session; the connector's own by default. */
   openSession?: (options: ImapSessionOptions) => Promise<ImapSession>;
   /** The sync clock. */
@@ -138,6 +156,10 @@ export const DEFAULT_SYNC_BATCH_SIZE = 25;
 export const DEFAULT_SYNC_MAX_MESSAGES_PER_RUN = 500;
 /** 32 MiB: above the 25 MB attachment limit of the large hosted providers, once transfer-encoded. */
 export const DEFAULT_SYNC_MAX_MESSAGE_BYTES = 32 * 1024 * 1024;
+/** 64 MiB of listed message bytes per fetch command. */
+export const DEFAULT_SYNC_MAX_BATCH_BYTES = 64 * 1024 * 1024;
+/** What the session's literal bound adds to `maxMessageBytes`: the framing around one body. */
+export const SYNC_LITERAL_ENVELOPE_BYTES = 64 * 1024;
 
 const SYSTEM_CTX = { isSystem: true } as const;
 const MAILBOX_PAGE_SIZE = 200;
@@ -157,6 +179,9 @@ const numberOf = (value: unknown): number | null => {
 };
 
 const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+/** The session refused more than it accepts, and closed the connection. */
+const isOversized = (err: unknown): boolean => err instanceof ImapError && err.kind === 'oversized';
 
 /** The IMAP sync of every mailbox an account resolver answers for. */
 export class MailboxSyncService {
@@ -250,82 +275,184 @@ export class MailboxSyncService {
       lastUid: numberOf(row.imap_last_uid),
     };
     const open = this.options.openSession ?? openImapSession;
-    const session = await open({ account: binding.account, credentials: binding.credentials });
-    this.open.add(session);
-    try {
-      return await this.syncFolder(engine, session, id, folder, stored);
-    } finally {
+    const maxBytes = this.maxMessageBytes();
+    const batchBytes = Math.max(this.options.maxBatchBytes ?? DEFAULT_SYNC_MAX_BATCH_BYTES, maxBytes);
+    // The session's own bounds follow the sync's: one literal is one message
+    // plus its framing, and one command holds at most a batch and one more
+    // message's worth (a listing of a large folder fits the default).
+    const sessionOptions: ImapSessionOptions = {
+      account: binding.account,
+      credentials: binding.credentials,
+      maxLiteralBytes: maxBytes + SYNC_LITERAL_ENVELOPE_BYTES,
+      maxCommandBytes: Math.max(DEFAULT_IMAP_MAX_COMMAND_BYTES, batchBytes + maxBytes + SYNC_LITERAL_ENVELOPE_BYTES),
+    };
+    const connect = async (): Promise<ImapSession> => {
+      const session = await open(sessionOptions);
+      this.open.add(session);
+      return session;
+    };
+    const release = async (session: ImapSession): Promise<void> => {
       this.open.delete(session);
       await session.logout();
-    }
+    };
+    return this.syncFolder(engine, connect, release, id, folder, stored);
   }
 
   private async syncFolder(
     engine: MailSyncEngine,
-    session: ImapSession,
+    connect: () => Promise<ImapSession>,
+    release: (session: ImapSession) => Promise<void>,
     mailboxId: string,
     folder: string,
     stored: Cursor,
   ): Promise<MailboxSyncResult> {
-    const status = await session.examine(folder);
-    const applies = stored.folder === folder && stored.uidValidity === status.uidValidity;
-    const hadCursor = stored.folder !== null || stored.uidValidity !== null || stored.lastUid !== null;
-    const result: MailboxSyncResult = {
-      mailboxId,
-      folder,
-      uidValidity: status.uidValidity,
-      reset: hadCursor && !applies,
-      fetched: 0,
-      stored: 0,
-      duplicates: 0,
-      suppressed: 0,
-      skipped: [],
-      lastUid: applies ? (stored.lastUid ?? 0) : 0,
-      more: false,
-    };
+    let session = await connect();
+    try {
+      const status = await session.examine(folder);
+      const applies = stored.folder === folder && stored.uidValidity === status.uidValidity;
+      const hadCursor = stored.folder !== null || stored.uidValidity !== null || stored.lastUid !== null;
+      const result: MailboxSyncResult = {
+        mailboxId,
+        folder,
+        uidValidity: status.uidValidity,
+        reset: hadCursor && !applies,
+        fetched: 0,
+        stored: 0,
+        duplicates: 0,
+        suppressed: 0,
+        skipped: [],
+        lastUid: applies ? (stored.lastUid ?? 0) : 0,
+        more: false,
+      };
 
-    const maxPerRun = this.options.maxMessagesPerRun ?? DEFAULT_SYNC_MAX_MESSAGES_PER_RUN;
-    const candidates = (await session.listMessages(result.lastUid + 1)).filter((m) => m.uid > result.lastUid);
-    const taken = candidates.slice(0, maxPerRun);
-    result.more = candidates.length > taken.length;
+      const maxPerRun = this.options.maxMessagesPerRun ?? DEFAULT_SYNC_MAX_MESSAGES_PER_RUN;
+      const candidates = (await session.listMessages(result.lastUid + 1)).filter((m) => m.uid > result.lastUid);
+      const taken = candidates.slice(0, maxPerRun);
+      result.more = candidates.length > taken.length;
 
-    const batchSize = Math.max(1, this.options.batchSize ?? DEFAULT_SYNC_BATCH_SIZE);
-    const maxBytes = this.options.maxMessageBytes ?? DEFAULT_SYNC_MAX_MESSAGE_BYTES;
-    for (let at = 0; at < taken.length && !this.closed; at += batchSize) {
-      const batch = taken.slice(at, at + batchSize);
-      const fits = batch.filter((m) => m.size === null || m.size <= maxBytes).map((m) => m.uid);
-      const fetched = new Map((await session.fetchMessages(fits)).map((m) => [m.uid, m]));
-      try {
-        for (const entry of batch) {
-          if (entry.size !== null && entry.size > maxBytes) {
-            this.skip(result, mailboxId, folder, entry.uid, 'too_large', `${entry.size} bytes, above the ${maxBytes}-byte bound`);
-            continue;
-          }
-          const message = fetched.get(entry.uid);
-          if (message) {
-            result.fetched++;
-            try {
-              const outcome = await this.options.ingest.ingest(
-                { mailboxId, raw: message.raw, receivedAt: message.internalDate ?? undefined },
-                { ...SYSTEM_CTX },
-              );
-              if (outcome.outcome === 'stored') result.stored++;
-              else if (outcome.outcome === 'duplicate') result.duplicates++;
-              else result.suppressed++;
-            } catch (err) {
-              if (!(err instanceof MailboxServiceError) || err.code !== 'VALIDATION_ERROR') throw err;
-              this.skip(result, mailboxId, folder, entry.uid, 'unreadable', err.message);
-            }
-          }
-          // Absent from the fetch: expunged since it was listed; nothing to mirror.
-          result.lastUid = entry.uid;
+      const maxBytes = this.maxMessageBytes();
+      // A fresh session on the same folder, after the server sent more than
+      // the session accepts (which closes the connection).
+      const reopen = async (): Promise<void> => {
+        await release(session);
+        session = await connect();
+        const again = await session.examine(folder);
+        if (again.uidValidity !== status.uidValidity) {
+          throw new ImapError(
+            'protocol',
+            `The UIDVALIDITY of folder '${folder}' changed during the sync of mailbox '${mailboxId}'; the next run reads it from its start.`,
+          );
         }
-      } finally {
-        await this.saveCursor(engine, mailboxId, folder, status.uidValidity, result.lastUid);
+      };
+
+      for (const batch of this.batchesOf(taken, maxBytes)) {
+        if (this.closed) break;
+        const fits = batch.filter((m) => m.size === null || m.size <= maxBytes).map((m) => m.uid);
+        let fetched = new Map<number, ImapMessage>();
+        let isolated = false;
+        try {
+          fetched = new Map((await session.fetchMessages(fits)).map((m) => [m.uid, m]));
+        } catch (err) {
+          if (!isOversized(err)) throw err;
+          // The server sent more for this batch than its listed sizes allow:
+          // read the batch again one message at a time, to find which.
+          await reopen();
+          isolated = true;
+        }
+        try {
+          for (const entry of batch) {
+            if (entry.size !== null && entry.size > maxBytes) {
+              this.skip(result, mailboxId, folder, entry.uid, 'too_large', `${entry.size} bytes, above the ${maxBytes}-byte bound`);
+              continue;
+            }
+            let message = fetched.get(entry.uid);
+            if (isolated) {
+              try {
+                [message] = await session.fetchMessages([entry.uid]);
+              } catch (err) {
+                if (!isOversized(err)) throw err;
+                this.skip(
+                  result,
+                  mailboxId,
+                  folder,
+                  entry.uid,
+                  'too_large',
+                  `the server sent more for it than the session accepts, above the ${maxBytes}-byte bound, ` +
+                    `though it listed ${entry.size === null ? 'no size' : `${entry.size} bytes`}`,
+                );
+                await reopen();
+                continue;
+              }
+            }
+            if (message && message.raw.length > maxBytes) {
+              this.skip(
+                result,
+                mailboxId,
+                folder,
+                entry.uid,
+                'too_large',
+                `${message.raw.length} bytes, above the ${maxBytes}-byte bound, ` +
+                  `though the server listed ${entry.size === null ? 'no size' : `${entry.size} bytes`}`,
+              );
+              continue;
+            }
+            if (message) {
+              result.fetched++;
+              try {
+                const outcome = await this.options.ingest.ingest(
+                  { mailboxId, raw: message.raw, receivedAt: message.internalDate ?? undefined },
+                  { ...SYSTEM_CTX },
+                );
+                if (outcome.outcome === 'stored') result.stored++;
+                else if (outcome.outcome === 'duplicate') result.duplicates++;
+                else result.suppressed++;
+              } catch (err) {
+                if (!(err instanceof MailboxServiceError) || err.code !== 'VALIDATION_ERROR') throw err;
+                this.skip(result, mailboxId, folder, entry.uid, 'unreadable', err.message);
+              }
+            }
+            // Absent from the fetch: expunged since it was listed; nothing to mirror.
+            result.lastUid = entry.uid;
+          }
+        } finally {
+          await this.saveCursor(engine, mailboxId, folder, status.uidValidity, result.lastUid);
+        }
       }
+      if (taken.length === 0) await this.saveCursor(engine, mailboxId, folder, status.uidValidity, result.lastUid);
+      return result;
+    } finally {
+      await release(session);
     }
-    if (taken.length === 0) await this.saveCursor(engine, mailboxId, folder, status.uidValidity, result.lastUid);
-    return result;
+  }
+
+  private maxMessageBytes(): number {
+    return this.options.maxMessageBytes ?? DEFAULT_SYNC_MAX_MESSAGE_BYTES;
+  }
+
+  /**
+   * The fetch batches: at most `batchSize` messages and `maxBatchBytes` listed
+   * bytes each (never less than one message's bound). A message listed above
+   * the bound costs nothing — it is never fetched — and one listed with no
+   * size costs the whole bound, the most the session lets it be.
+   */
+  private batchesOf(taken: ReadonlyArray<ImapMessageSize>, maxBytes: number): ImapMessageSize[][] {
+    const batchSize = Math.max(1, this.options.batchSize ?? DEFAULT_SYNC_BATCH_SIZE);
+    const budget = Math.max(this.options.maxBatchBytes ?? DEFAULT_SYNC_MAX_BATCH_BYTES, maxBytes);
+    const batches: ImapMessageSize[][] = [];
+    let current: ImapMessageSize[] = [];
+    let bytes = 0;
+    for (const entry of taken) {
+      const cost = entry.size === null ? maxBytes : entry.size > maxBytes ? 0 : entry.size;
+      if (current.length > 0 && (current.length >= batchSize || bytes + cost > budget)) {
+        batches.push(current);
+        current = [];
+        bytes = 0;
+      }
+      current.push(entry);
+      bytes += cost;
+    }
+    if (current.length > 0) batches.push(current);
+    return batches;
   }
 
   private skip(

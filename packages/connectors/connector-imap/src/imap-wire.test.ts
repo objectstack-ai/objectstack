@@ -3,6 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import { ImapError } from './imap-error.js';
 import {
+  IMAP_MAX_RESPONSE_LITERALS,
   ImapResponseReader,
   encodeMailboxName,
   imapAstring,
@@ -37,17 +38,32 @@ describe('ImapResponseReader frames a byte stream into responses', () => {
     expect([...(response![1] as Uint8Array)]).toEqual([0xc3, 0xa9, 0x00, 0xff]);
   });
 
-  it('refuses a literal larger than its bound, before reading it', () => {
-    expect(() => reader().push(bytes('* 1 FETCH (BODY[] {65}\r\n'))).toThrow(ImapError);
+  const kindOf = (fn: () => unknown): string | undefined => {
     try {
-      reader().push(bytes('* 1 FETCH (BODY[] {65}\r\n'));
+      fn();
     } catch (err) {
-      expect((err as ImapError).kind).toBe('protocol');
+      expect(err).toBeInstanceOf(ImapError);
+      return (err as ImapError).kind;
     }
+    return undefined;
+  };
+
+  it('refuses a literal larger than its bound, before reading it', () => {
+    expect(kindOf(() => reader().push(bytes('* 1 FETCH (BODY[] {65}\r\n')))).toBe('oversized');
   });
 
   it('refuses a line longer than its bound', () => {
     expect(() => reader().push(bytes('*'.repeat(1025)))).toThrow(/longer than 1024 bytes/);
+    expect(kindOf(() => reader().push(bytes('*'.repeat(1025))))).toBe('oversized');
+  });
+
+  it(`refuses a response of more than ${IMAP_MAX_RESPONSE_LITERALS} literals — an endless {0} run — and admits ${IMAP_MAX_RESPONSE_LITERALS}`, () => {
+    const run = (literals: number) => `* 1 FETCH (BODY[] {0}\r\n${' X {0}\r\n'.repeat(literals - 1)})\r\n`;
+    // Control: exactly the bound is one complete response.
+    expect(reader().push(bytes(run(IMAP_MAX_RESPONSE_LITERALS)))).toHaveLength(1);
+    expect(kindOf(() => reader().push(bytes(run(IMAP_MAX_RESPONSE_LITERALS + 1))))).toBe('oversized');
+    // The count is per response: two responses at the bound are both admitted.
+    expect(reader().push(bytes(run(IMAP_MAX_RESPONSE_LITERALS).repeat(2)))).toHaveLength(2);
   });
 });
 

@@ -16,6 +16,14 @@
 
 import { ImapError } from './imap-error.js';
 
+/**
+ * The most literals one response may carry. A response this client asks for
+ * carries at most one (a message body); the bound refuses a server that
+ * announces literal after literal — `{0}` after `{0}` — to grow one response
+ * forever.
+ */
+export const IMAP_MAX_RESPONSE_LITERALS = 32;
+
 /** One server response: text segments, each followed by the literal its `{n}` announced. */
 export type ImapResponseParts = Array<string | Uint8Array>;
 
@@ -27,15 +35,17 @@ const CR = 0x0d;
 const LITERAL_MARKER = /\{(\d+)\}$/;
 
 /**
- * Frames a server's byte stream into responses. Bounded on both axes: a line
- * longer than `maxLineBytes` or a literal larger than `maxLiteralBytes` is a
- * protocol failure, never an unbounded buffer.
+ * Frames a server's byte stream into responses. Bounded on every axis: a line
+ * longer than `maxLineBytes`, a literal larger than `maxLiteralBytes` and a
+ * response of more than {@link IMAP_MAX_RESPONSE_LITERALS} literals are refused
+ * (`oversized`) before the excess is kept, never an unbounded buffer.
  */
 export class ImapResponseReader {
   private pending: Buffer[] = [];
   private pendingBytes = 0;
   private parts: ImapResponseParts = [];
   private literalRemaining: number | null = null;
+  private literalsInResponse = 0;
 
   constructor(
     private readonly limits: { maxLineBytes: number; maxLiteralBytes: number },
@@ -58,7 +68,7 @@ export class ImapResponseReader {
       const lineLength = this.indexOfLf();
       if (lineLength < 0) {
         if (this.pendingBytes > this.limits.maxLineBytes) {
-          throw new ImapError('protocol', `The server sent a line longer than ${this.limits.maxLineBytes} bytes.`);
+          throw new ImapError('oversized', `The server sent a line longer than ${this.limits.maxLineBytes} bytes.`);
         }
         break;
       }
@@ -68,10 +78,16 @@ export class ImapResponseReader {
       const marker = LITERAL_MARKER.exec(line);
       this.parts.push(line);
       if (marker) {
+        if (++this.literalsInResponse > IMAP_MAX_RESPONSE_LITERALS) {
+          throw new ImapError(
+            'oversized',
+            `The server sent a response of more than ${IMAP_MAX_RESPONSE_LITERALS} literals; this session accepts no more.`,
+          );
+        }
         const size = Number(marker[1]);
         if (!Number.isSafeInteger(size) || size > this.limits.maxLiteralBytes) {
           throw new ImapError(
-            'protocol',
+            'oversized',
             `The server announced a ${marker[1]}-byte literal; this session accepts at most ${this.limits.maxLiteralBytes}.`,
           );
         }
@@ -80,6 +96,7 @@ export class ImapResponseReader {
       }
       done.push(this.parts);
       this.parts = [];
+      this.literalsInResponse = 0;
     }
     return done;
   }

@@ -18,13 +18,18 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import type { DataEngineInsertOptions, EngineQueryOptions } from '@objectstack/spec/data';
-import { staticCredentials } from '@objectstack/connector-imap';
+import { DEFAULT_IMAP_MAX_COMMAND_BYTES, openImapSession, staticCredentials } from '@objectstack/connector-imap';
 import { ImapServerDouble } from '@objectstack/connector-imap/testing';
 import { SysMailAssociation, SysMailbox, SysMailMessage } from '../objects/index.js';
 import { MailIngestService, MailboxServiceError, type MailIngestEngine } from '../ingest/mail-ingest-service.js';
 import { parseMatchAddresses } from '../ingest/match-addresses.js';
 import { bounce, forwardAsAttachment, plainMessage, rfc822 } from '../ingest/messages.fixture.js';
-import { MailboxSyncService, type MailboxSyncServiceOptions, type MailSyncEngine } from './mailbox-sync-service.js';
+import {
+  MailboxSyncService,
+  SYNC_LITERAL_ENVELOPE_BYTES,
+  type MailboxSyncServiceOptions,
+  type MailSyncEngine,
+} from './mailbox-sync-service.js';
 
 const SYSTEM = { isSystem: true } as const;
 const ORG = 'org_sync_a';
@@ -271,6 +276,81 @@ describe('the IMAP sync, end to end, on a real engine', () => {
       expect(errors[0]).toMatch(/UID 1 .* is NOT mirrored/);
       expect(errors[0]).toMatch(/raise `maxMessageBytes`/);
       expect(imap.commands.some((c) => /UID FETCH 1 \(/.test(c) || /UID FETCH 1:2 \(UID INTERNALDATE/.test(c))).toBe(false);
+    });
+
+    it('fetches by a byte budget per batch as well as by count', async () => {
+      const mailbox = await newMailbox();
+      for (let i = 1; i <= 4; i++) imap.append('INBOX', plainMessage({ 'Message-ID': `<budget-${i}@acme.test>` }, 'y'.repeat(300)));
+      const size = imap.messages('INBOX')[0]!.raw.length;
+
+      const result = await syncFor(mailbox, { maxBatchBytes: size * 2, maxMessageBytes: size * 2 }).syncMailbox(mailbox, SYSTEM);
+
+      expect(result).toMatchObject({ fetched: 4, stored: 4, lastUid: 4 });
+      const fetches = imap.commands.filter((c) => /BODY\.PEEK\[\]/.test(c)).map((c) => c.replace(/^\S+ /, ''));
+      expect(fetches).toEqual(['UID FETCH 1:2 (UID INTERNALDATE BODY.PEEK[])', 'UID FETCH 3:4 (UID INTERNALDATE BODY.PEEK[])']);
+    });
+
+    it('control: without a byte budget below the batch, the same four messages are one fetch', async () => {
+      const mailbox = await newMailbox();
+      for (let i = 1; i <= 4; i++) imap.append('INBOX', plainMessage({ 'Message-ID': `<nobudget-${i}@acme.test>` }, 'y'.repeat(300)));
+      await syncFor(mailbox).syncMailbox(mailbox, SYSTEM);
+      const fetches = imap.commands.filter((c) => /BODY\.PEEK\[\]/.test(c)).map((c) => c.replace(/^\S+ /, ''));
+      expect(fetches).toEqual(['UID FETCH 1:4 (UID INTERNALDATE BODY.PEEK[])']);
+    });
+
+    it('opens the session with the sync bound as its literal bound, plus the framing envelope', async () => {
+      const mailbox = await newMailbox();
+      const seen: Array<Record<string, unknown>> = [];
+      const sync = syncFor(mailbox, {
+        maxMessageBytes: 1024,
+        openSession: async (options) => {
+          seen.push({ ...options });
+          return openImapSession(options);
+        },
+      });
+      await sync.syncMailbox(mailbox, SYSTEM);
+      expect(seen).toHaveLength(1);
+      expect(seen[0]!.maxLiteralBytes).toBe(1024 + SYNC_LITERAL_ENVELOPE_BYTES);
+      expect(seen[0]!.maxCommandBytes).toBeGreaterThanOrEqual(DEFAULT_IMAP_MAX_COMMAND_BYTES);
+    });
+
+    for (const sizeReport of ['understated', 'omitted'] as const) {
+      it(`skips a lying server's oversized message (size ${sizeReport}) as too_large, moves the cursor past it, and the next message lands`, async () => {
+        await imap.close();
+        imap = new ImapServerDouble({ sizeReport });
+        endpoint = await imap.listen();
+        const mailbox = await newMailbox();
+        imap.append('INBOX', plainMessage({ 'Message-ID': `<huge-${sizeReport}@acme.test>` }, 'z'.repeat(100_000)));
+        imap.append('INBOX', plainMessage({ 'Message-ID': `<after-huge-${sizeReport}@acme.test>` }));
+        const sync = syncFor(mailbox, { maxMessageBytes: 1024 });
+
+        const result = await sync.syncMailbox(mailbox, SYSTEM);
+
+        expect(result).toMatchObject({ fetched: 1, stored: 1, lastUid: 2 });
+        expect(result!.skipped).toEqual([
+          { uid: 1, reason: 'too_large', detail: expect.stringMatching(/more for it than the session accepts/) },
+        ]);
+        const rows = await messagesIn(mailbox);
+        expect(rows.map((r) => r.message_id)).toEqual([`after-huge-${sizeReport}@acme.test`]);
+        expect((await mailboxRow(mailbox)).imap_last_uid).toBe(2);
+        expect(await sync.syncMailbox(mailbox, SYSTEM)).toMatchObject({ fetched: 0, skipped: [] });
+      });
+    }
+
+    it('skips a message whose listed size understates it within the framing envelope, after reading it', async () => {
+      await imap.close();
+      imap = new ImapServerDouble({ sizeReport: 'understated' });
+      endpoint = await imap.listen();
+      const mailbox = await newMailbox();
+      imap.append('INBOX', plainMessage({ 'Message-ID': '<under@acme.test>' }, 'w'.repeat(4000)));
+      imap.append('INBOX', plainMessage({ 'Message-ID': '<after-under@acme.test>' }));
+
+      const result = await syncFor(mailbox, { maxMessageBytes: 1024 }).syncMailbox(mailbox, SYSTEM);
+
+      expect(result).toMatchObject({ fetched: 1, stored: 1, lastUid: 2 });
+      expect(result!.skipped).toEqual([
+        { uid: 1, reason: 'too_large', detail: expect.stringMatching(/^4\d{3} bytes, above the 1024-byte bound, though the server listed 100 bytes$/) },
+      ]);
     });
 
     it('skips a message the seam refuses as unreadable, and moves on', async () => {

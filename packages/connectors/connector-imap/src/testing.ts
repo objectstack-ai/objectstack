@@ -11,8 +11,15 @@
  * in one is not silently mirrored by the other. It is also strict where the
  * client must be careful: a literal is accepted only after the server's `+`
  * continuation, `UID FETCH` is refused outside a selected folder, and a body
- * fetched with `BODY[]` (not `BODY.PEEK[]`) or under `SELECT` is marked
- * `\Seen`, which is how a test proves a client never altered the mailbox.
+ * fetched with `BODY[]` under `SELECT` is marked `\Seen` — the only state
+ * change a fetch makes, as RFC 3501 says: `BODY.PEEK[]` never sets it, and
+ * nothing changes a folder opened with `EXAMINE`. A client that keeps to
+ * `EXAMINE` and `BODY.PEEK[]` is therefore proved read-only by the commands
+ * it sends (`commands`), and a `\Seen` flag shows a client that broke both.
+ *
+ * It can also play a HOSTILE or LYING server, for tests of a client's bounds:
+ * `hostile` answers every `UID FETCH` with a stream that never ends, and
+ * `sizeReport` understates or omits `RFC822.SIZE`.
  *
  * Supported: `CAPABILITY`, `NOOP`, `LOGIN`, `AUTHENTICATE PLAIN` and
  * `AUTHENTICATE XOAUTH2` (with or without `SASL-IR`), `EXAMINE`, `SELECT`,
@@ -38,6 +45,16 @@ export interface ImapServerDoubleOptions {
   capabilitiesInGreeting?: boolean;
   /** Leave the UIDVALIDITY code out of `EXAMINE`/`SELECT` (a broken server). */
   omitUidValidity?: boolean;
+  /**
+   * Answer every `UID FETCH` with a stream that never ends until the client
+   * drops the connection: `endless-literals` — one response that announces
+   * empty literal after empty literal (`{0}` after `{0}`); `endless-untagged`
+   * — untagged FETCH responses, one after another, and never the tagged
+   * answer.
+   */
+  hostile?: 'endless-literals' | 'endless-untagged';
+  /** `RFC822.SIZE` as reported: `true` (default), `understated` (at most 100) or `omitted`. */
+  sizeReport?: 'true' | 'understated' | 'omitted';
 }
 
 /** One stored message. */
@@ -353,6 +370,7 @@ export class ImapServerDouble {
         const set = str(rest[1]);
         const wanted = set === undefined ? null : uidsOf(set, folder.messages.map((m) => m.uid));
         if (wanted === null) return bad('Invalid UID set');
+        if (this.options.hostile) return this.endless(conn, this.options.hostile);
         const items = (str(rest[2]) ?? '').replace(/^\(|\)$/g, '').toUpperCase().split(' ').filter(Boolean);
         folder.messages.forEach((message, index) => {
           if (!wanted.has(message.uid)) return;
@@ -360,7 +378,11 @@ export class ImapServerDouble {
           for (const item of items) {
             if (item === 'UID') continue;
             if (item === 'FLAGS') parts.push(`FLAGS (${[...message.flags].join(' ')})`);
-            else if (item === 'RFC822.SIZE') parts.push(`RFC822.SIZE ${message.raw.length}`);
+            else if (item === 'RFC822.SIZE') {
+              const report = this.options.sizeReport ?? 'true';
+              if (report === 'true') parts.push(`RFC822.SIZE ${message.raw.length}`);
+              else if (report === 'understated') parts.push(`RFC822.SIZE ${Math.min(message.raw.length, 100)}`);
+            }
             else if (item === 'INTERNALDATE') parts.push(`INTERNALDATE "${internalDate(message.internalDate)}"`);
             else if (item === 'BODY[]' || item === 'BODY.PEEK[]') {
               if (item === 'BODY[]' && !conn.selected!.readOnly) message.flags.add('\\Seen');
@@ -386,6 +408,19 @@ export class ImapServerDouble {
       default:
         return bad(`Unknown command ${name}`);
     }
+  }
+
+  /** A stream that never ends, one write per turn of the event loop, until the client drops the connection. */
+  private endless(conn: Conn, mode: 'endless-literals' | 'endless-untagged'): void {
+    let sent = 0;
+    const pump = () => {
+      if (conn.socket.destroyed || !conn.socket.writable || sent >= 1_000_000) return;
+      sent++;
+      if (mode === 'endless-literals') conn.socket.write(sent === 1 ? '* 1 FETCH (UID 1 BODY[] {0}\r\n' : ' X {0}\r\n');
+      else conn.socket.write(`* ${sent} FETCH (UID ${sent} FLAGS ())\r\n`);
+      setImmediate(pump);
+    };
+    pump();
   }
 
   private authenticate(conn: Conn, tag: string, mechanism: string, initial: string | undefined): void {

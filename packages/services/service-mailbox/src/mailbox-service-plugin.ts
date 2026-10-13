@@ -30,6 +30,8 @@ export interface MailboxImapSyncOptions {
   maxMessagesPerRun?: number;
   /** Larger messages are skipped, and logged at `error`. */
   maxMessageBytes?: number;
+  /** Listed bytes fetched per IMAP command. */
+  maxBatchBytes?: number;
 }
 
 export interface MailboxServicePluginOptions {
@@ -117,6 +119,7 @@ export class MailboxServicePlugin implements Plugin {
         batchSize: imap.batchSize,
         maxMessagesPerRun: imap.maxMessagesPerRun,
         maxMessageBytes: imap.maxMessageBytes,
+        maxBatchBytes: imap.maxBatchBytes,
       });
     }
 

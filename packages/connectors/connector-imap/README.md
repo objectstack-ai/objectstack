@@ -6,14 +6,15 @@ It registers no `connector_action` handlers and ships no plugin: nothing in a fl
 
 ## What it provides
 
-- **`openImapSession({ account, credentials, timeoutMs?, maxLiteralBytes? })`** — connects, reads the greeting, learns the server's capabilities, resolves the credential and authenticates. The session it answers:
+- **`openImapSession({ account, credentials, timeoutMs?, maxLiteralBytes?, maxCommandBytes? })`** — connects, reads the greeting, learns the server's capabilities, resolves the credential and authenticates. The session it answers:
   - `examine(folder)` opens a folder **read-only** (`EXAMINE`, never `SELECT`) and answers its `uidValidity`, `uidNext` and `exists`. A server that reports no UIDVALIDITY is refused: its UIDs could not be trusted across sessions;
   - `listMessages(fromUid)` answers the UIDs and sizes from `fromUid` up, ascending;
   - `fetchMessages(uids)` answers those messages byte for byte, with their `INTERNALDATE`, fetched with `BODY.PEEK[]` — so nothing the session does sets `\Seen` or changes the mailbox;
   - `logout()` ends the session politely; `close()` drops it.
 - **`MailAccount`** — an account is an identity with its own endpoint and login (`{ id, username, imap: { host, port?, security? } }`), never a process-wide setting, so many accounts coexist.
 - **`MailCredentialProvider`** — the credential is resolved per account, each time a session opens, and never stored on the account or cached by the connector. That is what lets a per-user mailbox later read a user's own stored credential and refresh an OAuth token without the connector changing. `staticCredentials(credential)` answers one fixed credential — the shared mailbox whose host supplies it at composition.
-- **`ImapError`** — every failure, with a `kind`: `configuration`, `connection`, `timeout`, `authentication`, `refused` or `protocol`. A message never carries the credential.
+- **`ImapError`** — every failure, with a `kind`: `configuration`, `connection`, `timeout`, `authentication`, `refused`, `protocol` or `oversized`. A message never carries the credential.
+- **Bounds against an untrusted server** — a line above 4 MiB, a literal above `maxLiteralBytes` (64 MiB by default), a response of more than 32 literals and more than `maxCommandBytes` of responses to one command (128 MiB by default, each response charged 256 bytes beyond its own) are refused as `oversized` before the excess is kept, and the connection is closed. The silence bound (`timeoutMs`) is an inactivity bound; these are what stop a server that trickles forever.
 
 ## Authentication
 
@@ -49,7 +50,7 @@ try {
 
 ## Testing
 
-`@objectstack/connector-imap/testing` exports **`ImapServerDouble`**, an in-process IMAP server on loopback for tests of anything that reads a mailbox. It is its own implementation of the server side — it shares no parser or encoder with the client — and it is strict where a client must be careful: a literal is accepted only after its continuation, and a body fetched with `BODY[]` or under `SELECT` is marked `\Seen`, which is how a test proves a client left the mailbox untouched.
+`@objectstack/connector-imap/testing` exports **`ImapServerDouble`**, an in-process IMAP server on loopback for tests of anything that reads a mailbox. It is its own implementation of the server side — it shares no parser or encoder with the client — and it is strict where a client must be careful: a literal is accepted only after its continuation, and a body fetched with `BODY[]` under `SELECT` is marked `\Seen`, the one state change a fetch makes (RFC 3501: `BODY.PEEK[]` never sets it, and nothing changes a folder opened with `EXAMINE`). A client that keeps to `EXAMINE` and `BODY.PEEK[]` is proved read-only by the commands it sends (`server.commands`). It can also play a hostile or lying server (`hostile`, `sizeReport`) for tests of a client's bounds.
 
 ```typescript
 import { ImapServerDouble } from '@objectstack/connector-imap/testing';

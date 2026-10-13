@@ -29,10 +29,13 @@ export {
   type MailCredentialProvider,
 } from './account.js';
 export { ImapError, type ImapErrorKind } from './imap-error.js';
+export { IMAP_MAX_RESPONSE_LITERALS } from './imap-wire.js';
 export {
+  DEFAULT_IMAP_MAX_COMMAND_BYTES,
   DEFAULT_IMAP_MAX_LITERAL_BYTES,
   DEFAULT_IMAP_TIMEOUT_MS,
   IMAP_MAX_LINE_BYTES,
+  IMAP_RESPONSE_OVERHEAD_BYTES,
   openImapSession,
   type ImapFolderStatus,
   type ImapMessage,
