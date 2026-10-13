@@ -6,7 +6,7 @@ Retirement prescriptions for shapes `@objectstack/spec` 17.7.0 still accepts now
 
 Clause-②: no
 
-17.7.0, the newest published release, still accepts every shape below. No 17.x release removes them: the 18 line does. Their refusals, and their `[REMOVED]` JSON Schema descriptions, named a different release:
+17.7.0, the newest 17.x release (npm `latest`), still accepts every shape below, and `18.0.0-next.0` is the first release that refuses them. No 17.x release removes them: the 18 line does. Their refusals, and their `[REMOVED]` JSON Schema descriptions, named a different release:
 
 | Surface | Was | Now |
 | --- | --- | --- |
