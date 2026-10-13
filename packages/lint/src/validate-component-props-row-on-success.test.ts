@@ -67,7 +67,7 @@ describe("the props gate refuses `'navigation'` at a page action row's executor 
     const findings = validateComponentProps(stackWith(node({ [key]: 'navigation', target: '/apps/crm/tasks' })));
     expect(findings.map((f) => [f.rule, f.path])).toEqual([[COMPONENT_PROPS_INVALID, `${at}.${key}`]]);
     expect(findings[0].message).toContain(
-      `${subject} is the console runner's local alias of \`'url'\`, and the url executor has one spelling.`,
+      `${subject} is the console runner's local alias of \`'url'\`, refused on page action rows since @objectstack/spec 18, and the url executor has one spelling.`,
     );
   });
 

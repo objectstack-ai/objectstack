@@ -77,11 +77,15 @@ import { describe, expect, it } from 'vitest';
 
 import { ALL_CONVERSIONS } from '../conversions/registry';
 import { TimeUpdateInterval } from '../data/analytics.zod';
-import { IndexSchema } from '../data/object.zod';
+import { IndexSchema, ObjectSchema } from '../data/object.zod';
 import { ManifestPermissionsSchema } from '../kernel/manifest.zod';
 import { PROTOCOL_MAJOR } from '../kernel/protocol-version';
 import { EmailTemplateDefinitionSchema } from '../system/email-template.zod';
 import {
+  ActionButtonPropsSchema,
+  ActionGroupPropsSchema,
+  ActionIconPropsSchema,
+  ActionMenuPropsSchema,
   ElementNumberPropsSchema,
   ElementRecordPickerPropsSchema,
   ElementRepeaterPropsSchema,
@@ -165,7 +169,7 @@ interface Prescription {
 
 type Renderer = () => Prescription[];
 
-type Parse = { success: boolean; error?: { issues: { message: string }[] } };
+type Parse = { success: boolean; error?: { issues: { message: string; path?: readonly PropertyKey[] }[] } };
 type Shaped = { shape: Record<string, { safeParse: (v: unknown) => Parse; description?: string }> };
 
 /** A `retiredKey()` tombstone: its parse refusal and its `[REMOVED]` description. */
@@ -182,11 +186,17 @@ const tombstone = (schema: unknown, surface: string, key: string): Renderer => (
   ];
 };
 
-/** The refusal a surface answers for a retired value or union arm. */
-const refusal = (where: string, parse: () => Parse): Renderer => () => {
+/**
+ * The refusal a surface answers for a retired value or union arm. `at` keeps
+ * only the issues at that first path segment, for a surface whose parse can
+ * report other, unrelated issues.
+ */
+const refusal = (where: string, parse: () => Parse, at?: PropertyKey): Renderer => () => {
   const refused = parse();
   expect(refused.success, `${where} must be refused`).toBe(false);
-  return refused.error!.issues.map((issue) => ({ where, text: issue.message }));
+  const issues = refused.error!.issues.filter((issue) => at === undefined || issue.path?.[0] === at);
+  expect(issues.length, `${where}: no issue at ${String(at)}`).toBeGreaterThan(0);
+  return issues.map((issue) => ({ where, text: issue.message }));
 };
 
 const ELEMENTS: readonly (readonly [unknown, string, readonly string[]])[] = [
@@ -210,6 +220,24 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   ],
   'declared-index-unique-scope': [
     refusal('indexes[].unique: true', () => IndexSchema.safeParse({ fields: ['code'], unique: true })),
+  ],
+  'page-action-row-navigation-executor-to-url': [
+    refusal("action:button actionType 'navigation'", () => ActionButtonPropsSchema.safeParse({ label: 'Clone', actionType: 'navigation', target: '/apps/crm/tasks' })),
+    refusal("action:icon actionType 'navigation'", () => ActionIconPropsSchema.safeParse({ icon: 'copy', label: 'Clone', actionType: 'navigation', target: '/apps/crm/tasks' })),
+    refusal("action:group member type 'navigation'", () => ActionGroupPropsSchema.safeParse({ actions: [{ label: 'Clone', type: 'navigation', target: '/apps/crm/tasks' }] })),
+    refusal("action:menu member type 'navigation'", () => ActionMenuPropsSchema.safeParse({ actions: [{ label: 'Clone', type: 'navigation', target: '/apps/crm/tasks' }] })),
+  ],
+  'cbp-master-detail-required-defaulted': [
+    refusal(
+      'a controlled_by_parent master_detail without `required`',
+      () => ObjectSchema.safeParse({
+        name: 'cbp_line',
+        label: 'Line',
+        sharingModel: 'controlled_by_parent',
+        fields: { order: { type: 'master_detail', label: 'Order', reference: 'cbp_order' } },
+      }),
+      'sharingModel',
+    ),
   ],
   // Shipped by a 17.x minor; `toMajor: 18` like the rows above.
   'page-header-breadcrumb-removed': [tombstone(PageHeaderProps, 'page:header', 'breadcrumb')],

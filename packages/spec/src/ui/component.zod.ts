@@ -4088,7 +4088,7 @@ function refuseRowUrlExecutorAlias(executorKey: 'actionType' | 'type', subject: 
       code: 'custom',
       path: [executorKey],
       message:
-        `${subject} is the console runner's local alias of \`'url'\`, and the url executor has one spelling. `
+        `${subject} is the console runner's local alias of \`'url'\`, refused on page action rows since @objectstack/spec 18, and the url executor has one spelling. `
         + `Write \`${executorKey}: 'url'\`: on a page action row the alias runs the same navigator on the same `
         + '`target` and `openIn`, so nothing else changes, and a `\'url\'` row\'s `target` is judged by the url '
         + 'scheme set.',
