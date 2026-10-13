@@ -5740,7 +5740,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * `object-grid-data-view-data-converged` semantic entry.
    */
   data: ViewDataSchema.optional()
-    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | api | value | schema). Static inline rows live at `{ provider: 'value', items: [...] }`; the bare-array shortcut is refused — see migration `object-grid-data-view-data-converged`"),
+    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | value | schema). Static inline rows live at `{ provider: 'value', items: [...] }`; the bare-array shortcut is refused — see migration `object-grid-data-view-data-converged`"),
   staticData: z.array(z.unknown()).optional().describe("Deprecated bare-array static-rows shortcut the renderer still reads. Prefer `data: { provider: 'value', items: [...] }`"),
 }));
 /** Author state (ADR-0122: the bare name is the author state). */
@@ -8692,7 +8692,7 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
    * props channel alone.
    */
   data: ViewDataSchema.optional()
-    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | api | value | schema), read FIRST by `getDataConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused"),
+    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | value | schema), read FIRST by `getDataConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused"),
   staticData: z.array(z.unknown()).optional()
     .describe("Inline records — read SECOND by `getDataConfig`, wrapped into a `{ provider: 'value' }` config"),
   /**
@@ -9242,7 +9242,7 @@ export const ObjectGanttPropsSchema = lazySchema(() => strictObject({
    * record-source config the fetch resolves through `resolveDataSource`.
    */
   data: ViewDataSchema.optional()
-    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | api | value | schema), read FIRST by `resolveRecordSourceConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused"),
+    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | value | schema), read FIRST by `resolveRecordSourceConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused"),
   staticData: z.array(z.unknown()).optional()
     .describe("Inline records — read SECOND by `resolveRecordSourceConfig`, wrapped into a `{ provider: 'value' }` config"),
   /** Base query filter — the family's one `ViewFilterRule` array orthography (#15449). */
@@ -9818,7 +9818,7 @@ export const ObjectTreePropsSchema = lazySchema(() => strictObject({
    * mirror, which carries no `data` on either face at this pin.
    */
   data: ViewDataSchema.optional()
-    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | api | value | schema), read FIRST by `resolveRecordSourceConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused"),
+    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | value | schema), read FIRST by `resolveRecordSourceConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused"),
   staticData: z.array(z.unknown()).optional()
     .describe("Inline records — read SECOND by `resolveRecordSourceConfig`, wrapped into a `{ provider: 'value' }` config"),
   /** Base query filter — the family's one `ViewFilterRule` array orthography (#15449). */

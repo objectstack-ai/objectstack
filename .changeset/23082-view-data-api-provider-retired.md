@@ -8,7 +8,7 @@ feat(spec)!: retire the view-level `api` data source — a view binds its object
 
 Clause-②: no (narrowing)
 
-Measured before removal: no producer wrote `provider: 'api'` on a view outside documentation in objectstack (`bcebd8409`), objectui (`origin/main` `f228d710` — the console's approval-requests source builds `ApiDataSource` in code from an `ApiDataSourceConfig`, never a `ViewData`) or hotcrm (`0f84c9c`), each with a lit `provider: 'object'` control. A renderer reader existed at the objectui pin (`ListView` routed the block to `ApiDataSource`; `ObjectGantt` built one from `read` / `write`) and is now unreachable from authored metadata.
+Measured before removal: no producer wrote `provider: 'api'` on a view outside documentation in objectstack (`bcebd8409`), objectui (`origin/main` `f228d710` — the console's approval-requests source builds `ApiDataSource` in code from an `ApiDataSourceConfig`, never a `ViewData`) or hotcrm (`0f84c9c`), each with a lit `provider: 'object'` control. A renderer reader existed in objectui, measured at `7578323a544e` (`ListView` routed the block to `ApiDataSource`; `ObjectGantt` built one from `read` / `write`), and is now unreachable from authored metadata.
 
 ## FROM → TO
 
@@ -22,7 +22,7 @@ Measured before removal: no producer wrote `provider: 'api'` on a view outside d
 
 **What an author who still writes it sees.** `tsc` fails at the authoring site (`ViewData` no longer has the arm), and the parse — `defineView()`, `defineStack({ views })`, `os validate`, `PUT /api/v1/meta/view/:name` — refuses it at `data.provider` with the prescription:
 
-> `view.data.provider: 'api'` was removed in @objectstack/spec 17.8.0 (ADR-0049 enforce-or-remove) — a view-level API source took any `url` and any `headers`, so a credential or a cross-origin call written there was stored with the view, served to every client that read it and sent by the console as written; a metadata-declared API call now has one door, the page element's binding, which is same-origin and credential-free. Bind the view to its object — `data: { provider: 'object', object: '<object_name>' }` — or to static rows — `data: { provider: 'value', items: [...] }` — and move the API read onto a page component: `dataSource: { provider: 'api', read: { url: '/api/...' } }` (with an optional `path` into the response) under a page's `regions[].components[]`, which the console reads with its own signed-in fetch.
+> `view.data.provider: 'api'` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — a view-level API source took any `url` and any `headers`, so a credential or a cross-origin call written there was stored with the view, served to every client that read it and sent by the console as written; a metadata-declared API call now has one door, the page element's binding, which is same-origin and credential-free. Bind the view to its object — `data: { provider: 'object', object: '<object_name>' }` — or to static rows — `data: { provider: 'value', items: [...] }` — and move the API read onto a page component: `dataSource: { provider: 'api', read: { url: '/api/...' } }` (with an optional `path` into the response) under a page's `regions[].components[]`, which the console reads with its own signed-in fetch.
 
 ## The retirement kit
 

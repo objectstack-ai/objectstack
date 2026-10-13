@@ -190,7 +190,7 @@ export type { HttpMethodSubset } from '../shared/http.zod';
  * `view-data-api-provider-retired` carries the judgement an upgrader owes.
  */
 const VIEW_DATA_API_PROVIDER_RETIRED =
-  "`view.data.provider: 'api'` was removed in @objectstack/spec 17.8.0 (ADR-0049 enforce-or-remove) — "
+  "`view.data.provider: 'api'` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — "
   + 'a view-level API source took any `url` and any `headers`, so a credential or a cross-origin call '
   + 'written there was stored with the view, served to every client that read it and sent by the '
   + "console as written; a metadata-declared API call now has one door, the page element's binding, "
