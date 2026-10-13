@@ -33,6 +33,20 @@ interface FakeOptions {
   tables?: Record<string, any[]>;
 }
 
+/**
+ * The fake engine's WHERE matcher: equality and `$in` per field. A combinator
+ * it does not implement is REFUSED, never read as a field name and answered
+ * silently wrong.
+ */
+function matchesWhere(row: any, where: any): boolean {
+  for (const [k, v] of Object.entries(where)) {
+    if (k.startsWith('$')) throw new Error('fakeEngine.find: unsupported logical operator ' + k);
+    const hit = v && typeof v === 'object' && '$in' in (v as any) ? (v as any).$in.includes(row[k]) : row[k] === v;
+    if (!hit) return false;
+  }
+  return true;
+}
+
 function fakeEngine(opts: FakeOptions = {}) {
   const reads: string[] = [];
   const tables: Record<string, any[]> = {
@@ -46,11 +60,7 @@ function fakeEngine(opts: FakeOptions = {}) {
     async find(object: string, q: any) {
       reads.push(object);
       const where = q?.where ?? {};
-      const rows = (tables[object] ?? []).filter((r) =>
-        Object.entries(where).every(([k, v]) =>
-          v && typeof v === 'object' && '$in' in (v as any) ? (v as any).$in.includes(r[k]) : r[k] === v,
-        ),
-      );
+      const rows = (tables[object] ?? []).filter((r) => matchesWhere(r, where));
       return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
     },
   };

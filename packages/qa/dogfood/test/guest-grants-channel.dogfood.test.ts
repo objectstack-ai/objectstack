@@ -42,7 +42,7 @@ import { defineStack, defineView } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { definePermissionSet } from '@objectstack/spec/security';
 import type { ApiEndpoint } from '@objectstack/spec/api';
-import type { IObjectQLEngine } from '@objectstack/spec/contracts';
+import type { IObjectQLEngine, ISecurityService, SecurityContext } from '@objectstack/spec/contracts';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -192,7 +192,7 @@ let stack: VerifyStack;
 let tempDir: string;
 let adminToken: string;
 let memberToken: string;
-let ql: any;
+let ql: IObjectQLEngine;
 let organizationId: string;
 let parentId: string;
 /** The context each engine `find` / `insert` on a fixture object was handed, in order. */
@@ -236,8 +236,8 @@ beforeAll(async () => {
 
   const watched = new Set<string>(Object.values(OBJ));
   for (const [method, at] of [['find', 1], ['insert', 2]] as const) {
-    const original = ql[method].bind(ql);
-    vi.spyOn(ql, method).mockImplementation(async (...args: any[]) => {
+    const original = (ql as any)[method].bind(ql);
+    vi.spyOn(ql as any, method).mockImplementation(async (...args: any[]) => {
       if (watched.has(args[0])) engineCalls.push({ method, object: args[0], context: args[at]?.context });
       return original(...args);
     });
@@ -250,9 +250,14 @@ afterAll(async () => {
   if (tempDir) rmSync(tempDir, { recursive: true, force: true });
 });
 
+/** The engine's registry seam — not part of the engine slot's contract, so it is typed here, narrowly. */
+interface RegistrySeam {
+  registry: { registerItem(type: string, item: Record<string, unknown>, key: string): void };
+}
+
 /** Declare a definition of `position` in the registry's bare slot — where an environment definition answers first. */
 function bindAnchor(position: 'guest' | 'everyone', permissionSets: string[]): void {
-  ql.registry.registerItem('position', { name: position, label: position, permissionSets }, 'name');
+  (ql as unknown as RegistrySeam).registry.registerItem('position', { name: position, label: position, permissionSets }, 'name');
 }
 
 async function anonymous(key: keyof typeof OBJ, init?: RequestInit): Promise<{ status: number; body: any; text: string }> {
@@ -275,9 +280,11 @@ function rowsOf(body: any): any[] {
 
 /** The permission-set names the security service resolves for the context the engine was last handed. */
 async function resolvedSetNames(context: Ctx): Promise<string[]> {
-  const security = stack.kernel.getService<any>('security');
-  const sets = await security.resolvePermissionSetsForContext(context);
-  return sets.map((s: any) => s.name).sort();
+  const security = stack.kernel.getService<ISecurityService>('security');
+  const resolve = security.resolvePermissionSetsForContext;
+  expect(resolve, 'the security service serves the set resolution').toBeTypeOf('function');
+  const sets = await resolve!.call(security, (context ?? {}) as SecurityContext);
+  return sets.map((s) => String(s.name)).sort();
 }
 
 function lastContext(object: string): Ctx {
