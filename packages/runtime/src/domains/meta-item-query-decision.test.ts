@@ -59,7 +59,7 @@ function protocolDouble() {
             type, name, code: MEMBERS['en-US'], overlay: null, overlayScope: null, effective: MEMBERS['en-US'],
             lock: 'none', editable: true, deletable: true, resettable: false,
         })),
-        saveMetaItem: vi.fn(async () => ({ success: true, version: 'v1' })),
+        saveMetaItem: vi.fn(async (_request: unknown) => ({ success: true, version: 'v1' })),
     };
 }
 
