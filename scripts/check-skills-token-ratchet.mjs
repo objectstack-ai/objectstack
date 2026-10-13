@@ -74,13 +74,14 @@
  * the catalog ever turns substantially non-Latin, the convention needs
  * revisiting rather than the ceilings.
  *
- * ONE EXCLUSION — the release stamp's whole line. Maintainer ruling, decision
- * record 6139629628 item 2 (A2′, the maintainer's 「同意」), verbatim: "counts
- * authored content only: the frontmatter `version:` line that the release bot
- * rewrites is excluded from the count … ceilings stay shrink-only and the
- * current headroom (0 and 1 tokens) stays as it is." It replaced route A of
- * record 6138951701, which priced only the stamp's prerelease segment at zero
- * and so still priced the stable part (`18.9.0` -> `18.10.0` is one byte).
+ * ONE EXCLUSION — the release stamp's whole line. Maintainer ruling: decision
+ * record 6139629628, item 2 (A2′), ruled by the maintainer's 「同意」; the
+ * record's text, verbatim: "counts authored content only: the frontmatter
+ * `version:` line that the release bot rewrites is excluded from the count …
+ * ceilings stay shrink-only and the current headroom (0 and 1 tokens) stays as
+ * it is." It replaced route A of record 6138951701, which priced only the
+ * stamp's prerelease segment at zero and so still priced the stable part
+ * (`18.9.0` -> `18.10.0` is one byte).
  *
  * A published SKILL.md's frontmatter `metadata.version` line is not authored
  * text: the root `version` script rewrites it from `@objectstack/spec`'s
@@ -280,9 +281,10 @@ export const CEILING_BASIS = {
  * The A2′ re-pin (ruling record 6139629628 item 2): the tree it was measured on,
  * the stamp every stamped SKILL.md carried there, and what taking that stamp's
  * line out of the count took off each stamped file's count — and therefore off
- * each stamped row's ceiling, so no file's headroom moved. `  version:
- * "17.7.0"` plus its newline is 20 bytes, a whole 5 units, which is why the
- * re-pin is the same 5 on every row whatever the rest of the file weighs.
+ * each stamped row's ceiling, so no file's headroom moved. The basis line,
+ * `  version: "17.7.0"` plus its newline, is 20 bytes — a whole 5 units — which
+ * is why the re-pin is the same 5 on every row whatever the rest of the file
+ * weighs.
  * Every SKILL.md row in {@link CEILINGS} carries the matching `-> ` line.
  */
 export const STAMP_LINE_REPIN = Object.freeze({ basis: 'd4aaeaf0e', stamp: '17.7.0', tokens: 5 });
@@ -1107,7 +1109,7 @@ function selfTest() {
   const priced = (text) => pricedTokens(text, { stamped: true });
   const basisStamp = stampFixture(STAMP_LINE_REPIN.stamp);
   const zeroHeadroom = priced(basisStamp);
-  // Every width a release has produced or will: stable, first prerelease, a
+  // Widths a release has produced or plausibly will: stable, first prerelease, a
   // minor gaining a digit, a two-digit prerelease counter, a three-digit major.
   const stampWidths = [STAMP_LINE_REPIN.stamp, '18.0.0-next.0', '18.9.0', '18.10.0', '18.10.0-next.12', '100.0.0'];
   // A version-shaped string in prose and a `version:` line in a code block —
