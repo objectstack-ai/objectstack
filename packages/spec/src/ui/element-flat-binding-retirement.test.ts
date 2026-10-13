@@ -198,7 +198,8 @@ describe('the binding — the one door the three elements read', () => {
   });
 
   it('never hard-refuses an existing page: the page parse still accepts a node carrying a flat key', () => {
-    // The open `properties` bag is the props lint's to judge (advisory), not the page parse's.
+    // The open `properties` bag is the props lint's to judge (a retired flat key is an `error`
+    // at `os validate` / `os build` / `os lint`), not the page parse's.
     const r = PageComponentSchema.safeParse({ type: 'element:repeater', properties: { object: 'deal' } });
     expect(r.success).toBe(true);
   });

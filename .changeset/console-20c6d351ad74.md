@@ -9,14 +9,14 @@ Derived from the changesets objectui declared over the range — 33 releasing of
 - **minor** — The approval decision panel draws a short notice instead of nothing when it is placed anywhere other than an approval request's record page (objectui#12072). (objectui `20c6d351a`)
 - **minor** — The per-group aggregation type that `useGroupedData` takes is declared and exported as `GroupAggregationConfig` instead of `AggregationConfig` (objectui#6349, batch 7). `@object-u… (objectui `c0c0a0d56`)
 - **minor** — The view switcher's views are typed as `@object-ui/core`'s `ListViewVisualization`, and this package no longer re-exports that union as `ViewType` (objectui#6349, batch 7). `@obje… (objectui `c0c0a0d56`)
-- **minor** — The console sidebar no longer lets a user drag the app's menu into a private order; the Pinned section is now the one place a user orders entries (objectui#12059). Arranging an ap… (objectui `8a55f0ccd`)
-- **minor** — feat(types)!: `UnifiedViewConfig.chart` retires with a tombstone that names the spec's list chart block, and the three `object-chart` legacy-axis refusals stop calling those keys… (objectui `c7b30bd66`)
+- **minor** — **BREAKING** — The console sidebar no longer lets a user drag the app's menu into a private order; the Pinned section is now the one place a user orders entries (objectui#12059). Arranging an ap… (objectui `8a55f0ccd`)
+- **minor** — **BREAKING** — feat(types)!: `UnifiedViewConfig.chart` retires with a tombstone that names the spec's list chart block, and the three `object-chart` legacy-axis refusals stop calling those keys… (objectui `c7b30bd66`)
 - **minor** — An `element:repeater` node may omit `properties.object` when its `dataSource.object` names the object. The zod arm `ElementRepeaterBlockSchema` now applies the same `object` waive… (objectui `2a48bd408`)
 - **minor** — A pointer field draws the record it points at, the console reads an approval request's record page through the approvals routes, and the approval decision panel is built for the r… (objectui `a368ccb1a`)
-- **minor** — feat(plugin-list)!: a chart list view binds only an ADR-0021 `dataset`; the legacy inline chart axes and their `name` / `value` floors are retired on every route (objectui#6152, r… (objectui `025341692`)
+- **minor** — **BREAKING** — feat(plugin-list)!: a chart list view binds only an ADR-0021 `dataset`; the legacy inline chart axes and their `name` / `value` floors are retired on every route (objectui#6152, r… (objectui `025341692`)
 - **minor** — **BREAKING** — `createObjectStackUploadAdapter` no longer sends an upload's `path` as the storage scope (objectui#12055). (objectui `7282c6a51`)
 - **minor** — **BREAKING** — The result type of `useConfirmDialog` is declared as `DesignerConfirmDialogState` instead of `ConfirmDialogState` (objectui#6349, batch 6). `@object-ui/app-shell` declares an unre… (objectui `1f1c4b526`)
-- **minor** — feat(plugin-list)!: the renderers stop reading the list-view keys every door refuses: the pre-#2231 aliases, `calendar.defaultView`, and the undeclared keys a per-kind block carri… (objectui `3fd862510`)
+- **minor** — **BREAKING** — feat(plugin-list)!: the renderers stop reading the list-view keys every door refuses: the pre-#2231 aliases, `calendar.defaultView`, and the undeclared keys a per-kind block carri… (objectui `3fd862510`)
 - **minor** — **BREAKING** — `objectui validate` and `objectui check` judge a document through the strict authoring face (objectui#5250) (objectui `e4c0b5432`)
 - **minor** — The runtime chat contracts have their own names, apart from `@object-ui/types`' authoring `ChatMessage` / `ChatToolInvocation` (objectui#6349, batch 5). The shape `<ChatbotEnhance… (objectui `b4e0787d5`)
 - **minor** — `UndoRedoEntry`, `UndoRedoConfig` and `UndoRedoState` are retired from this package (objectui#6349, batch 5). Nothing in the repository read or wrote any of the three, `@objectsta… (objectui `b4e0787d5`)
@@ -40,7 +40,7 @@ Derived from the changesets objectui declared over the range — 33 releasing of
 - **patch** — A console click on a declared `type: 'flow'` action now starts its flow through the action endpoint, `POST /api/v1/actions/:object/:action`, so the server-side gates that action d… (objectui `e97a0e2d1`)
 - **patch** — Approval requests can now be read by the standard list and record views, and `ApiDataSource.findOne` now rejects a refused or failed read instead of reporting the record as missin… (objectui `d99b731f0`)
 
-⚠️ 6 of these carry a breaking change: 6 by the author's own breaking annotation in the changeset body — objectui declares no `major` inside a launch window (`scripts/check-changeset-no-major.mjs`). Each is marked **BREAKING** in the list above — read them before compiling the release record.
+⚠️ 10 of these carry a breaking change: 10 by the author's own breaking annotation in the changeset body — objectui declares no `major` inside a launch window (`scripts/check-changeset-no-major.mjs`). Each is marked **BREAKING** in the list above — read them before compiling the release record.
 
 **In this console build, declared nowhere** — objectui merged 1 commit in this range with no `.changeset/*.md`. The code is inside the pin above and ships here, but nothing upstream declared it, so it appears in no objectui CHANGELOG and in no entry above. Listed by subject rather than counted, because a count cannot tell a dependency bump from a form-behaviour change (objectstack#6174); the upstream gate that would prevent this is objectui#3387.
 

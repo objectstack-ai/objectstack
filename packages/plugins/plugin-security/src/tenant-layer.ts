@@ -162,17 +162,19 @@ export function computeTenantLayer0Verdict(input: TenantLayer0Input): TenantLaye
  * is `tenantLayer0FilterOf(computeTenantLayer0Verdict(input))` and nothing
  * else.
  *
- * `deny` SPREADS {@link RLS_DENY_FILTER} rather than returning the frozen
- * object (`isTenantWallDenial` in `security-plugin.ts` compares by value for
- * exactly this reason); `organizations` copies the set so a later mutation of
- * the verdict cannot reach a compiled filter.
+ * [ADR-0139 D2 step 2] `deny` returns {@link RLS_DENY_FILTER} itself — the
+ * spec's frozen object, BY REFERENCE, never a spread copy — because the
+ * engine's composition and `isTenantWallDenial` in `security-plugin.ts`
+ * recognise the sentinel by identity; frozen, no holder can edit it.
+ * `organizations` copies the set so a later mutation of the verdict cannot
+ * reach a compiled filter.
  */
 export function tenantLayer0FilterOf(verdict: TenantLayer0Verdict): Record<string, unknown> | null {
   switch (verdict.kind) {
     case 'none':
       return null;
     case 'deny':
-      return { ...RLS_DENY_FILTER };
+      return RLS_DENY_FILTER;
     case 'organization':
       return { organization_id: verdict.organizationId };
     case 'organizations':

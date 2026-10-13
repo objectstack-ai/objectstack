@@ -57,6 +57,7 @@ export default defineConfig({
   resolve: {
     alias: [
       { find: /^@objectstack\/core$/, replacement: path.resolve(HERE, '../core/src/index.ts') },
+      { find: /^@objectstack\/metadata$/, replacement: path.resolve(HERE, '../metadata/src/index.ts') },
     ],
   },
   test: {
