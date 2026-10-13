@@ -142,6 +142,12 @@ export interface TableOutcome {
   columnDropped: boolean;
   /** Rows still NULL and listed by id — reported, never guessed. */
   unattributable: UnattributableRow[];
+  /**
+   * Rows that leave this table by a step this ceremony has not yet performed
+   * (a move, or a mirror its own stage removes): each counts as remaining
+   * until it is gone, and its label is the remedy.
+   */
+  departures: Array<{ id: string; label: string; as: 'mirror-deletion' | 'moved'; rows: number }>;
   /** Post-check: what is left for this table's fate, `0` when the fate is done. */
   remaining: number;
   notNull: TablePlan['notNull'];
@@ -686,11 +692,22 @@ async function runRewrite(run: Run): Promise<StepReport> {
 
 // ── Step 4: mirror deletion (fate 2) ─────────────────────────────────────────
 
+/** Provenance the seeders stamped: only such a row can be a copy of code. */
+const SEEDED_BY = ['package', 'platform', 'system'];
+
 /**
  * The rows of a fate-2 object that are deleted: its mirror selector (every
- * row when it names none), minus every row a named category of the object
- * claims — authored catalog rows, customized templates awaiting promotion.
- * `CASE … END = 0` so a category that evaluates NULL on a row still claims it.
+ * row when it names none), minus every row a claim keeps —
+ *
+ *  - each named category of the object (authored catalog rows, customized or
+ *    organization-stamped templates awaiting promotion);
+ *  - on a table that records provenance, every row no seeder wrote
+ *    (`managed_by` NULL or not package / platform / system): an admin-authored
+ *    row is never a copy of code, whatever the object's inventory row selects.
+ *    It stays and is reported for the step that carries it.
+ *
+ * A claim that evaluates neither true nor false on a row (NULL) claims it:
+ * an unknown is kept, never deleted.
  */
 function deletableWhere(run: Run, table: string, cols: ReadonlySet<string>, entry: InventoryEntry): { text: string; params: unknown[] } {
   const parts: string[] = [];
@@ -700,11 +717,16 @@ function deletableWhere(run: Run, table: string, cols: ReadonlySet<string>, entr
     parts.push(`(${mirror.text})`);
     params.push(...mirror.params);
   }
+  const keep = (claimed: { text: string; params: unknown[] }): void => {
+    parts.push(`(CASE WHEN ${claimed.text} THEN 1 WHEN NOT (${claimed.text}) THEN 0 ELSE 1 END) = 0`);
+    params.push(...claimed.params, ...claimed.params);
+  };
   for (const category of entry.categories ?? []) {
     if (!category.where || category.conflictBy) continue;
-    const claimed = predicateSql(run.sql, table, cols, category.where);
-    parts.push(`(CASE WHEN ${claimed.text} THEN 1 ELSE 0 END) = 0`);
-    params.push(...claimed.params);
+    keep(predicateSql(run.sql, table, cols, category.where));
+  }
+  if (cols.has('managed_by')) {
+    keep(predicateSql(run.sql, table, cols, [{ column: 'managed_by', notIn: SEEDED_BY }]));
   }
   return { text: parts.length ? parts.join(' AND ') : '1 = 1', params };
 }
@@ -749,7 +771,7 @@ async function runMirrorDeletion(run: Run): Promise<StepReport> {
       run.opts.onProgress?.(`mirror deletion: ${before} row(s) of ${physical}`);
     }
     const kept = Math.max(0, table.rows!.total - (run.deleted.get(table.object) ?? 0));
-    if (kept > 0) notes.push(`${table.object}: ${kept} row(s) are not mirrors (a named category claims them) and stay.`);
+    if (kept > 0) notes.push(`${table.object}: ${kept} row(s) are not mirrors (a named category or their non-seeded provenance claims them) and stay.`);
   }
   return { step: 'mirror-deletion', status: 'done', summary: { deleted: total }, blockers: [], notes };
 }
@@ -801,12 +823,17 @@ const RUNNERS: Record<CeremonyStep, (run: Run) => Promise<StepReport>> = {
   'column-drops': runColumnDrops,
 };
 
+/** NULL rows a departure still has to carry out of the table. */
+const departingRows = (table: TablePlan): number => table.departures.reduce((n, d) => n + d.rows, 0);
+
 /** What a table still owes its fate, read from the post-check plan. */
 async function remainingFor(run: Run, table: TablePlan, complete: boolean): Promise<number> {
   if (table.physical !== 'present' || !table.rows) return 0;
   switch (table.fate) {
     case 'attribution':
-      return Number(table.fateCounts.rowsToAttribute ?? 0);
+      return Number(table.fateCounts.rowsToAttribute ?? 0) + departingRows(table);
+    case 'report':
+      return departingRows(table);
     case 'mirror-deletion': {
       const entry = mirrorEntry(run, table.object);
       if (!entry) return 0;
@@ -902,8 +929,11 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
       deleted: run.deleted.get(object) ?? 0,
       columnDropped: b?.organizationColumn === 'present' && a?.organizationColumn === 'absent',
       unattributable: a?.unattributable ?? [],
+      departures: (a?.departures ?? []).filter((d) => d.rows > 0).map((d) => ({ id: d.id, label: d.label, as: d.as, rows: d.rows })),
       remaining,
-      notNull: ref.notNull,
+      notNull: a && departingRows(a) > 0
+        ? { willReceive: false, reason: `${departingRows(a)} row(s) still wait for a step not yet run: ${a.departures.filter((d) => d.rows > 0).map((d) => d.label).join('; ')}` }
+        : ref.notNull,
     });
   }
   const advisory = after.summary.unattributableRows;

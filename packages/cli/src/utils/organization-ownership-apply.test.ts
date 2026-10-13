@@ -146,12 +146,14 @@ function seed(): void {
       ('bind_3', 'org_default', 'pos_auth', 'ps_auth');
     CREATE TABLE sys_capability (id TEXT PRIMARY KEY, organization_id TEXT, name TEXT, managed_by TEXT);
     INSERT INTO sys_capability VALUES ('cap_seeded', NULL, 'manage_users', 'platform'), ('cap_authored', 'org_default', 'audit_fields', 'admin');
-    -- fate 2: templates — seeded mirrors, one customized, one organization-stamped
+    -- fate 2: templates — seeded mirrors, one customized, one organization-stamped,
+    -- and one an admin authored (never a mirror: kept for the promotion)
     CREATE TABLE sys_email_template (id TEXT PRIMARY KEY, organization_id TEXT, name TEXT, customized INTEGER, managed_by TEXT);
     INSERT INTO sys_email_template VALUES
       ('tpl_seeded', NULL, 'welcome', 0, 'platform'),
       ('tpl_customized', NULL, 'reset_password', 1, 'platform'),
-      ('tpl_org', 'org_b', 'welcome', 0, 'platform');
+      ('tpl_org', 'org_b', 'welcome', 0, 'platform'),
+      ('tpl_admin', NULL, 'crm.note', 0, 'admin');
 
     -- the references: grants by id (the rewrite names them) and assignments by name
     CREATE TABLE sys_user_permission_set (id TEXT PRIMARY KEY, organization_id TEXT, user_id TEXT,
@@ -314,7 +316,7 @@ describe('ADR-0131 D10 --apply — the acceptance fixture', () => {
     expect(rows('SELECT id FROM sys_position').map((r) => r.id)).toEqual(['pos_auth']);
     expect(rows('SELECT id FROM sys_position_permission_set')).toEqual([]);
     expect(rows('SELECT id FROM sys_capability').map((r) => r.id)).toEqual(['cap_authored']);
-    expect(rows('SELECT id FROM sys_email_template ORDER BY id').map((r) => r.id)).toEqual(['tpl_customized', 'tpl_org']);
+    expect(rows('SELECT id FROM sys_email_template ORDER BY id').map((r) => r.id)).toEqual(['tpl_admin', 'tpl_customized', 'tpl_org']);
 
     // Every grant names its set; the id column is still there (C7b's later drop).
     expect(rows('SELECT id, permission_set, permission_set_id FROM sys_user_permission_set ORDER BY id')).toEqual([
@@ -446,6 +448,24 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     expect(c.saved.size).toBe(0);
     expect(report.steps.find((s) => s.step === 'mirror-deletion')!.status).toBe('not-reached');
     expect(rows('SELECT COUNT(*) AS n FROM sys_permission_set')).toEqual([{ n: 3 }]);
+  });
+
+  it('does not certify a ceremony whose departures have not left: the global settings rung keeps verified_at null', async () => {
+    db.exec(`
+      CREATE TABLE sys_setting (id TEXT PRIMARY KEY, organization_id TEXT, namespace TEXT, key TEXT, scope TEXT);
+      INSERT INTO sys_setting VALUES ('set_global', NULL, 'mail', 'transport', 'global'), ('set_tenant', 'org_b', 'mail', 'from', 'tenant');
+    `);
+    const l = ledger();
+    const report = await apply(catalog(), l);
+
+    expect(report.complete).toBe(true);
+    expect(report.blocking).toBe(1);
+    expect(l.verdicts.at(-1)).toMatchObject({ complete: true, blocking: 1 });
+    const setting = tableOf(report, 'sys_setting');
+    expect(setting.remaining).toBe(1);
+    expect(setting.departures).toEqual([expect.objectContaining({ id: 'global-rung-move', as: 'moved', rows: 1 })]);
+    expect(setting.notNull.willReceive).toBe(false);
+    expect(rows(`SELECT id FROM sys_setting ORDER BY id`).map((r) => r.id)).toEqual(['set_global', 'set_tenant']);
   });
 
   it('holds a column whose rows another stage owns, and reports it', async () => {
