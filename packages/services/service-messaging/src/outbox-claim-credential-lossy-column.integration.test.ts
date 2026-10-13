@@ -107,9 +107,9 @@ function coerceComparands(where: unknown): unknown {
     ]));
 }
 
-function mapEpochColumns(row: unknown, fn: (value: unknown) => unknown): unknown {
+function mapEpochColumns<R>(row: R, fn: (value: unknown) => unknown): R {
     if (!row || typeof row !== 'object') return row;
-    return Object.fromEntries(Object.entries(row).map(([k, v]) => [k, EPOCH_MS_COLUMNS.has(k) ? fn(v) : v]));
+    return Object.fromEntries(Object.entries(row).map(([k, v]) => [k, EPOCH_MS_COLUMNS.has(k) ? fn(v) : v])) as R;
 }
 
 function withComparands<Q>(query: Q): Q {
@@ -127,19 +127,19 @@ function realColumnEngine(engine: ObjectQL): IDataEngine {
         get(target, prop, receiver) {
             switch (prop) {
                 case 'find':
-                    return async (object: string, query: unknown, options?: unknown) => {
-                        const rows = await target.find(object, withComparands(query) as any, options as any);
-                        return (rows as unknown[]).map((r) => mapEpochColumns(r, readReal));
+                    return async (...[object, query, options]: Parameters<ObjectQL['find']>) => {
+                        const rows = await target.find(object, withComparands(query), options);
+                        return rows.map((r) => mapEpochColumns(r, readReal));
                     };
                 case 'findOne':
-                    return async (object: string, query: unknown, options?: unknown) =>
-                        mapEpochColumns(await target.findOne(object, withComparands(query) as any, options as any), readReal);
+                    return async (...[object, query, options]: Parameters<ObjectQL['findOne']>) =>
+                        mapEpochColumns(await target.findOne(object, withComparands(query), options), readReal);
                 case 'insert':
-                    return (object: string, data: unknown, options?: unknown) =>
-                        target.insert(object, mapEpochColumns(data, storeReal) as any, options as any);
+                    return (...[object, data, options]: Parameters<ObjectQL['insert']>) =>
+                        target.insert(object, mapEpochColumns(data, storeReal), options);
                 case 'update':
-                    return (object: string, data: unknown, options?: unknown) =>
-                        target.update(object, mapEpochColumns(data, storeReal) as any, withComparands(options) as any);
+                    return (...[object, data, options]: Parameters<ObjectQL['update']>) =>
+                        target.update(object, mapEpochColumns(data, storeReal), withComparands(options));
                 default: {
                     const value = Reflect.get(target, prop, receiver);
                     return typeof value === 'function' ? value.bind(target) : value;
