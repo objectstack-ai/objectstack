@@ -310,18 +310,20 @@ describe("flow get_record refuses a filter that evaluates the stored-metadata fa
   });
 
   for (const runAs of ['system', 'user'] as const) {
-    it(`runAs:'${runAs}': a filter whose body condition is built from a flow variable is judged after interpolation and refused`, async () => {
+    it(`runAs:'${runAs}': a filter whose body condition is built from a flow variable is judged after evaluation and refused`, async () => {
       // The authored filter names no family column: the condition list arrives
-      // through `{record.conds}`. Only the interpolated filter (the one the
-      // engine would run) shows that it reads the body.
-      const authored: Filter = { $and: '{record.conds}' };
+      // through an envelope evaluating `record.conds`. Only the resolved filter
+      // (the one the engine would run) shows that it reads the body.
+      // [#19939, stage S6] The list was a `{record.conds}` token; a flow token
+      // at a filter operand is refused since S6, and the envelope evaluates.
+      const authored: Filter = { $and: { dialect: 'cel', source: 'record.conds' } };
       for (const conds of [[{ metadata: { $contains: SENTINEL.slice(0, 12) } }], [{ metadata: { $contains: 'no-such-credential-prefix' } }]]) {
         const run = await runWatched(readThenCopyFlow(`built_${seq++}`, 'sys_metadata', runAs, 'one', authored), { record: { conds } });
         expectRefusedRun(run, 'a variable-built body filter');
       }
       // …and a body condition whose value is a flow variable.
       const run = await runWatched(
-        readThenCopyFlow(`valued_${seq++}`, 'sys_metadata', runAs, 'list', { metadata: { $contains: '{record.guess}' } }),
+        readThenCopyFlow(`valued_${seq++}`, 'sys_metadata', runAs, 'list', { metadata: { $contains: { dialect: 'cel', source: 'record.guess' } } }),
         { record: { guess: SENTINEL.slice(0, 12) } },
       );
       expectRefusedRun(run, 'a body filter with a variable value');

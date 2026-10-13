@@ -160,6 +160,15 @@ export type FlowNodeExpressionRole =
    * (`flow-text-slot-template.ts`), and its `method`, `durable`, `timeoutMs`
    * and `signingSecret` are literals, read as written, whose `{…}` token the
    * contract refuses (`HttpConfigSchema`).
+   *
+   * And for each OPERAND of a `get_record`, `update_record` or `delete_record`
+   * node's `filter` — a field's value, an operator's comparand, each element
+   * of a list comparand ({@link FlowNodeExpressionPath.filterOperands}) —
+   * evaluated before the query. The filter's keys, operators, combinators and
+   * nested-relation conditions are its structure, never a value. A query
+   * placeholder (`{current_user_id}`, `{today}`) at an operand is the query
+   * engine's own vocabulary, handed to it untouched (ADR-0032 puts the
+   * query-filter surface out of its scope).
    */
   | 'value';
 
@@ -230,6 +239,21 @@ export interface FlowNodeExpressionPath {
    * reads only arrays and so would never reach a single value.
    */
   readonly eachElement?: true;
+  /**
+   * [#19939] The slot is a query FILTER — a `FilterCondition` tree — and each
+   * of its OPERANDS is a value slot of its own: today the `filter` of
+   * `get_record`, `update_record` and `delete_record`. Both walks
+   * ({@link resolveFlowNodeExpressions}, {@link resolveFlowNodeValueSlots})
+   * emit each operand at its own path ({@link flowFilterOperands}:
+   * `filter.owner`, `filter.amount.$gt`, `filter.id.$in[0]`,
+   * `filter.$or[1].status`), so an envelope operand is validated and
+   * evaluated where it sits and a `{…}` token in a string operand is refused
+   * with the envelope that replaces it there, while the filter's keys,
+   * operators, combinators and nested-relation conditions stay its structure.
+   * ⛔ Not a `*` path segment: a filter is a tree, and its operands sit at
+   * every depth.
+   */
+  readonly filterOperands?: true;
 }
 
 /**
@@ -243,9 +267,7 @@ export interface FlowNodeExpressionPath {
  * are *structural* predicate surfaces on every node and edge rather than
  * declared config properties, and both validators already walk them.
  *
- * Also deliberately absent: the config values that still INTERPOLATE
- * `{token}` templates — the positions the #19939 retirement has not reached
- * yet (a CRUD `filter` value) — and the TEXT slots, which render `{{ }}`
+ * Also deliberately absent: the TEXT slots, which render `{{ }}`
  * holes since #22110 (a notify `title` / `message` and, since #19939, its
  * `actionUrl` and an http node's `url` and `headers` values, a screen
  * `title` / `description`, an `end` `message`; their one judge and list is
@@ -306,6 +328,15 @@ export interface FlowNodeExpressionPath {
  * (a CEL map literal builds an object), declared through the spec Zod channel
  * (`HttpConfigSchema` in `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`; the
  * descriptor offers `body` with no marker).
+ *
+ * So are, since #19939, the operands of a `get_record`, `update_record` and
+ * `delete_record` node's `filter` — each declared ONCE, on the `filter` key,
+ * through the spec Zod channel (`GetRecordConfigSchema`,
+ * `UpdateRecordConfigSchema`, `DeleteRecordConfigSchema` in
+ * `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`; the descriptors offer `filter` as an
+ * open map with no marker). The entry carries
+ * {@link FlowNodeExpressionPath.filterOperands}: the walks emit each operand
+ * at its own path, never the filter itself.
  */
 export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
   {
@@ -395,9 +426,9 @@ export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
     label: 'create_record field value',
   },
   {
-    // The same map on the update node (`UpdateRecordConfigSchema`); its
-    // `filter` map is NOT a value slot — a filter is a match condition, not a
-    // value to compute.
+    // The same map on the update node (`UpdateRecordConfigSchema`). Its
+    // `filter` is a match condition, not a value to compute — but each of its
+    // OPERANDS is one (the `filter` entries below).
     nodeType: 'update_record',
     path: 'fields.*',
     role: 'value',
@@ -523,7 +554,150 @@ export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
     role: 'value',
     label: 'http body',
   },
+  {
+    // [#19939] The operands of a CRUD node's `filter` (Fork R17 → A; ADR-0032
+    // Decision 2: "Computed value (`dueDate`, filter values)" serialises as a
+    // CEL envelope). Each operand — a field's value, an operator's comparand,
+    // each element of a list comparand — is a CEL value envelope the executor
+    // evaluates in the run's scope BEFORE the query, or a literal handed to
+    // the query as written; a query placeholder (`{current_user_id}`,
+    // `{today}`) is a literal of the query engine's own vocabulary, which it
+    // resolves. An operand that evaluates to `null` refuses the node: an
+    // absent condition widens the query (#3810). Declared on `filter` through
+    // the spec Zod channel (`GetRecordConfigSchema`, carried to the ratchet by
+    // `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`); the descriptor offers `filter`
+    // as an open map with no marker.
+    nodeType: 'get_record',
+    path: 'filter',
+    role: 'value',
+    label: 'get_record filter operand',
+    filterOperands: true,
+  },
+  {
+    // The same operands on the update node (`UpdateRecordConfigSchema`).
+    nodeType: 'update_record',
+    path: 'filter',
+    role: 'value',
+    label: 'update_record filter operand',
+    filterOperands: true,
+  },
+  {
+    // And on the delete node (`DeleteRecordConfigSchema`), where an absent
+    // condition costs the most.
+    nodeType: 'delete_record',
+    path: 'filter',
+    role: 'value',
+    label: 'delete_record filter operand',
+    filterOperands: true,
+  },
 ];
+
+/** One operand of a flow node's query filter ({@link flowFilterOperands}). */
+export interface FlowFilterOperand {
+  /**
+   * Where the operand sits inside the filter — `['owner']`,
+   * `['amount', '$gt']`, `['id', '$in', 0]`, `['$or', 1, 'status']`,
+   * `['account', 'industry']` (a nested-relation condition).
+   */
+  readonly path: readonly (string | number)[];
+  /** The authored operand: an envelope, a string, any other literal. */
+  readonly value: unknown;
+}
+
+/** A plain object — not an array, not `null`, not a class instance such as a `Date`. */
+function isPlainFilterObject(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/**
+ * **Every OPERAND of a flow node's query filter** (#19939) — the positions a
+ * value sits at, as opposed to the filter's structure — read the way the
+ * filter grammar reads a `FilterCondition` (`data/filter.zod.ts`):
+ *
+ *  - `$and` / `$or` hold a list of conditions and `$not` one condition: each
+ *    is walked as a condition, never an operand;
+ *  - any other key names a field, and its value is
+ *     - an **envelope** (an object naming a string `dialect`,
+ *       {@link isExpressionEnvelopeShaped}) — an operand, the implicit
+ *       equality's computed comparand;
+ *     - an **operator map** (an object with a `$` key) — each entry's value is
+ *       an operand (`$gt`, `$in`, `$between`, …);
+ *     - any other **object** — a nested-relation condition (the filter
+ *       grammar's form 4), walked as a condition;
+ *     - anything else — an operand, the implicit equality's literal;
+ *  - an operand that is a LIST (`$in: [a, b]`, `$between: [lo, hi]`) is a
+ *    list of operands, each at its own index; one that is an envelope is ONE
+ *    operand, which may evaluate to a list.
+ *
+ * So an envelope is told apart from every literal object a filter holds by
+ * position and shape: at an operator's comparand or a list element a plain
+ * object is no literal the query takes (a `{ $field }` reference names a `$`
+ * key, not a `dialect`), and at a field's value an object without a `$` key is
+ * a nested-relation condition — one whose first level names a string
+ * `dialect` is read as an envelope, so a related field named `dialect` is
+ * matched as `{ dialect: { $eq: '…' } }`, an operator map. The top-level
+ * filter is a condition, never an operand.
+ *
+ * Whatever sits where a combinator wants a condition and is none — a value
+ * that is no plain object (`$and: 'x'`, `$and: [42]`), or an envelope
+ * (`$not: { dialect: 'cel', … }`) — is handed over as an operand, so every
+ * string the filter carries is reached and an envelope anywhere is evaluated
+ * (what it evaluates to is the query engine's to judge, as any operand's is).
+ * Cycle-safe: a flow built in code may hold a self-reference. Pure — no
+ * judgement about what an operand says.
+ */
+export function flowFilterOperands(filter: unknown): FlowFilterOperand[] {
+  const out: FlowFilterOperand[] = [];
+  const seen = new Set<object>();
+  const operand = (value: unknown, path: readonly (string | number)[]): void => {
+    if (Array.isArray(value)) {
+      value.forEach((element, index) => out.push({ path: [...path, index], value: element }));
+      return;
+    }
+    out.push({ path, value });
+  };
+  const conditionKeys = (node: Record<string, unknown>, path: readonly (string | number)[]): void => {
+    if (seen.has(node)) return;
+    seen.add(node);
+    for (const [key, value] of Object.entries(node)) {
+      const here = [...path, key];
+      if ((key === '$and' || key === '$or') && Array.isArray(value)) {
+        value.forEach((member, index) => condition(member, [...here, index]));
+        continue;
+      }
+      if (key === '$not') {
+        condition(value, here);
+        continue;
+      }
+      if (isPlainFilterObject(value) && !isExpressionEnvelopeShaped(value)) {
+        if (Object.keys(value).some((k) => k.startsWith('$'))) {
+          for (const [op, comparand] of Object.entries(value)) operand(comparand, [...here, op]);
+        } else {
+          conditionKeys(value, here);
+        }
+        continue;
+      }
+      operand(value, here);
+    }
+  };
+  // A combinator's member: a condition, unless it is no plain object or is an
+  // envelope — then it is handed over as an operand.
+  const condition = (node: unknown, path: readonly (string | number)[]): void => {
+    if (!isPlainFilterObject(node) || isExpressionEnvelopeShaped(node)) operand(node, path);
+    else conditionKeys(node, path);
+  };
+  if (isPlainFilterObject(filter)) conditionKeys(filter, []);
+  return out;
+}
+
+/** An operand's path appended to a ledger path, in the ledger's spelling (`filter.id.$in[0]`). */
+function operandPath(prefix: string, path: readonly (string | number)[]): string {
+  let out = prefix;
+  for (const segment of path) out += typeof segment === 'number' ? `[${segment}]` : (out ? `.${segment}` : segment);
+  return out;
+}
 
 /** One resolved expression value found in a node's config. */
 export interface ResolvedFlowNodeExpression {
@@ -609,7 +783,9 @@ export function isExpressionEnvelopeShaped(value: unknown): value is { dialect: 
  * An entry with {@link FlowNodeExpressionPath.onlyWithKey} is skipped on a
  * config that does not carry that key (#19939): its executor never reads the
  * slot there. An entry with {@link FlowNodeExpressionPath.eachElement} reads
- * each element of an array as a value of its own, at its index (#19939).
+ * each element of an array as a value of its own, at its index (#19939). An
+ * entry with {@link FlowNodeExpressionPath.filterOperands} reads each operand
+ * of the filter as a value of its own, at its path (#19939).
  */
 export function resolveFlowNodeExpressions(
   nodeType: string,
@@ -651,7 +827,9 @@ export function resolveFlowNodeExpressions(
  * are value slots.
  * An absent (`undefined`) value is skipped; everything else is handed over
  * verbatim, with its concrete path — on an {@link FlowNodeExpressionPath.eachElement}
- * entry holding an array, each element at its own index.
+ * entry holding an array, each element at its own index, and on a
+ * {@link FlowNodeExpressionPath.filterOperands} entry each operand of the
+ * filter at its own path.
  *
  * Pure path resolution, like its sibling — no judgement about what a value
  * says.
@@ -672,12 +850,20 @@ export function resolveFlowNodeValueSlots(nodeType: string, config: unknown): Re
  * The emitter a walk hands each value the entry's path reaches — `emit` itself,
  * or for an {@link FlowNodeExpressionPath.eachElement} entry one that hands
  * over each element of an array at its own index (`recipients[1]`) and any
- * other value at the slot's own path.
+ * other value at the slot's own path, or for a
+ * {@link FlowNodeExpressionPath.filterOperands} entry one that hands over each
+ * operand of the filter at its own path (`filter.amount.$gt`) and never the
+ * filter itself.
  */
 function slotEmitter(
   entry: FlowNodeExpressionPath,
   emit: (path: string, value: unknown) => void,
 ): (path: string, value: unknown) => void {
+  if (entry.filterOperands) {
+    return (path, value) => {
+      for (const found of flowFilterOperands(value)) emit(operandPath(path, found.path), found.value);
+    };
+  }
   if (!entry.eachElement) return emit;
   return (path, value) => {
     if (!Array.isArray(value)) {

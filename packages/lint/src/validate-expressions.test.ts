@@ -5109,6 +5109,59 @@ describe('the notify literals are refused with the literal remedy (#19939)', () 
  * replaces it — except `signingSecret`, whose credential store may hold the
  * secret the run signs with, so its refusal is the executor's parse.
  */
+/**
+ * [#19939, stage S6] Each operand of a CRUD node's `filter` is a value slot
+ * (Fork R17 → A): a CEL value envelope evaluated before the query, a query
+ * placeholder the query engine resolves, or a literal. `objectstack validate`
+ * refuses a flow `{…}` token at every operand position with its envelope, and
+ * judges an envelope operand as CEL; a placeholder passes untouched.
+ */
+describe('the CRUD filter operands are value slots; the query placeholders stay (#19939, S6)', () => {
+  const stackWith = (type: string, filter: unknown) => ({
+    flows: [{
+      name: 'f',
+      variables: [{ name: 'owner_id', type: 'text', isInput: true }],
+      nodes: [
+        { id: 'start', type: 'start' },
+        { id: 'n', type, config: { objectName: 'deal', filter, ...(type === 'update_record' ? { fields: { stage: 'x' } } : {}) } },
+      ],
+      edges: [],
+    }],
+  });
+  const errorsOf = (stack: unknown) =>
+    validateStackExpressions(stack as never).filter((i) => (i.severity ?? 'error') === 'error');
+  const TYPES = ['get_record', 'update_record', 'delete_record'] as const;
+
+  it.each(TYPES.flatMap((type) => [
+    [type, 'a field\'s value', { owner: '{owner_id}' }, 'config.filter.owner'],
+    [type, 'an operator\'s comparand', { amount: { $gte: '{owner_id}' } }, 'config.filter.amount.$gte'],
+    [type, 'an `$in` element', { id: { $in: ['d1', '{owner_id}'] } }, 'config.filter.id.$in[1]'],
+    [type, 'a `$or` member', { $or: [{ owner: '{owner_id}' }] }, 'config.filter.$or[0].owner'],
+  ] as const))('%s — %s: a flow token is refused at `error`, at the operand, with its envelope', (type, _what, filter, at) => {
+    const found = errorsOf(stackWith(type, filter));
+    expect(found).toHaveLength(1);
+    expect(found[0]!.where).toContain(`${type} filter operand at ${at}`);
+    expect(found[0]!.message.startsWith(VALUE_SLOT_TEMPLATE_REFUSAL)).toBe(true);
+    expect(found[0]!.message).toContain("{ dialect: 'cel', source: 'owner_id' }: an operand envelope is evaluated before the query.");
+  });
+
+  it.each(TYPES)('%s: an envelope operand, a literal and a query placeholder are clean', (type) => {
+    const CEL = (source: string) => ({ dialect: 'cel', source });
+    expect(errorsOf(stackWith(type, {
+      owner: CEL('owner_id'), amount: { $gt: 3 }, id: { $in: [CEL('owner_id'), 'd2'] },
+      creator: '{current_user_id}', due: { $lt: '{today}', $gte: '{30_days_ago}' }, status: 'open',
+    }))).toEqual([]);
+  });
+
+  it.each(TYPES)('%s: an envelope operand is judged as CEL — an unbound root and a malformed envelope are refused', (type) => {
+    const unbound = errorsOf(stackWith(type, { owner: { dialect: 'cel', source: 'nobody.id' } }));
+    expect(unbound.map((i) => i.where)).toEqual([expect.stringContaining(`${type} filter operand at config.filter.owner`)]);
+    const malformed = errorsOf(stackWith(type, { owner: { $eq: { dialect: 'cel', source: '   ' } } }));
+    expect(malformed).toHaveLength(1);
+    expect(malformed[0]!.where).toContain('config.filter.owner.$eq');
+  });
+});
+
 describe('the http text slots, body and literals are refused with their remedies (#19939)', () => {
   const stackWith = (config: Record<string, unknown>) => ({
     flows: [{ name: 'f', nodes: [{ id: 'start', type: 'start' }, { id: 'n', type: 'http', config: { url: 'https://x.test/hook', ...config } }], edges: [] }],

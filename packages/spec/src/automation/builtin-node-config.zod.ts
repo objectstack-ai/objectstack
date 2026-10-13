@@ -37,7 +37,8 @@
  * where values interpolate), so `{token}` templates pass and resolve at the
  * executor's existing interpolation points. The value slots are the exception
  * since #19939: the `{token}` dialect is retired there (the "value slots"
- * section below). So are the text slots since #22110: a screen `title` /
+ * section below), each operand of the CRUD `filter` included, where a query
+ * placeholder stays the query engine's. So are the text slots since #22110: a screen `title` /
  * `description` and an `end` `message` render `{{ }}` holes, and a `{token}`
  * there is refused (`flow-text-slot-template.ts`).
  *
@@ -77,7 +78,11 @@
  * refused there since #19939 — and those maps are the expression ledger's
  * `value`-role slots, as are, since #19939, the three maps a node hands to a
  * callee, a `screen`'s `defaults.*`, field `defaultValue` and `recordId`, and
- * the list a `loop` and a `map` iterate (`FlowCollectionSlotSchema`).
+ * the list a `loop` and a `map` iterate (`FlowCollectionSlotSchema`), and each
+ * operand of the CRUD `filter` — a field's value, an operator's comparand, each
+ * element of a list comparand — which a CEL value envelope computes before the
+ * query while a query placeholder (`{current_user_id}`, `{today}`) stays the
+ * query engine's (the "CRUD quartet" section below).
  *
  * Deliberately absent:
  *  - `decision` / `script` / `subflow` / `wait` / `connector_action` — the
@@ -95,7 +100,7 @@ import { EvaluatedExpressionSchema } from '../shared/expression.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { refuseCatchallProtoKey, refuseRecordProtoKey } from '../shared/record-proto-key-guard';
-import { isExpressionEnvelopeShaped } from './flow-node-expression-paths';
+import { flowFilterOperands, isExpressionEnvelopeShaped } from './flow-node-expression-paths';
 // [#19939] The retirement of the `{…}` template dialect from value slots — the
 // one judge, composed into every value slot's contract below rather than
 // re-spelled here.
@@ -181,9 +186,9 @@ const CRUD_ALIAS_GUIDANCE = {
  */
 const CRUD_RECORD_ID_GUIDANCE =
   'CRUD nodes address rows through `filter`, never through a `recordId` key — no executor has ever read one. '
-  + "Write the id as a filter VALUE: `filter: { id: '{record.id}' }`, which is the shape the node's own descriptor "
-  + 'documents. This matters most on `delete_record`: a config whose only "constraint" is an unread key is a '
-  + 'match-everything delete, the hazard.';
+  + "Write the id as a filter operand: `filter: { id: { dialect: 'cel', source: 'record.id' } }`, a CEL value "
+  + 'envelope evaluated before the query, which is the shape the node\'s own descriptor documents. This matters most '
+  + 'on `delete_record`: a config whose only "constraint" is an unread key is a match-everything delete, the hazard.';
 
 /**
  * `fieldValues` — the AI-authoring dialect that never had a runtime reader.
@@ -265,8 +270,9 @@ const CRUD_BULK_INTENT_GUIDANCE = {
  * `subflow.input.*`, `map.input.*`, `script.inputs.*`, a `screen`'s
  * `defaults.*`, `fields[].defaultValue` and `recordId`, a `loop`'s and a
  * `map`'s `collection`, a `notify` node's `recipients`, `templateData.*`
- * and `sourceId`, and an `http` node's `body`), so an author (or an agent
- * reading the issue) learns the rule before the detail.
+ * and `sourceId`, an `http` node's `body`, and each operand of a CRUD
+ * node's `filter`), so an author (or an agent reading the issue) learns the
+ * rule before the detail.
  *
  * Slot-neutral on purpose (#19938): the refusal's LOCATION names the slot
  * (`config.fields.<field>`, `config.assignments.<variable>`). A sentence that
@@ -427,7 +433,9 @@ function celValueSlotSchema(description: string) {
  * `notify` node's `templateData` map (`NotifyConfigSchema`; its `recipients`
  * and `sourceId` take the same rule with a string literal, a list of them for
  * `recipients`), and so does an `http` node's `body` (`HttpConfigSchema`, one
- * value: the whole payload), and it is
+ * value: the whole payload), and so does each operand of a CRUD node's
+ * `filter` (its own contract, {@link flowFilterSlotSchema}: the same rule, with
+ * the query placeholders handed on), and it is
  * what a consumer judging ANY value-role slot applies (`AutomationEngine`'s
  * `valueEnvelopeRefusals`, the lint's `checkDeclaredValue`). The `assignment`
  * map's {@link AssignmentValueSchema} is the same rule under a
@@ -534,13 +542,75 @@ export type FlowCollectionSlotParsed = z.infer<typeof FlowCollectionSlotSchema>;
 // ─── CRUD quartet ────────────────────────────────────────────────────
 
 /**
+ * A `get_record` / `update_record` / `delete_record` node's `filter` (#19939,
+ * Fork R17 → A; ADR-0032 Decision 2: "Computed value (`dueDate`, filter
+ * values)" serialises as a CEL envelope) — the match condition, a
+ * `FilterCondition` tree, whose OPERANDS are value slots
+ * (`flowFilterOperands`: a field's value, an operator's comparand, each
+ * element of a list comparand). Its keys, operators, combinators and
+ * nested-relation conditions are its structure. Each operand is:
+ *
+ *  - a **CEL value envelope** — {@link AssignmentExpressionValueSchema},
+ *    evaluated by the executor in the run's scope BEFORE the query; one that
+ *    evaluates to `null` refuses the node rather than widening the query
+ *    (#3810), as a `{token}` that resolved to nothing did. A malformed envelope
+ *    leads with {@link VALUE_ENVELOPE_REFUSAL}, as in every value slot;
+ *  - a **query placeholder** (`{current_user_id}`, `{today}`, `{30_days_ago}`)
+ *    — the query engine's own vocabulary, which it resolves; handed to the
+ *    query untouched (`classifyFlowFilterOperandString`, the one classifier);
+ *  - any other **literal**, handed to the query as written — and a string in
+ *    it that carries a `{…}` token of the retired flow template dialect is
+ *    refused with its CEL spelling ({@link valueSlotTemplateRefusals} with
+ *    `filterOperand`).
+ *
+ * The record type, and every rule a filter's SHAPE answers to — an operator's
+ * comparand, an empty combinator — stay the query engine's, judged where the
+ * query runs, as before. Built per contract for its description, eagerly, for
+ * the reason {@link celValueSlotSchema} gives; the `xExpression: 'value'`
+ * marker declares the operands to the expression ledger's reconciliation
+ * ratchet, whose `filter` entries carry `filterOperands`.
+ */
+function flowFilterSlotSchema(description: string) {
+  return z.record(z.string(), z.unknown())
+    .superRefine((filter, ctx) => {
+      for (const operand of flowFilterOperands(filter)) {
+        if (!isExpressionEnvelopeShaped(operand.value)) {
+          for (const refusal of valueSlotTemplateRefusals(operand.value, { filterOperand: true })) {
+            ctx.addIssue({ code: 'custom', path: [...operand.path, ...refusal.path], message: refusal.message });
+          }
+          continue;
+        }
+        const result = AssignmentExpressionValueSchema.safeParse(operand.value);
+        if (result.success) continue;
+        for (const issue of result.error.issues) {
+          const where = issue.path.length > 0 ? `\`${issue.path.map(String).join('.')}\`: ` : '';
+          ctx.addIssue({
+            code: 'custom',
+            path: [...operand.path, ...issue.path],
+            message: `${VALUE_ENVELOPE_REFUSAL} ${where}${issue.message}`,
+          });
+        }
+      }
+    })
+    .meta({ description, xExpression: 'value' });
+}
+
+/** What every CRUD `filter` description ends with — the operand rule. */
+const FILTER_OPERAND_DESCRIPTION =
+  'each operand — a field\'s value, an operator\'s comparand ({"$ne": null}), a list comparand\'s element — is a CEL '
+  + 'value envelope `{ dialect: \'cel\', source }` evaluated before the query (one that evaluates to null refuses the '
+  + 'node), a query placeholder such as `{current_user_id}` or `{today}` the query engine resolves, or a literal; a '
+  + 'flow `{…}` template token is refused';
+
+/**
  * `get_record` node config — what the executor reads.
  *
  * `objectName` is execute-time required (the step is refused without it).
- * `filter` values may carry operator objects (`{"$ne": null}`) and `{token}`
- * templates; a template that resolves to nothing REFUSES the node rather than
- * widening the query (#3810). `limit > 1` selects `find` (a `records` list);
- * otherwise `findOne` (a single `record`).
+ * `filter` values may carry operator objects (`{"$ne": null}`), and each
+ * operand is a CEL value envelope, a query placeholder or a literal
+ * ({@link flowFilterSlotSchema}); an envelope that evaluates to nothing
+ * REFUSES the node rather than widening the query (#3810). `limit > 1` selects
+ * `find` (a `records` list); otherwise `findOne` (a single `record`).
  */
 export const GetRecordConfigSchema = lazySchema(() => strictObject({
   surface: 'this get_record node config',
@@ -549,9 +619,8 @@ export const GetRecordConfigSchema = lazySchema(() => strictObject({
 }, {
   /** Object to query (execute-time required). */
   objectName: z.string().describe('Object to query'),
-  /** Field/value pairs to match; operator objects and `{token}` templates are legal values. */
-  filter: z.record(z.string(), z.unknown()).optional()
-    .describe('Field/value pairs to match (operator values like {"$ne": null} are preserved)'),
+  /** Field/value pairs to match; each operand an envelope, a query placeholder or a literal ({@link flowFilterSlotSchema}). */
+  filter: flowFilterSlotSchema(`Field/value pairs to match: ${FILTER_OPERAND_DESCRIPTION}`).optional(),
   /** Field projection — only these fields are read (default: all). */
   fields: z.array(z.string()).optional()
     .describe('Field projection — only these fields are read (default: all)'),
@@ -613,9 +682,12 @@ export const UpdateRecordConfigSchema = lazySchema(() => strictObject({
 }, {
   /** Object to update (execute-time required). */
   objectName: z.string().describe('Object to update'),
-  /** Field/value pairs identifying the record(s) to update; an erased template condition refuses the node (#3810). */
-  filter: z.record(z.string(), z.unknown()).optional()
-    .describe('Field/value pairs identifying the record(s) to update'),
+  /**
+   * Field/value pairs identifying the record(s) to update; each operand an
+   * envelope, a query placeholder or a literal ({@link flowFilterSlotSchema}),
+   * and an operand that evaluates to nothing refuses the node (#3810).
+   */
+  filter: flowFilterSlotSchema(`Field/value pairs identifying the record(s) to update: ${FILTER_OPERAND_DESCRIPTION}`).optional(),
   /**
    * Field values to write — a `value`-role slot of the expression ledger
    * (`update_record.fields.*`, #19938): each value is a CEL value envelope or
@@ -639,9 +711,9 @@ export const UpdateRecordConfigSchema = lazySchema(() => strictObject({
    * count. Same word the engine has always used for the concept
    * (`EngineUpdateOptions.multi`) — one concept, one name (PD #12).
    *
-   * It does not weaken the #3810 erased-condition guard: a node whose authored
-   * filter condition interpolated to nothing is still refused before any write,
-   * `multi` or not. What it DOES make reachable is the deliberate whole-object
+   * It does not weaken the #3810 erased-condition guard: a node whose filter
+   * operand evaluated to nothing is still refused before any write, `multi` or
+   * not. What it DOES make reachable is the deliberate whole-object
    * write — `multi: true` with no `filter` at all is every row, by declaration.
    */
   multi: z.boolean().optional()
@@ -664,9 +736,12 @@ export const DeleteRecordConfigSchema = lazySchema(() => strictObject({
 }, {
   /** Object to delete from (execute-time required). */
   objectName: z.string().describe('Object to delete from'),
-  /** Field/value pairs identifying the record(s) to delete. */
-  filter: z.record(z.string(), z.unknown()).optional()
-    .describe('Field/value pairs identifying the record(s) to delete'),
+  /**
+   * Field/value pairs identifying the record(s) to delete; each operand an
+   * envelope, a query placeholder or a literal ({@link flowFilterSlotSchema}),
+   * and an operand that evaluates to nothing refuses the node (#3810).
+   */
+  filter: flowFilterSlotSchema(`Field/value pairs identifying the record(s) to delete: ${FILTER_OPERAND_DESCRIPTION}`).optional(),
   /**
    * Declare BULK intent — this node may delete EVERY row `filter` matches.
    *
@@ -683,7 +758,7 @@ export const DeleteRecordConfigSchema = lazySchema(() => strictObject({
    *
    * The highest-stakes key on this shape, which is why it is a DECLARATION and
    * not an inference from the filter's shape: the #3810 erased-condition guard
-   * still refuses a node whose authored condition interpolated to nothing, but
+   * still refuses a node whose filter operand evaluated to nothing, but
    * `multi: true` with no `filter` at all is the whole object, by declaration.
    * Write the constraint you mean.
    */

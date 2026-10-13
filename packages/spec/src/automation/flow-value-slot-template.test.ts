@@ -55,6 +55,7 @@ import {
 import { FLOW_NODE_EXPRESSION_PATHS } from './flow-node-expression-paths';
 import {
   VALUE_SLOT_TEMPLATE_REFUSAL,
+  classifyFlowFilterOperandString,
   flowNodeValueTemplateRefusals,
   valueSlotTemplateRefusals,
 } from './flow-value-slot-template';
@@ -75,10 +76,14 @@ function configAtEntry(path: string, value: unknown): Record<string, unknown> {
 /**
  * {@link configAtEntry}, on a config the entry's slot is READ on: an entry with
  * `onlyWithKey` (`loop.collection`, read only with a `body` — #19939) gets that
- * key too.
+ * key too, and an entry with `filterOperands` (a CRUD `filter`, #19939 stage
+ * S6) holds the value at an operand — a field's value — never as the filter.
  */
-function configForEntry(entry: { readonly path: string; readonly onlyWithKey?: string }, value: unknown): Record<string, unknown> {
-  const config = configAtEntry(entry.path, value);
+function configForEntry(
+  entry: { readonly path: string; readonly onlyWithKey?: string; readonly filterOperands?: true },
+  value: unknown,
+): Record<string, unknown> {
+  const config = entry.filterOperands ? configAtEntry(`${entry.path}.*`, value) : configAtEntry(entry.path, value);
   return entry.onlyWithKey === undefined ? config : { ...config, [entry.onlyWithKey]: { nodes: [], edges: [] } };
 }
 
@@ -396,7 +401,11 @@ describe('the run user — `{$User.*}` is refused, with the ruled remedies', () 
       const message = refusalOf(token);
       expect(message).toContain(`\`${token}\` never resolved in any shipped run`);
       expect(message).toContain('`current_user` carries only what the run holds — `id`, `positions`, `organizationId`, `isPlatformAdmin`');
-      expect(message).toContain("assignments: { uid: { dialect: 'cel', source: 'current_user.id' } }");
+      // [#19939, stage S6] The read names the run user's id in the filter
+      // operand itself — the `{uid}` token it used to compute first is refused
+      // there now.
+      expect(message).toContain("filter: { id: { dialect: 'cel', source: 'current_user.id' } }");
+      expect(message).not.toContain('{uid}');
       expect(message).toContain("objectName: 'sys_user'");
       expect(message).toContain("{ dialect: 'cel', source: 'me.email' }");
       expect(message).not.toContain("Write `");
@@ -516,7 +525,11 @@ describe('every value-slot contract refuses the same set, at the value', () => {
 });
 
 describe('`flowNodeValueTemplateRefusals` — every value position of a node, located for a door', () => {
-  it('create_record / update_record `fields`, nested values included; a `filter` value is not a value slot', () => {
+  // [#19939, stage S6] RE-JUDGED IN PLACE: this pinned an `update_record`
+  // `filter` value as no value slot. Each filter operand is one since S6, so
+  // the update node's `{recordId}` operand is refused after its `fields`; the
+  // create node declares no `filter`, so its one stays unjudged.
+  it('create_record / update_record `fields`, nested values included; a filter operand on the update node only', () => {
     for (const nodeType of ['create_record', 'update_record']) {
       const refusals = flowNodeValueTemplateRefusals(nodeType, {
         objectName: 'task',
@@ -527,6 +540,7 @@ describe('`flowNodeValueTemplateRefusals` — every value position of a node, lo
         ['fields.owner', `${nodeType} field value`],
         ['fields.tags[0]', `${nodeType} field value`],
         ['fields.due', `${nodeType} field value`],
+        ...(nodeType === 'update_record' ? [['filter.id', 'update_record filter operand']] : []),
       ]);
     }
   });
@@ -881,6 +895,93 @@ describe('a notify node\'s value slots: located per position, a recipient\'s ref
       const carries = /names who the notification goes to/.test(refusal!.message);
       expect(carries, `${entry.nodeType} ${entry.path}`).toBe(`${entry.nodeType} ${entry.path}` === 'notify recipients');
     }
+  });
+});
+
+/**
+ * [#19939, stage S6] Each operand of a CRUD node's `filter` is a value slot
+ * (Fork R17 → A). Two `{…}` vocabularies met there; the query placeholders
+ * stay — the query engine resolves them — and the flow token is refused. ONE
+ * classifier draws the line, and the remedy names no guard answering `null`:
+ * an operand that evaluates to `null` refuses the node (#3810).
+ */
+describe('a CRUD filter operand: the query placeholders pass, a flow token is refused (#19939, S6)', () => {
+  const filterRefusalOf = (value: unknown): string => {
+    const refusals = valueSlotTemplateRefusals(value, { filterOperand: true });
+    expect(refusals, `exactly one refusal for ${JSON.stringify(value)}`).toHaveLength(1);
+    expect(refusals[0]!.message.startsWith(VALUE_SLOT_TEMPLATE_REFUSAL)).toBe(true);
+    return refusals[0]!.message;
+  };
+
+  it.each([
+    ['{current_user_id}', 'placeholder'],
+    ['{current_org_id}', 'placeholder'],
+    ['{today}', 'placeholder'],
+    ['${today}', 'placeholder'],
+    ['{30_days_ago}', 'placeholder'],
+    ['{current_year_start}', 'placeholder'],
+    ['{record.id}', 'flow-token'],
+    ['{recordId}', 'flow-token'],
+    ['{record_id}', 'flow-token'],
+    ['{TODAY()}', 'flow-token'],
+    ['{$User.Id}', 'flow-token'],
+    ['{ today }', 'flow-token'],
+    ['due {today}', 'flow-token'],
+    ['open', 'literal'],
+    ['', 'literal'],
+  ] as const)('classifies %s as %s — the one classifier', (value, kind) => {
+    expect(classifyFlowFilterOperandString(value)).toBe(kind);
+  });
+
+  it('a query placeholder is not judged, at any depth of a literal operand', () => {
+    expect(valueSlotTemplateRefusals('{current_user_id}', { filterOperand: true })).toEqual([]);
+    expect(valueSlotTemplateRefusals(['{today}', '{yesterday}'], { filterOperand: true })).toEqual([]);
+    // CONTROL: outside a filter operand the same string is a refused token.
+    expect(valueSlotTemplateRefusals('{today}')).toHaveLength(1);
+  });
+
+  it('a path: its envelope, and what `null` does at a filter operand — never a guard answering `null`', () => {
+    const message = filterRefusalOf('{record.id}');
+    expect(message).toContain("Write `{record.id}` as { dialect: 'cel', source: 'record.id' }: an operand envelope is evaluated before the query.");
+    expect(message).toContain('An operand that evaluates to `null` refuses the node, as a token that resolved to nothing did');
+    expect(message).toContain('route around the node with a `decision`');
+    expect(message).not.toContain('has(vars.');
+    expect(message).not.toContain('the guarded form writes `null`');
+  });
+
+  it('the run user\'s id: `current_user.id`, and a decision where the flow can run without a user', () => {
+    const message = filterRefusalOf('{$User.Id}');
+    expect(message).toContain("Write `{$User.Id}` as { dialect: 'cel', source: 'current_user.id' }");
+    expect(message).toContain('skip the node there with a `decision` on `current_user != null`');
+    expect(message).not.toContain('current_user != null ? current_user.id : null');
+  });
+
+  it('an expression keeps its decimal divisor; a date macro is its CEL string form', () => {
+    expect(filterRefusalOf('{round(x * 100) / 100}')).toContain("source: 'round(x * 100) / 100.0'");
+    expect(filterRefusalOf('{TODAY() - 3}')).toContain("{ dialect: 'cel', source: 'isoDate(daysAgo(3))' }");
+  });
+
+  it('a token that resembles a query placeholder names it — a near-miss and the placeholder written with spaces', () => {
+    expect(filterRefusalOf('{current_user}')).toContain('If you meant the query placeholder `{current_user_id}`, write it so');
+    expect(filterRefusalOf('{ today }')).toContain('If you meant the query placeholder `{today}`, write it so');
+    // A record page's placeholder resolves on no server path: no such suggestion.
+    expect(filterRefusalOf('{record.id}')).not.toContain('query placeholder');
+  });
+
+  it('text with holes is one concatenation; an envelope operand is not judged here', () => {
+    expect(filterRefusalOf('Acme {region} deal')).toContain(`{ dialect: 'cel', source: "'Acme ' + region + ' deal'" }`);
+    expect(valueSlotTemplateRefusals({ dialect: 'cel', source: 'record.id' }, { filterOperand: true })).toEqual([]);
+  });
+
+  it('the door call judges each operand at its own path, with the filter label', () => {
+    const refusals = flowNodeValueTemplateRefusals('delete_record', {
+      objectName: 'deal',
+      filter: { owner: '{record.owner}', due: { $lt: '{today}' }, id: { $in: ['r1', '{x}'] }, status: 'open' },
+    });
+    expect(refusals.map((r) => [r.path, r.label, r.source])).toEqual([
+      ['filter.owner', 'delete_record filter operand', '{record.owner}'],
+      ['filter.id.$in[1]', 'delete_record filter operand', '{x}'],
+    ]);
   });
 });
 
