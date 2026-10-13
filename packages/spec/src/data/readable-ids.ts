@@ -146,9 +146,9 @@ export function isReadableIds(value: unknown): value is ReadableIds {
  * in analytics) and is unchanged by this declaration.
  *
  * Frozen, so no holder of the reference can edit it, and so no read-scope merge
- * boundary can stamp a provenance mark on it
- * (`./filter-subtree-provenance.ts#markFilterSubtreeProvenance` leaves a
- * frozen subtree unmarked, which withholds).
+ * boundary can stamp a provenance mark on it: a frozen subtree stays unmarked,
+ * which withholds
+ * (`packages/spec/src/data/filter-subtree-provenance.ts#markFilterSubtreeProvenance`).
  */
 export const RLS_DENY_FILTER: Readonly<{ id: string }> = Object.freeze({
   id: '__rls_deny__:00000000-0000-0000-0000-000000000000',
