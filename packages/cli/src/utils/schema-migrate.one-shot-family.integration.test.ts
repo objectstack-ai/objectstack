@@ -57,6 +57,7 @@ import { buildDataMigrationPlugins } from './data-migration-plugins.js';
 import MigrateAccountIssuer from '../commands/migrate/account-issuer.js';
 import MigrateApply from '../commands/migrate/apply.js';
 import MigrateAuditMetadataBodies from '../commands/migrate/audit-metadata-bodies.js';
+import MigrateCommentReactions from '../commands/migrate/comment-reactions.js';
 import MigrateDuplicates from '../commands/migrate/duplicates.js';
 import MigrateFilesToReferences from '../commands/migrate/files-to-references.js';
 import MigrateMeta from '../commands/migrate/meta.js';
@@ -161,6 +162,11 @@ const CALLERS: Record<string, Caller> = {
     run: invoke(MigrateAuditMetadataBodies),
     noWrite: [{ label: 'migrate audit-metadata-bodies', argv: ['--database-url', '@DB@', '--json'] }],
     write: [{ label: 'migrate audit-metadata-bodies --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
+  },
+  'commands/migrate/comment-reactions.ts': {
+    run: invoke(MigrateCommentReactions),
+    noWrite: [{ label: 'migrate comment-reactions', argv: ['--database-url', '@DB@', '--json'] }],
+    write: [{ label: 'migrate comment-reactions --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
   },
   'commands/migrate/duplicates.ts': {
     run: invoke(MigrateDuplicates),

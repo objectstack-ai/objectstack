@@ -22,6 +22,10 @@ import { FIELD_GROUP_KEY_PATTERN } from './field-group-layout';
 // `password` exemption rather than restating it. No runtime cycle: that module's
 // only imports are type-only.
 import { isMaskedOnReadFieldType } from './masked-field-types';
+// The one-required-master predicate, shared with the v18 stored-row listing
+// (`conversions/refused-shapes.ts`) so the parse and the upgrade's preview
+// refuse one set. Internal: not re-exported by `data/index.ts`.
+import { controlledByParentMasterRefusal } from './controlled-by-parent-master';
 export const ApiMethod = z.enum([
   'get', 'list',                // Read
   'create', 'update', 'delete', // Write
@@ -1973,6 +1977,11 @@ function refuseAttachedBlockConflicts(attachedOnRead: unknown, fields: unknown, 
  *     rather leave `controlled_by_parent` is the author's decision.
  * The conversion is retired from the authoring load path, so a live author
  * still meets this refusal.
+ *
+ * The predicate and the message live in `controlled-by-parent-master.ts`
+ * ({@link controlledByParentMasterRefusal}), which the v18 upgrade's stored-row
+ * listing reads too: `os migrate meta --stored` lists each stored object this
+ * refinement refuses, by object, with the fate of its shape (#23270).
  */
 function refuseControlledByParentWithoutOneMaster(
   objectName: unknown,
@@ -1980,53 +1989,9 @@ function refuseControlledByParentWithoutOneMaster(
   fields: unknown,
   ctx: z.RefinementCtx,
 ): void {
-  if (sharingModel !== 'controlled_by_parent') return;
-  if (fields === null || typeof fields !== 'object' || Array.isArray(fields)) return;
-  const name = typeof objectName === 'string' && objectName.length > 0 ? objectName : '<unnamed>';
-  const entries = Object.entries(fields as Record<string, { type?: unknown; required?: unknown } | undefined>);
-  const masters = entries
-    .filter(([, f]) => f?.type === 'master_detail' && f.required === true)
-    .map(([key]) => key);
-  if (masters.length === 1) return;
-  if (masters.length > 1) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['fields'],
-      message:
-        `Object '${name}' declares sharingModel 'controlled_by_parent' with ${masters.length} required `
-        + `\`master_detail\` fields (${masters.map((m) => `\`${m}\``).join(', ')}). ADR-0055 §1: a `
-        + 'controlled-by-parent object derives its master from exactly one required `master_detail` field, so '
-        + 'with two the declaration does not say which master governs its rows, and the platform derives none '
-        + '(every read is denied, every write refused). Keep `master_detail` on the one master, and declare '
-        + 'every other parent as a `lookup` field.',
-    });
-    return;
-  }
-  const optionalMasters = entries.filter(([, f]) => f?.type === 'master_detail').map(([key]) => key);
-  const requiredLookups = entries
-    .filter(([, f]) => f?.type === 'lookup' && f.required === true)
-    .map(([key]) => key);
-  const found = [
-    ...optionalMasters.map((m) => `\`${m}\` is a \`master_detail\` without \`required: true\` — add it`),
-    ...requiredLookups.map(
-      (l) => `\`${l}\` is a required \`lookup\`, and a lookup derives no access — declare it `
-        + "`type: 'master_detail'` (a detail is deleted with its master; declare `deleteBehavior: 'restrict'` "
-        + 'to refuse deleting a master that still has rows instead)',
-    ),
-  ];
-  ctx.addIssue({
-    code: 'custom',
-    path: ['sharingModel'],
-    message:
-      `Object '${name}' declares sharingModel 'controlled_by_parent' but no required \`master_detail\` field. `
-      + 'ADR-0055 §1: since @objectstack/spec 18, a controlled-by-parent object derives its master from exactly '
-      + 'one `master_detail` field declared `required: true`, and from nothing else, so as declared the '
-      + 'platform derives no master '
-      + '(every read is denied, every write refused). '
-      + (found.length > 0 ? `${found.join('; ')}. ` : '')
-      + 'If the rows must outlive their parent, this object is not a detail: give it its own sharingModel '
-      + "('private', 'public_read' or 'public_read_write').",
-  });
+  const refusal = controlledByParentMasterRefusal(objectName, sharingModel, fields);
+  if (refusal === undefined) return;
+  ctx.addIssue({ code: 'custom', path: [refusal.path], message: refusal.message });
 }
 
 // ⚠️ ORDER IS LOAD-BEARING (#5593). This map used to live ~700 lines BELOW

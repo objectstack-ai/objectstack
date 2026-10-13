@@ -139,6 +139,9 @@ import {
   MasterReferenceMissingError,
   MaskedValueWriteError,
 } from './errors.js';
+// [ADR-0138 D4] The guest entry's organization step, and the located refusal
+// the CRUD gate raises where it refuses.
+import { GuestOrganizationUnresolvedError, resolveGuestOrganization } from '@objectstack/core';
 import { assertEngineOwnedWriteAllowed } from './system-write-guard.js';
 import { bootstrapPlatformAdmin, findExistingPlatformAdmin, shouldReplayBootstrapFor } from './bootstrap-platform-admin.js';
 import { claimSeedOwnership } from './claim-seed-ownership.js';
@@ -1454,6 +1457,14 @@ export class SecurityPlugin implements Plugin {
    * saying is worth saying again on the next boot.
    */
   private readonly nameFoldWarned = new Set<string>();
+
+  /**
+   * [ADR-0138 D4] The refusal reasons {@link refuseGuestWithoutOrganization}
+   * has already reported to the operator — once per reason per instance, for
+   * the reason {@link nameFoldWarned} gives: the condition is a deployment
+   * fact, and a per-request line is a filtered one.
+   */
+  private readonly guestOrganizationRefusalWarned = new Set<string>();
 
   /**
    * [#21729] Alternate matches other plugins contributed to the platform's
@@ -6491,7 +6502,17 @@ export class SecurityPlugin implements Plugin {
   private async resolvePermissionSetsForContextUnmemoized(
     context: any,
   ): Promise<PermissionSet[]> {
-    const positions = context?.positions ?? [];
+    // [ADR-0138 D3] The GUEST requests exactly the sets its envelope carries —
+    // the `guest` anchor's bindings, which `resolveAuthzContext` resolved in
+    // the organization D4 derived — and they are treated as any requested set
+    // below. Its position is NOT folded into the request: the position-name
+    // fold (#13419's ruling retires it) would hand an anonymous caller any set
+    // that merely shares the anchor's name, the one channel D3 item 3 says
+    // never reaches the guest. The baseline does not reach it either (applied
+    // only to a caller with a user id, below), and `everyone` is never among
+    // its positions.
+    const isGuest = context?.principalKind === 'guest' && !context?.userId;
+    const positions = isGuest ? [] : (context?.positions ?? []);
     const explicitPermissionSets = context?.permissions ?? [];
     const requested = [...positions, ...explicitPermissionSets];
     // [ADR-0090 D10] An AGENT principal's grants are EXACTLY its scope-derived
@@ -8707,6 +8728,7 @@ export class SecurityPlugin implements Plugin {
     if (isPrincipalLessContext(context)) {
       throw principalLessDenial(operation, object);
     }
+    await this.refuseGuestWithoutOrganization(context, operation, object);
 
     let permissionSets: PermissionSet[] = [];
     try {
@@ -8741,6 +8763,56 @@ export class SecurityPlugin implements Plugin {
       }
     }
     return { permissionSets, delegatorSets, delegatorContext };
+  }
+
+  /**
+   * [ADR-0138 D4] The located refusal: a GUEST that reaches a data operation
+   * acting in no organization, on a deployment where the guest entry's
+   * organization step refuses — a wall, several organizations, or none.
+   *
+   * Raised HERE, at the CRUD gate, because this is where the guest's
+   * organization matters (D4 item 3: to resolve its grants and to scope its
+   * data operation). The guest entry cannot raise it: the runtime face
+   * assembles the guest envelope for every sessionless request before any
+   * route is matched, so a refusal there would replace every anonymous 401 and
+   * reach the flow door D4 leaves alone. The entry instead records nothing it
+   * cannot use — no organization and no set (`resolveAuthzContext`) — and this
+   * gate asks the SAME step (`resolveGuestOrganization`, one step, two askers)
+   * for a guest that carries no organization. Before any set is resolved: where
+   * D4 refuses, D3 is never reached (D3 item 7). And ahead of the prologue's
+   * fail-closed `catch` on purpose: that net turns every throw of the set
+   * resolution into a generic `PERMISSION_DENIED`, which is the disguise the
+   * located refusal removes.
+   *
+   * A guest that carries an organization was derived one by the entry, and a
+   * decision other than `refuse` (`derived`, or a composition with no
+   * organization object) leaves the guest to the gate as it is — denied while
+   * it holds no set (D3 item 2).
+   */
+  private async refuseGuestWithoutOrganization(context: any, operation: string, object: string): Promise<void> {
+    // A system context never reaches here: both callers of
+    // {@link resolveOperationPrincipals} return before it for one (the
+    // middleware's system short-circuit, and `checkControlledByParentWrite`'s
+    // first exit), so this rule reads no elevation of its own.
+    if (context?.principalKind !== 'guest' || context?.userId) return;
+    const tenantId = context?.tenantId;
+    if (typeof tenantId === 'string' && tenantId !== '') return;
+    const decision = await resolveGuestOrganization(this.ql, this.tenancyPosture);
+    if (decision.kind !== 'refuse') return;
+    if (!this.guestOrganizationRefusalWarned.has(decision.reason)) {
+      this.guestOrganizationRefusalWarned.add(decision.reason);
+      this.logger.warn?.(
+        `[security] an anonymous request reached '${operation}' on '${object}' and was refused: this deployment ` +
+          `resolves no organization for the guest (${decision.reason}, tenancy posture '${this.tenancyPosture}'` +
+          `${decision.organizationCount !== undefined ? `, ${decision.organizationCount} organization(s)` : ''}). ` +
+          `ADR-0138 D4 derives the guest's organization only on a single-organization deployment, and no site ` +
+          `binding (D5) exists yet to name one per request, so every anonymous data operation here answers ` +
+          `501 NOT_IMPLEMENTED. Serve the endpoint to signed-in callers (authRequired: true), or run it on a ` +
+          `single-organization deployment. Reported once per reason.`,
+        { operation, object, reason: decision.reason },
+      );
+    }
+    throw new GuestOrganizationUnresolvedError(decision.reason);
   }
 
   /**

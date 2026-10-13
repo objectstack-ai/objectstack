@@ -22536,6 +22536,12 @@ export class ObjectStackProtocolImplementation implements
      *   a pre-protocol shape it cannot rewrite without changing what it means
      *   — a page filter carrying `$or`, which a flat rule list cannot spell —
      *   leaves the site byte-identical and reports a TODO instead of a notice.
+     *   The same list carries the shapes protocol 18 refuses that no
+     *   conversion covers (#23269, #23270, #23271: a `controlled_by_parent`
+     *   object without exactly one required `master_detail`, a view bound to
+     *   the retired view-level API source, a flow value slot carrying a `{…}`
+     *   token), each TODO naming the D3 entry that refuses it. A flow row's
+     *   TODOs come back from the flow canonicalizer.
      *   Every such site is listed under its row (`rows[].todos`) with the
      *   block and the reason, whatever the row's outcome; a row whose ONLY
      *   finding is TODOs has nothing to persist and is reported `skipped`,
@@ -22822,8 +22828,14 @@ export class ObjectStackProtocolImplementation implements
             // still changing the body. Both passes are copy-on-write, so
             // identity is the precise test there: `storable === body` exactly
             // when nothing was rewritten at all.
+            //
+            // [#23269] A flow's TODOs come back from the canonicalizer, which
+            // runs the same chain with the same sink: until they did, a stored
+            // flow carrying a `{…}` token at a value slot — a CRUD filter
+            // operand among them — parsed, rewrote nothing and was counted
+            // `canonical`, while `registerFlow` refused it at boot.
             const { item, notices, todos } = flowResult
-                ? { item: flowResult.storable, notices: flowResult.notices, todos: [] as ConversionTodoNotice[] }
+                ? { item: flowResult.storable, notices: flowResult.notices, todos: flowResult.todos ?? [] }
                 : this.convertStoredItemDetailed(singular, body);
             const changed = flowResult ? item !== body : notices.length > 0;
             // [#17321] A site the chain left as stored — no lossless rewrite
@@ -22856,8 +22868,8 @@ export class ObjectStackProtocolImplementation implements
                     outcome: 'skipped',
                     reason: `the conversion chain rewrites nothing here: it left ${flattenedTodos.length} `
                         + 'site(s) of this row as stored, because no lossless rewrite exists for them — '
-                        + 'each TODO below names the site and why. The row keeps loading unchanged; '
-                        + 'rewrite each site by hand.',
+                        + 'each TODO below names the site and why. The row is read as stored, unchanged, '
+                        + 'and each TODO says what that leaves it doing; rewrite each site by hand.',
                 });
                 continue;
             }

@@ -3018,7 +3018,7 @@
       "title": "The /s/:token share-link landing page renders the resolved record minus redacted fields, gates on password, and refuses dead links with designed states — never a blank page or a raw error",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3035,7 +3035,7 @@
         "knownGaps": [
           "automated.ref lives ENTIRELY in the objectui repo — from this checkout it is neither runnable nor pin-evidenced (the RUNNER standing fact): drive the item by hand in the browser, or run the pin in an objectui checkout and name the revision",
           "the ai_conversations transcript branch (SharedRecordPage.tsx,190-234 — messages fetch + ChatbotEnhanced readOnly) is ai_conversations-only (Cloud/EE service-ai) — the same knownGap split the API item records for /:token/messages; not runnable on open-framework showcase",
-          "the page folds EVERY 401 into the password prompt (SharedRecordPage.tsx branches on status alone, never on the body's NEEDS_PASSWORD vs SIGN_IN_REQUIRED code): a signed_in-audience link opened anonymously renders 'Password required' today, not a sign-in prompt. Clause 4's bar is therefore non-leak + a designed state; record the rendered state as measured, and revise this item if the console later distinguishes the two codes"
+          "FIXED, regression row, expected PASS (objectui#11649): the page no longer folds every 401 into the password prompt. At objectui 1fb1ced36243, still this repo's .objectui-sha, SharedRecordPage.tsx reads a 401 by the body's error.code through shared-record-shape.ts resolveGateOf — NEEDS_PASSWORD and WRONG_PASSWORD open the password prompt, SIGN_IN_REQUIRED opens the sign-in gate, and any other code shows the server's message, not a prompt — so a signed_in-audience link opened anonymously renders the dedicated 'Sign in required' state, never 'Password required'. acceptance[3] now asserts that state (QA run #23163 saw it live at objectstack 36b2889c). The objectui pins are apps/console/src/pages/SharedRecordPage-11649.test.tsx ('shows the sign-in path back to this link, and no password prompt') and shared-record-shape.test.ts ('reads each 401 code as its gate'), objectui-repo-only like knownGaps[0]"
         ]
       },
       "steps": [
@@ -3066,9 +3066,9 @@
           "evidence": "screenshots + the 404/410 bodies"
         },
         {
-          "clause": "audience 'signed_in', both sides: the anonymous open never renders the record (the 401 body is record-free; the page shows a designed state — per knownGaps, today that state is the password prompt, record which renders), and the form-signed-in member's open renders it",
+          "clause": "audience 'signed_in', both sides: the anonymous open never renders the record — the resolve answers 401 SIGN_IN_REQUIRED with a record-free body, and the page renders its dedicated sign-in state ('Sign in required', 'The owner shared this link with signed-in users only.', and a 'Sign in' link to the console's /login route whose redirect parameter returns to this link), never the 'Password required' prompt or a password input — a password prompt here is the regression knownGaps[2] records as fixed; and the form-signed-in member's open renders the record",
           "oracle": "network",
-          "verify": "anonymous resolve 401 record-free + the rendered state noted; signed-in resolve 200 and the record renders (the resolve fetch rides the same-origin session cookie)",
+          "verify": "anonymous resolve 401 SIGN_IN_REQUIRED record-free, then a screenshot and a DOM read of the sign-in state: the 'Sign in required' heading, a 'Sign in' link whose href is the console's /login with redirect= the URL-encoded /s/ path of this token, and no input[type=password] (SharedRecordPage.tsx renders it when shared-record-shape.ts resolveGateOf reads SIGN_IN_REQUIRED off the 401 body); signed-in resolve 200 and the record renders (the resolve fetch rides the same-origin session cookie)",
           "evidence": "both traces + both screenshots"
         },
         {
@@ -3088,7 +3088,7 @@
         "revoked (410 message)",
         "expired (410 message)",
         "unknown token (404 message)",
-        "audience signed_in — anonymous (refused, designed state)",
+        "audience signed_in — anonymous (refused: the 'Sign in required' state, no password prompt)",
         "audience signed_in — signed-in (renders)",
         "redacted-fields notice"
       ],
@@ -3115,6 +3115,12 @@
           "date": "2026-08-30",
           "change": "new — the UI half of the share-link surface: access-security.share-link-capability-tokens (surface:api) asserts the resolve contract but nothing asserted what /s/:token actually renders — the redaction notice (whose #3983 regression was precisely a render-only loss), the password prompt loop, the designed dead-link states, and the outside-the-shell mount. Cross-referenced both ways; the 401-fold boundary (password prompt rendered for a signed_in-audience 401) is recorded as a measured knownGap, not an expectation",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-13",
+          "change": "knownGaps[2], acceptance[3].clause, acceptance[3].verify and variants[5] (knownGap stale, #23163 C3; parked on #23121, carried by #23169). The page no longer folds every 401 into the password prompt: at objectui 1fb1ced36243, still this repo's .objectui-sha, SharedRecordPage.tsx reads a 401 by its error.code (shared-record-shape.ts resolveGateOf, objectui#11649) and renders a dedicated 'Sign in required' state, with a 'Sign in' link back to this link, for SIGN_IN_REQUIRED. The server half is unchanged at 87e902dcbb: both resolve mounts, packages/plugins/plugin-sharing/src/share-link-routes.ts and its dispatcher twin packages/runtime/src/domains/share-links.ts, answer an anonymous open of a live signed_in link with no password with 401 SIGN_IN_REQUIRED. As the knownGap itself asked, it becomes a regression row, and acceptance[3] (the item's clause 4) asserts the sign-in state instead of recording whichever state renders. Read from source at both pins; no browser was driven and no app was booted. QA run #23163 saw the state live",
+          "ref": "#23169"
         }
       ]
     }
