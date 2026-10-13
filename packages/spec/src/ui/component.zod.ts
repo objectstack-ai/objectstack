@@ -992,8 +992,8 @@ export const PageTabsProps = strictObject({
      * evaluator, and that evaluator differs on two points — both renderer
      * behaviour, NOT contract-guaranteed:
      *
-     *   * **`data` is the record ROW here**, where the component-node evaluator
-     *     binds it to the data-source ADAPTER. Same key, two meanings.
+     *   * **`data` is the record ROW here**; the component-node evaluator
+     *     mounts no `data` root at all (see `PageComponentSchema.visibleWhen`).
      *   * **The row's bare fields are spread flat**, so `status` resolves as
      *     well as `record.status`. The ambient scope is spread AFTER the row,
      *     so an ambient root (`features`, `user`, …) wins over a record
@@ -1003,8 +1003,8 @@ export const PageTabsProps = strictObject({
      * `features` / `os.user` roots, which no ADR rules for a UI predicate
      * (ADR-0068's Non-goals: "only the user object is in scope here").
      *
-     * Measured at the `.objectui-sha` pin `190fbd01d061`:
-     * `components/src/renderers/layout/containers.tsx:450-457`.
+     * Measured at the `.objectui-sha` pin `1fb1ced36243`:
+     * `components/src/renderers/layout/containers.tsx:642-649`.
      *
      * Canonical `*When` name per ADR-0089 — this key is new, so the deprecated
      * `visibility` / `visibleOn` aliases are NOT ACCEPTED on tab items: unlike
