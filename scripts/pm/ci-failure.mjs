@@ -130,6 +130,21 @@
  *     rather than in place of one, and as the whole answer when the log is past
  *     retention or the request did not complete.
  *
+ *   gate LANES since #23191 — every `Lint · *` / `Type Check · *` lane:
+ *     each gate step runs under `continue-on-error: true`, so a red gate's
+ *     `conclusion` is `success` in the jobs API (measured: job 115214618941,
+ *     step #8, `Docs anchors resolve to real headings`; only the steps-context
+ *     `outcome` said `failure`). The ONE failed step of a red lane is therefore
+ *     its last, `Lane verdict`, and that step's name resolves to the verdict's
+ *     own command, which run locally exits 3 and reproduces nothing. The red
+ *     gates are named only in the verdict's annotations, `gate step "NAME" (id
+ *     ID) failed`, so for that step the names are read from there (and from
+ *     the job log's error lines, which carry the same sentences) and each one
+ *     is resolved to the gate's OWN `run:` block (#23223). A verdict that is
+ *     red yet names no red gate — an unread gate, one that did not run, a
+ *     refusal — says so; one whose sentences this file cannot parse says THAT,
+ *     loudly, and never falls back to offering the verdict's command.
+ *
  * ## Exit codes — "I could not retrieve it" is a VERDICT, never a green
  *
  * This is the #9747 shape stated as an exit table. A gate that says `clean` when
@@ -327,7 +342,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the job log (#10141)': 34,
   'isRosterJob': 5,
   'runIdOf': 3,
-  'stepBodies / resolveStep': 8,
+  'stepBodies / resolveStep': 9,
+  'Lane verdict: the red gates, not the verdict (#23223)': 22,
   'proxyRearmFor: the transport trap': 17,
   'usageText: --help tracks the header instead of a line number': 4,
   'verdictOf: the exit table': 11,
@@ -338,7 +354,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 14;
+const SELF_TEST_BATTERY_FLOOR = 15;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -536,6 +552,12 @@ function isNewer(a, b) {
  *                   generic marker. Carries nothing. It is what a `check:*` gate
  *                   failure leaves behind, and mistaking its presence for
  *                   content is how a red gate reads as "no details recorded".
+ *   lane-verdict    one sentence of a gate lane's `Lane verdict` step
+ *                   (`scripts/ci/lane-verdict.mjs`, `renderVerdict`): `verdict`
+ *                   says which — `red` (and `gate` + `id` name the red gate
+ *                   step), `unread`, `did-not-run`, `fail-fast` or `refusal`.
+ *                   Points at another STEP of the same job, the way a
+ *                   roster-pointer points at another job (#23223).
  *
  * `.github` is how the runner spells "no file" in `path`, so it is not a file
  * anchor; that check is what keeps `exit-status` out of the assertion bucket.
@@ -545,6 +567,11 @@ export function classifyAnnotation(annotation) {
   const path = String(annotation?.path ?? '');
   const anchored = path !== '' && path !== '.github';
   if (anchored) return { kind: 'assertion', path, line: annotation?.start_line ?? null, message };
+
+  // Before the roster-pointer test: that one is unanchored, so a gate NAME
+  // containing its phrase would otherwise be read as a pointer at a job.
+  const verdict = laneVerdictSentence(message);
+  if (verdict) return { kind: 'lane-verdict', ...verdict, message };
 
   const command = /^command \((?<dir>.+?)\)\s+(?<bin>.*?)\s+exited \((?<code>\d+)\)\s*$/.exec(message);
   if (command) {
@@ -558,6 +585,92 @@ export function classifyAnnotation(annotation) {
   if (/^Process completed with exit code \d+\.?\s*$/.test(message)) return { kind: 'exit-status', message };
 
   return { kind: 'other', message };
+}
+
+/**
+ * The step name a gate lane's verdict runs under, as the jobs API returns it —
+ * the one failed step whose own `run:` block reproduces nothing (#23223).
+ *
+ * Matched by NAME because the name is what the jobs API hands this file, and
+ * it is matched even when the local workflow tree no longer carries the step.
+ * The coupling to the script is pinned instead: the self-test reds when any
+ * step in the real tree runs the verdict under a different name, which is the
+ * one edit that would bring the defect back silently.
+ */
+export const LANE_VERDICT_STEP = 'Lane verdict';
+
+/** A `run:` body that IS the verdict: the bare invocation, never `--self-test`. */
+const LANE_VERDICT_INVOCATION = /(?:^|\s)node\s+scripts\/ci\/lane-verdict\.mjs\s*$/m;
+
+/**
+ * The five sentences `scripts/ci/lane-verdict.mjs`'s `renderVerdict` writes as
+ * `::error` annotations, one pattern each. ⛔ This is a READER of that file's
+ * output, never a second definition of it: the self-test feeds these patterns
+ * what the REAL `judgeLane` + `renderVerdict` print, so a change of wording
+ * there reds here instead of silently turning every red lane into "no red gate
+ * named". Anything else is not a verdict sentence and stays `other`.
+ */
+const LANE_VERDICT_SENTENCES = [
+  ['red', /^gate step "(?<gate>.+)" \(id (?<id>[^\s)]+)\) failed -- /],
+  ['unread', /^gate step "(?<gate>.+?)" cannot be read: (?<detail>.+)\. An unread gate is not a pass\.$/],
+  ['did-not-run', /^gate step "(?<gate>.+?)" did not run: (?<detail>.+)\.$/],
+  ['fail-fast', /^a step without continue-on-error failed \(job status `(?<detail>[^`]*)`\)/],
+  ['refusal', /^NOT MEASURED -- (?<detail>.+)\. A verdict that cannot read its lane has not passed it\.$/],
+];
+
+function laneVerdictSentence(message) {
+  const text = String(message ?? '').trim();
+  for (const [verdict, pattern] of LANE_VERDICT_SENTENCES) {
+    const m = pattern.exec(text);
+    if (m) {
+      return { verdict, gate: m.groups.gate ?? null, id: m.groups.id ?? null, detail: m.groups.detail ?? null };
+    }
+  }
+  return null;
+}
+
+/**
+ * What a failed `Lane verdict` step said, gathered from both surfaces that carry
+ * its sentences: the check-run's annotations and the job log's `##[error]`
+ * lines (`extractLogAssertion`'s `errors`, already classified through
+ * `classifyAnnotation`). The union, deduplicated, annotations first.
+ *
+ * The log is read as well as the annotations because the two are not the same
+ * size by contract: GitHub documents a per-step cap on error annotations, and a
+ * lane with more red gates than the cap would name only some of them there.
+ * That cap is GitHub's documentation, NOT measured here; reading both makes the
+ * answer independent of it, and costs no request — the log is already fetched
+ * for exactly this family (#10141).
+ *
+ * `annotationsRead` / `logRead` say whether each surface was READ at all, so an
+ * empty reading can be told apart from an unread one by the caller.
+ */
+export function readLaneVerdict({ annotations = [], logErrors = [], annotationsRead = true, logRead = false } = {}) {
+  const seen = new Map();
+  const sources = { annotations: 0, jobLog: 0, jobLogOnly: 0 };
+  const take = (entry, source) => {
+    if (entry?.kind !== 'lane-verdict') return;
+    sources[source] += 1;
+    const key = JSON.stringify([entry.verdict, entry.gate, entry.id, entry.detail]);
+    if (seen.has(key)) return;
+    if (source === 'jobLog') sources.jobLogOnly += 1;
+    seen.set(key, { verdict: entry.verdict, gate: entry.gate, id: entry.id, detail: entry.detail });
+  };
+  for (const a of annotations ?? []) take(a, 'annotations');
+  for (const e of logErrors ?? []) take(e, 'jobLog');
+  const all = [...seen.values()];
+  const of = (verdict) => all.filter((e) => e.verdict === verdict);
+  return {
+    red: of('red').map((e) => ({ name: e.gate, id: e.id })),
+    unread: of('unread').map((e) => ({ name: e.gate, detail: e.detail })),
+    didNotRun: of('did-not-run').map((e) => ({ name: e.gate, detail: e.detail })),
+    failFast: of('fail-fast').map((e) => ({ jobStatus: e.detail })),
+    refusal: of('refusal').map((e) => ({ detail: e.detail })),
+    recognised: all.length,
+    sources,
+    annotationsRead: Boolean(annotationsRead),
+    logRead: Boolean(logRead),
+  };
 }
 
 /**
@@ -849,6 +962,12 @@ export function isRosterJob(failedStepNames) {
  * for RETRIEVAL, and the report no longer offers it as though it were the only
  * way to see the stdout.
  *
+ * ONE step name breaks that sentence by construction: a gate lane's
+ * `Lane verdict` (#23191). It is the only failed step of a red lane, and its
+ * body is the verdict itself, which reproduces nothing locally. So
+ * `resolveFailedStep` below does not resolve that name: it resolves the red
+ * gate names the verdict printed, each through this same function (#23223).
+ *
  * A hand-rolled scanner rather than the `yaml` dependency, for the reason
  * `dispatch-gates.mjs` gives for the same choice: this must run from a bare
  * checkout during triage, before `pnpm install`, and it needs the RAW text
@@ -860,12 +979,24 @@ export function isRosterJob(failedStepNames) {
  * job the reader meant; the caller prints the file beside each.
  */
 export function stepBodies(workflowText, stepName) {
+  return workflowSteps(workflowText)
+    .filter((s) => s.name === stepName)
+    .map(({ kind, text }) => ({ kind, text }));
+}
+
+/**
+ * Every named step in one workflow text, with the command it runs — the scan
+ * `stepBodies` filters by name, exposed so the self-test can ask the converse
+ * question ("which steps run THIS command?") of the real tree. A step whose
+ * body has neither `run:` nor `uses:` is not listed, exactly as `stepBodies`
+ * never returned one.
+ */
+export function workflowSteps(workflowText) {
   const lines = String(workflowText ?? '').split('\n');
   const found = [];
   for (let i = 0; i < lines.length; i++) {
     const head = /^(\s*)-\s+name:\s*(.*?)\s*$/.exec(lines[i]);
     if (!head) continue;
-    if (unquote(head[2]) !== stepName) continue;
     const itemIndent = head[1].length;
     const body = [];
     for (let j = i + 1; j < lines.length; j++) {
@@ -874,7 +1005,7 @@ export function stepBodies(workflowText, stepName) {
       body.push(lines[j]);
     }
     const command = commandOf(body);
-    if (command) found.push(command);
+    if (command) found.push({ name: unquote(head[2]), ...command });
   }
   return found;
 }
@@ -939,6 +1070,106 @@ export function resolveStep(workflows, stepName) {
     for (const command of stepBodies(wf.text, stepName)) hits.push({ file: wf.file, ...command });
   }
   return hits;
+}
+
+/**
+ * One failed step, resolved to what reproduces it locally (#23223).
+ *
+ * Every step but one resolves by its own name, as it always has — a pre-#23191
+ * head, where a red gate step itself reads `failure`, is untouched. The one is
+ * `LANE_VERDICT_STEP`: its `repro` is the RED GATES' own `run:` blocks, each hit
+ * carrying `gate: { name, id }`, and `laneVerdict` carries the whole reading —
+ * the gates it named red, the ones it could not read or saw not run, a
+ * fail-fast or refusal sentence — so a red verdict that names no red gate is
+ * reported as exactly that rather than as a step that resolves to nothing.
+ */
+export function resolveFailedStep(workflows, step, { annotations = [], logErrors = [], annotationsRead = true, logRead = false } = {}) {
+  const base = { number: step?.number ?? null, name: String(step?.name ?? '') };
+  if (base.name !== LANE_VERDICT_STEP) return { ...base, repro: resolveStep(workflows, base.name), laneVerdict: null };
+  const reading = readLaneVerdict({ annotations, logErrors, annotationsRead, logRead });
+  const red = reading.red.map((g) => ({ ...g, repro: resolveStep(workflows, g.name) }));
+  return {
+    ...base,
+    repro: red.flatMap((g) => g.repro.map((r) => ({ ...r, gate: { name: g.name, id: g.id } }))),
+    laneVerdict: { ...reading, red },
+  };
+}
+
+/**
+ * The `substitute` block for one failing check — every failed step's local
+ * reproduction, with a `Lane verdict` step's reading printed above it. Pure,
+ * so the self-test pins the printed lines rather than a model of them.
+ *
+ * ⛔ The verdict's own command is never offered: run locally it exits 3 and
+ * reproduces nothing, and printing it once per lane is the defect this
+ * replaces. Its absence is SPOKEN, in each of the three ways it can happen.
+ */
+export function renderSubstitute(failedSteps) {
+  const out = [];
+  const steps = failedSteps ?? [];
+  for (const step of steps) if (step.laneVerdict) out.push(...renderLaneVerdict(step));
+  const repros = steps.flatMap((s) => (s.repro ?? []).map((r) => ({ step: s.name, ...r })));
+  if (repros.length > 0) {
+    out.push('    substitute   run the failing step locally — it prints the same assertion:');
+    for (const r of repros) {
+      out.push(
+        r.gate
+          ? `      from ${r.file}, red gate "${r.gate.name}" (id ${r.gate.id}), named by step "${r.step}" (${r.kind}:)`
+          : `      from ${r.file}, step "${r.step}" (${r.kind}:)`,
+      );
+      for (const line of String(r.text).split('\n').slice(0, 12)) out.push(`        ${line}`);
+    }
+  } else if (steps.some((s) => s.laneVerdict)) {
+    out.push('    substitute   none — the lane verdict above says why. Its own command is not one.');
+  } else {
+    out.push('    substitute   none — the failing step name resolves to no `run:` block in .github/workflows/,');
+    out.push('                 so there is no offline reproduction to offer. Open the job URL above.');
+  }
+  return out;
+}
+
+/** The reading of one failed `Lane verdict` step, as report lines. */
+function renderLaneVerdict(step) {
+  const v = step.laneVerdict;
+  const pad = '                 ';
+  const out = [
+    `    lane verdict #${step.number} "${step.name}" judges this lane's gates; it is not one, and its own`,
+    `${pad}command reproduces nothing (run locally it exits 3). What it named:`,
+  ];
+  for (const g of v.red) {
+    const where = g.repro.length > 0 ? '' : ' — resolves to NO `run:` block in .github/workflows/ (absent from this tree?)';
+    out.push(`${pad}  RED       "${g.name}" (id ${g.id})${where}`);
+  }
+  for (const g of v.unread) out.push(`${pad}  UNREAD    "${g.name}" — ${g.detail}`);
+  for (const g of v.didNotRun) out.push(`${pad}  NOT RUN   "${g.name}" — ${g.detail}`);
+  for (const f of v.failFast) {
+    out.push(`${pad}  FAIL-FAST a step without continue-on-error failed (job status \`${f.jobStatus}\`); it is its own`);
+    out.push(`${pad}            failed step in the list above, and the gates behind it never ran.`);
+  }
+  for (const r of v.refusal) out.push(`${pad}  NOT MEASURED  the verdict could not read its lane: ${r.detail}`);
+  if (v.sources.jobLogOnly > 0) {
+    out.push(`${pad}(${v.sources.jobLogOnly} of these came from the job log only — its annotations did not carry them.)`);
+  }
+
+  if (v.red.length > 0) {
+    out.push(`${pad}${v.red.length} red gate(s); each one's OWN command is the substitute below.`);
+  } else if (v.recognised > 0) {
+    out.push(`${pad}It names NO red gate, so no gate command reproduces this red: the line(s) above are a`);
+    out.push(`${pad}roster, setup or refusal reading, and the fix is what each one names.`);
+  } else if (!v.annotationsRead && !v.logRead) {
+    out.push(`${pad}NOT READ — the annotations call failed (above) and no job log was read, so the red`);
+    out.push(`${pad}gates could not be named here. An absence of a READING, not of red gates.`);
+  } else {
+    const read = [v.annotationsRead ? "this check's annotations" : null, v.logRead ? "its job log's error lines" : null]
+      .filter(Boolean)
+      .join(' or ');
+    out.push(`${pad}UNRESOLVED — no sentence in ${read} has the shape`);
+    out.push(`${pad}\`scripts/ci/lane-verdict.mjs\` prints (gate step "NAME" (id ID) failed), so its red gates`);
+    out.push(`${pad}cannot be named here. Either that wording changed and this reader`);
+    out.push(`${pad}(LANE_VERDICT_SENTENCES) is stale with it, or the verdict died before it printed.`);
+    out.push(`${pad}Read the verdict step's own lines in the job log.`);
+  }
+  return out;
 }
 
 /**
@@ -1418,11 +1649,16 @@ async function walkInto(sha, progress) {
       url: check.html_url ?? check.details_url ?? null,
       jobsError: Array.isArray(jobs) ? null : (jobs?.error ?? "the run's jobs were not fetched"),
       steps: stepsIntegrity(steps),
-      failedSteps: failedSteps.map((s) => ({
-        number: s.number,
-        name: s.name,
-        repro: resolveStep(workflows, s.name),
-      })),
+      // #23223: a `Lane verdict` step resolves to the red gates it names, read
+      // from the annotations above and the log's error lines — both already in
+      // hand, so this costs no request.
+      failedSteps: failedSteps.map((s) =>
+        resolveFailedStep(workflows, s, {
+          annotations,
+          logErrors: log?.ok ? (log.finding?.errors ?? []) : [],
+          annotationsRead: retrievalError === null,
+          logRead: Boolean(log?.ok),
+        })),
       roster,
       annotations,
       assertions: annotationAssertions,
@@ -1530,17 +1766,7 @@ function render(result, target) {
     // Shared by every non-retrieved branch — the local reproduction is just as
     // useful when the annotations call FAILED as when it came back empty.
     const sayRepro = () => {
-      const repros = check.failedSteps.flatMap((s) => s.repro.map((r) => ({ step: s.name, ...r })));
-      if (repros.length > 0) {
-        say('    substitute   run the failing step locally — it prints the same assertion:');
-        for (const r of repros) {
-          say(`      from ${r.file}, step "${r.step}" (${r.kind}:)`);
-          for (const line of String(r.text).split('\n').slice(0, 12)) say(`        ${line}`);
-        }
-      } else {
-        say('    substitute   none — the failing step name resolves to no `run:` block in .github/workflows/,');
-        say('                 so there is no offline reproduction to offer. Open the job URL above.');
-      }
+      for (const line of renderSubstitute(check.failedSteps)) say(line);
     };
 
     sayLog();
@@ -2087,6 +2313,274 @@ async function selfTest() {
   // "here is the command" into "no substitute available".
   const live = resolveStep(readWorkflows(), 'Engine test-double contract gate');
   t('the real workflow tree still resolves a known gate step to a runnable command', live.length > 0 && live[0].kind === 'run', true);
+  t(
+    'workflowSteps lists every named step with a body, in order — the scan stepBodies filters',
+    workflowSteps(wf).map((s) => [s.name, s.kind]),
+    [['Checkout', 'uses'], ['Engine test-double contract gate', 'run'], ["Run this shard's tests", 'run'], ['Next step', 'run']],
+  );
+
+  // -- Lane verdict: the red gates, not the verdict (#23223) ----------------
+  //
+  // Since #23191 a red gate step's API conclusion is `success` (continue-on-
+  // error), so a red lane's ONE failed step is `Lane verdict`, whose name
+  // resolves 12 times — once per lane — to a command that exits 3 locally.
+  // The sentences parsed here are produced by the REAL renderer: the verdict
+  // module is imported and driven, so a change of its wording reds this
+  // battery instead of turning every red lane into "no red gate named".
+  // ⛔ Nothing below PRINTS a rendered line: they are workflow commands, and
+  // this self-test runs on a runner (`check-self-test-workflow-commands`).
+  battery('Lane verdict: the red gates, not the verdict (#23223)');
+  const verdictModule = await import(new URL('../ci/lane-verdict.mjs', import.meta.url).href);
+  // The rendered `::error title=T::DATA` lines as the annotations API returns
+  // them: path `.github`, the data unescaped (`escapeCommandData` reversed).
+  const annotationsOf = (rendered) =>
+    rendered
+      .map((line) => /^::error title=[^:]*::(?<data>.*)$/.exec(line))
+      .filter(Boolean)
+      .map((m) =>
+        classifyAnnotation({
+          path: '.github',
+          message: m.groups.data.replace(/%0A/g, '\n').replace(/%0D/g, '\r').replace(/%25/g, '%'),
+        }));
+  const laneRoster = [
+    { position: 1, name: 'Install dependencies', id: null, cond: null, gate: false },
+    { position: 2, name: 'Docs anchors resolve to real headings', id: 'docs-anchors', cond: null, gate: true },
+    { position: 3, name: 'Type check (debt) holds', id: 'debt', cond: null, gate: true },
+    { position: 4, name: 'Third gate', id: 'third', cond: null, gate: true },
+  ];
+  const laneContext = (docs, debt, third) => ({
+    'docs-anchors': { outcome: docs, conclusion: 'success' },
+    debt: { outcome: debt, conclusion: 'success' },
+    third: { outcome: third, conclusion: 'success' },
+  });
+  const verdictAnnotations = (input, job = 'lint-repo-tooling') =>
+    annotationsOf(verdictModule.renderVerdict(verdictModule.judgeLane(input), job));
+  const twoRed = verdictAnnotations({ steps: laneRoster, context: laneContext('failure', 'failure', 'success'), jobStatus: 'success' });
+  const laneWf = [
+    'jobs:',
+    '  lint-repo-tooling:',
+    '    steps:',
+    '      - name: Install dependencies',
+    '        run: pnpm install --frozen-lockfile',
+    '      - name: Docs anchors resolve to real headings',
+    '        id: docs-anchors',
+    '        continue-on-error: true',
+    '        run: |',
+    '          pnpm check:doc-anchors',
+    "      - name: 'Type check (debt) holds'",
+    '        id: debt',
+    '        continue-on-error: true',
+    '        run: pnpm check:debt',
+    '      - name: Third gate',
+    '        id: third',
+    '        continue-on-error: true',
+    '        run: pnpm check:third',
+    '      - name: Lane verdict',
+    '        if: ${{ !cancelled() }}',
+    '        run: node scripts/ci/lane-verdict.mjs',
+  ].join('\n');
+  const laneTree = [{ file: '.github/workflows/lint.yml', text: laneWf }];
+  const verdictStep = { number: 68, name: LANE_VERDICT_STEP };
+  const VERDICT_COMMAND = /node scripts\/ci\/lane-verdict\.mjs/;
+
+  // The measured specimen, transcribed from check-run 115214618941's
+  // annotations (PR head 5301220aa, run 38373082677).
+  const specimen = classifyAnnotation({
+    path: '.github',
+    message:
+      'gate step "Docs anchors resolve to real headings" (id docs-anchors-resolve-to-real-headings) failed -- its own ' +
+      'log above says why. continue-on-error let the gates behind it run; this verdict keeps the lane red.',
+  });
+  t(
+    'the measured specimen classifies as a red-gate sentence, keeping the gate name and id',
+    [specimen.kind, specimen.verdict, specimen.gate, specimen.id],
+    ['lane-verdict', 'red', 'Docs anchors resolve to real headings', 'docs-anchors-resolve-to-real-headings'],
+  );
+  t(
+    "the REAL renderer's red sentences parse: two red gates, both named, in workflow order",
+    readLaneVerdict({ annotations: twoRed }).red,
+    [{ name: 'Docs anchors resolve to real headings', id: 'docs-anchors' }, { name: 'Type check (debt) holds', id: 'debt' }],
+  );
+  t(
+    "the REAL renderer's unread sentence parses (a continue-on-error step with no id)",
+    readLaneVerdict({
+      annotations: verdictAnnotations({
+        steps: [...laneRoster, { position: 5, name: 'Silent gate', id: null, cond: null, gate: true }],
+        context: laneContext('success', 'success', 'success'),
+        jobStatus: 'success',
+      }),
+    }).unread.map((g) => g.name),
+    ['Silent gate'],
+  );
+  t(
+    "the REAL renderer's did-not-run sentence parses",
+    readLaneVerdict({
+      annotations: verdictAnnotations({ steps: laneRoster, context: laneContext('success', 'skipped', 'success'), jobStatus: 'success' }),
+    }).didNotRun.map((g) => g.name),
+    ['Type check (debt) holds'],
+  );
+  t(
+    "the REAL renderer's fail-fast sentence parses, keeping the job status",
+    readLaneVerdict({
+      annotations: verdictAnnotations({ steps: laneRoster, context: laneContext('skipped', 'skipped', 'skipped'), jobStatus: 'failure' }),
+    }).failFast,
+    [{ jobStatus: 'failure' }],
+  );
+  t(
+    "the REAL renderer's refusal sentence parses",
+    readLaneVerdict({ annotations: annotationsOf(verdictModule.renderVerdict({ refusal: 'OS_LANE_STEPS is not set' }, 'lane')) })
+      .refusal.length,
+    1,
+  );
+  t(
+    'a green verdict renders no annotation at all, so nothing is read as red',
+    verdictAnnotations({ steps: laneRoster, context: laneContext('success', 'success', 'success'), jobStatus: 'success' }).length,
+    0,
+  );
+  t(
+    'a gate name carrying a quote and parentheses still parses whole, with its id',
+    readLaneVerdict({
+      annotations: verdictAnnotations({
+        steps: [{ position: 1, name: 'Gate "quoted" (x) failed', id: 'q', cond: null, gate: true }],
+        context: { q: { outcome: 'failure' } },
+        jobStatus: 'success',
+      }),
+    }).red,
+    [{ name: 'Gate "quoted" (x) failed', id: 'q' }],
+  );
+  t(
+    'a red-gate sentence is content, not an exit status — the exit table does not move',
+    assertionStatus([{ kind: 'exit-status' }, specimen]).kind,
+    'no-anchor',
+  );
+
+  // The defect itself: by its own name the verdict step resolves to the verdict.
+  t(
+    'the defect: the step name `Lane verdict` alone resolves to the verdict command',
+    resolveStep(laneTree, LANE_VERDICT_STEP).map((h) => h.text),
+    ['node scripts/ci/lane-verdict.mjs'],
+  );
+  const resolvedTwo = resolveFailedStep(laneTree, verdictStep, { annotations: twoRed });
+  t(
+    'the fix: N red gates resolve to N gate commands, each the gate\'s OWN run: block',
+    // `?.`: a regression must be REPORTED by this harness, not crash it (see the job-log battery).
+    resolvedTwo.repro.map((r) => [r.gate?.name ?? null, r.text]),
+    [['Docs anchors resolve to real headings', 'pnpm check:doc-anchors'], ['Type check (debt) holds', 'pnpm check:debt']],
+  );
+  const twoLines = renderSubstitute([resolvedTwo]);
+  t(
+    '...and the substitute prints those commands, and never the verdict command',
+    [
+      twoLines.includes('        pnpm check:doc-anchors'),
+      twoLines.includes('        pnpm check:debt'),
+      twoLines.some((l) => VERDICT_COMMAND.test(l)),
+    ],
+    [true, true, false],
+  );
+  t(
+    '...naming each as a red gate of the verdict step',
+    twoLines.includes(
+      '      from .github/workflows/lint.yml, red gate "Docs anchors resolve to real headings" (id docs-anchors), named by step "Lane verdict" (run:)',
+    ),
+    true,
+  );
+
+  // A red verdict over an all-success lane: the roster mismatch.
+  const mismatch = resolveFailedStep(laneTree, verdictStep, {
+    annotations: [
+      { kind: 'exit-status', message: 'Process completed with exit code 1.' },
+      ...verdictAnnotations({
+        steps: [...laneRoster, { position: 5, name: 'Silent gate', id: null, cond: null, gate: true }],
+        context: laneContext('success', 'success', 'success'),
+        jobStatus: 'success',
+      }),
+    ],
+  });
+  const mismatchLines = renderSubstitute([mismatch]);
+  t(
+    'roster mismatch: a red verdict over an all-success lane names NO red gate, and SAYS so',
+    [
+      mismatch.repro.length,
+      mismatch.laneVerdict?.red?.length ?? null,
+      mismatchLines.some((l) => l.includes('It names NO red gate')),
+      mismatchLines.some((l) => l.includes('UNREAD    "Silent gate"')),
+    ],
+    [0, 0, true, true],
+  );
+  t(
+    '...and it never reads as a step that resolves to nothing, nor offers the verdict command',
+    [mismatchLines.some((l) => l.includes('resolves to no `run:` block')), mismatchLines.some((l) => VERDICT_COMMAND.test(l))],
+    [false, false],
+  );
+  const foreign = renderSubstitute([
+    resolveFailedStep(laneTree, verdictStep, {
+      annotations: [
+        { kind: 'exit-status', message: 'Process completed with exit code 1.' },
+        classifyAnnotation({ path: '.github', message: 'Gate lane 3 broke: docs anchors' }),
+      ],
+      logRead: true,
+    }),
+  ]);
+  t(
+    'a verdict whose sentences match no known shape is UNRESOLVED, loudly — never the verdict command',
+    [foreign.some((l) => l.includes('UNRESOLVED')), foreign.some((l) => VERDICT_COMMAND.test(l))],
+    [true, false],
+  );
+  const unreadCall = renderSubstitute([resolveFailedStep(laneTree, verdictStep, { annotations: [], annotationsRead: false })]);
+  t(
+    'a verdict whose annotations call FAILED (and no log read) is NOT READ, not a changed format',
+    [unreadCall.some((l) => l.includes('NOT READ')), unreadCall.some((l) => l.includes('UNRESOLVED'))],
+    [true, false],
+  );
+  const logNamed = verdictAnnotations({ steps: laneRoster, context: laneContext('failure', 'success', 'failure'), jobStatus: 'success' });
+  const union = readLaneVerdict({ annotations: logNamed.slice(0, 1), logErrors: logNamed, logRead: true });
+  t(
+    "the job log's error lines add a red gate the annotations lacked — union, deduplicated",
+    [union.red.map((g) => g.id), union.sources.jobLogOnly],
+    [['docs-anchors', 'third'], 1],
+  );
+  const missing = resolveFailedStep(laneTree, verdictStep, {
+    annotations: verdictAnnotations({
+      steps: [{ position: 1, name: 'Gate this tree does not have', id: 'gone', cond: null, gate: true }],
+      context: { gone: { outcome: 'failure' } },
+      jobStatus: 'success',
+    }),
+  });
+  t(
+    'a red gate this tree cannot resolve is NAMED as unresolved, never dropped',
+    renderSubstitute([missing]).some((l) => l.includes('"Gate this tree does not have" (id gone) — resolves to NO `run:` block')),
+    true,
+  );
+
+  // Pre-#23191 heads: the red gate step itself reads `failure`. Unchanged.
+  const preA1 = resolveFailedStep(laneTree, { number: 8, name: 'Docs anchors resolve to real headings' }, {
+    annotations: [{ kind: 'exit-status', message: 'Process completed with exit code 1.' }],
+  });
+  t(
+    'pre-A1: a failed gate step resolves to its OWN command, exactly as before',
+    [preA1.laneVerdict, preA1.repro],
+    [null, [{ file: '.github/workflows/lint.yml', kind: 'run', text: 'pnpm check:doc-anchors' }]],
+  );
+  t(
+    '...and its substitute is the unchanged block, line for line',
+    renderSubstitute([preA1]),
+    [
+      '    substitute   run the failing step locally — it prints the same assertion:',
+      '      from .github/workflows/lint.yml, step "Docs anchors resolve to real headings" (run:)',
+      '        pnpm check:doc-anchors',
+    ],
+  );
+
+  // The live coupling the name match relies on: every step in the REAL tree
+  // that runs the verdict is named LANE_VERDICT_STEP. A lane that renames its
+  // verdict step would otherwise bring the defect back with no test red.
+  const verdictRunners = readWorkflows().flatMap((w) =>
+    workflowSteps(w.text).filter((s) => s.kind === 'run' && LANE_VERDICT_INVOCATION.test(s.text)));
+  t(
+    'the real tree: every step that runs the lane verdict is named `Lane verdict`, and there is one',
+    [verdictRunners.length > 0, verdictRunners.every((s) => s.name === LANE_VERDICT_STEP)],
+    [true, true],
+  );
 
   // -- proxyRearmFor: the transport trap ------------------------------------
   battery('proxyRearmFor: the transport trap');
@@ -2569,7 +3063,11 @@ async function selfTest() {
     '    evidence, a CONNECT refusal lands as transport with the blocked host to report, and a\n' +
     '    tail carrying no runner error line at all is labelled a window rather than an anchor.\n' +
     '    And a `fix` renders as the ONE remedy it is: a single `fix:` marker with its\n' +
-    '    continuations padded under it, keeping a copy-pasteable command on a line of its own.',
+    '    continuations padded under it, keeping a copy-pasteable command on a line of its own.\n' +
+    '    And a red gate lane resolves to its red GATES, not to its verdict: the sentences the real\n' +
+    '    lane verdict renders parse, N red gates become N gate commands and the verdict command is\n' +
+    '    never offered, a red verdict naming no red gate says so, one in an unknown shape is\n' +
+    '    UNRESOLVED out loud, and a failed gate step on an older head resolves exactly as before.',
   );
 
   return SELF_TEST_VERDICT;
