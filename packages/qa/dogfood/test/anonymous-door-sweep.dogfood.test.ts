@@ -25,44 +25,58 @@
 //
 // ## Where the population comes from — three sources, each guarded
 //
-//   - the framework's own route table (`getRawApp().routes`): everything the
-//     router will route, the raw-app mounts included (`plugin-auth`'s
-//     catch-all and well-known documents, the approval pages, the inbound hook,
-//     the HMR stream, the runtime-config reads). The port's
-//     `getMountedRoutes()` is asserted to be a SUBSET of it, so a registration
-//     the port saw and the table did not would fail the derivation, not hide;
-//   - the declared ADR-0121 endpoints the metadata service matches, which the
-//     transport serves from its fallback seam and so no route table can list.
-//     Each is asserted to resolve through `matchEndpoint` to itself.
+//   - `port`: `IHttpServer.getMountedRoutes()`, every route registered through
+//     the HTTP-server contract;
+//   - `raw`: the framework's own route table (`getRawApp().routes`), which
+//     holds the port's routes AND the mounts made on the raw app handle,
+//     outside the port by construction (`plugin-auth`'s catch-all and
+//     well-known documents, the approval pages, the inbound hook, the HMR
+//     stream, the runtime-config reads). The port table is asserted to be a
+//     SUBSET of it, so a registration one saw and the other did not fails the
+//     derivation instead of hiding from it;
+//   - `declared`: the ADR-0121 endpoints the metadata service matches, which
+//     the transport serves from its fallback seam, so no route table lists
+//     them. Each is asserted to resolve through `matchEndpoint` to itself.
 //
 // ## The boot, and why each extra is on it
 //
 // `bootShowcase` composes what `objectstack serve` composes from the showcase's
-// configuration, minus the two process decisions `bootStack` documents it
-// leaves to the caller. This file adds back the ones a deployment has:
+// configuration, with three exceptions `bootStack` documents. This file adds
+// back the two a deployment of the showcase has a route for:
 //
-//   - `MetadataPlugin` over a build-shaped artifact — `createStandaloneStack`
-//     composes it unconditionally, and without it no declared endpoint routes
-//     (classes 4 and 5 live there). Because `bootStack` runs the development
-//     posture, it also mounts the dev-only metadata HMR stream, which the
-//     classification therefore covers on a measured route;
-//   - `MCPServerPlugin` — `serve` mounts MCP by default (`OS_MCP_SERVER_ENABLED`
+//   - `MetadataPlugin` over a build-shaped artifact. The lean harness reads
+//     metadata off the configuration and composes none, while
+//     `createStandaloneStack` composes it unconditionally, and without it no
+//     declared endpoint routes (classes 4 and 5 live there). Because
+//     `bootStack` runs the development posture, it also mounts the dev-only
+//     metadata HMR stream, so the classification covers that door on a
+//     measured route;
+//   - `MCPServerPlugin`. `serve` mounts MCP by default (`OS_MCP_SERVER_ENABLED`
 //     opts out), and D2 names MCP as outside the guest model.
 //
-// Pinyin search, the other process decision, mounts no route.
+// Pinyin search, the third, mounts no route.
 //
 // ## The fixtures, and why they are not the showcase's own
 //
 // The showcase declares no `authRequired: false` endpoint and one book, which
 // is public. Classes 4 and 5 and the negative half of class 3 need subjects it
-// does not have, so the configuration booted is the showcase plus three inline
+// does not have, so the configuration booted is the showcase plus inline
 // declarations: one anonymous `object_operation` endpoint, one anonymous `flow`
-// endpoint over a flow with no data step, and one `org`-audience book. The
-// showcase's own two declared endpoints are `authRequired: true` and of the
-// same two types, so they are the negative controls of classes 4 and 5 as they
-// ship. Every other subject (the public form, the shareable brief, the public
-// book, an uploaded file) is the showcase's own or is created here, signed in,
-// before the anonymous request.
+// endpoint over a flow with no data step, one `org`-audience book, and two docs
+// (one the public book claims by its own include rule, one only the org book
+// claims). The showcase's own two declared endpoints are `authRequired: true`
+// and of the same two types, so they are the negative controls of classes 4
+// and 5 as they ship. Every other subject (the public form, the shareable
+// brief, the public book, an uploaded file) is the showcase's own or is
+// created here, signed in, before the anonymous request.
+//
+// ## What a red run means
+//
+// A red everything-else case is a finding about the deployment: a surface that
+// serves an anonymous caller without the 401 floor D2 says every surface off
+// the list has. ⛔ It is never fixed here. A route moves into a door class or
+// an outside family only by an amendment of ADR-0138, and the classification
+// is edited after that amendment, never instead of it.
 //
 // ## Disclosure
 //
@@ -103,7 +117,7 @@ const SYS = { isSystem: true } as const;
 /** ADR-0121 D6: an anonymous endpoint publishes only with an armed budget. */
 const ARMED = { enabled: true, windowMs: 60_000, maxRequests: 1_000 };
 
-// ── The three inline declarations (see the header) ───────────────────────────
+// ── The inline declarations (see the header) ────────────────────────────────
 
 /** start → assignment → end, under `runAs: 'user'`: a flow that touches no data. */
 const EchoFlow = {
@@ -146,13 +160,21 @@ const FIXTURE_APIS = [
 
 const PUBLIC_BOOK = 'showcase_manual';
 const ORG_BOOK = 'anon_sweep_org_manual';
+/** Joins the public book by its own derived rule (`include: 'showcase_*_guide'`). */
+const PUBLIC_DOC = 'showcase_anon_sweep_guide';
+/** Claimed by the org book alone. */
+const ORG_DOC = 'anon_sweep_org_page';
 const OrgBook = {
   name: ORG_BOOK,
   label: 'Anonymous sweep org manual',
   slug: 'anon-sweep-org-manual',
   audience: 'org',
-  groups: [{ key: 'start', label: 'Start', order: 1, pages: [] }],
+  groups: [{ key: 'start', label: 'Start', order: 1, pages: [ORG_DOC] }],
 };
+const FIXTURE_DOCS = [
+  { name: PUBLIC_DOC, label: 'Anonymous sweep guide', content: '# Anonymous sweep guide\n\nA doc the public book claims.' },
+  { name: ORG_DOC, label: 'Anonymous sweep org page', content: '# Anonymous sweep org page\n\nA doc only the org book claims.' },
+];
 
 const showcase = showcaseStack as unknown as Record<string, unknown[] | undefined>;
 const SWEPT = {
@@ -160,6 +182,7 @@ const SWEPT = {
   apis: [...(showcase.apis ?? []), ...FIXTURE_APIS],
   flows: [...(showcase.flows ?? []), EchoFlow],
   books: [...(showcase.books ?? []), OrgBook],
+  docs: [...(showcase.docs ?? []), ...FIXTURE_DOCS],
 };
 
 // ── Probing ─────────────────────────────────────────────────────────────────
@@ -398,11 +421,20 @@ describe('ADR-0138 D2 class 3: the public book and doc metadata reads', () => {
     expect(tree.status, 'the public book tree').toBe(200);
   });
 
+  it('admit an anonymous read of a doc the public book claims', async () => {
+    const doc = await send(stack, 'GET', `/api/v1/meta/doc/${PUBLIC_DOC}`);
+    expect(doc.status, 'a doc of the public book').toBe(200);
+    expect(JSON.stringify(doc.json)).toContain(PUBLIC_DOC);
+  });
+
   it('refuse a book that is not public, and any write to the public one, with 401', async () => {
     // The fixture book is there for a signed-in reader: the refusal is the audience gate's.
     const signedIn = await stack.apiAs(adminToken, 'GET', `/meta/book/${ORG_BOOK}`);
     expect(signedIn.status, 'the org book exists for a signed-in reader').toBe(200);
     expect(EVERYTHING_ELSE(await send(stack, 'GET', `/api/v1/meta/book/${ORG_BOOK}`)), 'the org book').toBeUndefined();
+    const orgDoc = await stack.apiAs(adminToken, 'GET', `/meta/doc/${ORG_DOC}`);
+    expect(orgDoc.status, 'the org doc exists for a signed-in reader').toBe(200);
+    expect(EVERYTHING_ELSE(await send(stack, 'GET', `/api/v1/meta/doc/${ORG_DOC}`)), 'a doc only the org book claims').toBeUndefined();
     expect(
       EVERYTHING_ELSE(await send(stack, 'PUT', `/api/v1/meta/book/${PUBLIC_BOOK}`, { body: JSON.stringify({ name: PUBLIC_BOOK }) })),
       'a write to the public book',
