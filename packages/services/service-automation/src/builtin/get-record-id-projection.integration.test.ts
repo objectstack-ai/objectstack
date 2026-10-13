@@ -158,7 +158,7 @@ describe('get_record answers the row id as output.id whatever its fields project
     });
   }
 
-  it('a downstream update_record filtering on {read.id} updates the row the narrowed get_record read', async () => {
+  it('a downstream update_record filtering on read.id updates the row the narrowed get_record read', async () => {
     await ql.insert(OBJECT.name, { title: 'beta', status: 'open' }, { context: SYS });
     const def = {
       name: 'pin_get_record_id_flow', label: 'pin_get_record_id_flow', type: 'autolaunched', runAs: 'system',
@@ -166,7 +166,7 @@ describe('get_record answers the row id as output.id whatever its fields project
       nodes: [
         { id: 'start', type: 'start', label: 'Start' },
         { id: 'read', type: 'get_record', label: 'Read', config: { objectName: OBJECT.name, filter: { title: 'beta' }, fields: ['title'], outputVariable: 'rec' } },
-        { id: 'close', type: 'update_record', label: 'Close', config: { objectName: OBJECT.name, filter: { id: '{read.id}' }, fields: { status: 'closed' } } },
+        { id: 'close', type: 'update_record', label: 'Close', config: { objectName: OBJECT.name, filter: { id: { dialect: 'cel', source: 'read.id' } }, fields: { status: 'closed' } } },
         { id: 'end', type: 'end', label: 'End' },
       ],
       edges: [

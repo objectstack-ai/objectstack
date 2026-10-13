@@ -51,7 +51,7 @@ function stackWith(nodeType: NodeType, config: Record<string, unknown>) {
       name: 'price_quote',
       label: 'Price Quote',
       type: 'autolaunched',
-      variables: [{ name: 'price', type: 'number', isInput: true }],
+      variables: [{ name: 'price', type: 'number', isInput: true }, { name: 'quoteId', type: 'text', isInput: true }],
       nodes: [
         { id: 'start', type: 'start', label: 'Start' },
         { id: 'w', type: nodeType, label: 'Write', config },
@@ -80,7 +80,7 @@ function validate(nodeType: NodeType, config: Record<string, unknown>) {
 const crud = (nodeType: 'create_record' | 'update_record', fields: Record<string, unknown>) =>
   nodeType === 'create_record'
     ? { objectName: 'quote', fields }
-    : { objectName: 'quote', filter: { id: '{quoteId}' }, fields };
+    : { objectName: 'quote', filter: { id: { dialect: 'cel', source: 'quoteId' } }, fields };
 
 const NODE_TYPES = ['create_record', 'update_record'] as const;
 
@@ -172,8 +172,17 @@ describe('the retired template dialect — a `{…}` token in a value slot is a 
     expect(validate('assignment', { assignments: { v: value } })).toEqual([]);
   });
 
-  it('says nothing outside a value slot — `update_record.filter` is a match map, not a value', () => {
-    expect(validate('update_record', { objectName: 'quote', filter: { total: '{round(price)}' }, fields: { subject: 'x' } }))
-      .toEqual([]);
+  // [#19939, stage S6] RE-JUDGED IN PLACE: this pinned `update_record.filter`
+  // as no value slot, its token unjudged. Each filter operand is a value slot
+  // since S6, so the token is refused at the operand with its envelope — and a
+  // query placeholder there stays the query engine's, unjudged.
+  it('a filter operand is a value slot too — a token is refused there; a query placeholder is not', () => {
+    const findings = validate('update_record', {
+      objectName: 'quote', filter: { total: '{round(price)}', due: { $lt: '{today}' } }, fields: { subject: 'x' },
+    });
+    expect(findings.map((f) => [f.rule, f.severity])).toEqual([[EXPRESSION_INVALID, 'error']]);
+    expect(findings[0]!.where).toContain('update_record filter operand at config.filter.total');
+    expect(findings[0]!.message.startsWith(VALUE_SLOT_TEMPLATE_REFUSAL)).toBe(true);
+    expect(findings[0]!.message).toContain("{ dialect: 'cel', source: 'round(price)' }");
   });
 });

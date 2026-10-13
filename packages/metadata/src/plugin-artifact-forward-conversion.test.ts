@@ -34,10 +34,38 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveInstalledSpecVersion } from '@objectstack/metadata-core';
+import { ALL_CONVERSIONS } from '@objectstack/spec';
 import { MetadataPlugin } from './plugin.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_PATH = join(HERE, '__fixtures__/hotcrm-17.1-built-permissions.artifact.json');
+
+/**
+ * The floor an artifact authored against the CURRENT surface declares — the
+ * first `x.y.z` past both the installed spec's label and every retired entry's
+ * `retiredAfter`, which no half of the door's window opens for. The same
+ * derivation `plugin-unbound-form-predicate-roots.test.ts` uses for its
+ * "current surface".
+ *
+ * ⛔ Never `^<installed label>`. That reads as current only while the label is
+ * not the first release of a major: at `M.0.0` — and at every `M.0.0-next.N`
+ * the version pass writes, which the door reads as `M.0.0` — the major-step
+ * half opens every retired entry of step M by design (pinned at those labels
+ * in metadata-core's `artifact-forward-conversion.test.ts`), and
+ * `permission-allow-restore-purge-removed` belongs to step 18. So at the
+ * roll the "current" artifact was converted, and both pins below read a
+ * documented rescue as an amnesty. The patch bump keeps this floor off every
+ * `M.0.0`.
+ */
+function currentSurfaceFloor(): string {
+    const installed = resolveInstalledSpecVersion();
+    if (!installed) return '';
+    const triples = [installed, ...ALL_CONVERSIONS.flatMap((c) => (c.retiredFromLoadPath === true ? [c.retiredAfter] : []))]
+        .map((v) => v.split(/[.-]/).slice(0, 3).map((n) => Number.parseInt(n, 10)) as [number, number, number])
+        .sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
+    const [major, minor, patch] = triples[triples.length - 1]!;
+    return `${major}.${minor}.${patch + 1}`;
+}
 
 /** Fresh parse per test — `_parseAndRegisterArtifact` mutates items in place. */
 function loadFixture(): any {
@@ -138,14 +166,17 @@ describe('artifact door — the conversion is versioned, not a blanket amnesty (
     it('an artifact claiming the CURRENT spec version with a NON-default retired-key value still refuses with the tombstone', async () => {
         const installed = resolveInstalledSpecVersion();
         expect(installed).toMatch(/^\d+\.\d+\.\d+/); // spec is always resolvable here
+        const current = currentSurfaceFloor();
+        // Resolvable, and never a major's first release (a non-zero patch).
+        expect(current).toMatch(/^\d+\.\d+\.[1-9]\d*$/);
 
         const plugin = newPlugin();
         const fixture = loadFixture();
         // The manifest claims the running spec's own surface — the retired
-        // window must stay closed. `^X.Y.Z` floors at exactly the installed
-        // version, so this pin survives every future spec release without
-        // edits.
-        fixture.manifest.engines.protocol = `^${installed}`;
+        // window must stay closed. Derived from the installed label and the
+        // live registry (see `currentSurfaceFloor`), so this pin survives
+        // every future spec release, the major roll included, without edits.
+        fixture.manifest.engines.protocol = `^${current}`;
         // The real 17.1-built artifact carries only the emitted default
         // (150 × `false` — the premise guard above pins that), which is the
         // residue class #12845 now tolerates. The surviving refusal is the
@@ -172,12 +203,14 @@ describe('artifact door — the conversion is versioned, not a blanket amnesty (
     });
 
     it('an artifact claiming the CURRENT spec version whose retired keys carry only the emitted default parses clean — the #12845 residue tolerance, at the schema layer, not this door', async () => {
-        const installed = resolveInstalledSpecVersion();
+        const current = currentSurfaceFloor();
+        // Resolvable, and never a major's first release (a non-zero patch).
+        expect(current).toMatch(/^\d+\.\d+\.[1-9]\d*$/);
         const plugin = newPlugin();
         const ctx = fakeCtx();
         const fixture = loadFixture(); // untouched: 150 × the emitted default
         const before = loadFixture();
-        fixture.manifest.engines.protocol = `^${installed}`;
+        fixture.manifest.engines.protocol = `^${current}`;
 
         const total = await plugin._parseAndRegisterArtifact(ctx, fixture, 'fixture-current-residue');
         expect(total).toBe(before.permissions.length);

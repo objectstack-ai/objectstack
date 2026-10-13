@@ -249,7 +249,7 @@ describe('the rule does NOT over-reach', () => {
     // judges only this rule — a config left out is refused by its own (#20316).
     const WHOLE: Record<string, Record<string, unknown>> = {
       create_record: { objectName: 'task' },
-      update_record: { objectName: 'task', filter: { id: '{row.id}' } },
+      update_record: { objectName: 'task', filter: { id: { dialect: 'cel', source: 'row.id' } } },
       get_record: { objectName: 'task' },
       http: { url: 'https://example.com/hook' },
       notify: { recipients: [{ dialect: 'cel', source: 'row.owner' }], title: 'Row processed' },

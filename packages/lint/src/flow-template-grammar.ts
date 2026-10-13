@@ -3,30 +3,27 @@
 /**
  * @module flow-template-grammar
  *
- * **Which `{…}` dialect owns a whole-string token in a FLOW node's filter, and
- * which spellings neither dialect can resolve** (#16096).
+ * **How the 17.x flow template evaluator dispatches one whole-string `{…}`
+ * token** — `resolveToken` in `@objectstack/service-automation`'s
+ * `src/builtin/template.ts`, mirrored for the lint, which cannot import a
+ * runtime.
  *
- * A filter value position inside a flow node is the one place two `{…}`
- * vocabularies meet, and `interpolateFilter`
- * (`@objectstack/service-automation`, `src/builtin/template.ts`, #3810) is the
- * function that arbitrates them. Its own header states the split:
+ * It was written (#16096) to say which of two vocabularies owned a token in a
+ * flow CRUD node's `filter`: the flow template dialect, resolved before the
+ * query, or the query placeholders (`{current_user_id}`, `{today}`) handed on
+ * to ObjectQL. That position reads no flow token since #19939 (stage S6): a
+ * filter operand is a CEL value envelope, a query placeholder or a literal,
+ * told apart by the spec's one classifier (`classifyFlowFilterOperandString`,
+ * `@objectstack/spec/automation`), and a flow token there is refused by the
+ * value-slot judge at every door — so `flow-filter-token-unknown`, the rule
+ * that read this grammar at that position, retired with it. What still reads
+ * {@link classifyFlowTemplateToken} is `lint-flow-patterns.ts`, to tell the
+ * run user (`$User.*`) from a variable when it prescribes a bare `$`
+ * reference's envelope. The grammar goes with the single-brace resolver
+ * (ADR-0032 Sequencing 6).
  *
- * > A whole-string token that (a) no flow variable resolves and (b) IS a
- * > recognised filter placeholder is passed through **verbatim** for the engine
- * > to expand. That is a transfer of ownership, not a lenient fallback.
- *
- * So a token in this position falls in exactly one of three classes:
- *
- * | class | resolved by | example | judged here? |
- * |---|---|---|---|
- * | flow template dialect | the automation template evaluator, BEFORE the query | `{TODAY() - 45}`, `{record.id}`, `{$User.Id}`, `{round(x)}` | ⛔ no |
- * | filter placeholder dialect | ObjectQL, after hand-off (`isKnownFilterToken`) | `{current_user_id}`, `{30_days_ago}` | ⛔ no — `filter-token-unknown` owns it |
- * | **neither** | nothing — the run fails or the condition collapses | `{TOMORROW()}`, `{ROUND(x)}` | ✅ the third class, and only it |
- *
- * ## Why only the CALL-POSITION half of the third class is decidable here
- *
- * The flow dialect's vocabulary is closed in three of its four arms and OPEN in
- * the fourth:
+ * The dialect's vocabulary is closed in three of its four arms and OPEN in the
+ * fourth:
  *
  * - `NOW()` / `TODAY()` with an optional `± N` day offset — closed, two names.
  * - `$User.<path>` — closed prefix.
@@ -37,17 +34,7 @@
  *   **OPEN**: it addresses the run's `VariableMap`, which holds the flow's
  *   declared variables, every node's `outputVariable`, and — via
  *   `seedRunVariables` — the trigger record's own fields flattened to top
- *   level. None of that is decidable from authored metadata alone, and a flow
- *   bound to an object another package defines cannot be resolved here at all.
- *
- * That asymmetry is the whole reason this module reports the call-position arm
- * and nothing else. Measured on this repo's own examples, judging the OPEN arm
- * against the ObjectQL vocabulary — the shape #16096 calls "the obvious fix" —
- * reports **7 findings at `error`, all 7 false positives** (`{recordId}` ×3,
- * `{record.id}` ×3, `{currentTask.id}` ×1, across app-todo / app-crm /
- * app-showcase). Every one is a legitimate flow variable that resolves at run
- * time. A reference set that reds working sweeps is worse than the silence
- * #16096 reports, so the open arm stays unjudged and says so.
+ *   level. None of that is decidable from authored metadata alone.
  *
  * ## Dispatch ORDER is load-bearing, not incidental
  *
@@ -116,26 +103,24 @@ export type FlowTemplateTokenVerdict =
   /** `{$User.Id}` — the evaluator resolves it from the run context. */
   | { kind: 'user-context' }
   /**
-   * `{recordId}` / `{record.id}` — a `VariableMap` lookup, and the position
-   * from which an unresolved name is handed to the filter dialect. OPEN: not
-   * decidable from authored metadata, so never a finding.
+   * `{recordId}` / `{record.id}` — a `VariableMap` lookup. OPEN: not
+   * decidable from authored metadata.
    */
   | { kind: 'variable-path'; head: string }
   /**
    * A call to a name in NEITHER table. `resolveToken` throws
    * `FlowExpressionFunctionError` here (a guard refusal — a `fault` edge must
-   * not swallow it), so the node cannot run. THIS is the finding.
+   * not swallow it).
    */
   | { kind: 'unknown-function'; name: string }
   /**
    * Anything else — junk shapes (`{30 days ago}`) and arithmetic over names
-   * this module cannot resolve. `resolveToken` answers `undefined` and the
-   * CRUD collapse guard (#3810) reports it at run time. Open, not judged.
+   * this module cannot resolve. `resolveToken` answers `undefined`.
    */
   | { kind: 'unresolvable-shape' };
 
 /**
- * Classify the INSIDE of one whole-string `{…}` filter token — `inner` is the
+ * Classify the INSIDE of one whole-string `{…}` token — `inner` is the
  * text between the braces, exactly as authored.
  *
  * Mirrors `resolveToken`'s dispatch order (see the module header). Holds no
