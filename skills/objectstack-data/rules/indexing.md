@@ -157,13 +157,13 @@ the dialect you are actually running.
 and SQLite (≥ 3.8.9), absent on MySQL. Because it cannot be expressed
 portably — and because knex's index builders have no way to emit a predicate —
 it is issued as raw SQL from a runtime migration, falling back to a plain
-index on a dialect that rejects it. One *pending* job per dedup key, the
-coarse `{ fields: ['source', 'dedup_key'] }` declared in metadata:
+index on a dialect that rejects it. One *active* subscription per account,
+the coarse `{ fields: ['account_id'] }` declared in metadata:
 
 ```sql
-CREATE UNIQUE INDEX IF NOT EXISTS idx_job_dedup_pending
-  ON job (source, dedup_key)
-  WHERE status = 'pending';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_subscription_account_active
+  ON subscription (account_id)
+  WHERE status = 'active';
 ```
 
 Follow that shape: declare the coarse index (or none) in metadata, and build
