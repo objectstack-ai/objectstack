@@ -1307,7 +1307,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       isDefault: {
         label: "Is Default",
-        helpText: "Set as default page for this page type"
+        helpText: "Open this record page for its object's records. One default record page per object: a second is refused."
       },
       kind: {
         label: "Kind",

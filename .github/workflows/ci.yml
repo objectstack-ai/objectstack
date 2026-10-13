@@ -912,11 +912,35 @@ jobs:
           # happens even when a leg failed, because a red suite is exactly when
           # the completeness guard earns its keep.
           #
-          # ⛔ A failing leg STOPS the remaining ones, the same way turbo stops
-          # scheduling on the first failure inside one run. Carrying on would add
-          # a second full suite to a job that is already red and already inside a
-          # `timeout-minutes` wall — turning an informative red into a killed job with no
-          # attestation at all, which is the #16173 failure mode itself.
+          # ⭐ ONE PACKAGE'S RED STOPS NO OTHER PACKAGE (#23191; #23177 ruling B,
+          # item A1, comment 6139629628). Both turbo invocations below pass
+          # `--continue=dependencies-successful`: a failed `test` task no longer
+          # cancels the tasks still queued beside it, and only a task whose own
+          # dependency failed is withheld, because it would test a broken build.
+          # A failed leg no longer skips the legs after it either. Turbo still
+          # exits non-zero when any task failed, `STATUS` keeps the FIRST
+          # non-zero exit, and the step exits with it, so the shard is red
+          # exactly when it was before — and now names every red package of the
+          # shard in one run instead of the first one turbo reached.
+          #
+          # Measured before this was written: a three-package probe (turbo
+          # 2.11.5, `a#test` exits 1, `c` depends on `a`) ran `b` and `c` to
+          # completion and exited 1 with `Failed: a#test`; without the flag the
+          # same run stopped at `a` (`Tasks: 1 successful, 4 total`), also exit
+          # 1. The flag moves no task hash (`--dry=json` on this tree, plain vs
+          # `--continue=dependencies-successful`: 5 of 5 identical), so the
+          # main-seeded cache above still replays.
+          #
+          # What it costs is time on a red shard, and the wall above already
+          # holds it. A red leg now runs as long as a green one, and the legs
+          # together are the shard's own planned work (each slice is placed at
+          # its plain weight), so a red shard takes what a full one takes — the
+          # shape of the slowest job the wall above was sized on (27m05s, every
+          # package executed and the CLI as all 3 slices). A leg
+          # the stall guard kills still lands inside p + s + 20m, the budget
+          # the wall was sized to, whichever leg it is: the legs after it are
+          # the rest of `s`, not a second suite on top of it. Before this, a red
+          # stopped the run early, so the hidden reds cost another CI cycle each.
           #
           # `test test:repo` (#16466): six heavy packages split their suite into
           # two turbo tasks -- `test` (package-local inputs) and `test:repo`
@@ -938,7 +962,7 @@ jobs:
             if [ "$LEG" = __whole__ ]; then
               [ -n "$FILTERS" ] || continue
               LOG="$RUNNER_TEMP/test-core-packages.log"
-              set -- pnpm turbo run test test:repo $FILTERS --concurrency=4 --summarize --log-order=stream
+              set -- pnpm turbo run test test:repo $FILTERS --concurrency=4 --continue=dependencies-successful --summarize --log-order=stream
             else
               PKG="${LEG%%=*}"
               SLICE="${LEG#*=}"
@@ -1009,11 +1033,14 @@ jobs:
               # is empty); measure-test-shard-timings.mjs resolves that digest
               # against the k/n the partitioner can emit and refuses one it
               # cannot, so a slice is never timed as the whole package.
-              set -- env "OS_TEST_SHARD=$SLICE" pnpm turbo run test "--filter=$PKG" --concurrency=4 --summarize --log-order=stream
+              set -- env "OS_TEST_SHARD=$SLICE" pnpm turbo run test "--filter=$PKG" --concurrency=4 --continue=dependencies-successful --summarize --log-order=stream
             fi
             LOGS="$LOGS $LOG"
             node scripts/run-with-stall-guard.mjs --log "$LOG" --stall-minutes 10 \
-              --report-dir "$RUNNER_TEMP/stall-reports" -- "$@" || { STATUS=$?; break; }
+              --report-dir "$RUNNER_TEMP/stall-reports" -- "$@" || {
+              CODE=$?
+              if [ "$STATUS" -eq 0 ]; then STATUS=$CODE; fi
+            }
           done
 
           # Only over logs that EXIST, and via an explicit `if` rather than a
