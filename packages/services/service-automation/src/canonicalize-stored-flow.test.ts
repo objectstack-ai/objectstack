@@ -17,7 +17,9 @@
  * canonicalization pass exists to remove, so these pin that it stays out.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { AutomationEngine } from './engine.js';
+import { defineActionDescriptor } from '@objectstack/spec/automation';
+import { AutomationEngine, FLOW_REGISTRATION_TODO_ID } from './engine.js';
+import type { NodeExecutor } from './engine.js';
 
 const silentLogger = {
     info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(),
@@ -219,5 +221,187 @@ describe('canonicalizeStoredFlow — a site registerFlow refuses comes back as a
         expect(engine.canonicalizeStoredFlow('fd_refused_filter', flow).todos).toEqual([]);
         engine.registerFlow('fd_refused_filter', flow);
         expect(await engine.getFlow('fd_refused_filter')).not.toBeNull();
+    });
+});
+
+/**
+ * [#23317] `canonicalizeStoredFlow` runs `registerFlow`'s whole validation,
+ * not one judge: every registration check, through the one list
+ * `registerFlow` itself throws from, each refused site listed as a TODO under
+ * `registerFlow`. Before, only the value-slot judge reached the stored pass
+ * (through the spec's refused-shape detector), so a stored flow refused for
+ * any other reason after the parse was counted as on protocol.
+ */
+describe('canonicalizeStoredFlow — every site registerFlow refuses after the parse is a TODO (#23317)', () => {
+    const STAMP = 'stored_stamp';
+    const stampExecutor: NodeExecutor = {
+        type: STAMP,
+        descriptor: defineActionDescriptor({
+            type: STAMP, version: '1.0.0', name: 'Stored stamp', category: 'custom', paradigms: ['flow'], source: 'plugin',
+            configSchema: { type: 'object', properties: { count: { type: 'number' } } },
+        }),
+        async execute() { return { success: true }; },
+    };
+    const engineWithStamp = () => {
+        const engine = new AutomationEngine(silentLogger);
+        engine.registerNodeExecutor(stampExecutor);
+        return engine;
+    };
+    const flowOf = (nodes: unknown[], extra: Record<string, unknown> = {}) => ({
+        name: 'fd_stored',
+        label: 'Stored',
+        type: 'autolaunched',
+        status: 'active',
+        nodes: [{ id: 'start', type: 'start', label: 'Start' }, ...nodes, { id: 'end', type: 'end', label: 'End' }],
+        edges: [],
+        ...extra,
+    });
+    const notify = (title: string) => ({
+        id: 'tell', type: 'notify', label: 'Tell', config: { recipients: ['usr_1'], title, message: 'Done' },
+    });
+    const inLoop = (node: unknown) => ({
+        id: 'each', type: 'loop', label: 'Each',
+        config: { collection: { dialect: 'cel', source: 'items' }, body: { nodes: [node], edges: [] } },
+    });
+
+    /**
+     * One flow per registration check, each refused by `registerFlow` after
+     * `FlowSchema.parse` accepted it: [label, refused flow, the same flow on
+     * protocol, the site, the check's words].
+     */
+    const CASES: Array<[string, () => unknown, () => unknown, string, RegExp]> = [
+        ['a text slot still on the single-brace dialect',
+            () => flowOf([notify('Hi {record.name}')]), () => flowOf([notify('Hi {{ record.name }}')]),
+            'flows[0].nodes[1].config.title', /notify title at config\.title/],
+        ['a text slot whose hole holds an unknown formatter',
+            () => flowOf([notify('Hi {{ record.name | nope }}')]), () => flowOf([notify('Hi {{ record.name }}')]),
+            'flows[0].nodes[1].config.title', /notify title at config\.title/],
+        ['a text slot inside a loop body',
+            () => flowOf([inLoop(notify('Hi {item.name}'))]), () => flowOf([inLoop(notify('Hi {{ item.name }}'))]),
+            'flows[0].nodes[1].config.body.nodes[0].config.title', /loop 'each' body: node 'tell' \(notify\) notify title at config\.title/],
+        ['a decision mode the engine does not have',
+            () => flowOf([{ id: 'gate', type: 'decision', label: 'Gate', config: { mode: 'bogus' } }]),
+            () => flowOf([{ id: 'gate', type: 'decision', label: 'Gate', config: { mode: 'exclusive' } }]),
+            'flows[0].nodes[1].config.mode', /node 'gate' \(decision\) at config\.mode/],
+        ['a node predicate that does not parse',
+            () => flowOf([{ id: 'gate', type: 'decision', label: 'Gate', config: { condition: 'amount >' } }]),
+            () => flowOf([{ id: 'gate', type: 'decision', label: 'Gate', config: { condition: 'amount > 1' } }]),
+            'flows[0].nodes[1].config.condition', /node 'gate' \(decision\) condition/],
+        ['an edge predicate in template braces',
+            () => flowOf([], { edges: [{ id: 'e1', source: 'start', target: 'end', condition: '{record.x} == 1' }] }),
+            () => flowOf([], { edges: [{ id: 'e1', source: 'start', target: 'end', condition: 'record.x == 1' }] }),
+            'flows[0].edges[0].condition', /edge 'e1' \(start→end\) condition/],
+        ['a plugin node config key its descriptor does not declare',
+            () => flowOf([{ id: 'w', type: STAMP, label: 'W', config: { count: 1, countz: 2 } }]),
+            () => flowOf([{ id: 'w', type: STAMP, label: 'W', config: { count: 1 } }]),
+            'flows[0].nodes[1].config.countz', /unknown config key `countz` at config\.countz/],
+        ['an api flow whose start node declares no secret',
+            () => flowOf([], { type: 'api' }),
+            () => ({ ...flowOf([], { type: 'api' }), nodes: [{ id: 'start', type: 'start', label: 'Start', config: { secret: 'whsec_test' } }, { id: 'end', type: 'end', label: 'End' }] }),
+            'flows[0].nodes[0].config.secret', /binds the inbound `api` trigger/],
+    ];
+
+    it.each(CASES)('%s: listed under registerFlow at its site, in the check\'s words, and refused by registerFlow', (_label, refused, _onProtocol, path, words) => {
+        const engine = engineWithStamp();
+        const flow = refused();
+        const { notices, todos } = engine.canonicalizeStoredFlow('fd_stored', flow);
+
+        expect(notices).toEqual([]);
+        expect(todos.map((t) => [t.conversionId, t.path])).toEqual([[FLOW_REGISTRATION_TODO_ID, path]]);
+        const todo = todos[0]!;
+        expect(todo.reason).toMatch(/^No conversion rewrites it, and registerFlow refuses it: left as stored, the flow is not registered at boot and never runs\. Flow `fd_stored`, /);
+        expect(todo.reason).toMatch(words);
+
+        let thrown: unknown;
+        try {
+            engineWithStamp().registerFlow('fd_stored', flow);
+        } catch (e) {
+            thrown = e;
+        }
+        expect(thrown).toBeInstanceOf(Error);
+        expect((thrown as Error).message).toMatch(words);
+    });
+
+    it.each(CASES)('%s, on protocol: no TODO, and the flow registers', async (_label, _refused, onProtocol) => {
+        const engine = engineWithStamp();
+        expect(engine.canonicalizeStoredFlow('fd_stored', onProtocol()).todos).toEqual([]);
+        engine.registerFlow('fd_stored', onProtocol());
+        expect(await engine.getFlow('fd_stored')).not.toBeNull();
+    });
+
+    it('the listing and the door agree in both directions: a flow is listed exactly when registerFlow refuses it', () => {
+        const corpus = [...CASES.flatMap(([, refused, onProtocol]) => [refused, onProtocol]), legacyFlow];
+        for (const make of corpus) {
+            const listed = engineWithStamp().canonicalizeStoredFlow('fd_stored', make()).todos.length > 0;
+            let refusedAtRegistration = false;
+            try {
+                engineWithStamp().registerFlow('fd_stored', make());
+            } catch {
+                refusedAtRegistration = true;
+            }
+            expect(listed).toBe(refusedAtRegistration);
+        }
+    });
+
+    it('the listing rewrites nothing and throws nothing: a refused flow on no other old shape comes back as stored', () => {
+        const flow = flowOf([notify('Hi {record.name}')]);
+        const result = engineWithStamp().canonicalizeStoredFlow('fd_stored', flow);
+        expect(result.storable).toBe(flow);
+        expect(result.todos).toHaveLength(1);
+    });
+
+    it('every site of a flow refused by several checks is listed, in the order registerFlow judges them', () => {
+        const flow = flowOf([
+            { id: 'w', type: STAMP, label: 'W', config: { count: 1, countz: 2 } },
+            { id: 'gate', type: 'decision', label: 'Gate', config: { mode: 'bogus' } },
+            notify('Hi {record.name}'),
+        ]);
+        const { todos } = engineWithStamp().canonicalizeStoredFlow('fd_stored', flow);
+        expect(todos.map((t) => t.path)).toEqual([
+            'flows[0].nodes[1].config.countz',
+            'flows[0].nodes[2].config.mode',
+            'flows[0].nodes[3].config.title',
+        ]);
+        // registerFlow throws the first check's refusal, as it always has.
+        expect(() => engineWithStamp().registerFlow('fd_stored', flow)).toThrow(/1 undeclared config key/);
+    });
+
+    it('a site the conversion chain already lists under its D3 entry is listed once, under that entry', () => {
+        const flow = flowOf([
+            { id: 'get', type: 'get_record', label: 'Get', config: { objectName: 'lead', filter: { id: '{record.id}' } } },
+            notify('Hi {record.name}'),
+        ]);
+        const { todos } = engineWithStamp().canonicalizeStoredFlow('fd_stored', flow);
+        expect(todos.map((t) => [t.conversionId, t.path])).toEqual([
+            ['flow-value-slot-template-dialect-refused', 'flows[0].nodes[1].config.filter.id'],
+            [FLOW_REGISTRATION_TODO_ID, 'flows[0].nodes[2].config.title'],
+        ]);
+    });
+
+    it('a refusal the parse makes is not a TODO: canonicalizeStoredFlow throws it, as registerFlow does', () => {
+        // A builtin value of the wrong type, written as a `{token}`: the value
+        // arm of the builtin contracts refuses it inside `FlowSchema.parse`, so
+        // the stored pass reports the row `failed` with the parse's words.
+        const flow = flowOf([{ id: 'get', type: 'get_record', label: 'Get', config: { objectName: 'lead', limit: '{page.size}' } }]);
+        expect(() => engineWithStamp().canonicalizeStoredFlow('fd_stored', flow)).toThrow(/limit/);
+        expect(() => engineWithStamp().registerFlow('fd_stored', flow)).toThrow(/limit/);
+    });
+
+    it('logs nothing for the checks it runs: the schema-aware advisory pass is registration\'s alone', () => {
+        const warn = vi.fn();
+        const engine = new AutomationEngine({ ...silentLogger, warn });
+        engine.setObjectSchemaResolver(() => ({ fields: ['amount'], fieldTypes: { amount: 'number' } }));
+        // `amout` is not a field of the object: an advisory finding, never a refusal.
+        const flow = {
+            ...flowOf([]),
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start', config: { objectName: 'deal', triggerType: 'record-after-update', condition: 'amout > 1' } },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+        };
+        expect(engine.canonicalizeStoredFlow('fd_stored', flow).todos).toEqual([]);
+        expect(warn).not.toHaveBeenCalled();
+        engine.registerFlow('fd_stored', flow);
+        expect(warn).toHaveBeenCalled();
     });
 });
