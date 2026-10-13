@@ -308,8 +308,14 @@ describe('[#23214] GET /data/:object — the filter slot, through the rule RestS
 
     it('preserves one filter, and leaves a genuinely multi-valued `select` an array', async () => {
         const { dispatcher, protocol } = boot();
-        const answer = await get(dispatcher, '/data/task', { filter: ['{"status":"open"}'], select: ['id', 'status'] });
+        const answer = await get(dispatcher, '/data/task', { filter: '{"status":"open"}', select: ['id', 'status'] });
         expect(answer.status).toBe(200);
         expect(protocol.findData.mock.calls[0][0].query).toEqual({ filter: '{"status":"open"}', select: ['id', 'status'] });
+    });
+
+    it('reads a one-element filter array as the one filter it encodes, as RestServer does', async () => {
+        const { dispatcher, protocol } = boot();
+        expect((await get(dispatcher, '/data/task', { filter: ['{"status":"open"}'] })).status).toBe(200);
+        expect(protocol.findData.mock.calls[0][0].query).toEqual({ filter: '{"status":"open"}' });
     });
 });
