@@ -17,7 +17,6 @@ import * as objects from './src/data/objects/index.js';
 import { ShowcaseExternalDatasource } from './src/system/datasources/showcase-external.datasource.js';
 import { ExternalCustomer, ExternalOrder } from './src/data/objects/external/index.js';
 import { setupShowcaseExternalDatasource } from './src/system/datasources/external-fixture.js';
-import { registerRecalcEndpoint } from './src/system/server/recalc-endpoint.js';
 import { registerShowcaseApprovalDemo } from './src/security/seed-approval-demo.js';
 import { TaskViews, ProjectViews, InquiryViews, BusinessUnitViews, ContactViews, FieldZooViews } from './src/ui/views/index.js';
 import { ShowcaseApp } from './src/ui/apps/index.js';
@@ -256,8 +255,9 @@ export default defineStack({
   // carve-out `/api/v1/apps/<manifest.namespace>/…`, which is why
   // `manifest.namespace: 'showcase'` above is load-bearing rather than
   // decorative: publish rejects an `apis:` block without it. See
-  // src/system/apis/ for the declarations and the `authRequired` reasoning;
-  // src/system/server/recalc-endpoint.ts remains the code-mounted counterpart.
+  // src/system/apis/ for the declarations and the `authRequired` reasoning.
+  // They are the app's whole HTTP surface: the recalc behind the two `api`
+  // actions is one of them, a flow that writes as its caller.
   apis: allApis,
   // Declarative `connectors:` — both kinds (ADR-0097): provider-bound
   // INSTANCES (StatusApiConnector via `rest`; StatusOpenApiConnector via
@@ -293,8 +293,6 @@ export default defineStack({
  */
 export const onEnable = async (ctx: unknown): Promise<void> => {
   await setupShowcaseExternalDatasource(ctx as Parameters<typeof setupShowcaseExternalDatasource>[0]);
-  // Mount the custom REST endpoint behind the `showcase_recalc_estimate` api action.
-  registerRecalcEndpoint(ctx as Parameters<typeof registerRecalcEndpoint>[0]);
   // Make the v16 approval features (会签 / quorum) demonstrable on a fresh boot:
   // assign the dev admin the approver positions and launch the signoff flows so
   // real pending requests land in the inbox (cannot be a seed — see

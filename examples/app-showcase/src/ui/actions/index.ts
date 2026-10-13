@@ -164,16 +164,20 @@ export const QuickViewAction = defineAction({
   refreshAfter: false,
 });
 
-/** api — call a custom endpoint. */
+/**
+ * api — call an endpoint. The target is this app's declared
+ * `showcase_recalc_estimates_api` (src/system/apis/), a `type: 'flow'` endpoint
+ * whose flow writes as the caller — no handler code.
+ */
 export const RecalcEstimateAction = defineAction({
   name: 'showcase_recalc_estimate',
   label: 'Recalculate Estimate',
   icon: 'calculator',
   objectName: task,
   type: 'api',
-  target: '/api/v1/showcase/recalc',
-  // #17319 — one POST per record; the endpoint's per-record branch reads the
-  // single id. Its aggregate twin below is a SEPARATE action against the same
+  target: '/api/v1/apps/showcase/recalc',
+  // #17319 — one POST per record; the endpoint's flow reads the single id as a
+  // list of one. Its aggregate twin below is a SEPARATE action against the same
   // endpoint, which is what the platform used to require: one body, one
   // contract, and until this key no way to say which.
   execution: 'perRecord',
@@ -195,8 +199,8 @@ export const RecalcEstimateAction = defineAction({
  * value (see `task.view.ts` → `bulk_actions`); a bare-string wiring of it is
  * now refused at authoring time instead of quietly recalculating one row. The
  * renderer then dispatches it ONCE for the whole selection, with every
- * selected id in `params._selectedIds` — the recalc endpoint's batch branch
- * recomputes all of them in that single call (the "one zip for N devices"
+ * selected id in `params._selectedIds` — the recalc endpoint's flow runs the
+ * per-task recalculation for every one of them in that single call (the "one zip for N devices"
  * shape, minus the zip). Contrast with RecalcEstimateAction above: same
  * endpoint, one POST per record.
  *
@@ -214,7 +218,7 @@ export const RecalcEstimateAction = defineAction({
  * So `record_more` here is an explicit SINGLE-RECORD placement, not a way of
  * dodging an everywhere-default: it puts the action in the record overflow
  * menu, where the dispatch carries exactly one id and the recalc endpoint's
- * per-record branch handles it (via `recordIdParam`). Placement being
+ * flow reads it as a list of one (via `recordIdParam`). Placement being
  * declared rather than inherited is also what keeps the action off the LIST
  * TOOLBAR — a toolbar dispatch would carry neither a selection (no
  * `_selectedIds`) nor a record id, and the endpoint would reject it — but
@@ -226,7 +230,7 @@ export const RecalcSelectionAction = defineAction({
   icon: 'calculator',
   objectName: task,
   type: 'api',
-  target: '/api/v1/showcase/recalc',
+  target: '/api/v1/apps/showcase/recalc',
   // #17319 — ONE dispatch for the whole selection, every id in
   // `params._selectedIds`. The view's `bulkActionDefs` entry still performs
   // the dispatch; this declares what the body was written to receive, so a
