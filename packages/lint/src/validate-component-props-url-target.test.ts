@@ -55,3 +55,38 @@ describe('the props gate refuses a url `target` outside the shared set on the pa
     expect(validateComponentProps(stackWith(node('https://example.com/docs')))).toEqual([]);
   });
 });
+
+// The name leg. The runner dispatches on `type || actionType || name`, so a
+// row with no executor key whose `name` is `url` or `navigation` runs the url
+// navigator; the rows judge its `target` by the same set, and the gate reports
+// it at the same path. A `name` that names any other handler is untouched.
+
+/** [row, the node for a given name and target, the finding's path, the refusal's subject for a `name`]. */
+const NAME_LEG_ROWS: ReadonlyArray<readonly [string, (name: string, target: string) => AnyRec, string, (name: string) => string]> = [
+  ['action:button', (name, target) => ({ type: 'action:button', properties: { label: 'Open', name, target } }),
+    `${BASE}.target`, (name) => `An \`action:button\`'s \`target\` (\`name: '${name}'\` and no \`actionType\`, so the runner runs the url navigator)`],
+  ['action:icon', (name, target) => ({ type: 'action:icon', properties: { label: 'Open', name, target } }),
+    `${BASE}.target`, (name) => `An \`action:icon\`'s \`target\` (\`name: '${name}'\` and no \`actionType\`, so the runner runs the url navigator)`],
+  ['action:group member', (name, target) => ({ type: 'action:group', properties: { actions: [{ label: 'Open', name, target }] } }),
+    `${BASE}.actions.0.target`, (name) => `An \`action:group\` member's \`target\` (\`name: '${name}'\` and no \`type\`, so the runner runs the url navigator)`],
+  ['action:menu member', (name, target) => ({ type: 'action:menu', properties: { actions: [{ label: 'Open', name, target }] } }),
+    `${BASE}.actions.0.target`, (name) => `An \`action:menu\` member's \`target\` (\`name: '${name}'\` and no \`type\`, so the runner runs the url navigator)`],
+];
+
+describe("the props gate judges a name-leg row's `target` on the executor the runner runs", () => {
+  it.each(NAME_LEG_ROWS)("REFUSAL: %s named `url` or `navigation`, with no executor key, is one finding at its `target`", (_row, node, path, subject) => {
+    for (const name of ['url', 'navigation']) {
+      const findings = validateComponentProps(stackWith(node(name, 'javascript:alert(1)')));
+      expect(findings.map((f) => [f.rule, f.path]), name).toEqual([[COMPONENT_PROPS_INVALID, path]]);
+      expect(findings[0].message, name).toContain(`${subject(name)}${JAVASCRIPT_REST}`);
+    }
+  });
+
+  it.each(NAME_LEG_ROWS)('ACCEPTED CONTROL: %s named `url` with an admitted target reports nothing', (_row, node) => {
+    expect(validateComponentProps(stackWith(node('url', 'https://example.com/docs')))).toEqual([]);
+  });
+
+  it.each(NAME_LEG_ROWS)('CONTROL: %s named after another handler reports nothing at its `target`', (_row, node) => {
+    expect(validateComponentProps(stackWith(node('navigate_edit', 'convert_lead')))).toEqual([]);
+  });
+});
