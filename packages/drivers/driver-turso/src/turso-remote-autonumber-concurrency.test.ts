@@ -16,19 +16,44 @@
  * Node process, whose native calls run on the one JS thread.
  *
  * So this file spawns two child processes (through `tsx`, over the package's
- * SOURCE, the way `packages/spec`'s process-boundary pins do), each holding
- * its own `@libsql/client` connection — the native `file:` backend, which is
- * libSQL itself, the engine behind a Turso endpoint — to one database file,
- * each driving its own `TursoDriver` in REMOTE mode, writing through
- * `TursoDriver.create`. A file barrier releases both writers at once, so their
- * statements contend on the database's write lock rather than following each
- * other through process start-up.
+ * SOURCE, the way `packages/spec`'s process-boundary pins do). For each round
+ * the parent creates a fresh database, and each writer opens its own
+ * `@libsql/client` connection to it — the native `file:` backend, which is
+ * libSQL itself, the engine behind a Turso endpoint — drives its own
+ * `TursoDriver` in REMOTE mode, and writes through `TursoDriver.create`. The
+ * parent releases both writers with one `go` written to both pipes in the same
+ * tick, once both have reported ready, so their statements contend on the
+ * database's write lock rather than following each other through start-up.
  *
  * What is NOT measured here, said plainly: an HTTP `sqld` server. None runs in
  * this environment, and the transport's HTTP batching and retries are the
  * concern of the suites that mock `execute`. What a server adds is the network;
  * what decides atomicity is the statement, and the statement runs on the same
  * engine under the same lock here as there.
+ *
+ * # What the file waits on, and what it no longer waits on
+ *
+ * Measured at `d4aaeaf0e` on a 4-vCPU box, one round of the earlier shape
+ * (writers spawned per round, 200 writes each, the default
+ * `synchronous = FULL`) took about 4.4 s: about 2.2 s to start each writer
+ * (`tsx` plus the driver's source graph, mostly `@objectstack/driver-sql`),
+ * and about 2.2 s of writes. The writes were fsync-bound: one `create` is three
+ * statements (reserve, insert, read back), and a single writer took 5.9 ms per
+ * `create` with fsync and 1.2 ms with `synchronous = OFF`. CI's hourly full
+ * battery measured the file at up to 29.3 s, over 10 s in 6 of the 7 runs that
+ * executed it, and every retry round paid both start-ups again.
+ *
+ * Two changes, neither touching what is asserted:
+ *
+ * - The writers start ONCE per test and serve every round over stdin/stdout.
+ *   A retry round therefore costs its writes, not two more process start-ups.
+ * - Each writer sets `PRAGMA synchronous = OFF` on its own connection.
+ *   `synchronous` decides only whether SQLite flushes to disk at a commit,
+ *   which matters for a power cut and not for a throwaway temp file. The lock
+ *   protocol is unchanged: the journal mode, the locks each statement takes and
+ *   the busy timeout all stay as they were. What decides atomicity, two
+ *   connections in two processes serialised by the database's write lock, is
+ *   exactly what it was.
  *
  * # The pins
  *
@@ -80,7 +105,7 @@
 
 import { describe, it, expect, afterAll } from 'vitest';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -96,6 +121,8 @@ const WRITES_PER_WORKER = 200;
 /** Rounds a loaded box gets to let the two writers overlap before the overlap evidence is declared NOT MEASURED. */
 const MAX_ROUNDS = 3;
 const WORKERS = ['A', 'B'] as const;
+/** How long a writer may take to answer one command before the round fails with that writer's stderr. */
+const REPLY_DEADLINE_MS = 60_000;
 
 const NUMBERED_OBJECT = {
   name: 'crm_case',
@@ -120,74 +147,132 @@ interface WorkerReport {
 
 /**
  * The writer. Runs under `tsx` so it imports the driver's SOURCE, like the
- * test itself does. It connects, registers the schema (the tables already
- * exist — the parent created them — so `initObjects` records metadata and
- * runs no DDL), announces readiness, waits for the parent's `go` file, then
- * writes as fast as the database lets it and reports on stdout.
+ * test itself does, and pays that start-up once for every round. It reads one
+ * JSON command per line on stdin and answers one JSON line on stdout:
+ *
+ * - `{ open: <db path> }` — connect to that round's database, register the
+ *   schema (the tables already exist — the parent created them — so
+ *   `initObjects` records metadata and runs no DDL), answer `{ ready }`.
+ * - `{ go: <n> }` — write n records as fast as the database lets it,
+ *   disconnect, answer the report.
+ *
+ * stdin closing ends the loop, and the process exits.
  */
 const WORKER_SOURCE = `
   import { createClient } from '@libsql/client';
-  import { existsSync, writeFileSync } from 'node:fs';
+  import { createInterface } from 'node:readline';
   // tsx compiles this package's .ts to CJS (no "type": "module"), so the
   // class may arrive under \`default\` — the spelling packages/spec's
   // process-boundary pins use.
   const driverModule = await import(${JSON.stringify(DRIVER_ENTRY)});
   const TursoDriver = driverModule.TursoDriver ?? driverModule.default?.TursoDriver;
-  const { OS_TEST_DB, OS_TEST_DIR, OS_TEST_TAG, OS_TEST_WRITES } = process.env;
-  const client = createClient({ url: 'file:' + OS_TEST_DB, timeout: 20000 });
-  const driver = new TursoDriver({ url: 'libsql://concurrency.probe', client });
-  await driver.connect();
-  await driver.initObjects([${JSON.stringify(NUMBERED_OBJECT)}]);
-  writeFileSync(OS_TEST_DIR + '/ready-' + OS_TEST_TAG, String(process.pid));
-  const go = OS_TEST_DIR + '/go';
-  while (!existsSync(go)) await new Promise((r) => setTimeout(r, 2));
-  const numbers = [];
-  const errors = [];
-  for (let i = 0; i < Number(OS_TEST_WRITES); i++) {
-    try {
-      const row = await driver.create('crm_case', { organization_id: 'orgA', title: OS_TEST_TAG + '-' + i });
-      numbers.push(row.case_number);
-    } catch (e) {
-      errors.push(String(e && e.message || e));
+  const { OS_TEST_TAG } = process.env;
+  const reply = (message) => process.stdout.write(JSON.stringify(message) + '\\n');
+  let driver = null;
+  for await (const line of createInterface({ input: process.stdin })) {
+    const command = JSON.parse(line);
+    if (command.open) {
+      const client = createClient({ url: 'file:' + command.open, timeout: 20000 });
+      // No disk flush at commit: see "What the file waits on" in the parent.
+      await client.execute('PRAGMA synchronous = OFF');
+      driver = new TursoDriver({ url: 'libsql://concurrency.probe', client });
+      await driver.connect();
+      await driver.initObjects([${JSON.stringify(NUMBERED_OBJECT)}]);
+      reply({ ready: OS_TEST_TAG });
+    } else if (command.go) {
+      const numbers = [];
+      const errors = [];
+      for (let i = 0; i < command.go; i++) {
+        try {
+          const row = await driver.create('crm_case', { organization_id: 'orgA', title: OS_TEST_TAG + '-' + i });
+          numbers.push(row.case_number);
+        } catch (e) {
+          errors.push(String(e && e.message || e));
+        }
+      }
+      await driver.disconnect();
+      driver = null;
+      reply({ tag: OS_TEST_TAG, pid: process.pid, numbers, errors });
     }
   }
-  await driver.disconnect();
-  process.stdout.write(JSON.stringify({ tag: OS_TEST_TAG, pid: process.pid, numbers, errors }));
 `;
 
-function runWorker(env: Record<string, string>): Promise<WorkerReport> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(
-      process.execPath,
-      ['--import', 'tsx', '--input-type=module', '-e', WORKER_SOURCE],
-      { cwd: PKG_ROOT, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] },
-    );
-    let out = '';
-    let err = '';
-    child.stdout.on('data', (d) => { out += String(d); });
-    child.stderr.on('data', (d) => { err += String(d); });
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (code !== 0) {
-        reject(new Error(`writer ${env.OS_TEST_TAG} exited ${code}\nstderr:\n${err}\nstdout:\n${out}`));
-        return;
-      }
-      try {
-        resolve(JSON.parse(out) as WorkerReport);
-      } catch (e) {
-        reject(new Error(`writer ${env.OS_TEST_TAG} wrote no report: ${String(e)}\nstderr:\n${err}\nstdout:\n${out}`));
-      }
-    });
-  });
+interface Writer {
+  tag: string;
+  send(command: Record<string, unknown>): void;
+  /** The writer's next answer; rejects with its stderr if it dies or stays silent past the deadline. */
+  next<T>(what: string): Promise<T>;
+  /** Close stdin and wait for a clean exit; a writer that does not leave is killed. */
+  stop(): Promise<void>;
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+function startWriter(tag: string): Writer {
+  const child = spawn(
+    process.execPath,
+    ['--import', 'tsx', '--input-type=module', '-e', WORKER_SOURCE],
+    { cwd: PKG_ROOT, env: { ...process.env, OS_TEST_TAG: tag }, stdio: ['pipe', 'pipe', 'pipe'] },
+  );
+  const inbox: unknown[] = [];
+  const waiting: Array<{ resolve: (m: unknown) => void; reject: (e: Error) => void }> = [];
+  let failure: Error | null = null;
+  let stderr = '';
+  let pending = '';
+  const fail = (e: Error) => {
+    failure ??= e;
+    while (waiting.length > 0) waiting.shift()!.reject(failure);
+  };
+  child.stderr.on('data', (d) => { stderr += String(d); });
+  child.stdout.on('data', (d) => {
+    pending += String(d);
+    for (let nl = pending.indexOf('\n'); nl >= 0; nl = pending.indexOf('\n')) {
+      const line = pending.slice(0, nl);
+      pending = pending.slice(nl + 1);
+      let message: unknown;
+      try {
+        message = JSON.parse(line);
+      } catch (e) {
+        fail(new Error(`writer ${tag} wrote a line that is not a report: ${String(e)}\nline: ${line}\nstderr:\n${stderr}`));
+        return;
+      }
+      const waiter = waiting.shift();
+      if (waiter) waiter.resolve(message);
+      else inbox.push(message);
+    }
+  });
+  const exited = new Promise<number | null>((resolve) => child.on('close', resolve));
+  child.on('error', fail);
+  child.on('close', (code) => fail(new Error(`writer ${tag} exited ${code}\nstderr:\n${stderr}`)));
+  return {
+    tag,
+    send: (command) => { child.stdin.write(JSON.stringify(command) + '\n'); },
+    next: <T>(what: string) => {
+      if (inbox.length > 0) return Promise.resolve(inbox.shift() as T);
+      if (failure) return Promise.reject(failure);
+      return new Promise<T>((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error(`writer ${tag} sent no ${what} within ${REPLY_DEADLINE_MS / 1000}s\nstderr:\n${stderr}`)),
+          REPLY_DEADLINE_MS,
+        );
+        waiting.push({
+          resolve: (m) => { clearTimeout(timer); resolve(m as T); },
+          reject: (e) => { clearTimeout(timer); reject(e); },
+        });
+      });
+    },
+    stop: async () => {
+      child.stdin.end();
+      const killer = setTimeout(() => child.kill('SIGKILL'), 10_000);
+      await exited;
+      clearTimeout(killer);
+    },
+  };
+}
 
 /**
  * One round: a fresh database, both writers, the barrier, every hard pin.
  * Answers how many times the writer changed in the global order.
  */
-async function round(): Promise<number> {
+async function round(writers: Writer[]): Promise<number> {
   const dir = mkdtempSync(join(tmpdir(), 'turso-autonumber-concurrency-'));
   dirs.push(dir);
   const dbPath = join(dir, 'shared.db');
@@ -199,23 +284,12 @@ async function round(): Promise<number> {
   await parent.connect();
   await parent.initObjects([NUMBERED_OBJECT as any]);
 
-  // A writer that dies before the barrier surfaces as ITS error, not as a
-  // readiness timeout.
-  let died: Error | null = null;
-  const runs = WORKERS.map((tag) =>
-    runWorker({ OS_TEST_DB: dbPath, OS_TEST_DIR: dir, OS_TEST_TAG: tag, OS_TEST_WRITES: String(WRITES_PER_WORKER) })
-      .catch((e: Error) => { died ??= e; throw e; }),
-  );
   // Release both only once both are connected and registered, so the
-  // writes contend rather than queue behind process start-up.
-  const deadline = Date.now() + 60_000;
-  while (!WORKERS.every((tag) => existsSync(join(dir, `ready-${tag}`)))) {
-    if (died) throw died;
-    if (Date.now() > deadline) throw new Error('writers did not become ready within 60s');
-    await sleep(5);
-  }
-  writeFileSync(join(dir, 'go'), '1');
-  const reports = await Promise.all(runs);
+  // writes contend rather than queue behind connection set-up.
+  for (const w of writers) w.send({ open: dbPath });
+  await Promise.all(writers.map((w) => w.next('ready')));
+  for (const w of writers) w.send({ go: WRITES_PER_WORKER });
+  const reports = await Promise.all(writers.map((w) => w.next<WorkerReport>('report')));
 
   // Different processes, and not this one.
   const pids = reports.map((r) => r.pid);
@@ -266,11 +340,16 @@ async function round(): Promise<number> {
 
 describe('[#21113] two writers in two processes draw distinct numbers from one database', () => {
   it(`${WORKERS.length} x ${WRITES_PER_WORKER} creates -> ${WORKERS.length * WRITES_PER_WORKER} distinct, monotonic per writer, and the writers overlapped`, async (ctx) => {
+    const writers = WORKERS.map(startWriter);
     const observed: number[] = [];
-    for (let i = 0; i < MAX_ROUNDS; i++) {
-      const switches = await round();
-      observed.push(switches);
-      if (switches >= 2) return;
+    try {
+      for (let i = 0; i < MAX_ROUNDS; i++) {
+        const switches = await round(writers);
+        observed.push(switches);
+        if (switches >= 2) return;
+      }
+    } finally {
+      await Promise.all(writers.map((w) => w.stop()));
     }
     ctx.skip(
       `NOT MEASURED: in ${MAX_ROUNDS} round(s) the two processes never overlapped on this box ` +
