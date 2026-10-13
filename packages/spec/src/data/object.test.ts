@@ -1590,7 +1590,8 @@ describe('ObjectSchema.create() forces a required master_detail under controlled
 // ============================================================================
 
 describe('ObjectSchema refuses a controlled_by_parent object without exactly one required master_detail', () => {
-  const cbp = (fields: Record<string, unknown>) => ({ name: 'cbp_line', sharingModel: 'controlled_by_parent', fields });
+  const cbp = <F extends Record<string, unknown>>(fields: F) =>
+    ({ name: 'cbp_line', sharingModel: 'controlled_by_parent' as const, fields });
   const issuesOf = (input: unknown) => {
     const r = ObjectSchema.safeParse(input);
     return r.success ? [] : r.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message }));
