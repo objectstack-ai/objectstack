@@ -654,19 +654,6 @@ function callerHasOrganizationScope(context: any, posture: TenancyPosture): bool
 }
 
 /**
- * [ADR-0123 D2] Is this Layer 0 filter the fail-closed DENY sentinel — i.e. "a
- * walled posture on a tenant object, and the context carries no organization
- * scope to enforce with"?
- *
- * Identity is decided on the sentinel's own value, not on shape: `RLS_DENY_FILTER`
- * is a single `id` equality against a string no record can carry, and
- * `computeTenantLayer0Filter` SPREADS it (`{ ...RLS_DENY_FILTER }`) rather than
- * returning the frozen object, so a reference check would silently answer `false`
- * for every real denial. Every other Layer 0 return is a real tenant predicate
- * (`organization_id = …` / `organization_id $in […]`) or `null`, so no legitimate
- * wall can collide with this test.
- */
-/**
  * [#21771] Ruling A's read question, judged on the answer of a caller-context
  * by-id read: is the row ABSENT to this caller?
  *
@@ -783,10 +770,21 @@ function copyOfCallerPredicate(where: unknown): unknown {
   }
 }
 
+/**
+ * [ADR-0123 D2] Is this Layer 0 filter the fail-closed DENY sentinel — i.e. "a
+ * walled posture on a tenant object, and the context carries no organization
+ * scope to enforce with"?
+ *
+ * [ADR-0139 D2 step 2] Decided BY IDENTITY, the way the engine's composition
+ * decides it: the wall's `deny` returns `RLS_DENY_FILTER` itself — the spec's
+ * frozen object, never a spread copy (`tenantLayer0FilterOf`) — so the
+ * reference is the whole test, and no value or shape is compared. Every other
+ * Layer 0 return is a real tenant predicate (`organization_id = …` /
+ * `organization_id $in […]`) or `null`, which no reference check can confuse
+ * with it.
+ */
 function isTenantWallDenial(filter: Record<string, unknown> | null | undefined): boolean {
-  if (!filter) return false;
-  const keys = Object.keys(filter);
-  return keys.length === 1 && keys[0] === 'id' && filter.id === RLS_DENY_FILTER.id;
+  return filter === RLS_DENY_FILTER;
 }
 
 const SYSTEM_ROW_PROVENANCE: Record<
@@ -5595,6 +5593,14 @@ export class SecurityPlugin implements Plugin {
    * ({@link isPrincipalLessContext}, ADR-0096 D5 strict mode), which the
    * middleware refuses before it resolves anything: it no longer keeps the
    * sharing predicate alone.
+   *
+   * [ADR-0139 D2 step 2] Every deny this method answers is `RLS_DENY_FILTER`
+   * ITSELF — `@objectstack/spec/data`'s frozen object, by reference — whether
+   * it is returned here or comes up unchanged from a layer (the tenant wall's
+   * deny, the RLS compiler's, the dropped-policy and unresolvable-master
+   * denies below): the engine's composition recognises it by identity and
+   * answers `$in: []`. ⛔ Never return a spread copy; a copy still matches zero
+   * rows, but it is no longer the sentinel.
    */
   async getReadFilter(
     object: string,
@@ -5605,7 +5611,7 @@ export class SecurityPlugin implements Plugin {
     // [#21908] ADR-0096 D5 strict mode — the middleware's principal-less
     // refusal, mirrored: zero rows, read off the same predicate, before any
     // layer resolves. This used to answer the sharing predicate alone.
-    if (isPrincipalLessContext(context)) return { ...RLS_DENY_FILTER };
+    if (isPrincipalLessContext(context)) return RLS_DENY_FILTER;
     // [#4467] The OWD/sharing predicate is resolved for EVERY non-system caller,
     // ahead of the RLS branches below, because it is a SEPARATE middleware in
     // the chain this method mirrors: none of the RLS stand-downs below is a
@@ -5621,7 +5627,7 @@ export class SecurityPlugin implements Plugin {
           `the engine middleware never runs without the owner and share scope a direct read applies)`,
         e instanceof Error ? e : new Error(String(e)),
       );
-      return { ...RLS_DENY_FILTER };
+      return RLS_DENY_FILTER;
     }
     // [#2852] D10 delegator intersection is NOT implemented on this path.
     // The engine middleware (find/count/aggregate) intersects an on-behalf-of
@@ -5643,7 +5649,7 @@ export class SecurityPlugin implements Plugin {
           `implemented on the read-scope path; denying (fail-closed: a delegated read is never scoped ` +
           `wider than its delegator's own)`,
       );
-      return { ...RLS_DENY_FILTER };
+      return RLS_DENY_FILTER;
     }
     try {
       const permissionSets = await this.resolvePermissionSetsForContext(context);
@@ -5654,7 +5660,7 @@ export class SecurityPlugin implements Plugin {
       // from the layers instead, it was the sharing predicate alone — every
       // row of an object whose sharing model is not private. Not a failure,
       // so nothing is logged.
-      if (permissionSets.length === 0) return { ...RLS_DENY_FILTER };
+      if (permissionSets.length === 0) return RLS_DENY_FILTER;
       const filter = await this.computeRlsFilter(permissionSets, object, 'find', context);
       // [#5815] ADR-0055 — the SECOND thing the middleware ANDs into `ast.where`
       // for a read. Resolved from the sets already resolved above, exactly as
@@ -5681,7 +5687,7 @@ export class SecurityPlugin implements Plugin {
           `(user ${context?.userId ?? 'unknown'}) — denying (fail-closed)`,
         e instanceof Error ? e : new Error(String(e)),
       );
-      return { ...RLS_DENY_FILTER };
+      return RLS_DENY_FILTER;
     }
   }
 
@@ -7942,9 +7948,10 @@ export class SecurityPlugin implements Plugin {
               }
             : undefined,
         );
-        // Every applicable policy dropped for a missing field → deny sentinel.
+        // Every applicable policy dropped for a missing field → deny sentinel,
+        // by reference (ADR-0139 D2 step 2: recognised by identity).
         if (layer1 == null && dropped > 0) {
-          layer1 = { ...RLS_DENY_FILTER };
+          layer1 = RLS_DENY_FILTER;
         }
       }
     }
@@ -8375,7 +8382,7 @@ export class SecurityPlugin implements Plugin {
     //     header names those doors). So here the alias is genuinely REACHABLE.
     //   • And here a miss is not a quiet wrong answer, it is a DENIAL.
     //     `resolveCbpRelation` returning null is FAIL-CLOSED: the read leg
-    //     answers `{ ...RLS_DENY_FILTER }` (zero rows for every non-admin
+    //     answers `RLS_DENY_FILTER` (zero rows for every non-admin
     //     caller) and the write leg throws `MasterDetailRelationMissingError`.
     //     Narrowing this reader would take a raw-registered, alias-spelled
     //     `controlled_by_parent` object from "access derived from its master"
@@ -8596,7 +8603,8 @@ export class SecurityPlugin implements Plugin {
     if (sharingModel !== 'controlled_by_parent') return null;
 
     const rel = this.resolveCbpRelation(object);
-    if (!rel) return { ...RLS_DENY_FILTER };
+    // No resolvable master: the deny sentinel, by reference (ADR-0139 D2 step 2).
+    if (!rel) return RLS_DENY_FILTER;
 
     // [ADR-0055 amendment] Chain guards, BEFORE any store work. Both answer with the empty
     // master set — the same shape the #5386 sharing-resolution failure answers

@@ -153,7 +153,7 @@ function deleteReader(name: string, triggerType: 'record-before-delete' | 'recor
         id: 'read',
         type: 'get_record',
         label: 'Read the case back',
-        config: { objectName: CASE, filter: { id: '{record.id}' }, outputVariable: 'held' },
+        config: { objectName: CASE, filter: { id: { dialect: 'cel', source: 'record.id' } }, outputVariable: 'held' },
       },
       ledgerWrite(name, {
         previous_status: { dialect: 'cel', source: 'previous.status' },

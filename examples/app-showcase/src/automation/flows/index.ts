@@ -122,7 +122,7 @@ export const ReassignWizardFlow = defineFlow({
       label: 'Apply Reassignment',
       config: {
         objectName: 'showcase_task',
-        filter: { id: '{recordId}' },
+        filter: { id: { dialect: 'cel', source: 'recordId' } },
         // A CEL value envelope — the `{…}` template dialect is retired from
         // value slots. `new_assignee` is a required screen field, so it is
         // always bound here.
@@ -1255,7 +1255,7 @@ export const ResilientSyncFlow = defineFlow({
               label: 'Flag Sync Failure',
               config: {
                 objectName: 'showcase_task',
-                filter: { id: '{record.id}' },
+                filter: { id: { dialect: 'cel', source: 'record.id' } },
                 // `$error` (this try_catch's `errorVariable`) is not a CEL
                 // identifier, so the envelope reads it through `vars`.
                 fields: { sync_status: 'failed', sync_error: { dialect: 'cel', source: 'vars["$error"].message' } },
@@ -1368,7 +1368,7 @@ export const InvoiceDualSignoffFlow = defineFlow({
       label: 'Flag: Held',
       config: {
         objectName: 'showcase_invoice',
-        filter: { id: '{record.id}' },
+        filter: { id: { dialect: 'cel', source: 'record.id' } },
         fields: { status: 'draft' },
       },
     },

@@ -101,8 +101,9 @@ describe('no UI prose face advertises `app` as an expression-scope root — the 
       expect(mounts).not.toMatch(/`app`/);
 
       // Survival controls — deleting the token must not have taken the sentence with it.
+      // (`data` is no longer one of them: the renderer stopped mounting it too, and
+      // `expression-scope-data-root.pin.test.ts` holds that half.)
       for (const root of SURVIVING_ROOTS) expect(mounts).toContain(root);
-      expect(mounts).toContain('`data`');
       expect(mounts).toContain('NOT contract-guaranteed');
 
       // Contract-bound roots are a different clause and are untouched.
@@ -117,7 +118,6 @@ describe('no UI prose face advertises `app` as an expression-scope root — the 
 
       expect(s).not.toMatch(/`app`/);
       for (const root of SURVIVING_ROOTS) expect(s).toContain(root);
-      expect(s).toContain('binds `data`');
     });
 
     it('action.zod.ts — the param-level `visible` scope list', () => {

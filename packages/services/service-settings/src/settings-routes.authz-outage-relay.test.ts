@@ -130,6 +130,12 @@ async function drive(routes: Map<string, RouteHandler>, door: (typeof DOORS)[num
 
 const codeOf = (c: Captured) => c.body?.error?.code;
 const OUTAGE: Ctx = () => { throw new AuthzStoreUnavailableError('sys_user_permission_set'); };
+/**
+ * A context that RESOLVES, for a signed-in caller. It names a `userId` because
+ * the family's anonymous floor (ADR-0056 D2) refuses a context without one
+ * before the route runs, and these controls exist to reach the service.
+ */
+const RESOLVED: Ctx = () => ({ enforced: false, userId: 'usr_control' });
 
 // ---------------------------------------------------------------------------
 // §0 — The census control: the door table above IS the mounted surface.
@@ -148,7 +154,7 @@ describe('[#15999] §0 — all four route catches exist and are the ones driven'
 
 describe('[#15999] §1 — a resolvable context still reaches the service', () => {
   it.each(DOORS)('CONTROL · $name answers 200', async (door) => {
-    const routes = mount(() => ({ enforced: false }));
+    const routes = mount(RESOLVED);
     const res = await drive(routes, door);
     expect(res.status).toBe(200);
     expect(res.body?.success).toBe(true);
@@ -228,7 +234,7 @@ describe('[#15999] §3 — the relay is scoped to the brand; every other arm is 
   it('the namespace 404 arm is untouched — a service-thrown UnknownNamespaceError still wins', async () => {
     const service = permissiveService();
     service.getNamespace = async () => { throw new UnknownNamespaceError(NS); };
-    const routes = mount(() => ({ enforced: false }), service);
+    const routes = mount(RESOLVED, service);
     const res = await drive(routes, DOORS[1]);
     expect(res.status).toBe(404);
     expect(codeOf(res)).toBe('UNKNOWN_NAMESPACE');

@@ -38,6 +38,7 @@ import { ADMIN_FULL_ACCESS_CAPABILITIES } from '@objectstack/spec';
 import { PermissionSetSchema, PLATFORM_CAPABILITIES } from '@objectstack/spec/security';
 import { bootShowcase } from './showcase-boot.js';
 import { assertArmed, armedWhen } from './armed.js';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 /** The capability under test, as `PLATFORM_CAPABILITIES` declares it. */
 const CAP = 'manage_mailboxes';
@@ -107,8 +108,10 @@ describe('[#22870] the inbound-mail pool is restricted to mailbox owners and adm
     const userIdOf = async (email: string) => String((await atRest('sys_user', { email }))[0]?.id ?? '');
     uid.admin = await userIdOf('admin@objectos.ai');
     const grant = async (who: Who, setName: string) => {
-      const [set] = await atRest('sys_permission_set', { name: setName });
-      expect(set?.id, `fixture permission set ${setName} seeded`).toBeTruthy();
+      // [ADR-0131 D3] A set is served by name from the security catalog; no
+      // boot writes a `sys_permission_set` row for it.
+      const set = await catalogPermissionSet(ql, setName);
+      expect(set, `fixture permission set ${setName} served by the security catalog`).toBeTruthy();
       await ql.insert('sys_user_permission_set', { user_id: uid[who], permission_set: set.name }, { context: { ...SYS } });
     };
     for (const who of ['reader', 'owner', 'holder', 'outsider'] as const) {
