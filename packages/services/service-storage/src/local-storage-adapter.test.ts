@@ -4,8 +4,23 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { LocalStorageAdapter } from './local-storage-adapter.js';
+import {
+  LocalStorageAdapter,
+  StorageTokenRefusedError,
+  STORAGE_TOKEN_REFUSAL_MESSAGE,
+  isStorageTokenRefusal,
+} from './local-storage-adapter.js';
 import type { IStorageService } from '@objectstack/spec/contracts';
+
+/** Whether `fn` threw the adapter's token refusal (not merely threw). */
+function refusalOf(fn: () => unknown): boolean {
+  try {
+    fn();
+  } catch (err) {
+    return isStorageTokenRefusal(err);
+  }
+  return false;
+}
 
 describe('LocalStorageAdapter', () => {
   let rootDir: string;
@@ -130,14 +145,47 @@ describe('LocalStorageAdapter', () => {
       const expiredPayload = JSON.stringify({ k: 'x.txt', exp: Math.floor(Date.now() / 1000) - 5, op: 'put' });
       const expB64 = Buffer.from(expiredPayload).toString('base64url');
       const sig = createHmac('sha256', 'test-secret').update(expB64).digest('base64url');
-      expect(() => adapter2.verifyToken(`${expB64}.${sig}`, 'put')).toThrow('expired');
+      expect(refusalOf(() => adapter2.verifyToken(`${expB64}.${sig}`, 'put'))).toBe(true);
     });
 
     it('should reject wrong op tokens', async () => {
       await createTempDir();
       const desc = await adapter.getPresignedUpload!('file.txt', 60);
       const token = desc.uploadUrl.split('/_local/raw/')[1];
-      expect(() => adapter.verifyToken(token, 'get')).toThrow('mismatch');
+      expect(refusalOf(() => adapter.verifyToken(token, 'get'))).toBe(true);
+    });
+
+    it('refuses a malformed, forged, wrong-verb or expired token with one indistinguishable refusal', async () => {
+      await createTempDir();
+      const { createHmac } = await import('node:crypto');
+      const signer = new LocalStorageAdapter({ rootDir, signingSecret: 'test-secret' });
+      const sign = (payload: object, secret = 'test-secret') => {
+        const b64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
+        return `${b64}.${createHmac('sha256', secret).update(b64).digest('base64url')}`;
+      };
+      const now = Math.floor(Date.now() / 1000);
+      const tokens = [
+        'no-dot-at-all',
+        sign({ k: 'x', exp: now + 60, op: 'put' }, 'some-other-secret'),
+        sign({ k: 'x', exp: now + 60, op: 'get' }),
+        sign({ k: 'x', exp: now - 60, op: 'put' }),
+      ];
+      const thrown = tokens.map((t) => {
+        try {
+          signer.verifyToken(t, 'put');
+        } catch (err) {
+          return err;
+        }
+        return undefined;
+      });
+      expect(thrown.every((e) => isStorageTokenRefusal(e))).toBe(true);
+      expect(new Set(thrown.map((e) => (e as Error).message))).toEqual(new Set([STORAGE_TOKEN_REFUSAL_MESSAGE]));
+    });
+
+    it('the refusal is recognised by its brand, never by its text', () => {
+      expect(isStorageTokenRefusal(new StorageTokenRefusedError())).toBe(true);
+      expect(isStorageTokenRefusal(new Error(STORAGE_TOKEN_REFUSAL_MESSAGE))).toBe(false);
+      expect(isStorageTokenRefusal(new Error('Storage token expired'))).toBe(false);
     });
 
     it('should generate presigned download URL', async () => {
