@@ -2522,6 +2522,9 @@ export class AutomationServicePlugin implements Plugin {
                     flow: entry.name,
                     ...describeThrownForLog(err),
                 });
+                // [#23316] A flow this refusal leaves unregistered is readable as
+                // refused; one the engine still holds keeps that registration.
+                this.engine.recordFlowRefusal(entry.name, err);
             }
         }
 
@@ -2568,6 +2571,14 @@ export class AutomationServicePlugin implements Plugin {
      * refusal's warning kept the flow `active` and bound to its trigger.
      * Only the refused name is withdrawn; a failed or empty READ still tears
      * nothing down (the early returns above).
+     *
+     * [#23316] The refusal is then RECORDED on the engine
+     * (`recordFlowRefusal`), so the metadata read serves the stored flow
+     * beside `registration: { state: 'refused', reason }` instead of only its
+     * stored `status: 'active'`. This bind is the boot's verdict: the boot
+     * pull's own refusals are not recorded, because this bind re-judges every
+     * flow in the view at `kernel:ready` — a record made there could be
+     * contradicted by this same boot (AGENTS.md "Startup registry reads").
      */
     private async syncFlowsFromProtocol(ctx: PluginContext): Promise<void> {
         if (!this.engine) return;
@@ -2594,6 +2605,10 @@ export class AutomationServicePlugin implements Plugin {
                     this.engine.withdrawFlow(entry.name);
                     this.syncedFlowNames.delete(entry.name);
                 }
+                // [#23316] …and the refusal is readable: the engine holds
+                // nothing under the name now, so the metadata read serves the
+                // stored flow beside `registration: refused` and this error.
+                this.engine.recordFlowRefusal(entry.name, err);
             }
         }
         if (bound > 0) {
@@ -2732,6 +2747,8 @@ export class AutomationServicePlugin implements Plugin {
                         + 'registration it had, if any',
                     { flow: name, ...describeThrownForLog(err) },
                 );
+                // [#23316] With none to keep, the stored flow is readable as refused.
+                engine.recordFlowRefusal(name, err);
             }
         }
         if (armed.length > 0 || unregistered.length > 0) {
