@@ -632,29 +632,50 @@ export const PageComponentSchema = lazySchema(() => strictObject({
    * ## Ambient roots — renderer behaviour, NOT contract-guaranteed
    *
    * The shipping renderer additionally mounts `features` and `os.user`
-   * from app-shell's `ExpressionProvider`, and binds `data`. **No ADR rules
-   * those on this surface**: ADR-0068's Non-goals fence its ruling to the user
-   * object ("only the user object is in scope here"), and ADR-0058 governs
+   * from app-shell's `ExpressionProvider`. **No ADR rules those on this
+   * surface**: ADR-0068's Non-goals fence its ruling to the user object
+   * ("only the user object is in scope here"), and ADR-0058 governs
    * dialects/backends/fail-policy, not the UI root set. They are recorded as
    * measured behaviour so an author is not misled into thinking they are
    * unavailable — they are NOT promises, and widening the contract to cover
    * them is an open question, deliberately not decided here.
    *
-   * Measured at the `.objectui-sha` pin `190fbd01d061` (identical at objectui
-   * `origin/main` f2732afe): `app-shell/src/providers/ExpressionProvider.tsx:59`
-   * builds the ambient scope; `react/src/SchemaRenderer.tsx:463-471` composes
-   * this surface's evaluator.
+   * Measured at the `.objectui-sha` pin `1fb1ced36243` (the four files below
+   * are identical at objectui `origin/main` `f228d710`):
+   * `app-shell/src/providers/ExpressionProvider.tsx:181-190`
+   * (`buildExpressionScope`) builds the ambient scope — `current_user`,
+   * `user`, `ctx.user`, `os.user`, `features`, and nothing else;
+   * `react/src/SchemaRenderer.tsx:665-676` (`configEvaluationScope`) composes
+   * this surface's evaluator from it, adding `record` (only when the page has
+   * a row) and `page`.
    *
-   * ## ⚠️ `data` is surface-dependent
+   * ## No `data` root on this surface
    *
-   * HERE `data` is the data-source **ADAPTER** — what `${data.total}` in a
-   * `properties` / `props` / `content` value interpolates against. On a
-   * `page:tabs` **item-level** `visibleWhen` a separate evaluator
-   * (`components/src/renderers/layout/containers.tsx:450-457`) binds `data` to
-   * the record **ROW** instead. Same key name, two bindings; see that key's own
-   * describe in `component.zod.ts` rather than assuming this one carries over.
+   * The shipping renderer mounts NO `data` root here. objectui#9308 (ruling
+   * B, 2026-09-13) removed `data` as a runtime expression root:
+   * `SchemaRenderer` stopped publishing its injected data source under that
+   * name (`SchemaRenderer.tsx:1194`), and a data scope reaches a predicate
+   * only through the predicate-scope channel (`PredicateScopeProvider`),
+   * whose one shipping feeder, `ExpressionProvider`, publishes no `data`. So a
+   * `data.*` read here faults, and a faulting `visibleWhen` renders the
+   * component: `data.total > 0` and `data.total == 0` both show it, a gate
+   * that never gates. The row the page is about is `record`.
+   *
+   * The one `data` this surface declares is the PLANNED API binding's (see
+   * {@link ElementApiDataSourceSchema}): an element whose `dataSource` is
+   * `{ provider: 'api', … }` reads its bound value as `data` once that
+   * binding's renderer ships. No renderer reads that binding yet, so no
+   * element has a `data` to read today.
+   *
+   * ## ⚠️ A `page:tabs` item is a different evaluator
+   *
+   * On a `page:tabs` **item-level** `visibleWhen`, a separate evaluator
+   * (`components/src/renderers/layout/containers.tsx:642-649`) binds `data` to
+   * the record **ROW** and spreads the row's bare fields as well — a binding
+   * this surface does not have. See that key's own describe in
+   * `component.zod.ts` rather than assuming either environment carries over.
    */
-  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Visibility predicate (CEL) — component rendered only when TRUE. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user` — one object, three spellings), and page state as `page.<var>`. The shipping renderer additionally mounts `features`, `os.user` and binds `data` to the data-source ADAPTER here — renderer behaviour, NOT contract-guaranteed (ADR-0068 rules the user object only). ⚠️ `data` is surface-dependent: on a `page:tabs` item `visibleWhen` it is the record ROW instead. e.g. \"page.selectedProjectId != ''\""),
+  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Visibility predicate (CEL) — component rendered only when TRUE. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user` — one object, three spellings), and page state as `page.<var>`. The shipping renderer additionally mounts `features` and `os.user` — renderer behaviour, NOT contract-guaranteed (ADR-0068 rules the user object only). It mounts NO `data` root here: a `data.*` read faults and a faulting predicate renders the component, so such a gate never gates; the page's row is `record`. `data` is declared only for an element whose `dataSource` is the PLANNED API binding (`provider: 'api'`), which reads its bound value as `data` once that binding's renderer ships. ⚠️ A `page:tabs` item `visibleWhen` is a different evaluator: it binds `data` to the record ROW. e.g. \"page.selectedProjectId != ''\""),
   /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
   visibility: EvaluatedExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse.'),
 
