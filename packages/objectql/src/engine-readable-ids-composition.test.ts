@@ -31,9 +31,14 @@ import {
   filterSubtreeProvenanceOf,
 } from '@objectstack/spec/data';
 import { matchesFilterCondition } from '@objectstack/formula';
-import { ObjectQL } from './engine.js';
+import { ObjectQL, SECURITY_SERVICE_SOURCE_SLOT } from './engine.js';
 
 interface SeenCall { verb: string; object: string; ast: any }
+
+/** Put a security-service source in the engine's slot, as `ObjectQLPlugin.init` does. */
+function wire(engine: ObjectQL, source: unknown): void {
+  (engine as unknown as Record<symbol, unknown>)[SECURITY_SERVICE_SOURCE_SLOT] = source;
+}
 
 function makeRecordingDriver(name = 'recording', opts: { aggregate?: boolean } = {}) {
   const calls: SeenCall[] = [];
@@ -133,7 +138,7 @@ describe('[ADR-0139 D2] the executor boundary composes the ReadableIds leaf', ()
   it('each read verb hands its driver the composed leaf — scope by reference, marked policy', async () => {
     const scope = { owner: 'u1' };
     const { svc } = makeSecurity({ scope: () => scope });
-    engine.registerSecurityServiceSource(() => svc);
+    wire(engine, () => svc);
     for (const [verb, run] of readVerbs(branch())) {
       calls.length = 0;
       await run();
@@ -154,7 +159,7 @@ describe('[ADR-0139 D2] the executor boundary composes the ReadableIds leaf', ()
     e.registry.registerObject(CHILD as any, 'test');
     e.registry.registerObject(PARENT as any, 'test');
     const { svc } = makeSecurity({ scope: () => ({ owner: 'u1' }) });
-    e.registerSecurityServiceSource(() => svc);
+    wire(e, () => svc);
     rows.calls.length = 0;
     await e.aggregate('rid_child', { where: branch(), aggregations: COUNT_AGG as any });
     expect(rows.calls.map((c) => c.verb)).toEqual(['find']);
@@ -163,7 +168,7 @@ describe('[ADR-0139 D2] the executor boundary composes the ReadableIds leaf', ()
 
   it('a leaf written by an object-scoped middleware is composed on find, findOne, count and aggregate', async () => {
     const { svc } = makeSecurity();
-    engine.registerSecurityServiceSource(() => svc);
+    wire(engine, () => svc);
     engine.registerMiddleware(async (ctx, next) => {
       if (ctx.ast && ['find', 'findOne', 'count', 'aggregate'].includes(ctx.operation)) {
         ctx.ast.where = ctx.ast.where ? { $and: [ctx.ast.where, branch()] } : branch();
@@ -181,7 +186,7 @@ describe('[ADR-0139 D2] the executor boundary composes the ReadableIds leaf', ()
 
   it('a leaf written by a beforeFind hook is composed on find and findOne', async () => {
     const { svc } = makeSecurity();
-    engine.registerSecurityServiceSource(() => svc);
+    wire(engine, () => svc);
     engine.registerHook('beforeFind', (ctx: any) => {
       ctx.input.ast.where = { $and: [ctx.input.ast.where ?? {}, branch()] };
     }, { object: 'rid_child' });
@@ -193,7 +198,7 @@ describe('[ADR-0139 D2] the executor boundary composes the ReadableIds leaf', ()
 
   it('canReadObject false ⇒ $in: [] — no row of the parent, and getReadFilter is not asked', async () => {
     const { svc, asked } = makeSecurity({ canRead: () => false, scope: () => ({ owner: 'u1' }) });
-    engine.registerSecurityServiceSource(() => svc);
+    wire(engine, () => svc);
     await engine.find('rid_child', { where: branch() });
     expect(inComparandOf(calls[0].ast.where)).toEqual([]);
     expect(asked).toEqual(['canReadObject:rid_parent']);
@@ -201,7 +206,7 @@ describe('[ADR-0139 D2] the executor boundary composes the ReadableIds leaf', ()
 
   it('a parent the registry does not hold ⇒ $in: [] — no security call, no D5 verdict', async () => {
     const { svc, asked } = makeSecurity();
-    engine.registerSecurityServiceSource(() => svc);
+    wire(engine, () => svc);
     await engine.find('rid_child', { where: branch('rid_unregistered') });
     expect(inComparandOf(calls[0].ast.where)).toEqual([]);
     expect(asked).toEqual([]);
@@ -209,7 +214,7 @@ describe('[ADR-0139 D2] the executor boundary composes the ReadableIds leaf', ()
 
   it('the deny sentinel, by identity ⇒ $in: [] — no row of the parent', async () => {
     const { svc } = makeSecurity({ scope: () => RLS_DENY_FILTER });
-    engine.registerSecurityServiceSource(() => svc);
+    wire(engine, () => svc);
     for (const [verb, run] of readVerbs(branch())) {
       calls.length = 0;
       await run();
@@ -221,7 +226,7 @@ describe('[ADR-0139 D2] the executor boundary composes the ReadableIds leaf', ()
     for (const fault of ['canReadObject', 'getReadFilter'] as const) {
       const { svc } = makeSecurity({ scope: () => ({ owner: 'u1' }) });
       svc[fault] = async () => { throw new Error(`${fault} is down`); };
-      engine.registerSecurityServiceSource(() => svc);
+      wire(engine, () => svc);
       calls.length = 0;
       await engine.find('rid_child', { where: branch() });
       expect(inComparandOf(calls[0].ast.where), fault).toEqual([]);
@@ -231,7 +236,7 @@ describe('[ADR-0139 D2] the executor boundary composes the ReadableIds leaf', ()
   it("a service without canReadObject is asked explain's allowed instead", async () => {
     for (const allowed of [false, true]) {
       const svc = { getReadFilter: vi.fn(async () => undefined), explain: vi.fn(async () => ({ allowed })) };
-      engine.registerSecurityServiceSource(() => svc);
+      wire(engine, () => svc);
       calls.length = 0;
       await engine.find('rid_child', { where: branch() });
       const comparand = inComparandOf(calls[0].ast.where);
@@ -242,12 +247,13 @@ describe('[ADR-0139 D2] the executor boundary composes the ReadableIds leaf', ()
   });
 
   it('no usable security service ⇒ $in: [] — unregistered, answering nothing, throwing, or unable to answer', async () => {
-    const sources: ReadonlyArray<readonly [string, (() => unknown) | undefined]> = [
+    const sources: ReadonlyArray<readonly [string, unknown]> = [
       ['no source registered', undefined],
       ['the source answers nothing', () => undefined],
       ['the source throws (a kernel with no security service)', () => { throw new Error('service not found'); }],
       ['no getReadFilter', () => ({ canReadObject: async () => true, explain: async () => ({ allowed: true }) })],
       ['neither canReadObject nor explain', () => ({ getReadFilter: async () => undefined })],
+      ['the slot holds an object, not a source function', { getReadFilter: async () => undefined }],
     ];
     for (const [label, source] of sources) {
       const rec = makeRecordingDriver();
@@ -256,7 +262,7 @@ describe('[ADR-0139 D2] the executor boundary composes the ReadableIds leaf', ()
       await e.init();
       e.registry.registerObject(CHILD as any, 'test');
       e.registry.registerObject(PARENT as any, 'test');
-      if (source) e.registerSecurityServiceSource(source);
+      if (source !== undefined) wire(e, source);
       rec.calls.length = 0;
       await e.find('rid_child', { where: branch() });
       expect(inComparandOf(rec.calls[0].ast.where), label).toEqual([]);
@@ -265,7 +271,7 @@ describe('[ADR-0139 D2] the executor boundary composes the ReadableIds leaf', ()
 
   it('the security service is read AT USE: one registered after the source answers the next read', async () => {
     let registered: unknown;
-    engine.registerSecurityServiceSource(() => {
+    wire(engine, () => {
       if (!registered) throw new Error('service not found');
       return registered;
     });
@@ -278,7 +284,7 @@ describe('[ADR-0139 D2] the executor boundary composes the ReadableIds leaf', ()
 
   it('each parent is asked once per read: two leaves over one parent and one over another', async () => {
     const { svc, asked } = makeSecurity();
-    engine.registerSecurityServiceSource(() => svc);
+    wire(engine, () => svc);
     await engine.find('rid_child', {
       where: { $or: [branch('rid_parent'), branch('rid_other'), { $and: [{ note: 'x' }, branch('rid_parent')] }] },
     });
@@ -294,7 +300,7 @@ describe('[ADR-0139 D2] the executor boundary composes the ReadableIds leaf', ()
 
   it('a leaf beside a resolved placeholder arrives branded and is composed', async () => {
     const { svc } = makeSecurity();
-    engine.registerSecurityServiceSource(() => svc);
+    wire(engine, () => svc);
     await engine.find('rid_child', {
       where: { owner: '{current_user_id}', record_id: { $in: leafOf() } },
       context: { userId: 'usr_1' } as any,
@@ -317,7 +323,7 @@ describe('[ADR-0139 D2] the executor boundary composes the ReadableIds leaf', ()
     };
     for (const [label, scope] of Object.entries(scopes)) {
       const { svc } = makeSecurity({ scope: () => scope });
-      engine.registerSecurityServiceSource(() => svc);
+      wire(engine, () => svc);
       calls.length = 0;
       await engine.find('rid_child', { where: branch() });
       const composed = inComparandOf(calls[0].ast.where) as any;
@@ -331,7 +337,7 @@ describe('[ADR-0139 D2] the executor boundary composes the ReadableIds leaf', ()
 
   it('LIT CONTROL — a read without a leaf reaches the driver as written, and the security source is never read', async () => {
     const source = vi.fn(() => makeSecurity().svc);
-    engine.registerSecurityServiceSource(source);
+    wire(engine, source);
     await engine.find('rid_child', { where: { record_id: { $in: ['p1', 'p2'] } } });
     expect(calls[0].ast.where).toEqual({ record_id: { $in: ['p1', 'p2'] } });
     expect(source).not.toHaveBeenCalled();
@@ -355,7 +361,7 @@ describe('[ADR-0139 D1, D5] what the engine never composes is refused by name �
     engine.registerMiddleware(async (_ctx, next) => next(), { object: 'rid_gated' });
     const security = makeSecurity();
     asked = security.asked;
-    engine.registerSecurityServiceSource(() => security.svc);
+    wire(engine, () => security.svc);
     calls.length = 0;
   });
 

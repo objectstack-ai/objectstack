@@ -36,8 +36,6 @@ async function armedPlugin() {
     find: vi.fn(async () => []),
     registry: { getArtifactItem: vi.fn(() => undefined) },
     getDefaultActionRunner: () => undefined,
-    // init hands the engine its `security` source (ADR-0139 D2).
-    registerSecurityServiceSource: vi.fn(),
   };
   const plugin = new ObjectQLPlugin({ ql: ql as unknown as ObjectQL, environmentId: 'env_t' });
   const registered = new Map<string, any>();

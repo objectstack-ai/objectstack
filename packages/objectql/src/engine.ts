@@ -4160,6 +4160,28 @@ function stampObjectPackage(def: ServiceObject, packageId: string, packageVersio
  */
 type ReadableIdsSecurity = Pick<ISecurityService, 'getReadFilter'> & Partial<Pick<ISecurityService, 'canReadObject' | 'explain'>>;
 
+/**
+ * [ADR-0139 D2] The engine slot where `ObjectQLPlugin` puts the SOURCE the
+ * `ReadableIds` composition reads the registered `ISecurityService` from: a
+ * function that resolves the kernel's `security` service when a leaf is
+ * composed, never at init, so plugin-registration order cannot decide
+ * whether a leaf is composed or denied. Written by assignment, so the last
+ * registration wins.
+ *
+ * An empty slot is a DEFINED state, and it fails closed: so does a slot that
+ * holds something other than a function, a source that answers nothing or
+ * throws, and a service that cannot answer both halves of a read. Each
+ * answers every leaf `$in: []` (`ObjectQL#resolveReadableIdsSecurity`).
+ *
+ * A wiring seam between this package's plugin and its engine, and nothing
+ * more: ⛔ not a member of `ObjectQL`, and ⛔ not re-exported by `index.ts` or
+ * `core.ts`, so it adds nothing to the surface either entry publishes. A
+ * `Symbol.for` key (the shape `plugin.ts` already uses for its string-keyed
+ * `skipSchemaSync` slot), so every bundle of this package — both entries,
+ * ESM and CJS — names the one slot.
+ */
+export const SECURITY_SERVICE_SOURCE_SLOT: unique symbol = Symbol.for('objectstack.objectql.securityServiceSource');
+
 export class ObjectQL implements IObjectQLEngine {
   /**
    * Ambient transaction store (ADR-0034). While a `transaction()` callback
@@ -5550,26 +5572,6 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
-   * [ADR-0139 D2] Where the executor boundary reads the registered
-   * `ISecurityService` when it composes a `ReadableIds` leaf. `ObjectQLPlugin`
-   * supplies it: a source that reads the kernel's `security` service AT USE,
-   * never at init, so plugin-registration order cannot decide whether a leaf
-   * is composed or denied. Last registration wins.
-   *
-   * Unregistered is a DEFINED state, and it fails closed: so does a source
-   * that answers nothing, one that throws, and a service that cannot answer
-   * both halves of a read. Each answers every leaf `$in: []` — see
-   * {@link resolveReadableIdsSecurity}.
-   */
-  private _securityServiceSource?: () => unknown;
-
-  /** Wire the `security` service source for `ReadableIds` composition (ADR-0139 D2). Last registration wins. */
-  registerSecurityServiceSource(source: () => unknown): void {
-    this._securityServiceSource = source;
-    this.logger.debug('Registered security-service source for ReadableIds composition');
-  }
-
-  /**
    * The states {@link composeReadableIdsAtBoundary} has already reported for
    * this engine. It records only that the report was made and caches no
    * verdict: every composition resolves the service afresh.
@@ -5581,18 +5583,23 @@ export class ObjectQL implements IObjectQLEngine {
    * because they are logged apart — and answered alike: only `usable` is
    * asked anything.
    *
-   *  - **absent** — no source is registered, or it answered nothing;
-   *  - **unusable** — the source threw (the in-repo kernels throw on a name
-   *    nothing registered), or the service exposes no `getReadFilter`, or
-   *    neither `canReadObject` nor `explain`;
+   *  - **absent** — no source is in the engine slot, or it answered nothing;
+   *  - **unusable** — the slot holds something that is not a function, the
+   *    source threw (the in-repo kernels throw on a name nothing registered),
+   *    or the service exposes no `getReadFilter`, or neither `canReadObject`
+   *    nor `explain`;
    *  - **usable** — ask it.
    */
   private resolveReadableIdsSecurity():
     | { kind: 'usable'; svc: ReadableIdsSecurity }
     | { kind: 'absent' }
     | { kind: 'unusable'; why: string } {
-    const source = this._securityServiceSource;
-    if (!source) return { kind: 'absent' };
+    // Read from the engine slot at use (see SECURITY_SERVICE_SOURCE_SLOT), never cached.
+    const source = (this as unknown as Record<symbol, unknown>)[SECURITY_SERVICE_SOURCE_SLOT];
+    if (source === undefined || source === null) return { kind: 'absent' };
+    if (typeof source !== 'function') {
+      return { kind: 'unusable', why: `the security-service source slot holds ${Array.isArray(source) ? 'an array' : `a ${typeof source}`}, not a function` };
+    }
     let svc: unknown;
     try {
       svc = source();
