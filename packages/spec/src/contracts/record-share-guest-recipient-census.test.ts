@@ -80,8 +80,11 @@ const lineOf = (text: string, index: number): number => text.slice(0, index).spl
 /** Extensions read as JS/TS source: their comments are blanked first, since a comment writes no row. */
 const CODE_EXT = new Set(['.ts', '.mts', '.cts', '.js', '.mjs', '.cjs']);
 
+/** Cheap pre-filter: a file that never spells the key cannot hold a producer (and is never masked). */
+const SPELLS_RECIPIENT_KEY = /recipient_?[tT]ype/;
+
 const producersIn = (ext: string, raw: string, live = 'guest'): number[] => {
-  if (!raw.includes(live)) return [];
+  if (!raw.includes(live) || !SPELLS_RECIPIENT_KEY.test(raw)) return [];
   // `maskComments` blanks comment content and keeps offsets and line numbers.
   const text = CODE_EXT.has(ext) ? maskComments(raw) : raw;
   const out: number[] = [];
@@ -108,6 +111,7 @@ const literalsInBrackets = (text: string, open: number): string[] => {
 
 /** Leg 2: the options of the `recipient_type` select in a file that declares `sys_record_share`, or `null`. */
 const recordShareSelectOptions = (raw: string): string[] | null => {
+  if (!raw.includes('sys_record_share') || !raw.includes('recipient_type')) return null;
   const text = maskComments(raw);
   if (!/name:\s*['"]sys_record_share['"]/.test(text)) return null;
   const at = text.search(/recipient_type\s*:\s*Field\.select\(/);
@@ -118,6 +122,7 @@ const recordShareSelectOptions = (raw: string): string[] | null => {
 
 /** Leg 3: the literal members of `RecordShareRecipientType`, or `null` when the file does not declare it. */
 const unionMembers = (raw: string): string[] | null => {
+  if (!raw.includes('RecordShareRecipientType')) return null;
   const m = /export\s+type\s+RecordShareRecipientType\s*=([^;]*);/.exec(maskComments(raw));
   if (!m) return null;
   return [...m[1]!.matchAll(/'([^']*)'/g)].map((x) => x[1]!);
