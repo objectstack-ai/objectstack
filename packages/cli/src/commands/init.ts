@@ -342,7 +342,10 @@ export const SCAFFOLD_PNPM_RANGE = '>=10.15';
 //
 // `^4.0.0` over `^4.0.18`: no recorded decision exists for either, both were
 // written in the same 2026-02-07 commit, and `^4.0.18` claims a PATCH-level
-// floor nothing justifies while being strictly the narrower of the two.
+// floor nothing justifies while being strictly the narrower of the two. (The
+// vitest range has since moved to `~4.0.0` because `^4.0.0` stopped
+// installing on npm 10. That was an install failure, not a support decision;
+// the comment on `SCAFFOLD_VITEST_RANGE` holds the reading.)
 //
 // ⚠️ Neither choice changes what a scaffolded project INSTALLS. Measured
 // against the registry: `^5.3.0` and `^5.8.0` both resolve to typescript
@@ -379,8 +382,38 @@ export const SCAFFOLD_PNPM_RANGE = '>=10.15';
 /** The TypeScript range every scaffolded project declares. */
 export const SCAFFOLD_TYPESCRIPT_RANGE = '^5.3.0';
 
-/** The vitest range a scaffolded project declares when its template tests. */
-export const SCAFFOLD_VITEST_RANGE = '^4.0.0';
+/**
+ * The vitest range a scaffolded project declares when its template tests.
+ *
+ * `~4.0.0`, not `^4.0.0`, because `^4.0.0` does not INSTALL on npm 10, the npm
+ * that Node 22 bundles. Measured 2026-10-12, in an empty directory with a fresh
+ * `--cache` and a manifest holding only this one devDependency (the full matrix
+ * is in the PR that set this value): on npm 10.9.4 and 10.9.9, `npm install`
+ * exits 1 with `Cannot read properties of null (reading 'edgesOut')` from
+ * arborist's `#loadPeerSet`, and npm 11.21.0 installs it. `~4.0.0` installs on
+ * all three (vitest 4.0.18, vite 7.3.7), and so do both CLI-emitted plugin
+ * manifests. The cost: a scaffold gets vitest 4.0.18 rather than 4.1.11.
+ *
+ * The cause is upstream, in the peer graph. Every vitest 4.1.x admits vite 8.
+ * vite 8 declares an optional `@vitejs/devtools` peer, which reaches
+ * `@vitejs/devtools-vitest`, which peers `vitest@*`. npm 10 resolves that peer
+ * to vitest's `latest` release, whose exact-version peers then contradict the
+ * vitest at the root, and npm 10's arborist crashes on it. vitest 4.0.x admits
+ * only vite `^6 || ^7`, and no vite 6 or 7 release declares the devtools peer,
+ * so the `vitest@*` peer never enters the graph.
+ *
+ * ⛔ Not `^5.0.0`, although it installs today. It installs only because it
+ * resolves to exactly the version `latest` names: pinned to 5.0.0 or 5.0.2 it
+ * crashes the same way. So it would break again, with no change here, the day
+ * `latest` moves past 5.x. ⛔ Not a shipped `.npmrc` with `legacy-peer-deps`
+ * either, which changes peer resolution for every npm user of the scaffold.
+ *
+ * The re-check that lets this move back: run `npm install` of
+ * `{"devDependencies":{"vitest":"^4.0.0"}}` (or the range you want) in an empty
+ * directory with a fresh `--cache`, on the newest npm 10 and on npm 11. When
+ * both exit 0, widen this.
+ */
+export const SCAFFOLD_VITEST_RANGE = '~4.0.0';
 
 /** The `@types/node` range a scaffolded project declares. */
 export const SCAFFOLD_TYPES_NODE_RANGE = '^22.0.0';

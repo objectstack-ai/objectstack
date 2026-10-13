@@ -42,6 +42,7 @@ import { defineStack, defineFlow } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const OBJECT = 'snapmask_item';
 const POSITION = 'snapmask_reviewer';
@@ -196,9 +197,10 @@ describe('[#20964] approval snapshot field served masked on the data plane', () 
         const organization_id = membership?.organization_id;
         await ql.insert('sys_user_position', { id: 'hold_snapmask_m', user_id: memberId, position: POSITION, organization_id }, SYS);
         await ql.insert('sys_user_position', { id: 'hold_snapmask_u', user_id: unmaskerId, position: POSITION, organization_id }, SYS);
-        expect(ql.registry.getItem('permission', unmaskSet.name), 'fixture permission set declared').toBeTruthy();
+        const unmask = await catalogPermissionSet(ql, unmaskSet.name);
+        expect(unmask, 'fixture permission set served by the security catalog').toBeTruthy();
         for (const userId of [unmaskerId, submitterId]) {
-          await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: unmaskSet.name }, SYS);
+          await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: unmask.name }, SYS);
         }
 
         const createRes = await stack.apiAs(submitterToken, 'POST', `/data/${OBJECT}`, { name: 'Item one', [KEY]: STORED });

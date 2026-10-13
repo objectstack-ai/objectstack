@@ -100,7 +100,7 @@ describe('packagedBaseRefusal — the /meta door\'s locked-base verdict, handed 
         expect(p.packagedBaseRefusal({ type: 'flow', name: 'customer_flow', operation: 'delete' })).toBeNull();
     });
 
-    it('a Regime O overlay type (allowOrgOverride) is never refused on this ground', () => {
+    it('a Regime O overlay type (allowEnvironmentOverlay) is never refused on this ground', () => {
         const p = protocolOn(undefined);
         expect(p.packagedBaseRefusal({ type: 'view', name: 'pkg_view', operation: 'save' })).toBeNull();
         expect(p.packagedBaseRefusal({ type: 'view', name: 'pkg_view', operation: 'delete' })).toBeNull();
@@ -173,10 +173,10 @@ describe('packagedBaseRefusal — the /meta door\'s locked-base verdict, handed 
                 const { entries } = await (p as any).getMetaTypes();
                 return Object.fromEntries(['flow', 'page'].map((t) => {
                     const e = entries.find((x: any) => x.type === t);
-                    return [t, { allowOrgOverride: e?.allowOrgOverride, overrideSource: e?.overrideSource }];
+                    return [t, { allowEnvironmentOverlay: e?.allowEnvironmentOverlay, overrideSource: e?.overrideSource }];
                 }));
             };
-            const SHUT = { allowOrgOverride: false, overrideSource: 'registry' };
+            const SHUT = { allowEnvironmentOverlay: false, overrideSource: 'registry' };
             expect(await hatchOf(shut)).toEqual({ flow: SHUT, page: SHUT });
 
             process.env.OBJECTSTACK_METADATA_WRITABLE = 'flow,page';
@@ -194,7 +194,7 @@ describe('packagedBaseRefusal — the /meta door\'s locked-base verdict, handed 
             // Control: the preferred spelling is read, so the same names open the listing.
             process.env.OS_METADATA_WRITABLE = 'flow,page';
             ObjectStackProtocolImplementation.resetEnvWritableCache();
-            const OPEN = { allowOrgOverride: true, overrideSource: 'env' };
+            const OPEN = { allowEnvironmentOverlay: true, overrideSource: 'env' };
             expect(await hatchOf(protocolOn(environmentId))).toEqual({ flow: OPEN, page: OPEN });
         });
     }
@@ -227,13 +227,13 @@ describe('packagedBaseRefusal — the sentence is chosen per ADR-0126 regime', (
      */
     const SEALED_SAVE = (type: string, name: string) =>
         `Metadata item '${type}/${name}' is provided by a managed package and is sealed against in-place edits: `
-        + 'its type takes no environment overlay (allowOrgOverride=false), and OS_METADATA_WRITABLE does not open '
+        + 'its type takes no environment overlay (allowEnvironmentOverlay=false), and OS_METADATA_WRITABLE does not open '
         + 'a managed item. Edit the source artifact and redeploy. '
         + 'See docs/adr/0131-total-organization-ownership-no-null-organization-id.md.';
     /** …and its removal twin (`refusePackagedBaseRemoval`), which has no remedy to name. */
     const SEALED_DELETE = (type: string, name: string) =>
         `Metadata item '${type}/${name}' is provided by a managed package and is sealed against removal: `
-        + 'its type takes no environment overlay (allowOrgOverride=false), and OS_METADATA_WRITABLE does not open '
+        + 'its type takes no environment overlay (allowEnvironmentOverlay=false), and OS_METADATA_WRITABLE does not open '
         + 'a managed item. See docs/adr/0131-total-organization-ownership-no-null-organization-id.md.';
 
     for (const environmentId of [undefined, 'env_1']) {

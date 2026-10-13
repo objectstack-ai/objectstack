@@ -207,14 +207,14 @@ export const GetMetaTypesResponseSchema = lazySchema(() => z.object({
     label: z.string().describe('Human-readable label'),
     description: z.string().optional().describe('Brief description'),
     filePatterns: z.array(z.string()).describe('Glob patterns used to discover artifacts of this type'),
-    supportsOverlay: z.boolean().describe('Loader can merge per-org overlays on top of artifact'),
-    allowOrgOverride: z.boolean().describe('Per-org overlay writes accepted at runtime (may be env-elevated)'),
+    supportsOverlay: z.boolean().describe('Whether a stored overlay row of an item a managed package ships may be removed through the ordinary delete door without the type\'s environment-overlay permission: the removal removes no managed definition, and changes what is served for permission alone; it opens no save and it decides no read'),
+    allowEnvironmentOverlay: z.boolean().describe('True when the registry grants environment overlays of this type\'s packaged items, or when OS_METADATA_WRITABLE names the type (overrideSource env), which opens the type\'s writes of items no managed package ships and never a managed item (ADR-0131 D6)'),
     allowRuntimeCreate: z.boolean().describe('New artifacts of this type can be created via runtime API'),
     supportsVersioning: z.boolean().describe('History is tracked for this type'),
     executionPinned: z.boolean().describe('Runtime transactions pin a specific historical version_hash (ADR-0009)'),
     loadOrder: z.number().int().describe('Loading priority (lower = earlier)'),
     domain: z.enum(['data', 'ui', 'automation', 'system', 'security', 'ai']).describe('Protocol domain'),
-    overrideSource: z.enum(['registry', 'env']).describe('Whether allowOrgOverride is set in the static registry or via OS_METADATA_WRITABLE env var'),
+    overrideSource: z.enum(['registry', 'env']).describe('Whether allowEnvironmentOverlay comes from the static registry or is elevated by the OS_METADATA_WRITABLE environment variable'),
     createSeed: z.unknown().optional().describe('Authoritative minimal valid create seed for this type — Studio/CLI/API derive create defaults from it (single source of truth in @objectstack/spec). Absent for canvas-create types whose shape is built interactively.'),
   })).optional().describe('Enriched per-type registry entries (Phase 3a)'),
 }));
@@ -258,6 +258,21 @@ export const GetMetaItemsResponseSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * [#22877] The `member` every by-name door that reads or changes ONE stored
+ * item declares (get, delete, publish, history; revert has no declared
+ * request) — one sentence, so the four requests cannot drift apart. On the
+ * REST door it is the `?member=` query parameter of each route's closed set.
+ */
+const BUNDLE_MEMBER_SELECTOR_DESCRIPTION =
+  'Bundle member selector, for a metadata type whose identity is a pair (today only `email_template`, ' +
+  'identified by `(name, locale)`): the member this request addresses, spelled as its discriminator value ' +
+  '(`zh-CN`). Absent, the canonical member (`en-US` for `email_template`), which is what a bare-name read ' +
+  'answers; naming the canonical value is the same request. It is not the response translation locale, ' +
+  'which `?locale=` and `Accept-Language` choose. Refused with 400 `VALIDATION_ERROR` on a type that has ' +
+  'no members, and for a blank value or one longer than a stored member can be (100 characters). A ' +
+  'well-formed member with nothing stored or shipped answers as that door answers an absent item.';
+
+/**
  * Get Metadata Item Request
  * Get a specific metadata item by type and name
  */
@@ -265,6 +280,7 @@ export const GetMetaItemRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
   name: z.string().describe('Item name (snake_case identifier)'),
   packageId: z.string().optional().describe('Optional package ID to filter items by'),
+  member: z.string().optional().describe(BUNDLE_MEMBER_SELECTOR_DESCRIPTION),
   state: z.enum(['active', 'draft']).optional().describe(
     'Draft-visibility switch — which lifecycle row to read (strict mode): '
     + '`\'draft\'` opens the pending draft buffer (Studio\'s editor read) and '
@@ -902,6 +918,7 @@ export const PublishMetaItemRequestSchema = lazySchema(() => z.object({
     + 'package-bound draft unfindable — a silent `no_draft` on the untouched '
     + 'path.',
   ),
+  member: z.string().optional().describe(BUNDLE_MEMBER_SELECTOR_DESCRIPTION),
 }));
 
 /**
@@ -1363,6 +1380,7 @@ export const DeleteMetaItemRequestSchema = lazySchema(() => z.object({
     + 'state only; never `sys_` tables). Used by the "discard a previewed '
     + 'object" flow so a publish-to-preview leaves no orphan table.',
   ),
+  member: z.string().optional().describe(BUNDLE_MEMBER_SELECTOR_DESCRIPTION),
 }));
 
 /**
@@ -1579,6 +1597,7 @@ export const HistoryMetaItemRequestSchema = lazySchema(() => z.object({
     + 'declaring `.min()`/`.max()` here would refuse values the shipped '
     + 'verb accepts.)',
   ),
+  member: z.string().optional().describe(BUNDLE_MEMBER_SELECTOR_DESCRIPTION),
 }));
 
 /**
@@ -1603,7 +1622,7 @@ export const HistoryMetaItemRequestSchema = lazySchema(() => z.object({
  * carries no spelling regex.
  *
  * `{ events: [] }` is the honest answer for a genuinely empty change log AND
- * for a non-overlay metadata type (neither `allowOrgOverride` nor
+ * for a non-overlay metadata type (neither `allowEnvironmentOverlay` nor
  * `allowRuntimeCreate`): such types have no history by construction —
  * `saveMetaItem` refuses them outright (#5086) — and the implementation
  * answers `[]` rather than throwing so callers can treat "no history"
@@ -1731,11 +1750,24 @@ export const GetPublishedMetaItemResponseSchema = lazySchema(() => z.unknown().d
  * `null` is the honest answer for a body that declares none; ⛔ never a
  * machine-name fallback, which would make "has a label" and "has none"
  * indistinguishable to the reader that has to choose between them.
+ *
+ * [#23073] `member` tells two drafts of one bundle apart: for a type whose
+ * identity is a pair (`email_template`, `(name, locale)`), two languages of
+ * one template are two drafts with one `type` and `name`. It is the row's
+ * stored member, never read off the body, and it is the value the by-name
+ * doors' `member` selector takes back.
  */
 export const ListDraftsResponseSchema = lazySchema(() => z.object({
   drafts: z.array(z.object({
     type: z.string().describe('Metadata type name (canonical singular).'),
     name: z.string().describe('Item name.'),
+    member: z.string().optional().describe(
+      'The bundle member this draft is, for a metadata type whose identity is a pair (today only '
+      + '`email_template`, identified by `(name, locale)`): its discriminator value (`zh-CN`), and the '
+      + 'canonical member spelled out (`en-US`). Present on every draft of such a type, so two members of '
+      + 'one name are two entries; absent for a type whose identity is its name alone. Pass it back as the '
+      + 'by-name doors\' `member` selector (`?member=`) to read, publish or discard this draft.',
+    ),
     label: I18nLabelSchema.nullable().describe(
       'The draft body\'s own top-level `label`, as authored: a plain string or an inline '
       + 'locale map (`I18nLabel`), resolved by the reader. `null` when the body declares '

@@ -50,6 +50,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SysUser, SysAccount } from '@objectstack/platform-objects/identity';
 import { bootstrapPlatformAdmin, shouldReplayBootstrapFor } from './bootstrap-platform-admin.js';
+import { seedLegacyPlatformBucket } from './__tests__/legacy-catalog-rows.testkit.js';
 import { SysPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
@@ -319,6 +320,8 @@ describe('#14348 — the promotion target is the oldest human that can AUTHENTIC
     // written by hand — which is exactly the row the old selector would have
     // picked.
     const { logger: seedLogger } = collectingLogger();
+    // An existing database: the platform-bucket rows an earlier release seeded.
+    await seedLegacyPlatformBucket(engine as any, defaultPermissionSets);
     const seedPass = await bootstrapPlatformAdmin(engine as any, defaultPermissionSets, {
       logger: seedLogger,
     });

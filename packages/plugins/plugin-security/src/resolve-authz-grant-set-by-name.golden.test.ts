@@ -38,6 +38,7 @@ import { SysUser, SysAccount, SysMember, SysOrganization } from '@objectstack/pl
 
 import { SecurityPlugin } from './security-plugin.js';
 import { bootstrapPlatformAdmin } from './bootstrap-platform-admin.js';
+import { seedLegacyPlatformBucket } from './__tests__/legacy-catalog-rows.testkit.js';
 import { reconcileOrgAdminGrant } from './auto-org-admin-grant.js';
 import { SysPosition } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
@@ -156,6 +157,8 @@ async function resolverByPrincipal(posture: Posture): Promise<Record<string, unk
   await user('usr_agent', 'agent@rz.example', '2025-04-01T00:00:00.000Z');
 
   // The catalog and (single) the platform-admin promotion.
+  // An existing database: the platform-bucket rows an earlier release seeded.
+  await seedLegacyPlatformBucket(engine, defaultPermissionSets);
   const boot = await bootstrapPlatformAdmin(engine, defaultPermissionSets);
   expect(boot.adminPromoted).toBe(posture === 'single');
 
@@ -350,6 +353,7 @@ const SINGLE: unknown = {
       ],
       posture: 'TENANT_ADMIN',
       systemPermissions: [
+        'manage_mailboxes',
         'manage_org_users',
         'setup.access',
         'setup.write'
@@ -392,6 +396,7 @@ const SINGLE: unknown = {
       ],
       posture: 'PLATFORM_ADMIN',
       systemPermissions: [
+        'manage_mailboxes',
         'manage_metadata',
         'manage_platform_settings',
         'manage_sharing',
@@ -417,6 +422,7 @@ const SINGLE: unknown = {
       ],
       posture: 'PLATFORM_ADMIN',
       systemPermissions: [
+        'manage_mailboxes',
         'manage_metadata',
         'manage_platform_settings',
         'manage_sharing',
@@ -530,6 +536,7 @@ const WALLED: unknown = {
       ],
       posture: 'TENANT_ADMIN',
       systemPermissions: [
+        'manage_mailboxes',
         'manage_org_users',
         'setup.access',
         'setup.write'
@@ -572,6 +579,7 @@ const WALLED: unknown = {
       ],
       posture: 'PLATFORM_ADMIN',
       systemPermissions: [
+        'manage_mailboxes',
         'manage_metadata',
         'manage_platform_settings',
         'manage_sharing',
@@ -597,6 +605,7 @@ const WALLED: unknown = {
       ],
       posture: 'PLATFORM_ADMIN',
       systemPermissions: [
+        'manage_mailboxes',
         'manage_metadata',
         'manage_platform_settings',
         'manage_sharing',

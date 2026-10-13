@@ -289,6 +289,80 @@ describe('FLOW_NODE_EXPRESSION_PATHS — the loop and map collection (#19939)', 
 });
 
 /**
+ * #19939 (stage S4) — a `notify` node's computed values are `value` slots:
+ * `recipients`, `templateData.*` and `sourceId`. `recipients` holds one value
+ * or a list of them, so it carries `eachElement`: each element of a list is a
+ * value of its own, at its index. `sourceObject`, `actorId` and `payload` are
+ * literals, read as written — no flow computed one, so the ledger declares no
+ * slot there.
+ */
+describe('FLOW_NODE_EXPRESSION_PATHS — a notify node\'s value slots (#19939)', () => {
+  const ENVELOPE = { dialect: 'cel', source: 'record.owner' };
+
+  it('declares the three notify computed values as `value` slots, and only `recipients` reads each element', () => {
+    const notify = FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.nodeType === 'notify');
+    expect(notify.map((e) => [e.path, e.role, e.label])).toEqual([
+      ['recipients', 'value', 'notify recipient'],
+      ['templateData.*', 'value', 'notify templateData value'],
+      ['sourceId', 'value', 'notify sourceId'],
+    ]);
+    expect(FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.eachElement).map((e) => `${e.nodeType}.${e.path}`))
+      .toEqual(['notify.recipients']);
+  });
+
+  it('`recipients`: a list is read element by element, at each index; any other value at the slot itself', () => {
+    expect(resolveFlowNodeValueSlots('notify', { recipients: ['u1', ENVELOPE, '{x}'] }).map((f) => [f.path, f.value]))
+      .toEqual([['recipients[0]', 'u1'], ['recipients[1]', ENVELOPE], ['recipients[2]', '{x}']]);
+    expect(resolveFlowNodeValueSlots('notify', { recipients: '{x}' }).map((f) => [f.path, f.value]))
+      .toEqual([['recipients', '{x}']]);
+    // The expression walk emits the envelopes only — an entry's at its index.
+    expect(resolveFlowNodeExpressions('notify', { recipients: ['u1', ENVELOPE] }).map((f) => [f.path, f.value]))
+      .toEqual([['recipients[1]', ENVELOPE]]);
+    expect(resolveFlowNodeExpressions('notify', { recipients: ENVELOPE }).map((f) => f.path)).toEqual(['recipients']);
+    expect(resolveFlowNodeValueSlots('notify', { recipients: [] })).toEqual([]);
+  });
+
+  it('the map is read per key, the single values at their key; the literals are no slot', () => {
+    const config = {
+      recipients: 'u1', templateData: { a: ENVELOPE }, payload: { b: ENVELOPE },
+      sourceObject: 'o', sourceId: ENVELOPE, actorId: 'u2', actionUrl: '/x/{{ id }}', topic: '{t}',
+    };
+    expect(resolveFlowNodeValueSlots('notify', config).map((f) => f.path))
+      .toEqual(['recipients', 'templateData.a', 'sourceId']);
+    expect(resolveFlowNodeExpressions('notify', config).map((f) => f.path)).toEqual(['templateData.a', 'sourceId']);
+  });
+});
+
+/**
+ * #19939 (stage S5) — an `http` node's `body` is a `value` slot: ONE value,
+ * the whole payload. Its `url` and `headers` values are text slots
+ * (`flow-text-slot-template.ts`) and its `method`, `durable`, `timeoutMs` and
+ * `signingSecret` literals — the ledger declares no slot at any of them.
+ */
+describe('FLOW_NODE_EXPRESSION_PATHS — an http node\'s body (#19939)', () => {
+  const ENVELOPE = { dialect: 'cel', source: "{'id': record.id}" };
+
+  it('declares the body as the one `value` slot of an http node, read as one value', () => {
+    expect(FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.nodeType === 'http').map((e) => [e.path, e.role, e.label, e.eachElement]))
+      .toEqual([['body', 'value', 'http body', undefined]]);
+  });
+
+  it('reads the body whole — an envelope, a literal map or a list — and nothing else of the config', () => {
+    const config = {
+      url: '/x/{{ id }}', headers: { 'X-Ref': '{{ id }}' }, method: 'POST', durable: true, timeoutMs: 5, signingSecret: 's',
+    };
+    expect(resolveFlowNodeValueSlots('http', { ...config, body: ENVELOPE }).map((f) => [f.path, f.value]))
+      .toEqual([['body', ENVELOPE]]);
+    expect(resolveFlowNodeExpressions('http', { ...config, body: ENVELOPE }).map((f) => f.path)).toEqual(['body']);
+    // A literal is emitted for the template judge, never for the expression check.
+    expect(resolveFlowNodeValueSlots('http', { ...config, body: ['a', '{x}'] }).map((f) => [f.path, f.value]))
+      .toEqual([['body', ['a', '{x}']]]);
+    expect(resolveFlowNodeExpressions('http', { ...config, body: { id: '{x}' } })).toEqual([]);
+    expect(resolveFlowNodeValueSlots('http', config)).toEqual([]);
+  });
+});
+
+/**
  * #19939 (stage S2) — a `screen`'s three positions that hand a value to the
  * client are `value` slots: an object form's `defaults.*`, a field's
  * `defaultValue` (under the `fields[]` repeater) and an object form's
@@ -398,7 +472,8 @@ describe('every entry older than the value role resolves byte-identically (the r
     // byte-identical to what it was, with one exception: #19939's stage S3
     // moved `loop.collection` and `map.collection` from the retired
     // `flow-template` role to `value` IN PLACE (`screen.fields[].visibleWhen`
-    // keeps its `predicate` row beside the screen's value rows).
+    // keeps its `predicate` row beside the screen's value rows). Stage S4
+    // appended the three `notify` value rows, and stage S5 the `http` body's.
     expect(FLOW_NODE_EXPRESSION_PATHS.map(byKey)).toEqual([
       'screen.fields[].visibleWhen (predicate)',
       'decision.conditions[].expression (predicate)',
@@ -413,6 +488,10 @@ describe('every entry older than the value role resolves byte-identically (the r
       'screen.defaults.* (value)',
       'screen.fields[].defaultValue (value)',
       'screen.recordId (value)',
+      'notify.recipients (value)',
+      'notify.templateData.* (value)',
+      'notify.sourceId (value)',
+      'http.body (value)',
     ]);
   });
 

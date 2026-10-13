@@ -10,9 +10,9 @@ the seed loader replaying package fixtures, a plugin's boot reconciler, a
 service self-write, a migration.
 
 This page is **the authority** for what that flag actually does. It exists
-because the flag is not one concept: it is a single boolean read at **124
-distinct sites across 20 packages**, and knowing three of those behaviours gives
-no hint that the other hundred-and-four exist. Every documented app-side bug
+because the flag is not one concept: it is a single boolean read at **over a
+hundred distinct sites across some twenty packages**, and knowing three of those
+behaviours gives no hint that the rest exist. Every documented app-side bug
 traced to `isSystem` had the same shape — the metadata was complete and correct,
 and the gap was observable only by querying the resulting rows.
 
@@ -26,31 +26,31 @@ context whenever one exists.
 </Callout>
 
 <Callout type="info">
-**Every anchor, and every count about the census population, is checked by CI.**
+**Every anchor, and the population behind it, is checked by CI.**
 `scripts/check-system-context-census.mjs` re-runs the AST census over the whole
 repo on each PR and refuses the page when an anchor names a symbol its file no
-longer declares, when a stated count about the population disagrees with the
-census, or — the check that matters most — when the code holds an elevation read
-that no row here anchors. Six raw text counts in
-[Maintaining this table](#maintaining-this-table) are deliberately **not**
-enforced, and say there when they were measured.
+longer declares, or — the check that matters most — when the code holds an
+elevation read that no row here anchors. The page states no totals: run
+`node scripts/isystem-census.mjs` for a live count. The six raw text counts in
+[Maintaining this table](#maintaining-this-table) are a dated snapshot, and say
+there when they were measured.
 
 ⚠️ **What these anchors buy, and what they cost — read this before trusting a
 row.** Every anchor here is a `path#symbol` citation. Nothing encodes a
 position, so an unrelated edit above a site cannot rot one, and a repair is
 never mechanical: there are no numbers to renumber. The price is granularity.
 Several reads inside one function collapse onto one anchor, so **deleting a
-whole symbol reds this page, and deleting one of several reads inside a symbol
-that keeps at least one may not.** The gap is real, it is measured below, and it
-is left open deliberately rather than hidden — see
+whole symbol reds this page, and adding or deleting one of several reads inside
+a symbol that keeps at least one does not.** The gap is real, it is priced
+below, and it is left open deliberately rather than hidden — see
 [Maintaining this table](#maintaining-this-table).
 </Callout>
 
 ## Which `isSystem` this page is about
 
 Three unrelated declarations share the identifier. **This page documents only the
-first.** The others are ordinary metadata fields on a stored document and have
-nothing to do with elevation. (A fourth, `Environment.isSystem` — a
+first.** The others are metadata keys on a stored document (one of them now
+retired) and have nothing to do with elevation. (A fourth, `Environment.isSystem` — a
 platform-infrastructure environment, not user data — left this repo with the
 `@objectstack/spec/cloud` subpath in #16325 and is declared in the cloud repo.)
 
@@ -58,7 +58,7 @@ platform-infrastructure environment, not user data — left this repo with the
 |:---|:---|:---:|
 | `ExecutionContext.isSystem` — `packages/spec/src/kernel/execution-context.zod.ts#isSystem` | The elevation flag on an operation's context | ✅ |
 | `Object.isSystem` — `packages/spec/src/data/object.zod.ts#isSystem` | Marks a **system object** (protected from deletion; defaults its org-wide sharing to `public` when no `sharingModel` is set) | ❌ |
-| `EmailTemplate.isSystem` — `packages/spec/src/system/email-template.zod.ts#isSystem` | Built-in template; tenants may override but should not delete | ❌ |
+| `EmailTemplate.isSystem` — `packages/spec/src/system/email-template.zod.ts#isSystem` | A retired key: a `retiredKey()` tombstone, which the parse refuses with a migration note | ❌ |
 
 The collision is a genuine hazard rather than a naming nit: `Object.isSystem`
 changes an object's **default sharing**, and `ExecutionContext.isSystem` changes
@@ -137,12 +137,14 @@ that silently does not happen.
 | 27 | Search-companion column **kept** in a read's rows when it was explicitly requested | objectql | Get: the internal companion column is readable. Lose: nothing for app code — this is the engine reading its own index | `packages/objectql/src/engine.ts#stripSearchCompanionFromRead` |
 | 28 | Dependent-count disclosure on a blocked delete | objectql | Get: the count of blocking children. Nothing was elevated past the caller, so nothing is withheld | `packages/objectql/src/engine.ts#dependentCountIsDisclosable` |
 | 29 | Reference-cleanup log attributes the write to `'system'` | objectql | Get: an honest actor label instead of `anonymous` when the context carries neither `userId` nor `actor` | `packages/objectql/src/engine.ts#recordReferenceCheckElevation` |
-| 29b | A traversing validation rule's related read skips the **caller's bounds** | objectql | Get: no row bound from the caller's own read on a related object no organization wall scopes, and a related read even with no organization under a walled posture (a `tenantId` on the context still scopes it). Every caller that is not system is held to both | `packages/objectql/src/engine.ts#resolvePredicateRelated` |
+| 29b | A traversing validation rule's related read skips the **caller's bounds** | objectql | Get: no row bound from the caller's own read on a related object no organization wall scopes, no read door on a header the rule reads through a `master_detail` field, and a related read even with no organization under a walled posture (a `tenantId` on the context still scopes it). Every caller that is not system is held to all three: a header its read door does not return is unavailable to the rule exactly as a header that exists nowhere is, whatever it holds, and a header it can read is judged on its stored values. A plain `lookup` to an object an organization wall scopes asks no read door, system caller or not | `packages/objectql/src/engine.ts#resolvePredicateRelated` |
+| 29c | A detail write's master-detail header read asks **no read door** | objectql | Get: the write binds the header a parent-scoped `requiredWhen` / `readonlyWhen` reads as `parent` from the header's stored row whoever can read it, as before. Every caller that is not system meets its own read door first: a header that read does not return answers as a header that exists nowhere — an unbound `parent`, and `reference_not_found` on the reference check (which a system caller's write skips altogether) | `packages/objectql/src/engine.ts#masterDetailHeadersCallerReads` |
 | 30 | **Bulk data event `organizationId` OMITTED** — the batch is published "not asserted" | plugin-security | Get: nothing — the `data.records.*` event still publishes. Lose: the per-organization attribution: this exit is taken before the security middleware composes any tenant wall, so it records no Layer 0 verdict on the operation (`OperationContext.tenantLayer0Verdict`, #15813), and the engine's bulk producer — which reads that recorded verdict and nothing else — omits the key rather than filling it from the caller's `tenantId`; a tenant-scoped consumer then does not deliver the event inside an organization wall (#15225) | `packages/plugins/plugin-security/src/security-plugin.ts#start` |
 
 ### 3. Sharing (`plugin-sharing`)
 
-The largest single consumer — **17 of the 124 sites**.
+One of the largest consumers of the flag;
+`node scripts/isystem-census.mjs --json` lists every site with its package.
 
 | # | Behaviour when `isSystem` | What you get / what you lose | Anchor |
 |:--|:---|:---|:---|
@@ -167,26 +169,28 @@ The largest single consumer — **17 of the 124 sites**.
 | 44 | Attachment access hooks return early (insert + update + delete, and the read AST) | service-storage | Lose: attachment visibility scoping | `packages/services/service-storage/src/attachment-access-hooks.ts#installAttachmentAccessHooks`, `#installAttachmentReadVisibility` |
 | 45 | Comment access hooks return early (insert + update + delete, and the read AST), and so do the activity and audit-log read gates (their read AST), the activity field redaction and the audit-log field redaction (the rows a read serves), and the query guard over both objects' value-bearing columns (the read AST) | plugin-audit | Get: the whole activity row and the whole `sys_audit_log` row, its before/after snapshots included, on `find` / `findOne` — the audit writer, each read gate's own pre-scan and the activity redaction's — and a filter, sort or grouping by those columns. Lose: comment visibility scoping, the narrowing of `sys_activity` and of `sys_audit_log` to rows whose parent record the caller can read, the redaction of a parent field's value from an activity row's text and recorded change and from a ledger row's before/after snapshots, the withholding of an activity row recording an update whose every changed field the reader is withheld (on `count` and `aggregate` too, so a total agrees with the rows), and the refusal of a query over those columns for a reader withheld a field of the objects it can reach | `packages/plugins/plugin-audit/src/comment-access-hooks.ts#installCommentAccessHooks`, `#installCommentReadVisibility`, `packages/plugins/plugin-audit/src/activity-read-visibility.ts#installActivityReadVisibility`, `packages/plugins/plugin-audit/src/audit-log-read-visibility.ts#installAuditLogReadVisibility`, `packages/plugins/plugin-audit/src/activity-field-redaction.ts#installActivityFieldRedaction`, `packages/plugins/plugin-audit/src/audit-log-field-redaction.ts#installAuditLogFieldRedaction`, `packages/plugins/plugin-audit/src/parent-field-query-guard.ts#installParentFieldQueryGuard` |
 | 46 | Knowledge search returns hits unfiltered | service-knowledge | Lose: the permission filter over search results | `packages/services/service-knowledge/src/knowledge-service.ts#applyPermissionFilter` |
+| 47 | The inbound-mail read gates return early (the read AST) | service-mailbox | Get: every `sys_mail_message` and `sys_mail_association` row on `find` / `findOne` — the ingest writer and each gate's own pre-scan, which read the association and mailbox rows a decision needs. Lose: the narrowing of a message to callers who can read a record it is associated with or who own its mailbox (so the unassociated pool is restricted), and of an association to callers who can read the record it names (on `count` and `aggregate` too, so a total agrees with the rows) | `packages/services/service-mailbox/src/mail-read-visibility.ts#gateMiddleware` |
 
 ### 5. Actions, metadata plane, provenance, the organization wall
 
 | # | Behaviour when `isSystem` | Package | What you get / what you lose | Anchor |
 |:--|:---|:---|:---|:---|
-| 47 | Object API-exposure gate bypassed (`apiEnabled` / `apiMethods`) | runtime | Get: internal self-writes ignore exposure declarations — these govern **external** exposure, not engine self-writes | `packages/runtime/src/action-execution.ts#callData` |
-| 48 | Action `requiredPermissions` bypassed | runtime | Get: engine self-invocation runs any action | `packages/runtime/src/action-execution.ts#actionPermissionError` |
-| 49 | `manage_metadata` bypassed on metadata writes | runtime, rest | Get: schema writes without the capability (the permission-set clone door's save included) — and, because REST's save door and the stored-version read doors ask one save verdict, an app's full stored version on `/layers`, `?layers=true` and `/diff`, whatever its entry gates withhold | `packages/runtime/src/domains/meta.ts#handleMetadataRequest`, `packages/rest/src/rest-server.ts#registerMetadataEndpointsInner`, `packages/rest/src/rest-server.ts#metaSaveVerdict`, `packages/runtime/src/domains/permission-set-clone.ts#handlePermissionSetCloneWrite` |
-| 50 | The shared metadata-write verdict itself returns `allowed` | metadata-core | Get: the one function all of row 49's doors consult answers yes before any capability is examined | `packages/metadata-core/src/meta-write-capability.ts#metaWriteCapabilityVerdict` |
-| 51 | Anonymous-deny seam satisfied on the domain dispatchers and the package/federation routes | runtime, rest | Get: passes with no `userId` | `packages/runtime/src/domains/actions.ts#handleActionsRequest`, `packages/runtime/src/domains/ai.ts#handleAIRequest`, `packages/runtime/src/domains/automation.ts#handleAutomationRequest`, `packages/runtime/src/domains/meta.ts#handleMetadataRequest`, `packages/runtime/src/domains/security.ts#handleSecurityRequest`, `packages/runtime/src/domains/packages.ts#handlePackagesRequest`, `packages/runtime/src/domains/analytics.ts#handleAnalyticsRequest`, `packages/runtime/src/domains/i18n.ts#handleI18nRequest`, `packages/rest/src/external-datasource-routes.ts#registerExternalDatasourceRoutes`, `packages/rest/src/package-routes.ts#refusePackageRequest` |
-| 52 | MCP principal check satisfied | runtime | Get: MCP surface reachable with no user | `packages/runtime/src/domains/mcp.ts#handleMcpRequest` |
-| 53 | Package REST route capability gate bypassed | rest | Get: a marketplace publish over REST (`POST /packages/publish`, the one route the REST registrar mounts since #14503) without `manage_metadata`; the package read cohort (`studio.access` / `setup.access`) is enforced by the dispatcher `/packages` domain's own read gate, where the reads are served | `packages/rest/src/package-routes.ts#refusePackageRequest` |
-| 54 | Package domain capability gates bypassed | runtime | Get: package management and package-inventory reads without the capability | `packages/runtime/src/domains/packages.ts#requireManageMetadata`, `#requireReadCapability` |
-| 55 | Activation write / authoring refusals do not fire | runtime | Get: activation artifacts writable and authorable without the activation-authoring capability | `packages/runtime/src/domains/activation-gate.ts#refuseUngrantedActivationWrite`, `#refuseUngrantedActivationAuthoring` |
-| 56 | Automation run-state read, flow-authoring write, the paused-run caller gate (screen read and resume), the two operator run-lifecycle writes and the elevated self-triggered start at every door that starts a flow by name all pass | runtime | Get: run state, flow writes, a paused run's screen and its resume with no grant and without being the run's starter — and cancelling or restoring a suspension without the platform-operator rung. The screen read and the resume ask one predicate, so this is one bypass for both. The lifecycle bypass is the in-process owner's door: plugin-approvals' revise-window recall (ADR-0044) cancels on behalf of a decision it already authorized and recorded. And starting a flow declared `runAs: 'system'` whose type is self-triggered (`autolaunched`, `record_change`, `schedule`) through any door that starts a flow by name — the trigger route, an action of `type: 'flow'` (REST `/actions` and the MCP `run_action` bridge) and a declared endpoint of `type: 'flow'` — which every other caller, the guest principal included, is refused `403 PERMISSION_DENIED` (the maintainer's rulings, letters B and A). The three doors ask one predicate, so this is one bypass for all of them, and it is the in-process caller's, such as a job: inbound HTTP never carries the flag | `packages/runtime/src/domains/automation.ts#mayReadRunState`, `#refuseUngrantedFlowWrite`, `#isRunStarterOrRunStateReader`, `#refuseUngrantedRunLifecycleWrite`, `packages/runtime/src/flow-start-admission.ts#refusesElevatedSelfTriggeredStart` |
-| 57 | Audience-binding suggestion authority gate passes | plugin-security | Get: a system caller lists, accepts and dismisses suggestions without `manage_metadata` and, under a wall, without the platform-operator rung | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts#assertDeploymentAuthority` |
-| 58 | Email-template organization door passes; webhook provenance stamp skipped | plugin-email, plugin-webhooks | Get (`sys_email_template`): a create or update of a template row. The door refuses every other write that names a caller, `403 PERMISSION_DENIED` (ADR-0131 D6); the plugin itself no longer writes the table (templates resolve from the registry), so the v18 migration ceremony's promotion is the one remaining writer. Lose (`sys_webhook`): the row is not marked as an admin customization | `packages/plugins/plugin-email/src/email-template-door.ts#isOrganizationWrite`, `packages/plugins/plugin-webhooks/src/webhook-provenance.ts#bindWebhookProvenanceStamp` |
-| 59 | **Automation flow data nodes re-add the `owner_id` stamp** (the one place row 2's gap is compensated inline) | service-automation | Get: a flow-authored INSERT under system elevation still lands owned, when the run resolved a user. Fill-only — flow-authored values win | `packages/services/service-automation/src/runtime-identity.ts#stampSystemInsertOwner`, called from `packages/services/service-automation/src/builtin/crud-nodes.ts#registerCrudNodes` |
-| 60 | Inbox caller refusal names `isSystem` as what was carried | service-messaging | Get: nothing — the refusal still fires. The flag only shapes the diagnostic, because privilege is not an authorization subject | `packages/services/service-messaging/src/inbox-caller.ts#resolveInboxRecipient` |
-| 61 | **`organization_id` is not auto-stamped on INSERT** — the organization-axis twin of the `owner_id` gap above | organizations | Get: an elevated write may name another organization deliberately, which is what the per-organization seed replay, the orphan-row claim, imports and migrations all rely on. Lose: the fill-only stamp, so an elevated insert that names no organization lands `organization_id = NULL` and the wall hides it. ⛔ Neither path rewrites a supplied `organization_id`: the non-elevated path fills only an absent one, and a supplied value meets the Layer 0 write wall, which refuses a forged one `403 PERMISSION_DENIED` exactly as it refuses an update re-pointing a row. Elevation skips the stamp and the wall alike, which is why it is the seam the legitimate cross-organization writers use | `packages/plugins/organizations/src/organizations-plugin.ts#start` |
+| 48 | Object API-exposure gate bypassed (`apiEnabled` / `apiMethods`) | runtime | Get: internal self-writes ignore exposure declarations — these govern **external** exposure, not engine self-writes | `packages/runtime/src/action-execution.ts#callData` |
+| 49 | Action `requiredPermissions` bypassed | runtime | Get: engine self-invocation runs any action | `packages/runtime/src/action-execution.ts#actionPermissionError` |
+| 50 | `manage_metadata` bypassed on metadata writes | runtime, rest | Get: schema writes without the capability (the permission-set clone door's save included) — and, because REST's save door and the stored-version read doors ask one save verdict, an app's full stored version on `/layers`, `?layers=true` and `/diff`, whatever its entry gates withhold | `packages/runtime/src/domains/meta.ts#handleMetadataRequest`, `packages/rest/src/rest-server.ts#registerMetadataEndpointsInner`, `packages/rest/src/rest-server.ts#metaSaveVerdict`, `packages/runtime/src/domains/permission-set-clone.ts#handlePermissionSetCloneWrite` |
+| 51 | The shared metadata-write verdict itself returns `allowed` | metadata-core | Get: the one function all of row 50's doors consult answers yes before any capability is examined | `packages/metadata-core/src/meta-write-capability.ts#metaWriteCapabilityVerdict` |
+| 52 | Anonymous-deny seam satisfied on the domain dispatchers and the package/federation routes | runtime, rest | Get: passes with no `userId` | `packages/runtime/src/domains/actions.ts#handleActionsRequest`, `packages/runtime/src/domains/ai.ts#handleAIRequest`, `packages/runtime/src/domains/automation.ts#handleAutomationRequest`, `packages/runtime/src/domains/meta.ts#handleMetadataRequest`, `packages/runtime/src/domains/security.ts#handleSecurityRequest`, `packages/runtime/src/domains/packages.ts#handlePackagesRequest`, `packages/runtime/src/domains/analytics.ts#handleAnalyticsRequest`, `packages/runtime/src/domains/i18n.ts#handleI18nRequest`, `packages/rest/src/external-datasource-routes.ts#registerExternalDatasourceRoutes`, `packages/rest/src/package-routes.ts#refusePackageRequest` |
+| 53 | MCP principal check satisfied | runtime | Get: MCP surface reachable with no user | `packages/runtime/src/domains/mcp.ts#handleMcpRequest` |
+| 54 | Package REST route capability gate bypassed | rest | Get: a marketplace publish over REST (`POST /packages/publish`, the one route the REST registrar mounts since #14503) without `manage_metadata`; the package read cohort (`studio.access` / `setup.access`) is enforced by the dispatcher `/packages` domain's own read gate, where the reads are served | `packages/rest/src/package-routes.ts#refusePackageRequest` |
+| 55 | Package domain capability gates bypassed | runtime | Get: package management and package-inventory reads without the capability | `packages/runtime/src/domains/packages.ts#requireManageMetadata`, `#requireReadCapability` |
+| 56 | Activation write / authoring refusals do not fire | runtime | Get: activation artifacts writable and authorable without the activation-authoring capability | `packages/runtime/src/domains/activation-gate.ts#refuseUngrantedActivationWrite`, `#refuseUngrantedActivationAuthoring` |
+| 55b | Walled catalog refusal does not fire | metadata-core, rest, plugin-security, runtime | Get: under `isolated` / `group`, a create, change or delete of a position, a permission set or a capability, at the `/meta` write doors (save, reset, publish, rollback), at the permission-set clone door, at the data door on `sys_position`, `sys_permission_set` and `sys_capability`, and at the `/packages` write doors (delete, `publish-drafts`, `discard-drafts`, `revert`, `rollback`, `commits/:commitId/revert`, `duplicate`, `adopt-orphans`) when the items they act on include a position, a permission set or a capability. Every other caller below the platform-operator rung is refused `403` there (ADR-0131 D3), because one organization's write would change what every organization resolves by name. The seeders, the package door and migrations write the catalog this way. Under `single` the refusal is inert for every caller | `packages/metadata-core/src/meta-write-capability.ts#walledCatalogWriteVerdict`, `packages/rest/src/rest-server.ts#walledCatalogRefusal`, `packages/plugins/plugin-security/src/walled-catalog-data-door.ts#createWalledCatalogDataDoorRefusal`, `packages/runtime/src/domains/packages.ts#refuseWalledCatalogPackageWrite` |
+| 57 | Automation run-state read, flow-authoring write, the paused-run caller gate (screen read and resume), the two operator run-lifecycle writes and the elevated self-triggered start at every door that starts a flow by name all pass | runtime | Get: run state, flow writes, a paused run's screen and its resume with no grant and without being the run's starter — and cancelling or restoring a suspension without the platform-operator rung. The screen read and the resume ask one predicate, so this is one bypass for both. The lifecycle bypass is the in-process owner's door: plugin-approvals' revise-window recall (ADR-0044) cancels on behalf of a decision it already authorized and recorded. And starting a flow declared `runAs: 'system'` whose type is self-triggered (`autolaunched`, `record_change`, `schedule`) through any door that starts a flow by name — the trigger route, an action of `type: 'flow'` (REST `/actions` and the MCP `run_action` bridge) and a declared endpoint of `type: 'flow'` — which every other caller, the guest principal included, is refused `403 PERMISSION_DENIED` (the maintainer's rulings, letters B and A). The three doors ask one predicate, so this is one bypass for all of them, and it is the in-process caller's, such as a job: inbound HTTP never carries the flag | `packages/runtime/src/domains/automation.ts#mayReadRunState`, `#refuseUngrantedFlowWrite`, `#isRunStarterOrRunStateReader`, `#refuseUngrantedRunLifecycleWrite`, `packages/runtime/src/flow-start-admission.ts#refusesElevatedSelfTriggeredStart` |
+| 58 | Audience-binding suggestion authority gate passes | plugin-security | Get: a system caller lists, accepts and dismisses suggestions without `manage_metadata` and, under a wall, without the platform-operator rung | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts#assertDeploymentAuthority` |
+| 59 | Email-template organization door passes; webhook provenance stamp skipped | plugin-email, plugin-webhooks | Get (`sys_email_template`): a create or update of a template row. The door refuses every other write that names a caller, `403 PERMISSION_DENIED` (ADR-0131 D6); the plugin itself no longer writes the table (templates resolve from the registry), so the v18 migration ceremony's promotion is the one remaining writer. Lose (`sys_webhook`): the row is not marked as an admin customization | `packages/plugins/plugin-email/src/email-template-door.ts#isOrganizationWrite`, `packages/plugins/plugin-webhooks/src/webhook-provenance.ts#bindWebhookProvenanceStamp` |
+| 60 | **Automation flow data nodes re-add the `owner_id` stamp** (the one place row 2's gap is compensated inline) | service-automation | Get: a flow-authored INSERT under system elevation still lands owned, when the run resolved a user. Fill-only — flow-authored values win | `packages/services/service-automation/src/runtime-identity.ts#stampSystemInsertOwner`, called from `packages/services/service-automation/src/builtin/crud-nodes.ts#registerCrudNodes` |
+| 61 | Inbox caller refusal names `isSystem` as what was carried | service-messaging | Get: nothing — the refusal still fires. The flag only shapes the diagnostic, because privilege is not an authorization subject | `packages/services/service-messaging/src/inbox-caller.ts#resolveInboxRecipient` |
+| 62 | **`organization_id` is not auto-stamped on INSERT** — the organization-axis twin of the `owner_id` gap above | organizations | Get: an elevated write may name another organization deliberately, which is what the per-organization seed replay, the orphan-row claim, imports and migrations all rely on. Lose: the fill-only stamp, so an elevated insert that names no organization lands `organization_id = NULL` and the wall hides it. ⛔ Neither path rewrites a supplied `organization_id`: the non-elevated path fills only an absent one, and a supplied value meets the Layer 0 write wall, which refuses a forged one `403 PERMISSION_DENIED` exactly as it refuses an update re-pointing a row. Elevation skips the stamp and the wall alike, which is why it is the seam the legitimate cross-organization writers use | `packages/plugins/organizations/src/organizations-plugin.ts#start` |
 
 ### 6. Reads that only carry the flag onward
 
@@ -196,9 +200,9 @@ a reader tracing where elevation travels needs them.
 
 | # | Site | Package | What it does |
 |:--|:---|:---|:---|
-| 62 | `packages/objectql/src/engine.ts#buildSession` | objectql | Propagates `isSystem` into the hook session so hooks can tell engine self-writes from user writes |
-| 63 | `packages/objectql/src/engine.ts#isSystem` | objectql | `ScopedContext.isSystem` getter — re-exposes the underlying execution context's flag |
-| 64 | `packages/runtime/src/sandbox/body-runner.ts#executionContextFromHook` | runtime | Rebuilds an `ExecutionContext` from a hook session, carrying the flag across |
+| 63 | `packages/objectql/src/engine.ts#buildSession` | objectql | Propagates `isSystem` into the hook session so hooks can tell engine self-writes from user writes |
+| 64 | `packages/objectql/src/engine.ts#isSystem` | objectql | `ScopedContext.isSystem` getter — re-exposes the underlying execution context's flag |
+| 65 | `packages/runtime/src/sandbox/body-runner.ts#executionContextFromHook` | runtime | Rebuilds an `ExecutionContext` from a hook session, carrying the flag across |
 
 ---
 
@@ -285,10 +289,11 @@ Ownership injection, `readonly` bypass and sharing materialisation are
 independent decisions, and a seed loader plausibly wants the first two but not
 the third. The concept is nevertheless **staying as one boolean**:
 
-- **Shipped semantics.** `isSystem` is a published contract with 124 read sites
-  in 20 packages. Splitting it is a breaking contract change across all of them.
-  (The ruling was taken when the census read 80 sites in 18 packages; the count
-  has grown, which strengthens rather than weakens the argument.)
+- **Shipped semantics.** `isSystem` is a published contract read at over a
+  hundred sites across some twenty packages. Splitting it is a breaking contract
+  change across all of them. (The ruling was taken when the census read 80 sites
+  in 18 packages; the count has grown since, which strengthens rather than
+  weakens the argument.)
 - **No business pull.** No app has asked for the combinations a split would
   enable; the observed need was to *understand* the flag, which is what this
   page serves.
@@ -313,26 +318,21 @@ The table's value is exhaustiveness, so it is built by census, not by recall —
 and the census is a committed instrument rather than someone's afternoon:
 
 ```bash
-node scripts/isystem-census.mjs          # the summary below
+node scripts/isystem-census.mjs          # the live totals, for the tree you run it on
 node scripts/isystem-census.mjs --json   # every site, its kind and its package
 ```
 
-**Every number below marked ✅, plus the four sentences elsewhere on this page
-that restate the same figures (the opening headline, the plugin-sharing share,
-the #4707 ruling quote), is *generated*, never hand-maintained.** `pnpm
-gen:system-context-census` (`node scripts/check-system-context-census.mjs
---fix`) re-derives the census and rewrites every declared count that has
-drifted from it — the exact computation the check below already runs, applied
-as a write instead of a comparison. ⛔ **Never hand-retype one of these
-digits.** Two branches each independently — and correctly, for their own
-tree — bumping the same sentence to the same number is exactly how this page
-once went silently wrong: the edits are textually identical, git merges them
-clean with no conflict, and the merged total is neither side's number
-(#16919). Run the generator instead, against the tree you actually want
-counted, and it fails loudly rather than writing a partial page if a sentence
-no longer parses. `--fix` still cannot add or drop a **row** — a site that
-arrived or vanished is a human's editorial call, same as always — it only
-keeps the aggregate counts in lockstep with whatever rows exist.
+**This page states no totals, and that is deliberate.** How many sites, in how
+many packages and files, is derived data: it moves whenever a read arrives or
+leaves, and a figure typed into hand-written prose is paid for at every merge.
+Two branches that each add a read bump the same sentence and conflict on it —
+or, bumping it to the same number, text-merge clean to a total neither tree
+holds, which is how this page once went silently wrong (#16919). So the totals
+are computed where they are read: the census prints them for the tree you run
+it on, and the check below prints them again on every pass. What CI holds is
+the register itself — every elevation read anchored, every anchor resolving —
+not a sum of it. A site that arrived or vanished is a human's editorial call:
+add or drop its row.
 
 **⛔ Not a `grep`.** A text scan is where a census *starts* and it cannot be where
 one ends: it returns prose inside comments and strings, the three unrelated
@@ -347,31 +347,40 @@ a **read** (a table row here), a **declaration**, an object-literal or type
 
 Corpus: tracked `.ts` / `.tsx` / `.mts` / `.cts` under `packages/` and
 `examples/`, excluding `dist/`. A file counts as a test when its path carries
-`.test.` / `.spec.` or a `tests/` / `__tests__/` / `qa/` segment. Every number
-below was produced by that run. The **CI** column says which of them a check
-still holds equal to the census on every pull request:
+`.test.` / `.spec.` or a `tests/` / `__tests__/` / `qa/` segment. The census
+narrows that corpus in the order below. The raw text it starts from is kept here
+as a dated snapshot:
 
-| Measurement | Count | CI |
-|:---|--:|:--:|
-| Lines carrying `isSystem` in the corpus | 1811 | — |
-| — in tests | 1013 | — |
-| — in non-test sources | 798 | — |
-| Appearances of the bare identifier `isSystem` in non-test sources | 813 | — |
-| — parsed as a declaration | 28 | ✅ |
-| — parsed as an object-literal / type key (producers and option objects) | 310 | — |
-| — parsed as a property **read** | 129 | ✅ |
-| — parsed in some other syntactic position (a local, a cast, a conditional) | 9 | ✅ |
-| — the remainder: text inside comments and string literals | 358 | — |
-| Of those reads: reads of one of the unrelated metadata fields | 5 | ✅ |
-| Of those reads: reads of `ExecutionContext.isSystem` | **124** | ✅ |
-| — behaviour-bearing (rows 1–61 above) | 121 | ✅ |
-| — carry the flag onward only (rows 62–64 above) | 3 | ✅ |
-| Packages containing at least one elevation read | **20** | ✅ |
-| Files containing at least one elevation read | 58 | ✅ |
-| — the distinct symbols those reads live in — what this page anchors | 106 | ✅ |
-| — of those files, the ones holding more than one read in one symbol | 8 | ✅ |
+| Raw text | Count |
+|:---|--:|
+| Lines carrying `isSystem` in the corpus | 1811 |
+| — in tests | 1013 |
+| — in non-test sources | 798 |
+| Appearances of the bare identifier `isSystem` in non-test sources | 813 |
+| — parsed as an object-literal / type key (producers and option objects) | 310 |
+| — the remainder: text inside comments and string literals | 358 |
 
-The six rows marked — are a **dated decomposition, not a live claim**: they were
+The rest of those appearances are what the census classifies, and the page
+restates none of its figures:
+
+| Census step | What it holds |
+|:---|:---|
+| Appearances parsed as a declaration | every declaring slot — see below |
+| Appearances parsed as a property **read** | every read, before the collision is subtracted |
+| Appearances parsed in some other syntactic position | a local, a cast, a conditional |
+| Of those reads: reads of one of the unrelated metadata fields | subtracted — the collision this page opens with |
+| Of those reads: reads of `ExecutionContext.isSystem` | **the census answer**: every one sits in a symbol a row above anchors |
+| — behaviour-bearing (rows 1–62 above) | sections 1 to 5 |
+| — carry the flag onward only (rows 63–65 above) | section 6 |
+
+`node scripts/isystem-census.mjs` prints how many appearances fell in each
+syntactic slot, the subtraction, the answer and the packages and files that
+hold it;
+`node scripts/check-system-context-census.mjs` prints the answer again on every
+pass, with the distinct symbols those reads live in and how many files hold more
+than one read in one symbol.
+
+The six raw-text rows are a **dated decomposition, not a live claim**: they were
 measured on 2026-08-29 at `ca1965f2b5` and CI does not re-derive them. They count
 raw *text* over the whole corpus — every line, identifier appearance,
 object-literal key and prose mention of the string `isSystem` under `packages/`
@@ -382,25 +391,23 @@ elevation: a test that mentions the flag, a seed object carrying
 un-landable, because CI scores a **merge** with `main` and the merge queue
 re-derives that merge against a newer `main` on every attempt: three unrelated
 merges moved these six numbers eight times in one night, while the census
-population — 109 sites in 20 packages across 45 files — did not move once. They
-are kept because they are how you get from a raw `grep` to 109, which is the
-whole argument of this section; they are unenforced because a count of lines in
-test files certifies nothing. ⛔ Do not re-add them to `DECLARED_COUNTS` — a
-self-test case in the gate refuses that by name. Re-measure them with
+population — 109 sites in 20 packages across 45 files at the time — did not
+move once. They are kept because they are how far a raw `grep` sits from the
+census answer, which is the whole argument of this section; they are unenforced
+because a count of lines in test files certifies nothing. Re-measure them with
 `node scripts/isystem-census.mjs` when you want them current, and move the date.
 
-**What the enforced declarations row counts.** Not the three field declarations
-above — those are three *distinct fields* that happen to share a name, and only
-the first is elevation. This row counts every position where the parser puts the
-identifier in a **declaring** slot: those three, plus the structural type literals
-that restate `ExecutionContext.isSystem`'s shape inline rather than importing it
-(`{ isSystem: true; tenantId?: string }`, `context?: { isSystem?: boolean }`, and
-the `get isSystem()` accessor on the engine's context wrapper). A restatement is
-a producer's declaration of the shape it will build, never a read, so a new one
-moves this count and moves nothing else on this page — the census's read
-population, the anchored rows above, and the packages and files totals all stay
-where they are. The most recent arrival is the scoped
-seed context threaded into the org-admin permission-set lookup in
+**What the census counts as a declaration.** Not only the three field
+declarations above — those are three *distinct fields* that happen to share a
+name, and only the first is elevation. It counts every position where the
+parser puts the identifier in a **declaring** slot: those three, plus the
+structural type literals that restate `ExecutionContext.isSystem`'s shape inline
+rather than importing it (`{ isSystem: true; tenantId?: string }`,
+`context?: { isSystem?: boolean }`, and the `get isSystem()` accessor on the
+engine's context wrapper). A restatement is a producer's declaration of the
+shape it will build, never a read, so a new one moves the census's declaration
+count and nothing on this page — the read population and the anchored rows
+above stay where they are. The most recent arrival is the scoped seed context threaded into the org-admin permission-set lookup in
 `packages/plugins/plugin-security/src/auto-org-admin-grant.ts`, so that read resolves
 against the granting organization's own catalog row rather than an
 organization-less one (#11670). ⛔ Cited as a FILE deliberately, with no
@@ -432,8 +439,8 @@ same resolver, and the same registration shape, that holds `docs/adr/**`.
 Renaming a symbol is now a loud red instead of a silent misdirection.
 
 ⚠️ **The precision that costs, priced here rather than buried.** A symbol anchor
-cannot say WHICH read inside a function it means, and **8** of the **58**
-anchored files hold more than one read inside a single symbol. So the population
+cannot say WHICH read inside a function it means, and several of the anchored
+files hold more than one read inside a single symbol. So the population
 check runs per file at symbol granularity: every file the census finds a read in
 must be anchored, and the set of symbols this page cites into that file must
 equal the set of symbols the census finds reads in. Two consequences, and the
@@ -441,21 +448,23 @@ second one is a hole:
 
 - **Delete a whole symbol and this page reds** — the anchor stops resolving and
   the symbol set stops matching, in the same run.
-- **Delete one of several reads inside a symbol that keeps at least one, and the
-  symbol set does not move, so it may not red.** The previous edition's line
+- **Add or delete one of several reads inside a symbol that keeps at least one,
+  and the symbol set does not move, so it does not red.** While this page stated
+  totals, the site count moved on that edit — but the repair it prescribed was a
+  generator rewriting the number, never a row. The previous edition's line
   numbers did close this one: both reads lost in the last drift lived inside
   `callerContext()` helpers that still exist under the same names. Closing it
-  again means a span-aware resolver and per-read disambiguation in those nine
-  files; that is its own card, and it is deliberately not folded in here.
+  again means a span-aware resolver and per-read disambiguation in those files;
+  that is its own card, and it is deliberately not folded in here.
 
 Resolving anchors is nevertheless the *second* check, not the first. ⭐ **A gate
 that only checks what the page already says can never find what the page failed
 to say.** Re-resolving every anchor of the edition before last would have passed
 while it was missing 32 sites and its headline was 29 too low. So the
 load-bearing direction runs census → page: every elevation read in the code must
-be anchored here, and a site that vanishes from the code takes the census total
-with it — the site, package and file counts above are census-derived — which is
-what makes a row describing a protection that no longer exists fail.
+be anchored here, and a symbol whose last read vanishes from the code leaves an
+anchor that names no read site, which is what makes a row describing a
+protection that no longer exists fail.
 
 Four checks run, in `scripts/check-system-context-census.mjs`:
 
@@ -463,11 +472,12 @@ Four checks run, in `scripts/check-system-context-census.mjs`:
 |:---|:---|
 | **Population** | a file holding an elevation read with no anchor here, or a symbol holding one that no anchor here names |
 | **Resolution** | an anchor naming no tracked file, or naming a symbol that file does not declare — and any surviving line number, which is no longer an anchor form |
-| **Counts** | any **census-derived** number above that disagrees with the census — including the count-sentence wording, so the check cannot go quietly vacuous. The six raw text counts are exempt by design, but their rows must still be present and dated |
 | **Classification** | an anchor that is not a read site and is not a declared non-read citation |
+| **Dated snapshot** | a raw-text row above reworded off the page, or its measurement date dropped — the numbers themselves are never compared |
 
 A new read of `ExecutionContext.isSystem` belongs in this table in the same PR
-that introduces it — CI will say so if it is not.
+that introduces it — CI will say so when it lands in a symbol no row anchors
+yet; inside a symbol that already has one, only the reviewer will.
 
 ## Related
 

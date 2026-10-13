@@ -167,7 +167,7 @@ describe('#7369 an external delete is published only for an item that is really 
     expect(events[0]!.op).toBe('update');
     expect(events[0]!.ref.name).toBe('case_grid');
     expect(events[0]!.source).toBe('fs');
-    expect(events[0]!.actor).toBe('fs');
+    expect(events[0]!.actor).toBeNull();
     expect(events[0]!.parentHash).toBe(first.version);
     expect(events[0]!.hash).not.toBeNull();
 
@@ -238,7 +238,7 @@ describe('#7369 an external delete is published only for an item that is really 
     expect(events[0]!.hash).toBeNull();
     expect(events[0]!.parentHash).toBe(first.version);
     expect(events[0]!.source).toBe('fs');
-    expect(events[0]!.actor).toBe('fs');
+    expect(events[0]!.actor).toBeNull();
 
     expect(await repo!.get(r)).toBeNull();
   });

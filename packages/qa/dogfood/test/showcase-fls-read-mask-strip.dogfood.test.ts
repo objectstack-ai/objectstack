@@ -74,6 +74,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
 import { showcaseAppDefaultSecurity } from './showcase-security.js';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const SYS = { isSystem: true } as const;
 
@@ -132,11 +133,13 @@ describe('showcase FLS read side: a readable:false field is STRIPPED, not masked
         },
       });
     expect(authored.status, 'scratch set authored through the metadata door').toBeLessThan(300);
+    const ps = await catalogPermissionSet(ql, SCRATCH_SET);
+    expect(ps, 'scratch permission set authored').toBeTruthy();
     const memberId = (await ql.findOne('sys_user', { where: { email: MEMBER }, context: SYS }))?.id;
     expect(memberId, 'member provisioned').toBeTruthy();
     await ql.insert(
       'sys_user_permission_set',
-      { user_id: memberId, permission_set: SCRATCH_SET },
+      { user_id: memberId, permission_set: ps.name },
       { context: SYS },
     );
 

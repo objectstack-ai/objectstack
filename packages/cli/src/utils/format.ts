@@ -1136,7 +1136,7 @@ export function printServerReady(opts: ServerReadyOptions) {
     //     `Setup → Users` is `SETUP_APP` (`requiredPermissions:
     //     ['setup.access']`, which this account holds) → the `nav_users`
     //     contribution (`sys_user`, ungated), whose detail page carries the
-    //     "Grant permission set" related list. Pinned against those
+    //     "Permission Sets" related list (its New grants a set). Pinned against those
     //     declarations in `format.server-ready-dev-admin-audience.test.ts`, so
     //     a rename there cannot leave this sentence pointing at nothing.
     //   • It changes no seed. What the first run CREATES is a product-shape

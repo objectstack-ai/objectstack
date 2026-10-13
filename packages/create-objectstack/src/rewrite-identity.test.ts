@@ -117,20 +117,54 @@ describe('findStaleNamespacePrefixes', () => {
   it('reports nothing once the rewrite has run', () => {
     writeObject('todo_task.object.ts', 'todo_task');
     rewriteObjectNamePrefix(path.join(dir, 'src'), 'todo', 'my_app');
-    expect(findStaleNamespacePrefixes(path.join(dir, 'src'), 'todo')).toEqual([]);
+    expect(findStaleNamespacePrefixes(path.join(dir, 'src'), 'todo', 'my_app')).toEqual([]);
   });
 
   it('reports what a skipped rewrite leaves behind — the #4902 failure state', () => {
     writeObject('todo_task.object.ts', 'todo_task');
     writeObject('todo_label.object.ts', 'todo_label');
     // No rewrite at all: exactly what the old manifest-only guard produced.
-    const stale = findStaleNamespacePrefixes(path.join(dir, 'src'), 'todo');
+    const stale = findStaleNamespacePrefixes(path.join(dir, 'src'), 'todo', 'my_app');
     expect(stale).toHaveLength(2);
     expect(stale.map((s) => s.file).sort()).toEqual([
       path.join('objects', 'todo_label.object.ts'),
       path.join('objects', 'todo_task.object.ts'),
     ]);
     expect(stale[0].line).toBeGreaterThan(0);
+  });
+
+  // A new namespace that itself begins with the template namespace plus `_`
+  // (project `blank-probe` → namespace `blank_probe`): every CORRECT rewrite
+  // then carries the old prefix as well. The predicate is one rule for every
+  // template namespace, so the same pins run against more than one.
+  describe.each([
+    ['blank', 'blank_probe'],
+    ['todo', 'todo_list'],
+  ])('when the new namespace extends the template namespace (%s → %s)', (oldNs, newNs) => {
+    it('reports nothing once the rewrite has run', () => {
+      writeObject('note.object.ts', `${oldNs}_note`);
+      expect(rewriteObjectNamePrefix(path.join(dir, 'src'), oldNs, newNs)).toBe(1);
+      expect(
+        fs.readFileSync(path.join(dir, 'src', 'objects', 'note.object.ts'), 'utf8'),
+      ).toContain(`name: '${newNs}_note'`);
+      expect(findStaleNamespacePrefixes(path.join(dir, 'src'), oldNs, newNs)).toEqual([]);
+    });
+
+    it('CONTROL: still reports a genuinely stale name', () => {
+      writeObject('note.object.ts', `${oldNs}_note`);
+      // No rewrite: `<old>_note` is not under `<new>_`, so the project is rejected.
+      const stale = findStaleNamespacePrefixes(path.join(dir, 'src'), oldNs, newNs);
+      expect(stale).toHaveLength(1);
+      expect(stale[0].text).toContain(`'${oldNs}_note'`);
+    });
+
+    it('judges each literal, so a correct name does not hide a stale one on its line', () => {
+      fs.writeFileSync(
+        path.join(dir, 'src', 'objects', 'pair.object.ts'),
+        `export const o = [{ name: '${newNs}_ok' }, { name: '${oldNs}_note' }];\n`,
+      );
+      expect(findStaleNamespacePrefixes(path.join(dir, 'src'), oldNs, newNs)).toHaveLength(1);
+    });
   });
 });
 

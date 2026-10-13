@@ -242,7 +242,7 @@ function rewriteProjectIdentity(
   if (templateNamespace && namespace !== templateNamespace) {
     const srcDir = path.join(targetDir, 'src');
     rewriteObjectNamePrefix(srcDir, templateNamespace, namespace);
-    const stale = findStaleNamespacePrefixes(srcDir, templateNamespace);
+    const stale = findStaleNamespacePrefixes(srcDir, templateNamespace, namespace);
     if (stale.length > 0) {
       const shown = stale
         .slice(0, 5)

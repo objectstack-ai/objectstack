@@ -229,6 +229,14 @@ const CALLERS: Record<string, Classification> = {
       "to the SOURCE object (the REST data routes, which judge that object's exposure, and the engine's system write) " +
       'and reads no record of the target',
   },
+  'packages/verify/src/delete-behavior.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "the verification harness's delete-behaviour family: the target names the object whose records the family " +
+      'itself creates and then deletes, through the REST data routes (where that object is the ADDRESSED one, ' +
+      "judged as such) and the engine's system delete. It reads those records back only through the harness's " +
+      'system read, to see whether the delete removed them, and serves no field of the target to any caller',
+  },
 };
 
 const SCAN_TIMEOUT_MS = 60_000;

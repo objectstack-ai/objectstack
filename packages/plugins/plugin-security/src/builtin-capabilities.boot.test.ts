@@ -44,7 +44,6 @@ import { SysUser, SysAccount, SysMember, SysOrganization } from '@objectstack/pl
 import { SecurityPlugin } from './security-plugin.js';
 import { securityObjects, SECURITY_PLUGIN_ID } from './manifest.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
-import { CAPABILITY_PLATFORM_NAME_REFUSED } from './seed-refusal-diagnostics.js';
 
 const SYS = { isSystem: true } as const;
 const POSTURE_ENV = 'OS_TENANCY_POSTURE';
@@ -260,7 +259,6 @@ describe.each(SCENARIOS)('a $posture boot, the stack capability $declared', ({ p
 
   it('no capability seeder refuses or reports the platform’s own declarations', () => {
     for (const booted of [fresh, reseeded]) {
-      expect(booted.warnings.filter((w) => w.includes(CAPABILITY_PLATFORM_NAME_REFUSED))).toEqual([]);
       expect(booted.warnings.filter((w) => w.includes('capabilit'))).toEqual([]);
     }
   });

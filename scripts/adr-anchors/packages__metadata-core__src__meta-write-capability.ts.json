@@ -1,0 +1,7 @@
+{
+  "file": "packages/metadata-core/src/meta-write-capability.ts",
+  "adrs": [
+    "ADR-0131"
+  ],
+  "invariant": "`walledCatalogWriteVerdict` is the ONE predicate for ADR-0131 D3's walled catalog refusal: under `group` / `isolated` a write of a position, permission set or capability is admitted only for `isSystem` or the platform operator rung, never for an organization-scoped `manage_metadata` holder, because one organization's write would change what every other organization resolves. Every `/meta` write door and the security plugin's data door ask it; `single` is inert."
+}

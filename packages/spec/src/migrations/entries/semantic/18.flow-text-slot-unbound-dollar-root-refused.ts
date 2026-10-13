@@ -12,8 +12,9 @@ export const entry: SemanticMigration = {
   // No backticks in `surface` — build-upgrade-guide renders it inside a code
   // span already, and a nested backtick would close it.
   surface:
-    'flows[].nodes[].config of a notify node (title, message), a screen node (title, description) and an end node '
-    + '(message) — a string, or the source of a template envelope, carrying a double-brace hole whose root is a '
+    'flows[].nodes[].config of a notify node (title, message, actionUrl), a screen node (title, description), an end node '
+    + '(message) and an http node (url, and each value of the headers map) — a string, or the source of a template '
+    + 'envelope, carrying a double-brace hole whose root is a '
     + 'dollar-named variable the flow engine does not bind, such as {{ $User.Id }}',
   replacement:
     'a variable the run has, written as a hole. The run user\'s id is computed first, with an assignment node '

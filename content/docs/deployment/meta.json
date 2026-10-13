@@ -8,6 +8,7 @@
     "seed-tenancy-repair",
     "single-project-mode",
     "publish-and-preview",
+    "install-modes",
     "validating-metadata",
     "cli",
     "environment-variables",

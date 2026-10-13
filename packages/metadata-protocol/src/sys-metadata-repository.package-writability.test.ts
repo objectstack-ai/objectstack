@@ -292,7 +292,7 @@ describe('#7682 — the refusal discriminates on package writability', () => {
     });
 
     it('a runtime-only create names the base: WRITABLE_PACKAGE_REQUIRED / 422 vs NOT_CREATABLE / 403', async () => {
-      // `job` is code-only (no allowRuntimeCreate, no allowOrgOverride), so
+      // `job` is code-only (no allowRuntimeCreate, no allowEnvironmentOverlay), so
       // both bases are refused — and the codes still differ, because "you
       // named a read-only base" and "this type has no create channel" are
       // different facts. 422 + the wording mirror `saveMetaItem`'s ADR-0070 D1
@@ -327,7 +327,7 @@ describe('#7682 — the refusal discriminates on package writability', () => {
 
   describe('no allow decision moves', () => {
     it('an ADR-0005 overlay of a code-shipped item still lands (the naive gate would break this)', async () => {
-      // `view` is allowOrgOverride, and an overlay of a packaged view names
+      // `view` is allowEnvironmentOverlay, and an overlay of a packaged view names
       // the read-only package it customizes BY CONSTRUCTION. If the package
       // door refused instead of choosing a code, the whole overlay model would
       // close — this is the case that decides the shape of the fix.
@@ -384,7 +384,7 @@ describe('#7682 — the refusal discriminates on package writability', () => {
    *
    * One measurement worth carrying, because it narrows what this card proves:
    * `{ package_id: <read-only>, organization_id: null }` is ALSO what a genuine
-   * `allowOrgOverride` overlay writes whenever the caller names the package it
+   * `allowEnvironmentOverlay` overlay writes whenever the caller names the package it
    * customizes (the `view` case in "no allow decision moves" above). So the
    * defect was never "the hatch writes a row shape nothing else produces" — it
    * is precisely the ruling's own sentence: a type-level unlock reached the
@@ -527,7 +527,7 @@ describe('#7682 — the refusal discriminates on package writability', () => {
 
     it('the ADR-0005 overlay is untouched: a registry-allowed type still overlays a read-only package', async () => {
       // The limb ordering IS the fix, so it needs a pin on BOTH sides of the
-      // door. `view` is allowOrgOverride and returns at the registry limb —
+      // door. `view` is allowEnvironmentOverlay and returns at the registry limb —
       // above the door — with the hatch open for an unrelated type. If the
       // door had been placed one limb higher, this goes red and the whole
       // overlay model closes.
@@ -766,7 +766,7 @@ describe('#8184 — the scoped kernel answers the same code as the host-config k
       getArtifactItem: (type: string, name: string) =>
         (type === 'object' && name === 'showcase_task')
         || (type === 'permission' && name === 'showcase_contributor')
-        // [#8184] `view` is `allowOrgOverride: true`, so it returns at the
+        // [#8184] `view` is `allowEnvironmentOverlay: true`, so it returns at the
         // REGISTRY limb — above the door. Artifact-backed on purpose: that is
         // the ADR-0005 overlay the door must never refuse.
         || (type === 'view' && name === 'case_grid')
@@ -891,7 +891,7 @@ describe('#8184 — the scoped kernel answers the same code as the host-config k
 
   it('an ADR-0005 overlay of a code-shipped item still lands — the door is BELOW every registry limb', async () => {
     // If the door had been placed one limb higher this goes red and the whole
-    // overlay model closes. `view` is allowOrgOverride, artifact-backed, and
+    // overlay model closes. `view` is allowEnvironmentOverlay, artifact-backed, and
     // names the read-only package it customizes — by construction.
     const { engine, protocol } = boot('env_alpha');
     const err = await save(protocol, {
@@ -1001,7 +1001,7 @@ describe('#8361 — the create-side hatch clause reaches saveMetaItem', () => {
   /** Not artifact-backed under {@link boot}, so `saveMetaItem` intends `runtime-only`. */
   const runtimePermissionBody = { name: 'runtime_reviewer', label: 'Reviewer', objects: {} };
   /**
-   * `job` is `allowOrgOverride: false` AND `allowRuntimeCreate: false`, so the
+   * `job` is `allowEnvironmentOverlay: false` AND `allowRuntimeCreate: false`, so the
    * hatch is the ONLY thing that can carry this write as far as D1 — which is
    * what makes it the honest test of "the clause is reachable", as opposed to
    * `permission`, which reaches D1 either way. Spec-valid on purpose: the Zod
@@ -1152,7 +1152,7 @@ describe('#8361 — the create-side hatch clause reaches saveMetaItem', () => {
 
   it('a type with NO create channel reaches D1 only through the hatch', async () => {
     // Both halves in one case, because either alone is ambiguous. `job` has
-    // neither `allowOrgOverride` nor `allowRuntimeCreate`: shut, the code-only
+    // neither `allowEnvironmentOverlay` nor `allowRuntimeCreate`: shut, the code-only
     // refusal answers first and D1 is never consulted (so a hatch clause there
     // would be unreachable for this type); open, `isOverlayAllowed` folds the
     // hatch in and the write lands on D1 — carrying the clause.
@@ -1327,7 +1327,7 @@ describe('[#20910] the repository doors name a Regime C type\'s sanctioned path,
     expect(err).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
     expect(String(err.message)).toBe(
       "Metadata item 'object/showcase_task' is provided by a managed package and is sealed against in-place edits: "
-      + 'its type takes no environment overlay (allowOrgOverride=false), and OS_METADATA_WRITABLE does not open '
+      + 'its type takes no environment overlay (allowEnvironmentOverlay=false), and OS_METADATA_WRITABLE does not open '
       + 'a managed item. Edit the source artifact and redeploy. '
       + 'See docs/adr/0131-total-organization-ownership-no-null-organization-id.md.',
     );

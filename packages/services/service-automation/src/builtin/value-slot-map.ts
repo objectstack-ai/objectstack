@@ -19,7 +19,10 @@ import { interpolate, type VariableMap } from './template.js';
  *    `input`;
  *  - `screen` `defaults` (#19939) — an object form's prefill, served to the
  *    client (and, through {@link resolveValueSlot}, a field's `defaultValue`
- *    and an object form's `recordId`).
+ *    and an object form's `recordId`);
+ *  - `notify` `templateData` (#19939) — handed to the messaging service (and,
+ *    through {@link resolveValueSlot}, each `recipients` value or list entry,
+ *    and `sourceId`).
  *
  * A `loop`'s and a `map`'s `collection` (#19939) is a value slot too, whose
  * literal is a list: {@link resolveCollectionSlot}.
@@ -79,7 +82,10 @@ export function resolveValueSlotMap(
  * {@link resolveValueSlotMap}, for a slot that holds a single value rather than
  * a map: since #19939 a `screen` field's `defaultValue` and an object form's
  * `recordId` (`fields[].defaultValue`, `recordId` in the ledger), evaluated
- * before the screen goes on the wire. The map resolver calls this per key, so
+ * before the screen goes on the wire — a `notify` node's `recipients` (the
+ * value, or each entry of a list) and `sourceId`, evaluated before the
+ * notification is handed on — and an `http` node's `body`, evaluated once
+ * before the call, either mode. The map resolver calls this per key, so
  * the dispatch by shape is spelled once: an envelope-shaped value is evaluated
  * by `AutomationEngine.evaluateValueEnvelope` (`where` names it in a refusal
  * or a fault, `fields[0].defaultValue`), and every other value is a literal,

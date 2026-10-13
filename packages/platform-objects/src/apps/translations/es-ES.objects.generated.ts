@@ -2948,6 +2948,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           user: "Usuario"
         }
       },
+      bundle_member: {
+        label: "Bundle Member",
+        help: "Bundle member (e.g. the locale of an email template) this overlay row customizes. Null = the canonical member."
+      },
       metadata: {
         label: "Metadatos",
         help: "Payload de metadatos serializado en JSON."

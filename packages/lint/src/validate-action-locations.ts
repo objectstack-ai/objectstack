@@ -152,12 +152,12 @@ export function validateActionLocations(stack: AnyRec): ActionLocationsFinding[]
       message:
         `Action "${name}" declares no \`locations\` and no view places it by name, ` +
         'so it renders on no surface — the button exists in metadata and nowhere in the UI.',
+      // [#22161] One remedy line naming the three ways out; the location
+      // vocabulary, name placement and the headless shape are
+      // `os explain action-no-placement`.
       hint:
-        'Add the surface it belongs on, e.g. `locations: [\'record_header\']` (or `list_item`, ' +
-        '`list_toolbar`, `record_more`, `record_section`, `record_related`); or ' +
-        "place it from a list view's `bulkActions` / `bulkActionDefs` if it acts on a selection. " +
-        'If it is meant to be callable over REST / MCP / AI with no UI surface, say so explicitly ' +
-        'with `locations: []` — an empty array is the documented headless shape and is never flagged.',
+        'Declare where it renders, e.g. `locations: [\'record_header\']`, place it from a list view\'s ' +
+        '`bulkActions`, or write `locations: []` if it is headless (REST / MCP / AI only)',
     });
   };
 

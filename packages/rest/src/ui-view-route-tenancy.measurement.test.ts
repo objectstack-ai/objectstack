@@ -97,6 +97,11 @@ import type { RestEnvRegistry, RestKernelManager, RestRequestEnvResolver } from 
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SOURCE = readFileSync(resolve(HERE, 'rest-server.ts'), 'utf8');
+// [#23050 slice 1] The reverse checks below count a term's spelling over the
+// files RestServer's registrars live in, which since that slice include the
+// module `registerDataActionEndpoints`' body moved to. Sliced readings of ONE
+// registrar still read `SOURCE` alone.
+const REGISTRAR_SOURCES = SOURCE + '\n' + readFileSync(resolve(HERE, 'data-action-routes.ts'), 'utf8');
 
 const BASE = '/api/v1';
 const UI_ROUTE = `GET ${BASE}/ui/view/:object/:type`;
@@ -1096,11 +1101,11 @@ describe('[#13214] §4 preconditions', () => {
 
         // ⛔ Reverse-checked: the same terms counted over the WHOLE file, so
         // these readings are about this registrar and not about a misspelling.
-        expect(SOURCE.split('this.enforceAuth(').length - 1).toBeGreaterThan(40);
-        expect(SOURCE.split('this.resolveExecCtx(').length - 1).toBeGreaterThan(40);
+        expect(REGISTRAR_SOURCES.split('this.enforceAuth(').length - 1).toBeGreaterThan(40);
+        expect(REGISTRAR_SOURCES.split('this.resolveExecCtx(').length - 1).toBeGreaterThan(40);
         // ...and the ownership guard is NOT sprayed across the file — it is a
         // single new call site plus its definition.
-        expect(SOURCE.split('this.enforceEnvironmentOwnership(').length - 1).toBe(1);
+        expect(REGISTRAR_SOURCES.split('this.enforceEnvironmentOwnership(').length - 1).toBe(1);
     });
 });
 

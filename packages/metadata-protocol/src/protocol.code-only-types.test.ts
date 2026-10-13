@@ -57,7 +57,7 @@ interface Row {
  * the coverage guard below turns red until it has a probe.
  */
 const CODE_ONLY_TYPES = DEFAULT_METADATA_TYPE_REGISTRY
-    .filter((e) => !e.allowRuntimeCreate && !e.allowOrgOverride)
+    .filter((e) => !e.allowRuntimeCreate && !e.allowEnvironmentOverlay)
     .map((e) => e.type);
 
 /**
@@ -371,7 +371,7 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
     // ── no over-blocking: types WITHOUT the flags still save ──────────────
 
     describe('types the registry does not declare code-only still save', () => {
-        it('view (allowOrgOverride + allowRuntimeCreate) saves on a single kernel', async () => {
+        it('view (allowEnvironmentOverlay + allowRuntimeCreate) saves on a single kernel', async () => {
             const { protocol, rows } = makeProtocol(undefined);
             const result = await protocol.saveMetaItem({
                 type: 'view',
@@ -388,14 +388,14 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
             expect(metaRows(rows).length).toBe(1);
         });
 
-        it('hook (allowOrgOverride:false, allowRuntimeCreate:true) still saves on both kernels', async () => {
+        it('hook (allowEnvironmentOverlay:false, allowRuntimeCreate:true) still saves on both kernels', async () => {
             // The two-tier model (ADR-0005 PR-10d.7): no artifact at this name
             // means only `allowRuntimeCreate` is required. This is the case the
             // #5086 gate must NOT catch — it is the difference between "code-only"
             // and "packaged items are locked".
             // [#6190] The per-kernel `organizationId` was incidental scenery —
             // what this case measures is that the #5086 code-only gate does
-            // NOT catch a type that merely lacks `allowOrgOverride`. Since the
+            // NOT catch a type that merely lacks `allowEnvironmentOverlay`. Since the
             // #6190 ruling an org-scoped write of such a type is refused by a
             // DIFFERENT gate, so passing one here would have measured that
             // refusal instead of this one. The two-kernel matrix, which is the
@@ -506,7 +506,7 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
         // One savable type per shape the two-tier model distinguishes.
         const ACCEPTED: Array<{ type: string; item: Record<string, unknown> }> = [
             {
-                type: 'view', // allowOrgOverride + allowRuntimeCreate
+                type: 'view', // allowEnvironmentOverlay + allowRuntimeCreate
                 item: {
                     name: 'rc3_receipt_view',
                     label: 'Receipt',

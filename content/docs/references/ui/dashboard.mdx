@@ -139,7 +139,7 @@ Dashboard header action
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **label** | `string \| Record<string, string>` | ✅ | Action button label |
-| **actionUrl** | `string` | ✅ | URL or target for the action |
+| **actionUrl** | `string` | ✅ | URL or target for the action. When actionType is 'url' or omitted: an http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ — every other scheme and a protocol-relative //host are refused. |
 | **actionType** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional | Type of action |
 | **icon** | `string` | optional | Icon identifier for the action button |
 
@@ -155,7 +155,7 @@ Dashboard header action
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **label** | `string \| Record<string, string>` | ✅ | Action button label |
-| **actionUrl** | `string` | ✅ | URL or target for the action |
+| **actionUrl** | `string` | ✅ | URL or target for the action. When actionType is 'url' or omitted: an http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ — every other scheme and a protocol-relative //host are refused. |
 | **actionType** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional | Type of action |
 | **icon** | `string` | optional | Icon identifier for the action button |
 

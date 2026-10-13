@@ -27,9 +27,10 @@ export * from './manifest.zod';
 // supersedes it as a matter of record — "nothing may build against it").
 // Zero reachable consumers: the only implementation was `packages/metadata`'s
 // manager limb, served by no route and called only by its own unit tests. The
-// REAL customization mechanisms are ADR-0005's org-scoped overlay
-// (`allowOrgOverride` on DEFAULT_METADATA_TYPE_REGISTRY, sys_metadata rows)
-// and ADR-0126's packaged-metadata model (clone + ledger disable).
+// REAL customization mechanisms are ADR-0005's environment overlay
+// (`allowEnvironmentOverlay` on DEFAULT_METADATA_TYPE_REGISTRY, environment-wide
+// sys_metadata rows — ADR-0131 D6 retired the per-organization axis) and
+// ADR-0126's packaged-metadata model (clone + ledger disable).
 export * from './namespace-prefix';
 export * from './platform-capabilities';
 export * from './metadata-loader.zod';
@@ -56,6 +57,9 @@ export type { UnknownAuthoringKeyFinding } from '../data/authoring-key-lint';
 export * from './package-artifact.zod';
 export * from './package-registry.zod';
 export * from './package-upgrade.zod';
+// [ADR-0131 D6] What an `unmanaged` install can copy: the one key
+// classification `defineStack` and the install door's import planner read.
+export * from './unmanaged-install';
 export * from './plugin-capability.zod';
 export * from './plugin-lifecycle-advanced.zod';
 export * from './plugin-loading.zod';

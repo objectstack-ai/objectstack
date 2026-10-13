@@ -231,6 +231,75 @@ describe('SchemaRegistry — i18n bundle keys (#7730)', () => {
     });
   });
 
+  describe('[#22877] one member by name — the bare-name read answers the canonical member', () => {
+    it('a bare-name read answers the canonical member when only a second locale is overlaid', () => {
+      // The defect: the overlay tier won before canonical-first, so a template
+      // customized in `zh-CN` alone answered a read that named no member.
+      registry.registerItem('email_template', tpl('auth.welcome', 'en-US', { subject: 'packaged en' }), 'name', 'com.acme.crm');
+      registry.registerItem('email_template', tpl('auth.welcome', 'zh-CN', { subject: 'packaged zh' }), 'name', 'com.acme.crm');
+      registry.registerItem('email_template', tpl('auth.welcome', 'zh-CN', { subject: 'overlay zh' }), 'name');
+
+      expect(registry.getItem<any>('email_template', 'auth.welcome')?.subject).toBe('packaged en');
+      expect(registry.getItem<any>('email_template', 'auth.welcome', 'com.acme.crm')?.subject).toBe('packaged en');
+      // …while the overlay tier still wins within the canonical member.
+      registry.registerItem('email_template', tpl('auth.welcome', 'en-US', { subject: 'overlay en' }), 'name');
+      expect(registry.getItem<any>('email_template', 'auth.welcome')?.subject).toBe('overlay en');
+    });
+
+    it('a named member answers that member, in the same tier order, or nothing', () => {
+      registry.registerItem('email_template', tpl('auth.welcome', 'en-US', { subject: 'packaged en' }), 'name', 'com.acme.crm');
+      registry.registerItem('email_template', tpl('auth.welcome', 'zh-CN', { subject: 'packaged zh' }), 'name', 'com.acme.crm');
+      expect(registry.getItem<any>('email_template', 'auth.welcome', undefined, 'zh-CN')?.subject).toBe('packaged zh');
+
+      registry.registerItem('email_template', tpl('auth.welcome', 'zh-CN', { subject: 'overlay zh' }), 'name');
+      expect(registry.getItem<any>('email_template', 'auth.welcome', undefined, 'zh-CN')?.subject).toBe('overlay zh');
+      expect(registry.getItem<any>('email_template', 'auth.welcome', undefined, 'en-US')?.subject).toBe('packaged en');
+      expect(registry.getItem<any>('email_template', 'auth.welcome', undefined, 'fr-FR')).toBeUndefined();
+      // The artifact of one member, never its overlay.
+      expect(registry.getArtifactItem<any>('email_template', 'auth.welcome', undefined, 'zh-CN')?.subject).toBe('packaged zh');
+      // A type with no members ignores the argument.
+      registry.registerItem('page', { name: 'home', title: 'Home' }, 'name', 'com.acme.crm');
+      expect(registry.getItem<any>('page', 'home', undefined, 'zh-CN')?.title).toBe('Home');
+    });
+
+    it('a member-addressed heal lifts that member\'s shadow alone; naming no member keeps the group sweep', () => {
+      registry.registerItem('email_template', tpl('auth.welcome', 'en-US', { subject: 'packaged en' }), 'name', 'com.acme.crm');
+      registry.registerItem('email_template', tpl('auth.welcome', 'zh-CN', { subject: 'packaged zh' }), 'name', 'com.acme.crm');
+      registry.registerItem('email_template', tpl('auth.welcome', 'en-US', { subject: 'overlay en' }), 'name');
+      registry.registerItem('email_template', tpl('auth.welcome', 'zh-CN', { subject: 'overlay zh' }), 'name');
+
+      expect(registry.removeRuntimeShadow('email_template', 'auth.welcome', 'zh-CN')).toBe(true);
+      expect(registry.getItem<any>('email_template', 'auth.welcome', undefined, 'zh-CN')?.subject).toBe('packaged zh');
+      expect(registry.getItem<any>('email_template', 'auth.welcome', undefined, 'en-US')?.subject).toBe('overlay en');
+
+      // [#23074] A member the package does NOT ship: no artifact of that
+      // member takes its place, so the shadow heal declines, and the
+      // overlay-entry retirement takes it, the tenant row it is (the protocol
+      // registers it with no artifact envelope). Nothing else moves.
+      registry.registerItem('email_template', tpl('auth.welcome', 'ja-JP', { subject: 'overlay ja', _provenance: 'org' }), 'name');
+      expect(registry.removeRuntimeShadow('email_template', 'auth.welcome', 'ja-JP')).toBe(false);
+      expect(registry.getItem<any>('email_template', 'auth.welcome', undefined, 'ja-JP')?.subject).toBe('overlay ja');
+      expect(registry.removeOverlayEntry('email_template', 'auth.welcome', 'ja-JP')).toBe(true);
+      expect(registry.getItem<any>('email_template', 'auth.welcome', undefined, 'ja-JP')).toBeUndefined();
+      expect(registry.getItem<any>('email_template', 'auth.welcome', undefined, 'en-US')?.subject).toBe('overlay en');
+
+      // A bundle no package ships: the shadow heal declines, and the
+      // overlay-entry retirement takes the named member's entry only.
+      registry.registerItem('email_template', tpl('crm.digest', 'en-US', { subject: 'digest en' }), 'name');
+      registry.registerItem('email_template', tpl('crm.digest', 'zh-CN', { subject: 'digest zh' }), 'name');
+      expect(registry.removeRuntimeShadow('email_template', 'crm.digest', 'zh-CN')).toBe(false);
+      expect(registry.removeOverlayEntry('email_template', 'crm.digest', 'zh-CN')).toBe(true);
+      expect(registry.getItem<any>('email_template', 'crm.digest', undefined, 'zh-CN')).toBeUndefined();
+      expect(registry.getItem<any>('email_template', 'crm.digest', undefined, 'en-US')?.subject).toBe('digest en');
+
+      // No member named: the whole overlay group, as before.
+      registry.registerItem('email_template', tpl('auth.welcome', 'zh-CN', { subject: 'overlay zh' }), 'name');
+      expect(registry.removeRuntimeShadow('email_template', 'auth.welcome')).toBe(true);
+      expect(registry.getItem<any>('email_template', 'auth.welcome', undefined, 'en-US')?.subject).toBe('packaged en');
+      expect(registry.getItem<any>('email_template', 'auth.welcome', undefined, 'zh-CN')?.subject).toBe('packaged zh');
+    });
+  });
+
   describe('the #7557 disabled-package gate still sees every member', () => {
     it('hides the whole bundle when its owning package is disabled', () => {
       // `listItems` filters by each item's `_packageId` (PR #7700). Re-keying

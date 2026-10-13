@@ -70,6 +70,7 @@ import {
   PLATFORM_ADMIN_CANDIDATE_PAGE_SIZE,
   PLATFORM_ADMIN_CANDIDATE_SCAN_CEILING,
 } from './bootstrap-platform-admin.js';
+import { seedLegacyPlatformBucket } from './__tests__/legacy-catalog-rows.testkit.js';
 import { SysPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
@@ -744,6 +745,8 @@ describe('#16682 — the promotion target is chosen, not sampled', () => {
       // this change's to make. A declared owner must not move an existing grant.
       const engine = await boot();
       await seedUser(engine as any, 'usr_person0', 'person0@demo.example', '2025-01-01T00:00:00.000Z', false);
+      // An existing database: the platform-bucket rows an earlier release seeded.
+      await seedLegacyPlatformBucket(engine as any, defaultPermissionSets);
       const first = await bootstrapPlatformAdmin(engine as any, defaultPermissionSets, {});
       expect(first.reason).toBe('no_authenticable_user');
       const sets = await findRows(engine, 'sys_permission_set', { name: 'admin_full_access' });

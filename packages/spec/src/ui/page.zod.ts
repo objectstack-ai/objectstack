@@ -16,6 +16,7 @@ import {
   ViewFilterRuleSchema,
   AddRecordConfigSchema,
   ListColumnSchema,
+  EmptyStateSchema,
 } from './view.zod';
 
 import { lazySchema } from '../shared/lazy-schema';
@@ -284,6 +285,223 @@ export const ElementDataSourceSchema = lazySchema(() => strictObject({
 }));
 
 /**
+ * The SAME-ORIGIN API PATH an element's `api` data source reads — one string
+ * the parse can judge on its own, so a URL that would leave this deployment's
+ * origin is refused in front of the author and never reaches a browser.
+ *
+ * ## The admitted set
+ *
+ * A path that opens with ONE `/` (`/api/v1/cloud/home`), whose second
+ * character is neither `/` nor a backslash, and that carries no space and no
+ * ASCII control character anywhere. Everything else is refused, and the
+ * refusal says which of five classes the value fell in:
+ *
+ * - `scheme` — an absolute URL of ANY scheme (`https:`, `http:`, `mailto:`,
+ *   `javascript:`, `data:`, …): it names an origin of its own;
+ * - `protocol-relative` — `//host`, which the browser reads as a host name;
+ * - `backslash` — `/` then a backslash, or a backslash first: the URL parser
+ *   reads a backslash as a slash in a special-scheme URL, so both are `//host`;
+ * - `whitespace-or-control` — a tab, line feed or carriage return anywhere (the
+ *   parser deletes them before it reads the URL, so `/`+tab+`/host` is
+ *   `//host`), or a space or another control character, which the parser strips
+ *   from either end (a space before `//host` is `//host`);
+ * - `relative` — no leading `/` at all (`./home`, `../home`, `api/v1/home`,
+ *   `?q`, an empty string): it resolves against the PAGE's own address, never
+ *   the API.
+ *
+ * The first four are the browser-equivalent spellings of another origin that
+ * objectui's `classifyNavigationTarget` (`@object-ui/core`, the one answer its
+ * user-click navigations share) refuses for a navigation target. `./relative`,
+ * which that classifier admits for a NAVIGATION, is refused HERE on a
+ * measurement of the renderer, not by analogy: a read is a `fetch`, and the
+ * `apiBase` promotion the console applies to a `url` action
+ * (`ActionRunner.navigateTo`, measured at objectui `7578323a544e`) prefixes a
+ * root-relative `/api/…` path only — a `./` path would resolve against the
+ * console route the page is mounted on, on the SPA host, and read the wrong
+ * thing in the silent direction.
+ *
+ * ## Why a regex and not a `superRefine`
+ *
+ * A `.regex()` projects into the published JSON Schema as `pattern`, exactly;
+ * a refinement is dropped from it (`dropped-refinements.baseline.json`), so a
+ * document a validator accepted would be refused at parse a release later.
+ * The pattern IS the rule; {@link elementApiReadUrlRefusal} only names the
+ * class a refused value fell in, so the author reads why.
+ *
+ * Whatever the class, no credential is ever written here: the console reads the
+ * endpoint with its own signed-in fetch (the maintainer's ruling: "No
+ * credentials in metadata; the console's authenticated fetch is reused").
+ */
+const SAME_ORIGIN_API_PATH_RE = /^\/(?:[^/\\\x00-\x20\x7F][^\x00-\x20\x7F]*)?$/;
+
+/** The classes {@link SAME_ORIGIN_API_PATH_RE} refuses, in the order they are asked. */
+const ELEMENT_API_URL_CLASSES: ReadonlyArray<{ test: (url: string) => boolean; why: string }> = [
+  {
+    // whitespace-or-control — asked first: a space before `//host` is `//host`.
+    test: (url) => /[\x00-\x20\x7F]/.test(url),
+    why: 'This value holds a space or an ASCII control character. The browser\'s URL parser deletes a '
+      + 'tab, line feed or carriage return wherever it stands and strips spaces and control characters '
+      + 'from both ends before it reads the URL, so what it fetches is not what was written: a slash, a '
+      + 'tab and then `/host` is read as `//host`, another origin. Percent-encode a space the path '
+      + 'really needs (`%20`).',
+  },
+  {
+    // scheme — any scheme, not only http(s).
+    test: (url) => /^[A-Za-z][A-Za-z0-9+.-]*:/.test(url),
+    why: 'This value is an absolute URL: it opens with a scheme (`https:`, `http:`, `mailto:`, '
+      + '`javascript:`, `data:`, …), so it names an origin of its own.',
+  },
+  {
+    // protocol-relative.
+    test: (url) => url.startsWith('//'),
+    why: 'This value opens with `//`, a protocol-relative URL: the browser reads what follows as a host '
+      + 'name, so it is another origin.',
+  },
+  {
+    // backslash — `/\host` and a leading backslash are both `//host` to the parser.
+    test: (url) => url.startsWith('\\') || url.startsWith('/\\'),
+    why: 'This value puts a backslash where the browser\'s URL parser reads a slash, so it is read as '
+      + '`//host`, another origin.',
+  },
+];
+
+/**
+ * The refusal an element `api` data source's `read.url` raises — the rule, the
+ * class the value fell in, and the fix. ⛔ The value itself is never echoed: a
+ * URL an author pasted may carry a credential in its user-info or query.
+ */
+function elementApiReadUrlRefusal(input: unknown): string | undefined {
+  // A non-string is the type check's to report, in zod's own words.
+  if (typeof input !== 'string') return undefined;
+  const why = ELEMENT_API_URL_CLASSES.find((c) => c.test(input))?.why
+    ?? 'This value does not open with `/`, so it is a relative path: it resolves against the page\'s '
+      + 'own address, never the API.';
+  return '`read.url` of a page element\'s `api` data source must be a same-origin API path — one that '
+    + 'opens with a single `/`, such as `/api/v1/cloud/home`. ' + why + ' Write the endpoint\'s path '
+    + 'on this deployment\'s own origin. The console reads it with its own signed-in fetch, so a host, '
+    + 'a scheme or a credential is never written in metadata.';
+}
+
+/**
+ * The dotted path an element `api` data source selects from the response —
+ * `data.environments` in a `{ success, data }` envelope. Segments of letters,
+ * digits, `_` and `-`, joined by single dots: no brackets, no leading `$`, no
+ * slashes, so a JSONPath or a URL path written here is refused rather than
+ * selecting nothing.
+ */
+const ELEMENT_API_RESPONSE_PATH_RE = /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/;
+
+/** What an author who reached for a credential on an element `api` binding is told. */
+const ELEMENT_API_NO_CREDENTIALS =
+  'No credential is written in metadata: the console reads the endpoint with its own signed-in '
+  + 'fetch, so the request already carries the user\'s session. Delete this key.';
+
+/**
+ * Element API Data Source Schema — the second shape of a page element's
+ * `dataSource`, beside {@link ElementDataSourceSchema}'s object binding: the
+ * element binds the answer of one same-origin API endpoint instead of the rows
+ * of an object.
+ *
+ * ```ts
+ * { provider: 'api', read: { url: '/api/v1/cloud/home' }, path: 'data.environments' }
+ * ```
+ *
+ * ## The ruling, and what is deliberately NOT here
+ *
+ * The maintainer's ruling (objectstack#23016) declared this shape so a product
+ * page composes from a control-plane summary in metadata instead of a
+ * product-specific React widget: `{ provider: 'api', read: { url, method? },
+ * path? }`, `url` a same-origin API path, "No credentials in metadata; the
+ * console's authenticated fetch is reused", and a cross-origin `url` refused at
+ * parse. So the read block declares `url` and `method` and nothing else —
+ * `headers`, `params` and `body`, which the view-level `ViewDataSchema` `api`
+ * request carries, are absent ON PURPOSE, and a credential-shaped key is
+ * refused with {@link ELEMENT_API_NO_CREDENTIALS}. There is no `write` block:
+ * a page element READS.
+ *
+ * `method` admits `GET` alone. Measured at objectui `7578323a544e`: the adapter
+ * the ruling names, `@object-ui/core`'s `ApiDataSource`, issues every read —
+ * `find`, `findOne`, `aggregate` — with an explicit `method: 'GET'` that
+ * overrides the request config's own, so any other value here would declare a
+ * method the renderer never sends.
+ *
+ * ## Planned, not yet rendered
+ *
+ * At objectui `7578323a544e` no renderer reads this binding: the page-element
+ * data-source hook (`useElementDataSource`, `@object-ui/react`) admits only a
+ * binding with a string `object` (`isElementDataSourceConfig`), so an `api`
+ * binding reaches no block yet. The generic blocks that read it — stat, usage
+ * bar, checklist — are objectui#12197, re-scoped by the same ruling and
+ * sequenced after this shape lands. The liveness record is the
+ * `liveness/page.json` `_note`: the ledger's walk stops at the undrilled
+ * `page/regions` container, so no component-level key can carry a row.
+ *
+ * ## Why `ElementDataSourceSchema` is unchanged
+ *
+ * The two shapes meet as a `z.union` at `PageComponentSchema.dataSource`,
+ * not as a discriminated union, because zod's `discriminatedUnion` requires
+ * EVERY option to declare the discriminator key: the object binding would have
+ * had to grow a `provider: 'object'` key — a second spelling of the same
+ * binding. The object shape's accept set and its published def are therefore
+ * byte-identical; what moves is the envelope of a refused binding at the
+ * component door, which now arrives as one `invalid_union` whose closest branch
+ * the shared union-branch policy renders.
+ */
+export const ElementApiDataSourceSchema = lazySchema(() => strictObject({
+  surface: 'this element `api` data source',
+  history: 'A key an element `api` data source does not declare would otherwise be dropped in silence, '
+    + 'and the element would read without the setting.',
+  aliases: { response: 'path', select: 'path', dataPath: 'path', responsePath: 'path', fetch: 'read', request: 'read' },
+  guidance: {
+    url: 'Set the URL inside the read block: `read: { url }`.',
+    method: 'Set the method inside the read block: `read: { url, method }`.',
+    write: 'A page element only reads: an `api` data source declares `read` and no `write`.',
+    object: 'An `api` data source reads an API endpoint, not an object. To bind an object, drop '
+      + '`provider` and `read` and keep `object`; to read an endpoint, drop `object`.',
+    headers: ELEMENT_API_NO_CREDENTIALS,
+    credentials: ELEMENT_API_NO_CREDENTIALS,
+    auth: ELEMENT_API_NO_CREDENTIALS,
+    authorization: ELEMENT_API_NO_CREDENTIALS,
+    token: ELEMENT_API_NO_CREDENTIALS,
+    apiKey: ELEMENT_API_NO_CREDENTIALS,
+  },
+}, {
+  provider: z.literal('api').describe('Binds the element to one same-origin API endpoint instead of an object'),
+  read: strictObject({
+    surface: 'the `read` request of this element `api` data source',
+    history: 'A key this read request does not declare would otherwise be dropped in silence, and the '
+      + 'element would read without the setting.',
+    aliases: { href: 'url', endpoint: 'url', path: 'url', verb: 'method' },
+    guidance: {
+      headers: ELEMENT_API_NO_CREDENTIALS,
+      credentials: ELEMENT_API_NO_CREDENTIALS,
+      auth: ELEMENT_API_NO_CREDENTIALS,
+      authorization: ELEMENT_API_NO_CREDENTIALS,
+      token: ELEMENT_API_NO_CREDENTIALS,
+      apiKey: ELEMENT_API_NO_CREDENTIALS,
+      params: 'Write query parameters into the path itself: `read: { url: \'/api/v1/x?limit=5\' }`.',
+      body: 'A page element\'s read is a `GET` and sends no body.',
+    },
+  }, {
+    url: z.string()
+      .regex(SAME_ORIGIN_API_PATH_RE, { error: (issue) => elementApiReadUrlRefusal(issue.input) })
+      .describe('Same-origin API path the element reads — it opens with a single `/`, e.g. `/api/v1/cloud/home`. An absolute URL of any scheme, a protocol-relative `//host`, a backslash read as a slash, a space or control character, and a relative path are refused at parse. No credential is written here: the console reads the endpoint with its own signed-in fetch.'),
+    method: z.literal('GET', {
+      error: () => 'A page element\'s `api` read is sent as `GET`: the console issues every read with '
+        + '`GET`, whatever the request declares, so no other method is honoured. Omit `method` or write `\'GET\'`.',
+    }).optional().describe('HTTP method of the read — `GET`, the only method a page element\'s read is sent with'),
+  }).describe('The read request — the same-origin endpoint the element binds'),
+  path: z.string()
+    .regex(ELEMENT_API_RESPONSE_PATH_RE, {
+      error: () => '`path` of a page element\'s `api` data source is a dotted path into the response, '
+        + 'such as `data.environments`: segments of letters, digits, `_` or `-` joined by single dots — '
+        + 'no brackets, no leading `$`, no slashes.',
+    })
+    .optional()
+    .describe('Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response'),
+}).describe('[PLANNED — not yet rendered] API binding of a page element: `{ provider: \'api\', read: { url }, path? }` reads one same-origin endpoint with the console\'s signed-in fetch and binds the selected value, which the element reads as `data` in its expression holes and its `visibleWhen`. The console\'s generic stat, usage-bar and checklist blocks are the planned readers; until they ship, the binding parses and no block reads it.'));
+
+/**
  * Page Component Schema
  * A configured instance of a UI component.
  *
@@ -440,8 +658,21 @@ export const PageComponentSchema = lazySchema(() => strictObject({
   /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
   visibility: EvaluatedExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse.'),
 
-  /** Per-element data binding, overrides page-level object context */
-  dataSource: ElementDataSourceSchema.optional().describe('Per-element data binding for multi-object pages'),
+  /**
+   * Per-element data binding — one of two shapes:
+   *
+   * - the OBJECT binding ({@link ElementDataSourceSchema}) `{ object, view?,
+   *   filter?, sort?, limit? }`, which overrides the page-level object context
+   *   so one page can query several objects;
+   * - the API binding ({@link ElementApiDataSourceSchema}) `{ provider: 'api',
+   *   read: { url }, path? }`, which reads one same-origin endpoint with the
+   *   console's signed-in fetch (planned in the renderer — see its docblock).
+   *
+   * A plain `z.union`, object arm first: the API arm is told apart by its
+   * required `provider: 'api'`, and the object arm keeps its def byte-identical
+   * (no `provider` key of its own — see {@link ElementApiDataSourceSchema}).
+   */
+  dataSource: z.union([ElementDataSourceSchema, ElementApiDataSourceSchema]).optional().describe('Per-element data binding: an object binding `{ object, view?, filter?, sort?, limit? }` that overrides the page object, or an API binding `{ provider: \'api\', read: { url }, path? }` that reads one same-origin endpoint'),
 
   // `responsive` REMOVED (#11027, ADR-0049 D2): authorable and inert, exactly
   // like `view.responsive` (#3896) and `dashboard.widgets[].responsive`
@@ -658,6 +889,26 @@ export const InterfacePageConfigSchema = lazySchema(() => strictObject({
 
   /** Record count */
   showRecordCount: z.boolean().optional().describe('Show record count at page bottom'),
+
+  /**
+   * [#23005] What the list page draws in place of rows when it has none to
+   * show — the list view's own {@link EmptyStateSchema}, BY REFERENCE (triage's
+   * direction: ⛔ no second empty-state shape), so the page's empty state
+   * carries the same `title`, `message`, `icon` and one `link` a list view's
+   * does, judged by the same rules. A list page defines its own data surface
+   * (ADR-0047 revised), and until this key it had nowhere to say what belongs
+   * in an empty list: the "packages you publish appear here" line of an empty
+   * My Packages page, for one.
+   *
+   * Planned, not yet rendered: measured at objectui `7af0ab3`,
+   * `InterfaceListPage` hands `ListView` the resolved SOURCE view's
+   * `emptyState` (`InterfaceListPage.tsx:503`, `emptyState: view.emptyState`)
+   * and reads no `interfaceConfig.emptyState`. The renderer half — the page's
+   * own empty state preferred over a source view's, on every visualization —
+   * is objectstack-ai/objectui#12270.
+   */
+  emptyState: EmptyStateSchema.optional()
+    .describe('[PLANNED — not yet rendered] What the page draws in place of rows when its list has none to show: `{ title, message, icon, link }`, the list view\'s own empty-state shape. The console\'s list page is its planned reader; until it ships, the page draws a source view\'s empty state, if any.'),
 
   /** Advanced */
   allowPrinting: z.boolean().optional().describe('Allow users to print the page'),
@@ -1465,6 +1716,13 @@ export type ElementDataSource = z.input<typeof ElementDataSourceSchema>;
  * isomorphic family the way `element:number` and `element:record_picker` did.
  */
 export type ElementDataSourceParsed = z.infer<typeof ElementDataSourceSchema>;
+/**
+ * The API binding of a page element (`{ provider: 'api', read: { url }, path? }`).
+ * One shape: no default and no transform in its tree, so the author state and
+ * the parsed state coincide (pinned in `type-alias-convention.pin.test.ts`,
+ * ADR-0122).
+ */
+export type ElementApiDataSource = z.input<typeof ElementApiDataSourceSchema>;
 export type InterfacePageConfig = z.input<typeof InterfacePageConfigSchema>;
 /** Post-parse shape of {@link InterfacePageConfig} — defaults applied, transforms run (ADR-0122). */
 export type InterfacePageConfigParsed = z.infer<typeof InterfacePageConfigSchema>;

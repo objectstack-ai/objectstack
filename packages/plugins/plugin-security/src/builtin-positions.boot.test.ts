@@ -39,7 +39,9 @@
  * ## The goldens
  *
  * The census and the write ledger: no boot writes a `sys_position` row in any
- * scenario, and an existing database keeps exactly the rows it had. The census
+ * scenario, and an existing database keeps exactly the rows it had. Since
+ * stage 6b-2 no boot writes a `sys_permission_set` row either, and the grant
+ * golden holds without one. The census
  * instrument is proven able to see a row by a positive control (one
  * organization-authored create, read back as exactly one row).
  *
@@ -184,6 +186,14 @@ interface Booted {
   ledger: string[];
   /** The rows the boot left, one string per row. */
   census: string[];
+  /** [C3 stage 6b-2] The `sys_permission_set` rows the boot left, by name. */
+  permissionSetCensus: string[];
+}
+
+/** Every `sys_permission_set` row's name and organization, past every scope. */
+async function permissionSetCensus(engine: ObjectQL): Promise<string[]> {
+  const rows = (await engine.find('sys_permission_set', { where: {}, limit: 5000, context: SYS })) as any[];
+  return rows.map((r) => `${r.name} | ${r.organization_id ?? '-'}`).sort();
 }
 
 /** Every `sys_position` row, one string per row, past every scope. */
@@ -339,22 +349,14 @@ async function boot(scenario: Scenario): Promise<Booted> {
   }
   recording = false;
 
-  return { engine, metadata, ledger, census: await positionCensus(engine) };
+  return { engine, metadata, ledger, census: await positionCensus(engine), permissionSetCensus: await permissionSetCensus(engine) };
 }
 
 /** The four principals' resolved grants — needs the organization and its memberships. */
 async function grantsByPrincipal(engine: ObjectQL, posture: 'single' | 'isolated'): Promise<Record<string, unknown>> {
-  const orgCtx = { isSystem: true, tenantId: ORG };
-  // Walled: the organization's own copies of the sets its grants point at
-  // (the per-organization catalog), cloned from the platform bucket the boot
-  // just wrote — as the name-column equivalence suite does.
-  if (posture === 'isolated') {
-    for (const name of ['organization_admin', 'organization_admin_no_bypass', 'viewer_readonly']) {
-      const [bucket] = await engine.find('sys_permission_set', { where: { name }, context: SYS });
-      const { id: _id, created_at: _c, updated_at: _u, ...rest } = bucket as any;
-      await engine.insert('sys_permission_set', { ...rest, id: `ps_${name}_${ORG}`, organization_id: ORG }, { context: orgCtx } as any);
-    }
-  }
+  // [C3 stage 6b-2] No `sys_permission_set` row exists in any posture: every
+  // grant below names its set, and the resolver takes the set from the
+  // security catalog (ADR-0131 D3/D4).
   // [ADR-0131 D4] The boot's organization-admin backfill already granted it by
   // name, in every posture — no organization copy of the set is needed — so
   // the reconcile finds nothing to do.
@@ -362,13 +364,9 @@ async function grantsByPrincipal(engine: ObjectQL, posture: 'single' | 'isolated
   expect(reconciled.action).toBe('noop');
 
   // The member's set, granted through the data door by an administrator.
-  const [viewer] = await engine.find('sys_permission_set', {
-    where: { name: 'viewer_readonly', ...(posture === 'isolated' ? { organization_id: ORG } : {}) },
-    context: SYS,
-  });
   await engine.insert(
     'sys_user_permission_set',
-    { user_id: 'usr_member', permission_set: (viewer as any).name },
+    { user_id: 'usr_member', permission_set: 'viewer_readonly' },
     { context: { userId: 'usr_orgadmin', positions: [], permissions: ['qa_admin'], tenantId: ORG } } as any,
   );
 
@@ -500,6 +498,27 @@ for (const name of Object.keys(SCENARIOS) as ScenarioName[]) {
       expect(await positionCensus(engine)).toEqual(census);
     });
 
+    // [C3 stage 6b-2] The catalog seeders are retired: no boot writes a
+    // `sys_permission_set` row — not the platform defaults, not a package's
+    // sets, not an organization's copies (the late organization included) —
+    // while the first platform administrator and the organization
+    // administrator are still granted (the grant golden below) by name.
+    it('writes no sys_permission_set row, and still grants the first platform admin and the organization admin', async () => {
+      const { engine, permissionSetCensus: rows } = booted.get(name)!;
+      expect(rows).toEqual([]);
+      const holders = (await engine.find('sys_user_permission_set', { where: {}, limit: 100, context: SYS })) as any[];
+      const held = holders.map((g) => `${g.user_id} -> ${g.permission_set}`).sort();
+      if (scenario.posture === 'single') expect(held).toContain('usr_admin -> admin_full_access');
+      if (scenario.organizationAtBoot) {
+        expect(held.some((h) => h.startsWith('usr_orgadmin -> organization_admin'))).toBe(true);
+      }
+      // Positive control: the census sees a row — one insert reads back as one.
+      await engine.insert('sys_permission_set', { id: 'ps_census_control', name: 'zz_census_control', label: 'Control' }, { context: SYS } as any);
+      expect(await permissionSetCensus(engine)).toEqual(['zz_census_control | -']);
+      await engine.delete('sys_permission_set', { where: { id: 'ps_census_control' }, context: SYS } as any);
+      expect(await permissionSetCensus(engine)).toEqual([]);
+    });
+
     if (scenario.organizationAtBoot) {
       it('grants every principal what it was granted before the declarations', async () => {
         const { engine } = booted.get(name)!;
@@ -517,12 +536,13 @@ for (const name of Object.keys(SCENARIOS) as ScenarioName[]) {
 }
 
 /**
- * The tenant position writes — the same in both postures. A name the security
+ * The tenant position writes. A name the security
  * catalog does not hold, a dangling one or a row with no definition alike, is
  * the position catalog refusal's envelope (`reference_not_found` at
  * `position`); a stack-declared position is assigned with no row; the two
  * built-in rows an existing database holds are refused on their `platform`
- * provenance.
+ * provenance. Under a wall the tenant's position create is refused as well
+ * ({@link refusalGoldenFor}).
  */
 const REFUSAL_GOLDEN: Record<string, WriteOutcome> = {
   'assign a position the security catalog does not hold': {
@@ -553,10 +573,19 @@ const REFUSAL_GOLDEN: Record<string, WriteOutcome> = {
   },
 };
 
-/** {@link REFUSAL_GOLDEN} for a scenario: the built-in row cases need an existing database's rows. */
+/**
+ * {@link REFUSAL_GOLDEN} for a scenario: the built-in row cases need an existing
+ * database's rows. [ADR-0131 D3] Under a wall the tenant's position CREATE is
+ * refused (`walled-catalog-data-door.ts`): the catalog is the platform
+ * operator's, and a tenant may only assign it. The assignment cases do not
+ * move, and the built-in row refusals keep their `403 PERMISSION_DENIED`.
+ */
 function refusalGoldenFor(scenario: Scenario): Record<string, WriteOutcome> {
-  if (scenario.existingRows) return REFUSAL_GOLDEN;
-  const { 'delete the everyone row': _d, 'relabel the platform_admin row': _r, ...fresh } = REFUSAL_GOLDEN;
+  const golden: Record<string, WriteOutcome> = scenario.posture === 'single'
+    ? REFUSAL_GOLDEN
+    : { ...REFUSAL_GOLDEN, 'control: create a position row': { ok: false, code: 'PERMISSION_DENIED', status: 403 } };
+  if (scenario.existingRows) return golden;
+  const { 'delete the everyone row': _d, 'relabel the platform_admin row': _r, ...fresh } = golden;
   return fresh;
 }
 
@@ -622,7 +651,7 @@ const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {
       permissions: ['mcp_agent_data_read'],
       positions: [],
       principalKind: 'agent',
-      systemPermissions: ['manage_org_users', 'setup.access', 'setup.write'],
+      systemPermissions: ['manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
     },
     member: {
       accessible_org_ids: ['org_eq'],
@@ -640,7 +669,7 @@ const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {
       permissions: ['field_default', 'member_default', 'organization_admin_no_bypass'],
       positions: ['everyone', 'org_owner'],
       posture: 'TENANT_ADMIN',
-      systemPermissions: ['manage_org_users', 'setup.access', 'setup.write'],
+      systemPermissions: ['manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
     },
     platformAdmin: {
       accessible_org_ids: [],
@@ -650,6 +679,7 @@ const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {
       positions: ['everyone', 'platform_admin'],
       posture: 'PLATFORM_ADMIN',
       systemPermissions: [
+        'manage_mailboxes',
         'manage_metadata',
         'manage_platform_settings',
         'manage_sharing',
@@ -670,7 +700,7 @@ const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {
       permissions: ['mcp_agent_data_read'],
       positions: [],
       principalKind: 'agent',
-      systemPermissions: ['manage_org_users', 'setup.access', 'setup.write'],
+      systemPermissions: ['manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
     },
     member: {
       accessible_org_ids: ['org_eq'],
@@ -688,7 +718,7 @@ const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {
       permissions: ['field_default', 'member_default', 'organization_admin'],
       positions: ['everyone', 'org_owner'],
       posture: 'TENANT_ADMIN',
-      systemPermissions: ['manage_org_users', 'setup.access', 'setup.write'],
+      systemPermissions: ['manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
     },
     platformAdmin: {
       accessible_org_ids: [],
@@ -698,6 +728,7 @@ const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {
       positions: ['everyone', 'platform_admin'],
       posture: 'PLATFORM_ADMIN',
       systemPermissions: [
+        'manage_mailboxes',
         'manage_metadata',
         'manage_platform_settings',
         'manage_sharing',

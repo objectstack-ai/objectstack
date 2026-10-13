@@ -36,6 +36,7 @@ import { SysUser, SysAccount, SysMember, SysOrganization } from '@objectstack/pl
 
 import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-guard.js';
 import { ensureDefaultOrganization } from './ensure-default-organization.js';
+import { seedLegacyPlatformBucket } from './__tests__/legacy-catalog-rows.testkit.js';
 
 const SYS = { context: { isSystem: true } } as any;
 const GUARD_PACKAGE = 'test.grant-readers-unnamed';
@@ -122,6 +123,8 @@ async function soleGrantAnchoredAdmin(): Promise<Rig> {
       'sys_account', { id: `acc_${id}`, user_id: id, account_id: `${id}@un.example`, provider_id: 'credential' }, SYS,
     );
   }
+  // An existing database: the platform-bucket rows an earlier release seeded.
+  await seedLegacyPlatformBucket(engine, (manifest.permissions ?? []) as any[]);
   const boot = await bootstrapPlatformAdmin(engine, (manifest.permissions ?? []) as any[]);
   expect(boot).toMatchObject({ adminPromoted: true });
   return { engine };

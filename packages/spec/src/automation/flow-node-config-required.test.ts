@@ -87,7 +87,7 @@ const CENSUS: Array<{ type: string; config: Config; key: string }> = [
   { type: 'create_record', config: { objectName: 'account', fields: { name: 'Acme' } }, key: 'objectName' },
   { type: 'update_record', config: { objectName: 'account', filter: { id: '{record.id}' }, fields: { name: 'Acme' } }, key: 'objectName' },
   { type: 'delete_record', config: { objectName: 'account', filter: { id: '{record.id}' } }, key: 'objectName' },
-  { type: 'notify', config: { recipients: ['{record.owner}'], title: 'Hi' }, key: 'recipients' },
+  { type: 'notify', config: { recipients: [{ dialect: 'cel', source: 'record.owner' }], title: 'Hi' }, key: 'recipients' },
   { type: 'http', config: { url: 'https://example.com/hook' }, key: 'url' },
   { type: 'screen', config: SCREEN, key: 'fields[0].name' },
   { type: 'screen', config: SCREEN, key: 'fields[0].options[0].value' },
@@ -124,7 +124,7 @@ describe('FlowSchema.parse refuses a key the node\'s executor contract requires,
 
   describe('a key a RULE of the contract requires here — the contract\'s own message', () => {
     it('a `notify` with neither `title` nor `template` is refused at `title`, in the notify contract\'s words', () => {
-      const authored = { recipients: ['{record.owner}'] };
+      const authored = { recipients: [{ dialect: 'cel', source: 'record.owner' }] };
       const own = NotifyConfigSchema.safeParse(authored);
       expect(own.success).toBe(false);
       const issues = issuesOf(flowWith(node('notify', authored)));

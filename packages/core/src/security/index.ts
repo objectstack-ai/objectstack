@@ -279,6 +279,18 @@ export {
   type PositionBindingConversion,
 } from './position-binding-conversion.js';
 
+// ADR-0131 D3/D10 — a Setup-authored catalog row turned into the definition it
+// carries, so the upgrade ceremony (`os migrate`) can save it through the
+// metadata door. Pure; applied by the ceremony, never at boot.
+export {
+  permissionSetDefinitionFromRow,
+  type PermissionSetRowForDefinition,
+} from './permission-set-row-definition.js';
+export {
+  positionDefinitionFromRow,
+  type PositionRowForDefinition,
+} from './position-row-definition.js';
+
 // [commit f8eb73601] The measured read surface of the administrator derivation — the
 // single source `plugin-auth`'s break-glass standing-key lists correspond to.
 export {
@@ -330,6 +342,14 @@ export {
   OPERATION_PRIVATE_KEY_PREFIX,
   withoutOperationPrivateKeys,
 } from './operation-private-keys.js';
+
+// The caller-scoped "which of these parent records can the caller read?" probe
+// every parent-derived read gate asks (comments, activity, ledger, attachments,
+// mail). One owner for the body two packages had hand-copied.
+export {
+  resolveReadableParentIds,
+  type ReadableParentIdsEngine,
+} from './readable-parent-ids.js';
 
 // [#11968] Authorization caching SUBSTRATE, TTL-bounded and invalidated over a
 // best-effort cross-node channel — the channel contract and the boot-time

@@ -47,10 +47,32 @@ describe('sys_user page — the permission-set assignments list', () => {
     expect(columns).toEqual(expect.arrayContaining(['permission_set', 'valid_from', 'valid_until']));
   });
 
-  it('[ADR-0131 D4] the Add picker writes the set BY NAME, and the list never shows the legacy id', () => {
+  it('[ADR-0131 D4] the list never shows the legacy id', () => {
     const list = lists[0] as any;
-    expect(list.add.linkField).toBe('permission_set');
-    expect(list.add.picker.valueField).toBe('name');
     expect(list.columns).not.toContain('permission_set_id');
+  });
+});
+
+/**
+ * [#15204 B2] Neither grant list carries an `add` picker. Such a picker lists
+ * object ROWS, and positions and permission sets live in the security catalog,
+ * so it would offer nothing on a database that holds no such row. "New" opens
+ * the grant form, whose name field picks from the catalog (`widget:
+ * 'position-ref'` / `'permission-ref'` on the objects); Remove is the host's
+ * row delete, which does not depend on `add` (measured on #15204, 6116275825).
+ */
+describe('sys_user page — the grant lists have no row-object add picker', () => {
+  for (const objectName of ['sys_user_position', 'sys_user_permission_set']) {
+    it(`${objectName}: one related list, and no \`add\``, () => {
+      const found = relatedListsOf(SysUserDetailPage, objectName);
+      expect(found).toHaveLength(1);
+      expect(found[0]).not.toHaveProperty('add');
+    });
+  }
+
+  it('control: the business-unit list keeps its add picker (an object-row binding)', () => {
+    const found = relatedListsOf(SysUserDetailPage, 'sys_business_unit_member');
+    expect(found).toHaveLength(1);
+    expect(found[0]).toHaveProperty('add');
   });
 });

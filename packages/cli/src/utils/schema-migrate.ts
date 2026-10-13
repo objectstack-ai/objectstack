@@ -245,6 +245,82 @@ function sortPendingSchemaWork(work: PendingSchemaWork[]): PendingSchemaWork[] {
 }
 
 /**
+ * [#23022] The kernel service under which `PackageServicePlugin.init()`
+ * declares `sys_packages` — `@objectstack/service-package`'s
+ * `PACKAGE_STORAGE_SERVICE`, read by name because the package exports no
+ * constant for it.
+ */
+const PACKAGE_STORAGE_SERVICE = 'package.storage';
+
+/** What {@link PACKAGE_STORAGE_SERVICE} answers with (`service-package`'s `PackageStorageDeclaration`). */
+interface PackageStorageDeclaration {
+  readonly table: string;
+  readonly columns: readonly string[];
+  /** Read-only: `true` present, `false` absent, `undefined` could not tell. */
+  present(): Promise<boolean | undefined>;
+  /** The package registry's own `CREATE TABLE IF NOT EXISTS` and index. */
+  ensure(): Promise<void>;
+}
+
+/**
+ * [#23022] `sys_packages` as pending schema work, when it is absent.
+ *
+ * ## Why the plan needs this
+ *
+ * `PackageServicePlugin.start()` creates `sys_packages` with raw DDL, because
+ * the table cannot be a declared object (`service-package`'s
+ * `package-table.ts` records the measurement: the driver's managed tables key
+ * on `id` alone, and this one keys on `(id, version)`). So no driver deferral
+ * ever listed it, and a deployment that sets `OS_SKIP_SCHEMA_SYNC=1` — whose
+ * boot now creates nothing — was left with no way to get it from the documented
+ * path. The plugin declares the table in `init()`, which a migrate boot runs,
+ * and this lists it as `create_table` beside the objects' tables; `apply`'s
+ * flush then runs the plugin's own statements, so `apply` creates exactly what
+ * the boot creates.
+ *
+ * `null` when there is nothing to plan: the plugin is not composed, or the
+ * table exists. When its presence could not be READ, that is not absence: a
+ * note says the table was not examined, and nothing is planned.
+ */
+async function planPackageTable(
+  kernel: unknown,
+  notes: string[],
+): Promise<{ storage: PackageStorageDeclaration; work: PendingSchemaWork } | null> {
+  let service: unknown;
+  try {
+    service = (kernel as { getService?: (name: string) => unknown }).getService?.(PACKAGE_STORAGE_SERVICE);
+  } catch {
+    return null; // not composed: this boot's deployment serves no package registry
+  }
+  if (service === undefined || service === null) return null;
+  const storage = service as Partial<PackageStorageDeclaration>;
+  if (
+    typeof storage.table !== 'string' || !Array.isArray(storage.columns)
+    || typeof storage.present !== 'function' || typeof storage.ensure !== 'function'
+  ) {
+    throw new Error(
+      `The "${PACKAGE_STORAGE_SERVICE}" service does not have the shape this CLI reads (table, columns, present, `
+      + 'ensure), so sys_packages cannot be planned. @objectstack/cli and @objectstack/service-package must come '
+      + 'from the same release.',
+    );
+  }
+  const declared = storage as PackageStorageDeclaration;
+  const present = await declared.present();
+  if (present === true) return null;
+  if (present === undefined) {
+    notes.push(
+      `${declared.table} (the package registry's table) was NOT examined: its presence could not be read on this `
+      + 'database, so this run does not list it and does not create it.',
+    );
+    return null;
+  }
+  return {
+    storage: declared,
+    work: { table: declared.table, kind: 'create_table', columns: [...declared.columns] },
+  };
+}
+
+/**
  * Arms deferred-DDL mode on EVERY SQL driver the boot connects, before any of
  * them can schema-sync (#3917, #21391).
  *
@@ -925,6 +1001,10 @@ export async function bootSchemaStack(
   for (const d of deferral?.drivers ?? []) {
     if (d.previewDeferredSchemaWork) pendingSchemaWork.push(...(await d.previewDeferredSchemaWork()));
   }
+  // [#23022] …and the one table outside the object set, `sys_packages`, which
+  // no driver deferral can see. Read-only here; `flushSchemaDdl` creates it.
+  let packageTable = deferral ? await planPackageTable(kernel, composition.notes) : null;
+  if (packageTable) pendingSchemaWork.push(packageTable.work);
   sortPendingSchemaWork(pendingSchemaWork);
   // [#21529] The tables the held-back sync would create: measured absent.
   const absentTables = new Set(
@@ -1007,6 +1087,12 @@ export async function bootSchemaStack(
       const performed: PendingSchemaWork[] = [];
       for (const d of deferral?.drivers ?? []) {
         if (d.flushDeferredSchemaDdl) performed.push(...(await d.flushDeferredSchemaDdl()));
+      }
+      // [#23022] The package registry's own DDL — the statements its boot runs.
+      if (packageTable) {
+        await packageTable.storage.ensure();
+        performed.push(packageTable.work);
+        packageTable = null;
       }
       // [#21529] The tables exist now; nothing is measured absent any more.
       absentTables.clear();

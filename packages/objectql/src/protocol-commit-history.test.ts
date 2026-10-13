@@ -402,7 +402,7 @@ function makeRealRepoHarness(seedCommits: any[] = [], opts: { controlPlane?: boo
 /**
  * The reverted artifact is a `view`, not an `object`, and deliberately: the
  * repository's `assertAllowed` refuses `override-artifact` on `object` (not
- * `allowOrgOverride`), and `revertCommit` — unlike `rollbackMetaItem`, which
+ * `allowEnvironmentOverlay`), and `revertCommit` — unlike `rollbackMetaItem`, which
  * derives `runtime-only` for a runtime-created artifact — passed no intent, so
  * an object item failed that gate BEFORE reaching the scoping this file pins.
  * That was a separate defect of the same family, fixed as #6563 (whose own pins
@@ -535,7 +535,7 @@ describe('#6215 — revertCommit restores a PACKAGE-BOUND overlay row', () => {
  * no `intent`, so `SysMetadataRepository.restoreVersion` fell back to its
  * `?? 'override-artifact'` default, `put` opened with
  * `assertAllowed(ref.type, opts.intent)`, and every type that is not
- * `allowOrgOverride` was refused — `object` among them. So the metadata type
+ * `allowEnvironmentOverlay` was refused — `object` among them. So the metadata type
  * Studio creates most could not be reverted through the package-commit undo AT
  * ALL, while the same edit reverted fine one artifact at a time through
  * `rollbackMetaItem`, which derives the intent instead of defaulting it. The
@@ -742,7 +742,7 @@ describe('#6563 — rollbackToPackageCommit inherits the per-item intent', () =>
  * CONSTANT — `intent: 'override-artifact'`, written into the `repo.delete(...)`
  * call — and `SysMetadataRepository.delete` opens with the same
  * `assertAllowed(ref.type, opts.intent)` gate `put` uses. So `object`, which is
- * not `allowOrgOverride`, was refused on the delete path exactly as it had been
+ * not `allowEnvironmentOverlay`, was refused on the delete path exactly as it had been
  * on the restore path, and a commit that CREATED an object could not be
  * reverted either.
  *

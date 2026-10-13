@@ -632,6 +632,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Referencia mediante",
         helpText: "Convierte este campo de texto en la mitad de id de un puntero polimórfico: nombra el campo HERMANO del mismo objeto que guarda, fila a fila, el nombre del objeto destino (ADR-0052 §5). En snake_case; solo campos de texto y excluyente con `reference`."
       },
+      mailAssociation: {
+        label: "Asociar correo entrante",
+        helpText: "Vincula el correo entrante a los registros de este objeto cuyo valor en este campo coincide con el remitente o con algún destinatario del mensaje (sin distinguir mayúsculas; se excluye la dirección del propio buzón). Solo campos de email. Solo surte efecto donde hay un servicio de buzón configurado."
+      },
       dueLike: {
         label: "Fecha límite",
         helpText: "Marca esta fecha como fecha límite: una vez pasada, las vistas pueden mostrarla como vencida (texto relativo y un color de vencimiento). Desactivado o sin definir: no es una fecha límite, y no se deduce nada del nombre del campo."
@@ -2226,9 +2230,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       label: {
         label: "Etiqueta"
       },
-      category: {
-        label: "Categoría"
-      },
       locale: {
         label: "Configuración regional",
         helpText: "Etiqueta BCP-47, p. ej. en-US, zh-CN"
@@ -2260,10 +2261,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       active: {
         label: "Activo",
         helpText: "Si no está marcado, sendTemplate() devuelve TEMPLATE_INACTIVE."
-      },
-      isSystem: {
-        label: "Integrado del sistema",
-        helpText: "Plantilla integrada; los tenants pueden sobrescribirla, pero no deberían eliminarla."
       }
     }
   },

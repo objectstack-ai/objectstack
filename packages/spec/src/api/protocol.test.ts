@@ -2641,6 +2641,26 @@ describe('ListDraftsResponseSchema declares the pending-drafts body', () => {
   it('the honest-empty answer parses — {drafts: []} is a declared, legal body', () => {
     expect(ListDraftsResponseSchema.safeParse({ drafts: [] }).success).toBe(true);
   });
+
+  it('[#23073] two languages of one email_template are two drafts told apart by `member`, which the parse keeps', () => {
+    const draft = (member: string) => ({
+      type: 'email_template',
+      name: 'acme.welcome',
+      member,
+      label: 'Welcome',
+      packageId: 'com.acme.mail',
+      updatedAt: '2026-10-12T09:00:00.000Z',
+      updatedBy: 'admin@objectos.ai',
+    });
+    const bundle = { drafts: [draft('en-US'), draft('zh-CN'), realResponse.drafts[0]!] };
+    const result = ListDraftsResponseSchema.safeParse(bundle);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data).toEqual(bundle);
+    expect(result.data.drafts.map((d) => d.member)).toEqual(['en-US', 'zh-CN', undefined]);
+    // A type whose identity is its name alone carries no `member` key at all.
+    expect(result.data.drafts[2]).not.toHaveProperty('member');
+  });
 });
 
 describe('GetMetaDiagnosticsResponseSchema declares the validation-sweep body', () => {

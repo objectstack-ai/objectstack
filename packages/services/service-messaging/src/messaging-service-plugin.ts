@@ -32,6 +32,60 @@ import {
 // installed to register the table it writes.
 import { SysNotification } from '@objectstack/platform-objects/audit';
 
+/**
+ * [#22984] Whether the engine's `ObjectQLPlugin` resolved `skipSchemaSync` (the
+ * option, else `OS_SKIP_SCHEMA_SYNC=1`). `ObjectQLPlugin.init()` publishes that
+ * value on the engine instance as an undeclared property, so it is probed here:
+ * an engine nothing published it on (a test double, a foreign engine) reads as
+ * not set. ⛔ Never a second read of the environment: the option and the env
+ * var must not disagree between the engine's boot and this service's.
+ */
+function bootSchemaSyncSkipped(engine: IDataEngine): boolean {
+    return (engine as unknown as { skipSchemaSync?: unknown }).skipSchemaSync === true;
+}
+
+/**
+ * What an operator loses while `objectName`'s storage is missing, for
+ * {@link provisionFailureLine}. The four pipeline objects are written as a SIDE
+ * EFFECT of other actions — `emit()` writes the event, then the delivery outbox
+ * row, the inbox row and its receipt — and the callers that emit (an approval
+ * step, an @mention) catch a failed emit and complete anyway. So the loss there
+ * is invisible from the action that caused it.
+ */
+function lostWithoutStorage(objectName: string): string {
+    switch (objectName) {
+        case 'sys_notification':
+        case 'sys_notification_delivery':
+        case 'sys_inbox_message':
+        case 'sys_notification_receipt':
+            return (
+                'Notifications are written as a side effect of other actions, so an approval step or an @mention ' +
+                'keeps completing while the notification rows it needs here cannot land.'
+            );
+        default:
+            return 'Every write to it fails until it exists.';
+    }
+}
+
+/**
+ * The ONE line `provisionSystemTables` prints when an object's DDL throws — at
+ * `error`, carrying both halves AGENTS.md "Degradation log levels" asks of a
+ * durability degradation: ① the consequence, and that the deployment keeps
+ * looking healthy; ② the fix. Both remedies are measured: this provisioning
+ * runs on every boot that runs DDL, and `os migrate apply` creates all eight
+ * of these tables.
+ */
+function provisionFailureLine(objectName: string): string {
+    return (
+        `[messaging] could not provision ${objectName} storage — its storage was NOT created. ` +
+        `${lostWithoutStorage(objectName)} The boot still completes and the deployment keeps looking healthy. ` +
+        "Fix: resolve the driver's refusal (in this record's meta), then restart, since this provisioning runs on " +
+        'every boot, or run `os migrate apply`, which creates the missing storage (`os migrate plan` lists it as ' +
+        `\`create_table:${objectName}\`). If the boot log also carries \`Schema sync FAILED for object ` +
+        `'${objectName}'\`, that is the same refusal.`
+    );
+}
+
 export interface MessagingServicePluginOptions {
     /**
      * Register the always-on `inbox` channel during init (default `true`).
@@ -428,14 +482,27 @@ export class MessagingServicePlugin implements Plugin {
      * Creating the tables at kernel:ready makes a new env consistent from the
      * start. Idempotent (the driver only creates a table when absent), so it is
      * safe on every boot; per-object failures are isolated.
+     *
+     * [#22985] A failed provision is reported at `error`, once per object
+     * ({@link provisionFailureLine}): the boot completes and the deployment
+     * looks healthy while the table does not exist, and the pipeline tables
+     * are written as a side effect of actions that complete without them. That
+     * is the durability class AGENTS.md "Degradation log levels" sends to
+     * `error`; `check:durability-log-level` holds it there.
+     *
+     * [#22984] It is boot-time DDL, so it honours `skipSchemaSync` /
+     * `OS_SKIP_SCHEMA_SYNC=1` the way the engine's own boot sync does: a
+     * deployment that declared its DDL managed out-of-band ("Use after running
+     * migrations manually") gets no table created behind its back. The value is
+     * the one `ObjectQLPlugin` resolved (`bootSchemaSyncSkipped`); when it
+     * is set this returns before any DDL or existence probe (the flag protects a
+     * cold-start budget) and says once, at `info`, what it did not provision and
+     * why. Not `warn`: nothing is degraded, because the operator declared this.
+     * `os migrate apply`, the documented path, was measured to create all eight
+     * tables. `syncObjectSchema` itself stays ungated, because it is also how a
+     * runtime publish gives a new object its table.
      */
     private async provisionSystemTables(engine: IDataEngine, ctx: PluginContext): Promise<void> {
-        // [#12482] `syncObjectSchema?` is declared on the IDataEngine contract
-        // (optional — only engines owning drivers and DDL answer); the
-        // pre-#12482 `as unknown as` structural recovery is gone. The runtime
-        // probe stays: engines without on-demand DDL skip provisioning.
-        const sync = engine.syncObjectSchema;
-        if (typeof sync !== 'function') return;
         const objects = [
             // The L2 event is provisioned with the rest of the pipeline it
             // heads. Its table was previously created lazily by the SQL driver
@@ -451,11 +518,38 @@ export class MessagingServicePlugin implements Plugin {
             NotificationTemplate,
             HttpDelivery,
         ];
+        // [#22984] FIRST: see the docblock. One line, naming every skipped object.
+        if (bootSchemaSyncSkipped(engine)) {
+            ctx.logger.info(
+                `[messaging] ${objects.map((obj) => (obj as { name: string }).name).join(', ')} NOT provisioned at boot — ` +
+                    "the boot's schema sync is skipped (`skipSchemaSync` / OS_SKIP_SCHEMA_SYNC=1), declaring this " +
+                    "deployment's DDL managed out-of-band, so this service issues none either. `os migrate apply` creates " +
+                    'any that are missing (`os migrate plan` lists them as `create_table`).',
+            );
+            return;
+        }
+        // [#12482] `syncObjectSchema?` is declared on the IDataEngine contract
+        // (optional — only engines owning drivers and DDL answer); the
+        // pre-#12482 `as unknown as` structural recovery is gone. The runtime
+        // probe stays: engines without on-demand DDL skip provisioning.
+        const sync = engine.syncObjectSchema;
+        if (typeof sync !== 'function') return;
         for (const obj of objects) {
+            const name = (obj as { name: string }).name;
             try {
-                await sync.call(engine, (obj as { name: string }).name);
+                await sync.call(engine, name);
             } catch (err) {
-                ctx.logger.warn(`[messaging] could not provision ${(obj as { name: string }).name} storage — ${(err as Error)?.message ?? err}`);
+                // A DURABILITY degradation, so `error` (AGENTS.md "Degradation
+                // log levels"): the boot completes and the deployment looks
+                // healthy while this table does not exist. Once per object per
+                // boot, never per write; the boot is deliberately NOT failed.
+                // The driver's refusal goes in meta, not in the message: a
+                // multi-line driver error would split the record, and only its
+                // first fragment would carry the level.
+                ctx.logger.error(provisionFailureLine(name), undefined, {
+                    object: name,
+                    error: (err as Error)?.message ?? String(err),
+                });
             }
         }
     }

@@ -44,7 +44,31 @@
  */
 
 import type { AnchorBindingContext } from '@objectstack/spec/security';
-import { readDeclared } from './bootstrap-declared-permissions.js';
+
+/**
+ * Read the declared metadata items of a type from the engine's
+ * `SchemaRegistry` — every package manifest's items, provenance-stamped with
+ * `_packageId`, plus the environment items `loadMetaFromDb` hydrates into the
+ * same collection. The registry is the catalog's one home (ADR-0131 D3); this
+ * is a read of it, never of a catalog row.
+ *
+ * [#8378] The registered item IS the authoring document — there is no
+ * `{ name, content }` envelope to unwrap: `registerMetadataCollections`
+ * (objectql `engine.ts`) registers each stack-collection element as-is, and
+ * `loadMetaFromDb` registers the parsed body, never the `sys_metadata` row.
+ *
+ * An unreadable or absent registry answers `[]`; the callers fall back to the
+ * metadata service or fail closed on an empty answer.
+ */
+export function readDeclared(engine: any, type: string): any[] {
+  try {
+    const reg = engine?.registry;
+    if (reg?.listItems) {
+      return (reg.listItems(type) ?? []).filter(Boolean);
+    }
+  } catch { /* fall through */ }
+  return [];
+}
 
 /**
  * Read this stack's declared authorization capabilities as an

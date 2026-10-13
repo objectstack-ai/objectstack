@@ -252,7 +252,7 @@ describe('the rule does NOT over-reach', () => {
       update_record: { objectName: 'task', filter: { id: '{row.id}' } },
       get_record: { objectName: 'task' },
       http: { url: 'https://example.com/hook' },
-      notify: { recipients: ['{row.owner}'], title: 'Row processed' },
+      notify: { recipients: [{ dialect: 'cel', source: 'row.owner' }], title: 'Row processed' },
     };
     for (const type of ['assignment', 'decision', 'create_record', 'update_record', 'get_record', 'http', 'notify', 'loop']) {
       const node: FlowNode = type === 'loop'

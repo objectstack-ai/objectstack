@@ -632,6 +632,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "ポリモーフィック参照の相棒項目",
         helpText: "このテキスト項目をポリモーフィック参照の id 側にします。ここには、対象オブジェクト名を行ごとに保持する同一オブジェクト上の別項目名を指定します（ADR-0052 §5）。snake_case で記述し、テキスト項目のみ、`reference` とは併用できません。"
       },
+      mailAssociation: {
+        label: "受信メールの照合",
+        helpText: "この項目の値がメッセージの送信者またはいずれかの受信者のアドレスと一致する、このオブジェクトのレコードに受信メールを関連付けます（大文字と小文字は区別しません。メールボックス自身のアドレスは除きます）。メール項目のみ。メールボックスサービスが設定されている環境でのみ有効です。"
+      },
       dueLike: {
         label: "期限",
         helpText: "この日付を期限としてマークします。日付を過ぎると、ビューで期限切れとして表示されることがあります（相対的な表現と期限切れの色）。オフまたは未設定の場合は期限ではなく、項目名から推測されることもありません。"
@@ -2226,9 +2230,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       label: {
         label: "表示名"
       },
-      category: {
-        label: "カテゴリ"
-      },
       locale: {
         label: "ロケール",
         helpText: "BCP-47 タグ（例: en-US, zh-CN）"
@@ -2260,10 +2261,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       active: {
         label: "有効",
         helpText: "未チェックの場合、sendTemplate() は TEMPLATE_INACTIVE を返します。"
-      },
-      isSystem: {
-        label: "システム組み込み",
-        helpText: "組み込みテンプレート。テナントは上書きできますが、削除すべきではありません。"
       }
     }
   },
