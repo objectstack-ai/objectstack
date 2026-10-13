@@ -47,8 +47,8 @@ const legacyFlow = () => ({
                 // runs before the region canonicalization under test.
                 body: {
                     nodes: [
-                        { id: 'b1', type: 'update_record', label: 'Touch', config: { objectName: 'lead', filters: { id: '{item.id}' } } },
-                        { id: 'b2', type: 'update_record', label: 'Mark', config: { objectName: 'lead', filter: { id: '{item.id}' } } },
+                        { id: 'b1', type: 'update_record', label: 'Touch', config: { objectName: 'lead', filters: { id: { dialect: 'cel', source: 'item.id' } } } },
+                        { id: 'b2', type: 'update_record', label: 'Mark', config: { objectName: 'lead', filter: { id: { dialect: 'cel', source: 'item.id' } } } },
                     ],
                     edges: [{ id: 'be1', source: 'b1', target: 'b2', condition: "status == 'x'" }],
                 },
@@ -71,7 +71,7 @@ describe('canonicalizeStoredFlow — the storable shape (#4454)', () => {
         expect('filters' in s.nodes[1].config).toBe(false);
         // The conversion pass already reaches into regions — only the condition
         // envelope needs the schema's help.
-        expect(s.nodes[2].config.body.nodes[0].config.filter).toEqual({ id: '{item.id}' });
+        expect(s.nodes[2].config.body.nodes[0].config.filter).toEqual({ id: { dialect: 'cel', source: 'item.id' } });
         expect('filters' in s.nodes[2].config.body.nodes[0].config).toBe(false);
     });
 

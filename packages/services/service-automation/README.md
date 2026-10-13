@@ -110,7 +110,7 @@ const escalateCase = {
       label: 'Load Owner',
       config: {
         objectName: 'sys_user',
-        filter: { id: '{record.owner_id}' },
+        filter: { id: { dialect: 'cel', source: 'record.owner_id' } },
         fields: ['id', 'name', 'email'],
         outputVariable: 'owner',
       },
@@ -121,7 +121,7 @@ const escalateCase = {
       label: 'Flag Case',
       config: {
         objectName: 'crm_case',
-        filter: { id: '{record.id}' },
+        filter: { id: { dialect: 'cel', source: 'record.id' } },
         // A computed field value is a CEL value envelope; a literal is written as it is.
         fields: { escalated: true, escalation_note: { dialect: 'cel', source: "'Escalated to ' + owner.name" } },
       },
@@ -169,10 +169,14 @@ one this README used to get wrong:
 | `update_record` | `objectName`, `filter`, `fields` — **no** `outputVariable`; the executor does not read one |
 | `delete_record` | `objectName`, `filter` |
 
-`filter` is an **object** of field/value pairs (`{ id: '{record.id}' }`), not an
-array of `{ field, operator, value }` triples; operator objects such as
-`{ "$ne": null }` are legal values. There is no `recordId` key — select by id
-through `filter`. Unknown keys are rejected at `registerFlow()`.
+`filter` is an **object** of field/value pairs
+(`{ id: { dialect: 'cel', source: 'record.id' } }`), not an array of
+`{ field, operator, value }` triples; operator objects such as
+`{ "$ne": null }` are legal values. Each operand is a CEL value envelope,
+evaluated before the query (one that evaluates to `null` refuses the node), a
+query placeholder the query engine resolves (`{current_user_id}`, `{today}`),
+or a literal. There is no `recordId` key — select by id through `filter`.
+Unknown keys are rejected at `registerFlow()`.
 
 For every other node's `config`, and for loops, parallel blocks, subflows, waits
 and error handling, see the maintained reference — **[Flows](https://objectstack.ai/docs/automation/flows)**.
@@ -189,6 +193,7 @@ a CEL value envelope, and text is a `{{ }}` template.**
 | Edge `condition` | CEL — bare, no braces | `record.status == 'open'` |
 | Decision `conditions[].expression` | CEL — bare, no braces | `order_amount > 10000` |
 | Value slots — `create_record` / `update_record` `fields`, `assignment` values, the maps handed to a callee: `subflow` / `map` `input`, `script` `inputs`, a `screen`'s `defaults`, field `defaultValue` and `recordId`, each evaluated before the screen is served, a `loop`'s (with a `body`) or `map`'s `collection`, a `notify` node's `recipients` (each entry of a list), `templateData` values and `sourceId` (its `sourceObject`, `actorId` and `payload` are literals, read as written; a `{…}` token there is refused), and an `http` node's `body`, evaluated once before the call (its `method`, `durable`, `timeoutMs` and `signingSecret` are literals, read as written; a `{…}` token there is refused) | CEL value envelope; a plain string is the literal text it spells (`recordId`'s literal is the id, a string; a `collection`'s literal is an inline array, and any string there is refused; a recipient entry that evaluates to a list adds each of its recipients) | `{ dialect: 'cel', source: "'Follow up on ' + record.name" }`, `'open'`, `collection: { dialect: 'cel', source: 'tasks' }` |
+| A `get_record` / `update_record` / `delete_record` `filter` operand — a field's value, an operator's comparand, a list comparand's element | CEL value envelope, evaluated before the query (`null` refuses the node); or a literal — a query placeholder (`{current_user_id}`, `{today}`) among them, handed to the query engine untouched; any other `{…}` token is refused | `{ id: { dialect: 'cel', source: 'record.id' }, due_date: { $lt: '{today}' } }` |
 | Text slots — `notify` `title` / `message` / `actionUrl`, `http` `url` and each `headers` value, `screen` `title` / `description`, `end` `message` | Template — `{{ }}` holes (ADR-0032 §3; a single-brace token is refused) | `'Deal won: {{ record.name }}'`, `'{{ record.amount \| currency }}'` |
 
 A value slot refuses every `{…}` template token — `registerFlow()` and
@@ -208,8 +213,7 @@ Inside an object or list value, and in the legacy `assignment` shapes, an
 envelope is data: build the whole value as one envelope (a CEL map or list
 literal, its mixed values wrapped in `dyn(…)`), or move the assignment into the
 `assignments` map — an `http` `body` included: `{ dialect: 'cel', source:
-"{'id': record.id, 'text': dyn('Done: ' + record.title)}" }`. A `filter` still reads
-the single-brace dialect (`{record.id}`).
+"{'id': record.id, 'text': dyn('Done: ' + record.title)}" }`.
 
 A `loop`'s or a `map`'s `collection` must evaluate to a list: anything else,
 `null` included, fails the node, as a token that resolved to nothing did, so a

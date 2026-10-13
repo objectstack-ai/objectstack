@@ -262,7 +262,7 @@ const onApprovedFlow = {
     },
     {
       id: 'stamp', type: 'update_record', label: 'Stamp',
-      config: { objectName: 'opportunity', filter: { id: '{record.id}' }, fields: { cascaded: 'yes' } },
+      config: { objectName: 'opportunity', filter: { id: { dialect: 'cel', source: 'record.id' } }, fields: { cascaded: 'yes' } },
     },
     { id: 'end', type: 'end', label: 'End' },
   ],

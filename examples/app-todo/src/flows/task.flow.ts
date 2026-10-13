@@ -55,6 +55,9 @@ export const TaskReminderFlow: Flow = {
       // `limit > 1` is the declared way to make this a LIST read (`find`, not
       // `findOne`) — the undeclared `getAll` that sat here was never read, so
       // this sweep silently fetched a single task (#4277 rejects the key now).
+      // `{tomorrow}` is a query placeholder, the query engine's own vocabulary:
+      // a filter operand hands it on untouched. A value the FLOW computes is a
+      // CEL value envelope instead (`get_task` below).
       config: { objectName: 'todo_task', filter: { due_date: '{tomorrow}', status: { $ne: 'completed' } }, outputVariable: 'tasksToRemind', limit: 200 },
     },
     {
@@ -203,7 +206,7 @@ export const OverdueEscalationFlow: Flow = {
                       id: 'update_priority', type: 'update_record', label: 'Escalate Priority',
                       config: {
                         objectName: 'todo_task',
-                        filter: { id: '{currentTask.id}' },
+                        filter: { id: { dialect: 'cel', source: 'currentTask.id' } },
                         fields: { priority: 'urgent', tags: ['important', 'follow_up'] },
                       },
                     },
@@ -322,7 +325,7 @@ export const TaskCompletionFlow: Flow = {
     },
     {
       id: 'get_task', type: 'get_record', label: 'Get Completed Task',
-      config: { objectName: 'todo_task', filter: { id: '{record.id}' }, outputVariable: 'completedTask' },
+      config: { objectName: 'todo_task', filter: { id: { dialect: 'cel', source: 'record.id' } }, outputVariable: 'completedTask' },
     },
     // A plain exclusive gateway — the branching is on the OUT-EDGES (e3/e4
     // carry the predicate and its negation). It used to also set

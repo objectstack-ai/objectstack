@@ -77,7 +77,7 @@ export const flowDurableSuspend: Flow = {
       label: 'Apply resolution',
       config: {
         objectName: 'suspend_note',
-        filter: { id: '{noteId}' },
+        filter: { id: { dialect: 'cel', source: 'noteId' } },
         // A CEL value envelope — the `{…}` template dialect is retired from
         // value slots; `resolution` is the screen's required field.
         fields: { status: 'resolved', resolution: { dialect: 'cel', source: 'resolution' } },
