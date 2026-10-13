@@ -2,7 +2,7 @@
 
 import { promises as fs, createReadStream, createWriteStream } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { createHmac, randomUUID } from 'node:crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import {
   NoopMetricsRegistry,
   SEMCONV,
@@ -421,8 +421,15 @@ export class LocalStorageAdapter implements IStorageService {
     const [b64, sig] = token.split('.');
     if (!b64 || !sig) throw new StorageTokenRefusedError();
 
-    const expected = createHmac('sha256', this.signingSecret).update(b64).digest('base64url');
-    if (expected !== sig) throw new StorageTokenRefusedError();
+    // Constant-time, like core's `http-signature.ts`: a `!==` stops at the first
+    // differing byte, and that timing tells a forger how much of a guess was
+    // right. A length difference is not secret, and `timingSafeEqual` throws on
+    // one, so it is refused first with the same refusal.
+    const expected = Buffer.from(createHmac('sha256', this.signingSecret).update(b64).digest('base64url'), 'utf8');
+    const received = Buffer.from(sig, 'utf8');
+    if (expected.length !== received.length || !timingSafeEqual(expected, received)) {
+      throw new StorageTokenRefusedError();
+    }
 
     let payload: PresignTokenPayload;
     try {

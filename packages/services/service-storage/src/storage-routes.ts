@@ -7,7 +7,7 @@ import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/a
 // `sys_file.scope` select read it too. A value import: the doors ask it.
 import { UploadScopeSchema } from '@objectstack/spec/api';
 // The declared envelope is written in ONE place for the whole platform (#3973).
-import { sendOk, sendError } from '@objectstack/types';
+import { sendOk, sendError, logServerFault } from '@objectstack/types';
 // [#15999] The BRAND predicate, never `instanceof` — this error crosses package
 // boundaries and a monorepo resolves the same module through more than one path
 // (`src` under vitest aliases, `dist` under the published `exports`), so two
@@ -219,13 +219,28 @@ function declaredContentLength(req: IHttpRequest): number | undefined {
  * expired — is the caller's to fix: `401 INVALID_TOKEN`, with one message for
  * every case so the answer never says which check failed. Anything else is a
  * genuine fault and stays `500 INTERNAL`, whatever its text says.
+ *
+ * The fault's own text never reaches the caller — a declared 5xx answers with
+ * the route's generic `fallbackMessage`, the platform rule the REST door keeps
+ * (`packages/rest/src/error-response.ts`, `logWithheldServerFault`). The
+ * operator keeps it: the original error, stack included, goes to the same
+ * server-fault funnel `sendError` writes every 5xx line to, logged first the
+ * way the package registrar's sandbox branch logs before it answers. `route`
+ * is the mounted PATTERN, never the request URL, whose last segment is a live
+ * signed token.
  */
-function sendRawByteRouteFailure(res: IHttpResponse, err: any, fallbackMessage: string): void {
+function sendRawByteRouteFailure(
+  res: IHttpResponse,
+  err: unknown,
+  fallbackMessage: string,
+  route: { method: 'PUT' | 'GET'; path: string },
+): void {
   if (isStorageTokenRefusal(err)) {
     sendError(res, 401, 'INVALID_TOKEN', STORAGE_TOKEN_REFUSAL_MESSAGE);
     return;
   }
-  sendError(res, 500, 'INTERNAL', err?.message ?? fallbackMessage);
+  logServerFault({ status: 500, code: 'INTERNAL', error: err, request: route });
+  sendError(res, 500, 'INTERNAL', fallbackMessage);
 }
 
 /**
@@ -1473,7 +1488,7 @@ export function registerStorageRoutes(
       // observable to conformance tests and to curl, not to a caller.
       sendOk(res, { key: payload.k });
     } catch (err: any) {
-      sendRawByteRouteFailure(res, err, 'Upload failed');
+      sendRawByteRouteFailure(res, err, 'Upload failed', { method: 'PUT', path: `${basePath}/_local/raw/:token` });
     }
   });
 
@@ -1501,7 +1516,7 @@ export function registerStorageRoutes(
       }
       res.send(data);
     } catch (err: any) {
-      sendRawByteRouteFailure(res, err, 'Download failed');
+      sendRawByteRouteFailure(res, err, 'Download failed', { method: 'GET', path: `${basePath}/_local/raw/:token` });
     }
   });
 }
