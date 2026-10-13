@@ -284,13 +284,14 @@ describe.each(notificationStores)('$name — the claim credential round-trips th
 
         const claimed = await outbox.claim(notifyClaim('node-a', T0));
         expect(claimed.map((r) => r.id)).toEqual([id]);
-        // The credential is the claim instant AS THE STORE HOLDS IT — what
-        // every later read of the cell returns.
-        expect(claimed[0].claimedAt).toBe(readBack(store.column, T0));
-        expect(claimed[0].claimedAt).toBe((await readRow(id)).claimedAt);
+        const stored = (await readRow(id)).claimedAt;
 
         await expect(outbox.ack(claimed[0], { success: true, durationMs: 5 })).resolves.toBeUndefined();
         expect(notifyFingerprint(await readRow(id))).toBe('success:-:-:1');
+        // The credential that landed is the claim instant AS THE STORE HOLDS
+        // IT — what a read of the cell returned — never the `now` written.
+        expect(claimed[0].claimedAt).toBe(stored);
+        expect(claimed[0].claimedAt).toBe(readBack(store.column, T0));
 
         // The loop is closed: passes over three later reap windows send nothing.
         const sent = [
@@ -310,15 +311,15 @@ describe.each(notificationStores)('$name — the claim credential round-trips th
         const [claimA] = await outbox.claim(notifyClaim('node-a', T0));
         const [claimB] = await outbox.claim(notifyClaim('node-b', T_REAPED));
         expect([claimA?.id, claimB?.id]).toEqual([id, id]);
-        expect(claimB.claimedAt).toBe(readBack(store.column, T_REAPED));
 
         // A's late ack is refused by identity and writes nothing.
         await expect(outbox.ack(claimA, { success: true, durationMs: TTL + 5 })).rejects.toMatchObject(NOTIFY_REFUSAL);
-        expect(notifyFingerprint(await readRow(id))).toBe(`in_flight:node-b:${claimB.claimedAt}:0`);
+        expect(notifyFingerprint(await readRow(id))).toBe(`in_flight:node-b:${readBack(store.column, T_REAPED)}:0`);
 
         // B's ack — the live attempt A would have overwritten — lands.
         await expect(outbox.ack(claimB, { success: true, durationMs: 3 })).resolves.toBeUndefined();
         expect(notifyFingerprint(await readRow(id))).toBe('success:-:-:1');
+        expect(claimB.claimedAt).toBe(readBack(store.column, T_REAPED));
     });
 
     // The stuck state exists only where the old credential failed: the lossy column.
@@ -408,11 +409,12 @@ describe.each(httpStores)('$name — the claim credential round-trips the column
 
         const claimed = await outbox.claim(httpClaim('node-a', T0));
         expect(claimed.map((r) => r.id)).toEqual([id]);
-        expect(claimed[0].claimedAt).toBe(readBack(store.column, T0));
-        expect(claimed[0].claimedAt).toBe((await readRow(id)).claimedAt);
+        const stored = (await readRow(id)).claimedAt;
 
         await expect(outbox.ack(id, HTTP_OK, credentialOf(claimed[0]))).resolves.toBeUndefined();
         expect(httpFingerprint(await readRow(id))).toBe('success:-:-:1');
+        expect(claimed[0].claimedAt).toBe(stored);
+        expect(claimed[0].claimedAt).toBe(readBack(store.column, T0));
 
         const sent = [
             ...await httpPass(outbox, 'node-a', passAt(1)),
@@ -429,13 +431,13 @@ describe.each(httpStores)('$name — the claim credential round-trips the column
         const [claimA] = await outbox.claim(httpClaim('node-a', T0));
         const [claimB] = await outbox.claim(httpClaim('node-b', T_REAPED));
         expect([claimA?.id, claimB?.id]).toEqual([id, id]);
-        expect(claimB.claimedAt).toBe(readBack(store.column, T_REAPED));
 
         await expect(outbox.ack(id, HTTP_OK, credentialOf(claimA))).rejects.toMatchObject(HTTP_REFUSAL);
-        expect(httpFingerprint(await readRow(id))).toBe(`in_flight:node-b:${claimB.claimedAt}:0`);
+        expect(httpFingerprint(await readRow(id))).toBe(`in_flight:node-b:${readBack(store.column, T_REAPED)}:0`);
 
         await expect(outbox.ack(id, HTTP_OK, credentialOf(claimB))).resolves.toBeUndefined();
         expect(httpFingerprint(await readRow(id))).toBe('success:-:-:1');
+        expect(claimB.claimedAt).toBe(readBack(store.column, T_REAPED));
     });
 
     if (store.column === 'real') it('a row stuck in_flight behind an ack that could never land is sent once more, acked, and left alone', async () => {
