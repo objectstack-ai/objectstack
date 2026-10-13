@@ -8765,7 +8765,11 @@ export class SecurityPlugin implements Plugin {
    * it holds no set (D3 item 2).
    */
   private async refuseGuestWithoutOrganization(context: any, operation: string, object: string): Promise<void> {
-    if (context?.principalKind !== 'guest' || context?.userId || context?.isSystem) return;
+    // A system context never reaches here: both callers of
+    // {@link resolveOperationPrincipals} return before it for one (the
+    // middleware's system short-circuit, and `checkControlledByParentWrite`'s
+    // first exit), so this rule reads no elevation of its own.
+    if (context?.principalKind !== 'guest' || context?.userId) return;
     const tenantId = context?.tenantId;
     if (typeof tenantId === 'string' && tenantId !== '') return;
     const decision = await resolveGuestOrganization(this.ql, this.tenancyPosture);

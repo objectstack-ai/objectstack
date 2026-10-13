@@ -3282,6 +3282,11 @@
       "pinned": 2
     },
     {
+      "file": "packages/plugins/plugin-security/src/guest-grants-channel.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/insert-check-post-image.test.ts",
       "verb": "delete",
       "pinned": 1
