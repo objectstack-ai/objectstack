@@ -740,9 +740,9 @@ properties:
   `properties` is an open bag (`Record<string, unknown>`), so **it is the one part
   of a component the spec parse does not check**. For the platform's own types the
   authoring rules (`os validate`, `os build`, `os lint`) dispatch `ComponentPropsMap`:
-  a misspelled prop is reported as a warning, and a retired prop is refused as an
-  error, with its prescription. A `custom.*` type has no entry there, so its props
-  are validated only by whatever registered the component.
+  a misspelled prop or a value its schema rejects is refused as an error, and so is
+  a retired prop, with its prescription. A `custom.*` type has no entry there, so
+  its props are validated only by whatever registered the component.
 </Callout>
 
 ## Advanced Layouts

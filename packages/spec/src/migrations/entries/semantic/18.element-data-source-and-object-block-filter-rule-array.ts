@@ -86,7 +86,7 @@ export const entry: SemanticMigration = {
     + '(`applyConversionsToStoredItem` replays the chain without validating, by its own '
     + 'contract), and its `filter` door refuses the form: at `dataSource.filter` on the page\'s '
     + 'next save; at a block\'s `properties.filter` — like `properties.defaultFilters`, a key of '
-    + 'the open `properties` bag — only as the component-props gate\'s advisory finding '
+    + 'the open `properties` bag — only as the component-props gate\'s error '
     + '(os validate, os build, os lint), since a re-save through the metadata API is not '
     + 'refused there. For a combinator record that refusal names the combinator and says why no '
     + 'rule spells it. `os migrate meta --stored` lists each such filter as a TODO under its '

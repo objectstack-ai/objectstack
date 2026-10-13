@@ -33,8 +33,8 @@ export const entry: SemanticMigration = {
     + 'by `type`, with the rows\' prescriptions; the keys the rows leave undecided — `outcomeMessages`, a member '
     + '`className`, a member `properties.params` — are refused, and `outcomeMessages` stays undeclared on all four '
     + 'action blocks as one decision. It is read where every page component\'s props are: the component-props '
-    + 'gate reports a refused value as an advisory `component-props-invalid` / `component-props-unknown-key` '
-    + 'finding on `objectstack validate`, `objectstack build` and `objectstack lint`, and a stored page still saves '
+    + 'gate reports a refused value as a `component-props-invalid` / `component-props-unknown-key` '
+    + 'error on `objectstack validate`, `objectstack build` and `objectstack lint`, and a stored page still saves '
     + 'and loads, because a page component\'s `properties` is not parsed on the metadata save or load path. No '
     + 'conversion is registered: nothing on the load path refuses the shape, and the authored census found no '
     + 'working member to respell. Deployed metadata NOT MEASURED.',
