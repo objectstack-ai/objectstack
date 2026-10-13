@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
+import type { z } from 'zod';
 
 import { MIGRATIONS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../migrations/registry';
 import { FormViewSchema, ListViewSchema, ViewDataSchema, ViewSchema } from './view.zod';
@@ -64,7 +65,7 @@ const RETIRED_SOURCE = {
 const LIST_BASE = { type: 'grid', columns: ['name'] } as const;
 const FORM_BASE = { type: 'simple', fields: ['name'] } as const;
 
-function refusalAt(result: ReturnType<typeof ViewDataSchema.safeParse>, dotted: string) {
+function refusalAt(result: z.ZodSafeParseResult<unknown>, dotted: string) {
   expect(result.success).toBe(false);
   if (result.success) return undefined; // narrowing; the assertion above already failed
   const issue = result.error.issues.find((i) => i.path.join('.') === dotted);
