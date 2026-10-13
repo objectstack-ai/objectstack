@@ -757,6 +757,22 @@ describe('each package\'s copy of a view container expands into its own package\
         })).success).toBe(true);
     }
 
+    /**
+     * [#23165] A package-less copy stored BESIDE a package's copy. An author
+     * save naming no package now writes the row of the one package the item is
+     * bound to, so after pkg_b's copy it would update that copy instead. The
+     * row this pin reads is the package-less row such a save left before, and
+     * the door still writes it for a server-stated rewrite of that row
+     * (`packageId: null` with `source`, the stored-metadata migration's
+     * spelling), write-through included.
+     */
+    async function saveUnboundCopyBeside(protocol: any, allowAnonymous: boolean, title: string) {
+        expect((await protocol.saveMetaItem({
+            type: 'view', name: 'task', item: container(allowAnonymous, title), packageId: null,
+            source: 'migrate-stored', force: true,
+        })).success).toBe(true);
+    }
+
     /** Each body of the form in the env-wide view list: [package, allowAnonymous, title]. */
     async function envWideBodies(protocol: any): Promise<Array<[unknown, unknown, unknown]>> {
         const envWide: any = await protocol.getMetaItems({ type: 'view' });
@@ -840,6 +856,10 @@ describe('each package\'s copy of a view container expands into its own package\
                     const { protocol } = harness([['pkg_a', container(true)], ['pkg_b', container(true)]], environmentId);
                     await restoreOpenOverlay(protocol);
                     for (const pkg of order) {
+                        if (pkg === undefined && order[0] === 'pkg_b') {
+                            await saveUnboundCopyBeside(protocol, true, 'Intake (env-wide copy)');
+                            continue;
+                        }
                         await saveCopy(protocol, pkg, pkg === undefined, pkg ? `Intake (${pkg} copy)` : 'Intake (env-wide copy)');
                     }
 

@@ -129,13 +129,17 @@ function typeCheck(files: ReadonlyMap<string, string>): readonly ts.Diagnostic[]
     module: ts.ModuleKind.ESNext,
     moduleResolution: ts.ModuleResolutionKind.Bundler,
   };
-  const host = ts.createCompilerHost(options, true);
+  // Parse the way the `tsc` CLI parses (ParseForTypeErrors is its default; the
+  // API's is ParseAll, which builds a JSDoc tree for every comment in spec's
+  // `dist/*.d.ts`), and leave parent pointers to the binder, which sets them.
+  const host = ts.createCompilerHost(options);
+  host.jsDocParsingMode = ts.JSDocParsingMode.ParseForTypeErrors;
   const { getSourceFile, fileExists, readFile } = host;
   host.getSourceFile = (fileName, languageVersion, onError, shouldCreate) => {
     const text = files.get(fileName);
     return text === undefined
       ? getSourceFile.call(host, fileName, languageVersion, onError, shouldCreate)
-      : ts.createSourceFile(fileName, text, languageVersion, true);
+      : ts.createSourceFile(fileName, text, languageVersion);
   };
   host.fileExists = (fileName) => files.has(fileName) || fileExists.call(host, fileName);
   host.readFile = (fileName) => files.get(fileName) ?? readFile.call(host, fileName);

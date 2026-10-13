@@ -37,7 +37,7 @@
 // `AuthManager.handleRequest`, over a real better-auth instance carrying the
 // real `admin` and `@better-auth/sso` plugins.
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
 import { AuthManager } from './auth-manager';
 // ⚠️ Imported from a sibling TEST file on purpose — the same trade
@@ -49,6 +49,27 @@ import { AuthManager } from './auth-manager';
 // entirely (the gate discovers doubles by walking `*.test.ts` only).
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import { inviteForAudienceGate } from './audience-gate-test-support';
+import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
+// [#23184] better-auth's first module load is paid HERE, at module load, and
+// not inside the first clocked case: clocked windows measure behaviour, never
+// loading (AGENTS.md, Build & Test). `AuthManager` reaches every vendor module
+// through a lazy `await import()` (the package root stays light on purpose), so
+// without these lines the file's first case paid about half a second of vendor
+// module evaluation on a dev container. The list is what the managers in this
+// file (and the bearer-rotation cases it imports) boot through; a module it
+// misses is still loaded in the first case, as before. The module cache hands
+// `AuthManager` these same instances, and this file changes no environment the
+// vendor reads at load (better-auth captures `NODE_ENV` when its env module is
+// first evaluated), so nothing a case runs is different.
+import 'better-auth';
+import 'better-auth/api';
+import 'better-auth/plugins';
+import 'better-auth/plugins/bearer';
+import '@better-auth/oauth-provider';
+import '@better-auth/core/context';
+import '@better-auth/core/error';
+import 'better-auth/plugins/admin';
+import '@better-auth/sso';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const PASSWORD = 'S3cure!Passw0rd-10348';
@@ -239,6 +260,30 @@ const seedTenantAdmin = async (engine: any, userId: string) => {
 };
 
 /**
+ * [#23184] The two sign-ups every case starts from, made ONCE per file through
+ * the real `/sign-up/email` route, on an engine and manager of their own.
+ *
+ * A sign-up is the costly step here (one production-parameter scrypt
+ * derivation under a fresh salt), and no case is about it: each case is about
+ * what the gates answer for a standing seeded AFTER the users exist and BEFORE
+ * they sign in. So `arrange` starts each case from a deep copy of the tables
+ * these sign-ups wrote, on the case's own engine and its own manager, and
+ * every step from the seed on runs per case as before. The copy is
+ * `structuredClone`, so no case's write reaches the template or another case,
+ * and the sign-in that follows verifies the password against the very hash the
+ * sign-up stored (a memo hit, not a derivation).
+ */
+let signedUpTables: Promise<Map<string, any[]>> | undefined;
+const signedUpOnce = (): Promise<Map<string, any[]>> =>
+  (signedUpTables ??= (async () => {
+    const template = createMemoryEngine();
+    const templateManager = makeManager(template);
+    await signUp(templateManager, 'caller@example.com', 'Caller');
+    await signUp(templateManager, 'target@example.com', 'Target');
+    return template.tables as Map<string, any[]>;
+  })());
+
+/**
  * Two signed-in principals over one engine: `caller` (the one under test) and
  * `target` (an ordinary user for the impersonation body). The caller's standing
  * is seeded by `seed` BEFORE sign-in, so the session it gets is the one the
@@ -246,10 +291,8 @@ const seedTenantAdmin = async (engine: any, userId: string) => {
  */
 const arrange = async (seed?: (engine: any, callerId: string) => Promise<void>) => {
   const engine = createMemoryEngine();
+  for (const [name, rows] of await signedUpOnce()) engine.tables.set(name, structuredClone(rows));
   const manager = makeManager(engine);
-
-  await signUp(manager, 'caller@example.com', 'Caller');
-  await signUp(manager, 'target@example.com', 'Target');
 
   const callerId = userIdFor(engine, 'caller@example.com');
   const targetId = userIdFor(engine, 'target@example.com');
@@ -274,10 +317,25 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
+/**
+ * [#23184] Every case's two sign-ins verify the password against the hash the
+ * shared sign-ups stored (`signedUpOnce` above): the same password against the
+ * same salt, which the memo answers from the bytes the sign-up's derivation
+ * produced (`__tests__/scrypt-memo.testkit.ts`). Each case has its own engine
+ * and manager and reads no state another case writes, so the suites below run
+ * their cases concurrently. The one exception is the fail-closed floor, which
+ * stays sequential: its first case asserts a `vi.spyOn` spy saw NO call, and
+ * another case's `restoreAllMocks` lifting that spy mid-case would make the
+ * assertion pass on a dead spy. The console stubs above are the only other
+ * shared state; lifted early, they cost log output and no assertion.
+ */
+const scrypt = memoizeScrypt();
+afterAll(scrypt.restore);
+
 // ───────────────────────────────────────────────────────────────────────────
 // PIN 1 — the genuine ADR-0068 D2 platform admin is admitted at BOTH gates.
 // ───────────────────────────────────────────────────────────────────────────
-describe('a genuine platform admin (ADR-0068 D2 org-less admin_full_access) is ADMITTED', () => {
+describe.concurrent('a genuine platform admin (ADR-0068 D2 org-less admin_full_access) is ADMITTED', () => {
   it('/sso/register admits (and refuses the standing-less control on the same engine)', async () => {
     const { manager, callerBearer, targetBearer } = await arrange((e, id) => seedPlatformAdmin(e, id));
     const v = await ssoVerdict(manager, callerBearer);
@@ -302,7 +360,7 @@ describe('a genuine platform admin (ADR-0068 D2 org-less admin_full_access) is A
 // platform standing. Without this, a widened implementation scores green on
 // PIN 1 alone.
 // ───────────────────────────────────────────────────────────────────────────
-describe('an org owner / org admin / TENANT_ADMIN principal is NOT admitted', () => {
+describe.concurrent('an org owner / org admin / TENANT_ADMIN principal is NOT admitted', () => {
   const nearMisses: Array<[string, (e: any, id: string) => Promise<void>]> = [
     ['org owner (sys_member.role = owner)', (e, id) => seedOrgAdmin(e, id, 'owner')],
     ['org admin (sys_member.role = admin)', (e, id) => seedOrgAdmin(e, id, 'admin')],
@@ -382,7 +440,7 @@ describe('fail-closed floor', () => {
 // PIN 4 (#10949 axis ①) — a grant that has lapsed, and a catalogue row that has
 // been switched off, authorize NOTHING. Four distinct refusals.
 // ───────────────────────────────────────────────────────────────────────────
-describe('ADR-0091 validity window — an EXPIRED admin_full_access grant authorizes nothing', () => {
+describe.concurrent('ADR-0091 validity window — an EXPIRED admin_full_access grant authorizes nothing', () => {
   it('/sso/register refuses the expired grant', async () => {
     const { manager, callerBearer } = await arrange((e, id) => seedPlatformAdmin(e, id, { expiredGrant: true }));
     const v = await ssoVerdict(manager, callerBearer);
@@ -402,7 +460,7 @@ describe('ADR-0091 validity window — an EXPIRED admin_full_access grant author
   });
 });
 
-describe('ADR-0049 active flag — a DEACTIVATED admin_full_access row authorizes nothing', () => {
+describe.concurrent('ADR-0049 active flag — a DEACTIVATED admin_full_access row authorizes nothing', () => {
   it('/sso/register refuses while the catalogue row is switched off', async () => {
     const { manager, callerBearer } = await arrange((e, id) => seedPlatformAdmin(e, id, { deactivatedSet: true }));
     const v = await ssoVerdict(manager, callerBearer);
@@ -426,7 +484,7 @@ describe('ADR-0049 active flag — a DEACTIVATED admin_full_access row authorize
 // PIN 5 (#10949 axis ②) — the row is resolved by IDENTITY. A catalogue bigger
 // than any fixed page must not demote the platform admin.
 // ───────────────────────────────────────────────────────────────────────────
-describe('admin_full_access is resolved by identity, not by scanning a page of the catalogue', () => {
+describe.concurrent('admin_full_access is resolved by identity, not by scanning a page of the catalogue', () => {
   it(`/sso/register still admits with ${DECOY_PERMISSION_SETS} other permission sets ahead of it`, async () => {
     const { manager, callerBearer, targetBearer } = await arrange((e, id) =>
       seedPlatformAdmin(e, id, { decoySets: DECOY_PERMISSION_SETS }),
@@ -465,7 +523,7 @@ describe('admin_full_access is resolved by identity, not by scanning a page of t
 // `positions[]` / `isPlatformAdmin` from the same question, and the answer for
 // every shape above must be the SAME answer the gates give.
 // ───────────────────────────────────────────────────────────────────────────
-describe('the session payload agrees with the gates, shape for shape', () => {
+describe.concurrent('the session payload agrees with the gates, shape for shape', () => {
   const payloadFor = async (manager: AuthManager, bearer: string) => {
     const auth: any = await manager.getAuthInstance();
     const session = await auth.api
