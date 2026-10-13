@@ -82,7 +82,10 @@ import { enumWithRetiredValues, retiredKey } from '../shared/retired-key';
 // The retired page-component TYPES' prescriptions — one string per type, three
 // doors (#14159): the enum's error map and the `PageComponentSchema.type` check
 // in page.zod.ts, and the kept `ComponentPropsMap` rows below.
-import { RETIRED_PAGE_COMPONENT_TYPES } from './page.zod';
+// `record:related_list.parentDataSource` is the SAME object binding
+// `PageComponentSchema.dataSource` takes, referenced rather than re-spelled
+// (#23134). `page.zod.ts` imports nothing from this module, so no cycle.
+import { ElementDataSourceSchema, RETIRED_PAGE_COMPONENT_TYPES } from './page.zod';
 // `element:record_picker`'s flat `sort` shorthand is the SAME contract as
 // `ElementDataSourceSchema.sort` (page.zod.ts) — one shape, imported from the
 // shared source rather than re-spelled here (commit 78f0be872).
@@ -1786,6 +1789,65 @@ export const RecordRelatedListProps = strictObject({
    * parent-side value written by the Add picker.
    */
   relationshipValueField: z.string().default('id').describe("Parent-record field whose value relationshipField stores (default 'id'; e.g. 'name' for name-keyed junctions)."),
+  /**
+   * [#23134] The PARENT record this list hangs off, bound by a query of its
+   * own — the spec half of ruling B on objectstack-ai/objectui#12296 (ruling
+   * comment 6137226306). `record:related_list` is the one record block with
+   * TWO bindings, and they never trade meanings:
+   *
+   *  - the node-level `dataSource` (`PageComponentSchema.dataSource`) is the
+   *    CHILD rows — its published meaning since #6953: objectui's
+   *    `ElementDataSourceGate` maps the binding's `object` onto `objectName`
+   *    and its `view` / `filter` / `sort` / `limit` onto the list's own keys.
+   *    Unchanged here, byte for byte, and never re-read as the parent (the
+   *    ruling refuses that reading, option C, by name);
+   *  - this key is the PARENT record: the object binding
+   *    {@link ElementDataSourceSchema} `{ object, view?, filter?, sort?,
+   *    limit? }`, BY REFERENCE (no second copy), read by the single-record
+   *    rule the three sibling record blocks take for their own `dataSource`
+   *    under objectui#12294 — the FIRST row of the bound set by its `sort`;
+   *    no row ⇒ a loud absence, never an empty list. An empty list would read
+   *    as "this record has no related records", a wrong fact in the silent
+   *    direction. The API arm of `dataSource` is not admitted: the card fixes
+   *    the shape as the object binding's (object, view, filter, sort, limit),
+   *    the one the sibling blocks read, and that arm is still unrendered.
+   *
+   * Absent, the parent is the record page's record context, as it always was
+   * (objectui `RecordRelatedListBody` reads `useRecordContext()`'s `recordId`
+   * / `data`). `relationshipValueField` is read on whichever row is the parent.
+   *
+   * WHY THE PROPS DOOR, NOT A NODE KEY BESIDE `dataSource`.
+   * `PageComponentSchema` is one shape for every component type, so a node
+   * key there would be authorable on all of them. `ComponentPropsMap` is the
+   * per-type door: every other row refuses this key with its own
+   * `unrecognized_keys` (the two retired rows refuse the whole bag), and
+   * `os validate` reports that as `component-props-unknown-key`. objectui's
+   * `SchemaRenderer` hoists `properties` onto the node, so the reader sees the
+   * key on `schema` as it sees every other prop.
+   *
+   * THE NAME, measured on objectui `main` at `f0532d8a` and this repo at
+   * `e540e7ffb`: the three sibling record blocks read their one binding as
+   * `dataSource` (`plugin-detail/src/renderers/recordBinding.tsx`, through
+   * `isElementDataSourceConfig(schema.dataSource)`), and the one other block
+   * with a parent half, `record:line_items` above, spells that half `parent*`
+   * (`parentObject`, `parentId`). `parentDataSource` is both — the `dataSource`
+   * stem, so the two bindings read as one family, and the `parent` prefix, so
+   * it names the parent record and nothing else.
+   *
+   * ⛔ No `os validate` consistency finding against a sibling `record:details`
+   * binding: the ruling's own exclusion (a new gate defaults to no).
+   *
+   * PLANNED, not yet read: at objectui `f0532d8a` no renderer reads this key.
+   * Its reader is the related-list leg of objectui#12294, which lands once a
+   * spec release carrying the key is installable. The liveness record is the
+   * `liveness/page.json` `_note` (a component-level key carries no ledger row:
+   * the walk stops at the undrilled `page/regions` container) and the
+   * `[PLANNED — not yet rendered]` marker the describe opens with; when that
+   * leg lands, the marker leaves and the `_note` sentence is rewritten.
+   */
+  parentDataSource: ElementDataSourceSchema.optional().describe(
+    '[PLANNED — not yet rendered] The PARENT record this related list hangs off, bound by a query of its own: an object binding `{ object, view?, filter?, sort?, limit? }`, the shape `dataSource` takes. Read by the single-record rule: the FIRST row of the bound set by its `sort` is the parent (declare `limit: 1` to say one row is meant), and when no row answers, the block renders a loud absence, never an empty list, which would read as "this record has no related records". `relationshipValueField` is read on that row. When this key is absent, the record page\'s record context remains the parent. The node-level `dataSource` on this block keeps its published meaning, the CHILD rows the list draws (it fills `objectName`, `columns`, `filter`, `sort` and `limit`), and is never read as the parent.',
+  ),
   /**
    * [#18639] The SAME union `listViews[].columns` declares (`view.zod.ts`) —
    * not a lookalike: `ListColumnSchema` is imported from the view face, so two
