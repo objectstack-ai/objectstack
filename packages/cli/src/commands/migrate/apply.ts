@@ -33,6 +33,11 @@ import {
 } from '../../utils/schema-migration-plugins.js';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
+import {
+  COMMENT_OBJECT,
+  REACTIONS_COLUMN,
+  readCommentReactionsConversion,
+} from '../../utils/comment-reactions-conversion.js';
 
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --yes
@@ -414,6 +419,59 @@ export default class MigrateApply extends Command {
         if (!flags.json) {
           printSuccess(
             `sys_account.issuer retirement pre-flight: clean over ${preflight.scanned} row(s).`,
+          );
+        }
+      }
+
+      // ── [#23281] REFUSE THE sys_comment.reactions DROP BEFORE ITS CONVERSION ──
+      //
+      // The sibling of the gate above, placed by the same rule: below the
+      // report, above the confirmation prompt, above both writes.
+      //
+      // v18 retired the column and an upgrade keeps existing data, so the
+      // reactions a 17.x deployment stored in it are carried into
+      // `sys_comment_reaction` records by `os migrate comment-reactions`. The
+      // drop deletes whatever the column still holds, so it waits for that
+      // command's verified run, recorded in `sys_migration` — the evidence
+      // gated migrations already leave, read here instead of re-measured: once
+      // converted, a member may delete their own reaction, and a live probe
+      // would read that as unconverted (`utils/comment-reactions-conversion.ts`
+      // says why). The boot drift report and the retirement's upgrade note name
+      // this very command as the remedy, so both arrive here.
+      const dropsCommentReactions = intended.some(
+        (d) => d.op?.type === 'drop_column' && d.table === COMMENT_OBJECT && d.op.column === REACTIONS_COLUMN,
+      );
+      if (dropsCommentReactions) {
+        const engine = (stack.kernel as { getService?: (n: string) => unknown }).getService?.call(
+          stack.kernel,
+          'objectql',
+        );
+        const conversion = await readCommentReactionsConversion(engine as never);
+        if (!conversion.verified) {
+          const detail = conversion.flag
+            ? `The last run of "os migrate comment-reactions --apply" (${conversion.flag.last_run_at}) left `
+              + `${conversion.flag.blocking} reaction(s) or stored value(s) unconverted.`
+            : 'No run of "os migrate comment-reactions --apply" is recorded on this database.';
+          if (flags.json) {
+            await emitJson({
+              ...target, created: [], applied: [], skipped: drift, pending,
+              message: 'refused_comment_reactions_unconverted', detail, conversion: conversion.flag,
+            }, 1, { compact: true });
+            return;
+          }
+          printError(
+            'Refusing to drop sys_comment.reactions: the emoji reactions stored in it are not yet carried into '
+            + `sys_comment_reaction records, and dropping the column would delete them. ${detail} Run `
+            + '"os migrate comment-reactions" to preview, then "os migrate comment-reactions --apply"; once it '
+            + 'reports the run verified, re-run this command.',
+          );
+          this.exit(1);
+          return;
+        }
+        if (!flags.json) {
+          printSuccess(
+            `sys_comment.reactions: its reactions were converted and verified (${conversion.flag?.verified_at}) — `
+            + 'the drop may proceed.',
           );
         }
       }
