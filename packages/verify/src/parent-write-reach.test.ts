@@ -187,7 +187,12 @@ describe('deriveParentWriteReachCases — what the family reads from the metadat
     expect(byObject.get('pwr_deep_2')!.excluded).toBeUndefined();
     expect(byObject.get('pwr_deep_2')!.hops).toHaveLength(8);
     expect(byObject.get('pwr_deep_2')!.hops.at(-1)).toEqual({ object: 'pwr_deep_9', field: 'up', master: 'pwr_account' });
-    expect(byObject.get('pwr_badge_line')!.notDerivable).toMatch(/^the master pwr_badge cannot be synthesized: required image field "photo"/);
+    // [#23100] With its master_detail now `required: true` (the one shape ADR-0055 §1
+    // admits), the detail itself needs a synthesized master, so the family names the
+    // detail's own block — the same unsynthesizable master, reached one hop earlier.
+    expect(byObject.get('pwr_badge_line')!.notDerivable).toMatch(
+      /^the detail cannot be synthesized: required relational target "pwr_badge" is not synthesizable/,
+    );
     expect(byObject.get('pwr_bad')!.excluded).toMatch(/^the object does not parse under the spec's ObjectSchema/);
   });
 });
