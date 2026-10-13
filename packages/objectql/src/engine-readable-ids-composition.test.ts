@@ -198,6 +198,14 @@ describe('[ADR-0139 D2] the executor boundary composes the ReadableIds leaf', ()
     expect(asked).toEqual(['canReadObject:rid_parent']);
   });
 
+  it('a parent the registry does not hold ⇒ $in: [] — no security call, no D5 verdict', async () => {
+    const { svc, asked } = makeSecurity();
+    engine.registerSecurityServiceSource(() => svc);
+    await engine.find('rid_child', { where: branch('rid_unregistered') });
+    expect(inComparandOf(calls[0].ast.where)).toEqual([]);
+    expect(asked).toEqual([]);
+  });
+
   it('the deny sentinel, by identity ⇒ $in: [] — no row of the parent', async () => {
     const { svc } = makeSecurity({ scope: () => RLS_DENY_FILTER });
     engine.registerSecurityServiceSource(() => svc);

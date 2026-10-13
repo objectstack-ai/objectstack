@@ -10,7 +10,8 @@ Clause-②: no
 - **Composed.** On `find`, `findOne`, `count` and `aggregate`, after the middleware chain and the `beforeFind` hooks, every `{ FIELD: { $in: ReadableIds.of(P) } }` in `where` is replaced by `ReadableIds.compose(leaf, scope)`, where `scope` is the registered security service's `getReadFilter(P, caller)`, marked `'policy'` (`undefined` composes with no row restriction). The comparand becomes `$in: []`, which matches no row, when:
   - `canReadObject(P, caller)` is false or throws (a service without `canReadObject` is asked `explain`, and only `allowed: true` admits);
   - `getReadFilter` answers `RLS_DENY_FILTER` (by identity) or throws;
-  - no security service is registered, or the registered one cannot answer both halves.
+  - no security service is registered, or the registered one cannot answer both halves;
+  - the registry holds no object `P`.
 
   Each parent object is asked once per read, and nothing is kept across reads. A leaf that a middleware or a `beforeFind` hook writes is composed the same way.
 - **Refused, `INTERNAL_ERROR` / 500, before any driver is asked:**

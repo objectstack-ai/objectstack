@@ -51,8 +51,10 @@ import { MAX_BULK_PER_ROW_HOOK_ROWS, resolveBulkPerRowHookBudget } from '@object
 // [ADR-0126 §8] The packaged-action activation ledger: its row contract, its
 // stores and the engine-held projection the dispatch doors consult.
 import { ActionActivationProjection, type ActionActivationRow, type ActionActivationStore } from './action-activation.js';
-import { assertListComparandShapes, assertFilterIsMaterializable, invalidFilterError } from './filter-comparand-shape.js';
 import {
+  assertListComparandShapes,
+  assertFilterIsMaterializable,
+  invalidFilterError,
   collectComposableReadableIds,
   composeReadableIdsLeaves,
   describeReadableIdsLeaf,
@@ -5624,10 +5626,11 @@ export class ObjectQL implements IObjectQLEngine {
    *     (on-behalf-of) caller; a parent an object-scoped read middleware
    *     narrows ({@link hasObjectMiddleware}); a parent bound to another
    *     datasource than `object` ({@link resolveDatasourceBinding}).
-   *  2. **The security service** — absent or unusable ⇒ `$in: []`.
-   *  3. **`canReadObject(P)`** (its `explain` fallback when the method is
+   *  2. **A parent the registry does not hold** ⇒ `$in: []`, unasked.
+   *  3. **The security service** — absent or unusable ⇒ `$in: []`.
+   *  4. **`canReadObject(P)`** (its `explain` fallback when the method is
    *     absent) — false or a throw ⇒ `$in: []`.
-   *  4. **`getReadFilter(P)`** — `undefined` ⇒ composed, no row restriction;
+   *  5. **`getReadFilter(P)`** — `undefined` ⇒ composed, no row restriction;
    *     the deny sentinel `RLS_DENY_FILTER`, by identity, or a throw ⇒
    *     `$in: []`; any other filter ⇒ composed with it as the scope, marked
    *     `'policy'` and otherwise passed exactly as `P`'s own read passes its
@@ -5670,6 +5673,8 @@ export class ObjectQL implements IObjectQLEngine {
         ? await this.readableIdsScopeOf(object, operation, parent, security.svc, context)
         : null);
     }
+    // A parent with no answer (`null`, or never asked: not registered) is
+    // `$in: []`.
     const where = composeReadableIdsLeaves(ast.where, (leaf) => {
       const answer = answers.get(leaf.object);
       return answer ? ReadableIds.compose(leaf, answer.scope) : [];
@@ -5679,8 +5684,10 @@ export class ObjectQL implements IObjectQLEngine {
 
   /**
    * [ADR-0139 D5] Refuse D5's three classes, by name, and return the distinct
-   * parent objects of `sites` in walk order. Reads the context, the registry
-   * and the middleware registrations only — no security call.
+   * parent objects of `sites` the security service is asked about, in walk
+   * order (every one but a parent the registry does not hold). Reads the
+   * context, the registry and the middleware registrations only — no security
+   * call.
    */
   private refuseUncomposableReadableIdsClasses(
     object: string,
@@ -5702,7 +5709,12 @@ export class ObjectQL implements IObjectQLEngine {
         'delegator intersection, so the composed leaf would not answer what a direct read answers');
     }
     const outer = this.resolveDatasourceBinding(object)?.datasource;
+    const composable: string[] = [];
     for (const [parent, site] of firstSite) {
+      // A parent the registry does not hold has no record anyone may read:
+      // its leaf is answered `$in: []` without asking anything, and it is in
+      // none of D5's classes.
+      if (!this._registry.getObject(parent)) continue;
       if (this.hasObjectMiddleware(parent)) {
         throw refuse(site, `over '${parent}', whose rows an object-scoped read middleware narrows: that WHERE is ` +
           `built at read time and is no part of its read scope, so the composed leaf would be wider than a read of '${parent}'`);
@@ -5712,8 +5724,9 @@ export class ObjectQL implements IObjectQLEngine {
         throw refuse(site, `over '${parent}', which is bound to datasource '${String(bound)}' while '${object}' is ` +
           `bound to '${String(outer)}': no driver evaluates a subquery across two datasources`);
       }
+      composable.push(parent);
     }
-    return [...firstSite.keys()];
+    return composable;
   }
 
   /**
