@@ -98,11 +98,17 @@ export type InventoryCensus =
   | 'cloud-supplement'
   | 'host-supplement';
 
+/** Each arm of `T` with its list-valued fields read-only. */
+type ReadonlyLists<T> = T extends unknown ? { [K in keyof T]: T[K] extends ReadonlyArray<infer U> ? readonly U[] : T[K] } : never;
+
 /**
  * One condition on a row. A {@link RowPredicate} ANDs them. Spelled as data,
  * never as SQL text, so the plan binds every value and quotes every column.
+ * The spec's arms, with `in` / `notIn` read-only: the platform's rows and the
+ * ceremony's own selectors share constant value lists, and a spec-parsed row
+ * (mutable lists) is assignable to it unchanged.
  */
-export type RowCondition = OrganizationOwnershipRowCondition;
+export type RowCondition = ReadonlyLists<OrganizationOwnershipRowCondition>;
 
 export type RowPredicate = readonly RowCondition[];
 
