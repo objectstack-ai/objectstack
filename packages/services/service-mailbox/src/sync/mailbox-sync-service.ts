@@ -464,6 +464,9 @@ export class MailboxSyncService {
     detail: string,
   ): void {
     result.skipped.push({ uid, reason, detail });
+    // A skipped message is judged: the cursor passes it here, whichever path
+    // skipped it, so a skip that is the last of its batch is not re-read.
+    result.lastUid = uid;
     this.options.logger.error(
       `[mailbox] message UID ${uid} of folder '${folder}' in mailbox '${mailboxId}' is NOT mirrored (${detail}). ` +
         'The sync moves past it so the rest of the mailbox keeps arriving, and nothing else will report it: ' +

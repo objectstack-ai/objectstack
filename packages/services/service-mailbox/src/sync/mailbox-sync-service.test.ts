@@ -353,6 +353,75 @@ describe('the IMAP sync, end to end, on a real engine', () => {
       ]);
     });
 
+    describe('a too_large skip that is the LAST message of its batch and run is passed, not read again', () => {
+      // The offender comes after a good message, so only the skip itself can
+      // move the cursor past it: the second run must list nothing new, fetch
+      // nothing and log nothing.
+      const peeks = () => imap.commands.filter((c) => /BODY\.PEEK\[\]/.test(c)).length;
+      const twice = async (mailbox: string, sync: MailboxSyncService) => {
+        const first = await sync.syncMailbox(mailbox, SYSTEM);
+        const peeksBefore = peeks();
+        const second = await sync.syncMailbox(mailbox, SYSTEM);
+        return { first: first!, second: second!, peeksInSecond: peeks() - peeksBefore };
+      };
+      const lying = async (sizeReport: 'understated' | 'omitted') => {
+        await imap.close();
+        imap = new ImapServerDouble({ sizeReport });
+        endpoint = await imap.listen();
+      };
+
+      it('listed above the bound', async () => {
+        const mailbox = await newMailbox();
+        imap.append('INBOX', plainMessage({ 'Message-ID': '<listed-first@acme.test>' }));
+        imap.append('INBOX', plainMessage({ 'Message-ID': '<listed-last@acme.test>' }, 'x'.repeat(4096)));
+
+        const { first, second, peeksInSecond } = await twice(mailbox, syncFor(mailbox, { maxMessageBytes: 1024 }));
+
+        expect(first).toMatchObject({ fetched: 1, stored: 1, lastUid: 2 });
+        expect(first.skipped).toEqual([{ uid: 2, reason: 'too_large', detail: expect.stringMatching(/^\d+ bytes, above the 1024-byte bound$/) }]);
+        expect(second).toMatchObject({ fetched: 0, skipped: [], lastUid: 2 });
+        expect(peeksInSecond).toBe(0);
+        expect((await mailboxRow(mailbox)).imap_last_uid).toBe(2);
+        expect(errors).toHaveLength(1);
+      });
+
+      for (const sizeReport of ['understated', 'omitted'] as const) {
+        it(`refused by the session when fetched alone (size ${sizeReport})`, async () => {
+          await lying(sizeReport);
+          const mailbox = await newMailbox();
+          imap.append('INBOX', plainMessage({ 'Message-ID': `<lying-first-${sizeReport}@acme.test>` }));
+          imap.append('INBOX', plainMessage({ 'Message-ID': `<lying-last-${sizeReport}@acme.test>` }, 'z'.repeat(100_000)));
+
+          const { first, second, peeksInSecond } = await twice(mailbox, syncFor(mailbox, { maxMessageBytes: 1024 }));
+
+          expect(first).toMatchObject({ fetched: 1, stored: 1, lastUid: 2 });
+          expect(first.skipped).toEqual([{ uid: 2, reason: 'too_large', detail: expect.stringMatching(/more for it than the session accepts/) }]);
+          expect(second).toMatchObject({ fetched: 0, skipped: [], lastUid: 2 });
+          expect(peeksInSecond).toBe(0);
+          expect((await mailboxRow(mailbox)).imap_last_uid).toBe(2);
+          expect(errors).toHaveLength(1);
+        });
+      }
+
+      it('above the bound once read, inside the framing envelope', async () => {
+        await lying('understated');
+        const mailbox = await newMailbox();
+        imap.append('INBOX', plainMessage({ 'Message-ID': '<read-first@acme.test>' }));
+        imap.append('INBOX', plainMessage({ 'Message-ID': '<read-last@acme.test>' }, 'w'.repeat(4000)));
+
+        const { first, second, peeksInSecond } = await twice(mailbox, syncFor(mailbox, { maxMessageBytes: 1024 }));
+
+        expect(first).toMatchObject({ fetched: 1, stored: 1, lastUid: 2 });
+        expect(first.skipped).toEqual([
+          { uid: 2, reason: 'too_large', detail: expect.stringMatching(/^4\d{3} bytes, above the 1024-byte bound, though the server listed 100 bytes$/) },
+        ]);
+        expect(second).toMatchObject({ fetched: 0, skipped: [], lastUid: 2 });
+        expect(peeksInSecond).toBe(0);
+        expect((await mailboxRow(mailbox)).imap_last_uid).toBe(2);
+        expect(errors).toHaveLength(1);
+      });
+    });
+
     it('skips a message the seam refuses as unreadable, and moves on', async () => {
       const mailbox = await newMailbox();
       imap.append('INBOX', plainMessage({ 'Message-ID': '<bad@acme.test>' }));
