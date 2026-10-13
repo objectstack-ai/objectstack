@@ -246,6 +246,20 @@ describe('bounds against a hostile server', () => {
     expect(server.openConnections).toBe(0);
   }, 10_000);
 
+  it('refuses a response at the announcement of the literal that takes it past the command bound, before its octets', async () => {
+    // Two 40 KiB literals under a 64 KiB bound: the first is read, the second
+    // is announced and never sent. Charged only once a response completes,
+    // the session would wait for it until its silence bound (`timeout`).
+    const { server, session } = await openWith({ hostile: 'withheld-literal' }, 64 * 1024);
+    server.append('INBOX', MESSAGE);
+    await session.examine('INBOX');
+    const err = await session.fetchMessages([1]).catch((e) => e);
+    expect(refusal(err).kind).toBe('oversized');
+    expect(refusal(err).message).toMatch(/announced a literal that takes its responses to one command past 65536 bytes/);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(server.openConnections).toBe(0);
+  }, 10_000);
+
   it('control: the same command bound admits an honest folder of 50 messages', async () => {
     const { server, session } = await openWith({}, 64 * 1024);
     for (let i = 0; i < 50; i++) server.append('INBOX', MESSAGE);

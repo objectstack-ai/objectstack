@@ -38,7 +38,11 @@ const LITERAL_MARKER = /\{(\d+)\}$/;
  * Frames a server's byte stream into responses. Bounded on every axis: a line
  * longer than `maxLineBytes`, a literal larger than `maxLiteralBytes` and a
  * response of more than {@link IMAP_MAX_RESPONSE_LITERALS} literals are refused
- * (`oversized`) before the excess is kept, never an unbounded buffer.
+ * (`oversized`) before the excess is kept, never an unbounded buffer. At each
+ * literal's announcement, before any of its octets is read, `admitLiteral`
+ * (when given) is asked with the bytes the response would then hold — its
+ * text so far and its literals, the announced one included — and may refuse
+ * by throwing.
  */
 export class ImapResponseReader {
   private pending: Buffer[] = [];
@@ -46,9 +50,15 @@ export class ImapResponseReader {
   private parts: ImapResponseParts = [];
   private literalRemaining: number | null = null;
   private literalsInResponse = 0;
+  /** The response's bytes so far, as its parts measure them: text and literals. */
+  private responseBytes = 0;
 
   constructor(
-    private readonly limits: { maxLineBytes: number; maxLiteralBytes: number },
+    private readonly limits: {
+      maxLineBytes: number;
+      maxLiteralBytes: number;
+      admitLiteral?: (responseBytes: number) => void;
+    },
   ) {}
 
   /** Feed the next chunk; answers every response it completed. */
@@ -62,6 +72,7 @@ export class ImapResponseReader {
       if (this.literalRemaining !== null) {
         if (this.pendingBytes < this.literalRemaining) break;
         this.parts.push(new Uint8Array(this.take(this.literalRemaining)));
+        this.responseBytes += this.literalRemaining;
         this.literalRemaining = null;
         continue;
       }
@@ -77,6 +88,7 @@ export class ImapResponseReader {
       const line = raw.toString('utf8', 0, end);
       const marker = LITERAL_MARKER.exec(line);
       this.parts.push(line);
+      this.responseBytes += line.length;
       if (marker) {
         if (++this.literalsInResponse > IMAP_MAX_RESPONSE_LITERALS) {
           throw new ImapError(
@@ -91,12 +103,14 @@ export class ImapResponseReader {
             `The server announced a ${marker[1]}-byte literal; this session accepts at most ${this.limits.maxLiteralBytes}.`,
           );
         }
+        this.limits.admitLiteral?.(this.responseBytes + size);
         this.literalRemaining = size;
         continue;
       }
       done.push(this.parts);
       this.parts = [];
       this.literalsInResponse = 0;
+      this.responseBytes = 0;
     }
     return done;
   }

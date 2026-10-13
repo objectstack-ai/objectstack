@@ -18,8 +18,9 @@
  * it sends (`commands`), and a `\Seen` flag shows a client that broke both.
  *
  * It can also play a HOSTILE or LYING server, for tests of a client's bounds:
- * `hostile` answers every `UID FETCH` with a stream that never ends, and
- * `sizeReport` understates or omits `RFC822.SIZE`.
+ * `hostile` answers every `UID FETCH` with a stream that never ends or a
+ * literal that never arrives, and `sizeReport` understates or omits
+ * `RFC822.SIZE`.
  *
  * Supported: `CAPABILITY`, `NOOP`, `LOGIN`, `AUTHENTICATE PLAIN` and
  * `AUTHENTICATE XOAUTH2` (with or without `SASL-IR`), `EXAMINE`, `SELECT`,
@@ -28,6 +29,9 @@
  */
 
 import { createServer, type Server, type Socket } from 'node:net';
+
+/** The size of each literal of the `withheld-literal` hostile response. */
+const WITHHELD_LITERAL_BYTES = 40 * 1024;
 
 /** One account the double accepts. */
 export interface ImapDoubleUser {
@@ -50,9 +54,12 @@ export interface ImapServerDoubleOptions {
    * drops the connection: `endless-literals` — one response that announces
    * empty literal after empty literal (`{0}` after `{0}`); `endless-untagged`
    * — untagged FETCH responses, one after another, and never the tagged
-   * answer.
+   * answer. Or `withheld-literal` — one response whose first literal (40 KiB)
+   * is sent in full and whose second, of the same size, is announced and
+   * never sent: only a client that judges the announcement refuses it before
+   * its silence bound.
    */
-  hostile?: 'endless-literals' | 'endless-untagged';
+  hostile?: 'endless-literals' | 'endless-untagged' | 'withheld-literal';
   /** `RFC822.SIZE` as reported: `true` (default), `understated` (at most 100) or `omitted`. */
   sizeReport?: 'true' | 'understated' | 'omitted';
 }
@@ -370,6 +377,12 @@ export class ImapServerDouble {
         const set = str(rest[1]);
         const wanted = set === undefined ? null : uidsOf(set, folder.messages.map((m) => m.uid));
         if (wanted === null) return bad('Invalid UID set');
+        if (this.options.hostile === 'withheld-literal') {
+          write(`* 1 FETCH (UID 1 BODY[] {${WITHHELD_LITERAL_BYTES}}\r\n`);
+          write(Buffer.alloc(WITHHELD_LITERAL_BYTES, 0x78));
+          write(` BODY[HEADER] {${WITHHELD_LITERAL_BYTES}}\r\n`);
+          return;
+        }
         if (this.options.hostile) return this.endless(conn, this.options.hostile);
         const items = (str(rest[2]) ?? '').replace(/^\(|\)$/g, '').toUpperCase().split(' ').filter(Boolean);
         folder.messages.forEach((message, index) => {

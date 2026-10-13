@@ -41,7 +41,10 @@ export const IMAP_MAX_LINE_BYTES = 4 * 1024 * 1024;
  * bytes: their lines and literals, plus {@link IMAP_RESPONSE_OVERHEAD_BYTES}
  * per response for what holding it costs. Listing a 100,000-message folder
  * keeps about 30 MB; the bound refuses a server that streams untagged
- * responses before its tagged answer forever, however slowly.
+ * responses before its tagged answer forever, however slowly. The response
+ * being read is charged too, at each literal's announcement and before its
+ * octets are read, so one response cannot hold more than the bound and a
+ * line while it is still arriving.
  */
 export const DEFAULT_IMAP_MAX_COMMAND_BYTES = 128 * 1024 * 1024;
 /** What one kept response is charged beyond its own bytes. */
@@ -271,7 +274,19 @@ class ImapConnection implements ImapSession {
     timeoutMs: number,
     private readonly maxCommandBytes: number,
   ) {
-    this.reader = new ImapResponseReader({ maxLineBytes: IMAP_MAX_LINE_BYTES, maxLiteralBytes });
+    this.reader = new ImapResponseReader({
+      maxLineBytes: IMAP_MAX_LINE_BYTES,
+      maxLiteralBytes,
+      admitLiteral: (responseBytes) => {
+        const kept = (this.current?.keptBytes ?? 0) + IMAP_RESPONSE_OVERHEAD_BYTES + responseBytes;
+        if (kept > this.maxCommandBytes) {
+          throw new ImapError(
+            'oversized',
+            `The server announced a literal that takes its responses to one command past ${this.maxCommandBytes} bytes; this session keeps no more.`,
+          );
+        }
+      },
+    });
     socket.setTimeout(timeoutMs, () => {
       this.fail(new ImapError('timeout', `The IMAP server sent nothing for ${timeoutMs} ms.`));
     });
