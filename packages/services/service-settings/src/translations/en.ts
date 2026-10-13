@@ -179,7 +179,7 @@ export const en: PlatformTranslationData = {
         },
         audience_self_registration_permission_set: {
           label: 'Self-registration permission set',
-          help: 'sys_permission_set name granted to each self-registrant (declaring member_default explicitly is fine; admin_full_access is refused). Required whenever the posture permits self-registration.',
+          help: 'Name of the permission set granted to each self-registrant (declaring member_default explicitly is fine; admin_full_access is refused). Required whenever the posture permits self-registration.',
         },
         password_min_length: { label: 'Minimum password length' },
         password_max_length: { label: 'Maximum password length', help: 'Guards against denial-of-service via very long password hashing.' },

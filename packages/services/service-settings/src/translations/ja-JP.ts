@@ -146,7 +146,7 @@ export const jaJP: PlatformTranslationData = {
         },
         audience_self_registration_permission_set: {
           label: 'セルフ登録の権限セット',
-          help: '各セルフ登録ユーザーに付与される sys_permission_set 名(member_default の明示宣言は可。admin_full_access は拒否されます)。',
+          help: '各セルフ登録ユーザーに付与される権限セット名(member_default の明示宣言は可。admin_full_access は拒否されます)。',
         },
         password_min_length: { label: 'パスワードの最小文字数' },
         password_max_length: { label: 'パスワードの最大文字数', help: '非常に長いパスワードのハッシュ化によるサービス拒否を防ぎます。' },

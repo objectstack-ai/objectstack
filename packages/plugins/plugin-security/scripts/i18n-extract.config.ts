@@ -37,11 +37,12 @@
  */
 
 import { defineStack, type ObjectStackDefinition } from '@objectstack/spec';
-// SysCapability carries curated translations already present in the bundles; it
-// must stay in this list so `os i18n extract` keeps emitting it (dropping it
-// here silently deletes those strings on the next run — the sys_audit_log
-// incident). Enforced by src/translations/bundle-ownership.test.ts.
-import { SysPosition, SysCapability, SysPermissionSet, SysUserPermissionSet, SysPositionPermissionSet, SysUserPosition } from '../src/objects/index.js';
+// Every object the plugin owns must stay in this list so `os i18n extract`
+// keeps emitting it (dropping one here silently deletes its strings on the next
+// run — the sys_audit_log incident). Enforced by
+// src/translations/bundle-ownership.test.ts. [C3 stage 8] The four catalog row
+// objects are retired (ADR-0131 D3), and their strings with them.
+import { SysUserPermissionSet, SysUserPosition } from '../src/objects/index.js';
 import { enObjects } from '../src/translations/en.objects.generated.js';
 import { zhCNObjects } from '../src/translations/zh-CN.objects.generated.js';
 import { jaJPObjects } from '../src/translations/ja-JP.objects.generated.js';
@@ -62,7 +63,7 @@ import { esESObjects } from '../src/translations/es-ES.objects.generated.js';
  * precision: the annotated type is the function's own return type.
  */
 const config: ObjectStackDefinition = defineStack({
-  objects: [SysPosition, SysCapability, SysPermissionSet, SysUserPermissionSet, SysPositionPermissionSet, SysUserPosition] as any,
+  objects: [SysUserPermissionSet, SysUserPosition] as any,
   translations: [
     { en: { objects: enObjects } },
     { 'zh-CN': { objects: zhCNObjects } },

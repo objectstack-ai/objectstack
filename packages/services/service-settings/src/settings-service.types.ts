@@ -38,6 +38,9 @@
  * plugin wires those pieces up.
  */
 
+// ADR-0069 — the posture's ONE type, derived by core from its declaration on
+// `ExecutionContextSchema`; type-only, so the service stays framework-agnostic.
+import type { AuthGate } from '@objectstack/core';
 import type { FieldError } from '@objectstack/spec/api';
 import type { SettingsActionResult, SpecifierScope } from '@objectstack/spec/system';
 import { type CryptoAdapter } from './crypto-adapter.js';
@@ -62,6 +65,23 @@ export interface SettingsContext {
    * unset and keep full trusted access.
    */
   enforced?: boolean;
+  /**
+   * ADR-0069 — the caller's authentication-policy posture: present only while
+   * the session is held out of protected resources until it remediates (an
+   * expired password, enforced MFA not yet enrolled). The same shape and
+   * meaning as `ExecutionContext.authGate`.
+   *
+   * A context resolver puts it here from the session it read, through
+   * `normalizeAuthGate` (`@objectstack/core`); `SettingsServicePlugin`'s
+   * verified resolver does. The settings routes refuse a context carrying it
+   * with `403` and the gate's own `code` and `message`, on every route, before
+   * any settings logic runs.
+   *
+   * Optional: a host resolver that never sets it mounts the family exactly as
+   * before. A host that bridges the routes onto its own server with its own
+   * resolver sets it to have its held sessions refused too.
+   */
+  authGate?: AuthGate;
 }
 
 /** Storage row shape used by both the engine and the in-memory store. */

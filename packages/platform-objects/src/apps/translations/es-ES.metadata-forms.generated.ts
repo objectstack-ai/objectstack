@@ -2303,7 +2303,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       description: {
         label: "Descripción",
-        helpText: "Descripción legible que se muestra en Setup (se guarda como sys_permission_set.description)."
+        helpText: "Descripción legible que se muestra en Setup."
       },
       isDefault: {
         label: "Predeterminado",

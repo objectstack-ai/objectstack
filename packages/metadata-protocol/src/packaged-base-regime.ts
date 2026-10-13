@@ -195,7 +195,7 @@ export const PACKAGED_BASE_REGIME: Readonly<Record<string, PackagedBaseRegimeRow
         regime: 'C',
         routes: {
             clone: 'the "Clone" action on the permission set, '
-                + 'or POST /api/v1/data/sys_permission_set with a new name',
+                + 'or POST /api/v1/security/permission-sets/:name/clone with a new name',
         },
     },
     datasource: {
