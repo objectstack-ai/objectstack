@@ -62,11 +62,14 @@ export interface DashboardWidgetOptionFinding {
   hint: string;
 }
 
+/**
+ * [#22161] One remedy line naming the declared homes; which home serves what,
+ * and the `suppressWarnings` escape for a consumer outside the renderer, are
+ * `os explain unconsumed-widget-option`.
+ */
 const HINT =
-  'Remove the key: on a dataset-bound widget it styles nothing. Presentation has declared homes instead: ' +
-  "a number's face is the dataset measure's `format` and `currency`, a tile's accent is the widget's " +
-  "`colorVariant`, and a chart's look is the widget's `chartConfig`. A key with a genuine consumer outside " +
-  "the renderer can say so with `suppressWarnings: ['unconsumed-widget-option']` on the widget.";
+  'Remove the key; style the widget through its declared homes instead: the measure\'s `format` / ' +
+  '`currency`, `colorVariant`, `chartConfig`';
 
 const isRec = (v: unknown): v is AnyRec => typeof v === 'object' && v !== null && !Array.isArray(v);
 

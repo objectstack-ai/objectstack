@@ -101,6 +101,17 @@ export default defineConfig({
         find: /^@objectstack\/verify$/,
         replacement: path.resolve(__dirname, '../../verify/src/index.ts'),
       },
+      {
+        // [#23054] A VALUE reach from source and tests alike:
+        // `claim-org-seed-ownership.ts` pages its predicate write on
+        // `MAX_BULK_PER_ROW_HOOK_ROWS` and recognises the engine's refusal by
+        // `BULK_PER_ROW_HOOK_LIMIT_ERROR_CODE`, and its tests import the same
+        // two. Resolved from `dist/`, both the page size and the code the
+        // fallback keys on would be the last build's, and a fallback keyed on
+        // a stale code is the claim stopping at the ceiling while reading green.
+        find: /^@objectstack\/spec\/data$/,
+        replacement: path.resolve(__dirname, '../../spec/src/data/index.ts'),
+      },
     ],
   },
   test: {

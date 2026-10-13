@@ -26,7 +26,7 @@ import { explainRule } from './rule-explanations.js';
 // not a chosen few. Run the whole file: that case reads what the cases above
 // fired.
 const SHORTENED_RULE_IDS: readonly string[] = [FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR, FLOW_NODE_WRITE_UNKNOWN_FIELD];
-const firedShortened: Array<{ rule: string; message: string }> = [];
+const firedShortened: Array<{ rule: string; message: string; hint: string }> = [];
 const validateFlowNodeWrites: typeof validateFlowNodeWritesUnrecorded = (...args) => {
   const findings = validateFlowNodeWritesUnrecorded(...args);
   for (const f of findings) if (SHORTENED_RULE_IDS.includes(f.rule)) firedShortened.push(f);
@@ -68,7 +68,7 @@ function flowWith(
         id: 'mark',
         type: 'update_record',
         label: 'Mark won',
-        config: { objectName: 'deal', filter: { id: '{recordId}' }, fields, ...nodeConfigOverrides },
+        config: { objectName: 'deal', filter: { id: { dialect: 'cel', source: 'recordId' } }, fields, ...nodeConfigOverrides },
         ...nodeOverrides,
       },
     ],
@@ -568,7 +568,7 @@ const anchorFlow = (fields: unknown) => ({
       id: 'mark',
       type: 'update_record',
       label: 'Stamp',
-      config: { objectName: 'wh_order', filter: { id: '{recordId}' }, fields },
+      config: { objectName: 'wh_order', filter: { id: { dialect: 'cel', source: 'recordId' } }, fields },
     },
   ],
   edges: [],
@@ -630,5 +630,40 @@ describe('[#22161] one-line verdicts — the rule ids this file shortened', () =
     expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
     const text = explanation!.paragraphs.join('\n');
     for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
+});
+
+// [#22161] Slice 15: the `fix:` line of the two ids. Each names its remedy in
+// one line; why the unknown-field finding gates where the hook and action body
+// rules advise, and how to vouch for or opt out of an unprovisioned anchor, are
+// the explanations'.
+describe('[#22161] one-line fixes — the rule ids this file shortened', () => {
+  it('an unknown field with no near miss gets the remedy without a suggestion', () => {
+    const findings = validateFlowNodeWrites({ objects: [dealObject], flows: [flowWith({ totally_unrelated_column: 1 })] });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].hint).toBe("Fix the field name, or declare 'totally_unrelated_column' on the object");
+  });
+
+  it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {
+    // Coverage control: every id fired, the unknown-field line with and
+    // without a suggestion.
+    expect([...new Set(firedShortened.map((f) => f.rule))].sort()).toEqual([...SHORTENED_RULE_IDS].sort());
+    const unknown = firedShortened.filter((f) => f.rule === FLOW_NODE_WRITE_UNKNOWN_FIELD);
+    expect(unknown.some((f) => f.hint.startsWith('Did you mean'))).toBe(true);
+    expect(unknown.some((f) => f.hint.startsWith('Fix the field name'))).toBe(true);
+    for (const f of firedShortened) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  const MOVED_FROM_FIX: Record<string, readonly string[]> = {
+    [FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR]: ['`columnMap`', "`ownership: 'none'`", '`systemFields: { audit: false }`'],
+    [FLOW_NODE_WRITE_UNKNOWN_FIELD]: ['This rule gates where the hook and action body rules advise', 'nothing here is parsed'],
+  };
+
+  it.each([...SHORTENED_RULE_IDS])('`os explain %s` carries what its `fix:` line no longer says', (rule) => {
+    const text = explainRule(rule)?.paragraphs.join('\n') ?? '';
+    for (const fact of MOVED_FROM_FIX[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
   });
 });

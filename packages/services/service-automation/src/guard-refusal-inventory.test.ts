@@ -91,6 +91,9 @@ function flowWithHandler(name: string, node: Record<string, unknown>) {
  * is refused at the build doors too, so its row registers the block whole and
  * removes it from the stored node before the run.
  */
+/** [#19939] A filter operand envelope that evaluates to `null` on the run below (its record has no `manager`). */
+const NOTHING = { dialect: 'cel', source: 'has(record.manager) ? record.manager : null' };
+
 const GUARDS: Array<{ name: string; why: string; node: Record<string, unknown>; expect: string; strip?: string; stripBlock?: string }> = [
     // Since #4277 a missing REQUIRED key is refused by the executor's contract
     // parse (parse-config.ts) before the hand-written guard runs, so those
@@ -125,25 +128,30 @@ const GUARDS: Array<{ name: string; why: string; node: Record<string, unknown>; 
         strip: 'objectName',
         expect: 'does not satisfy the delete_record contract',
     },
+    // [#19939, stage S6] RE-JUDGED IN PLACE: these three wrote the condition as
+    // a `{record.ownr}` token that interpolated to nothing. A flow token at a
+    // filter operand is refused by the contract parse since S6, and the #3810
+    // guard holds for an operand ENVELOPE that evaluates to nothing — the run's
+    // record carries no `manager`, so the guarded read answers `null`.
     {
-        name: 'get_record whose filter lost a condition (#3810)',
+        name: 'get_record whose filter operand evaluated to nothing (#3810)',
         why: 'an erased condition WIDENS the query — the reason #3810 exists',
-        node: { type: 'get_record', config: { objectName: 'deal', filter: { owner: '{record.ownr}' } } },
+        node: { type: 'get_record', config: { objectName: 'deal', filter: { owner: NOTHING } } },
         expect: 'refusing to run',
     },
     {
-        name: 'update_record whose filter lost a condition (#3810)',
+        name: 'update_record whose filter operand evaluated to nothing (#3810)',
         why: 'the widened query would overwrite rows the author excluded',
         node: {
             type: 'update_record',
-            config: { objectName: 'deal', filter: { owner: '{record.ownr}' }, fields: { stage: 'x' } },
+            config: { objectName: 'deal', filter: { owner: NOTHING }, fields: { stage: 'x' } },
         },
         expect: 'refusing to run',
     },
     {
-        name: 'delete_record whose filter lost a condition (#3810)',
+        name: 'delete_record whose filter operand evaluated to nothing (#3810)',
         why: 'the highest-stakes case — a collapsed filter empties the object',
-        node: { type: 'delete_record', config: { objectName: 'deal', filter: { owner: '{record.ownr}' } } },
+        node: { type: 'delete_record', config: { objectName: 'deal', filter: { owner: NOTHING } } },
         expect: 'refusing to run',
     },
     {
@@ -154,9 +162,10 @@ const GUARDS: Array<{ name: string; why: string; node: Record<string, unknown>; 
         expect: 'does not satisfy the http contract',
     },
     {
-        name: 'http whose signingSecret did not resolve',
-        why: 'the call would leave unsigned — a fault edge must not turn a missing credential into a sent request',
-        // The record carries no `signing_key`, so the template renders nothing.
+        name: 'http whose signingSecret is written as a template',
+        why: 'the call would be signed with the braces, or leave unsigned — a fault edge must not turn an unusable credential into a sent request',
+        // [#19939] `signingSecret` is read as written: the contract parse
+        // refuses the token (until then the template rendered nothing here).
         node: { type: 'http', config: { url: 'http://127.0.0.1:9/never', method: 'POST', signingSecret: '{record.signing_key}' } },
         expect: 'signingSecret',
     },

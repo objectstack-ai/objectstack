@@ -58,6 +58,7 @@ import {
   FILE_BYTES,
   type AttachmentsHarness,
 } from './fixtures/attachments-authz-harness.js';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const SYS = { isSystem: true } as const;
 
@@ -116,11 +117,8 @@ describe('sys_attachment delete gate under an unscoped multi-delete (#9483)', ()
     // The delete BIT first. Without it RBAC refuses ahead of the attachment
     // hook with PERMISSION_DENIED, and every assertion below would be green for
     // the wrong reason — a denial from a layer this file is not about.
-    const managerSet = await ql.findOne('sys_permission_set', {
-      where: { name: 'att_attachment_manager' },
-      context: SYS,
-    });
-    expect(managerSet?.id, 'fixture permission set seeded').toBeTruthy();
+    const managerSet = await catalogPermissionSet(ql, 'att_attachment_manager');
+    expect(managerSet, 'fixture permission set served by the security catalog').toBeTruthy();
     await ql.insert(
       'sys_user_permission_set',
       { user_id: memberId, permission_set: managerSet.name },
@@ -311,11 +309,8 @@ describe('sys_attachment unscoped multi-delete is refused on its SHAPE, not on e
 
     // Same RBAC premise as the block above: without the delete bit the refusals
     // below would come from RBAC, about a different question entirely.
-    const managerSet = await ql.findOne('sys_permission_set', {
-      where: { name: 'att_attachment_manager' },
-      context: SYS,
-    });
-    expect(managerSet?.id, 'fixture permission set seeded').toBeTruthy();
+    const managerSet = await catalogPermissionSet(ql, 'att_attachment_manager');
+    expect(managerSet, 'fixture permission set served by the security catalog').toBeTruthy();
     await ql.insert(
       'sys_user_permission_set',
       { user_id: memberId, permission_set: managerSet.name },

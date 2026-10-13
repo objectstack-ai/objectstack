@@ -21,8 +21,9 @@
  * ⛔ not a uniform sweep. The pins below moved accordingly, and this diff is the
  * record of the ruling. What each seam now says:
  *
- *   - `normalize-managed-by.ts` — a read fault REFUSES the pass for that batch
- *     and reports at `error`; it never answers "already canonical".
+ *   - `normalize-managed-by.ts` refused a read fault for its batch; its
+ *     reading 1 retired with the module (ADR-0131 D3: no boot pass rewrites
+ *     catalog rows any more).
  *   - `auto-org-admin-grant.ts` — a fault on the `sys_member` read that feeds
  *     the revoke branch SKIPS that user for the round, never enters the revoke
  *     branch, and reports at `error`.
@@ -57,7 +58,6 @@ import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.j
 
 import { reconcileOrgAdminGrant, backfillOrgAdminGrants } from './auto-org-admin-grant.js';
 import { claimSeedOwnership } from './claim-seed-ownership.js';
-import { normalizeManagedByVocab } from './normalize-managed-by.js';
 
 const SYS = { context: { isSystem: true } } as any;
 const ORG = 'org_a';
@@ -147,133 +147,6 @@ function recordingLogger() {
     logger: { info: at('info'), warn: at('warn'), debug: at('debug'), error: atError },
   };
 }
-
-// ───────────────────────────────────────────────────────────────────────────
-// Reading 1 — normalize-managed-by.ts `tryFind` (`catch { return []; }`)
-// ───────────────────────────────────────────────────────────────────────────
-
-describe('[#15840] reading 1 — normalize-managed-by tryFind', () => {
-  it('a control: a legacy row IS healed, so the harness can tell a real difference', async () => {
-    const engine = await boot();
-    await (engine as any).insert('sys_position', { name: 'pos_legacy', label: 'Legacy', managed_by: 'system' }, SYS);
-    const { lines, logger } = recordingLogger();
-
-    const counts = await normalizeManagedByVocab(engine, { logger: logger as any });
-
-    expect(counts).toEqual({ positions: 1, permissionSets: 0 });
-    expect(lines.filter((l) => l.startsWith('info:')).length).toBe(1);
-  }, 120_000);
-
-  it('[RULED] an unreadable catalog REFUSES the pass; an already-canonical one still answers', async () => {
-    // ⭐ THE POSITIVE CONTROL — the healthy arm: a catalog that really is
-    // already canonical. Its behaviour must be EXACTLY what it was before the
-    // ruling, or this change is option C wearing option A's name.
-    const healthyEngine = await boot();
-    const healthy = recordingLogger();
-    const healthyCounts = await normalizeManagedByVocab(healthyEngine, { logger: healthy.logger as any });
-    expect(healthyCounts).toEqual({ positions: 0, permissionSets: 0 });
-    expect(healthy.lines).toEqual([]);
-
-    // The faulted arm: a catalog holding a row that DOES need healing, behind a
-    // read that cannot answer. The row is the discriminator — it makes the two
-    // arms differ in the world, so anything that still reports them alike is
-    // reporting a state it did not read.
-    const faultedEngine = await boot();
-    await (faultedEngine as any).insert(
-      'sys_position', { name: 'pos_legacy', label: 'Legacy', managed_by: 'system' }, SYS,
-    );
-    let faultsFired = 0;
-    const faulted = recordingLogger();
-    await expect(
-      normalizeManagedByVocab(
-        withFault(faultedEngine, { find: async () => { faultsFired += 1; throw READ_FAULT(); } }),
-        { logger: faulted.logger as any },
-      ),
-    ).rejects.toThrow(/managed_by normalize REFUSED for sys_position/);
-
-    // ⭐ The refusal aborts at the FIRST un-answered read. Before the ruling
-    // this pass swallowed four of them (once per legacy value) and reported
-    // nothing; it now asks once, refuses, and says so once.
-    expect(faultsFired).toBe(1);
-    // …and the row it was supposed to heal is untouched.
-    const stillLegacy = await (faultedEngine as any).find('sys_position', { where: { name: 'pos_legacy' } }, SYS);
-    expect(stillLegacy[0].managed_by).toBe('system');
-
-    // The value channel separates them: one answers, the other refuses.
-    // The report channel separates them too — exactly one line, at `error`.
-    const errors = faulted.lines.filter((l) => l.startsWith('error:'));
-    expect(errors.length).toBe(1);
-    expect(errors[0]).toContain('cannot tell "already canonical" from "could not ask"');
-    expect(errors[0]).toContain('injected read fault');
-    expect(errors[0]).toContain('"healedBeforeRefusal":0');
-    // ⛔ And it never claims the counts an already-canonical catalog reports.
-    expect(faulted.lines.some((l) => l.includes('managed_by vocab normalized'))).toBe(false);
-  }, 120_000);
-
-  it('[RULED] the refusal reaches the consumer catch that was declared for it', async () => {
-    // `security-plugin.ts` wraps this call in `try { … } catch { logger.warn(
-    // '[security] managed_by vocab normalization failed (non-fatal)') }` — the
-    // only handling any consumer declares, and the reason a refusal is decidable
-    // at this seam at all. Before the ruling nothing reached it, because the
-    // fault was swallowed one frame below. Now it does, and boot still proceeds.
-    const engine = await boot();
-    await expect(
-      normalizeManagedByVocab(withFault(engine, { find: async () => { throw READ_FAULT(); } }), {}),
-    ).rejects.toThrow(/the catalog read did not answer/);
-  }, 120_000);
-
-  it('[RULED] a NON-ARRAY answer refuses too — an envelope is not an empty catalog', async () => {
-    const engine = await boot();
-    await (engine as any).insert('sys_position', { name: 'pos_legacy', label: 'Legacy', managed_by: 'system' }, SYS);
-    const { lines, logger } = recordingLogger();
-
-    await expect(
-      normalizeManagedByVocab(
-        withFault(engine, { find: async (o: string, q?: any, opt?: any) => ({ records: await engine.find(o, q, opt) }) }),
-        { logger: logger as any },
-      ),
-    ).rejects.toThrow(/did not answer with a row array/);
-
-    expect(lines.filter((l) => l.startsWith('error:')).length).toBe(1);
-    const rows = await (engine as any).find('sys_position', { where: { name: 'pos_legacy' } }, SYS);
-    expect(rows[0].managed_by).toBe('system');
-  }, 120_000);
-
-  it('[RULED] rows healed BEFORE the refusal stay healed, and the report says how many', async () => {
-    // The fault lands on the second object, after the first one healed. A
-    // refusal is not a rollback, and the `error` line has to say so or an
-    // operator reads it as "nothing happened".
-    const engine = await boot();
-    await (engine as any).insert('sys_position', { name: 'pos_legacy', label: 'Legacy', managed_by: 'system' }, SYS);
-    const { lines, logger } = recordingLogger();
-
-    await expect(
-      normalizeManagedByVocab(
-        withFault(engine, {
-          find: async (o: string, q?: any, opt?: any) => {
-            if (o === 'sys_permission_set') throw READ_FAULT();
-            return engine.find(o, q, opt);
-          },
-        }),
-        { logger: logger as any },
-      ),
-    ).rejects.toThrow(/REFUSED for sys_permission_set/);
-
-    // The position row WAS healed on the way, and stays healed.
-    const rows = await (engine as any).find('sys_position', { where: { name: 'pos_legacy' } }, SYS);
-    expect(rows[0].managed_by).toBe('platform');
-    const errors = lines.filter((l) => l.startsWith('error:'));
-    expect(errors.length).toBe(1);
-    expect(errors[0]).toContain('the next boot asks again');
-  }, 120_000);
-
-  it('⭐ POSITIVE CONTROL — an engine with no find/update is NOT a read fault and still answers', async () => {
-    // The `!ql` guard is not a read that failed; it is a caller with no engine.
-    // Byte-identical to before the ruling.
-    await expect(normalizeManagedByVocab(null as any)).resolves.toEqual({ positions: 0, permissionSets: 0 });
-    await expect(normalizeManagedByVocab({} as any)).resolves.toEqual({ positions: 0, permissionSets: 0 });
-  });
-});
 
 // ───────────────────────────────────────────────────────────────────────────
 // Reading 2 — auto-org-admin-grant.ts `tryFind` (`catch` reports at `debug`)

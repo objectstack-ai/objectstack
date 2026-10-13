@@ -58,14 +58,12 @@ import { jsonColumnCheckRefusalCarriedBy, storedFormCheckJudge } from './rls-che
 import type { ExplainDecision, ExplainOperation } from '@objectstack/spec/security';
 import type { II18nService, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
 
-import { bootstrapDeclaredPermissions, upsertPackagePermissionSet, readDeclared } from './bootstrap-declared-permissions.js';
 import { applyManagedWriteDenies } from './managed-object-write-denies.js';
 import {
   createPermissionSetWriteThrough,
   registerPermissionSetProjection,
   reconcilePermissionSetProjection,
 } from './permission-set-projection.js';
-import { runPermissionSetDriftDiagnostics } from './permission-set-drift.js';
 import { reportPackagedPermissionSetOverlays } from './packaged-permission-set-overlay-detection.js';
 import { registerObjectPostureGate } from './object-posture-gate.js';
 import { registerPackagedPermissionSetLockGate } from './packaged-permission-set-lock-gate.js';
@@ -79,12 +77,7 @@ import {
   type SuggestionListFilter,
 } from './suggested-audience-bindings.js';
 import { cleanupPackagePermissions } from './cleanup-package-permissions.js';
-import {
-  catalogIsPerOrganization,
-  listSeedOrganizationIds,
-} from './organization-scope.js';
-import { normalizeManagedByVocab } from './normalize-managed-by.js';
-import { readDeclaredCapabilityContext } from './declared-capability-context.js';
+import { readDeclared, readDeclaredCapabilityContext } from './declared-capability-context.js';
 import { RLSCompiler, RLS_DENY_FILTER, compiledPolicyNameOf, policyDeclaresClause } from './rls-compiler.js';
 import {
   computeTenantLayer0Verdict,
@@ -458,6 +451,11 @@ interface RlsFilterOptions {
    *     sits directly below it on the same middleware pass, guarded by a
    *     SUPERSET of step 2.7's own condition (same `permissionSets`/`userId`/
    *     `ql` triple, same single target id, one extra operation — `insert`);
+   *   • [#23093] the chain walk's master-edit leg
+   *     ({@link SecurityPlugin.assertMasterRowEditable}) sets it on a hop whose
+   *     master is itself `controlled_by_parent`, on a non-delegated write. Why
+   *     the walk covers that master's write is stated once, at that call site's
+   *     `masterGateCoversThisWrite` bullet — not restated here;
    *   • the BULK write path does NOT, and must not: with no single id,
    *     `assertControlledByParentWrite` returns early and nothing replaces the
    *     floor. Reading the posture alone here would have widened bulk writes on
@@ -588,12 +586,11 @@ interface CbpRelation {
  *   • `platform` / `package` are managed; `admin`/∅ (tenant-authored) rows are
  *     the admin's.
  *   • sys_position additionally keeps its LEGACY values `system` (→ platform)
- *     and `config` (→ package) in the managed map: the boot normalizer
- *     (normalize-managed-by.ts) heals stored rows to the canonical vocabulary,
- *     but rows written before the normalizer runs — or in a store it has not
- *     touched yet — must not lose protection in the interim. Dropping the
- *     legacy keys here is what silently disarmed this gate for sys_position
- *     after the A4 rename (#2926 ①).
+ *     and `config` (→ package) in the managed map: no boot pass heals stored
+ *     rows to the canonical vocabulary any more (ADR-0131 retired it with the
+ *     catalog seeders), so a row still carrying a legacy value keeps its
+ *     protection here. Dropping the legacy keys is what silently disarmed this
+ *     gate for sys_position after the A4 rename (#2926 ①).
  * The map value for each managed `managed_by` is the human owner label used in
  * the (business-message-only) deny text.
  */
@@ -656,19 +653,6 @@ function callerHasOrganizationScope(context: any, posture: TenancyPosture): bool
   return tenantId != null && tenantId !== '';
 }
 
-/**
- * [ADR-0123 D2] Is this Layer 0 filter the fail-closed DENY sentinel — i.e. "a
- * walled posture on a tenant object, and the context carries no organization
- * scope to enforce with"?
- *
- * Identity is decided on the sentinel's own value, not on shape: `RLS_DENY_FILTER`
- * is a single `id` equality against a string no record can carry, and
- * `computeTenantLayer0Filter` SPREADS it (`{ ...RLS_DENY_FILTER }`) rather than
- * returning the frozen object, so a reference check would silently answer `false`
- * for every real denial. Every other Layer 0 return is a real tenant predicate
- * (`organization_id = …` / `organization_id $in […]`) or `null`, so no legitimate
- * wall can collide with this test.
- */
 /**
  * [#21771] Ruling A's read question, judged on the answer of a caller-context
  * by-id read: is the row ABSENT to this caller?
@@ -786,10 +770,21 @@ function copyOfCallerPredicate(where: unknown): unknown {
   }
 }
 
+/**
+ * [ADR-0123 D2] Is this Layer 0 filter the fail-closed DENY sentinel — i.e. "a
+ * walled posture on a tenant object, and the context carries no organization
+ * scope to enforce with"?
+ *
+ * [ADR-0139 D2 step 2] Decided BY IDENTITY, the way the engine's composition
+ * decides it: the wall's `deny` returns `RLS_DENY_FILTER` itself — the spec's
+ * frozen object, never a spread copy (`tenantLayer0FilterOf`) — so the
+ * reference is the whole test, and no value or shape is compared. Every other
+ * Layer 0 return is a real tenant predicate (`organization_id = …` /
+ * `organization_id $in […]`) or `null`, which no reference check can confuse
+ * with it.
+ */
 function isTenantWallDenial(filter: Record<string, unknown> | null | undefined): boolean {
-  if (!filter) return false;
-  const keys = Object.keys(filter);
-  return keys.length === 1 && keys[0] === 'id' && filter.id === RLS_DENY_FILTER.id;
+  return filter === RLS_DENY_FILTER;
 }
 
 const SYSTEM_ROW_PROVENANCE: Record<
@@ -4431,9 +4426,9 @@ export class SecurityPlugin implements Plugin {
     );
 
     // Defer platform admin bootstrap until all plugins finish starting —
-    // sys_user / sys_permission_set objects must be registered (by
-    // plugin-auth and platform-objects respectively) before we can
-    // insert seed rows. Falls back to immediate execution when the
+    // sys_user / sys_user_permission_set objects must be registered (by
+    // plugin-auth and platform-objects respectively) before the promotion
+    // can write its grant. Falls back to immediate execution when the
     // kernel does not expose `hook` (test stubs).
     let bootstrapRanOnce = false;
     const readSeedSettlement = (): SeedSettlementSnapshot | undefined => readSeedSettlementSnapshot(ctx);
@@ -4443,80 +4438,18 @@ export class SecurityPlugin implements Plugin {
     // onMetadataMutation fallback appends listeners, and re-wiring that would
     // project each save N times.
     let envProjectionWired = false;
+    // [#22801 → A] Same once-guard for the `permission` mutation listener
+    // that re-derives `everyone` (registered in `runBootstrap`).
+    let everyoneMutationWired = false;
     // [#3325 / ADR-0092] Union the better-auth managed-object write denies into
     // the default sets from the LIVE registry, replacing the hand-maintained
     // baseline as the source of truth (a newly-declared identity table is then
     // covered without editing a list). This mutates the shared
     // `bootstrapPermissionSets` instances IN PLACE — the same objects the
-    // permission evaluator resolves and `bootstrapPlatformAdmin` serializes into
-    // the seed row — so it must run BEFORE the seeder below, and once (the
-    // transform is idempotent, but the once-flag avoids re-reading the registry /
-    // re-logging on every runBootstrap re-entry). See managed-object-write-denies.ts.
+    // permission evaluator resolves — so it runs once, before the bootstrap
+    // below (the transform is idempotent, but the once-flag avoids re-reading
+    // the registry / re-logging on every runBootstrap re-entry). See managed-object-write-denies.ts.
     let managedDeniesApplied = false;
-
-    // ── The RBAC catalog, materialized PER ORGANIZATION ──────────────────
-    //
-    // `sys_position` and `sys_permission_set` both spell their name index
-    // `unique: 'organization'`, and both were seeded organization-less. On a
-    // walled deployment that made the whole catalog unreadable to EVERY
-    // principal at every rung: this plugin's Layer 0 composes a strict
-    // `organization_id = :tenant` and the middleware ANDs it over the driver's
-    // `(organization_id = :tenant OR organization_id IS NULL)`, and the
-    // conjunction of the two is the strict equality alone. Nothing about the
-    // wall changes here, at either layer — the rows get an owner instead.
-    //
-    // The catalog step is named ONCE and driven from two places (the boot sweep
-    // below, and the organization-creation hook further down) so a newly
-    // created organization can never be seeded differently from one present at
-    // boot. [ADR-0131 D2/D3] Positions get no row from the boot: the six
-    // built-ins are declared by this plugin (`builtin-positions.ts`), a
-    // package's positions are registry items, and the `everyone` baseline is
-    // that anchor's declared `permissionSets` (`declareEveryoneBaseline`). See `organization-scope.ts` for the doctrine and the loud guard
-    // that stands in place of a reap, and `rowMatchesDeclaration` for why the
-    // boot sweep is O(changed declarations) rather than O(organizations x rows)
-    // of blind writes.
-    //
-    // `organizationId` undefined is the `single`-posture pass and reproduces
-    // the pre-existing organization-less behaviour exactly.
-    // [#11532] The names `bootstrapPlatformAdmin` seeds organization-less on
-    // every boot. The per-organization pass sees those rows through the driver's
-    // compatibility arm and used to report them as PRE-FIX leftovers with a
-    // remedy ("re-initialize the deployment") that mints them again — on a fresh
-    // walled deployment the whole line was false and its first branch was a
-    // loop. Handed over from here because this is where the one array lives:
-    // the same `bootstrapPermissionSets` goes to the platform bootstrap above
-    // and onto the manifest as `permissions`, so the two can never disagree.
-    const platformBucketNames = this.bootstrapPermissionSets
-      .map((p) => p.name)
-      .filter((n): n is string => typeof n === 'string' && n !== '');
-    const seedCatalogPermissions = async (organizationId?: string): Promise<void> => {
-      try {
-        await bootstrapDeclaredPermissions(ql, this.metadata, { logger: ctx.logger, organizationId, platformBucketNames });
-      } catch (e) {
-        ctx.logger.warn('[security] declared-permission seeding failed', { error: (e as Error).message, organization: organizationId });
-      }
-    };
-    /**
-     * Every catalog step for ONE organization, in boot order. Used by the
-     * organization-creation hook; the boot sweep drives the same step
-     * interleaved with the organization-independent bootstrap work.
-     */
-    const seedCatalogForOrganization = async (organizationId?: string): Promise<void> => {
-      await seedCatalogPermissions(organizationId);
-    };
-    /**
-     * Which passes this boot performs: one per organization under a walled
-     * posture, exactly one organization-less pass under `single`, and NONE when
-     * the organization enumeration failed (already warned — an unreadable
-     * `sys_organization` is "we do not know", never "there are no tenants").
-     * A walled deployment with zero organizations yet is also none; each
-     * organization is seeded as it is created.
-     */
-    const catalogSeedPasses = async (): Promise<Array<string | undefined>> => {
-      if (!catalogIsPerOrganization(this.tenancyPosture)) return [undefined];
-      const ids = await listSeedOrganizationIds(ql, ctx.logger);
-      return ids ?? [];
-    };
 
     const runBootstrap = async () => {
       try {
@@ -4545,87 +4478,43 @@ export class SecurityPlugin implements Plugin {
         // real answer: a later pass that returns none (walled posture, an
         // unreadable engine) must not erase the admin an earlier pass resolved.
         if (report?.adminUserId) this.claimTargetAdminUserId = report.adminUserId;
-        // Which organizations this boot seeds. Resolved ONCE per bootstrap run.
-        const catalogPasses = await catalogSeedPasses();
-        // [ADR-0086 D5] Seed stack-declared permission sets into
-        // sys_permission_set with package provenance (managed_by:'package' +
-        // package_id) — packages ship working default access for their own
-        // objects, and the admin surface finally sees them. Runs AFTER
-        // bootstrapPlatformAdmin so the platform defaults keep their
-        // insert-once, provenance-less shape (env config, never clobbered).
-        for (const organizationId of catalogPasses) {
-          await seedCatalogPermissions(organizationId);
-        }
-
-        // [ADR-0086 P2 — 块1] Register the publish-time materializer so a
-        // permission set authored/edited through the PACKAGE door (saved as a
-        // `permission` draft, then published) lands in sys_permission_set with
-        // managed_by:'package' + package_id — the exact provenance the boot
-        // seeder stamps, only now on the runtime publish path instead of only at
-        // boot. Idempotent: registerPublishMaterializer replaces on re-run, and
-        // upsertPackagePermissionSet refuses to clobber env- or foreign-owned
-        // rows (ADR-0086 D4), so the two doors never overwrite each other.
         try {
           const protocol: any = ctx.getService?.('protocol');
-          if (protocol && typeof protocol.registerPublishMaterializer === 'function') {
-            protocol.registerPublishMaterializer(
-              'permission',
-              async (args: { body: unknown; packageId: string | null; organizationId: string | null }) => {
-                const r = await upsertPackagePermissionSet(ql, args.body, args.packageId, ctx.logger);
-                // [#10946] `unchanged` counts here. The question this line asks
-                // is "did the record end up matching the published body", NOT
-                // "was a write issued" — and until the seeder stopped re-writing
-                // rows it had nothing to change, those two were accidentally the
-                // same number. A re-publish of an identical body now lands in
-                // `unchanged`, and reading only `seeded + updated` would report
-                // that converged publish as a FAILURE and skip the audience
-                // reconcile below. The three refusal branches (foreign package,
-                // env-authored name, no owning package) all leave `unchanged` at
-                // 0, so every case that reported 0 before still reports 0.
-                const applied = r.seeded + r.updated + r.unchanged;
-                // [ADR-0090 D5] A published set carrying the install-time
-                // suggestion flag surfaces (or retires) its pending
-                // suggestion row right away — same convergent sync as boot —
-                // and `everyone` is derived again, so an accepted set whose new
-                // body fails the derivation stops granting at once.
-                if (applied > 0 && (args.body as { isDefault?: boolean } | null)?.isDefault !== undefined) {
-                  try {
-                    await reconcileAudienceBindingSuggestions(ql, ctx.logger);
-                  } catch (e) {
-                    ctx.logger.warn('[security] audience-binding suggestion sync failed (non-fatal)', { error: (e as Error).message });
-                  }
-                  await this.declareEveryone(ctx.logger);
+          // [ADR-0090 D5, #22801 → A] Every landed `permission` mutation —
+          // publish, direct-active save or delete, through any door — runs the
+          // suggestion reconcile and derives `everyone` again, so an accepted
+          // set whose new body no longer qualifies (dropped `isDefault`, a
+          // forbidden bit, deleted) stops granting at once rather than at the
+          // next boot. Unconditional on the body: whether a set still qualifies
+          // is `readAcceptedEveryoneSets`' question, asked of what the catalog
+          // now serves. Drafts change nothing the catalog serves. Wired once;
+          // the listener is fire-and-forget, so it owns its failures, and
+          // `declareEveryone` never throws.
+          if (!everyoneMutationWired && protocol && typeof protocol.onMetadataMutation === 'function') {
+            protocol.onMetadataMutation((evt: { type?: string; state?: string }) => {
+              if (evt?.type !== 'permission' || evt.state === 'draft') return;
+              void (async () => {
+                try {
+                  await reconcileAudienceBindingSuggestions(ql, ctx.logger);
+                } catch (e) {
+                  ctx.logger.warn('[security] audience-binding suggestion sync failed (non-fatal)', { error: (e as Error).message });
                 }
-                // A publish that materialized nothing did NOT go live — report it
-                // as a failure with the reason so the package-door UI never shows
-                // a clean publish over a set the admin surface can't see (ADR-0049
-                // honesty). The upsert only lands zero rows when it refused: the
-                // name is owned by another package, owned by the env door, or the
-                // publish carried no owning package_id to stamp.
-                if (applied === 0) {
-                  return {
-                    success: false, inserted: 0, updated: 0,
-                    error: r.skippedForeign > 0
-                      ? 'permission set name is owned by another package'
-                      : r.skippedEnvAuthored > 0
-                        ? 'permission set name is owned by the environment (edit it through the admin door)'
-                        : 'permission set was not materialized (publish carried no owning package)',
-                  };
-                }
-                return { success: true, inserted: r.seeded, updated: r.updated };
-              },
-            );
+                await this.declareEveryone(ctx.logger);
+              })();
+            });
+            everyoneMutationWired = true;
           }
-          // [#2747] Uninstall counterpart of the materializer above: when the
-          // owning package is uninstalled, revoke its data-plane permission
+          // [#2747] When the owning package is uninstalled, revoke its data-plane permission
           // rows (package-owned sets + their position/user bindings + the
-          // package's suggestion rows) so grants die with the package — the
-          // "no ghost grants" clause of ADR-0090 D5.
+          // package's suggestion rows) and the grants naming the sets it
+          // declared (`args.declared`, captured by the door before it withdrew
+          // the package) so grants die with the package — the "no ghost
+          // grants" clause of ADR-0090 D5.
           if (protocol && typeof protocol.registerUninstallCleanup === 'function') {
             protocol.registerUninstallCleanup(
               'security.package-permissions',
-              async (args: { packageId: string }) => {
-                const r = await cleanupPackagePermissions(ql, args.packageId, ctx.logger);
+              async (args: { packageId: string; declared?: { permission?: string[] } }) => {
+                const r = await cleanupPackagePermissions(ql, args.packageId, ctx.logger, args.declared);
                 // [#22801 → A] The package's acceptance rows are gone with it;
                 // `everyone` is derived again without its sets.
                 await this.declareEveryone(ctx.logger);
@@ -4677,18 +4566,6 @@ export class SecurityPlugin implements Plugin {
           } catch (e) {
             ctx.logger.warn('[security] permission-set projection reconciliation failed (ADR-0094)', { error: (e as Error).message });
           }
-          // [field report — rc→GA declared≠enforced surfacing] Recompute
-          // "declared ≠ enforced" per package-declared set AFTER both doors
-          // have settled for this boot (the package door above, and the env
-          // door's reconciliation just above this line) — so `drift_status`
-          // reflects the boot's TRUE final state, not a mid-boot snapshot.
-          // Own try/catch: a failure here must never take down boot, and must
-          // never be read as "reconciliation also failed" in the log above.
-          try {
-            await runPermissionSetDriftDiagnostics(ql, { logger: ctx.logger });
-          } catch (e) {
-            ctx.logger.warn('[security] permission-set drift diagnostics failed', { error: (e as Error).message });
-          }
           // [maintainer ruling 2026-08-24 — 「同意 第一步(创业阶段,Salesforce
           // 式)」, item 3] The DETECTION READING for sets that were already
           // silently forked before the save door was locked: count + NAMES,
@@ -4698,22 +4575,16 @@ export class SecurityPlugin implements Plugin {
           // cold-boot check holding such a fork does not boot at all; its
           // remedy is the offline `os migrate security-catalog-overlays`.
           //
-          // Distinct from the drift diagnostic above and deliberately run
-          // beside it: drift reports a set whose grants ALREADY differ from
-          // the artifact, so an overlay that currently happens to match is
-          // invisible to it — while that fork is entirely real and freezes
-          // the set the moment the package ships its next version.
-          //
           // Own try/catch, same discipline as its neighbours: a failure here
-          // must never take down boot, and must never read as "the drift
-          // diagnostics also failed".
+          // must never take down boot, and must never read as "the
+          // reconciliation also failed".
           try {
             await reportPackagedPermissionSetOverlays(ql, { logger: ctx.logger });
           } catch (e) {
             ctx.logger.warn('[security] packaged permission-set overlay detection failed', { error: (e as Error).message });
           }
         } catch (e) {
-          ctx.logger.warn('[security] permission publish-materializer registration failed', { error: (e as Error).message });
+          ctx.logger.warn('[security] permission-set door registration failed', { error: (e as Error).message });
         }
         // [ADR-0090 D5/D9] Reconcile the suggested-audience-binding surface:
         // every declared `isDefault: true` set the `everyone` definition does
@@ -4724,15 +4595,6 @@ export class SecurityPlugin implements Plugin {
           await reconcileAudienceBindingSuggestions(ql, ctx.logger);
         } catch (e) {
           ctx.logger.warn('[security] audience-binding suggestion sync failed (non-fatal)', { error: (e as Error).message });
-        }
-        // [A4 #2920] Heal residual legacy `managed_by` values (env sets stamped
-        // 'user'; older positions stamped system/config/user) onto the unified
-        // platform/package/admin vocab. Runs after the seeders so their canonical
-        // writes land first; idempotent and non-fatal.
-        try {
-          await normalizeManagedByVocab(ql, { logger: ctx.logger });
-        } catch (e) {
-          ctx.logger.warn('[security] managed_by vocab normalization failed (non-fatal)', { error: (e as Error).message });
         }
         bootstrapRanOnce = true;
         ctx.logger.info('[security] platform bootstrap complete', report);
@@ -4751,8 +4613,8 @@ export class SecurityPlugin implements Plugin {
     // [ADR-0131 D4] Name the permission set on every grant written before
     // `sys_user_permission_set.permission_set` existed — once per deployment,
     // recorded in `sys_migration`. At `kernel:bootstrapped`, not `kernel:ready`:
-    // every `kernel:ready` handler has settled by then (the bootstrap above that
-    // seeds the catalog rows among them), so the security catalog read each
+    // every `kernel:ready` handler has settled by then (the bootstrap above
+    // among them), so the security catalog read each
     // name is verified through sees every definition this boot registers. A
     // name it still does not resolve leaves the verdict unrecorded, so the next
     // boot tries again. See `grant-permission-set-name-backfill.ts`.
@@ -4830,45 +4692,6 @@ export class SecurityPlugin implements Plugin {
             '[security] the catalog reference report did not run — assignments and grants whose names the ' +
               'security catalog does not resolve go unreported for this boot',
             { error: (e as Error)?.message },
-          );
-        }
-      });
-    }
-
-    // ── Project the permission sets of a package that arrives AFTER the boot ──
-    //
-    // [#21322, ADR-0086 D5 — a package's sets are seeded ON INSTALL] The
-    // declared-permission seeding above runs once, at
-    // `kernel:ready`, over whatever the engine registry holds by then. A package
-    // registered later — `os package install` into a running runtime (the
-    // install-local plugin), an artifact reload — was never projected: its sets
-    // resolved for the evaluator (`/meta/permission` listed them) while
-    // `sys_permission_set` had no row, so no admin could grant them until a
-    // restart re-ran this pass. Every such door announces `metadata:reloaded`,
-    // the platform's one post-boot re-sync signal (the automation engine
-    // re-binds flows off the same event), so re-run the SAME step here: the
-    // same function, the same organization passes, the same provenance rules.
-    // Idempotent and upgrade-aware by construction (it re-seeds only rows it
-    // owns and never clobbers env-authored ones), so a reload that changed no
-    // permission set writes nothing.
-    //
-    // Only once the boot's own pass has run: it is what lets
-    // `bootstrapPlatformAdmin` write the platform defaults first, in their
-    // insert-once shape, and a reload cannot arrive ahead of it on a real
-    // kernel anyway. Never throws — `trigger` dispatch PROPAGATES, and a
-    // subscriber failure must not fail the install or publish that announced.
-    if (typeof (ctx as any).hook === 'function') {
-      (ctx as any).hook('metadata:reloaded', async () => {
-        if (!bootstrapRanOnce) return;
-        try {
-          for (const organizationId of await catalogSeedPasses()) {
-            await seedCatalogPermissions(organizationId);
-          }
-        } catch (e) {
-          ctx.logger.warn(
-            '[security] declared permission sets were NOT re-projected after a metadata reload — a package ' +
-              'registered after boot has no sys_permission_set row until the next restart',
-            { error: (e as Error).message },
           );
         }
       });
@@ -5000,80 +4823,12 @@ export class SecurityPlugin implements Plugin {
       void runOrgAdminBackfill();
     }
 
-    // ── Seed the RBAC catalog for a NEWLY CREATED organization ──────────
-    //
-    // The boot sweep covers the organizations that exist when the kernel is
-    // ready. Every organization minted afterwards needs the same catalog, and
-    // waiting for the next restart is not a repair: until it runs, that
-    // tenant's Setup lists no positions, no permission sets and no sharing
-    // rules — the exact symptom per-organization materialization exists to fix,
-    // only scoped to the newest tenant. Steady state therefore rides THIS hook,
-    // which is also why the boot sweep can afford to be a read-mostly
-    // reconciliation rather than a blind rewrite.
-    //
-    // Walled postures only: under `single` there is no organization to seed
-    // for, and the one organization-less pass at boot is the correct shape.
-    // Idempotent by construction (every seeder upserts by
-    // `(name, organization_id)`), so a double-fire is harmless.
-    ql.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
-      await next();
-      if (opCtx?.object !== 'sys_organization') return;
-      const op = opCtx?.operation;
-      if (op !== 'insert' && op !== 'create') return;
-      if (!catalogIsPerOrganization(this.tenancyPosture)) return;
-      const organizationId = this.extractOrganizationIdFromWrite(opCtx);
-      if (!organizationId) {
-        // Never fall back to an organization-less pass here. That is the
-        // `single`-posture shape, and running it on a walled deployment would
-        // mint exactly the invalid-state row this change exists to remove.
-        ctx.logger.warn?.(
-          '[security] an organization was created but its id could not be read off the write — its ' +
-            'RBAC catalog was NOT seeded now; the next boot sweep covers it',
-          { object: 'sys_organization' },
-        );
-        return;
-      }
-      try {
-        await seedCatalogForOrganization(organizationId);
-        ctx.logger.info?.('[security] RBAC catalog seeded for a newly created organization', {
-          organization: organizationId,
-        });
-      } catch (e) {
-        ctx.logger.warn?.('[security] catalog seeding for a new organization failed (retried on next boot)', {
-          organization: organizationId, error: (e as Error).message,
-        });
-      }
-    });
-
     // Per-organization seed DATA replay on `sys_organization` insert (business
     // records) lives in `@objectstack/organizations`, along with
     // `claimOrphanOrgRows` / `cloneOrgSeedData`. Install that plugin for
-    // multi-tenant deployments. The hook above is a different thing: the RBAC
-    // CATALOG, which plugin-security owns and seeds from declarations.
-  }
-
-  /**
-   * The id of the organization a `sys_organization` insert just created.
-   *
-   * Read from the write's own result first and its input second, because the
-   * two disagree in the case that matters: an insert that lets the engine mint
-   * the id carries none on the way in. Returns `undefined` rather than guessing
-   * — the caller refuses to run an organization-less pass on a walled
-   * deployment, which is the whole point.
-   */
-  private extractOrganizationIdFromWrite(opCtx: any): string | undefined {
-    const candidates = [
-      opCtx?.result?.id,
-      Array.isArray(opCtx?.result) ? opCtx.result[0]?.id : undefined,
-      opCtx?.data?.id,
-      opCtx?.doc?.id,
-      opCtx?.record?.id,
-      opCtx?.id,
-    ];
-    for (const c of candidates) {
-      if (typeof c === 'string' && c !== '') return c;
-    }
-    return undefined;
+    // multi-tenant deployments. The RBAC catalog needs no such replay: this
+    // plugin writes no catalog row, and every organization reads the same
+    // registry (ADR-0131 D3).
   }
 
   /**
@@ -5838,6 +5593,14 @@ export class SecurityPlugin implements Plugin {
    * ({@link isPrincipalLessContext}, ADR-0096 D5 strict mode), which the
    * middleware refuses before it resolves anything: it no longer keeps the
    * sharing predicate alone.
+   *
+   * [ADR-0139 D2 step 2] Every deny this method answers is `RLS_DENY_FILTER`
+   * ITSELF — `@objectstack/spec/data`'s frozen object, by reference — whether
+   * it is returned here or comes up unchanged from a layer (the tenant wall's
+   * deny, the RLS compiler's, the dropped-policy and unresolvable-master
+   * denies below): the engine's composition recognises it by identity and
+   * answers `$in: []`. ⛔ Never return a spread copy; a copy still matches zero
+   * rows, but it is no longer the sentinel.
    */
   async getReadFilter(
     object: string,
@@ -5848,7 +5611,7 @@ export class SecurityPlugin implements Plugin {
     // [#21908] ADR-0096 D5 strict mode — the middleware's principal-less
     // refusal, mirrored: zero rows, read off the same predicate, before any
     // layer resolves. This used to answer the sharing predicate alone.
-    if (isPrincipalLessContext(context)) return { ...RLS_DENY_FILTER };
+    if (isPrincipalLessContext(context)) return RLS_DENY_FILTER;
     // [#4467] The OWD/sharing predicate is resolved for EVERY non-system caller,
     // ahead of the RLS branches below, because it is a SEPARATE middleware in
     // the chain this method mirrors: none of the RLS stand-downs below is a
@@ -5864,7 +5627,7 @@ export class SecurityPlugin implements Plugin {
           `the engine middleware never runs without the owner and share scope a direct read applies)`,
         e instanceof Error ? e : new Error(String(e)),
       );
-      return { ...RLS_DENY_FILTER };
+      return RLS_DENY_FILTER;
     }
     // [#2852] D10 delegator intersection is NOT implemented on this path.
     // The engine middleware (find/count/aggregate) intersects an on-behalf-of
@@ -5886,7 +5649,7 @@ export class SecurityPlugin implements Plugin {
           `implemented on the read-scope path; denying (fail-closed: a delegated read is never scoped ` +
           `wider than its delegator's own)`,
       );
-      return { ...RLS_DENY_FILTER };
+      return RLS_DENY_FILTER;
     }
     try {
       const permissionSets = await this.resolvePermissionSetsForContext(context);
@@ -5897,7 +5660,7 @@ export class SecurityPlugin implements Plugin {
       // from the layers instead, it was the sharing predicate alone — every
       // row of an object whose sharing model is not private. Not a failure,
       // so nothing is logged.
-      if (permissionSets.length === 0) return { ...RLS_DENY_FILTER };
+      if (permissionSets.length === 0) return RLS_DENY_FILTER;
       const filter = await this.computeRlsFilter(permissionSets, object, 'find', context);
       // [#5815] ADR-0055 — the SECOND thing the middleware ANDs into `ast.where`
       // for a read. Resolved from the sets already resolved above, exactly as
@@ -5924,7 +5687,7 @@ export class SecurityPlugin implements Plugin {
           `(user ${context?.userId ?? 'unknown'}) — denying (fail-closed)`,
         e instanceof Error ? e : new Error(String(e)),
       );
-      return { ...RLS_DENY_FILTER };
+      return RLS_DENY_FILTER;
     }
   }
 
@@ -7108,7 +6871,7 @@ export class SecurityPlugin implements Plugin {
    * overlay layer. Fails CLOSED and never depends on the caller's grants, so
    * a platform admin with `modifyAllRecords` cannot forge provenance either.
    * System/boot writes never reach here (the middleware short-circuits on
-   * `isSystem`), so the seeder and the publish materializer are unaffected.
+   * `isSystem`), so system writes are unaffected.
    */
   /**
    * [ADR-0090 D5/D9] Reject binding a HIGH-PRIVILEGE permission set to an
@@ -8185,9 +7948,10 @@ export class SecurityPlugin implements Plugin {
               }
             : undefined,
         );
-        // Every applicable policy dropped for a missing field → deny sentinel.
+        // Every applicable policy dropped for a missing field → deny sentinel,
+        // by reference (ADR-0139 D2 step 2: recognised by identity).
         if (layer1 == null && dropped > 0) {
-          layer1 = { ...RLS_DENY_FILTER };
+          layer1 = RLS_DENY_FILTER;
         }
       }
     }
@@ -8618,7 +8382,7 @@ export class SecurityPlugin implements Plugin {
     //     header names those doors). So here the alias is genuinely REACHABLE.
     //   • And here a miss is not a quiet wrong answer, it is a DENIAL.
     //     `resolveCbpRelation` returning null is FAIL-CLOSED: the read leg
-    //     answers `{ ...RLS_DENY_FILTER }` (zero rows for every non-admin
+    //     answers `RLS_DENY_FILTER` (zero rows for every non-admin
     //     caller) and the write leg throws `MasterDetailRelationMissingError`.
     //     Narrowing this reader would take a raw-registered, alias-spelled
     //     `controlled_by_parent` object from "access derived from its master"
@@ -8839,7 +8603,8 @@ export class SecurityPlugin implements Plugin {
     if (sharingModel !== 'controlled_by_parent') return null;
 
     const rel = this.resolveCbpRelation(object);
-    if (!rel) return { ...RLS_DENY_FILTER };
+    // No resolvable master: the deny sentinel, by reference (ADR-0139 D2 step 2).
+    if (!rel) return RLS_DENY_FILTER;
 
     // [ADR-0055 amendment] Chain guards, BEFORE any store work. Both answer with the empty
     // master set — the same shape the #5386 sharing-resolution failure answers
@@ -9477,15 +9242,34 @@ export class SecurityPlugin implements Plugin {
     //  • the verb is `update`, matching the object-level check above and leg 2
     //    below: this gate's question is EDIT access to the master, never the
     //    detail's own verb;
-    //  • `masterGateCoversThisWrite` is deliberately NOT set. That knob is
-    //    commit 6feac910b's, and it hands a `controlled_by_parent` object's floor to THIS
-    //    gate; setting it here would hand a nested master's floor to a gate that
-    //    is already running, on a path no measurement covers. A master that is
-    //    itself a detail keeps its floor exactly as it does today.
+    //  • [#23093] `masterGateCoversThisWrite` IS set for a master that is itself
+    //    `controlled_by_parent`, on a non-delegated write. Maintainer ruling on
+    //    #23093 (letter A, 2026-10-12) extends the 2026-08-15 ruling — commit
+    //    6feac910b, which hands such an object's platform floor to its master
+    //    gate on its own by-id write (step 2.7) — to this hop. Before it, one
+    //    principal and one middle master row got two answers to one `update`:
+    //    the master's own door dropped the floor, a write to any of its details
+    //    kept it here. So an organization member who could edit a quote could
+    //    not edit its lines unless they had created the quote, and the quote's
+    //    creator could edit the lines of a quote an app policy refused them
+    //    (the floor and that policy compose as alternatives). The hop now asks
+    //    the composition that door asks, clause for clause: only the PLATFORM
+    //    floor yields; an app-authored update policy on the master and the
+    //    #7665 derive-from-select floor still run, and refuse here exactly as
+    //    they refuse the door. The vouch holds structurally, as step 2.7's
+    //    does: the flag is set on the very predicate
+    //    (`declaresControlledByParent(rel.master)`) that makes the walk in
+    //    {@link SecurityPlugin.assertControlledByParentWrite} continue to this
+    //    master's own master, so this master's own master gate runs next, for
+    //    this principal, on this pass — or the walk refuses (cycle, depth bound,
+    //    broken chain). A master that governs its own rows never sets it.
+    //    Pinned in `controlled-by-parent-chain-middle-master.test.ts`.
     //
     // [ADR-0090 D10] The on-behalf-of path is EXCLUDED, mirroring step 2.7's
-    // `floorApplies`. The delegation fact is read off `opCtx.context` rather
-    // than off `context`, because THIS METHOD RUNS TWICE for a delegated write
+    // `floorApplies` and its `masterGateCoversThisWrite = !delegatorSets` — from
+    // the sharing-verdict floor drop and from the vouch alike. The delegation
+    // fact is read off `opCtx.context` rather than off `context`, because THIS
+    // METHOD RUNS TWICE for a delegated write
     // — once per principal, with the delegator's own context substituted — and
     // only the shared `opCtx` carries the link on both passes. (At this point
     // `!!opCtx.context?.onBehalfOf?.userId` is the middleware's `!!delegatorSets`:
@@ -9515,6 +9299,7 @@ export class SecurityPlugin implements Plugin {
       : false;
     const masterWriteFilter = await this.computeRlsFilter(permissionSets, rel.master, 'update', context, {
       dropPlatformOwnershipFloor,
+      masterGateCoversThisWrite: !delegatedWrite && this.declaresControlledByParent(rel.master),
     });
     if (masterWriteFilter) {
       let visible: unknown = null;

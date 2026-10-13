@@ -7,9 +7,10 @@
  *
  * ## What was wrong
  *
- * `bootstrapDeclaredPermissions` refuses to write into a `sys_permission_set`
- * row another package owns (ADR-0086 D4: a package never writes into a foreign
- * record). That refusal is CORRECT and is unchanged here. What was wrong is
+ * `bootstrapDeclaredPermissions` refused to write into a `sys_permission_set`
+ * row another package owned (ADR-0086 D4: a package never writes into a foreign
+ * record); it retired with ADR-0131 C3 stage 6b-2, and the registry now refuses
+ * a second holder of a set name at install. What was wrong is
  * that it was INVISIBLE: the whole declared set vanished with an internal
  * counter incremented and one `logger?.warn?.(…)` line — optionally chained
  * TWICE, so a caller that passed no logger produced no output at all. The

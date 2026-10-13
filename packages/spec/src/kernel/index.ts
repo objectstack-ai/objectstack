@@ -57,6 +57,9 @@ export type { UnknownAuthoringKeyFinding } from '../data/authoring-key-lint';
 export * from './package-artifact.zod';
 export * from './package-registry.zod';
 export * from './package-upgrade.zod';
+// [ADR-0131 D6] What an `unmanaged` install can copy: the one key
+// classification `defineStack` and the install door's import planner read.
+export * from './unmanaged-install';
 export * from './plugin-capability.zod';
 export * from './plugin-lifecycle-advanced.zod';
 export * from './plugin-loading.zod';

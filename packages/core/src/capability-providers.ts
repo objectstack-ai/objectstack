@@ -181,6 +181,13 @@ export const CAPABILITY_PROVIDERS: Readonly<Record<string, CapabilitySpec>> = {
     export: 'EmailServicePlugin',
     identities: ['com.objectstack.service.email', 'EmailServicePlugin'],
   },
+  // Inbound mail: `sys_mailbox`, `sys_mail_message`, `sys_mail_association`
+  // and their read gates. Requested, never always-on (ADR-0029 D2).
+  mailbox: {
+    pkg: '@objectstack/service-mailbox',
+    export: 'MailboxServicePlugin',
+    identities: ['com.objectstack.service.mailbox', 'MailboxServicePlugin'],
+  },
   sms: {
     // #2780 — backs phone-number OTP sign-in/reset (plugin-auth) and
     // the messaging `sms` channel. Provider config lives in the `sms`

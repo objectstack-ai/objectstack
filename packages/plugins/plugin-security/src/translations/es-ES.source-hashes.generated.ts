@@ -18,14 +18,6 @@
  */
 
 export const esESGeneratedSourceHashes: Readonly<Record<string, string>> = {
-  "objects.sys_permission_set._views.drifted.label": "f7b9325c31edc552",
-  "objects.sys_permission_set.fields.drift_detail.help": "3572261f6d3bc8ab",
-  "objects.sys_permission_set.fields.drift_detail.label": "a84ebd221c37d10b",
-  "objects.sys_permission_set.fields.drift_status.help": "168e382c7568b1f3",
-  "objects.sys_permission_set.fields.drift_status.label": "7946a54138690b86",
-  "objects.sys_permission_set.fields.drift_status.options.other": "3ddcfb750014f293",
-  "objects.sys_permission_set.fields.drift_status.options.overlay_shadow": "7371472481b55b52",
-  "objects.sys_permission_set.fields.drift_status.options.provenance_skip": "fdd5f01e69fa0245",
   "objects.sys_position._validations.reserved_identity_name.message": "a23aa7c06745cc95",
   "objects.sys_position_permission_set.fields.display_title.help": "b99cbdc42ee68f06",
   "objects.sys_position_permission_set.fields.display_title.label": "70f7aadecce647a5",

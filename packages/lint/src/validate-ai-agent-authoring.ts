@@ -160,8 +160,9 @@ export function validateAiAgentAuthoring(stack: AnyRec): AiAgentAuthoringFinding
       rule: AGENT_AUTHORING_WITHDRAWN,
       where: `agent "${name}"`,
       path: `agents[${ai}]`,
-      // [#22161] One verdict per arm; the withdrawal, how the runtime enforces
-      // it and why this is a warning are `os explain` text.
+      // [#22161] One verdict and one remedy line per arm; the withdrawal, how
+      // the runtime enforces it, why this is a warning, and why dropping the
+      // persona loses nothing a skill carries, are `os explain` text.
       message: isPlatformName
         ? `This stack declares an agent named "${name}", which is a PLATFORM agent id, so the ` +
           `runtime serves its own record for that name and this declaration has no effect`
@@ -170,13 +171,11 @@ export function validateAiAgentAuthoring(stack: AnyRec): AiAgentAuthoringFinding
           `so it never runs`,
       hint: isPlatformName
         ? `Remove the declaration; the platform owns "${name}". Extend it with skills instead.`
-        : `Delete the agent and express its capability as skills. Everything an agent carried ` +
-          `that a skill does not is persona text: move the useful parts of \`instructions\` into ` +
-          `the skills' own instructions.` +
+        : `Delete the agent and express its capability as skills, moving the useful parts of its ` +
+          `\`instructions\` into theirs` +
           (skillCount > 0
-            ? ` The ${skillCount} skill${skillCount === 1 ? '' : 's'} this agent references ` +
-              `already carry the capability — they attach to the platform agent by \`surface\` ` +
-              `affinity, so nothing is lost by dropping the persona.`
+            ? `; the ${skillCount} skill${skillCount === 1 ? '' : 's'} it references already ` +
+              `${skillCount === 1 ? 'carries' : 'carry'} it`
             : ``),
     });
   }
@@ -218,15 +217,15 @@ export function validateAiAgentAuthoring(stack: AnyRec): AiAgentAuthoringFinding
       rule: DEFAULT_AGENT_OUTSIDE_ROSTER,
       where: `app "${appName}".defaultAgent`,
       path: `apps[${appIdx}].defaultAgent`,
-      // [#22161] One verdict; how the key resolves and why it is not a schema
-      // enum are `os explain` text.
+      // [#22161] One verdict and one remedy line; how the key resolves, why it
+      // is not a schema enum, and how skills reach the platform agents, are
+      // `os explain` text.
       message:
         `app "${appName}" pins \`defaultAgent\` to "${defaultAgent}", which is not a platform ` +
         `agent (${roster}), so it silently falls back to the platform default and the pin has no effect`,
       hint:
-        `Set \`defaultAgent\` to one of the platform agent names: ${roster}. If the goal is a ` +
-        `dedicated persona or capability, express it as skills instead — they attach to "ask" ` +
-        `/ "build" by surface affinity, not as a custom \`defaultAgent\` value.`,
+        `Set \`defaultAgent\` to a platform agent name (${roster}); for a dedicated persona or ` +
+        `capability, author skills instead`,
     });
   }
 

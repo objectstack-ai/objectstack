@@ -110,6 +110,7 @@ export async function cleanupPackagePermissions(
   ql: any,
   packageId: string,
   logger?: { info?: (m: string, meta?: any) => void; warn?: (m: string, meta?: any) => void },
+  declared?: { permission?: readonly string[] },
 ): Promise<PackagePermissionCleanupOutcome> {
   const out: PackagePermissionCleanupOutcome = {
     sets: 0, positionBindings: 0, userGrants: 0, suggestions: 0, refused: 0,
@@ -150,6 +151,21 @@ export async function cleanupPackagePermissions(
     out.userGrants += await deleteRows(ql, 'sys_user_permission_set', [...grants.values()], refusals);
   }
   out.sets = await deleteRows(ql, 'sys_permission_set', sets, refusals);
+
+  // [ADR-0131 D3/D4, ADR-0090 D5] The package's sets are served from the
+  // registry, so no row above stands for them: the grants naming them are
+  // reached by the names the uninstall door captured before it withdrew the
+  // package. A name belongs to one holder (the registry refuses a second at
+  // install), so every grant naming it was a grant of this package's set.
+  // Position bindings have no name column; a legacy one is reached above.
+  for (const name of new Set(declared?.permission ?? [])) {
+    if (typeof name !== 'string' || name === '') continue;
+    out.userGrants += await deleteRows(
+      ql, 'sys_user_permission_set',
+      await tryFind(ql, 'sys_user_permission_set', { permission_set: name }),
+      refusals,
+    );
+  }
 
   // Suggestion rows in every status — reinstall re-prompts fresh (D5).
   out.suggestions = await deleteRows(

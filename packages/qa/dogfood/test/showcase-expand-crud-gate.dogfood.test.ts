@@ -36,6 +36,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
 import { showcaseAppDefaultSecurity } from './showcase-security.js';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const SYS = { isSystem: true } as const;
 
@@ -75,8 +76,8 @@ describe('showcase: $expand honours the referenced object’s CRUD gate + OWD (#
     const contribId = (await ql.findOne('sys_user', { where: { email: CONTRIB_EMAIL }, context: SYS }))?.id;
     expect(contribId, 'contributor user provisioned').toBeTruthy();
     await ql.insert('sys_user_position', { user_id: contribId, position: 'contributor' }, { context: SYS });
-    const contribSet = await ql.findOne('sys_permission_set', { where: { name: 'showcase_contributor' }, context: SYS });
-    expect(contribSet?.id, 'the app’s contributor set is seeded').toBeTruthy();
+    const contribSet = await catalogPermissionSet(ql, 'showcase_contributor');
+    expect(contribSet, 'the app’s contributor set is served by the security catalog').toBeTruthy();
     await ql.insert(
       'sys_user_permission_set',
       { user_id: contribId, permission_set: contribSet.name },

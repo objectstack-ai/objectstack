@@ -12,9 +12,10 @@
  * hands to a callee — `subflow.input.*`, `map.input.*`, `script.inputs.*` —
  * a `screen`'s three positions that hand a value to the client —
  * `defaults.*`, `fields[].defaultValue`, `recordId` — the list a `loop`
- * and a `map` iterate, their `collection` — and a `notify` node's computed
+ * and a `map` iterate, their `collection` — a `notify` node's computed
  * values — `recipients` (each entry of a list), `templateData.*` and
- * `sourceId` — `FLOW_NODE_EXPRESSION_PATHS`), plus the two legacy
+ * `sourceId` — an `http` node's `body` — and each operand of a CRUD node's
+ * `filter` — `FLOW_NODE_EXPRESSION_PATHS`), plus the two legacy
  * `assignment` shapes the executor still reads (the
  * `assignments: [{ variable, value }]` array and the bare
  * `{ <variable>: <value> }` config). Until this retirement every string
@@ -180,6 +181,32 @@
  * whole token holding a list, written as a list entry, on as ONE recipient
  * joined with commas.
  *
+ * ## A CRUD node's filter operands — the query placeholders stay
+ *
+ * Each operand of a `get_record`, `update_record` or `delete_record` node's
+ * `filter` is a value slot (the ledger's `filterOperands`, read through
+ * `flowFilterOperands`): a field's value, an operator's comparand, each element
+ * of a list comparand. Two `{…}` vocabularies met there, and the 17.x executor
+ * told them apart at run time: a flow token resolved against the run's
+ * variables, and a whole-string token no variable resolved that IS a query
+ * placeholder (`{current_user_id}`, `{today}`, `{30_days_ago}` —
+ * `isKnownFilterToken`) was handed to the query engine untouched. The
+ * placeholders stay — they are the query-filter surface, which the query
+ * engine resolves and ADR-0032 puts out of its scope — and the flow token is
+ * retired, so the split is now static and is drawn by ONE classifier,
+ * {@link classifyFlowFilterOperandString}: a whole-string placeholder the query
+ * engine resolves passes, and every other string carrying a `{…}` token is
+ * refused with its CEL spelling (judged with
+ * {@link ValueSlotTemplateOptions.filterOperand}). A flow variable that shares
+ * a placeholder's name no longer shadows it: the placeholder is the query
+ * engine's, and the variable is read with an envelope.
+ *
+ * Where a whole token resolved to nothing, the 17.x executor refused the node
+ * — an absent condition does not narrow a query, it widens it (#3810) — and so
+ * does an operand envelope that evaluates to `null`. So the remedy at a filter
+ * operand names no guard that answers `null`: where the value may be absent,
+ * the node is routed around.
+ *
  * ## The token grammar is the interpolator's
  *
  * Which `{…}` the interpolator substitutes, and how it dispatches a token, is
@@ -189,6 +216,10 @@
  */
 
 import { isExpressionEnvelopeShaped, resolveFlowNodeValueSlots } from './flow-node-expression-paths';
+// [#19939] The query placeholders a flow filter operand hands on untouched —
+// the vocabulary the query engine's own resolver reads (`resolveFilterTokens`
+// in `@objectstack/core`), never re-spelled here.
+import { FILTER_TOKEN_WRAPPED_RE, classifyFilterToken, isKnownFilterToken } from '../data/context-tokens.zod';
 import {
   CEL_KEYWORDS,
   CEL_RUN_USER_ID,
@@ -474,6 +505,104 @@ function collectionRemedy(value: string, tokens: readonly Token[]): string {
   );
 }
 
+/**
+ * [#19939] What a string at an operand of a CRUD node's `filter` is — the ONE
+ * classifier the node contracts, `AutomationEngine.registerFlow`,
+ * `objectstack validate` and the executors' contract parse all read, through
+ * {@link valueSlotTemplateRefusals} (see the module docblock, "A CRUD node's
+ * filter operands"):
+ *
+ *  - `'placeholder'` — the whole string is ONE query placeholder the query
+ *    engine resolves on the server, a context token or a date macro
+ *    (`isKnownFilterToken`), in the wrapped spelling its resolver recognises
+ *    (`FILTER_TOKEN_WRAPPED_RE`: `{today}`, `${today}`). Handed to the query
+ *    untouched, as the 17.x executor handed a placeholder no flow variable
+ *    resolved — and now whatever the run's variables hold: no flow token is
+ *    read here, so none shadows it;
+ *  - `'flow-token'` — any other string carrying a `{…}` token of the retired
+ *    flow template dialect (`TEMPLATE_TOKEN`). Refused, with its CEL spelling;
+ *  - `'literal'` — a string with no `{…}` token, handed to the query as
+ *    written.
+ *
+ * A record page's placeholder (`{record_id}`) is not one the server resolves
+ * — the query engine refuses it on every server path — so here it is a token
+ * of the flow dialect like any other, as the 17.x executor read it.
+ */
+export type FlowFilterOperandStringKind = 'placeholder' | 'flow-token' | 'literal';
+
+/** Classify one string at a filter operand — see {@link FlowFilterOperandStringKind}. */
+export function classifyFlowFilterOperandString(value: string): FlowFilterOperandStringKind {
+  const wrapped = FILTER_TOKEN_WRAPPED_RE.exec(value);
+  if (wrapped !== null && isKnownFilterToken(wrapped[1]!)) return 'placeholder';
+  return tokensOf(value).length > 0 ? 'flow-token' : 'literal';
+}
+
+/**
+ * The query placeholder a refused whole-string token at a filter operand
+ * resembles, when it resembles one the server resolves — the placeholder
+ * written with spaces inside its braces, or a near-miss the placeholder
+ * vocabulary's own suggestion table names (`{current_user}` →
+ * `{current_user_id}`) — or `undefined`.
+ */
+function placeholderSuggestion(value: string): string | undefined {
+  const wrapped = FILTER_TOKEN_WRAPPED_RE.exec(value);
+  if (wrapped === null) return undefined;
+  const trimmed = wrapped[1]!.trim();
+  if (trimmed !== wrapped[1] && isKnownFilterToken(trimmed)) return `{${trimmed}}`;
+  const verdict = classifyFilterToken(value);
+  if (verdict?.kind !== 'unknown' || verdict.suggestion === undefined) return undefined;
+  return isKnownFilterToken(verdict.suggestion) ? `{${verdict.suggestion}}` : undefined;
+}
+
+/**
+ * What an operand envelope that evaluates to nothing does — the #3810 refusal,
+ * kept — and so why a filter operand's remedy names no guard answering `null`.
+ */
+const FILTER_OPERAND_ABSENT_SENTENCE =
+  'An operand that evaluates to `null` refuses the node, as a token that resolved to nothing did — an absent '
+  + 'condition does not narrow a query, it widens it — and CEL refuses an absent variable or key outright, so '
+  + 'where the value may be absent, route around the node with a `decision` rather than guarding it.';
+
+/**
+ * The remedy for a `{…}` token at a filter operand (see the module docblock,
+ * "A CRUD node's filter operands"): the operand's CEL envelope, evaluated
+ * before the query, and — where the value may be absent — what `null` does
+ * there, since a guard answering `null` refuses the node; then the query
+ * placeholder the token resembles, if any.
+ */
+function filterOperandRemedy(value: string, tokens: readonly Token[]): string {
+  const whole = wholeTokenOf(value, tokens);
+  const sentences: string[] = [];
+  if (whole?.kind === 'path') {
+    sentences.push(
+      `Write \`${whole.text}\` as ${envelopeOf(celPath(whole.inner))}: an operand envelope is evaluated before the `
+      + 'query.',
+      FILTER_OPERAND_ABSENT_SENTENCE,
+    );
+  } else if (whole?.kind === 'expression') {
+    sentences.push(
+      `Write \`${whole.text}\` as ${envelopeOf(celExpression(whole.inner))}: an operand envelope is evaluated before `
+      + 'the query. Every division keeps a decimal operand: CEL divides two integers as integers, so '
+      + '`round(x * 100) / 100` drops the decimals where `round(x * 100) / 100.0` keeps them.',
+      FILTER_OPERAND_ABSENT_SENTENCE,
+    );
+  } else if (whole?.kind === 'user' && isRunUserIdToken(whole.inner)) {
+    sentences.push(
+      `Write \`${whole.text}\` as ${envelopeOf(CEL_RUN_USER_ID)}: \`current_user\` is the run's user. In a flow that `
+      + 'can run without a user (a schedule, or a record change made by a system write) `current_user` is `null` '
+      + 'and that read fails the run, so skip the node there with a `decision` on `current_user != null`: an '
+      + 'operand that evaluates to `null` refuses the node.',
+    );
+  } else {
+    sentences.push(remedyFor(value, tokens, envelopeOf));
+  }
+  const placeholder = placeholderSuggestion(value);
+  if (placeholder !== undefined) {
+    sentences.push(`If you meant the query placeholder \`${placeholder}\`, write it so: the query engine resolves it.`);
+  }
+  return sentences.join(' ');
+}
+
 /** One refused string inside a value slot's value. */
 export interface ValueSlotTemplateRefusal {
   /** Where the string sits inside the value — `[]` for the value itself, `['meta', 'note']`, `[0]`. */
@@ -505,6 +634,15 @@ export interface ValueSlotTemplateOptions {
    * are left to the collection's contract. Default `false`.
    */
   readonly collection?: boolean;
+  /**
+   * [#19939] The position is an operand of a CRUD node's `filter` (the
+   * ledger's `filterOperands`): a string that is one whole query placeholder
+   * ({@link classifyFlowFilterOperandString}) is the query engine's and is not
+   * judged, at any depth, and every other `{…}` token is refused with the
+   * filter operand's remedy, which names no guard answering `null` — an
+   * operand that evaluates to `null` refuses the node. Default `false`.
+   */
+  readonly filterOperand?: boolean;
 }
 
 /**
@@ -531,16 +669,20 @@ export function valueSlotTemplateRefusals(
     return [{ path: [], message: `${VALUE_SLOT_TEMPLATE_REFUSAL} ${collectionRemedy(value, tokens)}`, source: value }];
   }
   const legacy = options.envelopeIsLiteral === true;
+  const filter = options.filterOperand === true;
   if (!legacy && isExpressionEnvelopeShaped(value)) return [];
   const out: ValueSlotTemplateRefusal[] = [];
   const seen = new Set<object>();
   const visit = (node: unknown, path: (string | number)[]): void => {
     if (typeof node === 'string') {
+      // [#19939] At a filter operand a whole query placeholder is the query
+      // engine's, handed on untouched — the one classifier decides.
+      if (filter && classifyFlowFilterOperandString(node) === 'placeholder') return;
       const tokens = tokensOf(node);
       if (tokens.length === 0) return;
       const lead = literalPositionLead(node, tokens, path, legacy);
       const remedy = lead === undefined
-        ? remedyFor(node, tokens, envelopeOf)
+        ? (filter ? filterOperandRemedy(node, tokens) : remedyFor(node, tokens, envelopeOf))
         : `${lead} ${remedyFor(node, tokens, path.length > 0 ? spanOf : envelopeOf)}`;
       out.push({ path, message: `${VALUE_SLOT_TEMPLATE_REFUSAL} ${remedy}`, source: node });
       return;
@@ -768,7 +910,10 @@ function joinPath(prefix: string, inner: readonly (string | number)[]): string {
  * (with a `body`) or a `map`'s `collection` only the value itself is judged,
  * with the collection's remedy: the list it must evaluate to. At a `notify`
  * node's `recipients` — the value, or each entry of a list — it ends with the
- * recipient sentence: what `null` and a list add to the audience.
+ * recipient sentence: what `null` and a list add to the audience. At each
+ * operand of a CRUD node's `filter` a whole query placeholder passes, and a
+ * token is refused with the filter operand's remedy
+ * ({@link ValueSlotTemplateOptions.filterOperand}).
  */
 export function flowNodeValueTemplateRefusals(nodeType: string, config: unknown): FlowNodeValueTemplateRefusal[] {
   const out: FlowNodeValueTemplateRefusal[] = [];
@@ -789,6 +934,10 @@ export function flowNodeValueTemplateRefusals(nodeType: string, config: unknown)
     const entryKey = `${found.entry.nodeType} ${found.entry.path}`;
     if (COLLECTION_SLOTS.has(entryKey)) {
       judge(found.path, found.entry.label, found.value, { collection: true });
+      continue;
+    }
+    if (found.entry.filterOperands) {
+      judge(found.path, found.entry.label, found.value, { filterOperand: true });
       continue;
     }
     const receiver = CALLEE_INPUT_SLOTS[entryKey];

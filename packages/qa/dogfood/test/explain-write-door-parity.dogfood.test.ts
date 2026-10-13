@@ -57,6 +57,7 @@ import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plug
 import { ExplainOperationSchema, PermissionSetSchema, type ExplainOperation, type PermissionSet } from '@objectstack/spec/security';
 import { cpgStack, cpgBaselineSet, cpgFilesAndThreadsSet } from './fixtures/cbp-parent-gates-fixture.js';
 import { assertArmed, principalArmed } from './armed.js';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const SYS = { isSystem: true } as const;
 
@@ -205,8 +206,8 @@ describe('security/explain answers every write verb as its door does, on read-ab
     for (const { axis, set, email } of AXES) {
       const token = await stack.signUp(email);
       const userId = await uid(email);
-      const row = await ql.findOne('sys_permission_set', { where: { name: set.name }, context: SYS });
-      expect(row?.id, `${set.name} seeded`).toBeTruthy();
+      const row = await catalogPermissionSet(ql, set.name);
+      expect(row, `${set.name} served by the security catalog`).toBeTruthy();
       await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: row.name }, { context: { ...SYS } });
       tokens[axis] = token;
     }

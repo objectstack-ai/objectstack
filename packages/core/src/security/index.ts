@@ -343,6 +343,14 @@ export {
   withoutOperationPrivateKeys,
 } from './operation-private-keys.js';
 
+// The caller-scoped "which of these parent records can the caller read?" probe
+// every parent-derived read gate asks (comments, activity, ledger, attachments,
+// mail). One owner for the body two packages had hand-copied.
+export {
+  resolveReadableParentIds,
+  type ReadableParentIdsEngine,
+} from './readable-parent-ids.js';
+
 // [#11968] Authorization caching SUBSTRATE, TTL-bounded and invalidated over a
 // best-effort cross-node channel — the channel contract and the boot-time
 // posture statement (#11633 §3, Fork 2 → B, ruled 2026-08-25). No cache lives

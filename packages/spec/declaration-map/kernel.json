@@ -85,6 +85,8 @@
     "GetPackageResponseSchema": "kernel/GetPackageResponse",
     "HotReloadConfig": "kernel/HotReloadConfig",
     "HotReloadConfigSchema": "kernel/HotReloadConfig",
+    "InstallMode": "kernel/InstallMode",
+    "InstallModeSchema": "kernel/InstallMode",
     "InstallPackageRequest": "kernel/InstallPackageRequest",
     "InstallPackageRequestSchema": "kernel/InstallPackageRequest",
     "InstallPackageResponse": "kernel/InstallPackageResponse",

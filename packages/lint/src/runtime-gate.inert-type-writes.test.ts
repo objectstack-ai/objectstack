@@ -60,8 +60,10 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { getMetadataTypeSchema } from '@objectstack/spec/kernel';
+
 import { AUTHORING_COMMANDS, AUTHORING_RULES, runAuthoringRules } from './authoring-rules.js';
-import { LIVENESS_DEAD_PROPERTY, lintLivenessProperties } from './lint-liveness-properties.js';
+import { lintLivenessProperties } from './lint-liveness-properties.js';
 import { REFERENCE_INTEGRITY_RULES } from './reference-integrity-suite.js';
 import {
   buildRuntimeWriteSnapshots,
@@ -132,17 +134,6 @@ const CONTEXT = { objects: OBJECTS, datasets: DATASETS };
 const ruleIds = (findings: readonly { rule: string }[]) => findings.map((f) => f.rule);
 const dump = (r: { errors: readonly unknown[]; advisories: readonly unknown[] }) =>
   JSON.stringify({ errors: r.errors, advisories: r.advisories });
-
-/**
- * An advisory's identity — its rule id and the property path it names (the
- * `sets \`<path>\`` token, the same identity `lint-liveness-properties.test.ts`'s
- * `ruleOf` reads) — never its wording.
- */
-const advisoryIds = (advisories: readonly unknown[]) =>
-  (advisories as Array<{ rule?: string; message?: string }>).map((a) => ({
-    rule: a.rule,
-    property: /sets `([^`]+)`/.exec(a.message ?? '')?.[1],
-  }));
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -748,21 +739,26 @@ describe('#19542 — group C: wired, dispatched, and silent by ledger (email_tem
     expect(result.advisories, dump(result)).toEqual([]);
   });
 
-  it('`email_template` — the rule judges exactly the key the ledger grades dead: `category`, and nothing else', () => {
-    // The door lighting up with no second edit, as the case above foresaw.
-    // `category` went `dead` when ADR-0131 D6/D10 retired the
-    // `sys_email_template` row projection that was its only reader (templates
-    // resolve from the registry now); the liveness rule warns on a dead row by
-    // its verdict alone. #22876 retires the key in the next enforce-or-remove
-    // batch, which removes this advisory with it. Everything else this item
-    // authors is `live`, so the advisory is the only finding.
-    const item = { name: 'acme_welcome', label: 'Welcome', subject: 'Hi', bodyHtml: '<p>Hi</p>', category: 'workflow' };
+  it('`email_template` — an item that authors no retired key draws nothing; one that does is the schema\'s to refuse (#22876)', () => {
+    // `category` and `isSystem` went `dead` when ADR-0131 D6/D10 retired the
+    // `sys_email_template` row projection, and #22876 retired both
+    // (`retiredKey()` tombstones, ADR-0049 enforce-or-remove). Their ledger
+    // rows stay `dead`, because a tombstone keeps the key in the walked shape,
+    // so this rule still names a raw body that writes one — but the door's
+    // schema refuses that body with the prescription before the write lands.
+    // An item that authors neither draws nothing: every other key is `live`.
+    const item = { name: 'acme_welcome', label: 'Welcome', subject: 'Hi', bodyHtml: '<p>Hi</p>' };
     const result = runRuntimeAuthoringRules({ type: 'email_template', item, context: CONTEXT });
 
     expect(result.errors, dump(result)).toEqual([]);
-    expect(advisoryIds(result.advisories), dump(result)).toEqual([
-      { rule: LIVENESS_DEAD_PROPERTY, property: 'category' },
-    ]);
+    expect(result.advisories, dump(result)).toEqual([]);
+
+    const door = getMetadataTypeSchema('email_template');
+    expect(door, 'no schema bound for `email_template`').toBeDefined();
+    const refused = door!.safeParse({ ...item, category: 'workflow' });
+    expect(refused.success).toBe(false);
+    expect(refused.error?.issues[0]?.path).toEqual(['category']);
+    expect(refused.error?.issues[0]?.message).toMatch(/^`email_template\.category` was removed in @objectstack\/spec 17/);
   });
 
   it('[#21127] a `mapping` write that DOES author `connectorSource` is judged silent — not thrown on', () => {
@@ -814,26 +810,20 @@ describe('#19542 — group C: wired, dispatched, and silent by ledger (email_tem
       item: {
         name: 'showcase_task_done_email',
         label: 'Task Done Notification',
-        category: 'workflow',
         locale: 'en-US',
         subject: 'Task done: {{title}}',
         bodyHtml: '<p>The task <strong>{{title}}</strong> was marked done.</p>',
         bodyText: 'The task {{title}} was marked done.',
         variables: [{ name: 'title', type: 'string', required: true, description: 'Task title' }],
         active: true,
-        isSystem: false,
       },
       context: CONTEXT,
     });
+    // Publishable and silent: the showcase template stopped writing the two
+    // keys #22876 retired (`category`, `isSystem`), so the one advisory it drew
+    // while they were `dead` and accepted is gone.
     expect(email.errors, dump(email)).toEqual([]);
-    // Publishable: no error. One advisory, on the one key the ledger grades
-    // `dead` that this template sets — `category` (its only reader, the
-    // retired `sys_email_template` row projection, is gone; #22876 retires the
-    // key). `isSystem: false` is dead too and draws nothing: a boolean warns
-    // only when set truthy.
-    expect(advisoryIds(email.advisories), dump(email)).toEqual([
-      { rule: LIVENESS_DEAD_PROPERTY, property: 'category' },
-    ]);
+    expect(email.advisories, dump(email)).toEqual([]);
 
     const mapping = runRuntimeAuthoringRules({
       type: 'mapping',

@@ -151,6 +151,10 @@ const SERVE_ONLY: Record<string, string> = {
     'serve\'s boot-mode dispatch between the standalone stack and a host config\'s own plugins; the one-shot '
     + 'boot always boots the standalone data stack and composes a host config\'s plugins over it for their '
     + 'declarations (buildSchemaMigrationPlugins)',
+  isHostConfig:
+    'decides serve\'s artifact-less MetadataPlugin for a host config that no artifact door serves ([#22989]); '
+    + 'the one-shot boot boots the standalone data stack, whose MetadataPlugin is always composed, and lays a '
+    + 'host config\'s plugins over it (buildSchemaMigrationPlugins)',
   bundleDeclaresTranslations:
     'decides serve\'s tier-gated i18n service, which the declaration boot does not compose '
     + '(schema-migration-plugins.ts, "What this does NOT compose")',

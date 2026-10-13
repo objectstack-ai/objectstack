@@ -278,7 +278,9 @@ export function dispatcherAckOptions(
  * @param id Primary key of the delivery row this attempt outcome belongs to.
  * @param expectedStatus The status the row MUST still hold for the write to land.
  * @param claimedBy The node id stamped by the claim this ack completes.
- * @param claimedAt The claim instant (ms) stamped by that same claim.
+ * @param claimedAt The claim instant (ms) stamped by that same claim, as the
+ *   store read it back — bound here, it matches the stored value whatever
+ *   numeric type holds the column.
  */
 export function dispatcherAckCasOptions(
     id: string,

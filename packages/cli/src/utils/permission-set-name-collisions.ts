@@ -7,9 +7,11 @@
  *
  * ## The defect this closes, one layer up from #17516
  *
- * `bootstrapDeclaredPermissions` refuses to write into a `sys_permission_set`
- * row another package owns (ADR-0086 D4). That refusal is CORRECT and nothing
- * here changes it — ⛔ this module reports, it does not alter what is skipped.
+ * `bootstrapDeclaredPermissions` refused to write into a `sys_permission_set`
+ * row another package owned (ADR-0086 D4). That seeder retired with ADR-0131
+ * C3 stage 6b-2; the registry now refuses, at install, a package declaring a
+ * set name another holder already holds. Nothing here changes either refusal —
+ * ⛔ this module reports, it does not alter what is refused.
  * #17516 gave that refusal a RUNTIME door. Until this module there was no
  * compile-time door at all: `os build` and `os validate` walked an artifact in
  * which two packages declared the same set name and said nothing, so the first
@@ -62,8 +64,8 @@
  *
  * ## The provenance rule, mirrored from the seeder rather than invented
  *
- * `bootstrapDeclaredPermissions` owns a set under
- * `ps._packageId ?? ps.packageId` — registry provenance (ADR-0010) first, the
+ * `bootstrapDeclaredPermissions` (retired with ADR-0131 C3 stage 6b-2) owned a
+ * set under `ps._packageId ?? ps.packageId` — registry provenance (ADR-0010) first, the
  * author-declared `packageId` (ADR-0086 D3) as fallback. At compile time the
  * artifact's package id IS that registry provenance: `artifactPackages`' id is
  * "the string the runtime registers a package under", so a set inside package

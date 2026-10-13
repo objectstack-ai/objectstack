@@ -39,6 +39,10 @@
  *      platform's not-visible refusal instead of the named one (#21755); see
  *      {@link refuseNotVisible}. The named refusal is what a caller who can
  *      read the parent, but may not edit it, receives.
+ *    * The edit stamp (#23124, ruling A): a SECOND `beforeUpdate` handler, not
+ *      part of the authorization above, sets `is_edited` / `edited_at` when the
+ *      body changes — see {@link stampCommentBodyEdit}. The create hook sets
+ *      both to "not edited" over a client value.
  *  - {@link installCommentReadVisibility} — the read side: a
  *    `find`/`findOne`/`count`/`aggregate` middleware that intersects the query
  *    with the threads whose parent record the caller can actually read.
@@ -107,7 +111,7 @@
  * objects, so the two can never disagree about who is exempt.
  */
 
-import { withoutOperationPrivateKeys } from '@objectstack/core';
+import { resolveReadableParentIds, withoutOperationPrivateKeys } from '@objectstack/core';
 import type { StandardErrorCode } from '@objectstack/spec/api';
 import type { ISecurityService, ISharingService } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -317,6 +321,59 @@ function refuseNotVisible(
   err.status = NOT_VISIBLE_STATUS;
   err.statusCode = NOT_VISIBLE_STATUS;
   throw err;
+}
+
+/**
+ * [#23124, maintainer ruling A] The platform marks a comment edited: when an
+ * update's `body` differs from the stored body, set `is_edited: true` and
+ * `edited_at` to the server clock. Both fields are `readonly` on
+ * `sys_comment`, so on an update by a non-system caller this hook is their one
+ * writer, as the create hook is on a create (`objects/sys-comment.object.ts`,
+ * "Platform-written").
+ *
+ * What counts as an edit is the BODY and nothing else: an update that does not
+ * name `body`, or names the stored text again (the console rewrites `mentions`
+ * beside it), stamps nothing. A row with no readable pre-image is stamped —
+ * the engine binds `previous` on both update paths, and a mark that cannot be
+ * proven unneeded is the safe side of a reader's trust signal.
+ *
+ * Every caller is stamped, system included, the way the engine's `updated_at`
+ * stamp is: the mark records that the text changed after it was posted, not
+ * who was allowed to change it (the authorization handler is separate and
+ * exempts system callers; this one does not). The one exception is the
+ * engine's own: a `preserveAudit` write (a historical import) keeps a value it
+ * supplies, as `updated_at` does, and is stamped only where it supplies none.
+ *
+ * Why the stamp is an assignment and the client's value needs no handling here:
+ * the engine hides a non-system caller's `readonly` values from the hooks and
+ * strips them after, and keeps a value a hook ASSIGNED (`hookWrittenKeys`). So
+ * on an edit the stamp lands whatever the client sent, and without one the
+ * client's value is dropped and reported as `droppedFields`.
+ *
+ * A predicate (`multi: true`) update dispatches this handler once per matched
+ * row, with that row as `previous`, over ONE shared payload. If every row's
+ * body changes, every row is stamped; if none does, none is. A batch whose rows
+ * disagree is refused whole by the engine (`MULTI_UPDATE_HOOK_KEY_DIVERGENCE`,
+ * 400, nothing written) — one SET clause cannot mark some rows and not others,
+ * and stamping all of them would mark text that never changed.
+ */
+async function stampCommentBodyEdit(ctx: any): Promise<void> {
+  const data: unknown = ctx?.input?.data;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return;
+  const payload = data as Record<string, unknown>;
+  if (!Object.prototype.hasOwnProperty.call(payload, 'body')) return;
+  const previous: unknown = ctx?.previous;
+  if (previous && typeof previous === 'object' && Object.is((previous as Record<string, unknown>).body, payload.body)) {
+    return;
+  }
+  const now = new Date().toISOString();
+  if (ctx?.session?.preserveAudit === true) {
+    payload.is_edited = payload.is_edited ?? true;
+    payload.edited_at = payload.edited_at ?? now;
+    return;
+  }
+  payload.is_edited = true;
+  payload.edited_at = now;
 }
 
 function asIdList(id: unknown): Array<string | number> | null {
@@ -539,6 +596,14 @@ export function installCommentAccessHooks(
     // spoofable — a caller could post as anyone, then "author-delete" it.
     if (ctx.session.userId) data.author_id = ctx.session.userId;
 
+    // [#23124] A new comment is not an edited one, whatever the client sent.
+    // The engine's create-side `readonly` strip leaves `sys_` objects to their
+    // own guards, so this is the guard: the platform's value, assigned over a
+    // client's, exactly as `author_id` above. Only a key the client named is
+    // touched; an absent one takes the field's default.
+    if (Object.prototype.hasOwnProperty.call(data, 'is_edited')) data.is_edited = false;
+    if (Object.prototype.hasOwnProperty.call(data, 'edited_at')) data.edited_at = null;
+
     const target = parseCommentThreadId(data.thread_id);
     if (!target) {
       forbid(
@@ -728,6 +793,13 @@ export function installCommentAccessHooks(
     // Same declaration the `beforeDelete` registration below carries.
     { object: 'sys_comment', packageId: PACKAGE_ID, dispatchUnscopedMultiWrite: true },
   );
+
+  // ── Update: the platform stamps an edit of the body (#23124) ─────────
+  // Its own registration, deliberately: the authorization handler above
+  // returns early for system and context-less callers and declares the
+  // whole-operation dispatch, and the stamp wants neither — see
+  // {@link stampCommentBodyEdit}.
+  engine.registerHook('beforeUpdate', stampCommentBodyEdit, { object: COMMENT_OBJECT, packageId: PACKAGE_ID });
 
   // ── Delete: author or parent editor ─────────────────────────────────
   engine.registerHook(
@@ -939,52 +1011,3 @@ async function computeThreadVisibilityFilter(
   return { thread_id: { $in: visibleThreads } };
 }
 
-/**
- * Which of these parent records can the CALLER read? Answered per parent
- * object by ONE caller-scoped engine read of the candidate ids, so the parent
- * object's own OWD/sharing, RLS and object-level CRUD decide.
- *
- * This is the one answer every parent-derived read gate in this package asks:
- * `sys_comment`'s thread visibility above and `sys_activity`'s parent
- * visibility (`activity-read-visibility.ts`). Shared as a function rather than
- * restated, so a record can never be readable under one gate and unreadable
- * under the other — ⛔ do not hand-copy this probe into a third gate, import it.
- *
- * Batched: one read per parent OBJECT, never one per row. An object whose read
- * throws (unknown to the engine, refused, driver fault) contributes no visible
- * id — fail closed — and a record that no longer exists is simply not found.
- *
- * [#7141] The caller's envelope, minus the operation-private keys: this probe
- * reads a DIFFERENT object than the one the middleware resolved its depth for,
- * and `__readScope` / `__expandRead` are widening inputs that would arrive
- * attached to the wrong question (the security middleware re-stamps the depth
- * for THIS object when it resolves any set, so the only thing dropping them can
- * do is leave the owner-match at its narrowest — the safe direction). Same rule
- * as `callerContext` above.
- */
-export async function resolveReadableParentIds(
-  engine: Pick<CommentAccessEngine, 'find'>,
-  callerContext: Record<string, unknown> | undefined,
-  idsByObject: ReadonlyMap<string, ReadonlySet<string>>,
-): Promise<Map<string, Set<string>>> {
-  const callerEnvelope = withoutOperationPrivateKeys((callerContext ?? {}) as Record<string, unknown>);
-  const visibleByObject = new Map<string, Set<string>>();
-  for (const [parentObject, idSet] of idsByObject) {
-    const ids = [...idSet];
-    let visible: string[] = [];
-    try {
-      const rows = await engine.find(parentObject, {
-        where: { id: { $in: ids } },
-        fields: ['id'],
-        limit: ids.length,
-        context: { ...callerEnvelope },
-      });
-      visible = rows.map((r) => String(r.id)).filter(Boolean);
-    } catch {
-      // Unknown/failing parent object → none visible (fail closed).
-      visible = [];
-    }
-    visibleByObject.set(parentObject, new Set(visible));
-  }
-  return visibleByObject;
-}

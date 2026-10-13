@@ -110,9 +110,11 @@ export interface WalkedFlowNode {
    * from the view unread. That second failure is not hypothetical — `body` is a
    * region slot on `loop` AND the canonical request-payload key on an `http`
    * node, so stripping the flat union blinded every recursive scan to the whole
-   * of `http.config.body`: a `{record.<field>}` token there interpolates at run
-   * time (`http-nodes.ts` interpolates the raw config wholesale) and rendered a
-   * silent empty value into an outbound request with nothing to see it.
+   * of `http.config.body`: a `{record.<field>}` token there interpolated at run
+   * time (the 17.x executor interpolated the raw config wholesale) and rendered
+   * a silent empty value into an outbound request with nothing to see it.
+   * (Since #19939 the body is a value slot and such a token is refused by its
+   * judge; the scans still read it for the wrong-syntax hints.)
    */
   localConfig?: AnyRec;
   /**

@@ -50,6 +50,16 @@ export default defineConfig({
         find: /^@objectstack\/metadata-core$/,
         replacement: path.resolve(__dirname, '../metadata-core/src/index.ts'),
       },
+      // [ADR-0131 D6] The install door now imports VALUES from the protocol —
+      // the `unmanaged` mode's walled-posture refusal, the read-only-package
+      // predicate and the client-facing sentence rule — so the install-local
+      // suites judge the door against the protocol in THIS checkout, not a
+      // `metadata-protocol/dist` that may be behind it. Anchored, same reason
+      // as the entries above.
+      {
+        find: /^@objectstack\/metadata-protocol$/,
+        replacement: path.resolve(__dirname, '../metadata-protocol/src/index.ts'),
+      },
       // [#15204 W2] The install-local door reads a manifest's catalog
       // declarations through `declaredSecurityCatalogNames`, so every suite
       // that imports the plugin judges THIS checkout's engine reading, not an
@@ -58,6 +68,15 @@ export default defineConfig({
       {
         find: /^@objectstack\/objectql$/,
         replacement: path.resolve(__dirname, '../objectql/src/index.ts'),
+      },
+      // [#15204 6b-2, ADR-0090 D5] The install-local uninstall captures the
+      // package's permission-set names through `captureUninstallDeclared`, so
+      // every suite that imports the plugin judges THIS checkout's capture, not
+      // a `metadata-protocol/dist` that may be behind it. Anchored like the
+      // entries above, though the package exports only `.` today.
+      {
+        find: /^@objectstack\/metadata-protocol$/,
+        replacement: path.resolve(__dirname, '../metadata-protocol/src/index.ts'),
       },
     ],
   },

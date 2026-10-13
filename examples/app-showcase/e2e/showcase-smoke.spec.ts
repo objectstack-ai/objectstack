@@ -85,14 +85,30 @@ const SURFACES: { name: string; path: string; chart?: boolean }[] = [
 
 /**
  * The console's boot splash — objectui app-shell's `LoadingScreen`, which the
- * shell also renders as a `Suspense` fallback INSIDE its `<main>` — reads
- * "Initializing application…" under the default locale. Its text is not empty,
- * so a check of "main has text" passed on a surface that had not rendered at
- * all: QA run #21056 read the splash as the FIRST `<main>` text on 22 of 49
- * surfaces. The wait below treats the splash as not-yet-rendered, and the
- * assertions refuse a surface that is still on it at the deadline.
+ * shell also renders as a `Suspense` fallback INSIDE its `<main>`. Its text is
+ * not empty, so a check of "main has text" passed on a surface that had not
+ * rendered at all: QA run #21056 read the splash as the FIRST `<main>` text on
+ * 22 of 49 surfaces. The wait below treats the splash as not-yet-rendered, and
+ * the assertions refuse a surface that is still on it at the deadline.
+ *
+ * A surface is on the splash when EITHER of these holds, and both stay:
+ *
+ * - `BOOT_SPLASH_MARKER` is in the page. From objectui `54159d3` on, the
+ *   splash root carries `data-boot-splash` in every state (loading, `message`,
+ *   error). It is the only language-independent sign: the splash's line
+ *   follows the user's language from that commit on, and it is absent until
+ *   that language's catalogue lands, leaving only the product name. Neither
+ *   English line below matches either case.
+ * - `<main>`'s text matches `BOOT_SPLASH_LINE`, the splash's English line in
+ *   both spellings: "Initializing application…" before objectui `54159d3`,
+ *   "Opening your console…" from it. A console pinned before that commit has
+ *   no marker, so the line is the only half that sees its splash.
+ *   ⛔ Never key on the marker alone while `.objectui-sha` is older than
+ *   `54159d3`: the marker then matches nothing, and the wait passes on the
+ *   splash.
  */
-const BOOT_SPLASH = /Initializing application/i;
+const BOOT_SPLASH_MARKER = '[data-boot-splash]';
+const BOOT_SPLASH_LINE = /Initializing application|Opening your console/i;
 
 /**
  * The budget every wait in this file spends, measured from the start of the
@@ -149,10 +165,14 @@ for (const surface of SURFACES) {
     // [#21060] Rendered means past the boot splash, not merely non-empty: the
     // splash is text too. The last sample is kept whatever it was, so a surface
     // stuck on the splash fails as exactly that rather than as "no content".
+    // The marker is read BEFORE the text: a splash that leaves between the two
+    // reads then errs toward "not yet", never toward "rendered".
     let mainText = '';
+    let splashMarkers = 0;
     await pollUntil(async () => {
+      splashMarkers = await page.locator(BOOT_SPLASH_MARKER).count();
       mainText = ((await main.innerText().catch(() => '')) || '').trim();
-      return mainText.length > 0 && !BOOT_SPLASH.test(mainText);
+      return mainText.length > 0 && splashMarkers === 0 && !BOOT_SPLASH_LINE.test(mainText);
     }, deadline);
 
     let chartBox: { width: number; height: number } | null = null;
@@ -181,7 +201,11 @@ for (const surface of SURFACES) {
       `leaked placeholder on ${surface.name}`,
     ).toHaveCount(0);
     expect(mainText.length, `${surface.name} rendered no main content`).toBeGreaterThan(0);
-    expect(mainText, `${surface.name} never got past the boot splash`).not.toMatch(BOOT_SPLASH);
+    expect(
+      splashMarkers,
+      `${surface.name} never got past the boot splash (${BOOT_SPLASH_MARKER} still in the page)`,
+    ).toBe(0);
+    expect(mainText, `${surface.name} never got past the boot splash`).not.toMatch(BOOT_SPLASH_LINE);
 
     if (surface.chart) {
       expect(

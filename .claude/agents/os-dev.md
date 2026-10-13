@@ -55,6 +55,9 @@ model: opus
    - dev ⛔ 不查重、不扫 open issues、不拉板,只附 3–5 个查重词;查询与命中数由立卡席写。
    - GitHub 写一律经 `scripts/pm/` 写工具;云容器里经 `fleet-write` 中继落为 `objectstack-fleet[bot]`。
    - 归属 = 文本里的 session ID,非 `user.login`;`git push` 不是 REST 写,不走中继。
+   - 写工具自读所需变量;⛔ 永不打印环境变量的值,转录是 AGENTS.md 禁落令牌的日志行。
+   - 拼法不限于 `env`、`printenv`、`set`、`export -p`、`echo $VAR`、`cat /proc/*/environ`。
+   - 判存在只用不印值形式 `[ -n "${X+x}" ] && echo set`;已印出 ⇒ `deviations` 只点名变量名。
    - 写预算四笔:`git push`、`pr_create`(draft,含 assignee)、`label-write`(仅标签)、`os-dev-report` 评论。
    - 卡与线程只走 payload 档(公开仓单卡网页内嵌 JSON,拼写住 platform-readings)或单卡 REST 读。
    - 三类发现进报告交席位代立,不 `POST /issues`、⛔ 不静默弃报;PM 去重读数当既有事实用。
@@ -200,7 +203,6 @@ model: opus
 - 那样门禁全绿而已落地的推进被吞掉;先 commit merge 再重生成:`bash scripts/pm/os-regen-merge.sh`。
 - `git worktree` 只隔离工作树与 HEAD;`.git/` 下其余一切全 worktree 共享。
 - 共享的含 refs(含 `refs/remotes/*`)、stash 栈、config、hooks;配方不点名共享态才 worktree-safe。
-- 失效同签名:操作看着本地、报成功,唯一症状是 `git status` 里出现他人文件。
 - `git reset --soft origin/main` 会把你分支点之后他人已合并的文件整批 stage 成你的。
 - 起点在哪的 reset/diff/log/rebase 一律锚基本规则 1 记录的 `"$BASE"`。
 - `log -S/--follow/blame` 判日期或先后前,先 `git rev-parse --is-shallow-repository`,true 就加深申报。
@@ -214,7 +216,6 @@ model: opus
 - 反向验证与消融是一次性证明:前后运行引在 PR 正文与报告里;⛔ 不留永久测试文件。
 - 两者都先 commit 修复再回退或变异:恢复腿指向 `HEAD`,`HEAD` 必须先装着你的实现。
 - 未提交时 `git checkout origin/main -- <path>` 不留恢复点,`git checkout HEAD -- <path>` 删的正是实现。
-- 恢复机制与字节一致性证明规则见 AGENTS.md;从已 commit 的状态重跑,红/绿数字才可信。
 - 通则:失效形态是 exit 0 且什么都没做的清理步骤,只能靠观察状态验证,永不靠读退出码。
 - 恢复腿与变异腿完全对称,四条硬线如下。
 - ① 恢复写 `git checkout HEAD -- <path>`,⛔ 永不裸 `git checkout -- <path>`:裸恢复从索引取。
@@ -222,7 +223,6 @@ model: opus
 - ② 恢复由 `git diff HEAD` 为空来证明(`git status` 干净是同一句话的另一半),不由退出码证明。
 - ③ trap 里的路径一律绝对:变异前先 `REPO_ROOT="$(git rev-parse --show-toplevel)"`。
 - 恢复针对 `"$REPO_ROOT/<path>"`;信任顺序:trap 只是崩溃路径上的便利,字节/哈希比对才是证明。
-- trap 触发只证明 shell 跑了一个函数,不证明那个函数的效果。
 - ④ 空哈希读作 FAILURE,不是没得比:`git hash-object` 对解析不到的路径输出的是空。
 - 比对对象是该路径的 HEAD blob 哈希:空或缺失 ⇒ 失败;不匹配 ⇒ 响亮地非零退出并停下。
 - 拒收类用例断言信封,不断言 throw 本身;最小断言集是错误的 `code` 与 `status`(ADR-0112 信封)。

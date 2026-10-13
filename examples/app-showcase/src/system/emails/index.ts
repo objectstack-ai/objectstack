@@ -33,7 +33,6 @@ import { defineEmailTemplateDefinition } from '@objectstack/spec';
 export const TaskDoneEmail = defineEmailTemplateDefinition({
   name: 'showcase_task_done_email',
   label: 'Task Done Notification',
-  category: 'workflow',
   locale: 'en-US',
   subject: '✅ Task done: {{title}}',
   bodyHtml: '<p>The task <strong>{{title}}</strong> on project {{project}} was marked done.</p>',
@@ -43,7 +42,6 @@ export const TaskDoneEmail = defineEmailTemplateDefinition({
     { name: 'project', type: 'string', required: false, description: 'Project name' },
   ],
   active: true,
-  isSystem: false,
 });
 
 export const allEmails = [TaskDoneEmail];

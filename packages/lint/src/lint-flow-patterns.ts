@@ -659,19 +659,20 @@ function scanFilterForDateEquality(
 // Three kinds of flow node config string, each with its own reading:
 //   - the VALUE slots (`create_record` / `update_record` `fields.*`,
 //     `assignment` values, a notify node's `recipients` and its other computed
-//     values — #19939): a CEL value envelope computes the value,
-//     and a string is the literal text it spells; a `{…}` token there is
-//     refused at `error` by the build door (`validate-expressions`, the spec's
-//     one judge);
+//     values, an http node's `body` — #19939): a CEL value envelope computes
+//     the value, and a string is the literal text it spells; a `{…}` token
+//     there is refused at `error` by the build door (`validate-expressions`,
+//     the spec's one judge);
 //   - the TEXT slots (#22110, ADR-0032 D3: a notify `title` / `message` /
-//     `actionUrl`, a screen `title` / `description`, an `end` `message` —
-//     `FLOW_NODE_TEXT_SLOTS`): they render the `{{ }}` holes of the formula
-//     template dialect;
-//   - every other config string (a `filter`, an `http` payload, …): it
-//     keeps the SINGLE-brace dialect (`{var}` /
-//     `{rec.field}` / `{$User.Id}`) — except a notify node's `sourceObject`,
-//     `actorId` and `payload`, literals read as written (#19939), where
-//     neither dialect resolves ({@link NOTIFY_LITERAL_KEYS}).
+//     `actionUrl`, an http `url` and each `headers` value, a screen `title` /
+//     `description`, an `end` `message` — `FLOW_NODE_TEXT_SLOTS`): they render
+//     the `{{ }}` holes of the formula template dialect;
+//   - every other config string (a `filter`, …): it keeps the SINGLE-brace
+//     dialect (`{var}` / `{rec.field}` / `{$User.Id}`) — except a node's
+//     literals, read as written (#19939: a notify node's `sourceObject`,
+//     `actorId` and `payload`; an http node's `method`, `durable`, `timeoutMs`
+//     and `signingSecret`), where neither dialect resolves
+//     ({@link LITERAL_KEYS}).
 // Two wrong-syntax mistakes AI/human authors carry over between them, or from
 // other platforms:
 //   - `{{ai_reply}}`  — double-brace on a single-brace value. NOT flagged on a
@@ -814,8 +815,8 @@ function valueSlotDoubleBraceHint(text: string, at: ValueSlotPosition): string {
     'A value slot reads a CEL value envelope, `{ dialect: \'cel\', source: \'…\' }`, and no template: a string in it '
     + 'is the literal text it spells, and `{{ }}` is no hole — the value-slot refusal reads its outer braces as '
     + `literal text. Written as the holes it means: ${valueSlotSpellingAt(at, meant)} Double-brace \`{{ }}\` is the `
-    + 'template dialect of the text slots only — a notify `title` / `message` / `actionUrl`, a screen `title` / `description`, '
-    + 'an `end` `message`.'
+    + 'template dialect of the text slots only — a notify `title` / `message` / `actionUrl`, an http `url` and '
+    + '`headers` values, a screen `title` / `description`, an `end` `message`.'
   );
 }
 
@@ -823,27 +824,50 @@ function valueSlotDoubleBraceHint(text: string, at: ValueSlotPosition): string {
 const CEL_KEYS = new Set(['condition', 'expression', 'conditions']);
 
 /**
- * [#19939] The `notify` keys the executor reads AS WRITTEN — literals, neither
- * interpolated nor evaluated (`NotifyConfigSchema`, "notify literals"): no
- * flow computed one, so no value slot is built there, and the contract refuses
- * a `{…}` token or an envelope in one. Neither brace dialect resolves there,
- * so the two hints below name the value itself, never a token the build would
- * refuse. Kept in step with the contract by a pin in
- * `lint-flow-patterns.test.ts` ("the notify literals").
+ * [#19939] The keys an executor reads AS WRITTEN — literals, neither
+ * interpolated nor evaluated: a `notify` node's `sourceObject`, `actorId` and
+ * `payload` (`NotifyConfigSchema`, "notify literals") and an `http` node's
+ * `method`, `durable`, `timeoutMs` and `signingSecret` (`HttpConfigSchema`,
+ * "http slots and literals"). No flow computed one, so no value slot is built
+ * there, and the contract refuses a `{…}` token or an envelope in one. Neither
+ * brace dialect resolves there, so the two hints below name the value itself,
+ * never a token the build would refuse. Kept in step with the contracts by
+ * the pins in `lint-flow-patterns.test.ts` ("the notify literals", "the http
+ * literals").
  */
-const NOTIFY_LITERAL_KEYS: ReadonlySet<string> = new Set(['sourceObject', 'actorId', 'payload']);
+const LITERAL_KEYS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['notify', new Set(['sourceObject', 'actorId', 'payload'])],
+  ['http', new Set(['method', 'durable', 'timeoutMs', 'signingSecret'])],
+]);
 
-/** The dotted position (`payload.meta.by`) of a string at a notify literal, or `undefined` elsewhere. */
-function notifyLiteralAt(nodeType: string, path: readonly (string | number)[]): string | undefined {
-  if (nodeType !== 'notify' || typeof path[0] !== 'string' || !NOTIFY_LITERAL_KEYS.has(path[0])) return undefined;
-  return path.map((segment, i) => (typeof segment === 'number' ? `[${segment}]` : `${i === 0 ? '' : '.'}${segment}`)).join('');
+/** The hint of either finding at a node's literal, by node type: nothing resolves a reference there. */
+const LITERAL_HINTS: ReadonlyMap<string, string> = new Map([
+  [
+    'notify',
+    'A notify node\'s `sourceObject`, `actorId` and `payload` are literals the executor reads as written: neither '
+      + '`{var}` nor `{{ }}` resolves there, and nothing evaluates a reference, braced or bare — a brace token in one '
+      + 'is refused at `objectstack validate` and `registerFlow`. Write the value itself.',
+  ],
+  [
+    'http',
+    'An http node\'s `method`, `durable`, `timeoutMs` and `signingSecret` are literals the executor reads as '
+      + 'written: neither `{var}` nor `{{ }}` resolves there, and nothing evaluates a reference, braced or bare — a '
+      + 'brace token in one is refused at `objectstack validate` and `registerFlow`, and in `signingSecret`, whose '
+      + 'secret the flow credential store may hold, by the executor\'s parse. Write the value itself.',
+  ],
+]);
+
+/**
+ * The dotted position (`payload.meta.by`) of a string at a node's literal, with
+ * the hint its findings take, or `undefined` elsewhere.
+ */
+function literalAt(nodeType: string, path: readonly (string | number)[]): { at: string; hint: string } | undefined {
+  const keys = LITERAL_KEYS.get(nodeType);
+  const hint = LITERAL_HINTS.get(nodeType);
+  if (keys === undefined || hint === undefined || typeof path[0] !== 'string' || !keys.has(path[0])) return undefined;
+  const at = path.map((segment, i) => (typeof segment === 'number' ? `[${segment}]` : `${i === 0 ? '' : '.'}${segment}`)).join('');
+  return { at, hint };
 }
-
-/** The hint of either finding at a notify literal: nothing resolves a reference there. */
-const NOTIFY_LITERAL_HINT =
-  'A notify node\'s `sourceObject`, `actorId` and `payload` are literals the executor reads as written: neither '
-  + '`{var}` nor `{{ }}` resolves there, and nothing evaluates a reference, braced or bare — a brace token in one '
-  + 'is refused at `objectstack validate` and `registerFlow`. Write the value itself.';
 
 /** `config` without its node type's `{{ }}` text slots — the strings that keep the single-brace dialect. */
 function withoutTextSlots(nodeType: unknown, config: unknown): unknown {
@@ -1320,9 +1344,9 @@ function scanBranchRouting(
  * Everything else is left alone, deliberately:
  *
  *  - **any node carrying a real predicate** (verdict `'clause'`) — including an
- *    authored `{token}` that will interpolate to nothing. That is the #3810
- *    guard's fact, judged at run time against the interpolation result, and this
- *    rule must not pre-empt it: at authoring time the condition IS written.
+ *    operand envelope that will evaluate to nothing. That is the #3810 guard's
+ *    fact, judged at run time against the evaluated operand, and this rule must
+ *    not pre-empt it: at authoring time the condition IS written.
  *  - **a non-object `filter`** (string, array, number). `DeleteRecordConfigSchema`
  *    /`UpdateRecordConfigSchema` type it `z.record(z.string(), z.unknown())`, so
  *    the node is refused BY NAME at execute time (`parseNodeConfig`). Warning
@@ -1388,7 +1412,8 @@ function previewFilter(filter: unknown): string {
  * ## Not a second copy of the #3810 guard
  *
  * `crud-nodes.ts` refuses a node at run time when a condition the author WROTE
- * interpolated to nothing (`{record.ownr}` — a typo — leaving `{}`), and it is
+ * evaluated to nothing (an operand envelope answering `null`, which would
+ * leave `{}` or match every empty field), and it is
  * deliberately keyed on "a condition the author wrote is gone", not on "the
  * filter is empty": losing one of two conditions still widens the blast radius,
  * and an intentionally empty filter erases nothing, so `crud-filter-guard.test.ts`
@@ -1401,8 +1426,9 @@ function previewFilter(filter: unknown): string {
  * | a written condition vanished          | #3810 filter guard   | run time  | refuse  |
  * | no condition was ever written         | this rule            | authoring | warn    |
  *
- * A node with `filter: { owner: '{record.ownr}' }` is silent here (a condition
- * IS written) and refused there. A node with no `filter` at all is warned about
+ * A node with `filter: { owner: { dialect: 'cel', source: 'record.owner' } }` is
+ * silent here (a condition IS written) and refused there when the record has
+ * no owner. A node with no `filter` at all is warned about
  * here and — correctly — allowed there.
  */
 function scanUnboundedBulkWrites(
@@ -1440,7 +1466,7 @@ function scanUnboundedBulkWrites(
         `the engine admits a whole-object write declared that way, so this is a warning, not a gate, and the ` +
         `run-time path stays open. Distinct from the run-time erased-condition guard, which REFUSES this node ` +
         `at run time when ` +
-        `a condition you WROTE interpolated to nothing — that guard is keyed on "a written condition is gone" ` +
+        `a condition you WROTE evaluated to nothing — that guard is keyed on "a written condition is gone" ` +
         `and deliberately not on "the filter is empty", which is the fact this rule judges at authoring ` +
         `time.`,
       // Warning, not `error`: see the severity policy at the top of this file.
@@ -1939,10 +1965,11 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
         // by taking `stripRegions`' default. That union deleted `body` from every
         // node's view — and `body` is `loop`'s region slot AND the canonical
         // request payload on an `http` node, so the whole of an `http` node's
-        // payload was invisible to both rules below. That is the one key where an
-        // uninterpolated token has an outbound consequence: `http-nodes.ts`
-        // interpolates the raw config wholesale, so a `{{ }}` or a bare `$ref.x`
-        // there ships to the endpoint as literal text. Remove fewer than the
+        // payload was invisible to both rules below. That is a key where an
+        // unresolved reference has an outbound consequence: a `{{ }}` or a bare
+        // `$ref.x` in a literal `body` ships to the endpoint as literal text
+        // (since #19939 the body is a value slot, and both hints name its CEL
+        // envelope). Remove fewer than the
         // node's own slots and the double-count returns; remove more and a key
         // that was never a region is deleted unread.
         //
@@ -1962,23 +1989,24 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
           const valueSlot = DOUBLE_BRACE.test(str) || BARE_DOLLAR_REF.test(str)
             ? valueSlotRefusalAt(at.nodeType, at.config, at.path)?.label
             : undefined;
-          // [#19939] At a notify literal neither dialect resolves: one hint
-          // for both findings, naming the value itself.
-          const literal = notifyLiteralAt(at.nodeType, path);
+          // [#19939] At a node's literal (a notify `sourceObject`, an http
+          // `method`, …) neither dialect resolves: one hint for both
+          // findings, naming the value itself.
+          const literal = literalAt(at.nodeType, path);
           if (literal !== undefined) {
             if (DOUBLE_BRACE.test(str)) {
               findings.push({
                 where: nodeWhere,
-                message: `double-brace interpolation \`${str.trim().slice(0, 80)}\` — \`${literal}\` is a literal, read as written.`,
-                hint: NOTIFY_LITERAL_HINT,
+                message: `double-brace interpolation \`${str.trim().slice(0, 80)}\` — \`${literal.at}\` is a literal, read as written.`,
+                hint: literal.hint,
                 rule: FLOW_DOUBLE_BRACE_INTERP,
               });
             }
             if (BARE_DOLLAR_REF.test(str)) {
               findings.push({
                 where: nodeWhere,
-                message: `\`${str.trim().slice(0, 80)}\` looks like a reference written as a literal — a bare \`$ref.field\` at \`${literal}\` is NOT resolved: it is read as written.`,
-                hint: NOTIFY_LITERAL_HINT,
+                message: `\`${str.trim().slice(0, 80)}\` looks like a reference written as a literal — a bare \`$ref.field\` at \`${literal.at}\` is NOT resolved: it is read as written.`,
+                hint: literal.hint,
                 rule: FLOW_BARE_DOLLAR_REF,
               });
             }
@@ -1993,7 +2021,7 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
               hint: valueSlot === undefined
                 ? `Use \`{var}\` (e.g. \`{record.title}\`): this flow node value is a string template in which only ` +
                   `single-brace \`{…}\` tokens resolve and all other text is literal. Double-brace \`{{ }}\` is ` +
-                  `the template dialect of the text slots only — a notify \`title\` / \`message\` / \`actionUrl\`, a screen ` +
+                  `the template dialect of the text slots only — a notify \`title\` / \`message\` / \`actionUrl\`, an http \`url\` and \`headers\` values, a screen ` +
                   `\`title\` / \`description\`, an \`end\` \`message\`.`
                 : valueSlotDoubleBraceHint(str, at),
               rule: FLOW_DOUBLE_BRACE_INTERP,

@@ -135,8 +135,8 @@ export interface SeedWriteRefusalReport {
 /**
  * The refusals ONE seeding pass accumulated, so the pass can report them once.
  *
- * Aggregate-then-warn, for the same reason {@link warnOrganizationLessRows}
- * aggregates: the catalog seeds every declared position, permission set and
+ * Aggregate-then-warn, for the same reason the retired organization-less row guard
+ * aggregated: the catalog seeds every declared position, permission set and
  * capability for every organization, and the failure this exists to surface
  * refuses ALL of them. A line per refused row would print hundreds of entries
  * into the boot log and bury the one sentence naming the remedy. One

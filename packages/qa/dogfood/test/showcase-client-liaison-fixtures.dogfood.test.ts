@@ -37,6 +37,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
 import { showcaseAppDefaultSecurity } from './showcase-security.js';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const SYS = { isSystem: true } as const;
 const LIAISON_SET = 'showcase_client_liaison';
@@ -78,8 +79,8 @@ describe('showcase client-liaison fixtures (#9308 fixtures 2 + 4)', () => {
     ql = await stack.kernel.getServiceAsync('objectql');
 
     liaisonTok = await stack.signUp(LIAISON_EMAIL);
-    const set = await ql.findOne('sys_permission_set', { where: { name: LIAISON_SET }, context: SYS });
-    expect(set?.id, `${LIAISON_SET} is seeded by the security bootstrap`).toBeTruthy();
+    const set = await catalogPermissionSet(ql, LIAISON_SET);
+    expect(set, `${LIAISON_SET} is served by the security catalog`).toBeTruthy();
     const uid = (await ql.findOne('sys_user', { where: { email: LIAISON_EMAIL }, context: SYS }))?.id;
     await ql.insert('sys_user_permission_set', { user_id: uid, permission_set: set.name }, { context: SYS });
 

@@ -27,7 +27,7 @@ Clause-②: no (narrowing)
 
 **The one-line fix: stop naming scope `public`, and mark each file that must render before sign-in `acl: 'public_read'` on its stored file record.** The upload request carries no `acl`: every upload is stored `acl: 'private'`, so adding an `acl` to the upload request changes nothing.
 
-**Files already stored with scope `public`** are not touched. They download exactly as they did: a signed-in caller gets them, an anonymous one gets `401`, unless the file is `acl: 'public_read'`.
+**Files already stored with scope `public`** download exactly as they did: a signed-in caller gets them, an anonymous one gets `401`, unless the file is `acl: 'public_read'`. Their stored file records are rewritten to scope `user` by the one-time operator sweep `@objectstack/service-storage` exports, which changes no access: the storage key and the bytes stay as they are.
 
 ### The retirement kit
 

@@ -63,7 +63,17 @@ export interface FileSystemRepositoryOptions {
   root: string;
   /** Tenant/org. */
   org: string;
-  /** Identity reported in events that originate from external FS edits. */
+  /**
+   * The acting user id to report for a change this repository did not write
+   * itself: an edit observed on disk (a watcher or resync event), and a file
+   * with no recorded write behind it (its `authoredBy`).
+   *
+   * Omitted → `null`, "no actor": the `PutOptions.actor` contract (#4556) is
+   * the acting user's id or `null`, ⛔ never a label such as `'fs'`. Every
+   * event already names its origin as `source: 'fs'`. A write that came
+   * through `put()` / `delete()` reports its own `actor`, `null` included,
+   * and this value never replaces it.
+   */
   fsActor?: string;
   /** Disable chokidar watcher (e.g. for read-only contexts). */
   disableWatch?: boolean;
@@ -112,7 +122,8 @@ const isEnoent = (err: unknown): boolean =>
 export class FileSystemRepository implements MetadataRepository {
   private readonly layout: FsLayout;
   private readonly org: string;
-  private readonly fsActor: string;
+  /** See {@link FileSystemRepositoryOptions.fsActor}: a user id, or `null`. */
+  private readonly fsActor: string | null;
   private readonly disableWatch: boolean;
   private readonly now: () => Date;
   private readonly log: JsonlLog;
@@ -147,7 +158,8 @@ export class FileSystemRepository implements MetadataRepository {
 
   constructor(opts: FileSystemRepositoryOptions) {
     this.org = opts.org;
-    this.fsActor = opts.fsActor ?? 'fs';
+    // [#23086] No default label: with no user named, the answer is `null`.
+    this.fsActor = opts.fsActor ?? null;
     this.disableWatch = opts.disableWatch ?? false;
     this.now = opts.now ?? (() => new Date());
     this.layout = { root: path.resolve(opts.root) };
@@ -269,7 +281,7 @@ export class FileSystemRepository implements MetadataRepository {
       body: body as Record<string, unknown>,
       hash,
       parentHash: meta?.parentHash ?? null,
-      authoredBy: meta?.actor ?? this.fsActor,
+      authoredBy: this.authoredByOf(meta),
       authoredAt: meta?.ts ?? new Date(0).toISOString(),
       message: meta?.message,
       seq: meta?.seq ?? 0,
@@ -298,7 +310,7 @@ export class FileSystemRepository implements MetadataRepository {
         ref: { ...ref, version: undefined },
         hash,
         parentHash: meta?.parentHash ?? null,
-        authoredBy: meta?.actor ?? this.fsActor,
+        authoredBy: this.authoredByOf(meta),
         authoredAt: meta?.ts ?? new Date(0).toISOString(),
         message: meta?.message,
         seq: meta?.seq ?? 0,
@@ -372,7 +384,7 @@ export class FileSystemRepository implements MetadataRepository {
             body: spec as Record<string, unknown>,
             hash,
             parentHash: meta?.parentHash ?? null,
-            authoredBy: meta?.actor ?? this.fsActor,
+            authoredBy: this.authoredByOf(meta),
             authoredAt: meta?.ts ?? this.now().toISOString(),
             message: meta?.message,
             seq: meta?.seq ?? 0,
@@ -532,6 +544,20 @@ export class FileSystemRepository implements MetadataRepository {
       if (evt.hash === hash) last = evt;
     }
     return last;
+  }
+
+  /**
+   * `authoredBy` for a HEAD, read off the log record that produced it.
+   *
+   * [#23086] A record answers with the actor it recorded, and a recorded `null`
+   * stays `null`: `meta?.actor ?? fallback` read a `put()` with `actor: null`
+   * back as the fallback, so an actor-less write came back authored by the
+   * `'fs'` default. The fallback answers only when no record exists (a file
+   * placed on disk outside this repository), and it is `fsActor`, which is a
+   * user id or `null`.
+   */
+  private authoredByOf(meta: MetadataEvent | null): string | null {
+    return meta ? (meta.actor ?? null) : this.fsActor;
   }
 
   /**

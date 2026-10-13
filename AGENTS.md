@@ -122,7 +122,13 @@ climbs out and comes straight back in. What it does flag is judged on the **shal
 point a path reaches, not where it ends.
 
 Clocked windows measure behaviour, never loading — a test that boots a real plugin chain
-pays its first load at module top; `pnpm check:test-source-alias` gates it.
+pays its first load at module top; `pnpm check:test-source-alias` gates it. A gate grading a
+duration reports and ⛔ never reds a required job, judges only on the run profile it measured,
+and when new soaks report-only a week before it grades; any seat flips a gate that reds untouched
+packages twice in an hour to report-only before any ruling. A suite-weight ceiling rises only by
+ruling (`RULED_CEILING_RAISES`); a test file over 10 s of wall is its lane's card, fixed and ⛔
+never deleted; a test is deleted only when its PR names a duplicate pinning that assertion at a
+layer at least as close to the code (ruling record 6120820653).
 
 ### Running the dev server
 
@@ -188,8 +194,8 @@ localStorage / auth gotchas.
    **Never** set `namespace` (deprecated) or `tableName` (always equals `name`). For module prefixes, embed in the name
    (`sys_user`, `ai_conversations`).
 7. **One Zod source per metadata type.** Each type (`view`, `flow`, `agent`, …) has exactly one schema in
-   `packages/spec/src/{domain}/`. Org overlay opt-in lives only in `allowOrgOverride` on
-   `DEFAULT_METADATA_TYPE_REGISTRY` — no parallel whitelists. See ADR-0005.
+   `packages/spec/src/{domain}/`. Environment-overlay opt-in lives only in `allowEnvironmentOverlay` on
+   `DEFAULT_METADATA_TYPE_REGISTRY` — no parallel whitelists. See ADR-0005, amended by ADR-0131 C5.
 8. **North Star alignment.** Read `content/docs/concepts/north-star.mdx` before structural changes. If a change doesn't
    advance §7 Built, shrink Drift, or unlock Missing — it probably shouldn't ship.
 9. **`OS_` env-var prefix + structure.** All ObjectStack-owned env vars MUST start with `OS_`, then follow
@@ -257,9 +263,9 @@ localStorage / auth gotchas.
 14. **⛔ A governed surface lands only the way its tier allows — Tier H by the maintainer's hand or by an authorized
     approval, Tier S by the owning seat on a contract-tier review of record; before that record no AI seat merges,
     queues, or arms auto-merge on a PR whose diff touches one.** The governed surfaces are `docs/adr/**`,
-    `docs/NORTH-STAR.md`, `.claude/**` (agents, hooks and settings — not only skills), `skills/**`, `AGENTS.md` and
-    `CLAUDE.md` — the file you are reading is one — and a mixed diff is governed whole on a single path hit. The
-    register is the `GOVERNED_SURFACES` table in `scripts/pm/check-governed-merges.mjs`, each row carrying its tier;
+    `docs/NORTH-STAR.md`, `.claude/**` (agents, hooks and settings — not only skills), `skills/**`, `AGENTS.md`,
+    `CLAUDE.md` — this file is one — and `.github/workflows/**`; a mixed diff is governed whole on one path hit.
+    The register is the `GOVERNED_SURFACES` table in `scripts/pm/check-governed-merges.mjs`, each row carrying its tier;
     adding a surface is an edit *there*, never here, and `pnpm check:pm-governed-prose` reds per-PR when this
     paragraph names fewer surfaces than the register — or more. When it reds, name the surface here. A fork PR
     (head repo ≠ base repo) is a proposal, never a delivery, whatever its paths: no AI seat readies, queues, arms
@@ -270,7 +276,7 @@ localStorage / auth gotchas.
     auto-merge, ⛔ never flip it out of draft to make any of those possible — judged on the PR's **file list**, not
     its description; a **mixed diff is not a proportion question**, one path hit is enough; to land the rest, split off
     the governed files. **The landing is tiered by the register; one Tier H path makes the whole PR Tier H.** **Tier H**
-    (人合: `docs/adr/**`, `docs/NORTH-STAR.md`, `skills/**`, `AGENTS.md`, `CLAUDE.md`): those four lift only for an
+    (人合: every register row except `.claude/**`): those four lift only for an
     authorized APPROVED review by an account in `GOVERNED_APPROVERS`, on ANY commit and not dismissed; that word is
     spent once per PR — the OWNING seat then lands it, later pushes included; the director seat requests the word as
     ONE batch of at most five rows, and the click stays the maintainer's. **Tier S** (席内达档复核落地: all of
@@ -516,12 +522,16 @@ Even inside your own worktree, operate defensively:
    yet"; `in_progress` is not a pass. Arming a red PR does not queue it, it hides it:
    every poll then misreads "not on `main` yet" as "queued". Always read *two* things:
    the queue branch **and** `origin/main`. And **the queue enforces only the required
-   set** — seven contexts block: `Lint & Repo Gates` (all `check:*` gates),
-   `TypeScript Type Check`, `Test Core`, `Dogfood Regression Gate`, `Build Core`,
-   `Temporal Conformance (live PG + MySQL)` and `Governed Surface Queue Guard`. A check outside
-   those seven is advisory and rides through, and an advisory red that lands rides `main`'s
-   merge ref into every later PR until stanched. A required context is matched by check-run
-   name, so a rename detaches its gate silently — treat those seven names as contract.
+   set** — five contexts block: `Lint & Repo Gates` (all `check:*` gates),
+   `TypeScript Type Check`, `Test Core`, `Build Core` and `Governed Surface Queue Guard`. A
+   check outside those five is advisory and rides through, and an advisory red that lands rides
+   `main`'s merge ref into every later PR until stanched. A required context is matched by
+   check-run name, so a rename detaches its gate silently — treat those five names as contract.
+   **Two speeds** (ruling record 6120820653): PR and queue runs carry the fast set, 10 minutes of
+   wall per queue entry; `main`'s hourly and push runs carry the full battery — dogfood, e2e,
+   `Console Pin Gate`, `Temporal Conformance (live PG + MySQL)` — read by the publish lane before
+   any approval. **Main-red:** a full-battery red is its lane's first work — triage files it under
+   the main-red convention, the lane's next PR fixes it, and ⛔ no lane PR arms the queue meanwhile.
 
    **Re-arm awareness** — none of these is a reason to avoid the queue; all are reasons to
    confirm a PR is still *in* it: a red queue build **ejects** your entry and drops
@@ -1089,13 +1099,10 @@ Both non-handshake shapes, and how to classify and probe your own:
    body, which also carries the PR's `Clause-②` line: `pnpm check:adr-0087-registration` reads the arm there. ⛔ The
    categories are NOT copied here — the gate prints the full set when it fails.
 4. **A removal that breaks the pinned sibling checkout ships together with the sibling fix and the pin bump — or it
-   does not ship.** The `Console Pin Gate` job builds objectui at the pinned `.objectui-sha` against **current** `main`,
-   so a removal or rename the pinned sibling still imports turns `main` red for every PR in the repo the moment it
-   merges — "retire the surface" and "leave the sibling untouched" cannot both hold. A ruling that authorizes such a
-   removal therefore implicitly authorizes the objectui-side fix and the pin bump as part of the same landing (the
-   bump's manifest regeneration included — see the Frontend section). Pre-merge check for any removal or rename
-   of an exported surface: does the pinned sibling import what you are removing? `git grep` it in `../objectui` at the
-   pinned SHA before merging.
+   does not ship.** The full battery's `Console Pin Gate` builds objectui at the pinned `.objectui-sha` against
+   **current** `main`, so such a removal is a main-red the moment it merges; its ruling therefore authorizes the
+   objectui-side fix and the pin bump (manifest regeneration included — see the Frontend section) in the same
+   landing. Before merging, `git grep` what you remove or rename in `../objectui` at the pinned SHA.
 5. **Touched `packages/spec`? Regenerate and commit its artifacts before pushing** — § *Touched `packages/spec`*
    above is the authority; note `OS_SKIP_DTS=1` greens `check:api-surface` locally and reds it in CI.
 6. Update `ROADMAP.md` if user-facing or architectural.

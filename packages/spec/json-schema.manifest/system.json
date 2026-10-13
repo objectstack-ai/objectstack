@@ -78,7 +78,6 @@
     "system/EmailProvider",
     "system/EmailServiceConfig",
     "system/EmailTemplateDefinition",
-    "system/EmailTemplateDefinitionCategory",
     "system/EmailTemplateDefinitionVariable",
     "system/EmailVerificationConfig",
     "system/EncryptionAlgorithm",

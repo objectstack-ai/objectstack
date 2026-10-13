@@ -186,7 +186,7 @@ describe('delete_record — bulk intent reaches deleteMany, and only when declar
     it('a scalar-id delete still needs no declaration — the by-id route is untouched', async () => {
         engine.registerFlow('bulk_flow', crudFlow('delete_record', {
             objectName: 'deal',
-            filter: { id: '{record.id}' },
+            filter: { id: { dialect: 'cel', source: 'record.id' } },
         }) as never);
 
         const result = await engine.execute('bulk_flow', { record: { id: 'd2' } } as never);
@@ -242,16 +242,19 @@ describe('delete_record — bulk intent reaches deleteMany, and only when declar
     it('declaring `multi` does NOT disarm the #3810 erased-condition guard', async () => {
         // The two guards are independent: bulk intent says "many rows are
         // fine", it never says "a condition the author wrote may vanish".
+        // [#19939, stage S6] The vanishing condition is an operand envelope
+        // that evaluates to nothing (the record has no owner); it was a
+        // `{record.ownr}` token, which the contract parse refuses since S6.
         engine.registerFlow('bulk_flow', crudFlow('delete_record', {
             objectName: 'deal',
-            filter: { owner: '{record.ownr}' },
+            filter: { owner: { dialect: 'cel', source: 'record.owner' } },
             multi: true,
         }) as never);
 
-        const result = await engine.execute('bulk_flow', { record: { id: 'd1', owner: 'usr_7' } } as never);
+        const result = await engine.execute('bulk_flow', { record: { id: 'd1', owner: null } } as never);
 
         expect(result.success).toBe(false);
-        expect(result.error).toContain('{record.ownr}');
+        expect(result.error).toContain('`record.owner` (at filter.owner)');
         expect(data.calls.delete).toBeUndefined();
         expect(data.remaining()).toHaveLength(3);
     });
@@ -302,7 +305,7 @@ describe('update_record — the executor forwards the declared bulk intent (#539
     it('a by-id update is unchanged — `multi: false`, one row, `acted: 1`', async () => {
         engine.registerFlow('bulk_flow', crudFlow('update_record', {
             objectName: 'deal',
-            filter: { id: '{record.id}' },
+            filter: { id: { dialect: 'cel', source: 'record.id' } },
             fields: { stage: 'won' },
         }) as never);
 

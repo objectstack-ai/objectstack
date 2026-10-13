@@ -428,14 +428,22 @@ describe('ActionSchema', () => {
 
   describe('Action Types', () => {
     it('should accept all action types with target', () => {
-      const types = ['script', 'url', 'modal', 'flow', 'api'] as const;
-      
-      types.forEach(type => {
+      // A `url` target is a navigation target with a closed scheme set (an
+      // in-app path here); every other type's target is a name.
+      const targets = {
+        script: 'test_handler',
+        url: '/test_handler',
+        modal: 'test_handler',
+        flow: 'test_handler',
+        api: 'test_handler',
+      } as const;
+
+      (Object.keys(targets) as Array<keyof typeof targets>).forEach(type => {
         const action: ActionType = {
           name: 'test_action',
           label: 'Test',
           type,
-          target: 'test_handler',
+          target: targets[type],
         };
         expect(() => ActionSchema.parse(action)).not.toThrow();
       });

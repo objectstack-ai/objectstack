@@ -412,7 +412,7 @@ export const NON_READ_ANCHORS = [
   {
     file: 'packages/spec/src/system/email-template.zod.ts',
     symbol: 'isSystem',
-    why: 'EmailTemplate.isSystem -- unrelated metadata field',
+    why: 'EmailTemplate.isSystem -- an unrelated metadata key, now a retiredKey() tombstone',
   },
   // `Environment.isSystem` (`packages/spec/src/cloud/environment.zod.ts`) was the
   // fourth row until #16325 removed the `@objectstack/spec/cloud` subpath; the
@@ -472,7 +472,7 @@ export const NON_READ_ANCHORS = [
   {
     file: 'packages/services/service-automation/src/builtin/crud-nodes.ts',
     symbol: 'registerCrudNodes',
-    why: 'row 59 -- the call site of the compensating owner stamp',
+    why: 'row 60 -- the call site of the compensating owner stamp',
     rowSeams: ['Automation flow data nodes re-add the `owner_id` stamp'],
   },
   {
@@ -2277,14 +2277,14 @@ function selfTest() {
         '⭐ ABLATION: one row inserted above row 34 turns the gate RED, naming the falsified page ' +
           'references -- this is the exact edit #15687 made under a green gate',
         falsifiedRefs.some((p) => p.includes('`Row 35`') && p.includes('is row 36')) &&
-          falsifiedRefs.some((p) => p.includes('`rows 1–61`')),
+          falsifiedRefs.some((p) => p.includes('`rows 1–62`')),
         ablated.problems.join(' | ')
       );
       t(
         '⭐ ABLATION: and the `why:` strings for the two `why:` references #15687 falsified ' +
           '(the seams #15687 knew as rows 34 and 60; the page has since grown a row above them)',
         falsifiedWhy.some((p) => p.includes('`row 35`') && p.includes('is row 36')) &&
-          falsifiedWhy.some((p) => p.includes('`row 59`') && p.includes('is row 60')),
+          falsifiedWhy.some((p) => p.includes('`row 60`') && p.includes('is row 61')),
         falsifiedWhy.join(' | ')
       );
       t(

@@ -215,7 +215,6 @@ import type * as M125 from './system/deploy-bundle.zod.js';
 import type * as M126 from './system/disaster-recovery.zod.js';
 import type * as M127 from './system/doc.zod.js';
 import type * as M128 from './system/email-config.zod.js';
-import type * as M129 from './system/email-template.zod.js';
 import type * as M130 from './system/encryption.zod.js';
 import type * as M131 from './system/environment-artifact.zod.js';
 import type * as M132 from './system/http-server.zod.js';
@@ -274,7 +273,7 @@ import type * as M187 from './shared/duration.zod.js';
 import type * as M188 from './ai/build-progress.zod.js';
 
 // ---------------------------------------------------------------------------
-// 775 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 776 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -963,6 +962,7 @@ export type Iso_kernel_events_core__EventPriority = Assert<Eq< z.input< typeof M
 export type Iso_kernel_events_handlers__EventRouteSchema = Assert<Eq< z.input< typeof M84.EventRouteSchema >, z.infer< typeof M84.EventRouteSchema > >>;
 
 // kernel/manifest.zod.ts
+export type Iso_kernel_manifest__InstallModeSchema = Assert<Eq< z.input< typeof M85.InstallModeSchema >, z.infer< typeof M85.InstallModeSchema > >>;
 export type Iso_kernel_manifest__ManifestPermissionsSchema = Assert<Eq< z.input< typeof M85.ManifestPermissionsSchema >, z.infer< typeof M85.ManifestPermissionsSchema > >>;
 export type Iso_kernel_manifest__PluginEnginesSchema = Assert<Eq< z.input< typeof M85.PluginEnginesSchema >, z.infer< typeof M85.PluginEnginesSchema > >>;
 export type Iso_kernel_manifest__PluginIntegritySchema = Assert<Eq< z.input< typeof M85.PluginIntegritySchema >, z.infer< typeof M85.PluginIntegritySchema > >>;
@@ -1271,7 +1271,6 @@ export type Iso_system_emailConfig__EmailAddressConfigSchema = Assert<Eq< z.inpu
 export type Iso_system_emailConfig__EmailProviderSchema = Assert<Eq< z.input< typeof M128.EmailProviderSchema >, z.infer< typeof M128.EmailProviderSchema > >>;
 
 // system/email-template.zod.ts
-export type Iso_system_emailTemplate__EmailTemplateDefinitionCategorySchema = Assert<Eq< z.input< typeof M129.EmailTemplateDefinitionCategorySchema >, z.infer< typeof M129.EmailTemplateDefinitionCategorySchema > >>;
 
 // system/encryption.zod.ts
 export type Iso_system_encryption__EncryptionAlgorithmSchema = Assert<Eq< z.input< typeof M130.EncryptionAlgorithmSchema >, z.infer< typeof M130.EncryptionAlgorithmSchema > >>;
@@ -1549,6 +1548,12 @@ export type Iso_ui_notification__NotificationTypeSchema = Assert<Eq< z.input< ty
 // is normalized on parse), so `ElementDataSourceParsed` is declared and this
 // pin deleted.
 export type Iso_ui_page__PageComponentType = Assert<Eq< z.input< typeof M163.PageComponentType >, z.infer< typeof M163.PageComponentType > >>;
+// `ElementApiDataSourceSchema` (#23016) — the API binding of a page element's
+// `dataSource` — joins the family the day it lands: its `url` and `path` are
+// regex-checked strings and its `method` an optional literal, with no default
+// and no transform in its tree, so `ElementApiDataSource` is the only name it
+// carries.
+export type Iso_ui_page__ElementApiDataSourceSchema = Assert<Eq< z.input< typeof M163.ElementApiDataSourceSchema >, z.infer< typeof M163.ElementApiDataSourceSchema > >>;
 // `PagePrintSchema` (#22158) joins the family the day it lands: no defaults,
 // no transforms, so `PagePrint` is the only name it carries.
 export type Iso_ui_page__PagePrintSchema = Assert<Eq< z.input< typeof M163.PagePrintSchema >, z.infer< typeof M163.PagePrintSchema > >>;
@@ -1673,7 +1678,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 775 isomorphic pins', () => {
+  it('still declares all 776 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2460,7 +2465,26 @@ describe('ADR-0122 type-alias convention', () => {
     // exactly as on `EngineQueryOptionsSchema`, so input !== infer as on the
     // aggregate verb above. Iso_data_dataEngine__EngineCountOptionsSchema
     // leaves and `EngineCountOptionsParsed` is declared. -1 removed.
-    expect(pins).toHaveLength(775);
+    //
+    // 775 -> 776 is ADR-0131 D6's install-mode stage: the new exported
+    // `InstallModeSchema` (the manifest's `installModes` element, `managed` /
+    // `unmanaged`) is a bare enum with no default and no transform, so it is
+    // pinned here (Iso_kernel_manifest__InstallModeSchema) rather than given an
+    // `InstallModeParsed` synonym. +1 added.
+    //
+    // 776 -> 775 is #22876: `EmailTemplateDefinitionCategorySchema` left with
+    // the retired `email_template.category` key it was the enum of (ADR-0049
+    // enforce-or-remove), so its pin
+    // (Iso_system_emailTemplate__EmailTemplateDefinitionCategorySchema) leaves
+    // with it — and with it the module import M129, which no other pin read.
+    // -1 removed.
+    //
+    // 775 -> 776 is #23016: a page element's `dataSource` gained its API
+    // binding, the new exported `ElementApiDataSourceSchema`, whose regex-checked
+    // strings and optional `method` literal carry no default and no transform, so
+    // it is pinned here (Iso_ui_page__ElementApiDataSourceSchema) rather than
+    // given an `ElementApiDataSourceParsed` synonym. +1 added.
+    expect(pins).toHaveLength(776);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

@@ -1309,6 +1309,9 @@ export async function selfTest() {
   // of them reddens.
   battery('#18701: ONE thread set -- what the template STATES is what the queue guard READS');
   const GUARD = await import('./check-governed-queue-guard.mjs');
+  // The register is scoped per row, so every guard question names its
+  // repository; this pin drives the guard for THIS repository's own queue.
+  const { SELF_REPO_ID: GUARD_REPO } = await import('./check-governed-merges.mjs');
   const TEMPLATE_TEXT = contractReviewTemplateLines().join('\n');
   const THREAD_SET = REVIEW_OF_RECORD_THREADS.map((thread) => thread.where).join();
 
@@ -1331,11 +1334,12 @@ export async function selfTest() {
   // below asks the register, so a row moving tiers reddens here instead of
   // silently driving the approval leg.
   const TIER_S_PATH = '.claude/skills/pm-dispatch/references/contract-review.md';
-  t('⛔ CONTROL: the fixture path is Tier S under the register, so the record leg is the one being driven', GUARD.governedTierFor([TIER_S_PATH]) === GUARD.TIER_S);
+  t('⛔ CONTROL: the fixture path is Tier S under the register, so the record leg is the one being driven', GUARD.governedTierFor([TIER_S_PATH], GUARD_REPO) === GUARD.TIER_S);
   const pinRun = async (where) => {
     const threadsRead = [];
     const verdict = await GUARD.runGuard({
       event: GUARD.EVENT_MERGE_GROUP,
+      repo: GUARD_REPO,
       rows: [{ sha: 'e'.repeat(40), subject: `x (#${PIN_PR})`, pr: PIN_PR, paths: [TIER_S_PATH] }],
       fetchReviews: async () => [],
       fetchPull: async () => ({ sha: PIN_HEAD, body: `Fixes #${PIN_CARD}`, headRef: `claude/issue-${PIN_CARD}-x` }),

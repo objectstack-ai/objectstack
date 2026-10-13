@@ -1,13 +1,20 @@
 #!/usr/bin/env node
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// scheduled-full-run -- the two halves of the hourly full run's contract that
-// nothing else can hold (#16467).
+// scheduled-full-run -- the three halves of the full battery's contract that
+// nothing else can hold (#16467, #22998).
 //
 //   node scripts/ci/scheduled-full-run.mjs --check-concurrency
+//   node scripts/ci/scheduled-full-run.mjs --release-gate --release-commit <sha>
 //   node scripts/ci/scheduled-full-run.mjs --self-test
 //
-// ## Why one file holds both halves
+// Half 3 (#22998) is the READER the full battery gained when PR and queue runs
+// became the fast set: release.yml's `full-battery` job runs `--release-gate`
+// before the `release` environment approval, and the publish lane refuses
+// unless the newest full-battery runs of `CI` and `Lint & Type Check` at or
+// before the version commit concluded `success`. See HALF 3 below.
+//
+// ## Why one file holds the first two halves
 //
 // `push` on `main` now tests the AFFECTED set. The thing that keeps "main is
 // green" a statement about the whole workspace is the hourly `schedule` run of
@@ -37,9 +44,12 @@
 // token it does not understand rather than guessing a value, because a guess
 // makes two groups compare equal or unequal for a reason nobody wrote down.
 
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
+import { EXIT_FINDINGS, EXIT_PREREQUISITE_NOT_MET } from '../import-prerequisite.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
 
 // The workflows that carry the hourly full run. Spelled as quoted repo-relative
@@ -368,6 +378,245 @@ export function renderBody({
 }
 
 // ---------------------------------------------------------------------------
+// HALF 3 -- the release reads the full battery (#22998)
+// ---------------------------------------------------------------------------
+//
+// A PR or queue build carries the FAST SET since #22998 (ci.yml's THE TWO
+// SPEEDS); the dogfood, temporal and console-pin legs run only on `main`'s
+// push, hourly schedule and dispatch runs. "Tested before a release" is
+// therefore a statement about those runs, and this half makes it a gate:
+// release.yml's `full-battery` job, which `publish` needs, so a refusal here
+// means no deployment is queued at the `release` environment at all.
+//
+// THE SELECTION RULE, per workflow (`CI`, `Lint & Type Check`), pinned below:
+//
+//   1. candidates are runs whose event is `schedule` or `push`, on `main`,
+//      `completed`, whose head is the release commit or one of its first-parent
+//      ancestors in the window read from git;
+//   2. a `cancelled` run carries no verdict and is passed over -- push runs on
+//      `main` cancel each other (62 of 100 `CI` push runs and 81 of 100
+//      `Lint & Type Check` push runs in the 2026-10-12 recording), so counting
+//      them would refuse nearly every release for a reason that says nothing
+//      about the tree;
+//   3. the NEAREST commit with a candidate decides, and on that commit the
+//      newest run (`run_started_at`, which a re-run moves) -- so an older
+//      green never outvotes a newer red, and a re-run that went green after a
+//      flake does count;
+//   4. the release passes only when BOTH workflows' chosen runs concluded
+//      `success`; every other conclusion, and no candidate at all, refuses.
+//
+// ⛔ It never waits and never reads a run AFTER the release commit: a run on a
+// later `main` head tested a different tree. ⚠️ A `push` run's Test Core is
+// affected-only (#16467), so a push run is a narrower verdict than an hourly
+// one; the ruled rule reads both events, and that narrowing is recorded on
+// #22998 rather than decided here.
+
+// The workflows whose full-battery runs the release reads, by file (the API's
+// stable key) and by the name a reader sees.
+export const RELEASE_GATE_WORKFLOWS = Object.freeze([
+  Object.freeze({ file: 'ci.yml', name: 'CI' }),
+  Object.freeze({ file: 'lint.yml', name: 'Lint & Type Check' }),
+]);
+
+// The events that carry the full battery on `main`, and the one conclusion that
+// carries no verdict. Both closed on purpose: widening either is a decision
+// about what "tested" means, never a spelling fix.
+export const FULL_BATTERY_EVENTS = Object.freeze(['schedule', 'push']);
+export const NO_VERDICT_CONCLUSIONS = Object.freeze(['cancelled']);
+
+// The workflow file that wires this half, as a quoted repo-relative literal so
+// the dispatch derivation schedules this family for a card touching it.
+export const RELEASE_WORKFLOW = '.github/workflows/release.yml';
+// The job id in it that runs `--release-gate`, and the job that must need it.
+export const RELEASE_GATE_JOB = 'full-battery';
+export const RELEASE_PUBLISH_JOB = 'publish';
+
+// How many first-parent commits the window spans, and how many pages of 100
+// completed runs per event per workflow are read. Generous against an hourly
+// cadence: the nearest verdict is normally a handful of commits back.
+export const RELEASE_GATE_WINDOW = 400;
+export const RELEASE_GATE_PAGES = 3;
+
+const startedAt = (run) => String(run?.run_started_at ?? run?.created_at ?? '');
+
+// Rule 1-3: the run that decides for one workflow, or null when none qualifies.
+export function selectFullBatteryRun({ history, runs, workflowFile }) {
+  const position = new Map((history ?? []).map((sha, index) => [sha, index]));
+  const candidates = (runs ?? []).filter(
+    (run) =>
+      FULL_BATTERY_EVENTS.includes(run?.event) &&
+      run?.head_branch === 'main' &&
+      run?.status === 'completed' &&
+      !NO_VERDICT_CONCLUSIONS.includes(run?.conclusion) &&
+      position.has(run?.head_sha) &&
+      (run?.path === undefined || String(run.path).endsWith(`/${workflowFile}`))
+  );
+  candidates.sort(
+    (a, b) =>
+      position.get(a.head_sha) - position.get(b.head_sha) ||
+      startedAt(b).localeCompare(startedAt(a)) ||
+      Number(b.id) - Number(a.id)
+  );
+  const run = candidates[0];
+  return run ? { run, distance: position.get(run.head_sha) } : null;
+}
+
+// Rule 4, over both workflows. `history[0]` is the release commit.
+export function releaseGateVerdict({ history, runsByWorkflow, workflows = RELEASE_GATE_WORKFLOWS }) {
+  const releaseCommit = history?.[0] ?? '';
+  if (!releaseCommit) {
+    return { ok: false, lines: [], refusals: ['no first-parent history was read, so no run can be placed at or before the release commit'] };
+  }
+  const lines = [];
+  const refusals = [];
+  for (const { file, name } of workflows) {
+    const chosen = selectFullBatteryRun({ history, runs: runsByWorkflow?.[file], workflowFile: file });
+    if (!chosen) {
+      refusals.push(
+        `${name}: no completed ${FULL_BATTERY_EVENTS.join(' or ')} run on main at or before ${releaseCommit.slice(0, 10)} ` +
+          `in the ${history.length}-commit window (a cancelled run carries no verdict)`
+      );
+      continue;
+    }
+    const { run, distance } = chosen;
+    const where = `run ${run.id} (${run.event}, attempt ${run.run_attempt ?? 1}) on ${String(run.head_sha).slice(0, 10)}, ${distance} first-parent commit(s) before the release commit`;
+    lines.push(`${name}: ${run.conclusion} -- ${where}`);
+    if (run.conclusion !== 'success') {
+      refusals.push(`${name}: the newest full-battery run at or before the release commit concluded ${run.conclusion} -- ${where}`);
+    }
+  }
+  return { ok: refusals.length === 0, lines, refusals };
+}
+
+// The exit a verdict maps to: 0 pass, EXIT_FINDINGS refuse.
+export function releaseGateExit(verdict) {
+  return verdict?.ok === true ? 0 : EXIT_FINDINGS;
+}
+
+// The wiring the verdict depends on, read from release.yml as TEXT (this file
+// takes no dependency beyond node): the gate job runs `--release-gate`, the
+// publish job needs it, and publish's `if:` opens with `success()` -- under
+// `!cancelled()` a failed gate would no longer stop the publish.
+function jobBlocks(yamlText) {
+  const lines = String(yamlText).split('\n');
+  const start = lines.findIndex((line) => line === 'jobs:');
+  const blocks = new Map();
+  if (start === -1) return blocks;
+  let current = null;
+  for (const line of lines.slice(start + 1)) {
+    if (/^\S/.test(line)) break;
+    const m = /^ {2}([A-Za-z0-9_-]+):\s*$/.exec(line);
+    if (m) {
+      current = m[1];
+      blocks.set(current, []);
+      continue;
+    }
+    if (current) blocks.get(current).push(line);
+  }
+  return blocks;
+}
+
+export function releaseGateWiring(yamlText) {
+  const findings = [];
+  const blocks = jobBlocks(yamlText);
+  if (blocks.size === 0) return [`${RELEASE_WORKFLOW} has no \`jobs:\` block this reader can see`];
+  const gate = blocks.get(RELEASE_GATE_JOB);
+  const code = (block) => block.filter((line) => !/^\s*#/.test(line));
+  if (!gate) {
+    findings.push(`${RELEASE_WORKFLOW} has no \`${RELEASE_GATE_JOB}\` job`);
+  } else {
+    if (!code(gate).some((line) => /node scripts\/ci\/scheduled-full-run\.mjs --release-gate\b/.test(line))) {
+      findings.push(`${RELEASE_WORKFLOW} job \`${RELEASE_GATE_JOB}\` never runs \`scripts/ci/scheduled-full-run.mjs --release-gate\``);
+    }
+    if (code(gate).some((line) => /^\s*continue-on-error:\s*true\b/.test(line))) {
+      findings.push(`${RELEASE_WORKFLOW} job \`${RELEASE_GATE_JOB}\` sets continue-on-error, so its refusal cannot conclude failure`);
+    }
+  }
+  const publish = blocks.get(RELEASE_PUBLISH_JOB);
+  if (!publish) {
+    findings.push(`${RELEASE_WORKFLOW} has no \`${RELEASE_PUBLISH_JOB}\` job`);
+    return findings;
+  }
+  const needsLine = code(publish).find((line) => /^ {4}needs:/.test(line)) ?? '';
+  const needs = needsLine.replace(/^ {4}needs:\s*/, '').replace(/[[\]]/g, '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (!needs.includes(RELEASE_GATE_JOB)) {
+    findings.push(`${RELEASE_WORKFLOW} job \`${RELEASE_PUBLISH_JOB}\` does not need \`${RELEASE_GATE_JOB}\` (needs: ${needs.join(', ') || 'none'})`);
+  }
+  const ifAt = code(publish).findIndex((line) => /^ {4}if:/.test(line));
+  const ifText = ifAt === -1 ? '' : code(publish).slice(ifAt).join('\n');
+  const firstTerm = ifText.replace(/^ {4}if:\s*(>-|\|)?\s*/, '').trim();
+  if (!firstTerm.startsWith('success() &&')) {
+    findings.push(`${RELEASE_WORKFLOW} job \`${RELEASE_PUBLISH_JOB}\`'s \`if:\` does not open with \`success() &&\`, so a refused \`${RELEASE_GATE_JOB}\` would not stop it`);
+  }
+  return findings;
+}
+
+// -- The live half: git for the window, the Actions API for the runs. --------
+
+function git(args) {
+  const res = spawnSync('git', args, { encoding: 'utf8' });
+  if (res.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${String(res.stderr || res.error || '').trim()}`);
+  return res.stdout.trim();
+}
+
+export function readFirstParentHistory(releaseCommit, window = RELEASE_GATE_WINDOW) {
+  if (!/^[0-9a-f]{40}$/.test(String(releaseCommit))) {
+    throw new Error(`the release commit '${releaseCommit}' is not a 40-hex sha`);
+  }
+  if (git(['rev-parse', '--is-shallow-repository']) !== 'false') {
+    throw new Error('shallow clone: a first-parent window read here would stop at the graft, so the checkout must keep fetch-depth: 0');
+  }
+  return git(['rev-list', '--first-parent', `--max-count=${window}`, releaseCommit]).split('\n').filter(Boolean);
+}
+
+export async function readRuns({ repo, token, file, event, pages = RELEASE_GATE_PAGES }) {
+  const runs = [];
+  for (let page = 1; page <= pages; page += 1) {
+    const url =
+      `https://api.github.com/repos/${repo}/actions/workflows/${file}/runs` +
+      `?branch=main&event=${event}&status=completed&per_page=100&page=${page}`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
+    });
+    if (!res.ok) throw new Error(`GET ${url} answered HTTP ${res.status}`);
+    const body = await res.json();
+    const batch = Array.isArray(body?.workflow_runs) ? body.workflow_runs : null;
+    if (!batch) throw new Error(`GET ${url} answered no workflow_runs array`);
+    runs.push(...batch);
+    if (batch.length < 100) break;
+  }
+  return runs;
+}
+
+async function releaseGate(argv) {
+  const at = argv.indexOf('--release-commit');
+  const releaseCommit = at === -1 ? '' : String(argv[at + 1] ?? '');
+  const repo = process.env.GITHUB_REPOSITORY ?? '';
+  const token = process.env.GITHUB_TOKEN ?? '';
+  let history;
+  const runsByWorkflow = {};
+  try {
+    if (!repo || !token) throw new Error('GITHUB_REPOSITORY and GITHUB_TOKEN are both required');
+    history = readFirstParentHistory(releaseCommit);
+    for (const { file } of RELEASE_GATE_WORKFLOWS) {
+      runsByWorkflow[file] = [];
+      for (const event of FULL_BATTERY_EVENTS) runsByWorkflow[file].push(...(await readRuns({ repo, token, file, event })));
+    }
+  } catch (error) {
+    console.log(`::error::release gate NOT MEASURED -- ${error.message}. Refusing: an unread full battery is not a green one.`);
+    process.exit(EXIT_PREREQUISITE_NOT_MET);
+  }
+  const verdict = releaseGateVerdict({ history, runsByWorkflow });
+  for (const line of verdict.lines) console.log(`scheduled-full-run --release-gate: ${line}`);
+  if (verdict.ok) {
+    console.log(`scheduled-full-run --release-gate: PASS -- the full battery at or before ${releaseCommit.slice(0, 10)} is green in both workflows.`);
+  } else {
+    for (const refusal of verdict.refusals) console.log(`::error::release refused -- ${refusal}`);
+  }
+  process.exit(releaseGateExit(verdict));
+}
+
+// ---------------------------------------------------------------------------
 // -- The self-test's own battery roster and floor ---------------------------
 //
 // Same shape as its siblings: what is pinned is the registered NAMES, and each
@@ -376,8 +625,11 @@ export function renderBody({
 const SELF_TEST_BATTERIES = Object.freeze({
   'scheduled-full-run concurrency isolation': 20,
   'scheduled-full-run card identity and de-dup': 23,
+  'release gate: the selection rule on the recorded 2026-10-12 listing': 6,
+  'release gate: the selection rule on synthetic runs': 14,
+  'release gate: release.yml wiring': 5,
 });
-const SELF_TEST_BATTERY_FLOOR = 2;
+const SELF_TEST_BATTERY_FLOOR = 5;
 const UNATTRIBUTED_BATTERY = '(no battery open)';
 
 // Returned by `selfTest()` only after its verdict is printed, so a `return`
@@ -743,6 +995,171 @@ async function selfTest() {
     }
   });
 
+  // ── HALF 3: the release gate ────────────────────────────────────────────
+  battery('release gate: the selection rule on the recorded 2026-10-12 listing');
+  // Read through the module's own location, never the cwd: the fixture is
+  // evidence recorded from the Actions API, and its provenance line says how.
+  const recorded = JSON.parse(
+    readFileSync(fileURLToPath(new URL('../fixtures/release-full-battery/runs-2026-10-12.json', import.meta.url)), 'utf8')
+  );
+  const recordedVerdict = (fromIndex) =>
+    releaseGateVerdict({ history: recorded.firstParent.slice(fromIndex), runsByWorkflow: recorded.runs });
+  await check(() => {
+    // Release commit 0524c1619b: both workflows' nearest verdict is green.
+    const v = recordedVerdict(0);
+    if (!v.ok) throw new Error(`recorded: 0524c1619b should pass, refused: ${v.refusals.join(' | ')}`);
+  });
+  await check(() => {
+    // ...and on 712361b7a8 CI carries a push success (07:57) AND a schedule
+    // success (08:15): the NEWER of the two is named.
+    const chosen = selectFullBatteryRun({ history: recorded.firstParent, runs: recorded.runs['ci.yml'], workflowFile: 'ci.yml' });
+    if (chosen?.run.id !== 38222448090 || chosen.distance !== 3) {
+      throw new Error(`recorded: expected CI run 38222448090 at distance 3, got ${chosen?.run.id} at ${chosen?.distance}`);
+    }
+  });
+  await check(() => {
+    // The commit 2 back (eede467f3d) carries only a CANCELLED push run in both
+    // workflows: it is passed over, never read as a refusal.
+    const chosen = selectFullBatteryRun({ history: recorded.firstParent, runs: recorded.runs['lint.yml'], workflowFile: 'lint.yml' });
+    if (chosen?.run.id !== 38223935346) throw new Error(`recorded: expected Lint run 38223935346, got ${chosen?.run.id}`);
+  });
+  await check(() => {
+    // FIRING CONTROL on real data. Release commit 19805d8956 (index 5): its own
+    // push run was cancelled, its hourly CI run concluded failure -> refused,
+    // naming CI and that run; Lint's nearest verdict (1f312fdfa6, 6 back) is
+    // green, so Lint is NOT named.
+    const v = recordedVerdict(5);
+    if (v.ok) throw new Error('recorded: 19805d8956 should be refused (the 07:25 hourly CI run failed)');
+    if (v.refusals.length !== 1 || !v.refusals[0].startsWith('CI:') || !v.refusals[0].includes('38217670691')) {
+      throw new Error(`recorded: the refusal must name CI and run 38217670691 alone, got ${v.refusals.join(' | ')}`);
+    }
+  });
+  await check(() => {
+    // Runs on commits that landed AFTER the release commit (48cca4ae00 and
+    // 6a40a09ed9 in the recording) tested another tree.
+    const onLater = recorded.runs['ci.yml'].filter((r) => !recorded.firstParent.includes(r.head_sha));
+    if (onLater.length === 0) throw new Error('recorded: the fixture lost its runs on later commits, so this case tests nothing');
+    for (let i = 0; i < 10; i += 1) {
+      const chosen = selectFullBatteryRun({ history: recorded.firstParent.slice(i), runs: recorded.runs['ci.yml'], workflowFile: 'ci.yml' });
+      if (chosen && onLater.includes(chosen.run)) throw new Error(`recorded: a run after the release commit was chosen (${chosen.run.id})`);
+    }
+  });
+  await check(() => {
+    // A release commit outside the recorded window: nothing to place, refused.
+    const v = releaseGateVerdict({ history: ['f'.repeat(40)], runsByWorkflow: recorded.runs });
+    if (v.ok || v.refusals.length !== 2) throw new Error(`recorded: an unplaced commit should refuse for both workflows, got ${JSON.stringify(v)}`);
+  });
+
+  battery('release gate: the selection rule on synthetic runs');
+  const sha = (n) => String(n).repeat(40).slice(0, 40);
+  const H = [sha(1), sha(2), sha(3), sha(4)];
+  const run = (id, headIndex, conclusion, extra = {}) => ({
+    id,
+    path: '.github/workflows/ci.yml',
+    event: 'schedule',
+    status: 'completed',
+    conclusion,
+    head_sha: H[headIndex],
+    head_branch: 'main',
+    run_started_at: `2026-10-12T0${id % 10}:00:00Z`,
+    run_attempt: 1,
+    ...extra,
+  });
+  const pick = (runs) => selectFullBatteryRun({ history: H, runs, workflowFile: 'ci.yml' })?.run.id ?? null;
+  const both = (ciRuns, lintRuns) =>
+    releaseGateVerdict({
+      history: H,
+      runsByWorkflow: { 'ci.yml': ciRuns, 'lint.yml': lintRuns.map((r) => ({ ...r, path: '.github/workflows/lint.yml' })) },
+    });
+  await check(() => {
+    if (pick([run(1, 0, 'cancelled'), run(2, 1, 'cancelled')]) !== null) throw new Error('synthetic: cancelled-only was given a verdict');
+  });
+  await check(() => {
+    if (!both([run(1, 0, 'cancelled')], [run(2, 0, 'success')]).refusals.some((r) => r.startsWith('CI: no completed'))) {
+      throw new Error('synthetic: no verdict-bearing CI run must refuse, naming CI');
+    }
+  });
+  await check(() => {
+    // A nearer red beats an older green, whatever the clock says.
+    if (pick([run(9, 2, 'success'), run(1, 1, 'failure')]) !== 1) throw new Error('synthetic: an older green outvoted a nearer red');
+  });
+  await check(() => {
+    // On one commit, the newer run decides: a re-run that went green counts...
+    if (pick([run(1, 1, 'failure'), run(2, 1, 'success')]) !== 2) throw new Error('synthetic: a newer green re-run on the same commit was ignored');
+  });
+  await check(() => {
+    // ...and so does a newer red after an older green.
+    if (pick([run(1, 1, 'success'), run(2, 1, 'failure')]) !== 2) throw new Error('synthetic: an older green outvoted a newer red on one commit');
+  });
+  await check(() => {
+    // Equal start times fall back to the higher run id, never to input order.
+    const a = run(3, 1, 'failure', { run_started_at: 'T' });
+    const b = run(4, 1, 'success', { run_started_at: 'T' });
+    if (pick([b, a]) !== 4 || pick([a, b]) !== 4) throw new Error('synthetic: the tie-break depends on input order');
+  });
+  for (const event of ['pull_request', 'merge_group', 'workflow_dispatch']) {
+    await check(() => {
+      if (pick([run(1, 0, 'failure', { event }), run(2, 2, 'success')]) !== 2) throw new Error(`synthetic: a ${event} run was read as full battery`);
+    });
+  }
+  await check(() => {
+    if (pick([run(1, 0, 'failure', { head_branch: 'feature' }), run(2, 2, 'success')]) !== 2) throw new Error('synthetic: a non-main run was read');
+  });
+  await check(() => {
+    if (pick([run(1, 0, 'failure', { status: 'in_progress', conclusion: null }), run(2, 2, 'success')]) !== 2) {
+      throw new Error('synthetic: an unfinished run was read');
+    }
+  });
+  await check(() => {
+    // Not `cancelled`, not `success`: a verdict, and a refusing one.
+    if (both([run(1, 0, 'startup_failure')], [run(2, 0, 'success')]).ok) throw new Error('synthetic: startup_failure passed');
+  });
+  await check(() => {
+    if (pick([run(1, 0, 'failure', { path: '.github/workflows/lint.yml' }), run(2, 2, 'success')]) !== 2) {
+      throw new Error("synthetic: another workflow's run was read as this one's");
+    }
+  });
+  await check(() => {
+    // Both must be green: either one red refuses, and only the red one is named.
+    const v = both([run(1, 0, 'success')], [run(2, 0, 'failure')]);
+    if (v.ok || v.refusals.length !== 1 || !v.refusals[0].startsWith('Lint & Type Check:')) {
+      throw new Error(`synthetic: a red Lint run did not refuse alone (${v.refusals.join(' | ')})`);
+    }
+    if (releaseGateExit(v) !== EXIT_FINDINGS || releaseGateExit(both([run(1, 0, 'success')], [run(2, 0, 'success')])) !== 0) {
+      throw new Error('synthetic: the verdict did not map to exit 1 / exit 0');
+    }
+  });
+  await check(() => {
+    if (releaseGateVerdict({ history: [], runsByWorkflow: {} }).ok) throw new Error('synthetic: an empty history passed');
+  });
+
+  battery('release gate: release.yml wiring');
+  const releaseYml = readFileSync(fileURLToPath(new URL('../../.github/workflows/release.yml', import.meta.url)), 'utf8');
+  await check(() => {
+    const findings = releaseGateWiring(releaseYml);
+    if (findings.length > 0) throw new Error(`wiring: the checked-in release.yml: ${findings.join(' | ')}`);
+  });
+  await check(() => {
+    const cut = releaseYml.replace(/(\n {4}needs: \[release-integrity), full-battery\]/, '$1]');
+    if (cut === releaseYml) throw new Error('wiring: the needs: anchor did not match, so this case tests nothing');
+    if (!releaseGateWiring(cut).some((f) => f.includes('does not need'))) throw new Error('wiring: publish without the gate in needs: passed');
+  });
+  await check(() => {
+    const cut = releaseYml.replace('node scripts/ci/scheduled-full-run.mjs --release-gate', 'node scripts/ci/scheduled-full-run.mjs --self-test');
+    if (cut === releaseYml) throw new Error('wiring: the run anchor did not match, so this case tests nothing');
+    if (!releaseGateWiring(cut).some((f) => f.includes('never runs'))) throw new Error('wiring: a gate job that never runs --release-gate passed');
+  });
+  await check(() => {
+    const cut = releaseYml.replace(/(\n {2}publish:[\s\S]*?\n {4}if: >-\n\s*)success\(\) &&/, '$1!cancelled() &&');
+    if (cut === releaseYml) throw new Error("wiring: publish's if: anchor did not match, so this case tests nothing");
+    if (!releaseGateWiring(cut).some((f) => f.includes('success() &&'))) throw new Error("wiring: publish's if: under !cancelled() passed");
+  });
+  await check(() => {
+    const cut = releaseYml.replace(/(\n {2}full-battery:\n)/, '$1    continue-on-error: true\n');
+    if (cut === releaseYml) throw new Error('wiring: the gate job anchor did not match, so this case tests nothing');
+    if (!releaseGateWiring(cut).some((f) => f.includes('continue-on-error'))) throw new Error('wiring: a continue-on-error gate passed');
+  });
+
   // -- The floor. Evaluated before the verdict, so the success line can only be
   //    printed by a run in which the set of batteries that registered EQUALS
   //    the set declared.
@@ -824,8 +1241,14 @@ async function main() {
     return;
   }
 
+  if (argv.includes('--release-gate')) {
+    await releaseGate(argv);
+    return;
+  }
+
   console.error(
     'usage: scheduled-full-run.mjs --check-concurrency\n' +
+      '       scheduled-full-run.mjs --release-gate --release-commit <sha>\n' +
       '       scheduled-full-run.mjs --self-test'
   );
   process.exit(1);

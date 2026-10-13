@@ -14,7 +14,7 @@
  * row, so neither OWD/sharing nor RLS can narrow them.
  *
  * ⛔ Nothing here derives readability. "Can this caller read that record" is
- * {@link resolveReadableParentIds} (`comment-access-hooks.ts`): one
+ * {@link resolveReadableParentIds} (`@objectstack/core`): one
  * caller-scoped engine read per parent object, so the parent's own OWD/sharing,
  * RLS and object-level CRUD decide. This module only chooses WHICH rows are
  * judged that way and turns the answer into a WHERE.
@@ -53,8 +53,8 @@
  * (the activity stream) exempts no caller.
  */
 
+import { resolveReadableParentIds } from '@objectstack/core';
 import {
-  resolveReadableParentIds,
   type CommentAccessEngine,
   type CommentAccessLogger,
   type CommentReadMiddlewareCtx,

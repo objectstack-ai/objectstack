@@ -208,20 +208,6 @@ describe('RBAC object canonical names + row actions', () => {
     ]);
   });
 
-  it('[field report — rc→GA declared≠enforced surfacing] SysPermissionSet.drift_status is a select naming the two detected causes, and appears in the "Needs Attention" list view', () => {
-    const f: any = (SysPermissionSet.fields as any).drift_status;
-    expect(f, 'drift_status field exists').toBeDefined();
-    expect(f.type).toBe('select');
-    expect(f.readonly).toBe(true);
-    const opts = (f.options ?? []).map((o: any) => o.value).sort();
-    expect(opts).toEqual(['other', 'overlay_shadow', 'provenance_skip']);
-
-    const views: any = SysPermissionSet.listViews;
-    expect(views.drifted, 'drifted list view exists').toBeDefined();
-    expect(views.drifted.columns).toContain('drift_status');
-    expect(views.all_permsets.columns).toContain('drift_status');
-  });
-
   it('[A4 #2920] SysPermissionSet.managed_by is a select on the unified platform/package/admin vocab', () => {
     const f: any = (SysPermissionSet.fields as any).managed_by;
     expect(f, 'managed_by field exists').toBeDefined();
