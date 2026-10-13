@@ -1,7 +1,7 @@
 ---
 title: Protocol schema — API Protocol reference
 navTitle: Protocol
-description: "Protocol schemas of the ObjectStack API Protocol: AiAgentCapabilities and 134 more — each property with its type, default and a TypeScript example."
+description: "Protocol schemas of the ObjectStack API Protocol: AiAgentCapabilities and 136 more — each property with its type, default and a TypeScript example."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -13,8 +13,8 @@ description: "Protocol schemas of the ObjectStack API Protocol: AiAgentCapabilit
 ## TypeScript Usage
 
 ```typescript
-import { AiAgentCapabilitiesSchema, AiAgentChatRequestSchema, AiAgentSummarySchema, AiAgentsResponseSchema, AiChatRequestSchema, AiChatResponseSchema, AiCompleteRequestSchema, AiConversationSchema, AiMessageSchema, AiModelsResponseSchema, AiPendingActionSchema, AiPendingActionStatusSchema, AiStreamChunkSchema, ApproveAiPendingActionResponseSchema, AuditMetaItemRequestSchema, AuditMetaItemResponseSchema, AutomationActionsResponseSchema, AutomationTriggerRequestSchema, AutomationTriggerResponseSchema, BatchDataRequestSchema, BatchDataResponseSchema, CheckPermissionRequestSchema, CheckPermissionResponseSchema, CloneDataResponseSchema, CreateAiConversationRequestSchema, CreateDataRequestSchema, CreateDataResponseSchema, CreateManyDataRequestSchema, CreateManyDataResponseSchema, DeleteDataRequestSchema, DeleteDataResponseSchema, DeleteManyDataRequestSchema, DeleteManyDataResponseSchema, DeleteMetaItemRequestSchema, DeleteMetaItemResponseSchema, DiffMetaItemResponseSchema, DisablePackageRequestSchema, DisablePackageResponseSchema, EnablePackageRequestSchema, EnablePackageResponseSchema, FindDataRequestSchema, FindDataResponseSchema, FindReferencesToMetaResponseSchema, GetDataRequestSchema, GetDataResponseSchema, GetDiscoveryRequestSchema, GetDiscoveryResponseSchema, GetEffectivePermissionsRequestSchema, GetEffectivePermissionsResponseSchema, GetFieldLabelsRequestSchema, GetFieldLabelsResponseSchema, GetLocalesRequestSchema, GetLocalesResponseSchema, GetMetaDiagnosticsResponseSchema, GetMetaItemCachedRequestSchema, GetMetaItemCachedResponseSchema, GetMetaItemLayeredRequestSchema, GetMetaItemLayeredResponseSchema, GetMetaItemRequestSchema, GetMetaItemResponseSchema, GetMetaItemsRequestSchema, GetMetaItemsResponseSchema, GetMetaTypesRequestSchema, GetMetaTypesResponseSchema, GetNotificationPreferencesRequestSchema, GetNotificationPreferencesResponseSchema, GetObjectPermissionsRequestSchema, GetObjectPermissionsResponseSchema, GetPackageRequestSchema, GetPackageResponseSchema, GetPresenceRequestSchema, GetPresenceResponseSchema, GetPublishedMetaItemResponseSchema, GetTranslationsRequestSchema, GetTranslationsResponseSchema, GetUiViewRequestSchema, GetUiViewResponseSchema, HistoryMetaItemRequestSchema, HistoryMetaItemResponseSchema, HttpFindQueryParamsSchema, InstallPackageRequestSchema, InstallPackageResponseSchema, ListAiConversationsRequestSchema, ListAiConversationsResponseSchema, ListAiPendingActionsRequestSchema, ListAiPendingActionsResponseSchema, ListDraftsResponseSchema, ListNotificationsRequestSchema, ListNotificationsResponseSchema, ListPackagesRequestSchema, ListPackagesResponseSchema, MarkAllNotificationsReadRequestSchema, MarkAllNotificationsReadResponseSchema, MarkNotificationsReadRequestSchema, MarkNotificationsReadResponseSchema, MetadataConflictErrorSchema, NotificationSchema, NotificationPreferencesSchema, PublishMetaItemRequestSchema, PublishMetaItemResponseSchema, PublishPackageDraftsResponseSchema, RealtimeConnectRequestSchema, RealtimeConnectResponseSchema, RealtimeDisconnectRequestSchema, RealtimeDisconnectResponseSchema, RealtimeSubscribeRequestSchema, RealtimeSubscribeResponseSchema, RealtimeUnsubscribeRequestSchema, RealtimeUnsubscribeResponseSchema, RegisterDeviceRequestSchema, RegisterDeviceResponseSchema, RejectAiPendingActionResponseSchema, RollbackMetaItemResponseSchema, RuntimeAuthoringIssueSchema, SaveMetaItemRequestSchema, SaveMetaItemResponseSchema, SearchAllHitSchema, SearchAllPageHitSchema, SearchAllResponseSchema, SetPresenceRequestSchema, SetPresenceResponseSchema, UninstallPackageRequestSchema, UninstallPackageResponseSchema, UnregisterDeviceRequestSchema, UnregisterDeviceResponseSchema, UpdateAiConversationRequestSchema, UpdateDataRequestSchema, UpdateDataResponseSchema, UpdateManyDataRequestSchema, UpdateManyDataResponseSchema, UpdateNotificationPreferencesRequestSchema, UpdateNotificationPreferencesResponseSchema, ValidateDataIssueSchema, ValidateDataRequestSchema, ValidateDataResponseSchema } from '@objectstack/spec/api';
-import type { AiAgentCapabilities, AiAgentChatRequest, AiAgentSummary, AiAgentsResponse, AiChatRequest, AiChatResponse, AiCompleteRequest, AiConversation, AiMessage, AiModelsResponse, AiPendingAction, AiPendingActionStatus, AiStreamChunk, ApproveAiPendingActionResponse, AuditMetaItemRequest, AuditMetaItemResponse, AutomationActionsResponse, AutomationTriggerRequest, AutomationTriggerResponse, BatchDataRequest, BatchDataResponse, CheckPermissionRequest, CheckPermissionResponse, CloneDataResponse, CreateAiConversationRequest, CreateDataRequest, CreateDataResponse, CreateManyDataRequest, CreateManyDataResponse, DeleteDataRequest, DeleteDataResponse, DeleteManyDataRequest, DeleteManyDataResponse, DeleteMetaItemRequest, DeleteMetaItemResponse, DiffMetaItemResponse, DisablePackageRequest, DisablePackageResponse, EnablePackageRequest, EnablePackageResponse, FindDataRequest, FindDataResponse, FindReferencesToMetaResponse, GetDataRequest, GetDataResponse, GetDiscoveryRequest, GetDiscoveryResponse, GetEffectivePermissionsRequest, GetEffectivePermissionsResponse, GetFieldLabelsRequest, GetFieldLabelsResponse, GetLocalesRequest, GetLocalesResponse, GetMetaDiagnosticsResponse, GetMetaItemCachedRequest, GetMetaItemCachedResponse, GetMetaItemLayeredRequest, GetMetaItemLayeredResponse, GetMetaItemRequest, GetMetaItemResponse, GetMetaItemsRequest, GetMetaItemsResponse, GetMetaTypesRequest, GetMetaTypesResponse, GetNotificationPreferencesRequest, GetNotificationPreferencesResponse, GetObjectPermissionsRequest, GetObjectPermissionsResponse, GetPackageRequest, GetPackageResponse, GetPresenceRequest, GetPresenceResponse, GetPublishedMetaItemResponse, GetTranslationsRequest, GetTranslationsResponse, GetUiViewRequest, GetUiViewResponse, HistoryMetaItemRequest, HistoryMetaItemResponse, InstallPackageRequest, InstallPackageResponse, ListAiConversationsRequest, ListAiConversationsResponse, ListAiPendingActionsRequest, ListAiPendingActionsResponse, ListDraftsResponse, ListNotificationsRequest, ListNotificationsResponse, ListPackagesRequest, ListPackagesResponse, MarkAllNotificationsReadRequest, MarkAllNotificationsReadResponse, MarkNotificationsReadRequest, MarkNotificationsReadResponse, MetadataConflictError, Notification, NotificationPreferences, PublishMetaItemRequest, PublishMetaItemResponse, PublishPackageDraftsResponse, RealtimeConnectRequest, RealtimeConnectResponse, RealtimeDisconnectRequest, RealtimeDisconnectResponse, RealtimeSubscribeRequest, RealtimeSubscribeResponse, RealtimeUnsubscribeRequest, RealtimeUnsubscribeResponse, RegisterDeviceRequest, RegisterDeviceResponse, RejectAiPendingActionResponse, RollbackMetaItemResponse, RuntimeAuthoringIssue, SaveMetaItemRequest, SaveMetaItemResponse, SearchAllHit, SearchAllPageHit, SearchAllResponse, SetPresenceRequest, SetPresenceResponse, UninstallPackageRequest, UninstallPackageResponse, UnregisterDeviceRequest, UnregisterDeviceResponse, UpdateAiConversationRequest, UpdateDataRequest, UpdateDataResponse, UpdateManyDataRequest, UpdateManyDataResponse, UpdateNotificationPreferencesRequest, UpdateNotificationPreferencesResponse, ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
+import { AiAgentCapabilitiesSchema, AiAgentChatRequestSchema, AiAgentSummarySchema, AiAgentsResponseSchema, AiChatRequestSchema, AiChatResponseSchema, AiCompleteRequestSchema, AiConversationSchema, AiMessageSchema, AiModelsResponseSchema, AiPendingActionSchema, AiPendingActionStatusSchema, AiStreamChunkSchema, ApproveAiPendingActionResponseSchema, AuditMetaItemRequestSchema, AuditMetaItemResponseSchema, AutomationActionsResponseSchema, AutomationTriggerRequestSchema, AutomationTriggerResponseSchema, BatchDataRequestSchema, BatchDataResponseSchema, CheckPermissionRequestSchema, CheckPermissionResponseSchema, CloneDataResponseSchema, CreateAiConversationRequestSchema, CreateDataRequestSchema, CreateDataResponseSchema, CreateManyDataRequestSchema, CreateManyDataResponseSchema, DeleteDataRequestSchema, DeleteDataResponseSchema, DeleteManyDataRequestSchema, DeleteManyDataResponseSchema, DeleteMetaItemRequestSchema, DeleteMetaItemResponseSchema, DiffMetaItemResponseSchema, DisablePackageRequestSchema, DisablePackageResponseSchema, EnablePackageRequestSchema, EnablePackageResponseSchema, FindDataRequestSchema, FindDataResponseSchema, FindReferencesToMetaResponseSchema, FlowRegistrationSchema, FlowRegistrationRefusalSchema, GetDataRequestSchema, GetDataResponseSchema, GetDiscoveryRequestSchema, GetDiscoveryResponseSchema, GetEffectivePermissionsRequestSchema, GetEffectivePermissionsResponseSchema, GetFieldLabelsRequestSchema, GetFieldLabelsResponseSchema, GetLocalesRequestSchema, GetLocalesResponseSchema, GetMetaDiagnosticsResponseSchema, GetMetaItemCachedRequestSchema, GetMetaItemCachedResponseSchema, GetMetaItemLayeredRequestSchema, GetMetaItemLayeredResponseSchema, GetMetaItemRequestSchema, GetMetaItemResponseSchema, GetMetaItemsRequestSchema, GetMetaItemsResponseSchema, GetMetaTypesRequestSchema, GetMetaTypesResponseSchema, GetNotificationPreferencesRequestSchema, GetNotificationPreferencesResponseSchema, GetObjectPermissionsRequestSchema, GetObjectPermissionsResponseSchema, GetPackageRequestSchema, GetPackageResponseSchema, GetPresenceRequestSchema, GetPresenceResponseSchema, GetPublishedMetaItemResponseSchema, GetTranslationsRequestSchema, GetTranslationsResponseSchema, GetUiViewRequestSchema, GetUiViewResponseSchema, HistoryMetaItemRequestSchema, HistoryMetaItemResponseSchema, HttpFindQueryParamsSchema, InstallPackageRequestSchema, InstallPackageResponseSchema, ListAiConversationsRequestSchema, ListAiConversationsResponseSchema, ListAiPendingActionsRequestSchema, ListAiPendingActionsResponseSchema, ListDraftsResponseSchema, ListNotificationsRequestSchema, ListNotificationsResponseSchema, ListPackagesRequestSchema, ListPackagesResponseSchema, MarkAllNotificationsReadRequestSchema, MarkAllNotificationsReadResponseSchema, MarkNotificationsReadRequestSchema, MarkNotificationsReadResponseSchema, MetadataConflictErrorSchema, NotificationSchema, NotificationPreferencesSchema, PublishMetaItemRequestSchema, PublishMetaItemResponseSchema, PublishPackageDraftsResponseSchema, RealtimeConnectRequestSchema, RealtimeConnectResponseSchema, RealtimeDisconnectRequestSchema, RealtimeDisconnectResponseSchema, RealtimeSubscribeRequestSchema, RealtimeSubscribeResponseSchema, RealtimeUnsubscribeRequestSchema, RealtimeUnsubscribeResponseSchema, RegisterDeviceRequestSchema, RegisterDeviceResponseSchema, RejectAiPendingActionResponseSchema, RollbackMetaItemResponseSchema, RuntimeAuthoringIssueSchema, SaveMetaItemRequestSchema, SaveMetaItemResponseSchema, SearchAllHitSchema, SearchAllPageHitSchema, SearchAllResponseSchema, SetPresenceRequestSchema, SetPresenceResponseSchema, UninstallPackageRequestSchema, UninstallPackageResponseSchema, UnregisterDeviceRequestSchema, UnregisterDeviceResponseSchema, UpdateAiConversationRequestSchema, UpdateDataRequestSchema, UpdateDataResponseSchema, UpdateManyDataRequestSchema, UpdateManyDataResponseSchema, UpdateNotificationPreferencesRequestSchema, UpdateNotificationPreferencesResponseSchema, ValidateDataIssueSchema, ValidateDataRequestSchema, ValidateDataResponseSchema } from '@objectstack/spec/api';
+import type { AiAgentCapabilities, AiAgentChatRequest, AiAgentSummary, AiAgentsResponse, AiChatRequest, AiChatResponse, AiCompleteRequest, AiConversation, AiMessage, AiModelsResponse, AiPendingAction, AiPendingActionStatus, AiStreamChunk, ApproveAiPendingActionResponse, AuditMetaItemRequest, AuditMetaItemResponse, AutomationActionsResponse, AutomationTriggerRequest, AutomationTriggerResponse, BatchDataRequest, BatchDataResponse, CheckPermissionRequest, CheckPermissionResponse, CloneDataResponse, CreateAiConversationRequest, CreateDataRequest, CreateDataResponse, CreateManyDataRequest, CreateManyDataResponse, DeleteDataRequest, DeleteDataResponse, DeleteManyDataRequest, DeleteManyDataResponse, DeleteMetaItemRequest, DeleteMetaItemResponse, DiffMetaItemResponse, DisablePackageRequest, DisablePackageResponse, EnablePackageRequest, EnablePackageResponse, FindDataRequest, FindDataResponse, FindReferencesToMetaResponse, FlowRegistration, FlowRegistrationRefusal, GetDataRequest, GetDataResponse, GetDiscoveryRequest, GetDiscoveryResponse, GetEffectivePermissionsRequest, GetEffectivePermissionsResponse, GetFieldLabelsRequest, GetFieldLabelsResponse, GetLocalesRequest, GetLocalesResponse, GetMetaDiagnosticsResponse, GetMetaItemCachedRequest, GetMetaItemCachedResponse, GetMetaItemLayeredRequest, GetMetaItemLayeredResponse, GetMetaItemRequest, GetMetaItemResponse, GetMetaItemsRequest, GetMetaItemsResponse, GetMetaTypesRequest, GetMetaTypesResponse, GetNotificationPreferencesRequest, GetNotificationPreferencesResponse, GetObjectPermissionsRequest, GetObjectPermissionsResponse, GetPackageRequest, GetPackageResponse, GetPresenceRequest, GetPresenceResponse, GetPublishedMetaItemResponse, GetTranslationsRequest, GetTranslationsResponse, GetUiViewRequest, GetUiViewResponse, HistoryMetaItemRequest, HistoryMetaItemResponse, InstallPackageRequest, InstallPackageResponse, ListAiConversationsRequest, ListAiConversationsResponse, ListAiPendingActionsRequest, ListAiPendingActionsResponse, ListDraftsResponse, ListNotificationsRequest, ListNotificationsResponse, ListPackagesRequest, ListPackagesResponse, MarkAllNotificationsReadRequest, MarkAllNotificationsReadResponse, MarkNotificationsReadRequest, MarkNotificationsReadResponse, MetadataConflictError, Notification, NotificationPreferences, PublishMetaItemRequest, PublishMetaItemResponse, PublishPackageDraftsResponse, RealtimeConnectRequest, RealtimeConnectResponse, RealtimeDisconnectRequest, RealtimeDisconnectResponse, RealtimeSubscribeRequest, RealtimeSubscribeResponse, RealtimeUnsubscribeRequest, RealtimeUnsubscribeResponse, RegisterDeviceRequest, RegisterDeviceResponse, RejectAiPendingActionResponse, RollbackMetaItemResponse, RuntimeAuthoringIssue, SaveMetaItemRequest, SaveMetaItemResponse, SearchAllHit, SearchAllPageHit, SearchAllResponse, SetPresenceRequest, SetPresenceResponse, UninstallPackageRequest, UninstallPackageResponse, UnregisterDeviceRequest, UnregisterDeviceResponse, UpdateAiConversationRequest, UpdateDataRequest, UpdateDataResponse, UpdateManyDataRequest, UpdateManyDataResponse, UpdateNotificationPreferencesRequest, UpdateNotificationPreferencesResponse, ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
 
 // Validate data
 const result = AiAgentCapabilitiesSchema.parse(data);
@@ -969,6 +969,65 @@ Enable package response
 
 ---
 
+## FlowRegistration
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **state** | `'registered'` | ✅ | The engine holds a registration under the flow's name. |
+
+---
+
+#### Option 2
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **state** | `'refused'` | ✅ | The engine refused to register the stored flow and holds nothing under its name: it never runs. |
+| **reason** | `{ code?: string; message: string }` | ✅ | What the engine threw, verbatim. |
+
+### Nested Shape: `FlowRegistration[state='refused'].reason`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `string` | optional | The machine code the engine's refusal carried, verbatim. Absent when the thrown error carried none. |
+| **message** | `string` | ✅ | The engine's refusal message, verbatim. Render it as sent; do not parse it. |
+
+---
+
+#### Option 3
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **state** | `'unregistered'` | ✅ | The engine holds nothing under the flow's name and recorded no refusal for it. |
+
+---
+
+
+---
+
+## FlowRegistrationRefusal
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `string` | optional | The machine code the engine's refusal carried, verbatim. Absent when the thrown error carried none. |
+| **message** | `string` | ✅ | The engine's refusal message, verbatim. Render it as sent; do not parse it. |
+
+
+---
+
 ## GetDataRequest
 
 ### Properties
@@ -1375,12 +1434,32 @@ Enable package response
 | **deletable** | `boolean` | optional | Whether deleting the overlay is permitted — false iff `lock` is `no-delete` or `full`. |
 | **resettable** | `boolean` | optional | Whether the item can be reset to its packaged default — true iff it is artifact-backed, i.e. there is a baseline to reset TO. |
 | **version** | `string \| null` | optional | ADR-0008 version token of the STORED row a save to this item compares against, at this read's scope (the environment's partition and `?package=`) and lifecycle (`?state=draft` reads the draft row, the plain read the active row). The same keyed token a save receipt's `version` serves for that row: send it back as the `If-Match` request header on `PUT /meta/:type/:name` (with `?mode=draft` for the draft) and a concurrent edit is refused 409 `METADATA_CONFLICT` instead of overwritten. `null` when no stored row is there — an item served from code or a package artifact, or from a row in another scope (a package-less row a package read falls back to) — so the next save creates one: pin it with `If-None-Match: *`. ABSENT on the cached published-value branch and on a `?preview=draft` read, which publish no version: absence means "not published here", never "no row". Opaque — echo it verbatim, never parse it. |
+| **registration** | `{ state: 'registered' } \| { state: 'refused'; reason: object } \| { state: 'unregistered' }` | optional | The automation engine's verdict on this flow (see `FlowRegistrationSchema`): `registered`, or `refused` with the engine's `reason` verbatim, or `unregistered`. Present only on a `flow` read answered by a process that runs an automation service; absent otherwise, and absence means no engine judged it, never `registered`. Like the protection keys it is published by the uncached branch only, and it is absent on a draft read, whose pending body no engine holds. The verdict is the answering process's engine. Beside `item`, never inside it: the item's `status` stays what its author declared. |
 
 ### Nested Shape: `GetMetaItemResponse.sortability`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **fields** | `Record<string, { sortable: boolean; reason?: 'virtual-type'; caveat?: 'unprovisioned-anchor' }>` | ✅ | Verdict per sortable-addressable column, keyed by field name. The domain is the served field map plus the always-provisioned `id`, less any field the caller's own field permission withholds: a caller exempt from the object-schema mask (ADR-0106 D4) is served such fields in `item` and gets no entry for them; for every other caller the served map already excludes them. A name absent from this map (an unknown field, a dotted path, an unprovisioned audit column, a field the caller may not read) has no platform sort behind it and must get no sort affordance. |
+
+### Nested Shape: `GetMetaItemResponse.registration[state='registered']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **state** | `'registered'` | ✅ | The engine holds a registration under the flow's name. |
+
+### Nested Shape: `GetMetaItemResponse.registration[state='refused']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **state** | `'refused'` | ✅ | The engine refused to register the stored flow and holds nothing under its name: it never runs. |
+| **reason** | `{ code?: string; message: string }` | ✅ | What the engine threw, verbatim. |
+
+### Nested Shape: `GetMetaItemResponse.registration[state='unregistered']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **state** | `'unregistered'` | ✅ | The engine holds nothing under the flow's name and recorded no refusal for it. |
 
 
 ---
@@ -1406,6 +1485,26 @@ Enable package response
 | :--- | :--- | :--- | :--- |
 | **type** | `string` | ✅ | Metadata type name |
 | **items** | `any[]` | ✅ | Array of metadata items |
+| **registrations** | `Record<string, { state: 'registered' } \| { state: 'refused'; reason: object } \| { state: 'unregistered' }>` | optional | The automation engine's verdict on each listed flow, keyed by the item's `name`: one entry per listed item that is not a pending draft. Present only on a `flow` list answered by a process that runs an automation service; absent otherwise, and absence means no engine judged them, never `registered`. The verdict is the answering process's engine. Beside the items, never inside one: an item's `status` stays what its author declared. |
+
+### Nested Shape: `GetMetaItemsResponse.registrations[string][state='registered']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **state** | `'registered'` | ✅ | The engine holds a registration under the flow's name. |
+
+### Nested Shape: `GetMetaItemsResponse.registrations[string][state='refused']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **state** | `'refused'` | ✅ | The engine refused to register the stored flow and holds nothing under its name: it never runs. |
+| **reason** | `{ code?: string; message: string }` | ✅ | What the engine threw, verbatim. |
+
+### Nested Shape: `GetMetaItemsResponse.registrations[string][state='unregistered']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **state** | `'unregistered'` | ✅ | The engine holds nothing under the flow's name and recorded no refusal for it. |
 
 
 ---
