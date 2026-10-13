@@ -30,20 +30,23 @@ export const entry: SemanticMigration = {
     + '`cbp-master-detail-required-forced` entry) forces `required: true` at '
     + '`ObjectSchema.create` but never inspects `readonly` or `system`, so two of the three shapes '
     + 'still pass the builder and meet their first authoring-time refusal here, and the third '
-    + 'still reaches it from any object not authored through the builder. Runtime tolerance is '
-    + 'unchanged on purpose: the security gate keeps refusing these inserts, and keeps resolving '
-    + 'the master for metadata already at rest.',
+    + 'still reaches it from any object not authored through the builder. The security gate keeps '
+    + 'refusing these inserts. (The later step-18 entry `cbp-master-relation-tiers-retired` goes '
+    + 'further for the first shape: a `master_detail` without `required: true` is refused at parse, '
+    + 'and the runtime no longer resolves a master from it.)',
   acceptanceCriteria:
     '`os lint` reports no `relationship/master-detail-required` finding at `error`: on every '
     + 'object declaring `sharingModel: \'controlled_by_parent\'`, each `master_detail` reference '
     + 'declares `required: true` (or omits it and is authored through `ObjectSchema.create`, '
     + 'which emits `required: true`) and carries neither `readonly: true` nor `system: true`. '
-    + '⚠️ WHICH DOOR: the refusal is `os lint`\'s and the metadata-generation rubric\'s only. The '
-    + 'rule is not in the authoring-rule registry, so `os build`, `os validate` and the metadata '
-    + 'save door do not run it, and a stack carrying the shape still builds and publishes — read '
-    + '`os lint`\'s exit code, not a green build. Stored metadata is not rewritten and keeps '
-    + 'loading, and the security gate still refuses an insert that omits the master FK on these '
-    + 'shapes. Repo census at the time of the change: 129 authored objects across the example '
+    + '⚠️ WHICH DOOR: this rule\'s refusal is `os lint`\'s and the metadata-generation rubric\'s '
+    + 'only. The rule is not in the authoring-rule registry, so `os build`, `os validate` and the '
+    + 'metadata save door do not run it, and a stack carrying the `readonly` or `system` shape still '
+    + 'builds and publishes — read `os lint`\'s exit code, not a green build. (A missing `required` '
+    + 'on an object\'s only `master_detail` is refused at parse by every one of those doors since '
+    + '`cbp-master-relation-tiers-retired`.) Stored metadata is not rewritten and keeps loading, and '
+    + 'the security gate still refuses an insert that omits the master FK on these shapes. Repo '
+    + 'census at the time of the change: 129 authored objects across the example '
     + 'apps, the platform and plugin objects and the CLI\'s golden eval corpus, 7 of them '
     + '`controlled_by_parent`, 0 findings at `error`.',
 };

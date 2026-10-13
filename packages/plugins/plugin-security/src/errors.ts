@@ -108,6 +108,11 @@ export class PermissionDeniedError extends Error {
  * `sharingModel: 'controlled_by_parent'` on an object with no `master_detail`
  * relation to derive access from → `422 INVALID_METADATA`.
  *
+ * [ADR-0055 §1 · #23100] "No relation" means: not exactly one `master_detail`
+ * field declared `required: true` — none, a non-required one, a required
+ * `lookup` only, or two or more required ones all land here, because the
+ * relation resolver derives a master from that one field and nothing else.
+ *
  * This is a precisely detectable AUTHORING defect, not an access verdict: the
  * object declares that its access is derived from a master and then gives the
  * platform no master to derive it from. Disguised as a routine permission
@@ -128,8 +133,10 @@ export class MasterDetailRelationMissingError extends Error {
   constructor(object: string, operation: string) {
     super(
       `[Security] Configuration defect: ${operation} on '${object}' cannot be authorized because the object `
-      + `declares sharingModel 'controlled_by_parent' but has no master_detail relation to derive access from. `
-      + `Declare a required master_detail field pointing at the master object, or change sharingModel.`,
+      + `declares sharingModel 'controlled_by_parent' but not exactly one required master_detail field to derive `
+      + `access from (a non-required master_detail or a required lookup derives none, and neither do two `
+      + `required ones). Declare one master_detail field with required: true pointing at the master object, `
+      + `or change sharingModel.`,
     );
     this.name = 'MasterDetailRelationMissingError';
   }

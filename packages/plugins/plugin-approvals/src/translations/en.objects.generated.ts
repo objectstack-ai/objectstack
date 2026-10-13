@@ -125,7 +125,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       approval_approve: {
         label: "Approve",
         description: "Approve this request? Your approval is recorded, and the request moves on once this step has the approvals it requires.",
-        successMessage: "Approved.",
+        successMessage: "Approved \"${result.request.record_title}\"",
         params: {
           comment: {
             label: "Comment"
@@ -138,7 +138,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       approval_reject: {
         label: "Reject",
         description: "Reject this request? A rejection is final for every approver.",
-        successMessage: "Rejected.",
+        successMessage: "Rejected \"${result.request.record_title}\"",
         params: {
           comment: {
             label: "Comment"
@@ -150,7 +150,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_reassign: {
         label: "Reassign",
-        successMessage: "Reassigned.",
+        successMessage: "Reassigned \"${result.request.record_title}\"",
         params: {
           to: {
             label: "New approver",
@@ -163,7 +163,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_send_back: {
         label: "Send back",
-        successMessage: "Sent back for revision.",
+        successMessage: "Sent \"${result.request.record_title}\" back for revision",
         params: {
           comment: {
             label: "Reason"
@@ -172,7 +172,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_request_info: {
         label: "Request info",
-        successMessage: "Information requested.",
+        successMessage: "Information requested on \"${result.request.record_title}\"",
         params: {
           comment: {
             label: "What do you need?"
@@ -181,7 +181,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_remind: {
         label: "Send reminder",
-        successMessage: "Reminder sent.",
+        successMessage: "Reminder sent for \"${result.request.record_title}\"",
         params: {
           comment: {
             label: "Note"
@@ -191,7 +191,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       approval_recall: {
         label: "Recall",
         description: "Recall this request? Approvers can no longer act on it and the record is unlocked.",
-        successMessage: "Recalled.",
+        successMessage: "Recalled \"${result.request.record_title}\"",
         params: {
           comment: {
             label: "Comment"
@@ -200,7 +200,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_resubmit: {
         label: "Resubmit",
-        successMessage: "Resubmitted.",
+        successMessage: "Resubmitted \"${result.request.record_title}\"",
         params: {
           comment: {
             label: "What changed?"
@@ -209,7 +209,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_comment: {
         label: "Reply",
-        successMessage: "Reply posted.",
+        successMessage: "Reply posted on \"${result.request.record_title}\"",
         params: {
           comment: {
             label: "Comment"

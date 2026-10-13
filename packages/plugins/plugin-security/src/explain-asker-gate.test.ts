@@ -269,6 +269,18 @@ const memberDoor = (verb: ExplainOperation, id: string): Promise<Answer> =>
 
 /** The decision with its record id set aside: the one field two different ids must differ in. */
 const withoutRecordId = (d: ExplainDecision) => ({ ...d, record: d.record ? { ...d.record, recordId: 'ID' } : d.record });
+/**
+ * [#23157] The decision with the principal's person set aside. The principal
+ * layer names the explained user as far as the ASKER's own read returns them
+ * (`explain-principal-person.test.ts`), so two askers' explanations of one
+ * principal may differ in that name; the record story compared below may not.
+ */
+const apartFromPrincipalPerson = (d: ExplainDecision) => ({
+  ...d,
+  layers: d.layers.map((l) => (l.layer === 'principal'
+    ? { ...l, detail: l.detail.replace(/^Principal .*? holds position\(s\) /, 'Principal PERSON holds position(s) ') }
+    : l)),
+});
 const layerRecord = (d: ExplainDecision, layer: string) => d.layers.find((l) => l.layer === layer)?.record;
 /** Every HTTP status, with its code, that any layer's prose names. */
 const statusesNamed = (d: ExplainDecision): string[] => {
@@ -325,7 +337,7 @@ describe('an asker who can read the row gets the explained principal\'s full rec
     const bySystem = await explain(SYSTEM, 'read', HIDDEN);
     expect(byAdmin.record).toEqual({ recordId: HIDDEN, visible: false, decidedBy: 'rls' });
     expect(layerRecord(byAdmin, 'rls')?.outcome).toBe('excluded');
-    expect(byAdmin).toEqual(bySystem);
+    expect(apartFromPrincipalPerson(byAdmin)).toEqual(apartFromPrincipalPerson(bySystem));
   });
 
   for (const verb of WRITE_VERBS) {
@@ -333,7 +345,7 @@ describe('an asker who can read the row gets the explained principal\'s full rec
       const byAdmin = await explain(ADMIN, verb, HIDDEN);
       const bySystem = await explain(SYSTEM, verb, HIDDEN);
       expect(byAdmin.record).toEqual({ recordId: HIDDEN, visible: false, decidedBy: 'rls' });
-      expect(byAdmin).toEqual(bySystem);
+      expect(apartFromPrincipalPerson(byAdmin)).toEqual(apartFromPrincipalPerson(bySystem));
     });
 
     it(`${verb}: each row-scoped layer carries the member's read attribution, and names only the door's 404`, async () => {
@@ -366,7 +378,9 @@ describe('controls', () => {
       const bySystem = await explain(SYSTEM, verb, OPEN);
       expect(bySystem.record).toMatchObject({ recordId: OPEN, visible: true });
       expect(layerRecord(bySystem, 'rls')).toMatchObject({ outcome: 'admitted', matchesRecord: true });
-      for (const asker of [ADMIN, BLIND_ADMIN, DELEGATE]) expect(await explain(asker, verb, OPEN)).toEqual(bySystem);
+      for (const asker of [ADMIN, BLIND_ADMIN, DELEGATE]) {
+        expect(apartFromPrincipalPerson(await explain(asker, verb, OPEN))).toEqual(apartFromPrincipalPerson(bySystem));
+      }
       const self = await explain(SELF, verb, OPEN);
       expect(self.record).toEqual(bySystem.record);
       expect(self.layers.map((l) => l.record)).toEqual(bySystem.layers.map((l) => l.record));

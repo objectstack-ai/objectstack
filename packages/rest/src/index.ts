@@ -123,6 +123,13 @@ export { refuseRepeatedQueryParams, repeatedQueryParamMessage } from './query-mu
 // `META_TYPE_WRITE_CAPABILITIES`), asked at the same two entries before any
 // store write: a datasource definition is written under the capability the
 // datasource admin door requires.
+//
+// [#23072] …and the by-name doors' QUERY decision (`metaItemQueryRefusal`,
+// ruling 6138588561): each door's closed set, the arity of its single-valued
+// names and the item read's refusal of a member on the layered view, answered
+// as DATA that each transport writes in its own envelope — with the member
+// selector's one reading beside it (`metaMemberSelector`). The sets and their
+// sentences travel inside the decision, never separately.
 export {
     createMetaBookTreeAnswer,
     createMetaItemAnswer,
@@ -135,6 +142,8 @@ export {
     META_TYPE_WRITE_CAPABILITIES,
     metaCallerOrganizationId,
     metaItemLayersDeprecationHeaders,
+    metaItemQueryRefusal,
+    metaMemberSelector,
     metaRequestLocale,
     metaTypeReadRefusal,
     metaTypeWriteRefusal,
