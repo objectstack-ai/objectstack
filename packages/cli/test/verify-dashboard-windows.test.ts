@@ -43,6 +43,7 @@ const OBJECTS = [
     name: 'vdw_case',
     label: 'Case',
     pluralLabel: 'Cases',
+    sharingModel: 'private',
     fields: {
       subject: { type: 'text', label: 'Subject', required: true },
       opened_at: { type: 'datetime', label: 'Opened at' },
