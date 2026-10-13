@@ -181,8 +181,8 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 
 - **ACCEPT 之后的路径分叉**:翻 ready / 挂 auto-merge / 入队前先取一次 PR 的路径面。
 - 路径面用 `get_files` 取,⛔ 不看报告自述;动手之前先分,不是事后对照。
-- governed 面统一定义:`docs/adr/**` + `.claude/**`(全量)+ `skills/**` + `docs/NORTH-STAR.md`。
-- governed 面同含 `AGENTS.md` + `CLAUDE.md`;`GOVERNED_REPOS` 各仓同治理待遇,执行席恒随落地仓车道。
+- governed 面统一定义:`docs/adr/**`+`.claude/**`(全量)+`skills/**`+`docs/NORTH-STAR.md`+`.github/workflows/**`。
+- governed 面同含 `AGENTS.md`+`CLAUDE.md`;`GOVERNED_REPOS` 同治理、行可限仓,执行席恒随落地仓车道。
 - 路径面命中 Tier H ⇒ ACCEPT 换终局四件套,混合 diff ⛔ 不按比例判;要拆让 dev 单独开 PR。
 - 改动 >3000 行(含生成物)同换终局四件套,⛔ 无 Tier S 例外;读数 = PR additions+deletions。
 - ① 复核结论照常写在 issue 上;技能面 hunk 须由契约复审档的席复核,档外席先交 skills 席。

@@ -264,11 +264,23 @@ interface RetiredConversionState {
    * retired entry, so tsc refuses a retirement that omits it.
    *
    * It is a FACT when the entry is written, never a guess at the next release
-   * number: it is the package's version label at the moment the retirement
-   * lands — `main` carries the last release's label until the next release is
-   * cut, and that release is the first one to refuse the old shape. For an
-   * entry already published, it is the stable release just before the first
-   * published tarball that carries the entry retired.
+   * number: the newest stable release at the moment the retirement lands, read
+   * off the package's version label.
+   *
+   * - Under a stable label (`x.y.z`), it is the label itself: `main` carries
+   *   the last release's label until the next release is cut, and that release
+   *   is the first one to refuse the old shape.
+   * - Under a prerelease label (`x.y.z-PRERELEASE`, Changesets pre mode), it is
+   *   the newest published stable release, which sits below `x.y.z` — never the
+   *   label (not a stable `x.y.z`) and never `x.y.z`, the first stable release
+   *   that carries the entry retired (`17.7.0` under `18.0.0-next.N`, say).
+   *
+   * For an entry already published, it is the stable release just before the
+   * first published tarball that carries the entry retired. So a stable
+   * release published after the entry landed that does not carry the
+   * retirement — a `17.x` maintenance release during the 18 prerelease — still
+   * accepted the old shape and becomes the value: refreshing the census asks
+   * for that re-stamp.
    *
    * Read by the artifact-ingestion door (`applyArtifactForwardConversions`,
    * `@objectstack/metadata-core`): an artifact whose declared `engines.protocol`
