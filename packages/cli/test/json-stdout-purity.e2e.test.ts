@@ -96,6 +96,10 @@ const FAMILY: Record<string, string[]> = {
   // its own, which `--json` points at stderr — a third pollution source beside
   // the two in the header, so this member is worth driving, not only listing.
   'migrate audit-metadata-bodies': [],
+  // A dry run is its DEFAULT and the only form driven here: without `--apply`
+  // it boots read-only (plugin-audit's objects registered), reads
+  // `sys_comment` below the data door and writes nothing.
+  'migrate comment-reactions': [],
   'migrate files-to-references': [],
   'migrate meta': ['--stored'],
   'migrate multi-value-columns': [],

@@ -38,8 +38,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           user: "用户",
           group: "组",
           position: "岗位",
-          unit_and_subordinates: "业务单元及下级",
-          guest: "访客"
+          unit_and_subordinates: "业务单元及下级"
         }
       },
       recipient_id: {
