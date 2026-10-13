@@ -44,8 +44,8 @@ const REGION = region('inner');
 const VALID: Readonly<Record<string, Config>> = {
   get_record: { objectName: 'account', filter: { status: 'open' }, fields: ['name'], limit: 10, outputVariable: 'rows' },
   create_record: { objectName: 'task', fields: { title: 'X' }, outputVariable: 'taskId' },
-  update_record: { objectName: 'task', filter: { id: '{record.id}' }, fields: { status: 'done' }, multi: false },
-  delete_record: { objectName: 'task', filter: { id: '{record.id}' }, multi: false },
+  update_record: { objectName: 'task', filter: { id: { dialect: 'cel', source: 'record.id' } }, fields: { status: 'done' }, multi: false },
+  delete_record: { objectName: 'task', filter: { id: { dialect: 'cel', source: 'record.id' } }, multi: false },
   notify: { recipients: ['u1'], title: 'Hello', severity: 'info', channels: ['inbox'] },
   http: { url: 'https://example.test/hook', method: 'POST', headers: { 'X-Kind': 'probe' }, durable: false, timeoutMs: 5000 },
   screen: {

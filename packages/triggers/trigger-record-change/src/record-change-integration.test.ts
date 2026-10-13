@@ -279,7 +279,7 @@ function stampFlow(name: string, object: string) {
     type: 'autolaunched',
     nodes: [
       { id: 'start', type: 'start', label: 'Start', config: { objectName: object, triggerType: 'record-after-create' } },
-      { id: 'stamp', type: 'update_record', label: 'Stamp', config: { objectName: object, filter: { id: '{record.id}' }, fields: { stamp: 'done' } } },
+      { id: 'stamp', type: 'update_record', label: 'Stamp', config: { objectName: object, filter: { id: { dialect: 'cel', source: 'record.id' } }, fields: { stamp: 'done' } } },
       { id: 'end', type: 'end', label: 'End' },
     ],
     edges: [
@@ -303,7 +303,7 @@ function mirrorWriteFlow(name: string, object: string) {
     type: 'record_change',
     nodes: [
       { id: 'start', type: 'start', label: 'Start', config: { objectName: object, triggerType: 'record-after-write' } },
-      { id: 'mirror', type: 'update_record', label: 'Mirror', config: { objectName: object, filter: { id: '{record.id}' }, fields: { mirror: { dialect: 'cel', source: 'record.status' } } } },
+      { id: 'mirror', type: 'update_record', label: 'Mirror', config: { objectName: object, filter: { id: { dialect: 'cel', source: 'record.id' } }, fields: { mirror: { dialect: 'cel', source: 'record.status' } } } },
       { id: 'end', type: 'end', label: 'End' },
     ],
     edges: [
@@ -338,7 +338,7 @@ function urgentAlertFlow(name: string, object: string) {
           condition: "priority == 'urgent' && (previous == null || previous.priority != 'urgent')",
         },
       },
-      { id: 'alert', type: 'update_record', label: 'Alert', config: { objectName: object, filter: { id: '{record.id}' }, fields: { alerted: 'yes' } } },
+      { id: 'alert', type: 'update_record', label: 'Alert', config: { objectName: object, filter: { id: { dialect: 'cel', source: 'record.id' } }, fields: { alerted: 'yes' } } },
       { id: 'end', type: 'end', label: 'End' },
     ],
     edges: [

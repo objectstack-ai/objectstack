@@ -254,20 +254,36 @@ export class SqlHttpOutbox implements IHttpOutbox {
             { ...dispatcherSweepOptions({ id: { $in: ids }, status: 'pending' }), context: DISPATCHER_SYSTEM_CONTEXT },
         );
 
-        // 4. Read back the rows we actually own.
+        // 4. Read back the rows we actually own. `claimed_at` is deliberately
+        //    not in this WHERE — the same reading as
+        //    `SqlNotificationOutbox.readBackClaimed`: an equality between the
+        //    column and the client's `now` holds only when the store coerces the
+        //    comparand to the column's own type. Every candidate was `pending`
+        //    at step 2, and a node runs one claim at a time, so a candidate now
+        //    `in_flight` under `nodeId` was taken by the UPDATE above.
         const claimed = (await this.engine.find(this.objectName, {
-            where: { id: { $in: ids }, claimed_by: opts.nodeId, claimed_at: now, status: 'in_flight' },
+            where: { id: { $in: ids }, claimed_by: opts.nodeId, status: 'in_flight' },
         }, { context: DISPATCHER_SYSTEM_CONTEXT })) as DeliveryRow[];
 
         // 5. [#8118] Recover the redacted header column for the rows this
         // claim now owns — the one read that must see the authored map.
         const headerColumns = await this.readClaimedHeaderColumns(claimed.map((r) => r.id));
 
-        // [#17634] The credential `ack()` takes back, stated explicitly: the
-        // read-back WHERE just proved (claimed_by, claimed_at) = (nodeId, now),
-        // so this restates what the query established — in the exact values the
-        // claiming UPDATE wrote, whatever form a dialect reads the column back in.
-        return claimed.map((r) => ({ ...this.toDelivery(r, headerColumns), claimedBy: opts.nodeId, claimedAt: now }));
+        // [#17634] The credential `ack()` takes back: the holder the WHERE just
+        // proved, and the claim instant AS THE STORE HOLDS IT — the `claimed_at`
+        // read back from the row, never the `now` this process wrote. A numeric
+        // column need not round-trip epoch-ms exactly (a Postgres `real` column
+        // left by the old `number` mapping stores a float32 rounding of it), and
+        // a credential holding `now` would then never equal the stored value:
+        // every ack refused, the row re-sent after each reap. The read-back value
+        // equals every later read of the cell and binds back to the same stored
+        // value in the ack's compare-and-set. `claimed_at` is non-null on an
+        // `in_flight` row: every write that sets `in_flight` sets it.
+        return claimed.map((r) => ({
+            ...this.toDelivery(r, headerColumns),
+            claimedBy: opts.nodeId,
+            claimedAt: r.claimed_at as number,
+        }));
     }
 
     /**
@@ -376,7 +392,10 @@ export class SqlHttpOutbox implements IHttpOutbox {
         // reaped and re-claimed while the send ran. `status = 'in_flight'` alone
         // matches the re-claiming node's live attempt, which is exactly the
         // overwrite #17634 measured. The SAME test is re-stated in the write
-        // below, which is the half that actually holds under the race.
+        // below, which is the half that actually holds under the race. Both
+        // sides of the `claimed_at` test are reads of the same cell —
+        // `claimedAt` is what `claim()` read back — so it is exact on any
+        // numeric column, a lossy `real` one included.
         if (current.claimed_by !== claimed.claimedBy || current.claimed_at !== claimed.claimedAt) {
             throw new HttpAckError(httpAckLostClaimMessage(id, current.status), 'DELIVERY_NOT_ELIGIBLE');
         }

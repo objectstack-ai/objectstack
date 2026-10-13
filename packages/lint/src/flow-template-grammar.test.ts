@@ -83,9 +83,15 @@ describe('the mirrored grammar still matches the evaluator that owns it', () => 
     expect(source).toContain('throw unknownFunctionError(match, trimmed)');
   });
 
-  it('the filter position still hands an unresolved KNOWN filter token to the engine', () => {
-    // The layer-one/layer-two split the rule is built on.
-    expect(source).toContain('isKnownFilterToken');
+  // [#19939, stage S6] RE-JUDGED IN PLACE: this pinned the evaluator's filter
+  // hand-off (`interpolateFilter` asking `isKnownFilterToken`), the split the
+  // retired `flow-filter-token-unknown` was built on. A filter operand reads
+  // no flow token since S6 — the spec's one classifier tells a query
+  // placeholder from a refused token — so the evaluator no longer has a
+  // filter position, and this mirror is read by `lint-flow-patterns.ts` alone.
+  it('the evaluator no longer reads a filter position — no hand-off to the query placeholders', () => {
+    expect(source).not.toContain('isKnownFilterToken');
+    expect(source).not.toContain('export function interpolateFilter');
   });
 });
 

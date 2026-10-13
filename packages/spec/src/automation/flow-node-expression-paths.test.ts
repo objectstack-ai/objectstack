@@ -18,6 +18,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   FLOW_NODE_EXPRESSION_PATHS,
+  flowFilterOperands,
   isExpressionEnvelopeShaped,
   resolveFlowNodeExpressions,
   resolveFlowNodeValueSlots,
@@ -140,9 +141,12 @@ describe('FLOW_NODE_EXPRESSION_PATHS — the assignment value entry', () => {
 describe('FLOW_NODE_EXPRESSION_PATHS — the CRUD `fields.*` value entries', () => {
   const PRICE_ENVELOPE = { dialect: 'cel', source: 'round(price * 100) / 100.0' };
 
-  it.each(['create_record', 'update_record'] as const)('declares exactly one slot for `%s`: `fields.*`, role `value`', (nodeType) => {
+  // [#19939, stage S6] RE-JUDGED IN PLACE: `update_record` declared `fields.*`
+  // alone; since S6 its `filter` operands are a value slot too (the filter
+  // entries below), so `fields.*` is its first entry, not its only one.
+  it.each(['create_record', 'update_record'] as const)('declares `fields.*` for `%s`, role `value`, and beside it only a filter-operand entry', (nodeType) => {
     const entries = FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.nodeType === nodeType);
-    expect(entries).toHaveLength(1);
+    expect(entries.map((e) => e.path)).toEqual(nodeType === 'create_record' ? ['fields.*'] : ['fields.*', 'filter']);
     expect(entries[0]!.path).toBe('fields.*');
     expect(entries[0]!.role).toBe('value');
     expect(entries[0]!.label).toBe(`${nodeType} field value`);
@@ -175,13 +179,21 @@ describe('FLOW_NODE_EXPRESSION_PATHS — the CRUD `fields.*` value entries', () 
     })).toEqual([]);
   });
 
-  it('`update_record.filter` is NOT a value slot — an envelope-shaped filter value resolves nothing', () => {
-    expect(resolveFlowNodeExpressions('update_record', { filter: { total: PRICE_ENVELOPE } })).toEqual([]);
+  // [#19939, stage S6] RE-JUDGED IN PLACE, both: these pinned a CRUD
+  // `filter` as no value slot, an envelope-shaped filter value resolving
+  // nothing. Each filter OPERAND is a value slot since S6, so the envelope
+  // operand resolves at its own path; `get_record`'s `fields` projection stays
+  // no slot.
+  it('`update_record.filter`: an envelope operand resolves at its own path', () => {
+    expect(resolveFlowNodeExpressions('update_record', { filter: { total: PRICE_ENVELOPE } })
+      .map((f) => [f.path, f.entry.label])).toEqual([['filter.total', 'update_record filter operand']]);
   });
 
-  it('`get_record` / `delete_record` declare no value slot — their `fields` / `filter` resolve nothing', () => {
-    expect(resolveFlowNodeExpressions('get_record', { fields: ['id'], filter: { total: PRICE_ENVELOPE } })).toEqual([]);
-    expect(resolveFlowNodeExpressions('delete_record', { filter: { total: PRICE_ENVELOPE } })).toEqual([]);
+  it('`get_record` / `delete_record`: an envelope filter operand resolves; the `fields` projection does not', () => {
+    expect(resolveFlowNodeExpressions('get_record', { fields: ['id'], filter: { total: PRICE_ENVELOPE } })
+      .map((f) => [f.path, f.entry.label])).toEqual([['filter.total', 'get_record filter operand']]);
+    expect(resolveFlowNodeExpressions('delete_record', { filter: { total: PRICE_ENVELOPE } })
+      .map((f) => [f.path, f.entry.label])).toEqual([['filter.total', 'delete_record filter operand']]);
   });
 
   it('a `fields` that is not a plain object resolves nothing rather than throwing', () => {
@@ -433,7 +445,11 @@ describe('resolveFlowNodeValueSlots — every authored value of a `value` slot, 
     expect(resolveFlowNodeValueSlots('screen', { fields: [{ visibleWhen: 'a == 1' }] })).toEqual([]);
     // [#19939] A body-less `loop` (the legacy flat-graph form): its `collection` is read by no value slot.
     expect(resolveFlowNodeValueSlots('loop', { collection: '{rows}' })).toEqual([]);
-    expect(resolveFlowNodeValueSlots('update_record', { filter: { id: '{x}' } })).toEqual([]);
+    // [#19939, stage S6] RE-JUDGED IN PLACE: an `update_record` filter operand
+    // was no value slot and resolved nothing; it is one since S6 (the filter
+    // operand block below pins what it resolves), so the undeclared map here
+    // is `create_record`'s `filter`, a key that node does not declare.
+    expect(resolveFlowNodeValueSlots('create_record', { filter: { id: '{x}' } })).toEqual([]);
     expect(resolveFlowNodeValueSlots('assignment', { digest: '{x}' })).toEqual([]);
     expect(resolveFlowNodeValueSlots('assignment', { assignments: [{ variable: 'd', value: '{x}' }] })).toEqual([]);
     expect(resolveFlowNodeValueSlots('create_record', null)).toEqual([]);
@@ -443,6 +459,79 @@ describe('resolveFlowNodeValueSlots — every authored value of a `value` slot, 
     const config = { fields: { a: '{x}', b: { dialect: 'cel', source: '1' }, c: { dialect: 'cel' }, d: 4 } };
     const envelopes = resolveFlowNodeValueSlots('update_record', config).filter((f) => isExpressionEnvelopeShaped(f.value));
     expect(envelopes).toEqual(resolveFlowNodeExpressions('update_record', config));
+  });
+});
+
+/**
+ * [#19939, stage S6] The operands of a CRUD node's `filter` are value slots
+ * (Fork R17 → A): `flowFilterOperands` reads the filter the way the filter
+ * grammar does, and both walks emit each OPERAND — never the filter's keys,
+ * operators, combinators or nested-relation conditions — at its own path.
+ */
+describe('a CRUD `filter`: each operand is a value slot of its own (#19939, S6)', () => {
+  const ENV = { dialect: 'cel', source: 'record.id' };
+
+  it.each(['get_record', 'update_record', 'delete_record'] as const)('%s declares one filter entry, `filterOperands`, role `value`', (nodeType) => {
+    const entry = FLOW_NODE_EXPRESSION_PATHS.find((e) => e.nodeType === nodeType && e.path === 'filter');
+    expect(entry).toEqual({
+      nodeType, path: 'filter', role: 'value', label: `${nodeType} filter operand`, filterOperands: true,
+    });
+  });
+
+  it('every operand shape: a field\'s value, an operator\'s comparand, a list comparand\'s elements, combinators, a nested relation', () => {
+    const filter = {
+      owner: ENV,
+      status: 'open',
+      amount: { $gt: ENV, $lte: 100 },
+      id: { $in: [ENV, 'r2'] },
+      due: { $between: ['{yesterday}', ENV] },
+      $or: [{ stage: ENV }, { stage: { $ne: null } }],
+      $not: { kind: 'x' },
+      account: { industry: ENV },
+      ref: { $eq: { $field: 'other' } },
+    };
+    expect(flowFilterOperands(filter).map((o) => [o.path, o.value])).toEqual([
+      [['owner'], ENV],
+      [['status'], 'open'],
+      [['amount', '$gt'], ENV],
+      [['amount', '$lte'], 100],
+      [['id', '$in', 0], ENV],
+      [['id', '$in', 1], 'r2'],
+      [['due', '$between', 0], '{yesterday}'],
+      [['due', '$between', 1], ENV],
+      [['$or', 0, 'stage'], ENV],
+      [['$or', 1, 'stage', '$ne'], null],
+      [['$not', 'kind'], 'x'],
+      [['account', 'industry'], ENV],
+      [['ref', '$eq'], { $field: 'other' }],
+    ]);
+  });
+
+  it('an envelope is ONE operand, which may evaluate to a list; the top-level filter is never one', () => {
+    expect(flowFilterOperands({ id: { $in: ENV } }).map((o) => o.path)).toEqual([['id', '$in']]);
+    // A filter written as an envelope is a condition on fields named `dialect` and `source`.
+    expect(flowFilterOperands(ENV).map((o) => [o.path, o.value])).toEqual([[['dialect'], 'cel'], [['source'], 'record.id']]);
+    // A related field named `dialect` is matched through an operator map, never read as an envelope.
+    expect(flowFilterOperands({ rel: { dialect: { $eq: 'cel' } } }).map((o) => [o.path, o.value]))
+      .toEqual([[['rel', 'dialect', '$eq'], 'cel']]);
+  });
+
+  it('a filter that is not a plain object has no operand; a malformed combinator member is handed over as one', () => {
+    expect(flowFilterOperands('{x}')).toEqual([]);
+    expect(flowFilterOperands(null)).toEqual([]);
+    expect(flowFilterOperands([ENV])).toEqual([]);
+    expect(flowFilterOperands({ $and: ['{x}'] }).map((o) => [o.path, o.value])).toEqual([[['$and', 0], '{x}']]);
+  });
+
+  it('both walks emit the operands at their ledger paths — every value, and the envelope subset', () => {
+    const config = { objectName: 'task', filter: { owner: ENV, id: { $in: ['{recordId}', ENV] }, $or: [{ s: 'x' }] } };
+    expect(resolveFlowNodeValueSlots('delete_record', config).map((f) => [f.path, f.value])).toEqual([
+      ['filter.owner', ENV],
+      ['filter.id.$in[0]', '{recordId}'],
+      ['filter.id.$in[1]', ENV],
+      ['filter.$or[0].s', 'x'],
+    ]);
+    expect(resolveFlowNodeExpressions('delete_record', config).map((f) => f.path)).toEqual(['filter.owner', 'filter.id.$in[1]']);
   });
 });
 
@@ -473,7 +562,8 @@ describe('every entry older than the value role resolves byte-identically (the r
     // moved `loop.collection` and `map.collection` from the retired
     // `flow-template` role to `value` IN PLACE (`screen.fields[].visibleWhen`
     // keeps its `predicate` row beside the screen's value rows). Stage S4
-    // appended the three `notify` value rows, and stage S5 the `http` body's.
+    // appended the three `notify` value rows, stage S5 the `http` body's, and
+    // stage S6 the three CRUD `filter` operand rows.
     expect(FLOW_NODE_EXPRESSION_PATHS.map(byKey)).toEqual([
       'screen.fields[].visibleWhen (predicate)',
       'decision.conditions[].expression (predicate)',
@@ -492,6 +582,9 @@ describe('every entry older than the value role resolves byte-identically (the r
       'notify.templateData.* (value)',
       'notify.sourceId (value)',
       'http.body (value)',
+      'get_record.filter (value)',
+      'update_record.filter (value)',
+      'delete_record.filter (value)',
     ]);
   });
 
