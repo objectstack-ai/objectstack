@@ -1,6 +1,6 @@
 # ADR-0087: Metadata protocol upgrades for AI consumers — conversion over notification, executable migrations, machine-verifiable upgrades
 
-**Status**: Accepted (2026-07-04, #2582) · trued up to as-built 2026-07-15 (see Addendum) · **Amended** (2026-09-30, #20390 ruling A — the artifact-ingestion window decides per entry by each retired conversion's `retiredAfter`; see the amendment note under the 2026-09-13 addendum's window bullet) · **Amended** (2026-10-09, #22449 ruling B′ — the two D4 projections, the per-major section of `spec-changes.json` and the protocol upgrade guide, are generated at publish rather than committed; see the amendment note under D4, which says what is generated where and where each part landed, and the struck clauses in the P2 phase-status bullet)
+**Status**: Accepted (2026-07-04, #2582) · trued up to as-built 2026-07-15 (see Addendum) · **Amended** (2026-09-30, #20390 ruling A — the artifact-ingestion window decides per entry by each retired conversion's `retiredAfter`; see the amendment note under the 2026-09-13 addendum's window bullet) · **Amended** (2026-10-09, #22449 ruling B′ — the two D4 projections, the per-major section of `spec-changes.json` and the protocol upgrade guide, are generated at publish rather than committed; see the amendment note under D4, which says what is generated where and where each part landed, and the struck clauses in the P2 phase-status bullet) · **Amended** (2026-10-13, #23038 — the artifact-ingestion window's third disjunct, landed as `58f5c90999`: a floor that is the first release of a major replays that major's conversion step, verdict `'converted-major-step'`; see the 2026-10-13 amendment note under the 2026-09-13 addendum's window bullet)
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0059](./0059-third-party-backward-compatibility-gates.md) (layered backward-compat gates — this ADR is its consumer-facing sequel), [ADR-0078](./0078-no-silently-inert-metadata.md) (no declarable-but-unenforced metadata — the un-checked `engines.protocol` is exactly this class), [ADR-0025](./0025-plugin-package-distribution.md) (§3.2 `engines.protocol` / `engines.platform` compatibility ranges, §3.10 #3 protocol-first check order), [ADR-0033](./0033-ai-assisted-metadata-authoring.md) (the authoring population this ADR designs for), [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove), [ADR-0054](./0054-runtime-proof-for-authorable-surface.md) (prove-it-runs), AGENTS.md Prime Directive #12 (contract-first, no consumer-side dialect fallbacks — §"Why the conversion layer does not violate PD #12" draws the line)
 **Consumers**: `@objectstack/spec` (protocol version constant, conversion layer, deprecation/change registries), `@objectstack/cli` (`validate`, `doctor`, `migrate meta`), the runtime metadata loader (handshake + conversion), `@objectstack/mcp` (the AI-native change/migration surface), `@objectstack/create-objectstack`, the Release workflow, and every third-party consumer — whose maintainer is assumed to be an **AI agent**
@@ -1167,6 +1167,39 @@ unconditional strip would start deleting legal metadata the day the keys return.
   > refused it outright. The module docblock of
   > `packages/metadata-core/src/artifact-forward-conversion.ts` states the rule
   > and is its authority.
+
+  > **Amended (2026-10-13) — a first-release-of-a-major floor replays that
+  > major's step.** Provenance: #23001, landed as `58f5c90999` (PR #23023),
+  > recorded here by #23038. The window has a THIRD disjunct: the door replays
+  > an entry E when `floor < runtime` OR `floor <= E.retiredAfter` OR
+  > (`floor` is `M.0.0` AND `E.toMajor` is M). A floor that is the first
+  > release of major M, at or above the runtime label, replays every retired
+  > entry of the conversion step into M (`CONVERSIONS_BY_MAJOR[M]`, the step
+  > `objectstack migrate meta --from M-1` replays), with the default flips
+  > still refused by id first, under the verdict `'converted-major-step'`
+  > (`packages/metadata-core/src/artifact-forward-conversion.ts#idsTheFloorPostdates`).
+  > Why: `M.0.0` is what a bare `^M` range reads as and the floor every build
+  > from M's prerelease declares, while the package label still names the
+  > last release of M-1 and every retirement landing in the prerelease is
+  > stamped at or below that label; so the per-entry half read a `^18`
+  > artifact built before a prerelease retirement as postdating every stamp
+  > (`'authored-current'`), and the strict parse refused it. The replay is
+  > safe because a conversion rewrites only the shape it positively
+  > recognizes: an artifact built after a retirement comes back unchanged,
+  > and one built before it boots. ⚠️ The M2 caveat: an entry whose old shape
+  > becomes legal again cannot be protected for a bare-major floor by this
+  > half, nor by the label half, which strips it for the same artifact one
+  > release later; the change that re-legalizes a retired key decides that
+  > entry's fate at this door, where the default-flip refusal
+  > (`packages/metadata-core/src/artifact-forward-conversion.ts#DEFAULT_FLIPS_NOT_REPLAYED_HERE`)
+  > is the existing mechanism. The `retiredAfter` the note above defines is a
+  > stable `x.y.z`: under a prerelease label (Changesets pre mode) it is the
+  > newest published stable release, never a prerelease tarball (#23042,
+  > landed as `719183f50`, PR #23130). The addendum's closing sentence,
+  > "within-line retirements (17.1 → 17.2)", still names the case that
+  > created the window and is annotated there, not rewritten: the window now
+  > also serves a prerelease-major floor. The module docblock remains the
+  > rule's authority.
 - **⚠️ The shipped key is the DECLARED FLOOR, not the authored version.** The
   ruling says "authored `specVersion`"; what an artifact manifest actually
   carries is a protocol *range*, so the implementation keys off that range's
@@ -1216,3 +1249,11 @@ should CONSUME this policy rather than reimplement it. Nothing here changes the
 protocol handshake's jurisdiction either — a cross-major gap refuses at
 `checkProtocolCompat` before conversion could matter, and this window is for
 within-line retirements (17.1 → 17.2), which are the case that created it.
+
+> **Annotated (2026-10-13).** Since `58f5c90999` the window also serves a
+> prerelease-major floor: `^18` on a runtime labelled from 17.7.0 through
+> 18.0.0, and from 18.0.1 on the label half replays the whole chain for it
+> (the 2026-10-13 amendment note under the window bullet). The handshake
+> still answers first: the protocol constant moves to M when M's prerelease
+> opens, so a `^M` floor passes it while the package label still names the
+> last release of M-1, and only then does the window decide.

@@ -447,7 +447,7 @@ describe('FlowSchema', () => {
             // `opportunity.*` predicate below referenced nothing.
             config: {
               objectName: 'opportunity',
-              filter: { id: '{opportunityId}' },
+              filter: { id: { dialect: 'cel', source: 'opportunityId' } },
               outputVariable: 'opportunity',
             },
             position: { x: 100, y: 150 },
@@ -474,7 +474,7 @@ describe('FlowSchema', () => {
             // outright — so this fixture could not have run as written either.
             config: {
               objectName: 'opportunity',
-              filter: { id: '{opportunityId}' },
+              filter: { id: { dialect: 'cel', source: 'opportunityId' } },
               fields: {
                 status: 'approved',
                 approved_by: 'system',
@@ -660,10 +660,10 @@ describe('FlowSchema', () => {
             //    string"), and `DAYS_AGO()` is a function no layer implements.
             //    The date window is spelled in the dialect that OWNS a filter
             //    value position: `{90_days_ago}` is a spec date macro
-            //    (`DATE_MACRO_PARAM_RE`), and `interpolateFilter` hands a known
-            //    filter token through VERBATIM for the query engine's
-            //    `resolveFilterTokens` to expand (#3810 ownership transfer) —
-            //    `date-macros.zod.ts` names "flow node filters" as a consumer.
+            //    (`DATE_MACRO_PARAM_RE`), a query placeholder a flow filter
+            //    operand hands to the query untouched for the query engine's
+            //    `resolveFilterTokens` to expand (`classifyFlowFilterOperandString`)
+            //    — `date-macros.zod.ts` names "flow node filters" as a consumer.
             //  • `limit` was absent. The executor branches on it: `limit > 1`
             //    runs `find` and outputs a `records` LIST; otherwise `findOne`
             //    and a single `record`. A cleanup sweep wants the list, and the
@@ -712,7 +712,7 @@ describe('FlowSchema', () => {
                     // body, which is what makes `item` actually bound per iteration.
                     config: {
                       objectName: 'log_entry',
-                      filter: { id: '{item.id}' },
+                      filter: { id: { dialect: 'cel', source: 'item.id' } },
                     },
                   },
                 ],
@@ -1121,7 +1121,7 @@ describe('BPMN — Parallel Gateway & Join Gateway', () => {
         { id: 'finance_review', type: 'connector_action', label: 'Finance Review', connectorConfig: { connectorId: 'finance_desk', actionId: 'request_review' } },
         { id: 'legal_review', type: 'connector_action', label: 'Legal Review', connectorConfig: { connectorId: 'legal_desk', actionId: 'request_review' } },
         { id: 'join', type: 'join_gateway', label: 'Join — All Approved' },
-        { id: 'final_approve', type: 'update_record', label: 'Final Approve', config: { objectName: 'contract', filter: { id: '{record.id}' }, fields: { status: 'approved' } } },
+        { id: 'final_approve', type: 'update_record', label: 'Final Approve', config: { objectName: 'contract', filter: { id: { dialect: 'cel', source: 'record.id' } }, fields: { status: 'approved' } } },
         { id: 'end', type: 'end', label: 'End' },
       ],
       edges: [
@@ -1208,9 +1208,9 @@ describe('BPMN — Default Sequence Flow (isDefault)', () => {
       nodes: [
         { id: 'start', type: 'start', label: 'Start' },
         { id: 'check_priority', type: 'decision', label: 'Check Priority' },
-        { id: 'high_path', type: 'update_record', label: 'High Priority Handler', config: { objectName: 'ticket', filter: { id: '{record.id}' } } },
-        { id: 'medium_path', type: 'update_record', label: 'Medium Priority Handler', config: { objectName: 'ticket', filter: { id: '{record.id}' } } },
-        { id: 'default_path', type: 'update_record', label: 'Default Handler', config: { objectName: 'ticket', filter: { id: '{record.id}' } } },
+        { id: 'high_path', type: 'update_record', label: 'High Priority Handler', config: { objectName: 'ticket', filter: { id: { dialect: 'cel', source: 'record.id' } } } },
+        { id: 'medium_path', type: 'update_record', label: 'Medium Priority Handler', config: { objectName: 'ticket', filter: { id: { dialect: 'cel', source: 'record.id' } } } },
+        { id: 'default_path', type: 'update_record', label: 'Default Handler', config: { objectName: 'ticket', filter: { id: { dialect: 'cel', source: 'record.id' } } } },
         { id: 'end', type: 'end', label: 'End' },
       ],
       edges: [
@@ -1637,7 +1637,7 @@ describe('BPMN — Boundary Event', () => {
             errorCode: 'TIMEOUT',
           },
         },
-        { id: 'handle_error', type: 'update_record', label: 'Log Error', config: { objectName: 'sync_log', filter: { id: '{record.id}' } } },
+        { id: 'handle_error', type: 'update_record', label: 'Log Error', config: { objectName: 'sync_log', filter: { id: { dialect: 'cel', source: 'record.id' } } } },
         { id: 'end_success', type: 'end', label: 'End Success' },
         { id: 'end_error', type: 'end', label: 'End Error' },
       ],

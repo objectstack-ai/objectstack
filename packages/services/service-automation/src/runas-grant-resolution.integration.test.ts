@@ -55,7 +55,7 @@ function updateFlow(name: string, runAs: 'system' | 'user') {
     variables: [{ name: 'noteId', type: 'text', isInput: true }],
     nodes: [
       { id: 'start', type: 'start', label: 'Start' },
-      { id: 'up', type: 'update_record', label: 'Update', config: { objectName: 'runas_thing', filter: { id: '{noteId}' }, fields: { status: 'x' } } },
+      { id: 'up', type: 'update_record', label: 'Update', config: { objectName: 'runas_thing', filter: { id: { dialect: 'cel', source: 'noteId' } }, fields: { status: 'x' } } },
       { id: 'end', type: 'end', label: 'End' },
     ],
     edges: [{ id: 'e1', source: 'start', target: 'up' }, { id: 'e2', source: 'up', target: 'end' }],

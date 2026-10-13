@@ -70,7 +70,7 @@ export const RollUpOrderTotals = defineFlow({
       label: 'Read the order lines',
       config: {
         objectName: 'sales_order_line',
-        filter: { sales_order_id: '{record.id}' },
+        filter: { sales_order_id: { dialect: 'cel', source: 'record.id' } },
         fields: ['amount'],
         limit: 200,
         outputVariable: 'lines',
@@ -92,7 +92,7 @@ export const RollUpOrderTotals = defineFlow({
       label: 'Write the totals back',
       config: {
         objectName: 'sales_order',
-        filter: { id: '{record.id}' },
+        filter: { id: { dialect: 'cel', source: 'record.id' } },
         // A value slot computes with a CEL value envelope; the script's
         // output `totals` is bound by the node before this one.
         fields: {
