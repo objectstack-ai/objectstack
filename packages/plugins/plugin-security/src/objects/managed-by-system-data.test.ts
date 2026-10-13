@@ -34,7 +34,6 @@ import { describe, expect, it } from 'vitest';
 import { resolveCrudAffordances } from '@objectstack/spec/data';
 import { SysUserPosition } from './sys-user-position.object.js';
 import { SysUserPermissionSet } from './sys-user-permission-set.object.js';
-import { SysPositionPermissionSet } from './sys-position-permission-set.object.js';
 
 /** What each object resolved to in v16: LOCKED `system` + `userActions: {c,e,d}`. */
 const V16_EXPECTED = { create: true, import: false, edit: true, delete: true, exportCsv: true };
@@ -69,7 +68,6 @@ const asV16 = (obj: { userActions?: unknown }) => ({
 const OBJECTS = [
   ['sys_user_position', SysUserPosition],
   ['sys_user_permission_set', SysUserPermissionSet],
-  ['sys_position_permission_set', SysPositionPermissionSet],
 ] as const;
 
 describe('#3355 — RBAC link tables move to `system-data` with their affordances intact', () => {

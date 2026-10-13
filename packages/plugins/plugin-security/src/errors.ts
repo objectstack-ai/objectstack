@@ -108,6 +108,11 @@ export class PermissionDeniedError extends Error {
  * `sharingModel: 'controlled_by_parent'` on an object with no `master_detail`
  * relation to derive access from → `422 INVALID_METADATA`.
  *
+ * [ADR-0055 §1 · #23100] "No relation" means: not exactly one `master_detail`
+ * field declared `required: true` — none, a non-required one, a required
+ * `lookup` only, or two or more required ones all land here, because the
+ * relation resolver derives a master from that one field and nothing else.
+ *
  * This is a precisely detectable AUTHORING defect, not an access verdict: the
  * object declares that its access is derived from a master and then gives the
  * platform no master to derive it from. Disguised as a routine permission
@@ -128,8 +133,10 @@ export class MasterDetailRelationMissingError extends Error {
   constructor(object: string, operation: string) {
     super(
       `[Security] Configuration defect: ${operation} on '${object}' cannot be authorized because the object `
-      + `declares sharingModel 'controlled_by_parent' but has no master_detail relation to derive access from. `
-      + `Declare a required master_detail field pointing at the master object, or change sharingModel.`,
+      + `declares sharingModel 'controlled_by_parent' but not exactly one required master_detail field to derive `
+      + `access from (a non-required master_detail or a required lookup derives none, and neither do two `
+      + `required ones). Declare one master_detail field with required: true pointing at the master object, `
+      + `or change sharingModel.`,
     );
     this.name = 'MasterDetailRelationMissingError';
   }
@@ -407,37 +414,6 @@ export class PermissionSetNameConflictError extends Error {
     super(`[Security] permission set '${setName}' already exists`);
     this.name = 'PermissionSetNameConflictError';
     this.setName = setName;
-  }
-}
-
-/**
- * [ruling Q (a), ADR-0131 D3] A Setup create of a position, or a rename into a
- * name, that the security catalog already holds a definition of under the
- * `single` posture: a second holder of one position name per deployment →
- * `409 UNIQUE_VIOLATION` (`position-write-through.ts`).
- *
- * The wire identity is the one this platform already answers for a second
- * `sys_position` row of a name in ONE organization (the engine's unique index,
- * reported as `409 UNIQUE_VIOLATION`), and the one
- * {@link PermissionSetNameConflictError} answers for the sibling catalog — one
- * condition, one envelope, whichever layer catches it. It stamps the same
- * named constants, so it adds no second emitter spelling of the code.
- */
-export class PositionNameConflictError extends Error {
-  readonly code = PERMISSION_SET_NAME_CONFLICT_CODE;
-  readonly status = PERMISSION_SET_NAME_CONFLICT_STATUS;
-  readonly statusCode = PERMISSION_SET_NAME_CONFLICT_STATUS;
-  /** The position name that is already held. */
-  readonly positionName: string;
-  constructor(positionName: string, holder?: string) {
-    super(
-      `[Security] a position named '${positionName}' already exists in this deployment`
-        + `${holder ? ` (declared by '${holder}')` : ''}: under the single tenancy posture a position name `
-        + 'is unique per deployment, and two holders of one name are never merged. Choose another name, '
-        + 'or edit the existing position.',
-    );
-    this.name = 'PositionNameConflictError';
-    this.positionName = positionName;
   }
 }
 

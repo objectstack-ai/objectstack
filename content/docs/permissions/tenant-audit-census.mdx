@@ -83,7 +83,7 @@ what moved this page's population from 225 to 227; nothing about the two sites
 changed, only whether this instrument could see them.
 
 **The expensive failure direction is a keyword.** Sites whose receiver the author
-typed `any` have no type to read, and there are 42 of them — just under a fifth
+typed `any` have no type to read, and there are 40 of them — just under a fifth
 of the population, concentrated in exactly the seed and bootstrap paths this
 control exists for. Scoring an unreadable receiver as "not an engine" would have
 dropped every one of them silently, with a clean exit and a smaller number that
@@ -189,7 +189,7 @@ reproduce them. Where it disagrees, it disagrees on the page:
 | :--- | :--- | ---: |
 | 175 write call sites | quoted in the merged changeset | **225** |
 | 24 carrying no tenant context | quoted in the merged changeset | **2** provable and tenancy-enabled; **32** more whose options argument is unreadable |
-| 127 of 175 statically decidable, 48 runtime-parameter-name sites | restated on the `isSystem`-scoping card | **155 of 225** decidable, **70** undecidable |
+| 127 of 175 statically decidable, 48 runtime-parameter-name sites | restated on the `isSystem`-scoping card | **153 of 225** decidable, **72** undecidable |
 | 135 (77%) silenced by the `isSystem` guard before the posture gate | the lost issue body — **no surviving corroboration** | **not reproduced**: 120 decidably elevated, 0 decidably not, 97 undecidable |
 | 141 and 132, two independent re-derivations | the card that filed this work | — |
 
@@ -200,8 +200,8 @@ be stated is what this instrument counts, which is written above and re-runnable
 at any commit.
 
 Two structural facts do plausibly widen this reading against any hand or regex
-one, and both are counted in the generated tables below: the 42 sites reached
-through an erased (`any`) receiver, and the 52 that name their object through a
+one, and both are counted in the generated tables below: the 40 sites reached
+through an erased (`any`) receiver, and the 50 that name their object through a
 `const` rather than inline. An instrument that read either the way a person does
 would report a smaller number and would not say so.
 
@@ -224,9 +224,9 @@ cannot read, and they are neither in nor out.
 | what | count |
 | :--- | ---: |
 | write call sites on the application surface | **225** |
-| …whose object name is statically decidable | 155 |
-| …whose object name is chosen at run time | 70 |
-| …against an object with tenancy ENABLED | 154 |
+| …whose object name is statically decidable | 153 |
+| …whose object name is chosen at run time | 72 |
+| …against an object with tenancy ENABLED | 151 |
 | …against an object that declares tenancy off | 1 |
 | threading a tenant context | 164 |
 | PROVABLY carrying none (options read, no context key) | **8** |
@@ -239,15 +239,15 @@ cannot read, and they are neither in nor out.
 
 | how the instrument reached the site | count |
 | :--- | ---: |
-| receiver carried a readable engine type | 183 |
-| receiver erased, placed by the object NAME | 30 |
+| receiver carried a readable engine type | 185 |
+| receiver erased, placed by the object NAME | 27 |
 | receiver erased, placed by an `object: string` PARAMETER | 7 |
-| receiver erased, placed by an `UNTYPED_RECEIVERS` row | 5 |
+| receiver erased, placed by an `UNTYPED_RECEIVERS` row | 6 |
 
 | object name spelled inline | 103 |
-| object name spelled through a `const` | 52 |
+| object name spelled through a `const` | 50 |
 | object name is an `object: string` parameter | 9 |
-| object name is some other run-time expression | 61 |
+| object name is some other run-time expression | 63 |
 
 ### Subtractions the census could NOT defend — enforced
 
@@ -297,13 +297,13 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-12 at `c60e08810`.
+Measured on 2026-10-13 at `66949b772`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 629 |
-| engine-shaped types recognised | 71 |
-| declared objects in the registry | 117 |
-| same-named calls subtracted as non-engine | 161 |
+| tracked non-test sources scanned | 648 |
+| engine-shaped types recognised | 72 |
+| declared objects in the registry | 116 |
+| same-named calls subtracted as non-engine | 160 |
 
 {/* END GENERATED: tenant-audit-census */}

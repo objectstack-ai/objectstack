@@ -125,7 +125,8 @@ export default class MigrateOrganizationOwnership extends Command {
     }),
     out: Flags.string({
       description:
-        'Where to write the plan (default: organization-ownership-plan-TIMESTAMP.json in the current directory). ' +
+        'Where to write the plan, or with --apply the apply report (default: organization-ownership-plan-TIMESTAMP.json, ' +
+        'or organization-ownership-apply-TIMESTAMP.json, in the current directory). ' +
         'An existing file is never overwritten',
     }),
     json: Flags.boolean({ description: 'Also print the plan (or, with --apply, the apply report) on stdout' }),
@@ -479,13 +480,16 @@ export default class MigrateOrganizationOwnership extends Command {
     console.log('');
     for (const table of report.tables) {
       if (!table.before) continue;
-      if (table.attributed + table.deleted + table.unattributable.length + table.remaining === 0 && !table.columnDropped) continue;
+      if (table.attributed + table.deleted + table.unattributable.length + table.remaining + table.departures.length === 0 && !table.columnDropped) continue;
       console.log(
         `  ${chalk.white(table.object.padEnd(34))} ${table.fate.padEnd(16)} attributed ${String(table.attributed).padStart(6)}  ` +
           `deleted ${String(table.deleted).padStart(6)}  ${table.columnDropped ? chalk.green('column dropped  ') : ''}` +
           `${table.unattributable.length ? chalk.yellow(`reported ${table.unattributable.length}  `) : ''}` +
           `${table.remaining ? chalk.red(`remaining ${table.remaining}`) : ''}`,
       );
+      for (const departure of table.departures) {
+        console.log(chalk.yellow(`      ${departure.rows} row(s) still to leave by a step not yet run — ${departure.label}`));
+      }
     }
     console.log('');
     if (report.advisory > 0) {

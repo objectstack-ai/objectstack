@@ -33,6 +33,30 @@ import { isServiceServeable } from '../service-serveable.js';
 import type { TranslationData } from '@objectstack/spec/system';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+// [#23214] The repo's one sentence for a repeated single-valued parameter.
+import { repeatedQueryParamMessage } from '@objectstack/rest';
+
+/**
+ * [#23214] `?locale=` on the two arms whose PATH names no locale
+ * (`/translations?locale=`, `/labels/:object?locale=`): ONE locale. A repeat
+ * reached `getTranslations` and `resolveLocale` as an array, and the latter's
+ * `toLowerCase()` threw, so the caller was answered a 500. Refused instead with
+ * the multiplicity sentence, before any i18n call; a one-element array is one
+ * occurrence and an empty one is none.
+ */
+function readQueryLocale(deps: DomainHandlerDeps, query: any): { locale: any } | { refused: HttpDispatcherResult } {
+    const raw = query?.locale;
+    if (!Array.isArray(raw)) return { locale: raw };
+    if (raw.length > 1) {
+        return {
+            refused: {
+                handled: true,
+                response: deps.error(repeatedQueryParamMessage('locale', raw.length), 400, { code: 'VALIDATION_ERROR' }),
+            },
+        };
+    }
+    return { locale: raw[0] };
+}
 
 export function createI18nDomain(deps: DomainHandlerDeps): DomainRoute {
     return {
@@ -112,7 +136,12 @@ export async function handleI18nRequest(
 
     // GET /i18n/translations/:locale  OR  /i18n/translations?locale=xx
     if (parts[0] === 'translations') {
-        const locale = parts[1] ? decodeURIComponent(parts[1]) : query?.locale;
+        let locale = parts[1] ? decodeURIComponent(parts[1]) : undefined;
+        if (!parts[1]) {
+            const read = readQueryLocale(deps, query);
+            if ('refused' in read) return read.refused;
+            locale = read.locale;
+        }
         if (!locale) return { handled: true, response: deps.error('Missing locale parameter', 400) };
 
         let translations = i18nService.getTranslations(locale);
@@ -135,7 +164,12 @@ export async function handleI18nRequest(
     // GET /i18n/labels/:object/:locale  OR  /i18n/labels/:object?locale=xx
     if (parts[0] === 'labels' && parts.length >= 2) {
         const objectName = decodeURIComponent(parts[1]);
-        let locale = parts[2] ? decodeURIComponent(parts[2]) : query?.locale;
+        let locale = parts[2] ? decodeURIComponent(parts[2]) : undefined;
+        if (!parts[2]) {
+            const read = readQueryLocale(deps, query);
+            if ('refused' in read) return read.refused;
+            locale = read.locale;
+        }
         if (!locale) return { handled: true, response: deps.error('Missing locale parameter', 400) };
 
         // Locale fallback for labels endpoint

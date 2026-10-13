@@ -274,8 +274,19 @@ function protocolDouble(opts: { withoutLayered?: boolean } = {}) {
             const listed = [...items.values()];
             return packageId ? listed.filter((i) => i._packageId === packageId) : listed;
         }),
-        getMetaItem: vi.fn(async ({ type, name, state, previewDrafts }: any) => {
+        getMetaItem: vi.fn(async ({ type, name, state, previewDrafts, member }: any) => {
             const t = singular(type);
+            // [#23072] The protocol's first step on a named member
+            // (`resolveBundleMemberSelector`): no type in these fixtures is a
+            // bundle, so a member is its located 400, before any read — which
+            // each transport must hand on as itself, never answer from a
+            // name-keyed fallback.
+            if (member !== undefined) {
+                throw Object.assign(
+                    new Error(`The "member" selector names a bundle member, and a '${t}' item has none: its identity is its name alone. Remove the selector.`),
+                    { code: 'VALIDATION_ERROR', status: 400 },
+                );
+            }
             const draft = (DRAFTS[t] ?? []).find((i) => i.name === name);
             if (state === 'draft') {
                 if (!draft) {
@@ -776,6 +787,12 @@ const ITEM_PROBES: ReadonlyArray<{ label: string; param?: string; query: Record<
     // and the empty value, which is the plain read on both transports.
     { label: '?layers=true', param: 'layers', query: { layers: 'true' } },
     { label: '?layers=', param: 'layers', query: { layers: '' } },
+    // [#23072] The bundle member selector: forwarded to the protocol by both
+    // transports (the dispatcher dropped it), which refuses it on every type
+    // here — none is a bundle — and refused beside the layered flag before any
+    // read, by the one decision both ask (`metaItemQueryRefusal`).
+    { label: '?member=zh-CN', param: 'member', query: { member: 'zh-CN' } },
+    { label: '?layers=true&member=zh-CN', param: 'member', query: { layers: 'true', member: 'zh-CN' } },
 ];
 const ITEM_PARAM_AXIS = new Set(ITEM_PROBES.map((p) => p.param).filter((p): p is string => !!p));
 
@@ -941,6 +958,19 @@ describe('[#20408] the item read: the reference moves — each probe changes Res
         expect((await builder('/meta/app/crm', { preview: 'DRAFT' })).item?.label).toBe('CRM (draft)');
         expect((await builder('/meta/app/crm', { state: 'DRAFT' })).item?.label).toBe('CRM (draft)');
         expect((await builder('/meta/object/invoice', { preview: 'draft' })).item?.label).toBe('Invoice (draft)');
+    });
+
+    it('[#23072] ?member= reaches the protocol, whose refusal is the answer; beside ?layers= the decision refuses it first', async () => {
+        const { read, protocol } = bootRest('holder');
+        const member = await read('/meta/view/lead_all', { member: 'zh-CN' });
+        expect({ status: member.status, code: member.code }).toEqual({ status: 400, code: 'VALIDATION_ERROR' });
+        expect(protocol.getMetaItem.mock.calls.at(-1)?.[0]).toMatchObject({ member: 'zh-CN' });
+        const calls = protocol.getMetaItem.mock.calls.length;
+        const layered = await read('/meta/view/lead_all', { layers: 'true', member: 'zh-CN' });
+        expect({ status: layered.status, code: layered.code }).toEqual({ status: 400, code: 'VALIDATION_ERROR' });
+        expect(text(layered)).toContain('not served by the layered view');
+        expect(protocol.getMetaItem.mock.calls.length).toBe(calls);
+        expect(protocol.getMetaItemLayered).not.toHaveBeenCalled();
     });
 
     it('the list: ?preview=DRAFT overlays the drafts, and a segment that names no type is refused', async () => {

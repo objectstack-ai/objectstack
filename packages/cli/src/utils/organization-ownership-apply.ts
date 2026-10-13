@@ -170,6 +170,12 @@ export interface TableOutcome {
   columnDropped: boolean;
   /** Rows still NULL and listed by id — reported, never guessed. */
   unattributable: UnattributableRow[];
+  /**
+   * Rows that leave this table by a step this ceremony has not yet performed
+   * (a move, or a mirror its own stage removes): each counts as remaining
+   * until it is gone, and its label is the remedy.
+   */
+  departures: Array<{ id: string; label: string; as: 'mirror-deletion' | 'moved'; rows: number }>;
   /** Post-check: what is left for this table's fate, `0` when the fate is done. */
   remaining: number;
   notNull: TablePlan['notNull'];
@@ -224,17 +230,21 @@ const TEMPLATES = 'sys_email_template';
 const SETTINGS = 'sys_setting';
 const PLATFORM_SETTINGS = 'sys_platform_setting';
 
-/** Provenance the seeders stamped: such a row is a copy of code unless an admin customized it. */
+/** Provenance the seeders stamped: only such a row can be a copy of code. */
 const SEEDED_BY = ['package', 'platform', 'system'];
 
 /**
- * The `sys_email_template` rows the promotion carries: customized seeded rows
- * and every row an admin authored. A seeded, uncustomized row — NULL residue or
- * an organization's copy — is a copy of code and is not promoted.
+ * The `sys_email_template` rows the promotion carries: exactly the rows mirror
+ * deletion keeps for it — a customized row (or one whose `customized` is
+ * unknown), and every row no seeder wrote (`managed_by` NULL or outside
+ * package / platform / system), with or without an organization. A seeded,
+ * uncustomized row — NULL residue or an organization's copy — is a copy of
+ * code: it is not promoted, and it is deleted as a mirror.
  */
 const templatePromotionSql = (sql: Sql, cols: ReadonlySet<string>): { text: string; params: unknown[] } => {
   const t = TEMPLATES;
-  const customized = cols.has('customized') ? `${sql.q('customized', t)} = ?` : '1 = 0';
+  const c = sql.q('customized', t);
+  const customized = cols.has('customized') ? `${c} = ? OR ${c} IS NULL` : '1 = 0';
   const params: unknown[] = cols.has('customized') ? [sql.bind(true)] : [];
   if (!cols.has('managed_by')) return { text: '1 = 1', params: [] };
   const managed = sql.q('managed_by', t);
@@ -914,9 +924,17 @@ async function runRewrite(run: Run): Promise<StepReport> {
 
 /**
  * The rows of a fate-2 object that are deleted: its mirror selector (every
- * row when it names none), minus every row a named category of the object
- * claims — authored catalog rows, customized templates awaiting promotion.
- * `CASE … END = 0` so a category that evaluates NULL on a row still claims it.
+ * row when it names none), minus every row a claim keeps —
+ *
+ *  - each named category of the object (authored catalog rows, customized or
+ *    organization-stamped templates awaiting promotion);
+ *  - on a table that records provenance, every row no seeder wrote
+ *    (`managed_by` NULL or not package / platform / system): an admin-authored
+ *    row is never a copy of code, whatever the object's inventory row selects.
+ *    It stays and is reported for the step that carries it.
+ *
+ * A claim that evaluates neither true nor false on a row (NULL) claims it:
+ * an unknown is kept, never deleted.
  */
 function deletableWhere(run: Run, table: string, cols: ReadonlySet<string>, entry: InventoryEntry): { text: string; params: unknown[] } {
   const parts: string[] = [];
@@ -926,20 +944,22 @@ function deletableWhere(run: Run, table: string, cols: ReadonlySet<string>, entr
     parts.push(`(${mirror.text})`);
     params.push(...mirror.params);
   }
-  // The promotion runs under `single` only; elsewhere its rows were not
-  // carried anywhere, so they stay, whatever category claims them or not.
-  const promoted = run.opts.posture === 'single';
+  const keep = (claimed: { text: string; params: unknown[] }): void => {
+    parts.push(`(CASE WHEN ${claimed.text} THEN 1 WHEN NOT (${claimed.text}) THEN 0 ELSE 1 END) = 0`);
+    params.push(...claimed.params, ...claimed.params);
+  };
+  // The template promotion runs under `single` only, and before this step:
+  // there, the rows it carried are discharged — their environment copy
+  // exists, so they are mirrors like the rest. Elsewhere nothing carried
+  // them, and every claim keeps its rows.
+  const promoted = run.opts.posture === 'single' && entry.object === TEMPLATES;
   const discharged = promoted ? DISCHARGED_BY_PROMOTION[entry.object] ?? [] : [];
-  if (!promoted && entry.object === TEMPLATES) {
-    const kept = templatePromotionSql(run.sql, cols);
-    parts.push(`(CASE WHEN ${kept.text} THEN 1 ELSE 0 END) = 0`);
-    params.push(...kept.params);
-  }
   for (const category of entry.categories ?? []) {
     if (!category.where || category.conflictBy || discharged.includes(category.id)) continue;
-    const claimed = predicateSql(run.sql, table, cols, category.where);
-    parts.push(`(CASE WHEN ${claimed.text} THEN 1 ELSE 0 END) = 0`);
-    params.push(...claimed.params);
+    keep(predicateSql(run.sql, table, cols, category.where));
+  }
+  if (cols.has('managed_by') && !promoted) {
+    keep(predicateSql(run.sql, table, cols, [{ column: 'managed_by', notIn: SEEDED_BY }]));
   }
   return { text: parts.length ? parts.join(' AND ') : '1 = 1', params };
 }
@@ -984,7 +1004,7 @@ async function runMirrorDeletion(run: Run): Promise<StepReport> {
       run.opts.onProgress?.(`mirror deletion: ${before} row(s) of ${physical}`);
     }
     const kept = Math.max(0, table.rows!.total - (run.deleted.get(table.object) ?? 0));
-    if (kept > 0) notes.push(`${table.object}: ${kept} row(s) are not mirrors (a named category claims them) and stay.`);
+    if (kept > 0) notes.push(`${table.object}: ${kept} row(s) are not mirrors (a named category or their non-seeded provenance claims them) and stay.`);
   }
   return { step: 'mirror-deletion', status: 'done', summary: { deleted: total }, blockers: [], notes };
 }
@@ -1038,19 +1058,29 @@ const RUNNERS: Record<CeremonyStep, (run: Run) => Promise<StepReport>> = {
   'column-drops': runColumnDrops,
 };
 
+/** NULL rows a departure still has to carry out of the table. */
+const departingRows = (table: TablePlan): number => table.departures.reduce((n, d) => n + d.rows, 0);
+
 /** What a table still owes its fate, read from the post-check plan. */
 async function remainingFor(run: Run, table: TablePlan, complete: boolean): Promise<number> {
   if (table.physical !== 'present' || !table.rows) return 0;
   switch (table.fate) {
     case 'attribution':
-      return Number(table.fateCounts.rowsToAttribute ?? 0)
-        + table.departures.filter((d) => d.as === 'moved' && MOVES[d.id]).reduce((n, d) => n + d.rows, 0);
+      return Number(table.fateCounts.rowsToAttribute ?? 0) + departingRows(table);
+    case 'report':
+      return departingRows(table);
     case 'mirror-deletion': {
       const entry = mirrorEntry(run, table.object);
       if (!entry) return 0;
       let left = 0;
       for (const physical of table.tables) {
-        left += await countWhere(run, physical, deletableWhere(run, physical, (await columnsOf(run, physical))!, entry));
+        const cols = (await columnsOf(run, physical))!;
+        left += await countWhere(run, physical, deletableWhere(run, physical, cols, entry));
+        // Template rows no promotion carried (none runs under a wall) still
+        // hold a customer's edit with no environment copy: they remain.
+        if (table.object === TEMPLATES && run.opts.posture !== 'single') {
+          left += await countWhere(run, physical, templatePromotionSql(run.sql, cols));
+        }
       }
       return left;
     }
@@ -1133,6 +1163,22 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
     const ref = a ?? b!;
     const remaining = a ? await remainingFor(run, a, complete) : 0;
     if (complete) discrepancies += remaining;
+    const departures = (a?.departures ?? []).filter((d) => d.rows > 0).map((d) => ({ id: d.id, label: d.label, as: d.as, rows: d.rows }));
+    if (a?.physical === 'present' && object === TEMPLATES && opts.posture !== 'single') {
+      let unpromoted = 0;
+      for (const physical of a.tables) {
+        unpromoted += await countWhere(run, physical, templatePromotionSql(run.sql, (await columnsOf(run, physical))!));
+      }
+      if (unpromoted > 0) {
+        departures.push({
+          id: 'template-promotion',
+          label: `customized or admin-authored templates no promotion carried (none runs under the ${opts.posture} posture)`,
+          as: 'moved',
+          rows: unpromoted,
+        });
+      }
+    }
+    const waiting = departures.reduce((n, d) => n + d.rows, 0);
     tables.push({
       object,
       fate: ref.fate,
@@ -1144,8 +1190,11 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
       movedIn: run.movedIn.get(object) ?? 0,
       columnDropped: b?.organizationColumn === 'present' && a?.organizationColumn === 'absent',
       unattributable: a?.unattributable ?? [],
+      departures,
       remaining,
-      notNull: ref.notNull,
+      notNull: waiting > 0
+        ? { willReceive: false, reason: `${waiting} row(s) still wait for a step not yet run: ${departures.map((d) => d.label).join('; ')}` }
+        : ref.notNull,
     });
   }
   const advisory = after.summary.unattributableRows;

@@ -447,7 +447,7 @@ export const AudienceConfigSchema = lazySchema(() => z.object({
    * receive the platform-admin set).
    */
   selfRegistrationPermissionSet: z.string().min(1).optional().describe(
-    'sys_permission_set name granted to each self-registrant. Required when posture is email_domain or open; ' +
+    'Name of the permission set granted to each self-registrant. Required when posture is email_domain or open; ' +
     'refused for invite_only. admin_full_access is refused.',
   ),
 }).superRefine((value, ctx) => {

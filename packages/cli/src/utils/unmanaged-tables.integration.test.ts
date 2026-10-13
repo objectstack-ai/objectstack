@@ -22,7 +22,7 @@
  *     dialects; this exercises the sqlite one through the driver's own raw
  *     seam, against tables that really exist.
  *
- * ⛔ The NEGATIVE control is the point. `sys_permission_set` (from the composed
+ * ⛔ The NEGATIVE control is the point. `sys_user_permission_set` (from the composed
  * plugin) and `sys_secret` (from the platform floor) are put in the database
  * BEFORE the boot and must NOT be reported, alongside `_objectstack_sequences`
  * and an application table. A sweep observed only in the presence of an orphan
@@ -76,7 +76,10 @@ const OVERRIDING_ENV = [
 
 /** Legitimate, and every one of them must stay OUT of the report. */
 const NEGATIVE_CONTROLS = [
-  'sys_permission_set',      // declared by the composed host plugin
+  // [ADR-0131 D3] A table the composed plugin still declares. `sys_permission_set`
+  // was this control until C3 stage 8 retired its object: its table is now
+  // declared by nothing, so the sweep is RIGHT to report it.
+  'sys_user_permission_set', // declared by the composed host plugin
   'sys_secret',              // declared by the platform floor
   '_objectstack_sequences',  // the driver's own autonumber ledger
   'app_leftovers',           // no reserved prefix at all
@@ -204,7 +207,7 @@ describe('os migrate plan — unmanaged tables, against a real database (#13204)
     expect(stack!.composition.servedBoot).toEqual({ mirrored: true });
     expect(stack!.managedTableCount).toBeGreaterThan(0);
     const declared = (stack!.allObjects() as Array<{ name?: string }>).map((o) => o?.name);
-    expect(declared).toContain('sys_permission_set');
+    expect(declared).toContain('sys_user_permission_set');
     expect(declared).toContain('sys_secret');
   });
 

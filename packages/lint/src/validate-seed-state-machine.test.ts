@@ -13,7 +13,7 @@ import { explainRule } from './rule-explanations.js';
 // recorded verdict to one line of at most 200 characters — every firing
 // variant this suite exercises, not a chosen few. Run the whole file: those
 // cases read what the cases above fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateSeedStateMachine: typeof validateSeedStateMachineUnrecorded = (...args) => {
   const findings = validateSeedStateMachineUnrecorded(...args);
   fired.push(...findings);
@@ -193,5 +193,36 @@ describe('[#22161] one-line verdicts — seed-value-outside-state-machine', () =
       expect(f.message, f.rule).not.toContain('\n');
       expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
     }
+  });
+});
+
+// [#22161] Slice 16: the `fix:` line names both ways out in one line; that the
+// seed exemption allows a mid-lifecycle state but never an undeclared one is
+// the explanation's.
+describe('[#22161] one-line fix — seed-value-outside-state-machine', () => {
+  it('reads as one remedy', () => {
+    const stack = {
+      objects: [{ name: 'ticket', validations: [{ type: 'state_machine', field: 'stage', initialStates: ['open'], transitions: { open: ['closed'] } }] }],
+      data: [{ object: 'ticket', records: [{ name: 'r', stage: 'clsoed' }] }],
+    };
+    const [f] = validateSeedStateMachine(stack);
+    expect(f!.hint).toBe(
+      "Correct 'clsoed' to a declared state, or, if it is a real state, add it to the state machine as an initial " +
+        'state or a transition endpoint',
+    );
+  });
+
+  it('every `fix:` line the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === SEED_VALUE_OUTSIDE_STATE_MACHINE);
+    expect(converted.length).toBeGreaterThan(1);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('`os explain` carries what the `fix:` line no longer says', () => {
+    const text = explainRule(SEED_VALUE_OUTSIDE_STATE_MACHINE)!.paragraphs.join('\n');
+    expect(text).toContain('it is not a licence to write an unknown state');
   });
 });

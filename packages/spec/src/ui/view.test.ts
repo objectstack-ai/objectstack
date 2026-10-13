@@ -116,34 +116,19 @@ describe('ViewDataSchema', () => {
     expect(() => ViewDataSchema.parse(data)).toThrow();
   });
 
-  it('should accept api provider with read configuration', () => {
-    const data: ViewData = {
-      provider: 'api',
-      read: {
-        url: '/api/accounts',
-        method: 'GET',
-        params: { status: 'active' },
-      },
-    };
-
-    expect(() => ViewDataSchema.parse(data)).not.toThrow();
-  });
-
-  it('should accept api provider with read and write configurations', () => {
-    const data: ViewData = {
-      provider: 'api',
-      read: {
-        url: '/api/accounts',
-        method: 'GET',
-      },
-      write: {
-        url: '/api/accounts',
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      },
-    };
-
-    expect(() => ViewDataSchema.parse(data)).not.toThrow();
+  // The two accept pins for the `api` provider that lived here were REPLACED
+  // by its retirement pins (ADR-0049 enforce-or-remove, maintainer ruling
+  // 2026-10-12 letter C): `view-data-api-provider-retirement.test.ts` holds
+  // the refusal, its prescription, the surviving arms and the tree-scoped
+  // absence scan. One refusal stays here as the control that the arm is gone
+  // from THIS schema and not merely from that file's fixtures.
+  it("REFUSES the retired `api` provider at `provider`, with the prescription", () => {
+    const result = ViewDataSchema.safeParse({ provider: 'api', read: { url: '/api/accounts' } });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'provider');
+    expect(issue, JSON.stringify(result.error!.issues)).toBeDefined();
+    expect(issue!.message).toMatch(/`view\.data\.provider: 'api'` was removed/);
+    expect(issue!.message).toContain('was removed in @objectstack/spec 18 (');
   });
 
   it('should accept value provider with static items', () => {
@@ -589,21 +574,9 @@ describe('ListViewSchema', () => {
     expect(() => ListViewSchema.parse(listView)).not.toThrow();
   });
 
-  it('should accept list view with api provider', () => {
-    const listView: ListView = {
-      type: 'grid',
-      columns: ['name', 'email', 'phone'],
-      data: {
-        provider: 'api',
-        read: {
-          url: '/api/contacts',
-          method: 'GET',
-        },
-      },
-    };
-
-    expect(() => ListViewSchema.parse(listView)).not.toThrow();
-  });
+  // `should accept list view with api provider` lived here until the view-level
+  // `api` data source was retired; `view-data-api-provider-retirement.test.ts`
+  // pins the refusal through `ListViewSchema.data` at its nested path.
 
   it('should accept list view with value provider', () => {
     const listView: ListView = {
@@ -621,16 +594,16 @@ describe('ListViewSchema', () => {
     expect(() => ListViewSchema.parse(listView)).not.toThrow();
   });
 
-  it('should accept kanban view with custom api data source', () => {
+  it('should accept kanban view with a non-object (static value) data source', () => {
+    // Was an `api` source until that arm was retired; the pin's point — a
+    // kanban config beside a data source that is not the bound object — is
+    // kept on the surviving `value` arm.
     const kanbanView: ListView = {
       type: 'kanban',
       columns: ['name', 'owner', 'amount'],
       data: {
-        provider: 'api',
-        read: {
-          url: '/api/opportunities',
-          params: { view: 'pipeline' },
-        },
+        provider: 'value',
+        items: [{ name: 'Acme renewal', owner: 'ann', amount: 1200, stage: 'proposal' }],
       },
       kanban: {
         groupByField: 'stage',

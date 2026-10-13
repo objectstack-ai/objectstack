@@ -1,5 +1,592 @@
 # @objectstack/platform-objects
 
+## 18.0.0-next.0
+
+### Minor Changes
+
+- 67b669e: The security catalog's activation door switches a position or permission set the environment authored, and a ledger write it refuses answers with the status its code means
+  
+  Clause-②: yes (widening)
+  
+  - **The door accepts environment-authored items** (`@objectstack/runtime`). `POST /api/v1/security/_activation/:type/:name` switched a position or permission set off and on only when a package shipped it. FROM: an item saved through the metadata door (`PUT /api/v1/meta/position/:name`, `PUT /api/v1/meta/permission/:name`) was refused `503` with `{ code: 'VALIDATION_FAILED', message: 'Package is required' }`, and nothing was written. TO: it is switched like a packaged one, `200`, and the resolver honours the row: a switched-off position stops granting its permission sets, and a switched-off set stops granting by every path. Who may call the door is unchanged (`manage_metadata`; the platform operator under a `group` or `isolated` posture), and so are its other refusals (an undeclared name `404`, a type with no switch or an audience anchor `400`, the last administrator `403`).
+  - **A refused ledger write keeps its code and its status together** (`@objectstack/runtime`, ADR-0112). FROM: the door kept a thrown `code` but answered `503` whenever the error declared no status, so a record validation refusal was served as `503 VALIDATION_FAILED`. TO: the door answers through the dispatcher's one thrown-error rule: a record validation refusal is `400 VALIDATION_FAILED`, a hook's refusal keeps its own pair (the last-admin guard's `403 PERMISSION_DENIED`), and an error that declares no status is `503 SERVICE_UNAVAILABLE`.
+  - **The ledger row of an item no package ships carries no package** (`@objectstack/platform-objects`, `@objectstack/core`). `sys_metadata_activation.package_id` is no longer required. It is empty exactly when no package ships the item. It is not part of the row identity (`metadata_type`, `name`), and no reader decides anything from it. The column was already nullable on disk (ADR-0113: `required` is a write-time check), so there is nothing to migrate.
+  - **One spelling for "no package"** (`@objectstack/core`). `MetadataActivationRow.packageId` is optional. FROM: `packageId: string`, with `''` the only way to say "no package". TO: omit `packageId` for an item no package ships, and the store writes no value. `ObjectStoreMetadataActivationStore.setActive` refuses `packageId: ''` with a `TypeError` before it reads or writes anything, and `list()` returns `packageId` only when the row names a package. If your code passes `''`, omit the key instead.
+  - **The flow row follows the shared row** (`@objectstack/service-automation`). `FlowActivationRow.packageId` is optional to match. Every flow row still names its package, because the flow toggle refuses a flow no package ships before it writes.
+  - **The action activation door's answer for an action no package ships changes; the action is still refused.** `POST /api/v1/actions/_activation/:object/:action` still passes `''` as the package of such an action. The write is still refused and still writes nothing, but the store's `TypeError` refuses it now, with the store's sentence. FROM: `503 VALIDATION_FAILED`. TO: `503 SERVICE_UNAVAILABLE`. An environment-authored action could not be switched on `main` before this change and cannot after it.
+- 117d34d: feat(metadata-core,metadata-protocol,metadata,platform-objects,spec)!: `sys_view_definition` retires as inert (ADR-0131 D13)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered sys-view-definition-retired -->
+  
+  **BREAKING**, graded `minor` on the v18 prerelease line: Changesets is in pre mode with the tag `next`, and the fixed group is already majored by the line's opening marker, so this ships in an `18.0.0-next.N` like every other stage.
+  
+  `sys_view_definition` was declared for runtime-authored shared and personal views (ADR-0017) and never used for them: no framework code writes or reads its rows, and the Studio console's view doors write the ADR-0005 `view` overlay in `sys_metadata` through the metadata API. ADR-0131 D13 retires it. A runtime-authored view is a `view` metadata item, written through `PUT /api/v1/meta/view/<name>` (the client's `meta.saveItem` for type `view`); nothing about that path changes.
+  
+  **What moves for consumers.**
+  
+  - **The object.** FROM `import { SysViewDefinitionObject } from '@objectstack/metadata-core'` (or from `@objectstack/platform-objects`, or its `/metadata` subpath) TO nothing: delete the import. Neither `MetadataPlugin` nor the metadata protocol assembly registers the object any more, so the generic data door no longer serves it.
+  - **The migration exports** of `@objectstack/metadata-protocol`. FROM `ensureViewDefinitionActiveIndex`, `resolveIndexExec`, `buildActiveIndexSql`, `VIEW_DEFINITION_TABLE`, `VIEW_ACTIVE_INDEX_NAME`, `VIEW_ACTIVE_PROBE_INDEX_NAME`, `VIEW_ACTIVE_INDEX_COLUMNS`, `EnsureViewIndexLogger`, `EnsureViewIndexStatus` and `EnsureViewIndexResult` TO nothing: delete the import. `classifyIndexFailure` and the `IndexExec` type are still exported, unchanged, from the shared index-migration module.
+  - **The name.** `PLATFORM_OBJECTS_BY_PACKAGE['metadata-core']` (`@objectstack/spec/system`) lists four objects, and `isPlatformProvidedObjectName` answers `false` for `sys_view_definition`. A stack that names it (a lookup target, a flow trigger, a permission entry, a platform-global declaration) is now flagged as naming an unknown object: remove the reference.
+  - **`os migrate duplicates`.** `runtimeIndexPreflight` carries three entries (the two `sys_metadata` overlay indexes and `sys_setting`'s row identity), with no `idx_sys_view_def_active` entry. A serving boot no longer runs the active-row index migration for the table, and no longer logs its `sys_view_definition active-row index` lines.
+  - **Translations.** The platform translation bundles no longer carry `sys_view_definition` keys.
+  
+  **Existing databases.** Schema sync is additive and never drops a table, so a database an earlier release provisioned keeps `sys_view_definition`, with any rows a caller wrote through the generic data door; nothing reads them. `os migrate apply --allow-destructive` does not drop it either, because it reconciles declared objects only (measured on one database: it dropped an orphaned column of a declared table and left this table and its row in place). On a project with a host config, `os migrate plan` lists it among the platform-prefixed tables nothing declares. Export any row worth keeping; dropping the table is the operator's call, by hand: `DROP TABLE sys_view_definition`.
+- 1920cf3: feat(platform-objects,service-automation,service-realtime)!: seven deployment-level platform tables lose their injected organization column, and reading them needs `manage_platform_settings` (ADR-0131 D7)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered sys-flow-dispatch-organization-column-retired, sys-job-organization-column-retired, sys-job-queue-organization-column-retired, sys-job-run-organization-column-retired, sys-migration-journal-organization-column-retired, sys-migration-organization-column-retired, sys-presence-organization-column-retired -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes (Changesets pre mode is not on yet).
+  
+  `sys_job`, `sys_job_run`, `sys_job_queue`, `sys_flow_dispatch`, `sys_migration`, `sys_migration_journal` and `sys_presence` hold deployment-level state. No writer attributes a row of any of them to an organization: every write is a system-context write whose row names none, and nothing writes `sys_presence` through ObjectQL at all. So the injected `organization_id` column only ever held NULL. ADR-0131 D7 takes it off: each object now declares `systemFields: { tenant: false }`.
+  
+  With no column there is no tenant wall, so these tables are governed by object permission. Each also declares `requiredPermissions: ['manage_platform_settings']`. Without that gate, a walled deployment's `organization_admin`, whose grant carries the superuser bits on every object, would read every other organization's job errors, queued payloads, dispatch keys and migration traces.
+  
+  **What moves for consumers.**
+  
+  - **The column.** `organization_id` is no longer a field of these seven objects. A filter, list-view column, report grouping, formula or seed key naming it on one of them is now an unknown field. Delete the reference: no organization owns a row of these tables.
+  - **Who reads, on a walled posture** (`group` or `isolated`). Before: the wall compared the NULL column to the caller's organization, so every reader got zero rows, platform administrators included (unless the deployment declared the table platform-global, which stood the wall down). Now: a principal holding `manage_platform_settings` (platform administrators hold it) lists every row; anyone else is refused `403 PERMISSION_DENIED`.
+  - **Who reads, on the `single` posture.** Before: any principal with a read grant on the object read every row, an organization administrator included. Now: only a principal holding `manage_platform_settings` reads; an organization administrator who is not a platform administrator is refused `403 PERMISSION_DENIED`. Grant the capability to an operator who needs these tables.
+  
+  **Unchanged.** Every platform writer and reader of these tables uses a system context, which no capability gate applies to, so job scheduling, the queue, flow dispatch, migration flags and the migration journal behave as before. The physical unique indexes are unchanged: none of these objects declares an organization-scoped one.
+  
+  **Existing databases.** Schema sync only adds, so the physical `organization_id` column stays on each existing table (with its index, where the deployment indexed it), and the boot drift report names it orphaned. By the writer census it holds only NULL, so dropping it loses nothing: `os migrate apply --allow-destructive` drops it, the remedy the drift report names.
+- c52bfb4: feat(service-settings,platform-objects)!: the settings cascade's global rung moves to the tenant-less `sys_platform_setting`, and `sys_setting.scope` no longer declares `global` (ADR-0131 D7)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered sys-setting-global-rung-moved -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes (Changesets pre mode is not on yet).
+  
+  A settings value for a key declared at `global` scope is a deployment-wide value: the mail transport, the SMS, storage, AI and knowledge providers, auth policy, the lifecycle retention defaults. It used to be a `scope: 'global'` row of `sys_setting`, a tenant-scoped table, where the injected `organization_id` column only ever held NULL and a walled posture hid the row from every reader. ADR-0131 D7 moves the rung out: it is now stored in a new platform object, `sys_platform_setting`.
+  
+  - **`sys_platform_setting`** (registered by the settings service, beside `sys_setting`): one row per `(namespace, key)` for the deployment, with the `value`, `value_enc`, `encrypted`, `locked`, `locked_reason` and `updated_by` columns of a settings row, and no `scope`, `user_id` or `organization_id` (`systemFields: { tenant: false }`). It is governed by object permission: a generic data read needs `manage_platform_settings` (`requiredPermissions`), which platform administrators hold. Writes go only through the settings door.
+  - **`SettingsService`** writes a global-scope key to `sys_platform_setting` and reads the cascade's global rung from there alone. Its `sys_setting` reads exclude `scope = 'global'`, so there is one source per rung. The cascade order, the lock semantics, `SpecifierScope` and the `source: 'global'` resolution value are unchanged. A global-scope change's `config_change` audit row names `sys_platform_setting` (`CONFIG_CHANGE_GLOBAL_OBJECT_NAME`); tenant- and user-scope changes still name `sys_setting`.
+  - **`sys_setting.scope`** no longer declares the `global` option: no write produces such a row. `sys_setting_audit.scope` keeps it, because a global-scope change is still audited there.
+  - **`os secret orphans` / `os secret rewrap`**: the settings family of the `sys_secret` reference union now reads both `sys_setting.value_enc` and `sys_platform_setting.value_enc`. Without that, every credential held at the global rung would read as unreferenced and be swept. An unreadable `sys_platform_setting` gaps the family, which refuses deletion.
+  
+  **What moves for consumers.**
+  
+  - **Existing databases — nothing moves automatically** (ADR-0131 D14). A `sys_setting` row at `scope = 'global'` is no longer read; until the v18 upgrade ceremony moves it, that key answers from its next rung or the manifest default. The ceremony moves each such row to `sys_platform_setting` by namespace and key, its `value_enc` handle included. An encrypted value needs no re-encryption: the ciphertext's associated data binds the settings scope, namespace and key, never the holding object or an organization.
+  - **Authored references.** A filter, list-view column or seed that names `scope = 'global'` on `sys_setting` matches nothing: point it at `sys_platform_setting`, which has no `scope` column.
+  - **Generic data reads of the global values.** Read `sys_platform_setting`; it needs `manage_platform_settings`. The settings door (`/api/settings/:namespace`) is unchanged and keeps applying each manifest's own read and write capability.
+  - **Kernels that register the settings objects by hand.** Register `SysPlatformSetting` (`@objectstack/platform-objects/system`) beside `SysSetting`; `SettingsServicePlugin` already does. The service reads both on every resolution, so a kernel missing one fails the read loudly rather than answering a cascade with a rung missing.
+- 8311650: The user page's "Permission Sets" list shows each assignment's validity window, `valid_from` and `valid_until` (ADR-0091 D1/D2)
+  
+  The resolver drops a `sys_user_permission_set` assignment outside its half-open `[valid_from, valid_until)` window at every evaluation, so a list that showed only the set presented an expired or not-yet-active assignment as a live grant. The two bounds now sit beside the set. The list's Add affordance still writes the user and the set only; the window is set by editing the assignment row.
+
+### Patch Changes
+
+- 0253192: Grants name their permission set, with no `sys_permission_set` row read (ADR-0131 D4)
+  
+  - `@objectstack/plugin-auth`: the self-registration grant names the declared set alone. Admission asks the security catalog and the activation ledger whether the set grants, and the settlement writes `{ user_id, permission_set }` with no row read, so a deployment with no `sys_permission_set` row for the set still grants it. The last-administrator guard reads which set a grant holds from its name only; writing `permission_set_id` moves no standing.
+  - `@objectstack/verify`: the RLS probe persona's grant names the registered probe set alone; it no longer needs, or refuses for want of, a boot-seeded `sys_permission_set` row.
+  - `@objectstack/platform-objects`: Setup's user page grants a permission set by name: the Add picker stores the set's machine name (`valueField: 'name'`, `linkField: 'permission_set'`), and the list shows the name column. The picker still lists `sys_permission_set` rows; listing the security catalog itself is a console change.
+- 48cca4a: Setup's user page grants a position or a permission set by picking its name from the security catalog (ADR-0131 D4)
+  
+  Clause-②: no
+  
+  - `@objectstack/plugin-security`: `sys_user_position.position` declares `widget: 'position-ref'` and `sys_user_permission_set.permission_set` declares `widget: 'permission-ref'`, so the grant form offers a picker over the positions and permission sets the catalog serves, and stores the chosen name. A console without those widgets keeps the text input. `sys_user_permission_set.permission_set_id`, the legacy id that grants nothing, is now `hidden` and no longer appears on the grant form; the column stays until a later release drops its data.
+  - `@objectstack/platform-objects`: the user page's Positions and Permission Sets lists no longer carry the "Assign position" / "Grant permission set" buttons. Those buttons listed `sys_position` / `sys_permission_set` rows, which a deployment need not hold. Grant with the list's **New**, which opens the grant form; removing a grant is unchanged.
+- bfc15d2: feat(spec,core)!: a position's permission sets are declared in `permissionSets` on its definition, and the authorization resolver reads positions, their sets and the set bodies from the security catalog (ADR-0131 D3/D4)
+  
+  Clause-②: yes
+  
+  <!-- adr-0087: registered position-permission-sets-declared -->
+  
+  **BREAKING** (the resolver stops reading the position → permission-set junction), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  **FROM → TO.** A position's permission sets were `sys_position_permission_set` rows. They are now declared in `permissionSets` on the position's definition; junction rows no longer grant.
+  
+  ```ts
+  definePosition({ name: 'sales_rep', label: 'Sales Representative', permissionSets: ['crm_sales_user'] });
+  ```
+  
+  The one-line fix for an app that bound sets to its positions with a boot-time binder: name the sets in `permissionSets` on each position.
+  
+  **`@objectstack/spec`.** `PositionSchema` accepts `permissionSets`: a list of permission-set names (lowercase snake_case). Before, the key was refused with a pointer to the junction. Each name is resolved in the environment catalog when a holder's grants are resolved. A name the catalog does not hold confers nothing.
+  
+  **`@objectstack/core`.** `resolveUserAuthzGrants`, and every surface built on it (`resolveAuthzContext`, `hasPlatformAdminStanding`, the permission explainer, `runAs: 'user'` automation), reads the security catalog the security plugin binds to its engine (`bindSecurityCatalogReader`, `securityCatalogReaderOf`):
+  
+  - A held position grants the sets its definition's `permissionSets` names. The junction rows and the read of set rows by the junction's ids are gone.
+  - A held set, granted directly or through a position, has the body (`systemPermissions`, `tabPermissions`) of its catalog definition. A set that only a `sys_permission_set` row carries, with no definition, confers nothing — including a row inserted directly (a script or a harness, outside the product's doors).
+  - **Deactivation moves to the activation ledger** (ADR-0049, as ADR-0131 D3 and ADR-0126 §4 place it). A position or a permission set is switched off by a `sys_metadata_activation` row of type `position` or `permission` whose `active` is false, deployment-wide. The `sys_position` and `sys_permission_set` rows are no longer read at all, their `active` column included. A name with no ledger row is in effect. A composition that does not register the ledger object (no `PlatformObjectsPlugin`) switches nothing off and issues no ledger read.
+  - The exported `ADMIN_STANDING_SURFACE` follows what the resolver reads: `sys_permission_set`, `sys_position` and `sys_position_permission_set` leave it, and `sys_metadata_activation` enters in the role `derives`, with the columns `metadata_type`, `name` and `active`. The `kind` union of `ADMIN_STANDING_NON_TABLE_INPUTS` gains `security-catalog`, for the catalog's `admin_full_access` definition.
+  - `convertDeactivatedCatalogRows` turns the rows' `active: false` flags into ledger rows. A name some organizations switched off and others kept on is reported `conflicting`, because the ledger is deployment-wide. The upgrade ceremony applies it beside `convertPositionBindingRows`. ⛔ It never runs at boot.
+  - Platform standing still requires an organization-less `admin_full_access` user grant, now resolved by name in the catalog.
+  - An engine no security plugin started on has no catalog bound, and resolves no set and no position-bound set. That is what an engine with no permission tables provisioned resolved before.
+  - `convertPositionBindingRows` converts the junction rows into each position's `permissionSets`. It answers per name `declared`, `converted` or `conflicting`, and it lists dangling bindings. The upgrade ceremony applies it. ⛔ It never runs at boot.
+  
+  **`@objectstack/plugin-security`.** The plugin binds the catalog read (engine registry and metadata service) to its engine at `start()`. At `kernel:ready` the built-in `everyone` anchor declares the deployment's baseline in its `permissionSets`: the app's `isDefault` set and the platform's `member_default`. It is judged by the same high-privilege check against the stack's declared capabilities that the boot binding used. Under a wall the envelope now carries `member_default` beside the app's set, as it did under `single`. `member_default` carries no system or tab permission, and enforcement already applied it to every human as the additive baseline. A Setup edit of a position row under `single` keeps the `permissionSets` the stored definition names (the row has no column for it).
+  
+  **`@objectstack/plugin-auth`.** The last-administrator guard follows what the resolver reads. Its standing-key map judges `sys_metadata_activation` (`metadata_type`, `name`, `active`) in place of `sys_permission_set`. A ledger write that switches `admin_full_access` off is refused only when it would leave no administrator who can sign in, and switching it back on is never refused. The guard no longer judges `sys_permission_set` writes, because the resolver no longer reads that row.
+  
+  **`@objectstack/platform-objects`.** The position metadata form gains a `permissionSets` row, translated in zh-CN, ja-JP and es-ES.
+  
+  **`@objectstack/plugin-security`.** The name-fold warning's remedy now names the position definition's `permissionSets`, not a junction row.
+  
+  **What stops granting at upgrade, and what to do.**
+  
+  - **A deactivation made in Setup.** The Deactivate action on a position or a permission set writes the row's `active` column, which no longer switches anything off. ⚠️ Until the upgrade ceremony converts the rows (`convertDeactivatedCatalogRows`), a position or set deactivated that way **grants again**. No enable/disable door accepts the `permission` or `position` type yet, so a new deactivation has no in-product path. To revoke now, remove the assignments or the binding.
+  
+  - **A binding made in Setup.** Binding a permission set on a position's page writes a `sys_position_permission_set` row, and so does confirming an audience-binding suggestion. That row no longer grants. Until Setup writes the definition (objectui C9), declare the binding in the position's `permissionSets` through the metadata door (`PUT /api/v1/meta/position/:name`, platform administrator) or in the app's code.
+  - **Under a wall (`group`, `isolated`): a position or permission set an organization authored in Setup.** It is a data row with no definition in the environment catalog (ADR-0131 D3), so it stops granting (ruling #15196 Q3 = A). To keep it, a platform administrator re-creates it as environment metadata through the metadata door, under the same name, with its `permissionSets` or its set body. No command promotes a row in place today.
+  - **Existing junction rows** are converted into definitions by the ADR-0131 upgrade ceremony (`os migrate`), which applies `convertPositionBindingRows`. A name that organizations bound differently is reported `conflicting` and is never merged.
+- 8c5aa50: feat(plugin-email,plugin-auth)!: an organization can no longer create or edit an email template row; the template provenance stamp and the auth SMS template seed retire
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling or stored shape is removed, renamed or re-shaped, and no stored row is read, rewritten, converted or dropped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a runtime write door (an organization's create and update of a sys_email_template row are refused) and a boot seed (no sys_notification_template row is written). The three retired names are runtime functions and a string constant of @objectstack/plugin-email with no metadata surface and no replacement: a direct caller meets the compiler's missing-export error and deletes the call. Measured consumers in this repository outside the package: one audit script, updated here. The other categories are closed on facts: every bumped package publishes (not unpublished); no ADR-0087 id covers these paths and this diff adds none (not registered / already-registered); and the retired names are functions and a constant, not a type surface (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing and three retired exports), shipped as `minor` under the launch-window convention for breaking changes. It carries ADR-0131 D6 and the maintainer's ruling C on ADR-0131 §6 Q1: email templates are not overridden per organization.
+  
+  **What stops being accepted.**
+  
+  - **The `sys_email_template` organization door is closed.** An organization's create and update of a template row are refused with `403 PERMISSION_DENIED`, and the message names the closed door: every engine `insert` / `update` whose context names a caller and is not system-elevated. That covers `POST` / `PATCH /api/v1/data/sys_email_template`, the Studio record editor, batch and import routes, and scripts and flows that run as a user or a service principal. System-context writes still pass: the built-in seed, the declared-template boot sweep, the live projection of a Studio `email_template` save into its row, and the v18 migration ceremony's promotion. Delete is not part of this door.
+  - **The template provenance stamp is retired.** It marked a package- or platform-seeded row `customized: true` when a non-system caller updated it. With the door closed no such update reaches the engine's write, so nothing marks a row any more. Rows already marked keep their mark and are still never overwritten by the boot seeders; they are the population the v18 migration ceremony promotes to environment-level Studio templates.
+  - **Retired exports of `@objectstack/plugin-email`:** `bindEmailTemplateProvenanceStamp`, `unbindEmailTemplateProvenanceStamp` and `EMAIL_TEMPLATE_PROVENANCE_PACKAGE`. They have no replacement. `EmailServicePlugin` closes the door itself, and there is no stamp left to bind, so a direct call is deleted, not rewritten.
+  - **The auth SMS template seed is retired.** A boot with phone sign-in on no longer writes the built-in OTP and invitation texts into `sys_notification_template` as rows. It was internal to `@objectstack/plugin-auth` and exported nothing.
+  
+  **What renders unchanged.**
+  
+  - Every email template renders as before: the template loader still reads `sys_email_template`, and a Studio edit of an `email_template` still reaches the mail at once and survives a restart.
+  - Every auth SMS text renders byte for byte as the seeded store rendered it, for every built-in text and every recipient locale. Each locale rung renders an operator's active row when one exists, and the built-in text where no row exists at that locale. A deactivated or blank row passes its rung on, as it did before.
+  - A `sys_notification_template` row an operator already has still wins, and no existing row is touched.
+  
+  **What changes for you.** To change what an email template sends, edit the `email_template` in Studio. A script or integration that wrote `sys_email_template` rows through the data API now receives `403 PERMISSION_DENIED`. `@objectstack/platform-objects` corrects the `is_system` and `customized` field help on `sys_email_template`, which said an organization may edit a row.
+- 77a94d8: "Add Member" is offered only to a platform administrator, the one standing its endpoint admits.
+  
+  Clause-②: no
+  
+  - `sys_member`'s `add_member` toolbar action now declares `visible: 'current_user.isPlatformAdmin == true'`. `requiresFeature: 'organization'` composes onto it at parse time, so the served predicate reads `(current_user.isPlatformAdmin == true) && features.organization != false`.
+  - Its endpoint, `POST /api/v1/auth/organization/add-member`, has always admitted a platform administrator alone (ADR-0068) and answered every other caller, org owners and admins included, with 403 `PERMISSION_DENIED`. Before this change the button was still shown to every member of the organization.
+  - ⛔ Nothing you author changes. The endpoint and the callers it admits are unchanged, and no key, export or parameter is added. The action's label is unchanged.
+- 879bd38: The user, OAuth-application and SSO-provider actions whose endpoint admits only a platform administrator are now offered only to a platform administrator.
+  
+  Clause-②: no
+  
+  - These thirteen actions now declare `visible: 'current_user.isPlatformAdmin == true'`, composed with their existing terms:
+    - `sys_user`: `ban_user`, `unban_user`, `unlock_user`, `create_user`, `set_user_password`, `impersonate_user` and `set_user_manager`;
+    - `sys_oauth_application`: `disable_oauth_application` and `enable_oauth_application`;
+    - `sys_sso_provider`: `register_sso_provider`, `register_saml_provider`, `request_domain_verification` and `verify_domain`.
+  - Where an action also carries `requiresFeature`, the feature gate composes onto it at parse time. For example, `ban_user` now serves `(current_user.isPlatformAdmin == true) && features.admin == true`.
+  - Each endpoint (`/api/v1/auth/admin/*`) has always admitted a platform administrator alone (ADR-0068) and answered every other caller, org owners and admins included, with 403 `PERMISSION_DENIED`. Before this change the buttons were still shown to those callers.
+  - `create_oauth_application`, `rotate_client_secret`, `delete_oauth_application` and `delete_sso_provider` are unchanged: their endpoints authorize the signed-in user or the record's owner, not the platform administrator.
+  - ⛔ Nothing you author changes. The endpoints and the callers they admit are unchanged, and no key, export or parameter is added. The actions' labels are unchanged.
+- 1c563af: Setup's identity pages open on the tenant-wide list, not on the administrator's own rows. Before this, Setup → API Keys, Sessions, OAuth Applications, Identity Links and User Preferences opened each object's first declared list view, which was the caller-scoped "My …" view (`user_id = {current_user_id}`), so an administrator saw only their own keys, sessions, applications, links and preferences.
+  
+  Clause-②: no
+  
+  - On `sys_api_key`, `sys_session`, `sys_oauth_application`, `sys_account`, `sys_user_preference` and `sys_user`, the unscoped "All" view (`all_keys`, `all_sessions`, `all_apps`, `all_links`, `all_preferences`, `all_users`) is now declared first, and the caller-scoped view (`mine`, `me`) second. A route that names no view, such as a record page's object breadcrumb or the object switcher, now opens the "All" view. No view is added, removed or changed.
+  - The Setup entries `nav_api_keys`, `nav_sessions`, `nav_oauth_apps`, `nav_accounts` and `nav_user_preferences` now name that view with `viewName`, as `nav_users` already did. The Account app's Linked Accounts entry (`nav_account_linked`) now names `mine`, like the other Account entries, so neither app depends on the declared order.
+  - The "My …" views are still tabs on each page. The declared order decides which view opens, not which rows a caller may read: row-level security still scopes a member's rows.
+  - The generated translation bundles follow the new view order. No translated text changed.
+  - ⛔ No schema, parse, export or accept-set change.
+- 51290bc: Form help and refusals an author reads no longer carry service-interface names, ruling dates or another product's ids
+  
+  Clause-②: no
+  
+  Wording only: no schema, key, type, export or error-code change.
+  
+  - The notify node's Template help (the `NotifyConfigSchema.template` describe and the Studio
+    inspector's copy in `@objectstack/service-automation`) names the deployment's default locale in
+    product words instead of `II18nService.getDefaultLocale()`, and drops its ruling date.
+  - `MANIFEST_ID_EXAMPLES` is now `com.acme.crm` and `org.example.help-desk` (was `com.steedos.crm`
+    and `org.apache.superset`). The package-id refusal opens with the headline
+    "Invalid package id 'VALUE'." and names the key in the sentence after it, so the headline alone
+    carries no JSON path; the rule, the examples and the suggestion follow unchanged in substance. A
+    caller that matched the old "on KEY. Expected reverse-domain notation" wording matches the
+    headline, or compares against `manifestIdRefusal()` by reference, instead.
+  - Ruling dates leave the describes Studio renders as form help: field `required` and `multiple`,
+    form-view field and section `visibleWhen`, section `collapsible` / `collapsed`, the redirect
+    arm's `submitBehavior.url`, and page `kind` / `source` (the ADR citations stay). They also
+    leave the refusals for padded grouping field names, `submitBehavior.url`, `features.*` in a
+    form-view predicate, and the four filter comparand refusals (null ordering comparand,
+    `{ $field }` in a list position, null list member, blank `$between` bound). Each sentence still
+    states the rule, why it exists and the repair.
+  - The email-template form's Identity section help says how senders address a template instead of
+    naming `IEmailService.sendTemplate`, in all four shipped locales.
+  - The action `description` help no longer ends in a dangling dash left behind by an earlier
+    strip: "(one dialog, not two —)" now reads "(one dialog, not two)".
+- 4e4111c: The `sys_email` field help for Headers (JSON) and Status no longer names the `IEmailService.send` service interface (#22093)
+  
+  Clause-②: no
+  
+  Studio shows these descriptions as field help in the object forms. They now say what the field holds and when it is set, in product words: Headers (JSON) holds the custom headers supplied with the message when it was sent, and Status is `queued` when the message is submitted for sending, before the first delivery attempt. Every other fact the help states is unchanged. The `en` bundle is regenerated from the source, and the `zh-CN`, `ja-JP` and `es-ES` translations of the two leaves are re-translated in place. Wording only: no field, option, key or type changes.
+- 0b7ba4d: fix(platform-objects): Invite User explains itself in its dialog and names the invitee in its success message
+  
+  Clause-②: no
+  
+  - **The parameter dialog.** `invite_user` on `sys_user`, `sys_invitation` and `sys_member` declares a `description`: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation." The console shows it as the dialog's subtitle, where a generic "Please provide the required information to continue." showed before.
+  - **The success toast.** `successMessage` is now `Invitation sent to ${result.email}`. `POST /api/v1/auth/organization/invite-member` answers the invitation row, and its top-level `email` is the invitee's address as stored (lowercased), so the toast reads "Invitation sent to ada@example.com" where it read "Invitation sent".
+  - **Translations.** The zh-CN, ja-JP and es-ES bundles carry the new description and a success message that keeps the `${result.email}` token, so every locale names the invitee.
+- 746637e: fix(service-automation)!: retire the `RunProvenanceContext` type; `RunDataContext` names only what `resolveRunDataContext` returns
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/services/service-automation/src/runtime-identity.ts#RunDataContext) Two TypeScript-only declarations in one runtime file move, and neither is metadata: `RunDataContext` loses its `RunProvenanceContext` arm, and the `RunProvenanceContext` interface declared beside it in the same file is removed together with its type export. No spec key, authorable spelling, Zod schema or stored shape moves, and no stored row is read or rewritten, so `objectstack migrate meta` has nothing to rewrite. The channel that reaches an affected consumer is the compiler, at the consumer's own import. -->
+  
+  **BREAKING** for TypeScript code that imports from `@objectstack/service-automation`: one type export is removed and one type narrows. It ships as `minor` under the launch-window convention for breaking changes. No runtime behaviour changes in any package.
+  
+  **What is removed.** The `RunProvenanceContext` type export, the `{ flowRunId }`-only "provenance" envelope, and its arm of `RunDataContext`. No code in this repository builds or reads one. Since ADR-0096 D5, the data engine's security middleware refuses a context that carries no principal and is not a system context (`403 PERMISSION_DENIED`, for every verb). So the type described a context the engine refuses, while its docstring said such a context was "indistinguishable from passing no context at all" and was let through.
+  
+  **What `RunDataContext` is now.** Exactly what `resolveRunDataContext` returns: `isSystem: true` for a `runAs: 'system'` run, and the triggering user's principal for a `runAs: 'user'` run. A run that resolves no principal is refused before any data operation (`AUTOMATION_UNSCOPED_RUN_DATA_ACCESS`), as before.
+  
+  **If your code named the type.** There is no replacement, because the context it described is refused. A custom data node builds its context with `resolveRunDataContext(context)`, typed `RunDataContext`.
+  
+  **`@objectstack/plugin-security`, `@objectstack/runtime`, `@objectstack/service-analytics`, `@objectstack/platform-objects`:** comment and docstring text only. Shipped comments that said the security middleware hands through, skips or falls open for a context with no principal now say that it used to, and that ADR-0096 D5 refuses such a context. Nothing these packages do changes.
+- a00cf99: Studio's object form now offers the `approvalsVisibleToReaders` row in its capabilities panel, with its label and help text in the metadata-form translation catalogs for `en`, `zh-CN`, `ja-JP` and `es-ES`.
+  
+  Clause-②: no
+- e223152: feat(spec)!: `PageSchema` refuses a page that authors both `slots.details` and `slots.tabs`; the `sys_user` record page carries its details grid as its first tab
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered page-slots-details-beside-tabs-refused -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface, shipped as `minor` under the launch-window convention for accept-set narrowings.
+  
+  **Why.** The slot map read as seven independent slots, and two of them are not. On a slotted record page `details` replaces the body of the Details tab, that tab lives inside the synthesized `page:tabs` strip, and `tabs` replaces the whole strip. The console's default-page synthesizer therefore reads `tabs` and never reads `details` when both are authored. A page authoring both passed `PageSchema.parse`, `objectstack validate` and the metadata save door, and its details body (its `sections`, its `hideFields`) silently never applied. The platform's own `sys_user` record page was one: its Identity and Audit sections never showed, and the ban columns it hides were never hidden by it.
+  
+  **What is refused.** A page whose `slots` map carries both a `details` and a `tabs` key, at `slots.details`, with a `custom` issue that names both slots and the fix. Either slot may be one component or an array; an empty `details: []` is refused like a full one, and the page's `kind` does not matter. That covers `PageSchema`, `definePage`, `defineStack` (`STACK_SCHEMA_INVALID`, 422), `os validate` and the metadata save door (`422 INVALID_METADATA`). The check is exported as `checkPageSlotPair`, for a mirror built from `PageSchema.shape` to re-attach.
+  
+  **What is still accepted, byte for byte.** A page authoring only `details`, only `tabs`, or neither.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `slots: { details: { type: 'record:details', … }, tabs: { type: 'page:tabs', properties: { items: [ … ] } } }` | `slots: { tabs: { type: 'page:tabs', properties: { items: [ { label: 'Details', children: [ { type: 'record:details', … } ] }, … ] } } }` |
+  | both slots, wanting the synthesized tabs with your details body | `slots: { details: { type: 'record:details', … } }`, with no `tabs` slot |
+  
+  **The one-line fix: move the `record:details` component into the `tabs` items (the first item's `children`, by convention) and delete `slots.details`.** Its `sections` and `hideFields` move unchanged. The page then shows the details body it always declared, which is a visible change on every page that authored the pair.
+  
+  **Who is affected, measured.** In this repository, only the `sys_user` record page (`sys_user_detail` in `@objectstack/platform-objects`) authored both slots; no example app page does. hotcrm's one slotted page authors `header` and `discussion` only. Deployed metadata was not measured. A page row already stored with the pair is replayed unchanged at load, so it renders as before (the authored tabs, without the details body); its read diagnostics name the pair, and saving it again is refused until the details body moves.
+  
+  ### The kit
+  
+  - **The refusal.** `checkPageSlotPair`, attached to `PageSchema` by identifier beside its three other object-level checks. No new error code.
+  - **The producer.** `sys_user_detail` moves its `record:details`, with its `sections` and `hideFields` unchanged, in as the first `tabs` item.
+  - **The ledger.** The D3 semantic entry `page-slots-details-beside-tabs-refused` (protocol 18) and its step-18 rationale fragment. No key is removed, so there is no tombstone, and there is no D2 conversion: which tab item carries the details body, and under which label, is the author's decision.
+- e5899a6: `fileAccessDelegate` and the refused file marker now describe what the delegate decides on a record read, beside the download
+  
+  Clause-②: no
+  
+  Wording only: no key, type, schema shape or runtime behaviour changes. A record read now follows the download door's field-owned verdict for a file the record owns, so the texts an author reads understated what a declared delegate decides.
+  
+  - **`fileAccessDelegate`.** This covers the object schema's description and TSDoc, the object form's help text in `en`, `zh-CN`, `ja-JP` and `es-ES`, and the generated reference pages. The named service authorizes downloads of files owned by the object's media fields. It also decides whether a reader who may not read `sys_file` sees those files' name, size and type in a record read of the object. It is asked once per owning record on each such read, so an implementation runs on reads, not only on downloads. A reader who may read `sys_file` never reaches it on a record read. It fails closed on both paths.
+  - **`FileRefusedValueSchema` (`{ id, metadataRefused: true }`).** The TSDoc and the `metadataRefused` description now give two cases for a reader who may not read `sys_file`: the record being read does not own the file, or the download verdict on the owning record did not allow it. A file the record owns and the verdict allows is served as the full file object.
+  - **`IFileAccessDelegate`.** The interface's TSDoc and its `authorizeFileRead` doc now name both questions one verdict answers: the download, and whether a reader refused `sys_file` sees the file's name, size and type in a record read (asked once per owning record per such read). The warning now covers metadata too: a permissive implementation leaks the metadata as well as the bytes.
+  
+  **For authors.** Nothing to change in metadata. An existing delegate now also decides a refused reader's file metadata on every read. It should keep applying the same rule its service uses to read the record.
+- e865300: A formula field can declare a currency result: `returnType: 'currency'`, with its currency in its own `currencyConfig`
+  
+  Clause-②: yes (widening)
+  
+  - **What is new in `@objectstack/spec`.** `FieldSchema.returnType` accepts `'currency'` beside `'number'`, `'text'`, `'boolean'` and `'date'`. A `currency` result is an amount of money. Its value is a bare number, as a currency field's is. Its currency is the formula field's own `currencyConfig`, the same `CurrencyConfigSchema` a currency field carries, with the same defaults and the same refusals: no `currencyConfig` means dynamic mode (the tenant default currency), and `{ currencyMode: 'fixed', defaultCurrency: 'USD' }` fixes it. Nothing is read at display time from the fields the expression references: the currency is a declaration on the formula.
+  - **Readers.** The filter doors judge a formula returning `currency` as the currency field it reads like: a text operator on it is refused (`INVALID_FILTER`), and the number door judges its comparands. A formula is still not title-eligible unless it returns `text`, and is still refused for `sum` / `avg` / `min` / `max` (it has no stored column).
+  - **Designer forms.** The field designer and the object designer's field grid both offer Currency as a return type. The field designer shows its Currency Config row for a formula whose return type is Currency, as it does for a currency field.
+  - **What is new in `@objectstack/formula`.** `inferFormulaReturn(expression, fields)` returns the declaration authoring stamps onto a formula field, judged over the host object's declared field map: `{ returnType: 'currency' }` when the expression is provably an amount of money, plus `currencyConfig: { currencyMode: 'fixed', defaultCurrency }` when its source amounts are in one fixed currency. "Provably money" is unit checking over the expression: amounts in one currency added, subtracted, scaled by a number or a percent, divided by a number, rounded, or picked by `min` / `max` / `coalesce` / a ternary. Two different currencies, an amount multiplied by an amount, or an amount plus a plain quantity are not money. For everything it cannot prove to be money it answers exactly what `inferExpressionType` answers, so a numeric formula stays `number`. Its types `FormulaReturnDeclaration` and `FormulaSourceField` are exported with it. `inferExpressionType` is unchanged.
+  - **`@objectstack/platform-objects`.** The designer help text for the return type and the currency config rows names the currency result, in all four locales.
+  - **Nothing to migrate.** Every value accepted before is accepted now. To declare a formula over money as money, declare `returnType: 'currency'` and copy the source currency field's `currencyConfig` onto the formula, or run `inferFormulaReturn` and write what it returns.
+- 31b5a5f: The Setup "Create User" and "Set Password" dialogs no longer offer a "Generate Temporary Password" box the server ignores once a password is typed
+  
+  Clause-②: no
+  
+  The `sys_user` actions `create_user` and `set_user_password` showed two controls for one decision: a "Generate Temporary Password" box (ticked by default on Create User) and a password field labelled "leave empty to generate". With a password typed, the box did nothing, yet it was sent ticked, so its state was false whenever the field was filled.
+  
+  The password field's label is now the only rule. `generatePassword` is no longer a dialog param on either action. It is sent as a constant `true` in each action's `bodyExtra`, and the endpoint's existing rule gives the label's behaviour:
+  
+  - **A typed password** is the one applied, and nothing is generated.
+  - **An empty password** generates a temporary password, shown once in the result dialog. On Set Password this is new: the box was unticked by default there, so an empty field answered `400` unless the admin ticked it.
+  
+  The endpoints `POST /api/v1/auth/admin/create-user` and `POST /api/v1/auth/admin/set-user-password` are unchanged. A caller that sends neither a password nor `generatePassword: true` still gets `400`.
+- e5687cb: An `email` field can declare that it identifies a correspondent for inbound mail: `mailAssociation`
+  
+  Clause-②: yes (widening)
+  
+  - **`mailAssociation: boolean`** (optional, no default) on a field definition. TRUE marks this email field as identifying a message correspondent: when a mailbox service ingests a message, it associates the message with every record of the object whose value in this field equals one of the message's participant addresses (From, Sender, Reply-To, To and Cc, plus those of a forwarded message it carries; ASCII case-insensitive; the receiving mailbox's own addresses excluded; only within the mailbox's organization). A message no record matches waits in the mailbox's unassociated pool. Absent or FALSE: the field takes no part in matching.
+  - **The platform learns which fields carry a correspondent's address, never what a contact is.** Every object that flags a field is treated alike; no app code and no resolver service is involved.
+  - **The door that judges it.** `FieldSchema` refuses the key on any type other than `email`, naming the field's type and the fix (change the type to `email`, or drop the key). Every metadata that parsed before parses unchanged.
+  - **Who reads it.** Nothing yet: the mailbox service's ingest is the reader, and it ships separately. Until then `objectstack validate` and `objectstack lint` warn an author who sets it (`liveness-planned-property`) that no mailbox service reads it yet.
+  - **Where to author it.** The field designer offers it on email fields as "Match Inbound Mail".
+  - **`@objectstack/driver-sql`.** `FIELD_KEY_STORAGE_CLASS` classifies `mailAssociation` as `presentation`: the mailbox service reads it, never `createColumn`, so a declaration on a builtin column name is not reported as discarded storage. No behaviour changes.
+  - **`@objectstack/metadata-core`.** `FIELD_REFERENCE_POSITIONS` classifies `mailAssociation` as `keep`: the FLS scrub of a served object definition passes the flag through unchanged, because it names no field.
+  - **`@objectstack/platform-objects`.** The field designer's new row carries its label and help text in the metadata-form translation bundles for en, zh-CN, ja-JP and es-ES.
+- ec7f7f8: feat(spec)!: retire an email template's `category` and `isSystem` — the grouping and the built-in flag nothing read (#22876)
+  
+  **BREAKING** — `category` and `isSystem` on an email template (`EmailTemplateDefinitionSchema`, the `email_template` metadata type) are now refused at parse. Nothing read either key once templates stopped being copied into `sys_email_template` rows: the Studio listing never offered the filter facet `category` promised, and no door refused deleting a template that set `isSystem`. Delete both keys. A template is found by its `name`, so group templates with a dotted namespace prefix (`auth.password_reset`, `crm.welcome`). A built-in template is a code package's declaration: a Studio save overrides it for the environment, and discarding that save restores the package's copy.
+  
+  Clause-②: no (narrowing)
+  
+  Measured before removal: no reader of either key in `@objectstack/plugin-email`, `@objectstack/service-messaging`, `@objectstack/plugin-auth`, the metadata protocol, ObjectQL, the runtime or the REST layer, and none in the Studio console at its pinned commit beyond a fallback form input, which the console's own companion change removes. Both keys carried a schema default (`category: 'custom'`, `isSystem: false`), so every parsed template carried them and the liveness advisory fired on every template, with no way for an author to clear it.
+  
+  ## FROM → TO
+  
+  | you wrote (17.7 and earlier) | write instead |
+  | --- | --- |
+  | `category: 'auth'` (or `'notification'`, `'workflow'`, `'marketing'`, `'custom'`) | nothing — delete the key; group by the `name` prefix |
+  | `isSystem: true` | nothing — delete the key |
+  | `isSystem: false` | nothing — delete the key |
+  | `import { EmailTemplateDefinitionCategorySchema } from '@objectstack/spec/system'` | nothing — the enum is removed with its key |
+  | `type EmailTemplateDefinitionCategory` | nothing — the type is removed with its key |
+  
+  **The one-line fix:** delete `category` and `isSystem` from every email template.
+  
+  **What an author who still writes either sees.** `tsc` fails at the authoring site (`EmailTemplateDefinition` types both keys as retired), and the parse — `defineEmailTemplateDefinition()`, `defineStack({ emailTemplates })`, `PUT /api/v1/meta/email_template/:name` — refuses each at its own path with the prescription:
+  
+  > `email_template.category` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing read it: the Studio listing never offered the filter facet it promised, and delivery never depended on it. Delete the key. A template is found by its `name`, so group templates with a dotted namespace prefix instead (`auth.password_reset`, `crm.welcome`). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.
+  
+  > `email_template.isSystem` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing enforced it: no door refused deleting a template that set it. Delete the key. A built-in template is a code package's declaration: a Studio save overrides it for the environment, and discarding that save restores the package's copy. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.
+  
+  ## The retirement kit
+  
+  - **Two `retiredKey()` tombstones** on `EmailTemplateDefinitionSchema`, a `strictObject` — so the refusal carries the prescription rather than a bare unknown-key report, and `tsc` fails first. `RETIRED_KEYS_BY_MAJOR[18]`: `system/EmailTemplateDefinition:category`, `system/EmailTemplateDefinition:isSystem`. The `category` enum, `EmailTemplateDefinitionCategorySchema`, had no other consumer and leaves with it: `RETIRED_DEFS_BY_MAJOR[18]`: `system/EmailTemplateDefinitionCategory`.
+  - **The D2 conversion `email-template-category-is-system-removed`** (protocol 18, retired from the load path) deletes both keys from every `emailTemplates[]` entry, one notice per key, as a lossless delete. Because both keys carried a default, every built artifact and every stored `email_template` row written under 17.x carries them; both load through the rehydration seams, which replay this conversion. The retired-default residue stage is not adopted: the replayed conversion heals those populations, and an authored source that still writes either key meets the prescription.
+  - **The D3 entry `email-template-category-is-system-retired`** asks the author whether anything they built read either key — a report or integration that filtered templates by `category`, or one that treated `isSystem: true` as protection against deletion. Nothing ever enforced that.
+  - **Studio:** the email-template form drops the `category` select and the `isSystem` checkbox.
+  - **Ledger:** both rows stay `dead`, re-noted as tombstones (a tombstone keeps the key in the walked shape).
+  - **No deprecation window**, per the project's startup-stage posture.
+  
+  **`@objectstack/plugin-email`:** the six built-in auth templates (in every locale) no longer write `category: 'auth'` or `isSystem: true`. They render and send exactly as before.
+  
+  **`@objectstack/platform-objects`:** the metadata-form translation bundles drop the two retired form inputs' labels (`email_template.fields.category`, `email_template.fields.isSystem`). The `sys_email_template` object and its `category` / `is_system` columns are unchanged.
+  
+  ⚠️ **The out-of-repo consumer population is NOT MEASURED.** `@objectstack/spec` is published, so this is breaking for consumers no telemetry was consulted for.
+  
+  <!-- adr-0087: registered email-template-category-is-system-removed, email-template-category-is-system-retired -->
+- 3071d3e: A host's translation bundle for a platform key now overrides the platform's text, whichever loads first
+  
+  Clause-②: no
+  
+  `PlatformObjectsPlugin` loaded its translation bundles (the Setup App, the `sys_*` objects, `metadataForms.*`) on `kernel:ready`, and the i18n service merges each load over the last. A bundle a host loaded earlier, during its own `init()` or `start()` (every `defineStack({ translations })` app is one), was overwritten for every key the platform also ships. Measured on both i18n providers: a host zh-CN bundle that set `objects.sys_organization.label` to 「工作区」 still served 「组织」. The docs already said such a bundle "would override the platform's".
+  
+  The platform bundles now load UNDER what the service already holds for each locale.
+  
+  - **A host's key wins in either order.** A bundle loaded before the platform's is laid back on top of it, and a bundle loaded after it wins as before.
+  - **Everything the host does not ship still serves the platform's text.** That covers sibling keys of a host key (a host field label leaves the platform's `help` for that field in place), and every locale the host does not ship.
+  - **Studio-authored translations are unaffected.** The bundles now load in `start()`, as soon as an i18n service exists, which is before the authored overlay is synced at `kernel:ready`. Deleting an authored override of a platform key brings back the platform text, as before. A kernel whose i18n service only appears later in Phase 2 (an `AppPlugin` registering the in-memory fallback on a lean kernel) gets the bundles on `kernel:ready` instead.
+  - **A provider without `getTranslations`** still gets the platform bundles, loaded over what is there as before, and the boot warns once that host bundles loaded earlier do not override it.
+  
+  No platform text changes: zh-CN `sys_organization` is still 「组织」. A host that wants different text ships it in its own bundle. The other platform packages' bundles share no key with this package's, and no example app's bundle repeats a platform key, so nothing else changes what it serves.
+- ef1fcb2: A declared index states its uniqueness scope: bare `unique: true` on `indexes[]` is refused (protocol 18, ADR-0120 D1/D7), stored metadata converts it to `unique: 'global'` with zero drift, and `VISIBILITY_STRICT_OPTIONS` leaves `@objectstack/spec`'s public surface.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered declared-index-bare-unique-true-retired, visibility-strict-options-unexported -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface and one export removal, shipped as `minor` under the launch-window convention for accept-set narrowings (Changesets pre mode is not in on `main`).
+  
+  **Why.** On a declared index, bare `unique: true` was the one `unique` spelling whose scope was positional. It built the index over exactly `fields`, one holder across the whole installation, while reading like "unique per organization" to an author who knew the field-level meaning. 17.x warned (lint `unique/unscoped-declared-index`). Protocol 18 refuses it, so the scope is always stated.
+  
+  **What is refused.** A declared index (`objects[].indexes[]`, `objectExtensions[].indexes[]`) whose `unique` is bare `true`. The refusal names both replacements, and says which one keeps the index bare `true` built. It is raised by:
+  
+  - the schema (`IndexSchema.unique`, now `false | 'global' | 'organization'`), at every door that parses: `ObjectSchema.create()` and `ObjectSchema.parse()`, `defineStack`, `os validate`, `os build`, and the runtime save door (`422 INVALID_METADATA`). `tsc` refuses it too, because the input type no longer admits `true`;
+  - lint `unique/unscoped-declared-index`, now an `error` and a gating rule on all three commands. It is what refuses the spelling under `os lint`, which never parses.
+  
+  **What converts.** The protocol-18 ADR-0087 conversion `declared-index-unique-scope` rewrites a declared index's bare `true` to `'global'` on every data-at-rest seam: stored `sys_metadata` rows (`applyConversionsToStoredItem`), built artifacts inside their declared-floor window, and `os migrate meta --from 17`. `'global'` is exactly the index bare `true` built, so the physical index is byte-identical and the drift plan is empty. It is retired from the authoring funnel, so a live author is refused and taught instead of converted silently.
+  
+  **What stays accepted.** Field-level `unique: true` still means one holder per organization and stays valid indefinitely. On a declared index, `unique: false` or omitted, `'global'` and `'organization'` parse exactly as before.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `indexes: [{ fields: [...], unique: true }]` | `indexes: [{ fields: [...], unique: 'global' }]`: the same index, nothing on disk changes |
+  | …the same, when you meant one holder per organization | `unique: 'organization'`: the driver prepends the NULL-safe organization key part at registration, and `os migrate plan` shows the index change |
+  | `import { VISIBILITY_STRICT_OPTIONS } from '@objectstack/spec/shared'` (or the root entry) | delete the import: it was an internal option bag for the spec's own visibility-carrying schemas, and those schemas are unchanged |
+  
+  **The one-line fix: on every declared index, write `unique: 'global'` where you wrote `unique: true`.** Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.
+  
+  **Who is affected, measured.** At `e67ba80049`, an AST census found 48 declared indexes with bare `unique: true` in 39 source files of this repository, all platform and plugin objects. Every one is respelled `'global'` in this change, and the nine-key S5 corpus is pinned to build byte-identical indexes before and after (`driver-sql`'s `sql-driver-unique-tenancy.test.ts`). `examples/**` and `apps/**` carry none. Deployed metadata and other repositories were not measured.
+  
+  ### The kit
+  
+  - **The refusal.** `IndexSchema.unique` in `data/object.zod.ts`, with its own prescription. The lint rule moved from `warning` to `error` and from advisory to gating.
+  - **The conversion.** `declared-index-unique-scope` (`toMajor: 18`, retired from the load path, `retiredAfter: '17.7.0'`), with its S4/S5 fixture.
+  - **The ledger.** The D3 semantic entries `declared-index-bare-unique-true-retired` (the scope each respelled index really meant is the author's call) and `visibility-strict-options-unexported`, plus a step-18 rationale fragment.
+  - **The export.** `VISIBILITY_STRICT_OPTIONS` moved to the unbarrelled `shared/visibility-strict-options.ts`, beside its type `StrictObjectOptions`. `check:api-surface` counts the removal.
+  - **The pins.** The "`'global'` is a synonym of `true`" driver pin retired with the bare spelling. The verbatim pin is stated in `'global'`.
+- Updated dependencies [317cddd]
+- Updated dependencies [fec87e7]
+- Updated dependencies [0253192]
+- Updated dependencies [bfc15d2]
+- Updated dependencies [7aa8d51]
+- Updated dependencies [95a8435]
+- Updated dependencies [60bcfe7]
+- Updated dependencies [d112087]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [7de0265]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [c8b062f]
+- Updated dependencies [117d34d]
+- Updated dependencies [6729e10]
+- Updated dependencies [1920cf3]
+- Updated dependencies [41d0d40]
+- Updated dependencies [c52bfb4]
+- Updated dependencies [c7d6037]
+- Updated dependencies [72b26ed]
+- Updated dependencies [2d21b9c]
+- Updated dependencies [f66fdc7]
+- Updated dependencies [9fdb127]
+- Updated dependencies [615c696]
+- Updated dependencies [968acc8]
+- Updated dependencies [111ffff]
+- Updated dependencies [12b9daf]
+- Updated dependencies [d85615d]
+- Updated dependencies [6a06e3b]
+- Updated dependencies [0e9e7b7]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [9c93ce6]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [04e776b]
+- Updated dependencies [a7df552]
+- Updated dependencies [2f70c22]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [a87d8be]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [ad381fd]
+- Updated dependencies [2b61f2d]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3b49318]
+- Updated dependencies [4e9fe9f]
+- Updated dependencies [9ad3d24]
+- Updated dependencies [326a90a]
+- Updated dependencies [9fe7448]
+- Updated dependencies [2e11d90]
+- Updated dependencies [4578c56]
+- Updated dependencies [c512c25]
+- Updated dependencies [215e662]
+- Updated dependencies [3d886ee]
+- Updated dependencies [f4069c5]
+- Updated dependencies [d8d0711]
+- Updated dependencies [40a6ee5]
+- Updated dependencies [5910b5e]
+- Updated dependencies [081e6a0]
+- Updated dependencies [1884948]
+- Updated dependencies [e23eccb]
+- Updated dependencies [ac8f2c5]
+- Updated dependencies [db9cf80]
+- Updated dependencies [e75dced]
+- Updated dependencies [9af0005]
+- Updated dependencies [9af0005]
+- Updated dependencies [440bed6]
+- Updated dependencies [b2549a8]
+- Updated dependencies [ee8751d]
+- Updated dependencies [96e4be4]
+- Updated dependencies [35ef501]
+- Updated dependencies [faf6348]
+- Updated dependencies [557ae7c]
+- Updated dependencies [6a3fe25]
+- Updated dependencies [7731d70]
+- Updated dependencies [3073b72]
+- Updated dependencies [c76edeb]
+- Updated dependencies [5b12503]
+- Updated dependencies [514bf3c]
+- Updated dependencies [20e7d52]
+- Updated dependencies [b3a3634]
+- Updated dependencies [3e72f93]
+- Updated dependencies [f89b5f5]
+- Updated dependencies [d25b187]
+- Updated dependencies [0e00d36]
+- Updated dependencies [d748ae8]
+- Updated dependencies [dab6bf4]
+- Updated dependencies [ed1de8c]
+- Updated dependencies [a00cf99]
+- Updated dependencies [5fb1746]
+- Updated dependencies [29a163f]
+- Updated dependencies [e223152]
+- Updated dependencies [9f5eca5]
+- Updated dependencies [9963322]
+- Updated dependencies [b27b894]
+- Updated dependencies [02d9f69]
+- Updated dependencies [f53f14b]
+- Updated dependencies [a800912]
+- Updated dependencies [d973c34]
+- Updated dependencies [156ddfa]
+- Updated dependencies [5081090]
+- Updated dependencies [b6eb25f]
+- Updated dependencies [165587e]
+- Updated dependencies [e04759d]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [b32ee3e]
+- Updated dependencies [e5899a6]
+- Updated dependencies [490cb6d]
+- Updated dependencies [e865300]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [85edd61]
+- Updated dependencies [e84aeb3]
+- Updated dependencies [322ff1e]
+- Updated dependencies [5fc57b3]
+- Updated dependencies [581ca7d]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [9814035]
+- Updated dependencies [55382dc]
+- Updated dependencies [b1d701b]
+- Updated dependencies [efcbac7]
+- Updated dependencies [20028df]
+- Updated dependencies [69d4218]
+- Updated dependencies [5ce6773]
+- Updated dependencies [8532783]
+- Updated dependencies [9432bac]
+- Updated dependencies [3f69471]
+- Updated dependencies [e5687cb]
+- Updated dependencies [1e62f71]
+- Updated dependencies [ec7f7f8]
+- Updated dependencies [038d4c9]
+- Updated dependencies [5677add]
+- Updated dependencies [147a0d1]
+- Updated dependencies [1959aac]
+- Updated dependencies [1badd31]
+- Updated dependencies [58f5c90]
+- Updated dependencies [55828c5]
+- Updated dependencies [7856110]
+- Updated dependencies [9b37edb]
+- Updated dependencies [a22e67b]
+- Updated dependencies [62ce45d]
+- Updated dependencies [c5b43b6]
+- Updated dependencies [39e93ef]
+- Updated dependencies [02bec6c]
+- Updated dependencies [719183f]
+- Updated dependencies [8464380]
+- Updated dependencies [8c10776]
+- Updated dependencies [252a582]
+- Updated dependencies [f931e76]
+- Updated dependencies [e5f9f01]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [de70e97]
+- Updated dependencies [74c4b34]
+- Updated dependencies [e040b8c]
+- Updated dependencies [f451a59]
+- Updated dependencies [ba95607]
+- Updated dependencies [b53b949]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [1e44436]
+- Updated dependencies [2acff87]
+- Updated dependencies [299a2c6]
+- Updated dependencies [e23eccb]
+- Updated dependencies [bf492c8]
+  - @objectstack/spec@18.0.0-next.0
+  - @objectstack/metadata-core@18.0.0-next.0
+
 ## 17.7.0
 
 ### Minor Changes

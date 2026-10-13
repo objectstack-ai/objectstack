@@ -39,10 +39,10 @@ import { SysUser, SysAccount, SysMember, SysOrganization } from '@objectstack/pl
 import { SysMigration } from '@objectstack/platform-objects/system';
 
 import { SecurityPlugin } from './security-plugin.js';
-import { SysPosition } from './objects/sys-position.object.js';
+import { SysPosition } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
-import { SysPermissionSet } from './objects/sys-permission-set.object.js';
-import { SysPositionPermissionSet } from './objects/sys-position-permission-set.object.js';
+import { SysPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
+import { SysPositionPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 import {
@@ -186,7 +186,7 @@ async function boot(opts: { posture?: 'single' | 'isolated' } = {}): Promise<Boo
     hooks,
     catalog,
     declared,
-    report: () => collectCatalogReferences(engine as any, { posture, catalog }),
+    report: () => collectCatalogReferences(engine as any, { catalog }),
     async bootstrapped() {
       for (const handler of hooks.get('kernel:bootstrapped') ?? []) await handler();
     },
@@ -229,18 +229,12 @@ const findings = (report: CatalogReferenceReport) =>
     positionAssignments: o.positionAssignments.map((r) => `${r.id}:${r.name}`),
     permissionSetGrants: o.permissionSetGrants.map((r) => `${r.id}:${r.name}`),
     unnamedGrants: o.unnamedGrants.map((g) => `${g.id}:${g.permissionSetId}`),
-    positionsWithoutDefinition: o.positionsWithoutDefinition.map((p) => `${p.name}${p.refusedName ? ' (refused name)' : ''}`),
   }));
 
 describe('[ADR-0131 D4] the catalog reference report — references whose names resolve nowhere, per organization', () => {
   it('a deployment whose every reference resolves reports nothing: declared, packaged and environment-defined names', async () => {
     const b = await boot();
     await b.protocol.saveMetaItem({ type: 'position', name: 's3_env_lead', item: { name: 's3_env_lead', label: 'Env lead' } });
-    await insertRows(b, 'sys_position', [
-      { id: 'pos_field', name: FIELD_LEAD.name, label: 'Field lead' },
-      { id: 'pos_pkg', name: PKG_POSITION, label: 'Package lead' },
-      { id: 'pos_env', name: 's3_env_lead', label: 'Env lead', organization_id: ORG },
-    ]);
     await insertRows(b, 'sys_user_position', [
       { id: 'up_declared', user_id: 'usr_a', position: FIELD_LEAD.name, organization_id: ORG },
       { id: 'up_pkg', user_id: 'usr_a', position: PKG_POSITION },
@@ -255,7 +249,6 @@ describe('[ADR-0131 D4] the catalog reference report — references whose names 
     expect(report.stopped).toBeUndefined();
     expect(report.absent).toEqual([]);
     expect(findings(report)).toEqual([]);
-    expect(report.conflictingPositionNames).toEqual([]);
   });
 
   it('an assignment and a grant whose names resolve nowhere are listed under their own organization, and nowhere else', async () => {
@@ -280,18 +273,18 @@ describe('[ADR-0131 D4] the catalog reference report — references whose names 
       {
         organizationId: null,
         positionAssignments: ['up_ghost_global:global_ghost'],
-        permissionSetGrants: [], unnamedGrants: [], positionsWithoutDefinition: [],
+        permissionSetGrants: [], unnamedGrants: [],
       },
       {
         organizationId: ORG,
         positionAssignments: ['up_ghost_own:ghost_lead'],
         permissionSetGrants: ['g_ghost:ghost_set'],
-        unnamedGrants: [], positionsWithoutDefinition: [],
+        unnamedGrants: [],
       },
       {
         organizationId: OTHER_ORG,
         positionAssignments: ['up_ghost_other:ghost_lead'],
-        permissionSetGrants: [], unnamedGrants: [], positionsWithoutDefinition: [],
+        permissionSetGrants: [], unnamedGrants: [],
       },
     ]);
     expect(report.organizations[1].positionAssignments[0].userId).toBe('usr_a');
@@ -319,102 +312,6 @@ describe('[ADR-0131 D4] the catalog reference report — references whose names 
       organizationId: ORG,
       positionAssignments: [], permissionSetGrants: [],
       unnamedGrants: ['g_row_only:ps_row_only'],
-      positionsWithoutDefinition: [],
-    }]);
-  });
-
-  it('under a walled posture, an organization-authored position has no catalog home: listed by name and organization; the organization\'s built-in copies are not', async () => {
-    const b = await boot({ posture: 'isolated' });
-    // The organizations' own copies of the built-ins, as an existing database
-    // holds them: the retired built-in seeder wrote them per organization, and
-    // since ADR-0131 D2 no boot writes them (stage 6a).
-    await insertRows(b, 'sys_position', [
-      { id: 'pos_everyone_own', name: 'everyone', label: 'Everyone', managed_by: 'platform', organization_id: ORG },
-      { id: 'pos_everyone_other', name: 'everyone', label: 'Everyone', managed_by: 'platform', organization_id: OTHER_ORG },
-      { id: 'pos_org_member_own', name: 'org_member', label: 'Organization Member', managed_by: 'platform', organization_id: ORG },
-    ]);
-    await insertRows(b, 'sys_position', [
-      { id: 'pos_regional_own', name: 'regional_lead', label: 'Regional lead', organization_id: ORG },
-      { id: 'pos_regional_other', name: 'regional_lead', label: 'Regional lead', organization_id: OTHER_ORG },
-      { id: 'pos_night_other', name: 'night_lead', label: 'Night lead', organization_id: OTHER_ORG },
-    ]);
-    await insertRows(b, 'sys_user_position', [
-      { id: 'up_regional', user_id: 'usr_a', position: 'regional_lead', organization_id: ORG },
-    ]);
-
-    const report = await b.report();
-    expect(findings(report)).toEqual([
-      {
-        organizationId: ORG,
-        positionAssignments: ['up_regional:regional_lead'],
-        permissionSetGrants: [], unnamedGrants: [],
-        positionsWithoutDefinition: ['regional_lead'],
-      },
-      {
-        organizationId: OTHER_ORG,
-        positionAssignments: [], permissionSetGrants: [], unnamedGrants: [],
-        positionsWithoutDefinition: ['night_lead', 'regional_lead'],
-      },
-    ]);
-    expect(report.conflictingPositionNames, 'one name on many rows is the walled shape, not a conflict').toEqual([]);
-  });
-
-  it('under a walled posture, a definition saved through the metadata door gives the position its catalog home, and it leaves the report', async () => {
-    const b = await boot({ posture: 'isolated' });
-    await insertRows(b, 'sys_position', [
-      { id: 'pos_regional_own', name: 'regional_lead', label: 'Regional lead', organization_id: ORG },
-    ]);
-    await insertRows(b, 'sys_user_position', [
-      { id: 'up_regional', user_id: 'usr_a', position: 'regional_lead', organization_id: ORG },
-    ]);
-    expect(findings(await b.report()).map((o) => o.positionsWithoutDefinition)).toEqual([['regional_lead']]);
-
-    await b.protocol.saveMetaItem({
-      type: 'position', name: 'regional_lead', item: { name: 'regional_lead', label: 'Regional lead' }, actor: 'system',
-    });
-    expect(findings(await b.report())).toEqual([]);
-  });
-
-  it('under single, a position name more than one row carries is conflicting — reported, never merged — whether or not the catalog resolves it', async () => {
-    const b = await boot();
-    await insertRows(b, 'sys_position', [
-      // Two organizations' Setup rows of one name, agreeing, from before the
-      // write door refused a second holder.
-      { id: 'pos_twin_own', name: 'twin_lead', label: 'Twin', organization_id: ORG },
-      { id: 'pos_twin_other', name: 'twin_lead', label: 'Twin', organization_id: OTHER_ORG },
-      // A package's seeded row, and an organization's Setup row of the same
-      // name stored before the Setup create refused a package-held name.
-      { id: 'pos_pkg', name: PKG_POSITION, label: 'Package lead' },
-      { id: 'pos_pkg_own', name: PKG_POSITION, label: 'Mine', organization_id: ORG },
-      { id: 'pos_alone', name: 'alone_lead', label: 'Alone', organization_id: ORG },
-    ]);
-    await b.bootstrapped();
-
-    const report = await b.report();
-    expect(report.conflictingPositionNames).toEqual([
-      { name: PKG_POSITION, organizationIds: [null, ORG], resolves: true },
-      { name: 'twin_lead', organizationIds: [ORG, OTHER_ORG], resolves: true },
-    ]);
-    const conflictLine = b.logger.error.mock.calls.find(([, , meta]: any[]) => meta?.conflicting);
-    expect(conflictLine?.[2]?.conflicting?.items?.map((c: any) => c.name)).toEqual([PKG_POSITION, 'twin_lead']);
-  });
-
-  it('under single, the refused-name class stays listed at every boot, after the row-only backfill has recorded its verdict', async () => {
-    const b = await boot();
-    await insertRows(b, 'sys_position', [
-      { id: 'pos_refused', name: 'Legacy Lead', label: 'Illegal name', organization_id: ORG },
-    ]);
-    await b.bootstrapped();
-    const ledger = (await b.engine.find('sys_migration', {
-      where: { id: 'adr-0131-position-environment-backfill' }, context: SYS,
-    })) as any[];
-    expect(ledger.length, 'the backfill recorded its verdict: the refused-name class is final for it').toBe(1);
-
-    await b.bootstrapped();
-    expect(findings(await b.report())).toEqual([{
-      organizationId: ORG,
-      positionAssignments: [], permissionSetGrants: [], unnamedGrants: [],
-      positionsWithoutDefinition: ['Legacy Lead (refused name)'],
     }]);
   });
 });
@@ -499,7 +396,7 @@ describe('[ADR-0131 D4] a read that did not happen is never "resolves nowhere"',
       { id: 'up_ghost', user_id: 'usr_a', position: 'ghost_lead', organization_id: ORG },
     ]);
     const catalog = { resolve: vi.fn().mockRejectedValue(new Error('registry offline')), list: vi.fn() };
-    const report = await reportCatalogReferences(b.engine as any, { posture: 'single', catalog, logger: b.logger });
+    const report = await reportCatalogReferences(b.engine as any, { catalog, logger: b.logger });
     expect({ stopped: report.stopped, organizations: report.organizations }).toEqual({
       stopped: 'catalog-unreadable', organizations: [],
     });
@@ -516,7 +413,7 @@ describe('[ADR-0131 D4] a read that did not happen is never "resolves nowhere"',
         return b.engine.find(object, options as EngineQueryOptions);
       },
     };
-    const report = await collectCatalogReferences(engine, { posture: 'single', catalog: b.catalog });
+    const report = await collectCatalogReferences(engine, { catalog: b.catalog });
     expect({ stopped: report.stopped, reading: report.stoppedReading, organizations: report.organizations })
       .toEqual({ stopped: 'scan-unreadable', reading: 'sys_user_permission_set', organizations: [] });
   });
@@ -525,22 +422,20 @@ describe('[ADR-0131 D4] a read that did not happen is never "resolves nowhere"',
     const engine: CatalogReferenceReportEngine = { getObject: () => undefined, find: vi.fn() };
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const catalog = { resolve: vi.fn(), list: vi.fn() };
-    const report = await reportCatalogReferences(engine, { posture: 'single', catalog, logger });
-    expect(report.absent).toEqual(['sys_user_position', 'sys_user_permission_set', 'sys_position']);
+    const report = await reportCatalogReferences(engine, { catalog, logger });
+    expect(report.absent).toEqual(['sys_user_position', 'sys_user_permission_set']);
     expect(engine.find).not.toHaveBeenCalled();
     expect([logger.info, logger.warn, logger.error].map((f) => f.mock.calls.length)).toEqual([0, 0, 0]);
   });
 });
 
 describe('[ADR-0131 D3/D4] SecurityPlugin runs the report at kernel:bootstrapped', () => {
-  it('after both backfills — a name either one resolved this boot is not reported — and the report writes nothing', async () => {
+  it('after the grant-name backfill — a name it resolved this boot is not reported — and the report writes nothing', async () => {
     const b = await boot();
-    // A row-only legal position the position backfill defines this boot, and
-    // an unnamed grant whose set row's name the catalog resolves, which the
-    // grant-name backfill names this boot. Neither may be reported.
-    await insertRows(b, 'sys_position', [{ id: 'pos_legacy', name: 'legacy_lead', label: 'Legacy lead', organization_id: ORG }]);
+    // An unnamed grant whose set row's name the catalog resolves, which the
+    // grant-name backfill names this boot: it may not be reported. (The
+    // row-only position backfill ran here too until C3 stage 8 unwired it.)
     await insertRows(b, 'sys_user_position', [
-      { id: 'up_legacy', user_id: 'usr_a', position: 'legacy_lead', organization_id: ORG },
       { id: 'up_ghost', user_id: 'usr_a', position: 'ghost_lead', organization_id: ORG },
     ]);
     await insertRows(b, 'sys_permission_set', [{ id: 'ps_auditor', name: AUDITOR.name, label: 'Auditor' }]);
@@ -549,7 +444,7 @@ describe('[ADR-0131 D3/D4] SecurityPlugin runs the report at kernel:bootstrapped
     ]);
 
     const handlers = b.hooks.get('kernel:bootstrapped') ?? [];
-    expect(handlers.length).toBeGreaterThanOrEqual(3);
+    expect(handlers.length).toBeGreaterThanOrEqual(2);
     for (const handler of handlers.slice(0, -1)) await handler();
     const writes = [
       vi.spyOn(b.engine, 'insert'), vi.spyOn(b.engine, 'update'), vi.spyOn(b.engine, 'delete'),

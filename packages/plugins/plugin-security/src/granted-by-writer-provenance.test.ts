@@ -41,13 +41,8 @@ import { PermissionSetSchema } from '@objectstack/spec/security';
 
 import { SecurityPlugin } from './security-plugin.js';
 import { INVITATION_PLACEMENT_SERVICE, type InvitationPlacementService } from './invitation-placement.js';
-import {
-  SysPermissionSet,
-  SysPosition,
-  SysPositionPermissionSet,
-  SysUserPermissionSet,
-  SysUserPosition,
-} from './objects/index.js';
+import { SysUserPermissionSet, SysUserPosition } from './objects/index.js';
+import { SysPermissionSet, SysPosition, SysPositionPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
 
 const SYS = { context: { isSystem: true } } as never;
 

@@ -6,10 +6,10 @@
  * D; ADR-0032 Decision 2, a computed value is whole-field CEL). Declared in the
  * expression ledger and evaluated in the same change.
  *
- * Before this, each executor ran a string `collection` through `interpolate()`:
- * a whole `{token}` handed back the variable's value, and the contract also
- * declared a variable's bare name there — which the structured `loop` and
- * `map` never read: `interpolate('rows')` returns `'rows'`, the fallback to a
+ * Before this, each executor ran a string `collection` through the 17.x
+ * `interpolate()`: a whole `{token}` handed back the variable's value, and the
+ * contract also declared a variable's bare name there — which the structured
+ * `loop` and `map` never read: `interpolate('rows')` returned `'rows'`, the fallback to a
  * variable lookup fired only on `null`, and every run failed at the node with
  * "did not resolve to an array" (measured on the base through this engine).
  * Pinned through the shipped `AutomationEngine`:

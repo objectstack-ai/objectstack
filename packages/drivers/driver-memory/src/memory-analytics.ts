@@ -2238,7 +2238,8 @@ export class MemoryAnalyticsService implements IAnalyticsService {
    * `'today'` still resolves to `[that zone's midnight, tomorrow's midnight)`
    * with `endExclusive: true` — #16179's repair, byte for byte, because the
    * shared resolver states the same window in the same tokens. The three
-   * rolling `last_N_days` presets end at NOW and stay INCLUSIVE. And the
+   * rolling `last_N_days` presets stop where `'today'` stops, at tomorrow's
+   * midnight, with `endExclusive: true` as well. And the
    * explicit `[a, b]` array arm never arrives here at all: it is discriminated
    * at the call site and keeps its published `$lte` reading.
    *

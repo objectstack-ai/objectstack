@@ -37,14 +37,11 @@ export const CaseViews = defineView({
 
 ### Data Source (`data`)
 
-Every view connects to data via one of three providers:
+Every view connects to data via one of two providers:
 
 ```typescript
 // Auto-connect to an ObjectStack object
 data: { provider: 'object', object: 'support_case' }
-
-// Custom API endpoint
-data: { provider: 'api', read: { url: '/api/cases', method: 'GET' } }
 
 // Static inline data
 data: { provider: 'value', items: [...] }
@@ -52,7 +49,8 @@ data: { provider: 'value', items: [...] }
 
 > **Best practice:** Always use `provider: 'object'` when the data source is
 > an ObjectStack-managed object. It enables automatic CRUD, real-time updates,
-> filtering, and pagination.
+> filtering, and pagination. A view never calls an API: an API read is a
+> page element's `dataSource` binding.
 
 ### Columns
 

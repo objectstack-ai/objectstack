@@ -39,12 +39,13 @@
  * `--skip-install` there is no resolved version, so the template keeps `latest`
  * and its comment keeps telling the reader to pin by hand — true in that path.
  *
- * Finally we (best-effort) install the ObjectStack skills bundle, for ONE
- * agent runtime (`skills-install.ts` carries the command and the measurement
- * behind that choice: `--all` writes the same bundle to three destinations and
- * the project then commits all three). The `/skills` subpath scopes discovery
- * to the curated, customer-published catalog — repo-internal skills (e.g.
- * under `.claude/skills/` in THIS repo) must never reach scaffolded projects.
+ * Finally we (best-effort) install the ObjectStack skills catalog, for ONE
+ * agent runtime, from the `@objectstack/skills` package the install just put in
+ * `node_modules` — the catalog at the project's own `@objectstack/spec`
+ * version, never the repository's `main` branch (`skills-install.ts` carries
+ * the command and the measurements behind it: why the package, why `--copy`,
+ * why one agent). With no install there is no package to read, so
+ * `--skip-install` installs no skills and the summary says how to get them.
  *
  * Only THEN is the "Created files" summary printed, and it is a walk of the
  * finished project directory rather than a list accumulated during the copy
@@ -79,7 +80,13 @@ import {
   DEFAULT_SKILLS_DIR,
   EXAMPLE_OTHER_AGENT,
   SKILLS_INSTALL_COMMAND,
+  SKILLS_PACKAGE,
+  SKILLS_PACKAGE_CATALOG_DIR,
+  installedSkillsVersion,
+  listSkills,
   skillsInstallHint,
+  skillsPackageDir,
+  skillsSyncedFromPackage,
 } from './skills-install.js';
 import { renderVersionBanner } from './banner.js';
 
@@ -379,6 +386,71 @@ function writeIfAbsent(filePath: string, contents: string) {
   }
 }
 
+// Install the skills catalog from the `@objectstack/skills` package that
+// `<pm> install` put in node_modules, for one agent. Returns the package
+// version installed, or `null` after a warning naming the remedy.
+//
+// The sync's exit code is not the verdict: with no package to read it prints
+// "Nothing to sync." and exits 0, and it exits 0 having skipped a skill it did
+// not install (`skills-install.ts`). So both sides are read here — a catalog
+// in the package before the call, and every one of its skills in the agent's
+// directory, recorded in the lock as synced from the package, after it — and
+// a gap on either is said out loud rather than summarised as "Installed".
+function installSkillsFromPackage(
+  targetDir: string,
+  installed: boolean,
+  pm: string,
+): string | null {
+  const hint = `    ${skillsInstallHint(DEFAULT_SKILLS_AGENT)}`;
+  if (!installed) {
+    printWarning(
+      `Skills not installed: they are read from ${SKILLS_PACKAGE} in node_modules, ` +
+        `and \`${pm} install\` did not complete. Once it does, run:\n${hint}`,
+    );
+    console.log('');
+    return null;
+  }
+
+  const version = installedSkillsVersion(targetDir);
+  const catalog = listSkills(path.join(skillsPackageDir(targetDir), SKILLS_PACKAGE_CATALOG_DIR));
+  if (!version || catalog.length === 0) {
+    printWarning(
+      `Skills not installed: node_modules holds no ${SKILLS_PACKAGE} catalog ` +
+        `(${SKILLS_PACKAGE_CATALOG_DIR}/<skill>/SKILL.md) to read. Depend on ${SKILLS_PACKAGE} ` +
+        `at your @objectstack/spec version, run \`${pm} install\`, then:\n${hint}`,
+    );
+    console.log('');
+    return null;
+  }
+
+  printStep(`Installing AI skills for your coding agent from ${SKILLS_PACKAGE}@${version}...`);
+  try {
+    execSync(SKILLS_INSTALL_COMMAND, { stdio: 'inherit', cwd: targetDir });
+  } catch {
+    printWarning(`Skills installation failed. Run manually:\n${hint}`);
+    console.log('');
+    return null;
+  }
+
+  // Both the files and the lock entry: the sync leaves an existing directory
+  // it did not write (one from `skills add`) in place and still exits 0.
+  const landed = new Set(listSkills(path.join(targetDir, DEFAULT_SKILLS_DIR)));
+  const synced = skillsSyncedFromPackage(targetDir);
+  const missing = catalog.filter((skill) => !landed.has(skill) || !synced.has(skill));
+  if (missing.length > 0) {
+    printWarning(
+      `Skills installation incomplete: ${missing.length} of ${catalog.length} skill(s) in ` +
+        `${SKILLS_PACKAGE}@${version} are not in ${DEFAULT_SKILLS_DIR} as files synced from it ` +
+        `(${missing.join(', ')}). The sync leaves a skill installed earlier with \`skills add\` ` +
+        `in place: remove it (\`npx skills remove <name> -y\`), then run:\n${hint}`,
+    );
+    console.log('');
+    return null;
+  }
+  console.log('');
+  return version;
+}
+
 // ─── CLI Program ────────────────────────────────────────────────────
 
 const program = new Command()
@@ -495,9 +567,11 @@ const program = new Command()
       printSuccess(`Template files written (${createdFiles.length})`);
       console.log('');
 
+      // Hoisted: the skills step below reads its catalog out of what this
+      // install put in node_modules, so it needs to know whether it ran.
+      let installed = false;
       if (!options.skipInstall) {
         printStep('Installing dependencies...');
-        let installed = false;
         try {
           execSync(`${pm} install`, { stdio: 'inherit', cwd: targetDir });
           installed = true;
@@ -538,24 +612,12 @@ const program = new Command()
       // diffing the directory across the call rather than from a list this
       // file would have to keep current.
       const beforeSkills = topLevelNames(targetDir);
-      let skillsInstalled = false;
-      if (!options.skipInstall && !options.skipSkills) {
-        printStep('Installing AI skills for your coding agent...');
-        try {
-          execSync(SKILLS_INSTALL_COMMAND, {
-            stdio: 'inherit',
-            cwd: targetDir,
-          });
-          skillsInstalled = true;
-          console.log('');
-        } catch {
-          printWarning(
-            'Skills installation skipped. Run manually:\n' +
-              `    ${skillsInstallHint(DEFAULT_SKILLS_AGENT)}`,
-          );
-          console.log('');
-        }
-      }
+      // `--skip-install` implies no skills: the catalog is read out of
+      // node_modules, and that run leaves none.
+      const skillsVersion =
+        !options.skipInstall && !options.skipSkills
+          ? installSkillsFromPackage(targetDir, installed, pm)
+          : null;
       const skillPaths = new Set(
         [...topLevelNames(targetDir)].filter((p) => !beforeSkills.has(p)),
       );
@@ -587,20 +649,32 @@ const program = new Command()
       // succeeded still leaves every other runtime uninstalled — and a
       // capability that is absent has to say so, with the remedy, rather than
       // leave the reader to discover the gap. The command printed here is the
-      // one this scaffolder ran, with a different agent name.
+      // one this scaffolder ran, with a different agent name — and, because
+      // the catalog follows the installed package, the same command is also
+      // the re-install after an upgrade of the @objectstack/* set.
       console.log('');
-      if (skillsInstalled) {
+      if (skillsVersion) {
         console.log(chalk.bold('  AI Skills:'));
         console.log(
           chalk.dim(
-            `    Installed for ${DEFAULT_SKILLS_AGENT} → ${DEFAULT_SKILLS_DIR} — commit it with your project.`,
+            `    Installed for ${DEFAULT_SKILLS_AGENT} → ${DEFAULT_SKILLS_DIR} from ` +
+              `${SKILLS_PACKAGE}@${skillsVersion} — commit it with your project.`,
           ),
         );
+        console.log(chalk.dim('    After upgrading the @objectstack/* packages, re-install them at the new version:'));
+        console.log(chalk.dim(`      ${skillsInstallHint(DEFAULT_SKILLS_AGENT)}`));
         console.log(chalk.dim('    Using a different agent? Add it one runtime at a time:'));
         console.log(chalk.dim(`      ${skillsInstallHint(EXAMPLE_OTHER_AGENT)}`));
-        console.log(chalk.dim('      (`npx skills add --help` lists every agent name)'));
+        console.log(chalk.dim('      (an unknown agent name makes the skills CLI list every valid one)'));
       } else {
         console.log(chalk.bold('  AI Skills (recommended):'));
+        console.log(
+          chalk.dim(
+            options.skipInstall
+              ? `    Not installed yet — they are read from ${SKILLS_PACKAGE} in node_modules. After \`${pm} install\`:`
+              : `    Read from ${SKILLS_PACKAGE} in node_modules, at your @objectstack/spec version:`,
+          ),
+        );
         console.log(chalk.dim(`    ${skillsInstallHint(DEFAULT_SKILLS_AGENT)}`));
         console.log(
           chalk.dim(`    Replace \`${DEFAULT_SKILLS_AGENT}\` with your own agent runtime if it differs.`),

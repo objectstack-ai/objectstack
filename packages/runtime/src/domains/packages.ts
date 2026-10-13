@@ -1093,6 +1093,22 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     response: deps.error(repeatedQueryParamMessage('enabled', enabled.count), 400),
                 };
             }
+            // [#23214] `status` and `type` are each compared with `===` against
+            // ONE value below, so a repeat matched no package and the door
+            // answered an empty 200, the plausible-looking wrong answer
+            // `enabled` above is refused to prevent. Refused the same way, with
+            // the same sentence; a one-element array is one occurrence.
+            for (const name of ['status', 'type'] as const) {
+                const raw = query?.[name];
+                if (!Array.isArray(raw)) continue;
+                if (raw.length > 1) {
+                    return {
+                        handled: true,
+                        response: deps.error(repeatedQueryParamMessage(name, raw.length), 400),
+                    };
+                }
+                query[name] = raw[0];
+            }
             let packages = registry.getAllPackages();
             // Apply optional filters
             if (query?.status) {
@@ -1729,16 +1745,30 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                                 : Array.isArray((appsRes as any)?.items) ? (appsRes as any).items : [];
                             for (const app of apps) {
                                 if (app && typeof app === 'object' && app._unpublished === true && typeof app.name === 'string') {
+                                    // `false`, not a delete: ADR-0045 §3 makes
+                                    // publish/unpublish symmetric ("unpublish =
+                                    // re-hide"), so the gate stays a two-state
+                                    // flag rather than a key whose absence has
+                                    // to be re-derived. Whatever `hidden` the
+                                    // app carries is copied through untouched.
+                                    const item: Record<string, unknown> = { ...app, _unpublished: false };
+                                    // [#23120, ADR-0010 §3.5] …but not a
+                                    // `protection` block. This body is the
+                                    // server's, built from the stored row, and
+                                    // a row stored before the metadata save door
+                                    // refused the block can still carry one: the
+                                    // save would be refused with
+                                    // `400 VALIDATION_ERROR` and the app left
+                                    // `_unpublished`. Only the package loader
+                                    // translates the block into a lock, so it
+                                    // never bound and dropping it changes no
+                                    // verdict. Dropped from this copy only — the
+                                    // row the read returned is not mutated.
+                                    delete item.protection;
                                     await protocol.saveMetaItem({
                                         type: 'app',
                                         name: app.name,
-                                        // `false`, not a delete: ADR-0045 §3 makes
-                                        // publish/unpublish symmetric ("unpublish =
-                                        // re-hide"), so the gate stays a two-state
-                                        // flag rather than a key whose absence has
-                                        // to be re-derived. Whatever `hidden` the
-                                        // app carries is copied through untouched.
-                                        item: { ...app, _unpublished: false },
+                                        item,
                                         packageId: id,
                                         ...(body?.actor ? { actor: body.actor } : {}),
                                     });

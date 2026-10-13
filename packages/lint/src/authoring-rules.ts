@@ -1155,32 +1155,41 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // while a schema error elsewhere in the stack cannot take these findings down
   // with it.
   //
-  // Advisory, deliberately, and this is the whole shape of #5068's first step:
-  // wiring the parse is the precondition for enforcement, not the enforcement
-  // (#5020, one surface over). The live corpus violates the declarations in two
-  // places that are open contract questions — inline i18n label maps on three
-  // published platform pages (#5728) and the record picker's declared-but-unread
-  // `displayField` (#5775) — so gating today would fail the platform's own pages
-  // to enforce declarations the platform does not keep. The error upgrade is a
-  // separate step, once the warning-period inventory is empty.
-  //
-  // #5775 settled the record picker's half: `displayField` is retired in favour
-  // of the `labelField` the renderer actually reads. Its claim that "the rest of
-  // the keys the renderers honour are declared" did NOT hold — #6776 found five
-  // more (`page:header` `recordChrome`/`showStar`/`showCopyId`,
-  // `page:accordion.variant`, and the tab strip's visual style, whose declared
-  // spelling `page:tabs.type` collided with the component node's own dispatch
-  // key and so was unauthorable in the flat and JSX carriers). All five are
-  // declared as of #6776, the last as the renamed `tabStyle`. What remains
-  // before the error upgrade is #5728 and two page rewrites.
+  // Gating: every finding is an `error`, so `os validate`, `os build` and
+  // `os lint` refuse an undeclared prop, a value the props schema rejects, a
+  // missing `dataSource.object` binding and a retired prop (with its
+  // prescription). #5068's first step was advisory on purpose — wiring the
+  // parse is the precondition for enforcement, not the enforcement (#5020, one
+  // surface over) — and the error upgrade was to be its own step once the
+  // warning-period inventory was empty. Its blockers (#5728, #5775, #6776's
+  // undeclared props, two page rewrites) are all closed. #23026 moved the
+  // retired-key class and #23147 the rest, each on an inventory of 0 — the
+  // second one over a corpus authored outside this repository too. The rule's
+  // module header records both measurements.
   {
     name: 'validateComponentProps',
-    tier: 'advisory',
+    tier: 'gating',
     input: 'normalized',
     commands: ALL,
     source: 'packages/lint/src/validate-component-props.ts',
     surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
+    // Page-local, MEASURED (#23147): the rule reads `stack.pages` and nothing
+    // else — each page's components through `walkPageComponents`, judged
+    // against the static `ComponentPropsMap` — and a `page` write's per-write
+    // snapshot (`runtime-gate.ts`) carries the written page as `pages[0]`. Over
+    // the showcase's 28 pages, the rule's findings through that snapshot were
+    // identical to the whole-stack run's findings on the same page, as
+    // authored (0 = 0) and with an undeclared key and a wrong-typed prop
+    // planted (19 = 19). So RUNTIME_NEEDS_FULL_SNAPSHOT, which this entry
+    // carried until then, was false here. What holds the rule off the runtime
+    // door is the `validateComponentTypes` discipline: a measured false-refusal
+    // budget over STORED tenant page rows, which no population measured so far
+    // is. Crossing is its own rollout decision.
+    surfaceReason:
+      'Gating rule held off the runtime door pending the crossing discipline the gating object rules ' +
+      'went through: a measured false-refusal budget, here over stored tenant page rows. The rule is ' +
+      'page-local and a page write\'s snapshot carries everything it reads; the 0-finding inventories ' +
+      'cover authored config-file metadata only. Crossing is its own rollout card.',
     run: (stack) => validateComponentProps(stack),
   },
   // The TYPE half of the same door (#12183's ruling): a component `type` inside

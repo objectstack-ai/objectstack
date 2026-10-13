@@ -23,12 +23,13 @@
 // ## Why synthetic trees rather than a real scaffold
 //
 // The real run's last two write phases are `<pm> install` and
-// `npx skills add …` — a package manager and a third-party CLI, both needing
-// the network. A unit test that depended on them would be a network test that
-// fails for reasons unrelated to this property. The shapes that matter are
-// reproduced directly instead: a large tree that must collapse, a symlink farm
-// that must be counted without being followed, a single-child chain that must
-// compress, and a tree past the measurement budget.
+// `npx skills experimental_sync …` — a package manager and a third-party CLI,
+// both needing the network. A unit test that depended on them would be a
+// network test that fails for reasons unrelated to this property. The shapes
+// that matter are reproduced directly instead: a large tree that must
+// collapse, a single-child chain that must compress, a tree past the
+// measurement budget, and — in a tree of its own — a symlink farm that must be
+// counted without being followed.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'node:fs';
@@ -105,31 +106,28 @@ beforeAll(() => {
   write('src/objects/index.ts', 'export {};\n');
   write('src/objects/note.object.ts', 'export {};\n');
 
-  // Phase 2 — the package manager.
+  // Phase 2 — the package manager, which also brings the catalog's source:
+  // the `@objectstack/skills` package the template depends on.
   write('pnpm-lock.yaml', 'lockfileVersion: 9.0\n'.repeat(400));
   for (let i = 0; i < MEASURE_BUDGET + 50; i += 1) {
     write(`node_modules/pkg-${i}/index.js`, 'module.exports = {};\n');
   }
+  for (const skill of SKILLS) {
+    write(`node_modules/@objectstack/skills/dist/skills/${skill}/SKILL.md`, '---\nname: x\n---\n');
+  }
 
-  // Phase 3 — the skills installer: two real trees plus a symlink farm, the
-  // layout measured from `npx skills add … --all` (one directory per catalog
-  // skill, `.claude/skills/*` symlinked into `.agents/skills/`). The COUNT is
-  // faithful on purpose: the two real trees (two files per skill) sit above
-  // COLLAPSE_AT and take the collapse path the product takes, while the
-  // ten-link farm sits exactly AT it and enumerates — a 3-skill fixture would
-  // put every tree on the enumerate path, testing the branch the product does
-  // not use.
+  // Phase 3 — the skills installer, in the shape the scaffolder runs it:
+  // `experimental_sync --agent claude-code --copy` copies the installed
+  // package's catalog into ONE real tree, `.claude/skills/<skill>/`, and
+  // writes `skills-lock.json` (skills-install.ts carries the measurement).
+  // The COUNT is faithful on purpose: two files per skill put the tree above
+  // COLLAPSE_AT, so it takes the collapse path the product takes — a 3-skill
+  // fixture would put it on the enumerate path, testing the branch the
+  // product does not use.
   write('skills-lock.json', '{"version":1}\n');
   for (const skill of SKILLS) {
-    for (const tree of ['.agents/skills', 'agent/skills']) {
-      write(`${tree}/${skill}/SKILL.md`, '---\nname: x\n---\n'.repeat(60));
-      write(`${tree}/${skill}/references/guide.md`, 'guide\n'.repeat(60));
-    }
-    fs.mkdirSync(path.join(root, '.claude/skills'), { recursive: true });
-    fs.symlinkSync(
-      path.join('..', '..', '.agents', 'skills', skill),
-      path.join(root, '.claude/skills', skill),
-    );
+    write(`.claude/skills/${skill}/SKILL.md`, '---\nname: x\n---\n'.repeat(60));
+    write(`.claude/skills/${skill}/references/guide.md`, 'guide\n'.repeat(60));
   }
 });
 
@@ -146,8 +144,9 @@ describe('created-summary — reachability', () => {
     expect(written).toContain('AGENTS.md');
     expect(written).toContain('skills-lock.json');
     expect(written).toContain('pnpm-lock.yaml');
-    expect(written.filter((p) => p.startsWith('.agents/')).length).toBeGreaterThan(0);
-    expect(written.filter((p) => p.startsWith('agent/')).length).toBeGreaterThan(0);
+    expect(written.filter((p) => p.startsWith('.claude/skills/')).length).toBeGreaterThan(
+      COLLAPSE_AT,
+    );
     expect(written.filter((p) => p.startsWith('node_modules/')).length).toBeGreaterThan(
       MEASURE_BUDGET,
     );
@@ -177,9 +176,9 @@ describe('created-summary — reachability', () => {
       '.github/copilot-instructions.md',
       'pnpm-lock.yaml',
       'skills-lock.json',
-      '.agents/skills/objectstack-ai/SKILL.md',
-      'agent/skills/objectstack-ai/SKILL.md',
-      '.claude/skills/objectstack-ai',
+      '.claude/skills/objectstack-ai/SKILL.md',
+      '.claude/skills/objectstack-ai/references/guide.md',
+      'node_modules/@objectstack/skills/dist/skills/objectstack-ai/SKILL.md',
       'node_modules/pkg-0/index.js',
     ]);
     expect(missed).toEqual([]);
@@ -196,7 +195,7 @@ describe('created-summary — reachability', () => {
 describe('created-summary — readability', () => {
   it('collapses big trees instead of enumerating them', () => {
     const entries = summarizeTree(root);
-    // 10 skills x 2 files x 2 trees plus a 2050-entry node_modules: an
+    // 10 skills x 2 files plus a 2050-entry node_modules: an
     // enumeration would be thousands of lines. The bar is reachability AND a
     // summary a human reads, so bulk arrives as directory lines.
     expect(entries.length).toBeLessThan(60);
@@ -205,43 +204,68 @@ describe('created-summary — readability', () => {
   });
 
   it('compresses single-child chains down to the directory worth opening', () => {
-    // `.agents/` holds only `skills/`, so the line must read `.agents/skills/`
+    // `.claude/` holds only `skills/`, so the line must read `.claude/skills/`
     // — the path the "review your skills" advice actually sends people to.
     const dirs = summarizeTree(root)
       .filter((e) => e.kind === 'dir')
       .map((e) => e.path);
-    expect(dirs).toContain('.agents/skills/');
-    expect(dirs).toContain('agent/skills/');
-    expect(dirs).not.toContain('.agents/');
+    expect(dirs).toContain('.claude/skills/');
+    expect(dirs).not.toContain('.claude/');
   });
 
   it('counts symlinks without following them', () => {
-    // `.claude/skills/*` are symlinks into `.agents/skills/`. Following them
-    // would double-count that tree and report a size the disk does not hold.
-    // A ten-skill catalog puts the farm exactly AT COLLAPSE_AT, so it is
-    // ENUMERATED (a directory collapses only above the threshold) and the
-    // property is read off the ten symlink lines themselves: each is one
-    // entry whose size is the link's own bytes — the target path string, as
-    // `lstat` reports it — never the tree it points at. Should the catalog
-    // grow past COLLAPSE_AT again, the farm collapses to one line and this
-    // test moves back to asserting on that line's `entries` and `bytes`.
+    // The scaffolder's own phase 3 writes no links any more (`--copy`), but the
+    // walk still meets them: pnpm builds node_modules out of them, and the same
+    // sync WITHOUT `--copy` writes two farms — `.agents/skills/*` into the
+    // package in node_modules and `.claude/skills/*` into `.agents/skills/`
+    // (measured, skills-install.ts). That shape is built here in a tree of its
+    // own. Following the links would double-count the catalog and report a
+    // size the disk does not hold. A ten-skill catalog puts each farm exactly
+    // AT COLLAPSE_AT, so it is ENUMERATED (a directory collapses only above the
+    // threshold) and the property is read off the symlink lines themselves:
+    // each is one entry whose size is the link's own bytes — the target path
+    // string, as `lstat` reports it — never the tree it points at. Should the
+    // catalog grow past COLLAPSE_AT again, the farms collapse to one line each
+    // and this test moves to asserting on those lines' `entries` and `bytes`.
     expect(
       SKILLS.length,
       'the farm must sit at or under COLLAPSE_AT for the enumerate-path reading below',
     ).toBeLessThanOrEqual(COLLAPSE_AT);
-    const entries = summarizeTree(root);
-    const links = entries.filter((e) => e.path.startsWith('.claude/skills/'));
-    expect(links.map((e) => e.path).sort()).toEqual(SKILLS.map((s) => `.claude/skills/${s}`).sort());
-    const agents = entries.find((e) => e.path === '.agents/skills/');
-    expect(agents, '.agents/skills/ must still collapse — it holds two files per skill').toBeTruthy();
-    for (const link of links) {
-      const target = path.join('..', '..', '.agents', 'skills', link.path.slice('.claude/skills/'.length));
-      expect(link.kind).toBe('file');
-      expect(link.entries).toBe(1);
-      expect(link.bytes, `${link.path} must be sized as the link, not as its target`).toBe(
-        Buffer.byteLength(target),
-      );
-      expect(link.bytes).toBeLessThan(agents!.bytes / SKILLS.length);
+    const linked = fs.mkdtempSync(path.join(os.tmpdir(), 'summary-linked-'));
+    try {
+      const pkgSkills = path.join('node_modules', '@objectstack', 'skills', 'dist', 'skills');
+      const targets = new Map<string, string>();
+      for (const skill of SKILLS) {
+        for (const f of ['SKILL.md', 'references/guide.md']) {
+          const abs = path.join(linked, pkgSkills, skill, f);
+          fs.mkdirSync(path.dirname(abs), { recursive: true });
+          fs.writeFileSync(abs, 'guide\n'.repeat(60));
+        }
+        for (const [farm, target] of [
+          ['.agents/skills', path.join('..', '..', pkgSkills, skill)],
+          ['.claude/skills', path.join('..', '..', '.agents', 'skills', skill)],
+        ] as const) {
+          fs.mkdirSync(path.join(linked, farm), { recursive: true });
+          fs.symlinkSync(target, path.join(linked, farm, skill));
+          targets.set(`${farm}/${skill}`, target);
+        }
+      }
+      const entries = summarizeTree(linked);
+      expect(unreachablePaths(entries, walkWritten(linked))).toEqual([]);
+      const real = entries.find((e) => e.path === `${pkgSkills.split(path.sep).join('/')}/`);
+      expect(real, 'the real catalog tree must still collapse — two files per skill').toBeTruthy();
+      const links = entries.filter((e) => targets.has(e.path));
+      expect(links.map((e) => e.path).sort()).toEqual([...targets.keys()].sort());
+      for (const link of links) {
+        expect(link.kind).toBe('file');
+        expect(link.entries).toBe(1);
+        expect(link.bytes, `${link.path} must be sized as the link, not as its target`).toBe(
+          Buffer.byteLength(targets.get(link.path)!),
+        );
+        expect(link.bytes).toBeLessThan(real!.bytes / SKILLS.length);
+      }
+    } finally {
+      fs.rmSync(linked, { recursive: true, force: true });
     }
   });
 
@@ -255,7 +279,7 @@ describe('created-summary — readability', () => {
   });
 
   it('describes a fully measured directory with both count and size', () => {
-    const skills = summarizeTree(root).find((e) => e.path === '.agents/skills/')!;
+    const skills = summarizeTree(root).find((e) => e.path === '.claude/skills/')!;
     expect(skills.truncated).toBe(false);
     expect(describeEntry(skills)).toMatch(/^\d+ files, [\d.]+ (B|KB|MB)$/);
   });

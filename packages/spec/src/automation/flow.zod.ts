@@ -980,8 +980,10 @@ export const FlowEdgeSchema = lazySchema(() => strictObject(
  *     { id: "check_amount", type: "decision", label: "Check Amount", position: {x: 0, y: 100} },
  *     { id: "auto_approve", type: "update_record", label: "Auto Approve", position: {x: -100, y: 200},
  *       config: { objectName: "order", filter: { id: { dialect: "cel", source: "record.id" } }, fields: { status: "approved" } } },
+ *     // `connectorConfig.input` is handed to the action as written: no template
+ *     // is read there, so it holds literals.
  *     { id: "submit_for_approval", type: "connector_action", label: "Submit", position: {x: 100, y: 200},
- *       connectorConfig: { connectorId: "approvals_desk", actionId: "submit", input: { orderId: "{record.id}" } } }
+ *       connectorConfig: { connectorId: "approvals_desk", actionId: "submit", input: { queue: "large_orders" } } }
  *   ],
  *   edges: [
  *     { id: "e1", source: "start", target: "check_amount" },

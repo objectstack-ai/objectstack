@@ -24,7 +24,7 @@ import { resetPlatformAdminEmailMemo } from '@objectstack/core';
 import { SysUser, SysAccount, SysMember } from '@objectstack/platform-objects/identity';
 import { bootstrapPlatformAdmin, findExistingPlatformAdmin } from './bootstrap-platform-admin.js';
 import { reconcileOrgAdminGrant } from './auto-org-admin-grant.js';
-import { SysPermissionSet } from './objects/sys-permission-set.object.js';
+import { SysPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 

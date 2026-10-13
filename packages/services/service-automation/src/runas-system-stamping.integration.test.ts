@@ -35,7 +35,7 @@
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { ObjectKernel } from '@objectstack/core';
+import { ObjectKernel, type PluginContext } from '@objectstack/core';
 import { ObjectQLPlugin, type ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { createIdentityObjectsPlugin } from '@objectstack/plugin-auth';
@@ -232,16 +232,31 @@ describe('the #5494 admission flip: row content, not caller, decides (real Secur
     objects: { crm_task: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
   });
 
-  /** The rank-and-file member who triggered the sweep. */
+  /**
+   * The rank-and-file member who triggered the sweep. `tenantId` is the
+   * deployment's one organization, the Default Organization the boot creates;
+   * `bootWithSecurity` fills it in.
+   */
   const MEMBER_CTX = {
     userId: 'usr_member',
-    tenantId: 'org_1',
+    tenantId: '',
     positions: ['org_member'],
     permissions: ['member_default', 'task_delete'],
   };
 
   async function bootWithSecurity() {
     kernel = new ObjectKernel({ logger: { level: 'fatal' } });
+    // The driver is published before the boot, as a datasource plugin does:
+    // the identity objects' `start()` reads and writes `sys_organization`.
+    const driver = makeSqliteDriver();
+    await kernel.use({
+      name: 'test.driver.sqlite',
+      type: 'standard',
+      version: '1.0.0',
+      async init(ctx: PluginContext) {
+        ctx.registerService('driver.default', driver);
+      },
+    });
     await kernel.use(new ObjectQLPlugin());
     await kernel.use(new AutomationServicePlugin({ suspendedRunStore: 'memory' }));
     // SecurityPlugin refuses a kernel without the identity objects its
@@ -258,22 +273,15 @@ describe('the #5494 admission flip: row content, not caller, decides (real Secur
     ql = kernel.getService<ObjectQL>('objectql');
     automation = kernel.getService<AutomationEngine>('automation');
 
-    const driver = makeSqliteDriver();
-    await driver.connect();
-    ql.registerDriver(driver, true);
     ql.registry.registerObject(crmTask as any, 'stamping-test', 'stamping-test');
     await ql.syncSchemas();
-    // [ADR-0131 D3] A production `single` boot holds the Default Organization
-    // before any flow runs: the auth plugin's boot invariant, which this rig
-    // (identity objects, no auth plugin) does not compose. It is the member's
-    // organization, `org_1`, the deployment's one organization. Without it the
-    // user-less run's system insert is refused (D9): this composition
-    // registers `sys_organization`, and the install would hold none.
-    await ql.insert(
-      'sys_organization',
-      { id: 'org_1', name: 'Default Organization', slug: 'default' },
-      { context: { isSystem: true } },
-    );
+    // [ADR-0131 D3] A `single` boot holds the Default Organization before any
+    // flow runs: the identity objects keep that invariant without the auth
+    // plugin. It is the member's organization, the deployment's one
+    // organization, which the user-less run's system insert derives (D9).
+    const orgs = await ql.find('sys_organization', { context: { isSystem: true } });
+    expect(orgs.map((o: any) => o.slug)).toEqual(['default']);
+    MEMBER_CTX.tenantId = String(orgs[0].id);
   }
 
   const SYS = { isSystem: true } as const;
@@ -291,7 +299,7 @@ describe('the #5494 admission flip: row content, not caller, decides (real Secur
     const row = await rowByTitle('flip A');
     expect(row!.created_by).toBe('usr_member');
     expect(row!.owner_id).toBe('usr_member');
-    expect(row!.organization_id).toBe('org_1');
+    expect(row!.organization_id).toBe(MEMBER_CTX.tenantId);
 
     // Step 3, inverted: the same member — no elevation, no transfer grant —
     // repairs and completes the record the sweep made for them.
@@ -318,7 +326,7 @@ describe('the #5494 admission flip: row content, not caller, decides (real Secur
     // [ADR-0131 D9] The user-less system insert derives the install's one
     // organization, the member's own, so the denial below is decided by the
     // stamp columns alone and not by an organization boundary.
-    expect(row!.organization_id).toBe('org_1');
+    expect(row!.organization_id).toBe(MEMBER_CTX.tenantId);
 
     // The SAME member context that succeeded above is denied here: the only
     // difference between the two attempts is the row's stamp columns — the

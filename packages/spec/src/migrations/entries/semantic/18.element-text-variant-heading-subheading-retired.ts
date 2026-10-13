@@ -33,8 +33,8 @@ export const entry: SemanticMigration = {
     + 'styles. Whether the page wanted that level is the author\'s call — a heading placed for its '
     + 'size rather than its place in the outline may want a deeper level. Nothing is dropped at rest: '
     + 'a stored page replays the rewrite at rehydration; a page component\'s `properties` is not '
-    + 'parsed on the save path, and the component-props gate reports an old spelling as an advisory '
-    + '`component-props-invalid` finding, carrying the prescription, on `os validate`, `os build` and '
+    + 'parsed on the save path, and the component-props gate reports an old spelling as a '
+    + '`component-props-invalid` error, carrying the prescription, on `os validate`, `os build` and '
     + '`os lint`. ADR-0087',
   acceptanceCriteria:
     'No `element:text` page component carries `variant` `heading` or `subheading`; `os validate` '

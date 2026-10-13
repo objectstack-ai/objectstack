@@ -435,8 +435,9 @@ describe('validatePresetComparands — arm 2, the FIELD-TYPED equality / members
         ],
       }],
       views: [
-        // A non-`object` provider names no fields on any object graph.
-        { name: 'api', data: { provider: 'api', object: 'crm_opportunity' }, filter: [{ field: 'close_date', operator: 'equals', value: 'last_30_days' }] },
+        // A non-`object` provider names no fields on any object graph (the
+        // `value` arm; the view-level `api` arm is retired).
+        { name: 'static', data: { provider: 'value', items: [] }, filter: [{ field: 'close_date', operator: 'equals', value: 'last_30_days' }] },
         // No binding at all.
         { name: 'unbound', filter: [{ field: 'close_date', operator: 'in', value: ['last_30_days'] }] },
       ],
@@ -483,7 +484,7 @@ describe('validatePresetComparands — arm 2, the FIELD-TYPED equality / members
     // rest of the shared refusal is the id's `os explain` entry.
     expect(f.message).toBe(
       '"last_30_days" is a dashboard date-range PRESET name, not a filter value as a bare "$eq" '
-      + "comparand; its window is { $gte: '{30_days_ago}' }",
+      + "comparand; its window is { $between: ['{30_days_ago}', '{today}'] }",
     );
     expect(f.hint).toBe(
       'Presets belong to the dashboard date-filter bar (dateRange.defaultRange, a '

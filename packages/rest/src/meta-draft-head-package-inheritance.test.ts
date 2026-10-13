@@ -167,7 +167,11 @@ async function boot(opts: { item?: { type: string; name: string }; permissions?:
         }, { context: { isSystem: true } } as any);
     };
 
-    return { read, save, stored, storedBodies, seed };
+    /** `DELETE /meta/view/case_grid` (the reset). */
+    const remove = (query: Record<string, string> = {}, headers: Record<string, string> = {}) =>
+        call('DELETE', `${META}/:type/:name`, { path, params: item, query, headers });
+
+    return { read, save, remove, stored, storedBodies, seed };
 }
 
 const ok = (res: any) => {
@@ -263,17 +267,23 @@ describe('[#22128] `?package=all`: the read resolves `all` the way the save does
         expect(await h.stored('active')).toEqual([{ label: 'edited', packageId: null }]);
     }, 60_000);
 
-    it('active, no row at the env-local address: the read serves `null`, and `If-None-Match: *` creates it', async () => {
+    // [#23165] Replaced, not respelled: this case pinned the read serving
+    // `null` and `If-None-Match: *` minting an env-local row BESIDE the
+    // package's row, which is the defect #23165 removes (a package-less save
+    // of an item a package owns writes that package's row). The invariant the
+    // rider asked for still holds and is what is pinned: `all` names no
+    // package on both doors, so the read's token is the one the save compares
+    // against, and the save writes the row the read serves.
+    it('active, an item a package owns: the read serves that package row\'s `version`, and the save naming no package addresses the same row', async () => {
         const h = await boot();
         ok(await h.save(view('live'), { package: PKG }));
 
-        expect(ok(await h.read({ package: 'all' })).version).toBeNull();
-        const created = ok(await h.save(view('env-local'), { package: 'all' }, { 'if-none-match': '*' }));
-        expect(ok(await h.read({ package: 'all' })).version).toBe(created.version);
-        expect(await h.stored('active')).toEqual(expect.arrayContaining([
-            { label: 'live', packageId: PKG },
-            { label: 'env-local', packageId: null },
-        ]));
+        const token = ok(await h.read({ package: 'all' })).version;
+        expect(token).toMatch(KEYED);
+        const refused = refusedConflict(await h.save(view('as if first'), { package: 'all' }, { 'if-none-match': '*' }));
+        expect(refused.currentVersion).toBe(token);
+        ok(await h.save(view('edited'), { package: 'all' }, { 'if-match': token }));
+        expect(await h.stored('active')).toEqual([{ label: 'edited', packageId: PKG }]);
     }, 60_000);
 
     it('draft of a package-owned item: `?state=draft&package=all` serves the inherited draft and its token, and the save accepts it', async () => {
@@ -348,5 +358,65 @@ describe('[#22128] the credential carry-forward reads the row the draft save ove
         ok(await h.save({ ...servedDraft, label: 'draft 2' }, { mode: 'draft' }));
         const drafts = await h.storedBodies('draft');
         expect(drafts.map((r) => [r.body.label, r.packageId, holdsCredential(r.body)])).toEqual([['draft 2', null, true]]);
+    }, 60_000);
+});
+
+/**
+ * [#23165, ADR-0048] The direct save and the delete that name no package, on
+ * the real routes: they address the row of the one package the item belongs
+ * to, a name two packages hold is refused, and `?package=` on the delete door
+ * removes that package's row. The protocol suite
+ * (`protocol.packageless-save-address.test.ts` in metadata-protocol) holds the
+ * rest of the matrix over a stub engine; these drive the HTTP doors over
+ * better-sqlite3.
+ */
+describe('[#23165] a save or a delete naming no package addresses the one package\'s row, on the real routes', () => {
+    const OTHER_PKG = 'com.probe.other';
+
+    /** A refusal of a write naming no package, of a name two packages hold. */
+    const refusedAmbiguous = (res: any) => {
+        expect(res.statusCode, JSON.stringify(res.body)).toBe(409);
+        expect(res.body.code).toBe('RESOURCE_CONFLICT');
+        return res.body;
+    };
+
+    it('the card\'s probe: the package-less save writes the package\'s row and the read serves it; the package-less delete removes that row', async () => {
+        const h = await boot();
+        ok(await h.save(view('live'), { package: PKG }));
+
+        const saved = ok(await h.save(view('disabled')));
+        expect(saved.message).toContain(`package=${PKG}`);
+        expect(await h.stored('active')).toEqual([{ label: 'disabled', packageId: PKG }]);
+        expect(ok(await h.read()).item.label).toBe('disabled');
+
+        const deleted = ok(await h.remove());
+        expect(deleted.reset).toBe(true);
+        expect(await h.stored('active')).toEqual([]);
+    }, 60_000);
+
+    it('two packages: the package-less save and delete are refused 409 and change nothing; `?package=` on the delete removes that row only', async () => {
+        const h = await boot();
+        ok(await h.save(view('A'), { package: PKG }));
+        ok(await h.save(view('B'), { package: OTHER_PKG }));
+        const both = [{ label: 'A', packageId: PKG }, { label: 'B', packageId: OTHER_PKG }];
+
+        expect(refusedAmbiguous(await h.save(view('neither'))).error).toContain(OTHER_PKG);
+        expect(refusedAmbiguous(await h.remove()).error).toContain(OTHER_PKG);
+        expect(await h.stored('active')).toEqual(expect.arrayContaining(both));
+        expect(await h.stored('active')).toHaveLength(2);
+
+        const deleted = ok(await h.remove({ package: PKG }));
+        expect(deleted.reset).toBe(true);
+        expect(deleted.message).toContain(OTHER_PKG);
+        expect(await h.stored('active')).toEqual([{ label: 'B', packageId: OTHER_PKG }]);
+        expect(ok(await h.read()).item.label).toBe('B');
+    }, 60_000);
+
+    it('control: an item with no package binding is saved and deleted at the package-unbound row, as before', async () => {
+        const h = await boot();
+        ok(await h.save(view('plain')));
+        expect(await h.stored('active')).toEqual([{ label: 'plain', packageId: null }]);
+        expect(ok(await h.remove()).reset).toBe(true);
+        expect(await h.stored('active')).toEqual([]);
     }, 60_000);
 });

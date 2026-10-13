@@ -124,7 +124,7 @@ describe('the element tombstones — refused at the key, with the prescription',
     expect(issues[0]!.path).toEqual([key]);
     const message = issues[0]!.message;
     // House convention 1 + 2: the qualified key opens it, then the release and ADR.
-    expect(message.startsWith(`\`${type}\` property \`${key}\` was removed in @objectstack/spec 17 (ADR-0087 D2) — `)).toBe(true);
+    expect(message.startsWith(`\`${type}\` property \`${key}\` was removed in @objectstack/spec 18 (ADR-0087 D2) — `)).toBe(true);
     // The live mechanism, named at its own key on the node.
     expect(message).toContain(`Use \`dataSource.${key}\` on the component node, a sibling of \`type\``);
     expect(message.endsWith(MIGRATE_SENTENCE)).toBe(true);
@@ -198,7 +198,8 @@ describe('the binding — the one door the three elements read', () => {
   });
 
   it('never hard-refuses an existing page: the page parse still accepts a node carrying a flat key', () => {
-    // The open `properties` bag is the props lint's to judge (advisory), not the page parse's.
+    // The open `properties` bag is the props lint's to judge (a retired flat key is an `error`
+    // at `os validate` / `os build` / `os lint`), not the page parse's.
     const r = PageComponentSchema.safeParse({ type: 'element:repeater', properties: { object: 'deal' } });
     expect(r.success).toBe(true);
   });
@@ -217,7 +218,7 @@ describe('`object-grid.defaultFilters` — refused at the key, with the prescrip
     expect(at).toHaveLength(1);
     expect(at[0]!.code).toBe('invalid_type');
     expect(at[0]!.path).toEqual(['defaultFilters']);
-    expect(at[0]!.message.startsWith('`object-grid` property `defaultFilters` was removed in @objectstack/spec 17 (ADR-0087 D2) — ')).toBe(true);
+    expect(at[0]!.message.startsWith('`object-grid` property `defaultFilters` was removed in @objectstack/spec 18 (ADR-0087 D2) — ')).toBe(true);
     expect(at[0]!.message).toContain('Use `filter`.');
     expect(at[0]!.message.endsWith(MIGRATE_SENTENCE)).toBe(true);
   });

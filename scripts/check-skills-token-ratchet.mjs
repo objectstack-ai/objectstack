@@ -61,8 +61,9 @@
  *     IDIOM note at the top of `.github/workflows/lint.yml` carries that lane's
  *     verbatim scope, and it is pointed at rather than restated here.
  *   - INDEPENDENTLY REPRODUCIBLE. Anyone can audit a ceiling without running
- *     this script: `ceil($(wc -c < file) / 4)`. A tokenizer's count can only be
- *     checked by re-running the tokenizer.
+ *     this script: `ceil($(wc -c < file) / 4)` — on a stamped SKILL.md, first
+ *     subtract its release-stamp line's bytes (the one exclusion below).
+ *     A tokenizer's count can only be checked by re-running the tokenizer.
  *
  * ~4 bytes per token is the standard rule of thumb for BPE over English prose
  * and markdown, which is what this catalog is. Its KNOWN limitation, stated
@@ -72,6 +73,44 @@
  * units — 0.2%, an order of magnitude below the ratchet's own resolution. If
  * the catalog ever turns substantially non-Latin, the convention needs
  * revisiting rather than the ceilings.
+ *
+ * ONE EXCLUSION — the release stamp's whole line. Maintainer ruling: decision
+ * record 6139629628, item 2 (A2′), ruled by the maintainer's 「同意」; the
+ * record's text, verbatim: "counts authored content only: the frontmatter
+ * `version:` line that the release bot rewrites is excluded from the count …
+ * ceilings stay shrink-only and the current headroom (0 and 1 tokens) stays as
+ * it is." It replaced route A of record 6138951701, which priced only the
+ * stamp's prerelease segment at zero and so still priced the stable part
+ * (`18.9.0` -> `18.10.0` is one byte).
+ *
+ * A published SKILL.md's frontmatter `metadata.version` line is not authored
+ * text: the root `version` script rewrites it from `@objectstack/spec`'s
+ * version (`scripts/check-skill-compatibility-version.mjs --fix`, whose check
+ * reds on any other value). Its width moves with releases — `"17.7.0"` to
+ * `"18.0.0-next.0"` is 7 bytes — and no author wrote those bytes or can pay for
+ * them by deleting text, so a file at zero headroom went red on a Version
+ * Packages PR alone. The whole line is therefore not priced, on every tree and
+ * at every stamp width: a stamped file's count is the count of everything ELSE
+ * in it, and it cannot move when only the stamp does. Nothing else moves — a
+ * version-shaped string anywhere else in a file (prose, a `version:` line in a
+ * code block), every other frontmatter line (the `compatibility:` pins
+ * included), and every byte of a file the version script does not stamp are
+ * priced as before. Which line it is comes from the stamp WRITER, never a
+ * second parser here: `stampLine()` has that script's `deriveFrontmatter`
+ * restamp the file with a probe value and takes the one line it rewrote; which
+ * files carry a stamp is that script's `stampedSkillPaths()`.
+ *
+ * The ceilings were re-pinned with the exclusion, never loosened by it. On the
+ * basis tree (`STAMP_LINE_REPIN`) every stamp line read `  version: "17.7.0"`,
+ * 20 bytes — exactly 5 units, so every stamped file's count fell by exactly 5
+ * whatever its length, and every stamped row was lowered by exactly 5: each
+ * file's headroom is what it was. The self-test pins that identity on the real
+ * bundle. Hand audit of a stamped SKILL.md, whose first indented `version:`
+ * line is its stamp (pinned in the self-test):
+ *
+ *   ceil(($(wc -c < FILE) - $(grep -m1 -E '^[[:space:]]+version:' FILE | wc -c)) / 4)
+ *
+ * and of every other file, `ceil($(wc -c < FILE) / 4)`.
  *
  * ⚠️ Counts produced here are comparable ONLY against other counts produced
  * here. They are not an estimate of any specific model's tokenizer, and the
@@ -172,6 +211,10 @@ import { isEntrypoint } from './invoked-as.mjs';
 // see the boundary section in the header. #11705's ruling forbids a second
 // mechanism, so this gate consults the register the governed-merge fork owns.
 import { generatedExceptionFor } from './pm/check-governed-merges.mjs';
+// The stamp's WRITER and the stamped set, from the script that owns the stamp —
+// see "ONE EXCLUSION" in the header. Its reader is imported only to cross-check
+// the writer's answer in the self-test.
+import { deriveFrontmatter, extractMetadataVersion, stampedSkillPaths } from './check-skill-compatibility-version.mjs';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const REPO_ROOT = resolve(HERE, '..');
@@ -234,6 +277,18 @@ export const CEILING_BASIS = {
   bundleExtension: 'c026b0d2d',
 };
 
+/**
+ * The A2′ re-pin (ruling record 6139629628 item 2): the tree it was measured on,
+ * the stamp every stamped SKILL.md carried there, and what taking that stamp's
+ * line out of the count took off each stamped file's count — and therefore off
+ * each stamped row's ceiling, so no file's headroom moved. The basis line,
+ * `  version: "17.7.0"` plus its newline, is 20 bytes — a whole 5 units — which
+ * is why the re-pin is the same 5 on every row whatever the rest of the file
+ * weighs.
+ * Every SKILL.md row in {@link CEILINGS} carries the matching `-> ` line.
+ */
+export const STAMP_LINE_REPIN = Object.freeze({ basis: 'd4aaeaf0e', stamp: '17.7.0', tokens: 5 });
+
 // ── The 2026-08-31 app-repo-principles raise, shared by five rows below ─────
 //
 // ⚠️ PLACEMENT IS LOAD-BEARING: this block sits ABOVE the doc comment below, not
@@ -283,13 +338,17 @@ export const CEILING_BASIS = {
 export const CEILINGS = new Map([
   // Every row re-measured after the internal issue-id strip — see
   // CEILING_BASIS.strippedInternalIds. `(was N)` is the ceiling this replaced.
-  ['skills/objectstack-ai/SKILL.md', 6806], //          -18 (was 6824)
+  // Every SKILL.md row was later lowered by exactly 5 when its release-stamp
+  // line left the count (A2′, see STAMP_LINE_REPIN) — its headroom did not move.
+  ['skills/objectstack-ai/SKILL.md', 6801], //          -18 (was 6824), then -5 A2′ (was 6806)
   // -12 (was 6331): the `http.server` decision-table row dropped a trailing
   // clause that taught `contributes.routes` as a key that "parses but serves
   // nothing". The key is retired — an authored entry is now REFUSED, carrying
   // the removal prescription — so the clause described a state the runtime no
   // longer has. Lowered to the measurement, per the shrink-only discipline.
-  ['skills/objectstack-api/SKILL.md', 6319],
+  // 6319 -> 6314: A2′ — the release-stamp line left the count (see
+  // STAMP_LINE_REPIN); the file's count fell by the same 5, headroom unchanged.
+  ['skills/objectstack-api/SKILL.md', 6314],
   // 12511 -> 12643 (#11348): the flow value-expression section documented the
   // expression surface but not the function vocabulary (round/floor/ceil/abs/
   // min/max); an unknown function fails at RUNTIME, not at flow-save, so the
@@ -320,7 +379,9 @@ export const CEILINGS = new Map([
   // only spelling had moved with the section. +23 tokens, re-locked at the
   // landed count of the same split (no ruling needed: the raise is against a
   // row this PR itself lowered by 7,006, and the entry stays 448 lines).
-  ['skills/objectstack-automation/SKILL.md', 5785],
+  // 5785 -> 5780: A2′ — the release-stamp line left the count (see
+  // STAMP_LINE_REPIN); the file's count fell by the same 5, headroom unchanged.
+  ['skills/objectstack-automation/SKILL.md', 5780],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
@@ -338,9 +399,11 @@ export const CEILINGS = new Map([
   // `references/examples-objects.md`, `references/seeds.md` and
   // `references/lint-rules.md` (rows below); the frontmatter `description`
   // shrank to 689 characters (card item 3). One pointer line per moved block.
-  ['skills/objectstack-data/SKILL.md', 6128],
-  ['skills/objectstack-formula/SKILL.md', 6002], //     -53 (was 6055)
-  ['skills/objectstack-i18n/SKILL.md', 6338], //        -11 (was 6349)
+  // 6128 -> 6123: A2′ — the release-stamp line left the count (see
+  // STAMP_LINE_REPIN); the file's count fell by the same 5, headroom unchanged.
+  ['skills/objectstack-data/SKILL.md', 6123],
+  ['skills/objectstack-formula/SKILL.md', 5997], //     -53 (was 6055), then -5 A2′ (was 6002)
+  ['skills/objectstack-i18n/SKILL.md', 6333], //        -11 (was 6349), then -5 A2′ (was 6338)
   // 12705 -> 12984 (2026-08-31 app-repo-principles raise, see the block above).
   // The largest of the five and the frame the other four are read under: what an
   // app IS (metadata under the platform's spec, authored from these skills,
@@ -356,14 +419,16 @@ export const CEILINGS = new Map([
   // Part 1 example / composition sections into `references/bootstrap.md` (rows
   // below). One pointer line per moved block; the entry keeps its rules and
   // decision tables at 487 lines.
-  ['skills/objectstack-platform/SKILL.md', 5833],
+  // 5833 -> 5828: A2′ — the release-stamp line left the count (see
+  // STAMP_LINE_REPIN); the file's count fell by the same 5, headroom unchanged.
+  ['skills/objectstack-platform/SKILL.md', 5828],
   // `skills/objectstack-pm-dispatch/SKILL.md` (9708) and its
   // `rules/dev-template.md` (1838) left this table on 2026-09-10 with the files:
   // the maintainer deleted the published PM skill whole (verbatim:
   // 「发布版 skills/objectstack-pm-dispatch 删」). A row for a file the walk cannot
   // read is red, not a skip (#4690), so the rows go with the files; the bundle
   // total drops by the two ceilings, which is the ratchet's ordinary direction.
-  ['skills/objectstack-query/SKILL.md', 5552], //       -17 (was 5569)
+  ['skills/objectstack-query/SKILL.md', 5547], //       -17 (was 5569), then -5 A2′ (was 5552)
   // 25125 -> 25143: the CRM UI Blueprint — the catalog's module-completeness
   // list, and the only place an agent is told what a finished module contains —
   // priced `src/views/**`, `src/apps/**`, dashboards and reports but never the
@@ -416,12 +481,16 @@ export const CEILINGS = new Map([
   // the next token added here is paid for by deleting one from this file.
   // Independently reproducible without running this script:
   //   ceil($(wc -c < skills/objectstack-ui/SKILL.md) / 4) == ceil(15424 / 4)
-  ['skills/objectstack-ui/SKILL.md', 3856],
+  // 3856 -> 3851: A2′ — the release-stamp line left the count (see
+  // STAMP_LINE_REPIN); the file's count fell by the same 5, headroom unchanged.
+  ['skills/objectstack-ui/SKILL.md', 3851],
   // 8333 -> 6193: RE-LOCK at the landed count after the #19715 split (decision
   // batch #213 item 1, maintainer 「1 2 4 同意」): the worked R1, the report
   // template and the v17-canonical shapes block moved VERBATIM into
   // `references/examples-upgrade.md` (row below), one pointer line each.
-  ['skills/objectstack-upgrade/SKILL.md', 6193],
+  // 6193 -> 6188: A2′ — the release-stamp line left the count (see
+  // STAMP_LINE_REPIN); the file's count fell by the same 5, headroom unchanged.
+  ['skills/objectstack-upgrade/SKILL.md', 6188],
 
   // ── the #12392 extension: the rest of the AUTHORED bundle ────────────────
   // Every row below is an INITIAL measurement, taken on
@@ -596,6 +665,57 @@ export function countTokens(text) {
 }
 
 /**
+ * The workspace the stamp writer is handed to FIND the stamp: every package it
+ * asks about answers with one probe version, so this file never restates which
+ * package anchors the stamp. The probe has no numeric major, so the writer
+ * leaves every `compatibility:` pin alone (it repins those only to a numeric
+ * major) and rewrites exactly one line; no release carries it, so on any tree
+ * the version gate passes, the stamp differs from it.
+ *
+ * @param {string} version
+ */
+const writerAnswering = (version) => ({ get: () => ({ version }) });
+const STAMP_PROBE = writerAnswering('unpriced-stamp-probe');
+
+/**
+ * The release-stamp line of a file — the one line the stamp writer
+ * (`deriveFrontmatter`, the `--fix` leg of the version script) rewrites — or
+ * null when the writer finds none to rewrite. See "ONE EXCLUSION".
+ *
+ * @param {string} text
+ * @returns {{index: number, line: string} | null}
+ */
+export function stampLine(text) {
+  const before = text.split('\n');
+  const after = deriveFrontmatter(text, STAMP_PROBE).text.split('\n');
+  const moved = before.flatMap((line, index) => (line === after[index] ? [] : [{ index, line }]));
+  if (moved.length > 1) {
+    throw new Error(
+      `check-skills-token-ratchet: the stamp writer rewrote ${moved.length} lines for one probe stamp `
+        + `(lines ${moved.map((m) => m.index + 1).join(', ')}), so which line is the release stamp has no `
+        + 'single answer — refusing to guess which bytes to leave unpriced.',
+    );
+  }
+  return moved[0] ?? null;
+}
+
+/**
+ * The count the gate judges: `countTokens`, less the whole release-stamp line
+ * (and its newline) when the file is one the version script stamps. Every
+ * other file prices byte-for-byte as `countTokens`.
+ *
+ * @param {string} text
+ * @param {{stamped?: boolean}} [options] is this file in `stampedSkillPaths()`?
+ * @returns {number}
+ */
+export function pricedTokens(text, { stamped = false } = {}) {
+  if (text.length === 0) return 0;
+  const stamp = stamped ? stampLine(text) : null;
+  const unpriced = stamp ? Buffer.byteLength(`${stamp.line}\n`, 'utf8') : 0;
+  return Math.ceil((Buffer.byteLength(text, 'utf8') - unpriced) / 4);
+}
+
+/**
  * Every file that ships inside a published skill — read off the filesystem,
  * never a hand list, walked RECURSIVELY (#12392).
  *
@@ -749,6 +869,7 @@ export function reportLines(rows) {
 
 function run() {
   const covered = [...new Set([...discoverBundleFiles(), ...CEILINGS.keys()])].sort();
+  const stampedSet = new Set(stampedSkillPaths());
   const rows = [];
   let failed = 0;
 
@@ -761,17 +882,23 @@ function run() {
       failed++;
       continue;
     }
-    const tokens = countTokens(text);
+    const stamped = stampedSet.has(rel);
+    const tokens = pricedTokens(text, { stamped });
+    const stamp = stamped ? stampLine(text) : null;
+    const note = stamp
+      ? ` Its release-stamp line (\`${stamp.line.trim()}\`, ${Buffer.byteLength(`${stamp.line}\n`, 'utf8')} bytes) `
+        + 'is written by the version script, not an author, and is not priced.'
+      : '';
     const ceiling = CEILINGS.get(rel);
     const generated = generatorOwning(rel);
     rows.push({ rel, tokens, ceiling, generated });
     const v = verdict(rel, tokens, ceiling, generated);
     if (!v.ok) {
       failed++;
-      console.error(`✗ check-skills-token-ratchet: ${v.msg}`);
+      console.error(`✗ check-skills-token-ratchet: ${v.msg}${note}`);
       continue;
     }
-    console.log(`✓ check-skills-token-ratchet: ${v.msg}`);
+    console.log(`✓ check-skills-token-ratchet: ${v.msg}${note}`);
   }
 
   const ratcheted = rows.filter((r) => !r.generated).length;
@@ -866,6 +993,20 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'five ASCII bytes round up to two': 1,
   'the unit is UTF-8 BYTES, not JS characters (a 3-byte CJK char is not free)': 1,
   'empty text counts zero, which the verdict turns red': 1,
+  'the unpriced line is the one the stamp writer rewrites': 1,
+  'the writer\'s probe moves only the stamp line, never a compatibility pin': 1,
+  'a stamp change of any width moves no count (17.7.0 -> 18.10.0-next.12)': 1,
+  'a zero-headroom file stays green at every stamp width': 1,
+  'priced whole, the widest stamp reds that same file (the rows above are not vacuous)': 1,
+  'one authored byte over a zero-headroom ceiling is red at every stamp width': 1,
+  'a version-shaped string outside the stamp is priced': 1,
+  'a file the version script does not stamp is priced whole': 1,
+  'a stamped file whose writer finds no stamp is priced whole': 1,
+  'the stamped set is the version script\'s: exactly the real SKILL.md files': 1,
+  'on every real stamped file the unpriced line is its metadata.version stamp': 1,
+  'the header\'s hand audit reproduces every real stamped count': 1,
+  'real bundle: each stamped file reads exactly the re-pin below its basis-stamp count, nothing else moves': 1,
+  'the stamp-line re-pin is recorded': 1,
   'the catalog is discovered from disk': 1,
   'every discovered file lives under a published skill directory': 1,
   'a discovered file with no ceiling is RED': 1,
@@ -920,7 +1061,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // the literal above, so the roster falls below this number; the table
 // cross-check in the floor block is the other half, and names WHICH label
 // collided.
-const SELF_TEST_BATTERY_FLOOR = 64;
+const SELF_TEST_BATTERY_FLOOR = 79;
 
 function selfTest() {
   const rel = 'skills/objectstack-ui/SKILL.md';
@@ -955,6 +1096,65 @@ function selfTest() {
   // and the case below asks only that every one of them is priced.
   const skillMdOnDisk = discoverBundleFiles().filter((p) => /^skills\/[^/]+\/SKILL\.md$/.test(p)).length;
 
+  // The release-stamp fixtures ("ONE EXCLUSION" in the header). The head carries
+  // a `compatibility:` pin because the writer rewrites those too, and padded so
+  // the BASIS spelling is a whole number of tokens both priced whole and with
+  // its 20-byte stamp line out: a ceiling set at its count has zero headroom, so
+  // one more authored byte is red — the row that proves the padding is right is
+  // "one authored byte over" below.
+  const stampHead = (v) => '---\nname: x\ncompatibility: Requires @objectstack/spec 17.x\nmetadata:\n'
+    + `  author: objectstack-ai\n  version: "${v}"\n---\n\n# body\n`;
+  const stampPad = '.'.repeat((4 - (Buffer.byteLength(stampHead(STAMP_LINE_REPIN.stamp), 'utf8') % 4)) % 4);
+  const stampFixture = (v, extra = '') => `${stampHead(v)}${stampPad}${extra}`;
+  const priced = (text) => pricedTokens(text, { stamped: true });
+  const basisStamp = stampFixture(STAMP_LINE_REPIN.stamp);
+  const zeroHeadroom = priced(basisStamp);
+  // Widths a release has produced or plausibly will: stable, first prerelease, a
+  // minor gaining a digit, a two-digit prerelease counter, a three-digit major.
+  const stampWidths = [STAMP_LINE_REPIN.stamp, '18.0.0-next.0', '18.9.0', '18.10.0', '18.10.0-next.12', '100.0.0'];
+  // A version-shaped string in prose and a `version:` line in a code block —
+  // both priced. Padded to whole tokens so its price is exactly its length / 4.
+  const proseRaw = 'pin 18.10.0-next.12 in prose\n```yaml\nmetadata:\n  version: "18.10.0"\n```\n';
+  const prose = `${proseRaw}${'.'.repeat((4 - (Buffer.byteLength(proseRaw, 'utf8') % 4)) % 4)}`;
+  const probeMoves = (text) => {
+    const after = deriveFrontmatter(text, STAMP_PROBE).text.split('\n');
+    return text.split('\n').filter((line, i) => line !== after[i]);
+  };
+  // The one counterfactual the re-pin needs: this file as the basis tree would
+  // have stamped it. Only the stamp line is re-spelled — by the writer, at the
+  // index `stampLine` names — so nothing else in the file is touched.
+  const atBasisStamp = (text) => {
+    const at = stampLine(text);
+    if (!at) return text;
+    const lines = text.split('\n');
+    lines[at.index] = deriveFrontmatter(text, writerAnswering(STAMP_LINE_REPIN.stamp)).text.split('\n')[at.index];
+    return lines.join('\n');
+  };
+  const stampedOnDisk = new Set(stampedSkillPaths());
+  const realStamped = discovered.filter((p) => stampedOnDisk.has(p))
+    .map((p) => ({ p, text: readFileSync(join(REPO_ROOT, p), 'utf8') }));
+  const notTheStamp = realStamped.filter(({ text }) => {
+    const at = stampLine(text);
+    const read = extractMetadataVersion(text);
+    return !(at && read.ok && /^\s+version:/.test(at.line) && at.line.includes(read.value));
+  }).map(({ p }) => p);
+  // `grep -m1 -E '^[[:space:]]+version:' FILE | wc -c`, as the header spells it.
+  const handAudit = (text) => {
+    const first = text.split('\n').find((l) => /^\s+version:/.test(l));
+    const minus = first === undefined ? 0 : Buffer.byteLength(`${first}\n`, 'utf8');
+    return Math.ceil((Buffer.byteLength(text, 'utf8') - minus) / 4);
+  };
+  const handAuditMisses = realStamped.filter(({ text }) => handAudit(text) !== priced(text)).map(({ p }) => p);
+  // Old reading (everything priced, at the stamp the old ceilings were measured
+  // with) minus new reading must be the re-pin on every stamped file: the rows
+  // moved by exactly that, so the headroom is the same number. Every other file
+  // must read exactly as it did.
+  const repinMisses = discovered.filter((p) => {
+    const text = readFileSync(join(REPO_ROOT, p), 'utf8');
+    if (!stampedOnDisk.has(p)) return pricedTokens(text) !== countTokens(text);
+    return countTokens(atBasisStamp(text)) - priced(text) !== STAMP_LINE_REPIN.tokens;
+  });
+
   const cases = [
     // ── ratchet semantics ────────────────────────────────────────────────
     ['under the ceiling -> green', verdict(rel, 25000, 25154).ok, true],
@@ -988,6 +1188,35 @@ function selfTest() {
     ['five ASCII bytes round up to two', countTokens('abcde'), 2],
     ['the unit is UTF-8 BYTES, not JS characters (a 3-byte CJK char is not free)', countTokens('中'), 1],
     ['empty text counts zero, which the verdict turns red', countTokens(''), 0],
+
+    // ── the release-stamp line (ruling record 6139629628 item 2, A2′) ─────
+    ['the unpriced line is the one the stamp writer rewrites',
+      stampLine(basisStamp)?.line, `  version: "${STAMP_LINE_REPIN.stamp}"`],
+    ['the writer\'s probe moves only the stamp line, never a compatibility pin',
+      probeMoves(basisStamp), [`  version: "${STAMP_LINE_REPIN.stamp}"`]],
+    ['a stamp change of any width moves no count (17.7.0 -> 18.10.0-next.12)',
+      [...new Set(stampWidths.map((v) => priced(stampFixture(v))))], [zeroHeadroom]],
+    ['a zero-headroom file stays green at every stamp width',
+      stampWidths.every((v) => verdict(rel, priced(stampFixture(v)), zeroHeadroom).ok), true],
+    ['priced whole, the widest stamp reds that same file (the rows above are not vacuous)',
+      verdict(rel, countTokens(stampFixture('18.10.0-next.12')), countTokens(basisStamp)).ok, false],
+    ['one authored byte over a zero-headroom ceiling is red at every stamp width',
+      stampWidths.map((v) => verdict(rel, priced(stampFixture(v, 'x')), zeroHeadroom).ok), stampWidths.map(() => false)],
+    ['a version-shaped string outside the stamp is priced',
+      priced(stampFixture(STAMP_LINE_REPIN.stamp, prose)) - zeroHeadroom, Buffer.byteLength(prose, 'utf8') / 4],
+    ['a file the version script does not stamp is priced whole',
+      pricedTokens(basisStamp, { stamped: false }), countTokens(basisStamp)],
+    ['a stamped file whose writer finds no stamp is priced whole',
+      priced('# no frontmatter, so no stamp\n'), countTokens('# no frontmatter, so no stamp\n')],
+    ['the stamped set is the version script\'s: exactly the real SKILL.md files',
+      [...stampedOnDisk], discovered.filter((p) => /^skills\/[^/]+\/SKILL\.md$/.test(p))],
+    ['on every real stamped file the unpriced line is its metadata.version stamp', notTheStamp, []],
+    ['the header\'s hand audit reproduces every real stamped count', handAuditMisses, []],
+    ['real bundle: each stamped file reads exactly the re-pin below its basis-stamp count, nothing else moves',
+      repinMisses, []],
+    // Same reason as the basis pins below: nothing else reads these, so a record
+    // drifting from the rows it explains would do so in silence.
+    ['the stamp-line re-pin is recorded', { ...STAMP_LINE_REPIN }, { basis: 'd4aaeaf0e', stamp: '17.7.0', tokens: 5 }],
 
     // ── enumeration, never a hand list ───────────────────────────────────
     ['the catalog is discovered from disk', discovered.length > 0, true],

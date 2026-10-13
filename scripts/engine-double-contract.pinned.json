@@ -1122,6 +1122,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.packageless-save-address.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.packageless-save-address.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.packageless-save-address.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.platform-schedule-org-gate.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1392,6 +1407,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.save-door-lock-family.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.save-door-lock-family.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.save-door-lock-family.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.save-door-protection.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1573,6 +1603,21 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol.validate-data.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.view-container-reset-expansions.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.view-container-reset-expansions.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.view-container-reset-expansions.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3347,6 +3392,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/permission-set-echo-package-owner.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/permission-set-echo-package-owner.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/permission-set-echo-package-owner.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/permission-set-projection.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -3649,6 +3709,11 @@
     {
       "file": "packages/plugins/plugin-webhooks/src/webhook-drop-durable-record.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-webhooks/src/webhook-redeliver-auth-gate.pin.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {

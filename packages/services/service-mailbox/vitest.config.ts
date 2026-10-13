@@ -22,6 +22,9 @@ export default defineConfig({
     alias: [
       { find: /^@objectstack\/lint$/, replacement: path.resolve(__dirname, '../../lint/src/index.ts') },
       { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
+      { find: /^@objectstack\/types$/, replacement: path.resolve(__dirname, '../../types/src/index.ts') },
+      { find: /^@objectstack\/objectql$/, replacement: path.resolve(__dirname, '../../objectql/src/index.ts') },
+      { find: /^@objectstack\/driver-sql$/, replacement: path.resolve(__dirname, '../../drivers/driver-sql/src/index.ts') },
       { find: /^@objectstack\/platform-objects\/apps$/, replacement: path.resolve(__dirname, '../../platform-objects/src/apps/index.ts') },
       { find: /^@objectstack\/spec$/, replacement: path.resolve(__dirname, '../../spec/src/index.ts') },
       { find: /^@objectstack\/spec\/data$/, replacement: path.resolve(__dirname, '../../spec/src/data/index.ts') },

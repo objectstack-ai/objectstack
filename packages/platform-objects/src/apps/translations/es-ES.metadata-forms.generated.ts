@@ -1307,7 +1307,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       isDefault: {
         label: "Predeterminado",
-        helpText: "Establece como página predeterminada para este tipo de página"
+        helpText: "Abre los registros de su objeto con esta página de registro. Una sola página de registro predeterminada por objeto: una segunda se rechaza."
       },
       kind: {
         label: "Modo",
@@ -2303,7 +2303,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       description: {
         label: "Descripción",
-        helpText: "Descripción legible que se muestra en Setup (se guarda como sys_permission_set.description)."
+        helpText: "Descripción legible que se muestra en Setup."
       },
       isDefault: {
         label: "Predeterminado",

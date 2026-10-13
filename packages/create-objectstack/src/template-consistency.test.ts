@@ -15,7 +15,12 @@ import { syncObjectStackDeps } from './pkg-utils.js';
 import { copyDir, TEMPLATE_FILE_ALIASES } from './template-copy.js';
 import { TEMPLATES } from './template-registry.js';
 import { gitFreeEnv } from '../../../scripts/git-env.mjs';
-import { SKILLS_CATALOG, SKILLS_INSTALL_COMMAND } from './skills-install.js';
+import {
+  DEFAULT_SKILLS_AGENT,
+  SKILLS_INSTALL_COMMAND,
+  SKILLS_PACKAGE,
+  skillsInstallHint,
+} from './skills-install.js';
 
 const pkgRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = path.resolve(pkgRoot, '..', '..');
@@ -608,10 +613,12 @@ describe('README template table', () => {
 // also walks `.claude/skills/`. The published catalog is exactly the root
 // `skills/` directory; everything else must stay repo-internal.
 //
-// The boundary is the `/skills` SUBPATH, and it did not move when the
-// scaffolder stopped passing `--all` — `--skill '*'` still selects every
-// entry discovery finds, `metadata.internal` ones included, so a root-scoped
-// install would leak them exactly as before.
+// The scaffolder no longer reads GitHub at all: it syncs the catalog out of
+// the installed `@objectstack/skills` package, whose build copies `skills/**`
+// and nothing else (`skills-install.ts`). The `/skills` SUBPATH stays the
+// boundary for the GitHub path the docs keep as the `next` channel —
+// `--skill '*'` selects every entry discovery finds, `metadata.internal` ones
+// included, so a root-scoped install would leak them exactly as before.
 describe('skills catalog boundary', () => {
   const frontmatterOf = (file: string): string =>
     /^---\n([\s\S]*?)\n---/.exec(fs.readFileSync(file, 'utf8'))?.[1] ?? '';
@@ -660,17 +667,16 @@ describe('skills catalog boundary', () => {
   // text of the module that happens to hold it today: a `toContain` on source
   // text goes vacuous the moment the literal is assembled from parts, and a
   // vacuous half of this pair is the half that guards the leak.
-  it('scaffolder installs from the curated skills/ subpath, not the repo root', () => {
-    expect(SKILLS_CATALOG).toBe('objectstack-ai/objectstack/skills');
-    expect(SKILLS_INSTALL_COMMAND).toContain(`skills add ${SKILLS_CATALOG} `);
-    expect(SKILLS_INSTALL_COMMAND).not.toMatch(
-      /skills add objectstack-ai\/objectstack(?!\/skills)/,
-    );
+  it('scaffolder installs from the @objectstack/skills package, never a GitHub source', () => {
+    expect(SKILLS_PACKAGE).toBe('@objectstack/skills');
+    expect(SKILLS_INSTALL_COMMAND).toMatch(/ experimental_sync /);
+    expect(SKILLS_INSTALL_COMMAND).not.toMatch(/skills add|objectstack-ai\/objectstack/);
   });
 
   // The source-text half survives as its own case, aimed at a DIFFERENT
-  // failure: a second, hand-written `skills add` invocation added to the
-  // scaffolder later, bypassing the shared constant above.
+  // failure: a second, hand-written GitHub `skills add` invocation added to
+  // the scaffolder later, bypassing the shared constant above — subpath or
+  // root, either one reads `main` instead of the installed package.
   it('the scaffolder hard-codes no second skills invocation', () => {
     const SKILLS_SOURCE = fs.readFileSync(
       path.join(pkgRoot, 'src', 'skills-install.ts'),
@@ -682,13 +688,31 @@ describe('skills catalog boundary', () => {
     ] as const) {
       expect(
         src,
-        `${name} spells a repo-root skills install — discovery from the root ` +
-          'also walks .claude/skills/, so internal skills would ship.',
-      ).not.toMatch(/skills add objectstack-ai\/objectstack(?!\/skills)/);
+        `${name} spells a GitHub skills install — the catalog is read from the ` +
+          'installed @objectstack/skills package, at the project\'s own version.',
+      ).not.toMatch(/skills add objectstack-ai\/objectstack/);
     }
     // Exactly one place builds the command; index.ts imports it.
     expect(REGISTRY_SOURCE).toContain("from './skills-install.js'");
     expect(REGISTRY_SOURCE).not.toMatch(/execSync\(\s*['\`"]npx/);
+  });
+
+  // The files the scaffolder WRITES into a project tell its agents how to
+  // re-install the skills, and this package's README says what it runs; each
+  // must name the command the scaffolder really runs, pin included, and never
+  // the GitHub path a released project must not read.
+  it('the scaffolded guides and the README name the command the scaffolder runs', () => {
+    for (const [rel, command] of [
+      ['src/templates/AGENTS.md', skillsInstallHint(DEFAULT_SKILLS_AGENT)],
+      ['src/templates/blank/README.md', skillsInstallHint(DEFAULT_SKILLS_AGENT)],
+      ['README.md', SKILLS_INSTALL_COMMAND],
+    ] as const) {
+      const text = fs.readFileSync(path.join(pkgRoot, rel), 'utf8');
+      expect(text, `${rel} no longer names the scaffolder's own command`).toContain(command);
+      expect(text, `${rel} tells a released project to read GitHub main`).not.toMatch(
+        /skills add objectstack-ai\/objectstack/,
+      );
+    }
   });
 
   // The /skills subpath is the hard boundary: `--skill '*'` (which `--all`

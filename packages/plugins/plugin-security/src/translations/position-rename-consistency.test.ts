@@ -33,8 +33,13 @@ import { zhCNObjects } from './zh-CN.objects.generated.js';
 import { jaJPObjects } from './ja-JP.objects.generated.js';
 import { esESObjects } from './es-ES.objects.generated.js';
 
-/** The objects ADR-0090 P1 renamed — the exact surface the rename had to land on. */
-const RENAMED_OBJECTS = ['sys_position', 'sys_position_permission_set', 'sys_user_position'];
+/**
+ * The objects ADR-0090 P1 renamed that still exist — the exact surface the
+ * rename had to land on. `sys_position` and `sys_position_permission_set` are
+ * retired with the catalog row objects (ADR-0131 D3), and their strings with
+ * them; `sys_user_position` remains.
+ */
+const RENAMED_OBJECTS = ['sys_user_position'];
 
 const LOCALES = [
   // `\b` keeps this off `control` / `controlar`, which legitimately contain "rol".

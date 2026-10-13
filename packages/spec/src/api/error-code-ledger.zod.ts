@@ -606,6 +606,15 @@ export const ERROR_CODE_LEDGER = {
     'COMMIT_NOT_FOUND',
     'CONCURRENT_UPDATE',
     'DESTRUCTIVE_CHANGE',         // change would drop data; needs an explicit opt-in
+    // [#23015] The save door's half of "one default record page per object per
+    // deployment" (maintainer ruling A, record 6134056653): `saveMetaItem`
+    // refuses a `page` body that is the default record page of an object a
+    // stored page or a packaged page already holds, naming both, 422 — the
+    // same code and status `@objectstack/objectql`'s registration refusal
+    // stamps for the same condition (that package depends on this one, so the
+    // string is spelled in each). Served by the `/meta` write doors through
+    // `errorFromThrown`.
+    'DEFAULT_RECORD_PAGE_CONFLICT',
     // [#9567] ADR-0078's rename guard refuses a metadata write whose `type`/
     // `name` token is already a LIVE name owned by something else in the
     // environment — persisting the un-renamed body would mint exactly the row
@@ -891,6 +900,21 @@ export const ERROR_CODE_LEDGER = {
     // carries; `DUPLICATE_RECORD` / `DUPLICATE_VALUE` name a different
     // condition and share only the first token).
     'DUPLICATE_ARTIFACT_OBJECT_NAME',
+    // [#23015] One default record page per object per deployment (maintainer
+    // ruling A, record 6134056653): a package registering a record page as the
+    // default record page of an object another page already holds — another
+    // package's page, the environment's, or a second page of the same manifest
+    // — is refused at the package door (`SchemaRegistry.installPackage`, ahead
+    // of every mutation) and at the item seam (`registerItem`), naming both
+    // pages (`DefaultRecordPageConflictError`, `registry.ts`; `status: 422`;
+    // the exported `DEFAULT_RECORD_PAGE_CONFLICT_CODE`). Wire-reachable: the
+    // two HTTP install doors call `installPackage`. Its own code rather than
+    // `NAMESPACE_CONFLICT`: no name is taken — an object's one default slot is
+    // held — and renaming fixes nothing; the remedy is `isDefault: false` on
+    // one page, or composing the deployment without the other package. Not a
+    // synonym of any standard member: the manifest is well-formed, and the
+    // refusal comes from what the deployment already holds.
+    'DEFAULT_RECORD_PAGE_CONFLICT',
   ],
   '@objectstack/core': [
     'ERR_BULK_RESULT_MISMATCH',

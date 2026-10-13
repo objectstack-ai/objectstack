@@ -388,7 +388,7 @@ describe('#4389 — registration validators cover region graphs', () => {
   });
 });
 
-describe("#4347 — the legacy `{var}` path refuses an unresolved reference", () => {
+describe("#4347 — a dotted predicate is CEL, and the legacy `{var}` path is gone (#19939)", () => {
   let engine: AutomationEngine;
   beforeEach(() => { engine = new AutomationEngine(silentLogger()); });
 
@@ -402,15 +402,10 @@ describe("#4347 — the legacy `{var}` path refuses an unresolved reference", ()
     expect(engine.evaluateCondition('oppRecord.amount > 5', vars)).toBe(true);
   });
 
-  it('still refuses a dotted reference mixed INTO a template-dialect condition', () => {
-    // A `{…}` hole puts the whole condition in the template dialect, where a
-    // dotted operand is text and the compare would answer anyway. One operand
-    // away from the right dialect, so the refusal names the fix.
+  it('refuses a dotted reference mixed with a `{…}` hole as the brace trap — the template path that compared it as text is deleted', () => {
     const vars = new Map<string, unknown>([['limit', 5]]);
-    expect(() => engine.evaluateCondition('{limit} > record.amount', vars)).toThrow(/unresolved expression reference/);
-    expect(() => engine.evaluateCondition('{limit} > record.amount', vars)).toThrow(/dialect: 'cel'/);
-    // Either side of the operator.
-    expect(() => engine.evaluateCondition('{limit} == row.shouldRun', vars)).toThrow(/unresolved expression reference/);
+    expect(() => engine.evaluateCondition('{limit} > record.amount', vars)).toThrow(/do not wrap field references/);
+    expect(() => engine.evaluateCondition('{limit} == row.shouldRun', vars)).toThrow(/source: `\{limit\} == row\.shouldRun`/);
   });
 
   it('evaluates the same predicate correctly once it is a CEL envelope', () => {
@@ -418,16 +413,18 @@ describe("#4347 — the legacy `{var}` path refuses an unresolved reference", ()
     expect(engine.evaluateCondition({ dialect: 'cel', source: 'oppRecord.amount > 500000' }, vars)).toBe(false);
   });
 
-  it('leaves the documented legacy dialects alone', () => {
+  it('the spellings the legacy dialect answered are refused, and their CEL spellings answer the same', () => {
     const vars = new Map<string, unknown>([['amount', 500], ['status', 'active'], ['rate', 1.5]]);
-    // `{var}` templates: substitution resolves the reference before comparison.
-    expect(engine.evaluateCondition('{amount} > 100', vars)).toBe(true);
+    for (const braced of ['{amount} > 100', '{rate} > 1.25', '{status} == active']) {
+      expect(() => engine.evaluateCondition(braced, vars), braced).toThrow(/do not wrap field references/);
+    }
+    expect(engine.evaluateCondition('amount > 100', vars)).toBe(true);
     // A decimal literal is not a reference.
-    expect(engine.evaluateCondition('{rate} > 1.25', vars)).toBe(true);
-    // Bare words compare as strings on purpose — the documented spelling.
-    expect(engine.evaluateCondition('{status} == active', vars)).toBe(true);
+    expect(engine.evaluateCondition('rate > 1.25', vars)).toBe(true);
+    // A string compares quoted.
+    expect(engine.evaluateCondition("status == 'active'", vars)).toBe(true);
     expect(engine.evaluateCondition('true', vars)).toBe(true);
-    // A dotted key that DID resolve is a value by the time the compare runs.
-    expect(engine.evaluateCondition('{a.b} == 7', new Map([['a.b', 7]]))).toBe(true);
+    // A node output's flat dotted key is read as the path it spells.
+    expect(engine.evaluateCondition('a.b == 7', new Map([['a.b', 7]]))).toBe(true);
   });
 });

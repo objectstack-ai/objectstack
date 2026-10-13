@@ -148,6 +148,13 @@ async function bootShowcaseApprovals(
  * How long either direction watches the inbox. [#10106] Deliberately NOT
  * raised: a wrong verdict handed over later is still a wrong verdict, and the
  * defect below was never about the size of the window.
+ *
+ * [#23185] It is an UPPER BOUND, never the normal path. A positive watch ends
+ * the moment its message lands; a negative watch ends the moment the system
+ * SETTLES (see `inboxStayedQuiet`). Waiting the window out is what a watch
+ * does only when neither happens — and the stays-quiet call site below asserts
+ * that it did not, because the 5 s it used to cost on every run was this
+ * file's whole budget overrun.
  */
 const INBOX_WATCH_MS = 5_000;
 
@@ -156,10 +163,19 @@ const INBOX_WATCH_MS = 5_000;
  * "the window elapsed and the inbox is empty" and "the watch gave up" are
  * three different facts, and the `any[]` this replaces conflated the last two
  * into the same value.
+ *
+ * `endedBy` on `'quiet'` says what ended the observation the verdict rests on:
+ * the system settling, or the window running out. Both are sound grounds for
+ * `'quiet'` (the read behind it is taken after either); only one is fast.
  */
 type InboxWatch =
   | { readonly outcome: 'delivered'; readonly hits: any[]; readonly waitedMs: number }
-  | { readonly outcome: 'quiet'; readonly hits: any[]; readonly waitedMs: number }
+  | {
+      readonly outcome: 'quiet';
+      readonly hits: any[];
+      readonly waitedMs: number;
+      readonly endedBy: 'settled' | 'deadline';
+    }
   | { readonly outcome: 'timeout'; readonly hits: any[]; readonly waitedMs: number; readonly expected: number };
 
 /**
@@ -191,6 +207,14 @@ type InboxWatch =
  * milliseconds instead of seconds. It is clamped to `INBOX_WATCH_MS`, so it
  * can only ever SHRINK the window — widening it is not expressible, which is
  * the ban in #10106 made structural rather than asked for in a comment.
+ *
+ * [#23185] `settled` is the negative direction's other way to END the
+ * observation: a predicate that answers true once nothing can still put a row
+ * in the inbox. It changes WHEN the final read is taken, never WHAT the
+ * verdict rests on — it is asked first, and the fresh read is taken after it
+ * answered, so a row that landed before the system settled is still seen.
+ * The positive direction has no use for it (it ends on the message itself),
+ * so passing one there is refused rather than given a meaning.
  */
 const watchWindowMs = (budgetMs: number = INBOX_WATCH_MS): number =>
   Math.min(budgetMs, INBOX_WATCH_MS);
@@ -200,7 +224,11 @@ async function watchInbox(
   titleFragment: string,
   expected: number,
   budgetMs: number = INBOX_WATCH_MS,
+  settled?: () => Promise<boolean>,
 ): Promise<InboxWatch> {
+  if (settled && expected > 0) {
+    throw new Error('a settle signal ends the NEGATIVE watch only — a positive watch ends on its message');
+  }
   const started = Date.now();
   const deadline = started + watchWindowMs(budgetMs);
   const matches = async (): Promise<any[]> =>
@@ -211,9 +239,12 @@ async function watchInbox(
     if (expected > 0 && hits.length >= expected) {
       return { outcome: 'delivered', hits, waitedMs: Date.now() - started };
     }
-    if (Date.now() >= deadline) {
-      // The one observation the verdict is allowed to rest on: taken at or
-      // after the deadline, never before it.
+    const endedBy =
+      Date.now() >= deadline ? 'deadline' : settled && (await settled()) ? 'settled' : undefined;
+    if (endedBy) {
+      // The one observation the verdict is allowed to rest on: taken after
+      // the observation ended — at or past the deadline, or once the system
+      // has settled — never before it.
       const final = await matches();
       const waitedMs = Date.now() - started;
       if (expected > 0) {
@@ -222,7 +253,7 @@ async function watchInbox(
           : { outcome: 'timeout', hits: final, waitedMs, expected };
       }
       return final.length === 0
-        ? { outcome: 'quiet', hits: final, waitedMs }
+        ? { outcome: 'quiet', hits: final, waitedMs, endedBy }
         : { outcome: 'delivered', hits: final, waitedMs };
     }
     await sleep(50);
@@ -259,11 +290,52 @@ async function deliveredInbox(
  * above — after a fresh read taken past the deadline. A watch that gave up
  * therefore cannot satisfy a stays-empty assertion, which is the half of
  * #10106 that a louder timeout alone would not have fixed.
+ *
+ * [#23185] With `settled`, `'quiet'` is ALSO constructible after a fresh read
+ * taken once the system has settled — the deterministic end that replaces
+ * waiting the window out. `inboxSettled` is the predicate the suite uses.
  */
 async function inboxStayedQuiet(
-  booted: Booted, titleFragment: string, budgetMs?: number,
+  booted: Booted,
+  titleFragment: string,
+  options: { readonly budgetMs?: number; readonly settled?: () => Promise<boolean> } = {},
 ): Promise<InboxWatch> {
-  return watchInbox(booted, titleFragment, 0, budgetMs);
+  return watchInbox(booted, titleFragment, 0, options.budgetMs, options.settled);
+}
+
+/**
+ * Delivery states after which a `sys_notification_delivery` row can never
+ * materialize an inbox message. Every OTHER state — `pending`, `in_flight`,
+ * `failed`, or one added after this was written — may still land, so an
+ * unknown state keeps the watch open rather than settling it: the fail-safe
+ * direction, since the worst it costs is the window.
+ */
+const FINAL_DELIVERY_STATES: ReadonlySet<string> = new Set(['success', 'dead', 'suppressed']);
+
+/**
+ * [#23185] The settle point a stays-quiet watch ends on: the run that could
+ * notify has reached `status`, and the delivery outbox owes nothing.
+ *
+ * Why those two facts are SUFFICIENT: the in-app inbox is a materialization
+ * of delivery — no producer writes a `sys_inbox_message` row directly
+ * (`MessagingService`'s own docblock) — so a row can only come from a delivery
+ * row, and a delivery row can only come from an `emit()` by a live producer.
+ * A run in a terminal status emits nothing more, and an outbox holding only
+ * final rows materializes nothing more. So from that moment the inbox cannot
+ * change, and one fresh read is the whole verdict.
+ *
+ * `status` is named by the caller, not inferred as "any terminal status":
+ * each call site knows how its run must end, and a run ending some OTHER way
+ * is a finding that should keep the watch open and fail on the `endedBy`
+ * assertion rather than settle quietly.
+ */
+function inboxSettled(booted: Booted, flowName: string, status: string): () => Promise<boolean> {
+  return async () => {
+    const runs: any[] = await booted.automation.listRuns(flowName);
+    if (runs[0]?.status !== status) return false;
+    const deliveries = rows(await booted.data.find('sys_notification_delivery', { ...SYS }));
+    return deliveries.every((delivery: any) => FINAL_DELIVERY_STATES.has(String(delivery.status)));
+  };
 }
 
 /** Insert the demo's account + a `sent` invoice owned by a real rep. */
@@ -341,8 +413,12 @@ describe('#7381 — approving Invoice Dual Sign-off delivers the cleared notice'
     // THE REGRESSION: pre-fix this came back false, with the strand error.
     expect(second.resumed, 'the flow run was not resumed by the final approval').toBe(true);
 
-    await sleep(200);
-
+    // [#23185] No settle sleep before reading the run: `decide` AWAITS the
+    // resume (`ApprovalService.serviceResume` awaits `automation.resume`, which
+    // runs the flow to its next stop), so the run is already terminal here.
+    // What does arrive later is the inbox row — a dispatcher hop after the
+    // notify node's `emit()` — and that is what `deliveredInbox` waits for.
+    //
     // The run reached the success end, not a failure.
     //
     // `end_ok` itself is deliberately NOT asserted by name in the step log:
@@ -486,13 +562,29 @@ describe('#7381 — approving Invoice Dual Sign-off delivers the cleared notice'
     // [#10106] Asserted on the WATCH VERDICT, not on a length. A length
     // assertion here was satisfied by a watch that gave up early, so this
     // reverse check could stay green while no longer checking anything;
-    // `'quiet'` is only reachable from a fresh read taken past the deadline.
-    const quiet = await inboxStayedQuiet(booted, 'Invoice cleared');
+    // `'quiet'` is only reachable from a fresh read taken after the
+    // observation ended.
+    //
+    // [#23185] And the observation ends on the SETTLE POINT, not on the 5 s
+    // window it used to wait out on every run: the stranded run is `failed`
+    // and the outbox owes no delivery, after which nothing can reach the inbox
+    // (see `inboxSettled`). `endedBy` pins that it really ended there — a
+    // watch that fell back to the window would mean the system never settled,
+    // which is a finding about this harness, not a slower pass.
+    const quiet = await inboxStayedQuiet(booted, 'Invoice cleared', {
+      settled: inboxSettled(booted, 'showcase_invoice_signoff', 'failed'),
+    });
     expect(
       quiet.outcome,
       `the inbox did not stay quiet: ${quiet.outcome} after ${quiet.waitedMs} ms ` +
         `with ${quiet.hits.length} match(es) — the pre-fix shape is no longer stranding the run`,
     ).toBe('quiet');
+    expect(
+      quiet.outcome === 'quiet' ? quiet.endedBy : quiet.outcome,
+      `the stays-quiet watch ran its whole ${INBOX_WATCH_MS} ms window: the run never reached ` +
+        '`failed` with an outbox owing nothing, so the verdict rests on the clock instead of on a ' +
+        'settled system',
+    ).toBe('settled');
   }, 30_000);
 
   /**
@@ -580,16 +672,85 @@ describe('#10106 — the inbox watch reports WHY it ended, not just what it had'
     // First read issued at t=0 against an empty inbox and resolving only after
     // the whole budget; the row lands at 20% of the window. This is exactly the
     // shape that made the negative call site pass for the wrong reason.
-    const verdict = await inboxStayedQuiet(fakeBooted(laggingInbox(400, 60)), 'Invoice cleared', 300);
+    const verdict = await inboxStayedQuiet(fakeBooted(laggingInbox(400, 60)), 'Invoice cleared', { budgetMs: 300 });
     expect(verdict.outcome, 'a row delivered inside the window was reported as quiet').toBe('delivered');
     expect(verdict.hits).toHaveLength(1);
   }, 30_000);
 
   it('an empty window really does read as quiet, so the pin above is not vacuous', async () => {
-    const verdict = await inboxStayedQuiet(fakeBooted(async () => []), 'Invoice cleared', 300);
+    const verdict = await inboxStayedQuiet(fakeBooted(async () => []), 'Invoice cleared', { budgetMs: 300 });
     expect(verdict.outcome).toBe('quiet');
+    expect(verdict.outcome === 'quiet' && verdict.endedBy).toBe('deadline');
     expect(verdict.hits).toHaveLength(0);
   }, 30_000);
+
+  /**
+   * [#23185] The settle end, pinned on read ORDER rather than on the clock, so
+   * neither case below waits on anything. An inbox that counts its reads, and
+   * a settle signal that records when it was asked.
+   */
+  function countingInbox(landsWhen: () => boolean) {
+    let reads = 0;
+    const inbox = async (): Promise<any[]> => {
+      reads += 1;
+      return landsWhen() ? [{ title: 'Invoice cleared: INV-1010', user_id: 'grace@example.com' }] : [];
+    };
+    return { inbox, reads: () => reads };
+  }
+
+  it('a settled system ends the stays-quiet watch at once, without waiting out the window', async () => {
+    const counting = countingInbox(() => false);
+    const verdict = await inboxStayedQuiet(fakeBooted(counting.inbox), 'Invoice cleared', {
+      settled: async () => true,
+    });
+    expect(verdict.outcome).toBe('quiet');
+    expect(verdict.outcome === 'quiet' && verdict.endedBy).toBe('settled');
+    // One sample, then the settle check, then ONE fresh read: the window
+    // (`INBOX_WATCH_MS`, the default budget here) was never slept through.
+    expect(counting.reads()).toBe(2);
+  });
+
+  it('settling cannot satisfy stays-quiet when a row lands before it — the verdict read comes AFTER the settle check', async () => {
+    // The row becomes visible only once the settle signal has been asked: a
+    // delivery that landed between the last sample and the moment the system
+    // settled. A watch that took its verdict read BEFORE asking would read the
+    // empty inbox and call it quiet.
+    let asked = false;
+    const counting = countingInbox(() => asked);
+    const verdict = await inboxStayedQuiet(fakeBooted(counting.inbox), 'Invoice cleared', {
+      settled: async () => {
+        asked = true;
+        return true;
+      },
+    });
+    expect(verdict.outcome, 'a row delivered before the system settled was reported as quiet').toBe('delivered');
+    expect(verdict.hits).toHaveLength(1);
+  });
+
+  it('the settle point needs BOTH halves: the run in its named status, and an outbox owing nothing', async () => {
+    // `inboxSettled` over a fake run log and a fake outbox — its two reads are
+    // the whole of its input, so this pins each half without a kernel.
+    const settledOver = (runStatus: string, deliveryStates: readonly string[]) =>
+      inboxSettled(
+        {
+          automation: { listRuns: async () => [{ status: runStatus }] },
+          data: { find: async () => deliveryStates.map((status) => ({ status })) },
+        } as unknown as Booted,
+        'showcase_invoice_signoff',
+        'failed',
+      )();
+
+    expect(await settledOver('failed', []), 'a failed run with an empty outbox').toBe(true);
+    expect(await settledOver('failed', ['success', 'dead', 'suppressed']), 'only final deliveries').toBe(true);
+    // A delivery still owed can still land in the inbox, so it holds the watch open...
+    expect(await settledOver('failed', ['success', 'pending']), 'a pending delivery').toBe(false);
+    expect(await settledOver('failed', ['in_flight']), 'an in-flight delivery').toBe(false);
+    // ...and so does a state this predicate has never heard of: fail-safe.
+    expect(await settledOver('failed', ['some_future_state']), 'an unknown delivery state').toBe(false);
+    // A run that has not reached the named status can still emit.
+    expect(await settledOver('paused', []), 'a paused run').toBe(false);
+    expect(await settledOver('completed', []), 'a run that ended some OTHER way').toBe(false);
+  });
 
   it('a positive watch that runs out of window THROWS, and names a timeout rather than an absence', async () => {
     const err: Error = await deliveredInbox(fakeBooted(async () => []), 'Invoice cleared', 1, 300)

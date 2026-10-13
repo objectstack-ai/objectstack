@@ -1,7 +1,7 @@
 # @objectstack/verify
 
 Boot any ObjectStack app **in-process** and verify it through the **real HTTP
-stack** — no mocks, no ports, no sockets. Six app-agnostic proof families, all
+stack** — no mocks, no ports, no sockets. Seven app-agnostic proof families, all
 derived from your own metadata:
 
 - **Data fidelity** — author one record per object covering every field type,
@@ -36,6 +36,13 @@ derived from your own metadata:
   persona, each compared with that conjunction — the caller's effective grants
   on the detail, and its edit of the master MEASURED by an empty update of the
   master.
+- **Dashboard date windows** (opt-in) — *every widget a dashboard's `dateRange`
+  binds counts, under each preset of the picker, the rows that window selects*:
+  per bound widget and count measure, fixture rows are written on known days
+  around every preset's edges, and the widget is asked through the dataset door
+  with no window and under each of the 13 presets, before and after the
+  fixtures. Each difference must equal the fixture rows the window selects; a
+  window that answers nothing is `blank`, and one that never narrows is inert.
 
 And, on the same booted stack, an **in-process handle** so an app's own tests
 can run a hook, a validation rule, a flow, an action, a seed or a read against
@@ -83,6 +90,9 @@ objectstack verify --unique-scopes --multi-tenant
 
 # also prove every controlled_by_parent detail write follows its master
 objectstack verify --parent-write-reach
+
+# also prove every dashboard date picker counts the rows its window selects
+objectstack verify --dashboard-windows
 ```
 
 `--reference-shapes` is opt-in, on a fresh boot of its own: the engine still
@@ -139,11 +149,45 @@ verb on the detail and may update the middle master directly, which also needs
 edit access to the root, and refused otherwise, so the family reports such a
 chain `proven`.
 
+`--dashboard-windows` is opt-in, on a fresh boot of its own (it writes fixture
+rows). The population is every dashboard the spec's parse gives a `dateRange`,
+and every widget it binds: the window lands on the field
+`filterBindings.dateRange` names, or on `dateRange.field` (`created_at` when
+unauthored) where the widget declares no binding, and a widget with
+`filterBindings: { dateRange: false }` is `unbound`. The field resolves against
+the object behind the widget's dataset, as the stack registers it, and must be
+a `date` or `datetime` field. Each preset of `DATE_RANGE_PRESETS` is handed to
+`POST /analytics/dataset/query` as its `{date-macro}` window from the spec
+(`DATE_RANGE_PRESET_MACRO_WINDOWS`, e.g. `{ $gte: '{7_days_ago}', $lte: '{today}' }`), ANDed
+with the widget's own filter as `runtimeFilter`, as the signed-in admin; the
+server resolves the tokens, and the ground truth resolves the same window with
+`@objectstack/core`'s `resolveFilterTokens` on the caller's reference timezone
+(UTC unless the `ExecutionContext` carries one). Fixture rows are written
+through the seed door on each preset's first and last day and the day either
+side (never after today), each stamped at UTC noon (a `date` field takes the
+day), owned by the caller, with every column the widget's filter, the
+dataset's filter and the measure's filter compare held to a value they select,
+and read back before anything is judged. A row is the smallest record the CRUD
+derivation offers (its required fields); if the seed door refuses that (an app
+rule that requires a field only in some state), every field it synthesizes. Every count is a difference (after
+the fixtures minus before, under the same window), so the app's own rows
+cancel out, and the widget with no window must count every fixture row before
+any window is judged. A count measure is probed (a `count` of a named field
+gets a non-null value); an average, a sum or a derived measure is counted as
+excluded. A held column is an equality, an `$in` (its first member), a
+`$nin` or `$ne` on a field that declares its options (the first option it does
+not exclude) or `{current_user_id}` (the caller); any other filter the ground
+truth cannot model (`$or`, a range, a relationship path, another placeholder, a
+condition on the window's own field) is excluded, and so is a dataset over an
+object the app does not declare. The shipped console closes the three rolling windows at `{today}` as
+well; the fixtures carry no later day, so both select the same rows.
+
 Exit code is **non-zero** on real failures (`create-failed`, `read-failed`,
 `fidelity-gaps`, `rls-hole`, with `--reference-shapes` a field with `holes` or
 `failed`, with `--delete-behaviors` or `--unique-scopes` a field
-`contradicted` or `failed`, and with `--parent-write-reach` an object
-`contradicted` or `failed` or a persona that could not be provisioned) so
+`contradicted` or `failed`, with `--parent-write-reach` an object
+`contradicted` or `failed` or a persona that could not be provisioned, and
+with `--dashboard-windows` a widget `contradicted` or `failed`) so
 it drops straight into a CI gate. Inconclusive
 verdicts (`needs-fixture`, `skipped`, `member-visible`) are warnings and exit 0.
 
@@ -446,6 +490,20 @@ is reported not run: that empty answer is also the endpoint's when it could not
 compute one, so it is not read as "no grant anywhere". `summary.hardFailures` is
 `contradicted + failed` objects plus personas that could not be provisioned.
 
+**Dashboard date windows** (`runDashboardWindowProofs`), per widget a
+dashboard's `dateRange` binds. Probes per count measure: the widget with no
+window, then each of the 13 presets, each counted before and after the
+fixture rows:
+
+| status | meaning |
+| --- | --- |
+| `proven` | under every preset the window counted exactly the fixture rows it selects |
+| `contradicted` | under some preset the widget showed nothing where the window selects fixture rows (`blank`), or counted another number of them; a window that answers what no window answers under every preset is also named `inert` **(failure)** |
+| `failed` | the door refused or faulted on a windowed query while the widget's own query answered **(failure)** |
+| `inconclusive` | a fixture row could not be written or did not read back as written (an app hook rewrote it, or the read omits the column), the widget with no window did not count every fixture row (its own selection does not meet the fixtures), its own query is refused, the UTC day turned after the run started, or the caller's reference timezone is not UTC |
+| `unbound` | the widget opts out of the window (`filterBindings: { dateRange: false }`) |
+| `excluded` | the family cannot compare it: no count measure, a filter the ground truth cannot model, a window on a field that is missing or is not `date` / `datetime`, a dataset or dashboard that is undeclared or does not parse, or an object the app does not declare or the CRUD derivation cannot synthesize (`excludedKind` names which) |
+
 `member-visible` everywhere usually means the app is single-tenant; pass
 `--multi-tenant` (or `{ multiTenant: true }`) to register org-scoping so tenant
 isolation policies actually apply.
@@ -496,6 +554,10 @@ run" must never read like "nothing to find".
   `SecurityPlugin` to boot with (registers the verifier personas' sets); `runParentWriteReachProofs(stack, config)` →
   `ParentWriteReachReport` (`personas` names who wrote and who could not be provisioned; `summary.hardFailures` is what
   a gate reads); `formatParentWriteReachReport(report)`.
+- `deriveDashboardWindowCases(config)` → one case per widget of every dashboard with a `dateRange`: its bound field,
+  dataset, object and count measures, or why it is unbound or not compared; `runDashboardWindowProofs(stack, token,
+  config)` → `DashboardWindowReport` (`presets` names what each preset handed the door and how it resolved;
+  `summary.hardFailures` is what a gate reads); `formatDashboardWindowReport(report)`.
 
 `bootStack` options: `admin`, `authSecret`, `security` (a custom `SecurityPlugin`
 for owner-scoped fixtures), `multiTenant` (also what decides the posture

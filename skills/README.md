@@ -2,23 +2,25 @@
 
 Domain-scoped instructions for AI coding assistants (Claude Code, Copilot, Cursor)
 working in **any ObjectStack app** — this monorepo *and* third-party projects.
-`npm create objectstack` installs them into new apps automatically; existing
-projects add (or update) the bundle with:
+They ship as the npm package `@objectstack/skills`, released with the other
+`@objectstack/*` packages at one shared version. Install it at your installed
+`@objectstack/spec`'s version — the catalog's version is then your spec's — and
+sync it from `node_modules` into your agent's directory:
 
 ```bash
-npx skills add objectstack-ai/objectstack/skills --skill '*' --agent claude-code -y
+npm install --save-dev "@objectstack/skills@$(node -p "require('@objectstack/spec/package.json').version")"
+npx skills experimental_sync --agent claude-code -y
 ```
 
-Name your own runtime after `--agent` (`codex`, `cursor`, …) — the bundle is
-byte-identical whichever you name, and it lands **once**, in that agent's own
-directory (`.claude/skills/` for `claude-code`). Replacing
-`--skill '*' --agent claude-code -y` with `--all` is the multi-runtime opt-in:
-it installs for every runtime the CLI knows and writes the bundle to **three**
-destinations instead of one — a full real copy in **both** `.agents/` and
-`agent/`, plus `.claude/` symlinks pointing into `.agents/`.
+Name your own runtime after `--agent` (`codex`, `cursor`, …). To update, bump
+`@objectstack/skills` with the other `@objectstack/*` packages, then re-run the
+sync. The package is published from `18.0.0-next.0` on (there is no 17.x release);
+`--copy`, projects scaffolded by `npm create objectstack` and the rest are in the
+[Skills reference](https://objectstack.ai/docs/ai/skills-reference#installing-skills).
 
-The `/skills` subpath matters: it is the published catalog boundary — pointing
-the skills CLI at the repo root would also pick up repo-internal skills.
+**The `next` channel.** `npx skills add objectstack-ai/objectstack/skills --skill '*' --agent claude-code -y`
+reads the catalog straight from the repository's unreleased `main` — for trying
+the next version's skills, not for a released project.
 
 Each **domain** skill is self-contained: a `SKILL.md` with YAML frontmatter, plus a
 `references/_index.md` that points into the authoritative Zod sources in

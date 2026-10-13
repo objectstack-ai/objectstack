@@ -1926,6 +1926,7 @@ os verify --reference-shapes                   # Also prove reference fields ref
 os verify --delete-behaviors                   # Also prove each declared deleteBehavior is what a delete does
 os verify --unique-scopes --multi-tenant       # Also prove each declared unique collides where its scope says
 os verify --parent-write-reach                 # Also prove each controlled_by_parent detail write follows its master
+os verify --dashboard-windows                  # Also prove each dashboard date picker counts the rows its window selects
 ```
 
 1. **Author-time rules.** The rule registry `os validate` runs, over the stack
@@ -2016,6 +2017,37 @@ os verify --parent-write-reach                 # Also prove each controlled_by_p
    admitted exactly when the caller holds the verb on the detail and may update
    the middle master directly, which also needs edit access to the root, and
    refused otherwise, so such a chain is reported proven.
+   With `--dashboard-windows`, another fresh boot proves that every dashboard
+   declaring a `dateRange` answers under each preset of its picker with the
+   rows that window selects. A widget's window lands on the field its
+   `filterBindings.dateRange` names, or on the dashboard's `dateRange.field`
+   (`created_at` when unauthored), resolved against the object behind the
+   widget's dataset, and must be a `date` or `datetime` field; a widget with
+   `filterBindings: { dateRange: false }` is reported `unbound`. For each count
+   measure of a bound widget, fixture rows are written through the seed door
+   on every preset's first and last day and the day either side (never after
+   today), stamped at UTC noon, owned by the caller and holding every column
+   the widget's own filter, the dataset's filter and the measure's filter
+   compare (the smallest record first, every synthesized field if the seed
+   door refuses it), and read back. The widget is then asked through
+   `POST /analytics/dataset/query` as the signed-in admin with no window and
+   under each of the 13 presets, before and after the fixtures. A preset is
+   handed as the spec's `{date-macro}` window for it
+   (`{ $gte: '{7_days_ago}', $lte: '{today}' }` for `last_7_days`, `{ $gte: '{month_start}', $lte: '{month_end}' }` for
+   `this_month`), ANDed with the widget's filter, and the server resolves the
+   tokens; the ground truth resolves the same window with the platform's
+   resolver, on UTC calendar days unless the caller's context names a
+   timezone. Each difference must equal the fixture rows the window selects: a
+   widget that shows nothing there, or counts another number of them, fails
+   the run, and one whose every preset answers what no window answers is named
+   inert. The widget with no window must count every fixture row first; a
+   probe whose fixtures do not meet the widget's own selection, or that cannot
+   be written or read back as written, is reported inconclusive, never proven.
+   A held column is an equality, an `$in`, a `$nin` or `$ne` on a field that
+   declares its options, or `{current_user_id}`; an average, a sum or a derived
+   measure, and a filter the ground truth cannot model (`$or`, a range, a
+   relationship path, a condition on the window's own field), are reported
+   `excluded`.
    `--multi-tenant` boots org-scoped so tenant-isolation RLS policies
    apply; a walled tenancy posture (`OS_TENANCY_POSTURE` set to `isolated` or
    `group`) asks for the same boot.
@@ -2047,8 +2079,10 @@ document carries depends on where the run ended:
   `deleteBehaviors` (with `--delete-behaviors`), `uniqueScopes` (with
   `--unique-scopes`; its `boot` names the legs the run could prove),
   `parentWriteReach` (with `--parent-write-reach`; its `personas` name who
-  wrote and who could not be provisioned) and `hardFailures`, the count
-  the exit status is read from.
+  wrote and who could not be provisioned), `dashboardWindows` (with
+  `--dashboard-windows`; its `presets` name what each preset handed the door
+  and how it resolved) and `hardFailures`, the count the exit status is read
+  from.
 - **Could not run:** `{ "error": "<sentence>" }`, plus `code` and `httpStatus`
   when the failure carries them.
 

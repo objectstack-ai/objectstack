@@ -169,14 +169,17 @@ function seed(): void {
     CREATE TABLE sys_capability (id TEXT PRIMARY KEY, organization_id TEXT, name TEXT, managed_by TEXT);
     INSERT INTO sys_capability VALUES ('cap_seeded', NULL, 'manage_users', 'platform'), ('cap_authored', 'org_default', 'audit_fields', 'admin');
     -- fate 2: templates — a seeded mirror, an organization's seeded copy, a
-    -- customized seeded row and an admin-authored one (the last two promoted first)
+    -- customized seeded row, admin-authored rows (with and without an
+    -- organization) and a row of unknown provenance (the last four promoted first)
     CREATE TABLE sys_email_template (id TEXT PRIMARY KEY, organization_id TEXT, name TEXT, label TEXT, locale TEXT,
       subject TEXT, body_html TEXT, active INTEGER, variables_json TEXT, customized INTEGER, managed_by TEXT);
     INSERT INTO sys_email_template VALUES
       ('tpl_seeded', NULL, 'auth.welcome', 'Welcome', 'en-US', 'Hi', '<p>hi</p>', 1, '[]', 0, 'platform'),
       ('tpl_customized', NULL, 'auth.reset_password', 'Reset', 'en-US', 'Reset your password', '<p>our code</p>', 1, '[]', 1, 'platform'),
       ('tpl_org', 'org_b', 'auth.welcome', 'Welcome', 'en-US', 'Hi', '<p>hi</p>', 1, '[]', 0, 'platform'),
-      ('tpl_admin', 'org_b', 'crm.renewal', 'Renewal', 'zh-CN', '续约', '<p>续约</p>', 1, '[]', 0, 'admin');
+      ('tpl_admin', 'org_b', 'crm.renewal', 'Renewal', 'zh-CN', '续约', '<p>续约</p>', 1, '[]', 0, 'admin'),
+      ('tpl_admin_env', NULL, 'crm.note', 'Note', 'en-US', 'A note', '<p>note</p>', 1, '[]', 0, 'admin'),
+      ('tpl_unknown', NULL, 'crm.memo', 'Memo', 'en-US', 'A memo', '<p>memo</p>', 1, '[]', 0, NULL);
 
     -- the settings global rung, still in sys_setting, and its new home
     CREATE TABLE sys_setting (id TEXT PRIMARY KEY, organization_id TEXT, namespace TEXT, key TEXT, scope TEXT, user_id TEXT,
@@ -354,9 +357,12 @@ describe('ADR-0131 D10 --apply — the acceptance fixture', () => {
     expect(rows('SELECT id FROM sys_capability').map((r) => r.id)).toEqual(['cap_authored']);
     expect(rows('SELECT id FROM sys_email_template')).toEqual([]);
 
-    // Ruling C: the customized and the authored template became environment
-    // items before any row went; the seeded copies were not promoted.
-    expect([...c.templates.keys()].sort()).toEqual(['auth.reset_password|en-US', 'crm.renewal|zh-CN']);
+    // Ruling C: the customized, the admin-authored and the unknown-provenance
+    // templates became environment items before any row went; the seeded
+    // copies were not promoted.
+    expect([...c.templates.keys()].sort()).toEqual([
+      'auth.reset_password|en-US', 'crm.memo|en-US', 'crm.note|en-US', 'crm.renewal|zh-CN',
+    ]);
     expect(c.templates.get('auth.reset_password|en-US')).toMatchObject({ subject: 'Reset your password', bodyHtml: '<p>our code</p>' });
 
     // The global rung moved to sys_platform_setting, value and secret handle verbatim; the tenant row stayed.
@@ -481,16 +487,22 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     expect(report.steps.find((s) => s.step === 'mirror-deletion')!.status).toBe('not-reached');
   });
 
-  it('never overwrites a template the environment already holds, and keeps every template row', async () => {
+  it('never overwrites a template the environment already holds, keeps every template row, and certifies nothing', async () => {
     const c = catalog();
     c.templates.set('crm.renewal|zh-CN', { name: 'crm.renewal', label: 'Renewal', locale: 'zh-CN', subject: '新的', bodyHtml: '<p>新的</p>' });
-    const report = await apply(c, ledger());
+    const l = ledger();
+    const report = await apply(c, l);
+
+    // A blocked promotion: the ceremony stops there, verified_at stays null.
+    expect(report.complete).toBe(false);
+    expect(report.blocking).toBeGreaterThan(0);
+    expect(l.verdicts.at(-1)).toMatchObject({ complete: false });
 
     const promotion = report.steps.find((s) => s.step === 'template-promotion')!;
     expect(promotion.status).toBe('blocked');
     expect(promotion.blockers.join('\n')).toMatch(/crm\.renewal \(zh-CN\)/);
     expect(c.templates.get('crm.renewal|zh-CN')).toMatchObject({ subject: '新的' });
-    expect(rows('SELECT COUNT(*) AS n FROM sys_email_template')).toEqual([{ n: 4 }]);
+    expect(rows('SELECT COUNT(*) AS n FROM sys_email_template')).toEqual([{ n: 6 }]);
   });
 
   it('deletes nothing while a reference does not resolve by name — the gate of fate 2', async () => {
@@ -529,7 +541,53 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     expect(report.steps.find((s) => s.step === 'mirror-deletion')!.status).toBe('not-reached');
     expect(rows('SELECT COUNT(*) AS n FROM sys_permission_set')).toEqual([{ n: 3 }]);
     expect(c.templates.size).toBe(0);
-    expect(rows('SELECT COUNT(*) AS n FROM sys_email_template')).toEqual([{ n: 4 }]);
+    expect(rows('SELECT COUNT(*) AS n FROM sys_email_template')).toEqual([{ n: 6 }]);
+  });
+
+  it('does not certify a ceremony whose departures have not left: the declared sharing-rule mirrors keep verified_at null', async () => {
+    db.exec(`
+      CREATE TABLE sys_sharing_rule (id TEXT PRIMARY KEY, organization_id TEXT, name TEXT, managed_by TEXT, customized INTEGER);
+      INSERT INTO sys_sharing_rule VALUES ('rule_declared', NULL, 'share_deals', 'package', 0), ('rule_org', 'org_b', 'mine', 'admin', 0);
+    `);
+    const l = ledger();
+    const report = await apply(catalog(), l);
+
+    // Every step ran, and the moved settings rung reads zero; the rule mirror
+    // is D2's to remove, so it still counts and is named.
+    expect(report.complete).toBe(true);
+    expect(report.blocking).toBe(1);
+    expect(l.verdicts.at(-1)).toMatchObject({ complete: true, blocking: 1 });
+    expect(tableOf(report, 'sys_setting').departures).toEqual([]);
+    const rule = tableOf(report, 'sys_sharing_rule');
+    expect(rule.remaining).toBe(1);
+    expect(rule.departures).toEqual([expect.objectContaining({ id: 'declared-rule-mirrors', as: 'mirror-deletion', rows: 1 })]);
+    expect(rule.notNull.willReceive).toBe(false);
+    expect(rows(`SELECT id FROM sys_sharing_rule ORDER BY id`).map((r) => r.id)).toEqual(['rule_declared', 'rule_org']);
+  });
+
+  it('under a wall, a template no promotion carried keeps verified_at null and is named', async () => {
+    // A database holding nothing but templates: every step can finish under a wall.
+    const only = new Database(join(dir, 'templates.db'));
+    only.exec(`
+      CREATE TABLE sys_organization (id TEXT PRIMARY KEY, slug TEXT);
+      CREATE TABLE sys_email_template (id TEXT PRIMARY KEY, organization_id TEXT, name TEXT, customized INTEGER, managed_by TEXT);
+      INSERT INTO sys_email_template VALUES ('tpl_seeded', NULL, 'auth.welcome', 0, 'platform'), ('tpl_admin', NULL, 'crm.note', 0, 'admin');
+    `);
+    const saved = db;
+    db = only;
+    try {
+      const l = ledger();
+      const report = await apply(catalog(), l, { posture: 'isolated' });
+      expect(report.complete).toBe(true);
+      expect(report.blocking).toBe(1);
+      expect(l.verdicts.at(-1)).toMatchObject({ complete: true, blocking: 1 });
+      const templates = tableOf(report, 'sys_email_template');
+      expect(templates.departures).toEqual([expect.objectContaining({ id: 'template-promotion', rows: 1 })]);
+      expect(rows('SELECT id FROM sys_email_template')).toEqual([{ id: 'tpl_admin' }]);
+    } finally {
+      db = saved;
+      only.close();
+    }
   });
 
   it('holds a column whose rows another stage owns, and reports it', async () => {

@@ -1301,6 +1301,25 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'retired from the load path.',
   },
   {
+    id: 'cbp-master-relation-tiers-retired',
+    order: 95,
+    text:
+      'It also enforces ADR-0055 §1 (ADR-0049 enforce-or-remove, maintainer ruling B): a '
+      + '`controlled_by_parent` object derives its master from exactly one `master_detail` field '
+      + 'declared `required: true`, and from nothing else. The parse now refuses the object with none or '
+      + 'with two, naming it and the rule. The security runtime\'s two unrecorded fallback tiers retire: '
+      + 'any `master_detail`, then a required `lookup`, picked by field order. The runtime derives no '
+      + 'master from those shapes, denying every read and refusing every write with 422 '
+      + 'INVALID_METADATA, and the linter\'s two rules read the same one tier. One shape converts '
+      + 'losslessly: an omitted `required` on the object\'s one `master_detail`, which objectui\'s '
+      + 'Studio writes. The D2 conversion `cbp-master-detail-required-defaulted` gives it the builder\'s '
+      + 'own `required: true`, retired from the load path so a live author is refused at parse while '
+      + 'stored rows and `os migrate meta` replay it. A required `lookup` is not converted, because '
+      + 'turning it into a `master_detail` changes what deleting the master does. Neither is an explicit '
+      + '`required: false` or a second master. Its D3 record is the semantic entry '
+      + '`cbp-master-relation-tiers-retired`.',
+  },
+  {
     id: 'chart-config-aria-retired',
     order: 31,
     text:
@@ -1998,8 +2017,9 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '(JSON-quoted against ISO text), and a whole-slot object differently in a screen or `end` text or a '
       + 'notify link, and an `http` url or header that was one token holding anything but a string was refused '
       + 'after the interpolation where the engine renders it as text, so '
-      + 'the rewrite is the author\'s to check. Every other flow string keeps the single-brace dialect. Its '
-      + 'D3 record is the semantic entry `flow-text-slot-single-brace-refused`.',
+      + 'the rewrite is the author\'s to check. No other flow string reads the single-brace dialect either: '
+      + 'the value slots take a CEL value envelope, a node\'s literals are read as written, and the 17.x '
+      + 'interpolator is deleted. Its D3 record is the semantic entry `flow-text-slot-single-brace-refused`.',
   },
   {
     id: 'flow-text-slot-unbound-dollar-root-refused',
@@ -2020,10 +2040,18 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     text:
       'It retires the single-brace `{…}` template dialect from the flow VALUE slots (the C half of the '
       + 'maintainer\'s ruling D on the flow expression dialects): the `assignment` node\'s values, in all '
-      + 'three shapes, and the `fields` map of `create_record` and `update_record`, where a CEL value '
-      + 'envelope is already the expression form. A string there is now the literal '
-      + 'text it spells, and one carrying a `{…}` token is refused — by `FlowValueSlotSchema`, '
-      + '`registerFlow`, `objectstack validate` and the executor alike — with the CEL spelling of each token. '
+      + 'three shapes; the `fields` map of `create_record` and `update_record`; the maps a node hands to a '
+      + 'callee (a `subflow`\'s and a `map`\'s `input`, a `script`\'s `inputs`); a `screen`\'s `defaults`, each '
+      + 'field\'s `defaultValue` and its `recordId`; the `collection` a `loop` with a `body` and a `map` '
+      + 'iterate; a `notify` node\'s `recipients`, `templateData` and `sourceId`; an `http` node\'s `body`; and '
+      + 'each operand of a `get_record`, `update_record` or `delete_record` `filter`. A CEL value envelope is '
+      + 'the expression form in each. A string there is now the literal text it spells (a `collection`\'s '
+      + 'literal is an inline array), and one carrying a `{…}` token is refused — by the node contracts, '
+      + '`registerFlow`, `objectstack validate` and the executor alike — with the CEL spelling of each token; '
+      + 'a whole-string query placeholder at a filter operand (`{current_user_id}`, `{today}`) stays the '
+      + 'query engine\'s. A `notify` node\'s `sourceObject`, `actorId` and `payload` and an `http` node\'s '
+      + '`method`, `durable`, `timeoutMs` and `signingSecret` are literals read as written, where a token is '
+      + 'refused too. '
       + 'No D2 conversion exists: every authored spelling was measured lossy (an absent key writes nothing '
       + 'under the template and fails under CEL; CEL divides two integers as integers), so which value an '
       + 'absent key should write is the author\'s judgment. The `$User` paths are refused too: the flow CEL '
@@ -2753,7 +2781,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'unless the member\'s `type` is `api`, whose object `params` keeps its request-payload window. `params` '
       + 'carries one shape and no second value-bag key is declared, so an object `params` on any other member, which '
       + 'parsed and then reached no action, is refused at `actions.N.params` with the prescription to author an action '
-      + 'with static parameter values as its own `action:button` node. Read by the component-props gate (advisory); a '
+      + 'with static parameter values as its own `action:button` node. Read by the component-props gate (refused as an error); a '
       + 'stored page still saves and loads, so no conversion is registered. Its D3 record is the semantic entry '
       + '`ui-action-group-menu-member-params-array-only`.',
   },
@@ -2768,7 +2796,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'reads — an `action:menu` item reads no `size` and declares none — with the rows\' prescriptions; '
       + '`outcomeMessages`, a member `className` and a member `properties.params` are refused, and '
       + '`outcomeMessages` stays undeclared on all four action blocks as one decision. Read by the '
-      + 'component-props gate (advisory); a stored page still saves and loads, so no conversion is registered. '
+      + 'component-props gate (refused as an error); a stored page still saves and loads, so no conversion is registered. '
       + 'Its D3 record is the semantic entry `ui-action-group-menu-members-typed`.',
   },
   {
@@ -2813,7 +2841,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`name` or a misspelled member passed every door and the form drew the field without it. The spec now '
       + 'declares a closed runtime form field of the members the form draws, in camelCase, keyed by `name` — '
       + 'the `grid` widget\'s snake_case keys stay out until the widget reads a camelCase spelling — and the '
-      + 'row takes a list of it. Read by the component-props gate (advisory); a stored page still saves and '
+      + 'row takes a list of it. Read by the component-props gate (refused as an error); a stored page still saves and '
       + 'loads, so no conversion is registered. Its D3 record is the semantic entry '
       + '`ui-object-form-custom-fields-typed`.',
   },
@@ -2828,7 +2856,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'authoring face, drawing only a stored one by its name. So both rows take field names, objectui\'s own '
       + 'declaration of the member, and refuse an object entry with what to write instead — a `{ name }` entry '
       + 'is its bare name, and a `{ field }` entry belongs in a section. Read by the component-props gate '
-      + '(advisory); a stored page still saves and loads, so no conversion is registered. Its D3 record is the '
+      + '(refused as an error); a stored page still saves and loads, so no conversion is registered. Its D3 record is the '
       + 'semantic entry `ui-object-form-fields-names-typed`.',
   },
   {
@@ -2843,7 +2871,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'take the measured shape. The form\'s `fields` and `sections` and the master-detail form\'s two '
       + 'stay open — the form draws a `{ name }` field entry and an inline runtime field inside a section, '
       + 'which the typed shapes would refuse — and `customFields` stays open until the spec declares the '
-      + 'runtime form field its entries are. Read by the component-props gate (advisory); a stored page '
+      + 'runtime form field its entries are. Read by the component-props gate (refused as an error); a stored page '
       + 'still saves and loads, so no conversion is registered. Its D3 record is the semantic entry '
       + '`ui-object-form-members-typed`.',
   },
@@ -2859,7 +2887,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'form field — in canonical spellings only: a page block\'s `properties` is never parsed on the way to '
       + 'the form, so a deprecated section `visibleOn` or a string `columns`, which a form view folds at '
       + 'parse, was dropped, and is refused with the canonical spelling. The stored form view is unchanged. '
-      + 'Read by the component-props gate (advisory); a stored page still saves and loads, so no conversion is '
+      + 'Read by the component-props gate (refused as an error); a stored page still saves and loads, so no conversion is '
       + 'registered. Its D3 record is the semantic entry `ui-object-form-sections-typed`.',
   },
   {
@@ -2870,7 +2898,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`z.unknown()` because the marker contract lived only in objectui, so a marker with no `date`, a numeric '
       + '`date` or a misspelled member passed every door and the chart drew no line, or drew it unlabelled. The '
       + 'spec now declares objectui\'s own authoring declaration of a marker, `{ date, label?, color? }` with '
-      + '`date` a string, and the row takes it. Read by the component-props gate (advisory); a stored page still '
+      + '`date` a string, and the row takes it. Read by the component-props gate (refused as an error); a stored page still '
       + 'saves and loads, so no conversion is registered. Its D3 record is the semantic entry '
       + '`ui-object-gantt-markers-typed`.',
   },
@@ -2885,7 +2913,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'takes the list view\'s own `columns` by reference — all field names or all column entries — and a '
       + 'column keyed `accessorKey` / `header` / `name`, a mixed list or an undeclared column key (`editable`, '
       + '`options`, `reference`), which passed every door and drew no column or was ignored, is refused. Read by '
-      + 'the component-props gate (advisory); a stored page still saves and loads, so no conversion is '
+      + 'the component-props gate (refused as an error); a stored page still saves and loads, so no conversion is '
       + 'registered. Its D3 record is the semantic entry `ui-object-grid-columns-typed`.',
   },
   {
@@ -2899,8 +2927,8 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'the author\'s list was dropped. The row now takes the list view\'s five-member export '
       + 'options object by identity, not the list view\'s union, and refuses a bare array with the '
       + 'object form named, a format outside the enum and an undeclared key. Page-component '
-      + '`properties` is read by the component-props gate, which reports these as advisory '
-      + 'findings, and is not parsed on the metadata save or load path, so a stored page still saves '
+      + '`properties` is read by the component-props gate, which reports these as '
+      + 'errors, and is not parsed on the metadata save or load path, so a stored page still saves '
       + 'and loads and no conversion is registered: the bare array never worked here, and lifting it '
       + 'would change the menu a deployed grid shows. The authored census found nothing to respell. '
       + 'Its D3 record is the semantic entry `ui-object-grid-export-options-closed`.',
@@ -2918,7 +2946,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '(`batchActions`, the spelling the grid reads first, takes `bulkActions`\'s); the grid\'s `fields` '
       + 'and `selectable` and the kanban lane take the measured shape. The grid\'s `columns` stays open: its '
       + 'group headers draw an authored column\'s `options`, which the list view\'s column entry does not '
-      + 'declare. Read by the component-props gate (advisory); a stored page still saves and loads, so no '
+      + 'declare. Read by the component-props gate (refused as an error); a stored page still saves and loads, so no '
       + 'conversion is registered. Its D3 record is the semantic entry '
       + '`ui-object-grid-kanban-calendar-list-members-typed`.',
   },
@@ -2934,7 +2962,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`aggregations` takes the measured `[{ field, type }]` with the query AST\'s aggregation '
       + 'functions, and `operations` the four booleans a grid read point names (`create`, '
       + '`update`, `delete`, `export`), refusing `read` and `import`, which nothing reads. Read by '
-      + 'the component-props gate (advisory); a stored page still saves and loads, so no conversion '
+      + 'the component-props gate (refused as an error); a stored page still saves and loads, so no conversion '
       + 'is registered. Its D3 record is the semantic entry `ui-object-grid-row-members-typed`.',
   },
   {
@@ -2947,7 +2975,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'passed every door and the board painted no card for it. objectui has since made the list view\'s '
       + '`{ condition, style }` rule the member\'s only authoring dialect, and the board evaluates it with the '
       + 'grid\'s evaluator, so the row takes the list view\'s own member by reference, as `object-grid` does. '
-      + 'Read by the component-props gate (advisory); a stored page still saves and loads, so no conversion is '
+      + 'Read by the component-props gate (refused as an error); a stored page still saves and loads, so no conversion is '
       + 'registered. Its D3 record is the semantic entry `ui-object-kanban-conditional-formatting-typed`.',
   },
   {
@@ -2960,7 +2988,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'so `navigation: 42` and a bare mode string passed every door and opened the record page. The '
       + 'three rows now take the list view\'s `NavigationConfigSchema` by reference, the carrier the grid, '
       + 'kanban, calendar and timeline blocks already take. Read by the component-props gate '
-      + '(advisory); a stored page still saves and loads, so no conversion is registered. Its D3 record '
+      + '(refused as an error); a stored page still saves and loads, so no conversion is registered. Its D3 record '
       + 'is the semantic entry `ui-object-map-gantt-tree-navigation-typed`.',
   },
   {
@@ -2974,7 +3002,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'went through `objectstack validate` green. '
       + 'Each detail entry is now a strict shape of the twelve keys the renderer reads, and its '
       + '`columns` references `InlineGridColumnSchema`. Page-component `properties` is read by the '
-      + 'component-props gate, which reports a failing entry or column as an advisory finding, '
+      + 'component-props gate, which reports a failing entry or column as an error, '
       + 'and is not parsed on the metadata save or load path, so a stored page still saves and '
       + 'loads and no conversion is registered; the authored census found nothing to respell. '
       + '`defineStack`\'s identity-only check reaches the block wherever a page carries it, with '
@@ -2995,7 +3023,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'badge\'s measured shape. `drillDown` and `compareTo` stay open: each by-reference candidate declares a key '
       + 'the tile never reads (the chart drill-down\'s `filter`, the dashboard comparison\'s `dimension`), and '
       + 'the chart drill-down refuses the `report` the tile draws, so each waits on a ruling. Read by the '
-      + 'component-props gate (advisory); a stored page still saves and loads, so no conversion is '
+      + 'component-props gate (refused as an error); a stored page still saves and loads, so no conversion is '
       + 'registered. Its D3 record is the semantic entry `ui-object-metric-aggregate-trend-typed`.',
   },
   {
@@ -3008,7 +3036,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'reference, and `dimension` refused by name, because this inline tile shifts the date macros in its own '
       + '`filter` and never reads a dataset time dimension. A bare kind string, a kind outside the two and a '
       + '`dimension` passed every door and compared the wrong window. Read by the component-props gate '
-      + '(advisory); a stored page still saves and loads, so no conversion is registered. Its D3 record is the '
+      + '(refused as an error); a stored page still saves and loads, so no conversion is registered. Its D3 record is the '
       + 'semantic entry `ui-object-metric-compare-to-typed`.',
   },
   {
@@ -3020,7 +3048,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'reference (fork 1, letter B): it waited until a joined report refused a block that binds no dataset, '
       + 'and since then every report the member admits is one the drill drawer draws — a report with no '
       + '`dataset`, a bare report name or a `{ name }` reference, which the drawer answered by listing the '
-      + 'records, is refused. Read by the component-props gate (advisory); a stored page still saves and loads, '
+      + 'records, is refused. Read by the component-props gate (refused as an error); a stored page still saves and loads, '
       + 'so no conversion is registered. Its D3 record is the semantic entry '
       + '`ui-object-metric-drill-down-report-typed`.',
   },
@@ -3034,7 +3062,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'metric tile has no click event for a drill filter to resolve against and no row for `mode` to open; '
       + 'both passed every door and were ignored. The drill `report` stays open: the tile draws a '
       + 'dataset-bound report, but the spec declares no drill report yet, and declares that contract first. '
-      + 'Read by the component-props gate (advisory); a stored page still saves and loads, so no conversion is '
+      + 'Read by the component-props gate (refused as an error); a stored page still saves and loads, so no conversion is '
       + 'registered. Its D3 record is the semantic entry `ui-object-metric-drill-down-typed`.',
   },
   {
@@ -3047,7 +3075,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'epoch milliseconds — and a row refinement pairs each entry with the kind the block\'s `variant` selects, '
       + 'so a feed entry with no `title`, or a gantt row on a feed timeline, is refused instead of drawn empty. '
       + 'A feed entry\'s `content` (child components) is held unjudged until a writer appears. Read by the '
-      + 'component-props gate (advisory); a stored page still saves and loads, so no conversion is registered. '
+      + 'component-props gate (refused as an error); a stored page still saves and loads, so no conversion is registered. '
       + 'Its D3 record is the semantic entry `ui-object-timeline-items-typed`.',
   },
   {
@@ -3061,8 +3089,24 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'declaration of it, and the row takes it. The stage\'s other members — the metric drill-down\'s '
       + '`report`, the form\'s `customFields` and both forms\' `sections`, the timeline\'s `items` and the '
       + 'action containers\' members — stay open: each contract has more than one viable shape that no ruling '
-      + 'decides yet. Read by the component-props gate (advisory); a stored page still saves and loads, so no '
+      + 'decides yet. Read by the component-props gate (refused as an error); a stored page still saves and loads, so no '
       + 'conversion is registered. Its D3 record is the semantic entry `ui-object-timeline-mapping-typed`.',
+  },
+  {
+    id: 'ui-page-action-row-navigation-executor-refused',
+    order: 95,
+    text:
+      'It also closes the fourth door of the url-target family on the page action rows (`action:button`, '
+      + '`action:icon`, and each `action:group` / `action:menu` member). A row\'s `onSuccess` was any value; it is '
+      + 'now `ActionSchema`\'s own post-success block, by reference, so its `navigate` is judged by the one url '
+      + 'grammar and the block\'s renames and closed `openIn` come with it (the semantic entry '
+      + '`ui-page-action-row-on-success-shape-closed`; a refused address has no lossless rewrite). The row\'s '
+      + 'executor key stays open to host-registered handler names, but refuses `\'navigation\'`, the console '
+      + 'runner\'s local alias of `\'url\'`, whose `target` the rows never judged. On a row the two spellings run '
+      + 'one navigator on the same `target`, so the D2 conversion `page-action-row-navigation-executor-to-url` '
+      + 'renames the value, retired from the load path so authors are refused at the door while stored rows and '
+      + '`os migrate meta` replay it. Its D3 record is the semantic entry '
+      + '`ui-page-action-row-navigation-executor-refused`.',
   },
   {
     id: 'ui-record-line-items-props-closed',
@@ -3109,6 +3153,24 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'an effect to lose — because a stored report row CAN carry them (the Studio report form '
       + 'offered a block `chart` input until this change); it is retired from the load path, so '
       + 'authors are refused at parse rather than rewritten.',
+  },
+  {
+    id: 'view-data-api-provider-retired',
+    order: 95,
+    text:
+      "It also retires the view-level `api` data source — the `provider: 'api'` arm of `ViewDataSchema`, "
+      + 'with its `read` / `write` request blocks (ADR-0049 enforce-or-remove; maintainer ruling 2026-10-12, '
+      + 'letter C). The arm took any `url` and any `headers`, so a credential or a cross-origin call written '
+      + 'into a view was stored as metadata, served to every client that read the view and sent by the '
+      + "console as written, while the page element's API binding — the newer door for a metadata-declared "
+      + 'API call — is same-origin, credential-free and read with the console\'s own signed-in fetch. One '
+      + 'operation with two implementations that behave differently keeps the governed one: a view now binds '
+      + "its object or static rows, and an API read is a page component's `dataSource` binding. Measured "
+      + 'before removal: no producer wrote the arm outside documentation in objectstack, objectui or hotcrm. '
+      + 'The arm is refused by name on the union\'s own error map, with no `retiredKey()` tombstone (a value '
+      + 'left, not a key) and no D2 conversion (the replacement lives on another surface, and deleting the '
+      + "view's `data` would silently change what it shows); its D3 record is the semantic entry "
+      + '`view-data-api-provider-retired`.',
   },
   {
     id: 'view-item-owner-hidden-retired',

@@ -56,13 +56,14 @@
  * tomorrow.
  *
  * ⚠️ {@link ResolvedAnalyticsDateRange.endExclusive} is the flag that carries
- * that reading to the comparison, and it is NOT constant across the
- * vocabulary:
- *
- *   - the ten CALENDAR presets end at a day boundary the window must not
- *     contain ⇒ `endExclusive: true`;
- *   - the three ROLLING `last_N_days` presets end at NOW, an instant the
- *     window REACHES ⇒ `endExclusive: false`.
+ * that reading to the comparison, and every preset this module resolves sets
+ * it: each of the thirteen ends at a day boundary the window must not contain
+ * ⇒ `endExclusive: true`. The three ROLLING `last_N_days` presets are no
+ * exception — they stop before TOMORROW begins, exactly as `today` does,
+ * because the spec's `DATE_RANGE_PRESET_MACRO_WINDOWS` closes them on
+ * `{today}` and this module must select the same EXTENT. An end at NOW would
+ * drop the rest of today's rows (a datetime later today) that the spec's
+ * window, the console's lowering and an author's `$between` all count.
  *
  * ⛔ And it is never `true` for a window a CALLER wrote out as an explicit
  * `[a, b]` array — that arm never reaches this file. `$lte` on a caller's
@@ -98,8 +99,9 @@ export interface ResolvedAnalyticsDateRange {
   readonly end: string;
   /**
    * Is `end` the first instant AFTER the window rather than its last instant?
-   * `true` for the ten calendar presets, `false` for the three rolling ones,
-   * whose upper bound is NOW.
+   * `true` for every preset this module resolves — the three rolling ones
+   * included, which stop before tomorrow begins. A caller's explicit `[a, b]`
+   * window never comes here and keeps its inclusive reading at each face.
    */
   readonly endExclusive: boolean;
 }
@@ -108,32 +110,27 @@ export interface ResolvedAnalyticsDateRange {
  * The `{date-macro}` token pair each preset resolves to — `[start, endBefore]`
  * in the UNWRAPPED spelling {@link resolveFilterToken} takes.
  *
- * `endBefore: null` means the window has no calendar upper bound and runs to
- * the reference instant (the rolling `last_N_days` family), matching the
- * `end: null` of `DATE_RANGE_PRESET_MACRO_WINDOWS`.
- *
  * ⚠️ The end token names the day the window STOPS BEFORE, not its last day —
- * `this_week` ends at `next_week_start`, not at `week_end`. That is why this
+ * `this_week` ends at `next_week_start`, not at `week_end`, and the rolling
+ * `last_N_days` family ends at `tomorrow`, not at `today`. That is why this
  * table states the ends itself instead of reading the spec's prescription
  * pair: `DATE_RANGE_PRESET_MACRO_WINDOWS` is written for `$between`, whose
  * bare-day upper bound is INCLUSIVE of that whole day, so its end names one
- * CALENDAR day earlier than the token here — for EVERY calendar preset, with
- * no remainder; the rolling ones are `null` on both sides and have no end to
- * be earlier. ⛔ A uniform offset is still not a derivable one: every boundary
+ * CALENDAR day earlier than the token here — for EVERY preset, with no
+ * remainder. ⛔ A uniform offset is still not a derivable one: every boundary
  * here is a macro token the one resolver answers, so shifting the spec's day
  * by one would be calendar arithmetic performed in this file — the second
  * implementation the module header exists to refuse. ⛔ And it is a CALENDAR
  * day, never 86_400_000 ms: `Pacific/Chatham` ends DST on a Sunday, so
  * `this_week`'s own prescribed last day is 25 hours long there.
  *
- * The STARTS agree exactly, and the test pins BOTH halves — deriving the
- * calendar/rolling split from the spec table rather than counting presets in
- * this sentence, which is how the count here came to read "the eight period
- * presets" and stayed there after `today` and `yesterday` were corrected to
- * close on their own last day (#17341).
+ * The STARTS agree exactly, and the test pins BOTH halves — iterating the spec
+ * table rather than counting presets in this sentence, which is how the count
+ * here came to read "the eight period presets" and stayed there after `today`
+ * and `yesterday` were corrected to close on their own last day (#17341).
  */
 const PRESET_WINDOW_TOKENS: Readonly<
-  Record<DateRangePreset, readonly [start: string, endBefore: string | null]>
+  Record<DateRangePreset, readonly [start: string, endBefore: string]>
 > = {
   today:        ['today', 'tomorrow'],
   yesterday:    ['yesterday', 'today'],
@@ -145,9 +142,9 @@ const PRESET_WINDOW_TOKENS: Readonly<
   last_quarter: ['last_quarter_start', 'quarter_start'],
   this_year:    ['year_start', 'next_year_start'],
   last_year:    ['last_year_start', 'year_start'],
-  last_7_days:  ['7_days_ago', null],
-  last_30_days: ['30_days_ago', null],
-  last_90_days: ['90_days_ago', null],
+  last_7_days:  ['7_days_ago', 'tomorrow'],
+  last_30_days: ['30_days_ago', 'tomorrow'],
+  last_90_days: ['90_days_ago', 'tomorrow'],
 };
 
 /** Options every `dateRange` resolution reads. */
@@ -185,14 +182,11 @@ export function resolveAnalyticsDateRangePreset(
 ): ResolvedAnalyticsDateRange {
   const now = options.now ?? new Date();
   const [startToken, endToken] = PRESET_WINDOW_TOKENS[preset];
-  const start = tokenDayStart(startToken, now, options.timezone);
-  if (endToken === null) {
-    // The rolling family. The upper bound is the current INSTANT, which no
-    // zone moves — and it is a moment the window REACHES, so it stays
-    // INCLUSIVE (#16179 leaves this leg alone).
-    return { start, end: now.toISOString(), endExclusive: false };
-  }
-  return { start, end: tokenDayStart(endToken, now, options.timezone), endExclusive: true };
+  return {
+    start: tokenDayStart(startToken, now, options.timezone),
+    end: tokenDayStart(endToken, now, options.timezone),
+    endExclusive: true,
+  };
 }
 
 /**

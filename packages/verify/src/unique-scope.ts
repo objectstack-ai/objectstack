@@ -82,7 +82,7 @@ import {
 } from '@objectstack/spec/data';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { declaredCollection } from './artifact-collections.js';
-import { deriveCrudCases, fillRelationalRefs, type CrudCase } from './derive.js';
+import { deriveCrudCases, fillRelationalRefs, fixtureBody, vary, type CrudCase } from './derive.js';
 import type { VerifyStack } from './harness.js';
 
 /** A scope a declaration can state (`UniqueScopeSchema`, minus `false`). */
@@ -334,26 +334,8 @@ export interface UniqueScopeProofOptions {
 
 const clip = (s: unknown, n = 200): string => String(s ?? '').slice(0, n);
 
-const DAY_MS = 86_400_000;
-
-/** A `date` / `datetime` value moved `days` later, in the same spelling. */
-function laterBy(value: string, days: number): string {
-  const at = Date.parse(value);
-  if (Number.isNaN(at) || days === 0) return value;
-  const moved = new Date(at + days * DAY_MS).toISOString();
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? moved.slice(0, 10) : moved;
-}
-
-/** The `k`-th fresh value of a field whose sample is `base`. */
-function vary(base: string | number, k: number): string | number {
-  if (typeof base === 'number') return base + k;
-  if (/^\d{4}-\d{2}-\d{2}/.test(base)) return laterBy(base, k);
-  const at = base.indexOf('@');
-  if (at > 0) return `${base.slice(0, at)}-u${k}${base.slice(at)}`;
-  if (/^https?:\/\//.test(base)) return `${base.replace(/\/$/, '')}/u${k}`;
-  if (/^\+\d+$/.test(base)) return `${base}${k}`;
-  return `${base}-u${k}`;
-}
+/** This family's letter on every string value it varies (`derive.ts`'s `vary`). */
+const FIXTURE_TAG = 'u';
 
 /** Does a stored value equal the value written (a date read back in another spelling counts)? */
 function holds(stored: unknown, value: unknown): boolean {
@@ -366,46 +348,12 @@ function holds(stored: unknown, value: unknown): boolean {
   return String(stored) === String(value);
 }
 
-/** The fields of `objectDef` a uniqueness constraint covers: a declared field scope, or a unique index entry. */
-function uniqueFields(objectDef: any): Set<string> {
-  const out = new Set<string>();
-  for (const [name, def] of Object.entries<any>(objectDef?.fields ?? {})) {
-    if (def?.unique !== undefined && def?.unique !== false) out.add(name);
-  }
-  for (const index of Array.isArray(objectDef?.indexes) ? objectDef.indexes : []) {
-    if (index?.unique) for (const f of Array.isArray(index.fields) ? index.fields : []) out.add(String(f));
-  }
-  return out;
-}
-
 /** The columns of each unique `indexes[]` entry of `objectDef` that includes `field`. */
 function uniqueIndexesOver(objectDef: any, field: string): string[][] {
   const out: string[][] = [];
   for (const index of Array.isArray(objectDef?.indexes) ? objectDef.indexes : []) {
     const columns = Array.isArray(index?.fields) ? index.fields.map(String) : [];
     if (index?.unique && columns.includes(field)) out.push(columns);
-  }
-  return out;
-}
-
-/**
- * The smallest record of `objectDef` the CRUD derivation can offer: its values
- * for the fields the object REQUIRES (required relations already filled), so
- * every optional field takes the app's own default. Each `date` / `datetime`
- * is one day after the one declared before it, and each unique-constrained
- * value is made distinct by `n`, so a fixture collides with nothing but the
- * value a probe writes on purpose.
- */
-function fixtureBody(body: Record<string, unknown>, objectDef: any, n: number): Record<string, unknown> {
-  const unique = uniqueFields(objectDef);
-  const out: Record<string, unknown> = {};
-  let dates = 0;
-  for (const [name, def] of Object.entries<any>(objectDef?.fields ?? {})) {
-    if (def?.required !== true || !(name in body)) continue;
-    let value = body[name];
-    if ((def?.type === 'date' || def?.type === 'datetime') && typeof value === 'string') value = laterBy(value, dates++);
-    if (unique.has(name) && (typeof value === 'string' || typeof value === 'number')) value = vary(value, n);
-    out[name] = value;
   }
   return out;
 }
@@ -679,7 +627,7 @@ export async function runUniqueScopeProofs(
     createdIds.set(w.label, ids);
     const { body, missing } = fillRelationalRefs(c, ids);
     if (missing) return { reason: missing };
-    const answer = await w.insert(object, { ...fixtureBody(body, objectDefs.get(object), n), ...overrides });
+    const answer = await w.insert(object, { ...fixtureBody(body, objectDefs.get(object), n, FIXTURE_TAG), ...overrides });
     if (answer.kind !== 'written') return { answer, reason: `${w.label}: create ${object} ${answer.kind} (${answer.code ?? answer.status ?? ''}): ${answer.detail ?? ''}` };
     return answer.id ? { id: answer.id, answer } : { answer, reason: `${w.label}: create ${object} returned no id` };
   }
@@ -732,7 +680,7 @@ export async function runUniqueScopeProofs(
     const coveringIndexes = uniqueIndexesOver(objectDefs.get(c.object), c.field);
     // Probe values draw on the fixtures' counter, so no probe value equals a fixture's.
     const fresh = async (w: Writer): Promise<{ value?: unknown; reason?: string }> => {
-      if (source.base !== undefined) return { value: vary(source.base, ++variant) };
+      if (source.base !== undefined) return { value: vary(source.base, ++variant, FIXTURE_TAG) };
       const t = await create(w, source.target!, {});
       return t.id ? { value: t.id } : { reason: `a record to reference: ${t.reason}` };
     };

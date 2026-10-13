@@ -1,5 +1,242 @@
 # @objectstack/types
 
+## 18.0.0-next.0
+
+### Minor Changes
+
+- 5cfd866: feat(sharing): a share-link password can be sent in the `X-Share-Password` header whatever its characters, under a declared encoding (`X-Share-Password-Encoding: utf-8`)
+  
+  Clause-②: yes (widening)
+  
+  - **What was missing.** A browser cannot put a character above U+00FF in a request header (`Headers` throws a `TypeError` before the request leaves), and it strips leading and trailing spaces. `createLink` accepts any password, so a link whose password has a CJK character or an emoji could not be opened through the header.
+  - **What is now accepted.** A new companion request header, `X-Share-Password-Encoding`, declares how `X-Share-Password` is encoded. Its one value is `utf-8`, compared case-insensitively. Under it, `X-Share-Password` carries the password's UTF-8 bytes percent-encoded, as `encodeURIComponent(password)` produces them, and both public routes (`GET /api/v1/share-links/:token/resolve` and `/:token/messages`) decode it on both mounts: the sharing plugin's routes and the runtime dispatcher's `/share-links` domain. Both read the pair through one helper, `readSharePasswordHeader`, exported from `@objectstack/types` with the header-name constants.
+  - **Unchanged.** Without `X-Share-Password-Encoding`, `X-Share-Password` is read raw, exactly as before, so every value a client sends today resolves as it did. That includes a Latin-1 password and a raw password containing `%`; the server never percent-decodes a value nobody declared encoded. The `?password=` query parameter is still read first, and when it is present the header pair is not read.
+  - **What is refused.** `X-Share-Password-Encoding` naming any other value, or a password header that is not percent-encoded UTF-8 under `utf-8` (a `%` without two hex digits, octets that are not well-formed UTF-8, a character outside visible ASCII), answers `400 VALIDATION_FAILED` before the token is looked up. It is never compared raw instead. The message names the headers and the rule, never the presented value.
+  - **Response headers.** Both public routes now answer `Vary: X-Share-Password, X-Share-Password-Encoding`, still beside `Cache-Control: no-store`.
+  - **Cross-origin clients.** `X-Share-Password-Encoding` is in the default CORS preflight allow-list (`DEFAULT_CORS_ALLOW_HEADERS` in `@objectstack/plugin-hono-server`, which the `@objectstack/hono` adapter also applies). A deployment that passes its own `allowHeaders` must add `X-Share-Password-Encoding` beside `X-Share-Password` to let a cross-origin client send an encoded password.
+- 8f2e808: feat(meta): the `/meta` item read serves the ADR-0008 version token, `If-None-Match: *` pins a save that expects no row, and the 409 `METADATA_CONFLICT` body carries the current version as data
+  
+  Clause-②: yes (narrowing)
+  
+  **BREAKING** for two request shapes on `PUT /api/v1/meta/:type/:name` that were answered `200` before this release and are now refused `400 VALIDATION_ERROR`, with nothing written: an `If-None-Match` header whose value is anything but `*` (an entity-tag, a list, a weak `W/"*"`, an empty value), and an `If-None-Match` header sent beside `If-Match`. Before, the door did not read `If-None-Match` at all and wrote the body, unguarded or under the `If-Match` alone. The remedy: send `If-None-Match: *` alone to save only where no row exists, or `If-Match` with the version you read alone to save only over that version. No first-party client sends `If-None-Match` on a `PUT`: the SDK sends it only on its cached `GET`, and objectui's ETag hook has no caller.
+  
+  ADR-0008's optimistic lock on `PUT /api/v1/meta/:type/:name` takes the version a client read as `If-Match`, but a client can only send a token it was served, and only a save receipt served one. So the first save after a load could not be pinned: two editors who each loaded an item and saved once overwrote each other. Three additions close that.
+  
+  - **The read serves the token.** `GET /meta/:type/:name` now carries `version` (declared on `GetMetaItemResponseSchema`): the keyed token of the stored row a save to this item would compare against, at the read's scope (the caller's organization partition and `?package=`) and lifecycle (`?state=draft` for the draft row, the plain read for the active row). It is the same producer and the same row as the save receipt's `version`, so a read after a save serves the receipt's token byte for byte. Send it back as `If-Match`. `null` means no stored row is there (an item served from code or a package artifact, or from a row in a scope the save does not write), so the next save is a create. The cached published-value branch (the default plain read) and `?preview=draft` publish no `version`, as they publish no `lock`; their `ETag` stays the cache validator and is not the token.
+  - **"Expect no row" can be said.** `If-None-Match: *` on `PUT /meta/:type/:name` (with `?mode=draft` for a draft) saves only where no row of that lifecycle exists, and is refused `409 METADATA_CONFLICT` once one does. This is the `parentVersion: null` pin `SaveMetaItemRequestSchema` already declared, now reachable over HTTP. The header takes `*` alone: any other value, or `If-None-Match` beside `If-Match`, is refused `400 VALIDATION_ERROR` and nothing is written. No first-party client sends `If-None-Match` on a `PUT`. A save with neither header is last-writer-wins, as before.
+  - **The conflict body names the current version as data.** The 409 of the `/meta` item write doors (save, publish, rollback, reset) now carries `currentVersion` beside the unchanged `error` sentence: the token the sentence names, or `null` when no row of the target lifecycle exists (declared as `MetadataConflictErrorSchema`). On the save door it equals the token the next read at the same address serves, so a client offering "reload" or "overwrite" re-pins without parsing prose. The SDK already exposes it as `err.details.currentVersion`.
+  - **The receipts' `version` describes are corrected.** `SaveMetaItemResponseSchema.version`, `PublishMetaItemResponseSchema.version` and the package publish door's `published[].version` said "Content hash … currently emitted as `sha256:`" and "409 `metadata_conflict`". The token has been the keyed `hmac-sha256:` digest of the stored content hash since the doors stopped serving the raw hash, and the conflict code on the wire is `METADATA_CONFLICT`. Only the description text moves.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A refusal at one runtime write door of two request-header shapes that door never read, not a metadata change: no spec key, export, response field or stored shape is removed, renamed or re-shaped, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which `PUT /meta/:type/:name` requests the door answers: a request carrying an `If-None-Match` value other than `*`, or `If-None-Match` beside `If-Match`, is refused before any write, where it was written unguarded. The remedy is a choice of precondition only the client can make (which of the two it meant), so no conversion entry can derive it. Census: measured on this repo at the merge base, no first-party sender puts `If-None-Match` on a `PUT` (`@objectstack/client` sends it only from `meta.getCached`, a `GET`); on the objectui checkout, `useETagCache` sets it and has zero in-repo callers. Not measured: third-party and hosted-tenant HTTP clients. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id covers this door and this diff adds none (not registered / already-registered); and the change is a door verdict over request headers, not a published runtime interface or a type surface alone (not runtime-interface-only / type-surface-only). -->
+- a45d5d8: fix(auth): a server-side session read no longer renews a browser session behind its cookie (#22258)
+  
+  **What was wrong.** better-auth's `getSession` renews a session older than `session.updateAge`: it moves `sys_session.expires_at` to `now + expiresIn` and stages the renewed session cookie on that call's own response. Ten doors read the session in-process (`auth.api.getSession`) and answer with their own response, so the renewal landed in the database and its cookie was discarded. The browser kept its old cookie, later `GET /api/v1/auth/get-session` calls found a fresh row and re-issued nothing, and the cookie expired first: a dead cookie beside a live bearer, and every cookie-only path then saw a signed-out user. Measured on a fresh dev stack (better-auth 1.7.3, `expiresIn` 604800 s, `updateAge` 86400 s, a session aged to `now + expiresIn − updateAge − 60 s`): `GET /api/v1/data/:object`, `GET /api/v1/auth/me/permissions`, `GET /api/v1/meta/object`, `GET /api/v1/i18n/locales`, `GET /api/v1/packages`, `GET /api/v1/marketplace/install-local` and the MCP door each moved `expires_at` by +86460 s and set no session cookie.
+  
+  **The rule now, decided by what the request carries.**
+  
+  - **A session cookie** (a browser, including a console that sends its cookie beside its bearer): the in-process read passes `query.disableRefresh`. The session renews only through `GET /api/v1/auth/get-session`, which re-issues the cookie with `Max-Age = expiresIn`, so cookie and session expire together. Measured after the change: every door above leaves `expires_at` unchanged on a cookie request and sets no cookie.
+  - **No session cookie** (a bearer-only client: `@objectstack/client` outside a browser, the `os` CLI): unchanged. A data read past `updateAge` still renews the session (+86460 s, measured on the same doors), so an active bearer client keeps sliding forward without calling `get-session`. No cookie is ever set on a response to a request that sent none.
+  
+  **Upgrading.** Nothing to change. A browser session renews whenever the app calls `GET /api/v1/auth/get-session`; a tab that never calls it now signs out at the session's real expiry instead of keeping a live bearer beside a dead cookie.
+  
+  `@objectstack/types` gains `inProcessSessionReadInput(headers)` (the `getSession` input for an in-process read: the request's own headers, plus `query: { disableRefresh: true }` when they carry a better-auth session cookie), `carriesSessionCookie(headers)` and the `InProcessSessionReadInput` type. A host that calls `auth.api.getSession` itself should read through `inProcessSessionReadInput` for the same reason.
+  
+  The same rule is applied to the in-process `auth.api.getSession` readers in `@objectstack/plugin-auth`, `@objectstack/plugin-webhooks`, `@objectstack/plugin-sharing`, `@objectstack/service-storage`, `@objectstack/service-settings` and `@objectstack/service-datasource` by their own changeset.
+- 6d5191e: An import row for the sandbox's own fault reads the create door's fault sentence, not the runner's diagnostic text (#22741)
+  
+  Clause-②: yes (widening)
+  
+  The QuickJS runner raises some `SandboxError`s itself: a hook or action body that runs past its CPU budget or past the wall-clock ceiling, calls a capability it was not granted, or meets a failed install or marshal. These carry no `innerMessage`. `POST /api/v1/data/:object` and `/createMany` answer them `500 INTERNAL_ERROR` `Internal server error`. The sync `/import` row and the `/import/jobs` stored row answered the runner's text instead, for example `hook 'guard' exceeded CPU budget of 50ms (after 3 pump iterations)`.
+  
+  - **`@objectstack/types`** exports `isSandboxOwnFault(error)`. It is `true` for an error whose `name` is `'SandboxError'` and whose `innerMessage` is not a non-empty string, which is how the runner marks the faults it raises itself. A body's refusal or crash carries `innerMessage` and answers `false`.
+  - **`@objectstack/core`**'s import row applies the rule a crashed body already gets: when the sandbox raised the error and the create door answers it with a 5xx, the row's `error` is the door's sentence. The row's `code` is unchanged (`IMPORT_ROW_FAILED`). A driver error, and an error a code-defined hook threw, keep the row text they had.
+
+### Patch Changes
+
+- ec7c7e0: fix(types): a thrown exposure refusal about a second object names that object on the REST body (#22737)
+  
+  The shared REST error classification gains one arm for `OBJECT_API_DISABLED` and `OBJECT_API_METHOD_NOT_ALLOWED`. Both REST error doors ask it: `mapDataError`, and `resolveErrorResponse` behind `sendThrownError`.
+  
+  When the thrown error names an object other than the one the route addressed, the body's `object` is that object, and a `405` carries the effective operation set as `allowed`. The generic data door throws this when a nested-relation condition's related object is not served by the API. The new body is the same one the REST door already sends for these codes about the addressed object. Before, the body named the route's object beside a code saying that object was switched off.
+  
+  An error naming the route's own object, or a door given no route object, answers exactly as before. No code is added.
+- 8bc7836: fix(types): the data door answers the sandbox's own fault as a fault, not as "this object does not exist" (#22868)
+  
+  Clause-②: no
+  
+  **What was wrong.** The QuickJS runner raises some `SandboxError`s itself. These carry no `innerMessage`. Two of them name the object the hook body addressed: a denied capability on `ctx.api.object(...)` (`capability 'api.read' not granted to hook 'guard' (called ctx.api.object('account').find)`) and a `ctx.api` method the host does not implement (`ctx.api.object('account').find not implemented`). When that object was the one the request named, `mapDataError` read the quoted object name plus the word `not` as an unknown object. `POST /api/v1/data/account` then answered `404 OBJECT_NOT_FOUND` with `Object 'account' is not registered`. Every other runner fault already answered `500 INTERNAL_ERROR`, which is what the runner's contract says these errors are.
+  
+  **What changes.** `mapDataError` checks `isSandboxOwnFault` first, next to the existing check for a sandboxed body that crashed. An error the sandbox raised itself now answers `500 INTERNAL_ERROR` with `Internal server error`, whatever its text names. The runner's text goes to the server log only. The sync `/import` row and the `/import/jobs` stored row read that same sentence.
+  
+  **Unchanged.** A driver's unknown-object text (`no such table: account`, `relation "account" does not exist`) still answers `404 OBJECT_NOT_FOUND`. So does the same wording thrown by anything other than the sandbox: the check reads the error's producer, not its words. A hook body's refusal keeps its sentence and status, and a crash keeps its `500`.
+- Updated dependencies [317cddd]
+- Updated dependencies [fec87e7]
+- Updated dependencies [0253192]
+- Updated dependencies [bfc15d2]
+- Updated dependencies [7aa8d51]
+- Updated dependencies [95a8435]
+- Updated dependencies [60bcfe7]
+- Updated dependencies [d112087]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [7de0265]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [c8b062f]
+- Updated dependencies [117d34d]
+- Updated dependencies [6729e10]
+- Updated dependencies [1920cf3]
+- Updated dependencies [41d0d40]
+- Updated dependencies [c52bfb4]
+- Updated dependencies [c7d6037]
+- Updated dependencies [72b26ed]
+- Updated dependencies [2d21b9c]
+- Updated dependencies [f66fdc7]
+- Updated dependencies [9fdb127]
+- Updated dependencies [615c696]
+- Updated dependencies [968acc8]
+- Updated dependencies [111ffff]
+- Updated dependencies [12b9daf]
+- Updated dependencies [d85615d]
+- Updated dependencies [6a06e3b]
+- Updated dependencies [0e9e7b7]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [9c93ce6]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [04e776b]
+- Updated dependencies [a7df552]
+- Updated dependencies [2f70c22]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [a87d8be]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [ad381fd]
+- Updated dependencies [2b61f2d]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3b49318]
+- Updated dependencies [4e9fe9f]
+- Updated dependencies [9ad3d24]
+- Updated dependencies [326a90a]
+- Updated dependencies [9fe7448]
+- Updated dependencies [2e11d90]
+- Updated dependencies [4578c56]
+- Updated dependencies [c512c25]
+- Updated dependencies [215e662]
+- Updated dependencies [3d886ee]
+- Updated dependencies [d8d0711]
+- Updated dependencies [40a6ee5]
+- Updated dependencies [5910b5e]
+- Updated dependencies [081e6a0]
+- Updated dependencies [1884948]
+- Updated dependencies [e23eccb]
+- Updated dependencies [ac8f2c5]
+- Updated dependencies [db9cf80]
+- Updated dependencies [e75dced]
+- Updated dependencies [9af0005]
+- Updated dependencies [440bed6]
+- Updated dependencies [b2549a8]
+- Updated dependencies [ee8751d]
+- Updated dependencies [96e4be4]
+- Updated dependencies [35ef501]
+- Updated dependencies [faf6348]
+- Updated dependencies [557ae7c]
+- Updated dependencies [6a3fe25]
+- Updated dependencies [7731d70]
+- Updated dependencies [3073b72]
+- Updated dependencies [c76edeb]
+- Updated dependencies [5b12503]
+- Updated dependencies [514bf3c]
+- Updated dependencies [20e7d52]
+- Updated dependencies [b3a3634]
+- Updated dependencies [3e72f93]
+- Updated dependencies [f89b5f5]
+- Updated dependencies [d25b187]
+- Updated dependencies [0e00d36]
+- Updated dependencies [d748ae8]
+- Updated dependencies [dab6bf4]
+- Updated dependencies [ed1de8c]
+- Updated dependencies [a00cf99]
+- Updated dependencies [5fb1746]
+- Updated dependencies [29a163f]
+- Updated dependencies [e223152]
+- Updated dependencies [9f5eca5]
+- Updated dependencies [9963322]
+- Updated dependencies [b27b894]
+- Updated dependencies [02d9f69]
+- Updated dependencies [f53f14b]
+- Updated dependencies [a800912]
+- Updated dependencies [d973c34]
+- Updated dependencies [156ddfa]
+- Updated dependencies [5081090]
+- Updated dependencies [b6eb25f]
+- Updated dependencies [165587e]
+- Updated dependencies [e04759d]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [b32ee3e]
+- Updated dependencies [e5899a6]
+- Updated dependencies [490cb6d]
+- Updated dependencies [e865300]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [85edd61]
+- Updated dependencies [e84aeb3]
+- Updated dependencies [322ff1e]
+- Updated dependencies [5fc57b3]
+- Updated dependencies [581ca7d]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [9814035]
+- Updated dependencies [55382dc]
+- Updated dependencies [b1d701b]
+- Updated dependencies [efcbac7]
+- Updated dependencies [20028df]
+- Updated dependencies [69d4218]
+- Updated dependencies [5ce6773]
+- Updated dependencies [9432bac]
+- Updated dependencies [3f69471]
+- Updated dependencies [e5687cb]
+- Updated dependencies [1e62f71]
+- Updated dependencies [ec7f7f8]
+- Updated dependencies [038d4c9]
+- Updated dependencies [147a0d1]
+- Updated dependencies [1959aac]
+- Updated dependencies [1badd31]
+- Updated dependencies [55828c5]
+- Updated dependencies [7856110]
+- Updated dependencies [9b37edb]
+- Updated dependencies [a22e67b]
+- Updated dependencies [62ce45d]
+- Updated dependencies [39e93ef]
+- Updated dependencies [02bec6c]
+- Updated dependencies [719183f]
+- Updated dependencies [8464380]
+- Updated dependencies [252a582]
+- Updated dependencies [f931e76]
+- Updated dependencies [e5f9f01]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [de70e97]
+- Updated dependencies [74c4b34]
+- Updated dependencies [e040b8c]
+- Updated dependencies [f451a59]
+- Updated dependencies [ba95607]
+- Updated dependencies [b53b949]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [1e44436]
+- Updated dependencies [2acff87]
+- Updated dependencies [299a2c6]
+- Updated dependencies [e23eccb]
+- Updated dependencies [bf492c8]
+  - @objectstack/spec@18.0.0-next.0
+
 ## 17.7.0
 
 ### Minor Changes

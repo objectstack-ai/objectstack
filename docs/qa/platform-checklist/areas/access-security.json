@@ -2560,8 +2560,9 @@
       "id": "access-security.packaged-permission-set-lifecycle",
       "title": "Packaged permission-set lifecycle (#11513) survives ADR-0126 unchanged: locked base at the data door, clone-to-customize with every facet carried, `active` row-state flip — and NONE of it writes a sys_metadata_activation row",
       "since": "v16",
-      "status": "active",
-      "revision": 1,
+      "status": "retired",
+      "retiredReason": "C3 stage 8 (ADR-0131 D3) retired the sys_permission_set row object: its data door, its Activate / Deactivate / Clone row actions and its `active` column are gone. A packaged set's base stays locked at the metadata door, a copy is made with POST /api/v1/security/permission-sets/:name/clone, and a set is switched off in the activation ledger (sys_metadata_activation).",
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -2646,7 +2647,7 @@
       "source": [
         "packages/plugins/plugin-security/src/packaged-permission-set-lock.ts (classifier + both refusals; the SchemaRegistry-not-managed_by decision)",
         "packages/plugins/plugin-security/src/permission-set-projection.ts (insert-path lock + duplicate 409; the #4669 row-state carve-out ordered BEFORE the update-path lock)",
-        "packages/plugins/plugin-security/src/objects/sys-permission-set.object.ts#bodyExtra (activate/deactivate bodyExtra {active}, clone_permission_set params — the payload contract)",
+        "packages/runtime/src/domains/permission-set-clone.ts (the clone door that replaced the retired object's clone_permission_set action)",
         "docs/adr/0126-packaged-metadata-customization-model.md §1.1 (the #11513 machinery, named as the regime's first instance), §8 item 3 (permission sets converge later; the landed shape stays valid meanwhile)",
         "#11513 (lock the base, clone to customize — the 2026-08-24 ruling), #11703 (the three dropped clone facets), #12159 (ruling 2026-08-26: no ledger rows for permission sets pending the convergence card), #12438 (the sweep)"
       ],
@@ -2656,6 +2657,12 @@
           "date": "2026-08-26",
           "change": "new — the landed #11513 surface (data-door lock, clone action, active row-state lifecycle) had no checklist item: readonly-package-locks-studio covers the /meta door on objects and permission-matrix-edit-loop explicitly scopes itself to WRITABLE sets, so the packaged-set data-door lifecycle was uncovered end to end. Authored as the ADR-0126 regression guard with the no-ledger-row wall as its ⭐ clause, per the 2026-08-26 ruling in #12159 (card 已知边界 4): flipping active or cloning must keep writing sys_permission_set state only, never a sys_metadata_activation row",
           "ref": "#12438"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-12",
+          "change": "retired — the sys_permission_set row object, its data door and its row actions are retired with C3 stage 8 (ADR-0131 D3)",
+          "ref": "#15204"
         }
       ]
     },

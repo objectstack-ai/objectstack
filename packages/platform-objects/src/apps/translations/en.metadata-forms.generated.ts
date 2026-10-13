@@ -1307,7 +1307,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       isDefault: {
         label: "Is Default",
-        helpText: "Set as default page for this page type"
+        helpText: "Open this record page for its object's records. One default record page per object: a second is refused."
       },
       kind: {
         label: "Kind",
@@ -2303,7 +2303,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       description: {
         label: "Description",
-        helpText: "Human-readable description shown in Setup (persisted as sys_permission_set.description)."
+        helpText: "Human-readable description shown in Setup."
       },
       isDefault: {
         label: "Is Default",
