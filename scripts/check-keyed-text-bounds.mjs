@@ -108,9 +108,12 @@
  * object) re-derived at its ref on 2026-08-29 -- exactly the record, which is
  * the measurement that ruled out "the original count was written wrong". The
  * current record is C3 stage 8's: 111/116/236/592/148, re-derived on 2026-10-13
- * on the stage-8 tree (ref `01a3421f42` plus the stage-8 diff). Against the ref
- * alone the instrument reads 115/120/248/612/152; the difference is the four
- * retired security-catalog object files.
+ * on the stage-8 tree (ref `6d7f4df3c9` plus the stage-8 diff). Against the ref
+ * alone the instrument reads 115/120/248/612/152. The difference is the four
+ * retired security-catalog object files (-4 files, -4 objects, -12 index
+ * entries, -21 text fields, -5 keyed columns), less one text field the same diff
+ * adds: `sys_user_permission_set.permission_set_id` became `Field.text` and is
+ * keyed by its unique index (+1 text field, +1 keyed column).
  *
  * ⚠️ A SHALLOW clone cannot do this at all -- `MEASURED.ref` predates the
  * default checkout window, so the commit is simply absent. That is why the
@@ -399,10 +402,10 @@ const MEASURED = Object.freeze({
   // ⛔ Never repoint it without re-running all five counts against the new tree.
   //
   // [C3 stage 8] Re-measured, all five, when the four security-catalog row
-  // objects retired (ADR-0131 D3) and took 4 files, 4 objects, 12 index entries,
-  // 20 text fields and 4 keyed columns with them: the census is the stage-8
-  // tree's, the ref its base.
-  ref: '01a3421f42',
+  // objects retired (ADR-0131 D3): net 4 files, 4 objects, 12 index entries, 20
+  // text fields and 4 keyed columns fewer (the header itemises it). The census is
+  // the stage-8 tree's, the ref its base.
+  ref: '6d7f4df3c9',
   files: 111,
   objects: 116,
   indexEntries: 236,
