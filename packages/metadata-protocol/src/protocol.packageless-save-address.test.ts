@@ -422,3 +422,176 @@ describe('an item a CODE package ships', () => {
         expect((await protocol.getMetaItem({ type: 'view', name })).item.label).toBe('Unnamed');
     });
 });
+
+/**
+ * [#23165, ADR-0048] The DELETE door takes the same address.
+ *
+ * `deleteMetaItem` handed the repository no package, so its probe and its
+ * delete each took the first row a package-agnostic `findOne` met: one
+ * package's row of an item two packages hold (the other package's row then
+ * served, while the receipt said "it no longer exists"), or the package's row
+ * when a package-less row sat beside it. Named, a delete now removes that
+ * package's row and no other; naming none, it resolves through the save
+ * door's function: one binding removes that row, two or more are refused,
+ * none removes the package-unbound row as before.
+ */
+describe('a delete that names no package removes the row the save door addresses', () => {
+    it('the round trip: a package-less delete of an item ONE package owns removes that row, and the read serves nothing', async () => {
+        const { protocol, rows } = makeProtocol();
+        const name = 'deleted_app';
+        await protocol.saveMetaItem({ type: 'app', name, item: app(name), packageId: WRITABLE });
+
+        const receipt = await protocol.deleteMetaItem({ type: 'app', name });
+
+        expect(receipt).toMatchObject({ success: true, reset: true });
+        expect(receipt.message).toContain(`package=${WRITABLE}`);
+        expect(receipt.message).toContain('it no longer exists');
+        expect(rows('app', name)).toEqual([]);
+        const read = await protocol.getMetaItem({ type: 'app', name }).catch((e: unknown) => e);
+        expect(read?.item ?? null).toBeNull();
+    });
+
+    it('the item read\'s version names the row that delete removes, so read → delete with the served token is accepted', async () => {
+        const { protocol, rows } = makeProtocol();
+        const name = 'pinned_delete_app';
+        await protocol.saveMetaItem({ type: 'app', name, item: app(name), packageId: WRITABLE });
+        const { version } = await protocol.getMetaItem({ type: 'app', name });
+        expect(version).toEqual(expect.any(String));
+
+        const receipt = await protocol.deleteMetaItem({ type: 'app', name, parentVersion: version });
+
+        expect(receipt.reset).toBe(true);
+        expect(rows('app', name)).toEqual([]);
+    });
+
+    it('a draft discard naming no package removes the draft the package-less draft save put in the package', async () => {
+        const { protocol, rows } = makeProtocol();
+        const name = 'draft_discard_app';
+        await protocol.saveMetaItem({ type: 'app', name, item: app(name), packageId: WRITABLE });
+        await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'Pending' }), mode: 'draft' });
+        expect(rows('app', name, 'draft').map((r) => r.package_id ?? null)).toEqual([WRITABLE]);
+
+        const receipt = await protocol.deleteMetaItem({ type: 'app', name, state: 'draft' });
+
+        expect(receipt.reset).toBe(true);
+        expect(rows('app', name, 'draft')).toEqual([]);
+        expect(rows('app', name).map((r) => r.package_id ?? null)).toEqual([WRITABLE]);
+    });
+});
+
+describe('an item TWO packages hold: a delete naming neither is refused', () => {
+    async function twoPackageItem(name: string) {
+        const fixture = makeProtocol();
+        await fixture.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'A' }), packageId: WRITABLE });
+        await fixture.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'B' }), packageId: OTHER_WRITABLE });
+        return fixture;
+    }
+
+    it('409 RESOURCE_CONFLICT naming both packages, and nothing is deleted', async () => {
+        const name = 'shared_delete_app';
+        const { protocol, rows } = await twoPackageItem(name);
+        const bodiesBefore = bodiesByBinding(rows('app', name));
+
+        const err = await refusalOf(() => protocol.deleteMetaItem({ type: 'app', name }));
+
+        const envelope = resolveThrownHttpError(err);
+        expect(envelope.status).toBe(409);
+        expect(envelope.code).toBe('RESOURCE_CONFLICT');
+        expect(err.message).toContain(`'${WRITABLE}'`);
+        expect(err.message).toContain(`'${OTHER_WRITABLE}'`);
+        expect(err.message).toContain('?package=');
+        expect(bodiesByBinding(rows('app', name))).toEqual(bodiesBefore);
+    });
+
+    it('a draft discard naming no package is refused when drafts sit in both packages', async () => {
+        const name = 'shared_draft_app';
+        const { protocol, rows } = await twoPackageItem(name);
+        for (const packageId of [WRITABLE, OTHER_WRITABLE]) {
+            await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: `Draft ${packageId}` }), packageId, mode: 'draft' });
+        }
+
+        const envelope = resolveThrownHttpError(await refusalOf(() => protocol.deleteMetaItem({ type: 'app', name, state: 'draft' })));
+
+        expect(envelope).toMatchObject({ status: 409, code: 'RESOURCE_CONFLICT' });
+        expect(rows('app', name, 'draft')).toHaveLength(2);
+    });
+
+    it('naming one removes that package\'s row only, the other is served, and the receipt names what remains', async () => {
+        const name = 'shared_delete_app';
+        const { protocol, rows } = await twoPackageItem(name);
+
+        const receipt = await protocol.deleteMetaItem({ type: 'app', name, packageId: WRITABLE });
+
+        expect(receipt.reset).toBe(true);
+        expect(rows('app', name).map((r) => r.package_id)).toEqual([OTHER_WRITABLE]);
+        expect(receipt.message).toContain(`package=${WRITABLE}`);
+        expect(receipt.message).toContain(`'${OTHER_WRITABLE}'`);
+        expect(receipt.message).not.toContain('no longer exists');
+        expect((await protocol.getMetaItem({ type: 'app', name })).item).toMatchObject({ label: 'B', _packageId: OTHER_WRITABLE });
+    });
+
+    it('naming a package that holds no row removes nothing and says the other rows remain', async () => {
+        const name = 'shared_delete_app';
+        const { protocol, rows } = await twoPackageItem(name);
+
+        const receipt = await protocol.deleteMetaItem({ type: 'app', name, packageId: 'com.qa.thirdapp' });
+
+        expect(receipt).toMatchObject({ success: true, reset: false });
+        expect(receipt.message).toContain(`'${WRITABLE}'`);
+        expect(receipt.message).toContain(`'${OTHER_WRITABLE}'`);
+        expect(receipt.message).not.toContain('nothing to delete');
+        expect(rows('app', name)).toHaveLength(2);
+    });
+
+    it('uninstalling one package removes its row, never the other package\'s', async () => {
+        const name = 'shared_uninstall_app';
+        const { protocol, rows } = await twoPackageItem(name);
+
+        const out = await protocol.deletePackage({ packageId: OTHER_WRITABLE, keepData: true });
+
+        expect(out.failed ?? []).toEqual([]);
+        expect(rows('app', name).map((r) => r.package_id)).toEqual([WRITABLE]);
+        expect(bodiesByBinding(rows('app', name))[WRITABLE]).toMatchObject({ label: 'A' });
+    });
+
+    it('discarding one package\'s drafts removes its draft, never the other package\'s', async () => {
+        const name = 'shared_discard_app';
+        const { protocol, rows } = await twoPackageItem(name);
+        for (const packageId of [WRITABLE, OTHER_WRITABLE]) {
+            await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: `Draft ${packageId}` }), packageId, mode: 'draft' });
+        }
+
+        const out = await protocol.discardPackageDrafts({ packageId: OTHER_WRITABLE });
+
+        expect(out).toMatchObject({ discardedCount: 1, failedCount: 0 });
+        expect(rows('app', name, 'draft').map((r) => r.package_id)).toEqual([WRITABLE]);
+    });
+});
+
+describe('CONTROL: what the delete resolution leaves alone', () => {
+    it('an item with no package binding: the package-unbound row is removed, and the receipt reads as before', async () => {
+        const { protocol, rows } = makeProtocol();
+        const name = 'plain_delete_app';
+        await protocol.saveMetaItem({ type: 'app', name, item: app(name) });
+
+        const receipt = await protocol.deleteMetaItem({ type: 'app', name });
+
+        expect(receipt.message).toBe(`Deleted app '${name}' — it no longer exists. [seq=${receipt.seq}]`);
+        expect(rows('app', name)).toEqual([]);
+    });
+
+    it('a package-less row beside the package\'s row stays: the delete removes the package\'s row and says the other remains', async () => {
+        const { protocol, rows, seedRow } = makeProtocol();
+        const name = 'residue_delete_app';
+        await protocol.saveMetaItem({ type: 'app', name, item: app(name), packageId: WRITABLE });
+        seedRow({ type: 'app', name, package_id: null, metadata: JSON.stringify(app(name, { active: false })), checksum: 'sha-residue' });
+
+        const receipt = await protocol.deleteMetaItem({ type: 'app', name });
+
+        expect(rows('app', name).map((r) => r.package_id ?? null)).toEqual([null]);
+        expect(receipt.message).toContain(`package=${WRITABLE}`);
+        expect(receipt.message).toContain('package-less row');
+        expect(receipt.message).not.toContain('no longer exists');
+        expect((await protocol.getMetaItem({ type: 'app', name })).item).toMatchObject({ active: false });
+    });
+});

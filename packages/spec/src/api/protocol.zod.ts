@@ -1384,6 +1384,19 @@ export const DeleteMetaItemRequestSchema = lazySchema(() => z.object({
     + 'object" flow so a publish-to-preview leaves no orphan table.',
   ),
   member: z.string().optional().describe(BUNDLE_MEMBER_SELECTOR_DESCRIPTION),
+  packageId: z.string().nullable().optional().describe(
+    'ADR-0048 — the software package whose row this delete removes '
+    + '(`sys_metadata.package_id`; `?package=<id>` on the REST door, where '
+    + '`all` and an empty value name no package), as a save names the row it '
+    + 'writes. Named, the delete removes that package\'s row and no other; a '
+    + 'package that holds no row removes nothing. Absent or `null` names no '
+    + 'package: the delete then removes the row of the one package the '
+    + 'item\'s rows at the deleted `state` are bound to, is refused `409 '
+    + 'RESOURCE_CONFLICT` when they are bound to two or more, and with none '
+    + 'removes the env-local row (no package stamp). That row is the one '
+    + '`parentVersion` is judged against. When another row of the item is '
+    + 'still stored afterwards, the receipt `message` names it.',
+  ),
 }));
 
 /**
@@ -1391,8 +1404,10 @@ export const DeleteMetaItemRequestSchema = lazySchema(() => z.object({
  *
  * Describes the FULL body `DELETE /api/v1/meta/:type/:name` returns (#13155 —
  * the #5745 ruling carried to the third verb on this door). `reset === true`
- * means a row was deleted (item is now at artifact default); `reset === false`
- * means no overlay row existed (already at artifact default).
+ * means a row was deleted; `reset === false` means the delete's address held
+ * no row, so nothing was removed. Either way the item is at its artifact
+ * default only when no other row of it is still stored, and the `message`
+ * names any that is (ADR-0048: one row per package).
  *
  * **Why the widening.** The metadata door has three write verbs, all running
  * the same ADR-0094 mutation projector and the same history append, and all
