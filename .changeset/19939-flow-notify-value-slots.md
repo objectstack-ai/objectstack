@@ -41,7 +41,7 @@ Clause-②: yes (narrowing: a {…} token is refused at notify recipients (the v
 
 **Newly refused at the literals.** A `{…}` token in `sourceObject`, in `actorId` or in any string of a `payload` value, and a CEL value envelope written as a `payload` value, which was handed on as the object it spells.
 
-**Still accepted, unchanged.** Every literal at these positions. The single-brace dialect keeps resolving where it still lives, a CRUD `filter` value.
+**Still accepted, unchanged.** Every literal at these positions.
 
 ### The kit
 
