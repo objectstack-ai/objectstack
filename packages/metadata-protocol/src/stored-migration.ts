@@ -63,8 +63,9 @@ export interface StoredFlowCanonicalization {
    * — above all a value slot carrying a `{…}` template token, which
    * `registerFlow` refuses although the parse accepts the flow. Listed under
    * the row exactly as a non-flow row's TODOs are ({@link StoredMigrationTodo}).
-   * Optional, so a caller-supplied canonicalizer that reports none still fits;
-   * absent reads as none.
+   * It restates the contract's own optional member,
+   * `IAutomationService.canonicalizeStoredFlow(...).todos?` (`@objectstack/spec`):
+   * a canonicalizer that reports none still conforms, and absent reads as none.
    */
   todos?: Array<{
     conversionId: string;

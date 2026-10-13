@@ -1,12 +1,12 @@
 ---
-'@objectstack/spec': patch
-'@objectstack/service-automation': patch
-'@objectstack/metadata-protocol': patch
+'@objectstack/spec': minor
+'@objectstack/service-automation': minor
+'@objectstack/metadata-protocol': minor
 ---
 
 fix: `os migrate meta --stored` lists every stored row that protocol 18 refuses and no conversion rewrites. Before, the preview counted each such row as already on protocol.
 
-Clause-②: no
+Clause-②: yes (widening: `IAutomationService.canonicalizeStoredFlow(...).todos?` in `@objectstack/spec`, `AutomationEngine.canonicalizeStoredFlow(...).todos` in `@objectstack/service-automation` and `StoredFlowCanonicalization.todos?` in `@objectstack/metadata-protocol`, each a new output member; nothing narrows, and no door accepts or refuses anything it did not before)
 
 Three step-18 retirements refuse a stored shape that has no lossless rewrite. Upgrading a v17 database left those rows refused at load or at boot, and the stored preview read them as `canonical`. Each shape now has exactly one fate: **refused and listed**. The preview and `--apply` print one `TODO` line per site under its row. The line names the step-18 entry that refuses the shape, the site, and the choice the owner has to make. Nothing is rewritten, and the run's verdict does not change, because no run of the pass could clear these rows.
 
@@ -16,4 +16,10 @@ Three step-18 retirements refuse a stored shape that has no lossless rewrite. Up
 
 **#23271, a view whose `data` binds the retired view-level API source: refuse and list, by view (`view-data-api-provider-retired`).** There is no mechanical move. The replacement is a page component's `dataSource`, so a page must exist to carry it. Deleting the view's `data` would make the view query its object instead. Views in every stored body spelling are covered, and so are an object's own `listViews`. The line shows the request URL and method and withholds every other request key, so a credential stored in a view's headers never reaches the report. A view on the `object`, `value` or `schema` provider is not listed.
 
-How it is wired: `applyConversions` reports these shapes through its existing `onTodo` sink, after the conversions run. Each TODO's `conversionId` is the id of the D3 entry that refuses the shape. `AutomationEngine.canonicalizeStoredFlow` now returns `todos` beside `notices` and `conflicts`, and the stored pass lists a flow row's TODOs the way it lists any other row's. The authoring funnel and the read seams pass no sink, so nothing changes for them.
+How it is wired: `applyConversions` reports these shapes through its existing `onTodo` sink, after the conversions run. Each TODO's `conversionId` is the id of the D3 entry that refuses the shape, so the published `ConversionTodoNotice.conversionId` now names either a conversion or a D3 entry. The published flow-canonicalization result gains one member, a widening in three packages:
+
+- `@objectstack/spec`: the contract `IAutomationService.canonicalizeStoredFlow(...)` declares an optional `todos?: ConversionTodoNotice[]` beside `notices` and `conflicts`. An implementation that reports none still conforms.
+- `@objectstack/service-automation`: `AutomationEngine.canonicalizeStoredFlow(...)` returns `todos`. `registerFlow` ignores them, because its own refusal names the same sites.
+- `@objectstack/metadata-protocol`: `StoredFlowCanonicalization` gains the matching optional `todos?`, and the stored pass lists a flow row's TODOs the way it lists any other row's.
+
+The authoring funnel and the read seams pass no sink, so nothing changes for them.
