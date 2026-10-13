@@ -3657,10 +3657,11 @@ export class RestServer {
     private static readonly STORED_VERSION_DOOR_POLICY: MetaReadGatePolicy = metaReadGate.STORED_VERSION_DOOR_POLICY;
 
     /**
-     * [ADR-0131 D3 · D12 items 7–8] The walled refusal for one `/meta` item
-     * write: the shared `walledCatalogWriteVerdict` (`@objectstack/metadata-core`),
-     * asked by this transport's four write doors (save, reset, publish,
-     * rollback) after {@link metaSaveVerdict}'s capability gate, for every type
+     * [ADR-0131 D3 · D12 items 7–8] The walled refusal for one `/meta` write:
+     * the shared `walledCatalogWriteVerdict` (`@objectstack/metadata-core`),
+     * asked by this transport's four item write doors (save, reset, publish,
+     * rollback) after {@link metaSaveVerdict}'s capability gate, and by
+     * `POST /meta/_migrate-stored` after its own, for every type
      * (ruling A on #23231: the catalog is no longer a special case, so this
      * method no longer pre-filters on it). The posture is read through
      * {@link resolveAnonymousFormTenancy}, the wiring that mirrors
@@ -5940,6 +5941,26 @@ export class RestServer {
                                 },
                             });
                             return;
+                        }
+                        // [ADR-0131 D12 items 7–8] The walled refusal, after the
+                        // capability gate and before the protocol is resolved or
+                        // a row is read: this rewrites every stored row of the
+                        // environment's metadata, which under `isolated` /
+                        // `group` is the platform operator's (ruling A on
+                        // #23231). A preview is refused too: it is the same
+                        // install-wide pass, without the write. Inert under
+                        // `single`. See {@link walledCatalogRefusal}.
+                        {
+                            const walled = await this.walledCatalogRefusal('sys_metadata', ctx, environmentId, req);
+                            if (!walled.allowed) {
+                                res.status(403).json({
+                                    error: {
+                                        code: 'FORBIDDEN',
+                                        message: walled.message,
+                                    },
+                                });
+                                return;
+                            }
                         }
                         const p = await this.resolveProtocol(environmentId, req);
                         if (typeof (p as any).migrateStoredMetadata !== 'function') {

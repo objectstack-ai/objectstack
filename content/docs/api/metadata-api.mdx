@@ -62,7 +62,9 @@ tenancy posture it also requires the platform operator, for every type: the
 environment's metadata is shared by every organization (ADR-0131 D12 items 7–8,
 D11), so a `manage_metadata` holder inside one organization is refused
 `403 FORBIDDEN` naming the posture. The same holds for `DELETE` (reset),
-`POST /meta/:type/:name/publish` and `POST /meta/:type/:name/rollback`.
+`POST /meta/:type/:name/publish` and `POST /meta/:type/:name/rollback`, and for
+`POST /meta/_migrate-stored`, the install-wide rewrite of the stored metadata,
+preview included.
 
 Creates are gated per type: `MetadataTypeRegistryEntry.allowRuntimeCreate` decides
 whether a **brand-new** name may be minted under that type at all, separately from

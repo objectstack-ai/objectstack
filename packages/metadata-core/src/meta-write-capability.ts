@@ -35,7 +35,8 @@
  * ── What deliberately does NOT consult this predicate ─────────────────────
  *
  *   - `POST /meta/_migrate-stored` (both transports): an install-wide stored-
- *     metadata rewrite, gated on `manage_metadata` by its own door.
+ *     metadata rewrite, gated on `manage_metadata` by its own door (and, under
+ *     a wall, by the walled predicate below).
  *   - Every non-`/meta` `manage_metadata` gate (automation flow authoring,
  *     package management, activation toggles, datasource admin).
  *   - The read path, which carries no capability gate (ADR-0106 masking is
@@ -43,8 +44,8 @@
  *
  * Under a wall, the doors that write the environment's metadata ask a second
  * predicate after their capability gate, {@link walledCatalogWriteVerdict}:
- * the `/meta` item write doors, the `/packages` write doors, the `/automation`
- * definition writes and `install-local`.
+ * the `/meta` item write doors, `POST /meta/_migrate-stored`, the `/packages`
+ * write doors, the `/automation` definition writes and `install-local`.
  *
  * ── Refusal messages (#7450) ──────────────────────────────────────────────
  *
@@ -130,13 +131,16 @@ export function isSecurityCatalogType(type: string): boolean {
 /**
  * The subject the refusal names, per written type: the catalog's own nouns, a
  * package for the package doors (which act on a package's items, whatever
- * their types), and any other metadata type by its name.
+ * their types), the whole stored ledger for the install-wide rewrite
+ * (`POST /meta/_migrate-stored`, which rewrites every `sys_metadata` row), and
+ * any other metadata type by its name.
  */
 const WRITTEN_SUBJECT: Readonly<Record<string, string>> = {
     position: 'a position',
     permission: 'a permission set',
     capability: 'a capability',
     package: 'a package',
+    sys_metadata: 'the environment\'s stored metadata',
 };
 
 /**
@@ -175,7 +179,8 @@ export const PLATFORM_OPERATOR_POSTURE = 'PLATFORM_ADMIN';
  * no door pre-filters on the written type before asking it. Every door that
  * writes the environment's metadata asks it after its own capability gate: the
  * `/meta` item write doors on both transports (save, reset, publish,
- * rollback), the `/packages` write doors, the `/automation` definition writes,
+ * rollback), `POST /meta/_migrate-stored` on both transports, the `/packages`
+ * write doors, the `/automation` definition writes,
  * `install-local` (install, upgrade, uninstall), the permission-set clone
  * door and the security plugin's data door on the catalog objects. Under
  * `single` it is inert: the organization is the environment, and the
@@ -196,8 +201,9 @@ export const PLATFORM_OPERATOR_POSTURE = 'PLATFORM_ADMIN';
  */
 export function walledCatalogWriteVerdict(input: {
     /**
-     * The metadata type written (`package` at the package doors). It names the
-     * refusal's subject and never decides the verdict.
+     * The metadata type written (`package` at the package doors,
+     * `sys_metadata` at the stored-metadata rewrite). It names the refusal's
+     * subject and never decides the verdict.
      */
     type: string;
     /** The deployment's EFFECTIVE tenancy posture; `undefined` when no `tenancy` service answers. */

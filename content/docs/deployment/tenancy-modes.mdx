@@ -57,7 +57,8 @@ organization at once. Under `group` and `isolated` only the platform operator
 (the `PLATFORM_ADMIN` rung: an address declared in `OS_PLATFORM_OWNER_EMAIL`)
 and the engine's own writes (seeders, installers, migrations) write it. Holding
 `manage_metadata` inside an organization does not admit a write: the `/meta`
-write doors (save, reset, publish, rollback), every `/packages` write,
+write doors (save, reset, publish, rollback), the install-wide stored rewrite
+(`POST /meta/_migrate-stored`), every `/packages` write,
 `install-local` install, upgrade and uninstall, and the `/automation`
 definition writes refuse such a caller `403`, naming the posture.
 

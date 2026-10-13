@@ -104,7 +104,7 @@ describe('metaWriteCapabilityVerdict — who is admitted', () => {
 describe('[ADR-0131 D12 items 7–8] walledCatalogWriteVerdict — under a wall the environment\'s metadata is the platform operator\'s', () => {
     const TENANT = { isSystem: false, callerPosture: 'TENANT_ADMIN' };
     /** Catalog and non-catalog types alike, plus the package doors' subject. */
-    const TYPES = [...SECURITY_CATALOG_TYPES, 'object', 'view', 'flow', 'app', 'dashboard', 'translation', 'package'];
+    const TYPES = [...SECURITY_CATALOG_TYPES, 'object', 'view', 'flow', 'app', 'dashboard', 'translation', 'package', 'sys_metadata'];
 
     it('refuses a non-operator write of every type under `isolated` and `group`', () => {
         for (const tenancyPosture of ['isolated', 'group'] as const) {
@@ -127,6 +127,7 @@ describe('[ADR-0131 D12 items 7–8] walledCatalogWriteVerdict — under a wall 
             position: 'a position',
             capability: 'a capability',
             package: 'a package',
+            sys_metadata: "the environment's stored metadata",
             view: "a 'view' metadata item",
             flow: "a 'flow' metadata item",
         };

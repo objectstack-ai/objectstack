@@ -17,7 +17,8 @@ export const entry: SemanticMigration = {
   surface:
     'on a group or isolated deployment, by a caller below the platform operator, whatever the metadata '
     + 'type: PUT, DELETE, publish and rollback of /meta/:type/:name on @objectstack/rest and PUT on the '
-    + 'runtime dispatcher; every /api/v1/packages write on the runtime dispatcher (create, the manifest '
+    + 'runtime dispatcher; POST /meta/_migrate-stored, the install-wide stored rewrite, on both '
+    + 'transports, preview included; every /api/v1/packages write on the runtime dispatcher (create, the manifest '
     + 'PATCH, enable, disable, publish, publish-drafts, discard-drafts, revert, rollback, '
     + 'commits/:commitId/revert, duplicate, adopt-orphans and delete); POST and DELETE of '
     + '/api/v1/marketplace/install-local (@objectstack/cloud-connection); and the /api/v1/automation '
@@ -42,7 +43,8 @@ export const entry: SemanticMigration = {
   acceptanceCriteria:
     'On an isolated or group deployment, an organization owner holding manage_metadata inside their '
     + 'own organization saves an object, a view and a flow at /api/v1/meta, edits, publishes, rolls '
-    + 'back and resets the operator\'s view, calls each of the thirteen /api/v1/packages write doors, '
+    + 'back and resets the operator\'s view, runs POST /api/v1/meta/_migrate-stored, calls each of the '
+    + 'thirteen /api/v1/packages write doors, '
     + 'installs, upgrades and uninstalls a package through install-local, and creates, updates, '
     + 'deletes and clones a flow at /api/v1/automation: each answers 403 (FORBIDDEN on the REST /meta '
     + 'doors and install-local, PERMISSION_DENIED on the dispatcher, /packages and /automation), the '

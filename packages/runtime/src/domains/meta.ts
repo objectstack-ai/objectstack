@@ -1964,6 +1964,25 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             };
         }
 
+        // [ADR-0131 D12 items 7–8] The walled refusal, after the capability gate
+        // and before the protocol is resolved or a row is read: this rewrites
+        // every stored row of the environment's metadata, which under
+        // `isolated` / `group` is the platform operator's (ruling A on #23231).
+        // A preview is refused too: it is the same install-wide pass, without
+        // the write. Inert under `single`. Same predicate as `RestServer`'s
+        // `_migrate-stored` door and this branch's `PUT` above.
+        {
+            const walled = walledCatalogWriteVerdict({
+                type: 'sys_metadata',
+                tenancyPosture: await readEffectiveTenancyPosture(deps, _context),
+                isSystem: ec?.isSystem === true,
+                callerPosture: ec?.posture,
+            });
+            if (!walled.allowed) {
+                return { handled: true, response: deps.error(walled.message, 403) };
+            }
+        }
+
         const protocol = await resolveProtocol(deps, _context);
         if (!protocol || typeof protocol.migrateStoredMetadata !== 'function') {
             return { handled: true, response: deps.error('Stored-metadata migration not supported', 501) };

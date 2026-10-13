@@ -19,7 +19,8 @@
 // (rung `TENANT_ADMIN`, never the platform operator), answered 2xx at every
 // door below on metadata carrying no catalog item — `/meta` save (an object, a
 // view and a flow created; the operator's view edited), publish, rollback and
-// reset of the operator's items; all thirteen `/packages` write doors;
+// reset of the operator's items; `POST /meta/_migrate-stored`, the install-wide
+// rewrite of the stored metadata; all thirteen `/packages` write doors;
 // `install-local` install, upgrade and uninstall; and the `/automation`
 // definition create — and organization B's owner read every result through
 // `GET /meta`. One organization's write changed what another organization
@@ -215,6 +216,12 @@ for (const posture of ['isolated', 'group'] as const) {
       expect(await readAsB(h, 'view', name)).toEqual({ status: 200, label: 'Operator reset target' });
     });
 
+    it("/meta/_migrate-stored: A's install-wide rewrite of the stored metadata is refused 403 FORBIDDEN, preview and apply alike", async () => {
+      for (const body of [{}, { apply: true }]) {
+        await refused(await h.stack.apiAs(h.tokA, 'POST', '/meta/_migrate-stored', body), 'FORBIDDEN');
+      }
+    });
+
     it("/packages: each of the thirteen write doors refuses A 403 PERMISSION_DENIED, and B reads the operator's package unchanged", async () => {
       const pkg = `com.em.${p}.op`;
       const pv = `crm_lead.em_${p}_pv`;
@@ -304,6 +311,7 @@ for (const posture of ['isolated', 'group'] as const) {
 
       await ok(await h.stack.apiAs(h.operator, 'POST', '/automation', flow(`em_${p}_opautoflow`, 'Operator automation')));
       await ok(await h.stack.apiAs(h.operator, 'DELETE', `/automation/em_${p}_opautoflow`));
+      await ok(await h.stack.apiAs(h.operator, 'POST', '/meta/_migrate-stored', {}));
     }, 60_000);
   });
 }
@@ -319,7 +327,7 @@ describe('[ADR-0131 D12 items 7–8 · D11] single (CONTROL): the refusal is ine
     else process.env.OS_TENANCY_POSTURE = previous;
   });
 
-  it('a `manage_metadata` holder below the operator writes at the /meta, /packages, install-local and /automation doors as before', async () => {
+  it('a `manage_metadata` holder below the operator writes at the /meta (the stored rewrite included), /packages, install-local and /automation doors as before', async () => {
     const a = await resolveUserAuthzGrants(h.ql as never, h.userA, {});
     expect(a.systemPermissions).toContain('manage_metadata');
     expect(a.posture).not.toBe('PLATFORM_ADMIN');
@@ -334,5 +342,6 @@ describe('[ADR-0131 D12 items 7–8 · D11] single (CONTROL): the refusal is ine
     await ok(await h.stack.apiAs(h.tokA, 'POST', INSTALL_LOCAL, packageBody('com.em.sin.il', '1.0.0', [object('em_sin_ilobj', 'v1')])));
     await ok(await h.stack.apiAs(h.tokA, 'DELETE', `${INSTALL_LOCAL}/com.em.sin.il`));
     await ok(await h.stack.apiAs(h.tokA, 'POST', '/automation', flow('em_sin_autoflow', 'Automation by A')));
+    await ok(await h.stack.apiAs(h.tokA, 'POST', '/meta/_migrate-stored', {}));
   }, 60_000);
 });
