@@ -37,7 +37,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 
-import { SysPermissionSet } from './objects/sys-permission-set.object.js';
+import { SysPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
 import {
   permissionSetRowFields,
   reconcilePermissionSetProjection,

@@ -66,6 +66,7 @@ import { SysUser, SysAccount, SysMember, SysOrganization } from '@objectstack/pl
 import { SecurityPlugin } from './security-plugin.js';
 import { reconcileOrgAdminGrant } from './auto-org-admin-grant.js';
 import { securityObjects, SECURITY_PLUGIN_ID } from './manifest.js';
+import { withLegacyCatalogTables } from './__tests__/legacy-catalog-objects.testkit.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 
 const SYS = { isSystem: true } as const;
@@ -224,7 +225,8 @@ async function boot(scenario: Scenario): Promise<Booted> {
     version: '1.0.0',
     type: 'plugin',
     scope: 'system',
-    objects: [SysUser, SysAccount, SysMember, SysOrganization, ...securityObjects],
+    // The retired catalog tables too: an existing database still holds their rows.
+    objects: withLegacyCatalogTables([SysUser, SysAccount, SysMember, SysOrganization, ...securityObjects]),
   } as any);
   await engine.syncSchemas();
   if (scenario.authoredPosition) {

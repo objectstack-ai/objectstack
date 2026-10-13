@@ -158,7 +158,9 @@ async function standingByReader(posture: Posture): Promise<Record<string, unknow
   await seedLegacyPlatformBucket(engine, bootstrapSets);
   const boot = await bootstrapPlatformAdmin(engine, bootstrapSets);
   expect(boot.adminPromoted).toBe(posture === 'single');
-  if (walled) {
+  // The organization's own copies of the sets, where the row object is still
+  // registered; C3 stage 8 retires it, and a grant names its set (ADR-0131 D4).
+  if (walled && engine.getObject?.('sys_permission_set')) {
     for (const name of ['organization_admin', 'organization_admin_no_bypass']) {
       const [bucket] = await engine.find('sys_permission_set', { where: { name }, context: SYS });
       const { id: _id, created_at: _c, updated_at: _u, ...rest } = bucket as any;

@@ -149,7 +149,6 @@ describe('approval snapshot of a record with credential-class and internal field
         // all-literal slate would then open on the organization's
         // administrators instead (#22824).
         const membership = await ql.findOne('sys_member', { where: { user_id: approverId }, context: { isSystem: true } });
-        await ql.insert('sys_position', { id: 'pos_credsnap', name: POSITION, label: 'Reviewer', active: true }, SYS);
         await ql.insert('sys_user_position', {
           id: 'hold_credsnap', user_id: approverId, position: POSITION, organization_id: membership?.organization_id,
         }, SYS);

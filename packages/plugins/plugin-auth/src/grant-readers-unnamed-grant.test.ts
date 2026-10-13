@@ -175,8 +175,12 @@ describe('[ADR-0131 D4] a grant that names nothing — the last-administrator gu
   it('writing the legacy id moves no standing: nothing derives a name from it, so the write is permitted', async () => {
     const { engine } = await soleGrantAnchoredAdmin();
     const grant = await adminGrant(engine);
-    const [viewer] = (await engine.find('sys_permission_set', { where: { name: 'viewer_readonly' }, ...SYS })) as any[];
-    await engine.update('sys_user_permission_set', { id: grant.id, permission_set_id: viewer.id, reason: 'renewed' }, SYS);
+    // The id of another set's legacy catalog row — read off the row where that
+    // object is still registered, a literal one once it is retired (C3 stage 8).
+    const viewerId = engine.getObject?.('sys_permission_set')
+      ? ((await engine.find('sys_permission_set', { where: { name: 'viewer_readonly' }, ...SYS })) as any[])[0]?.id
+      : 'ps_legacy_viewer_readonly';
+    await engine.update('sys_user_permission_set', { id: grant.id, permission_set_id: viewerId, reason: 'renewed' }, SYS);
     expect(await adminGrant(engine)).toMatchObject({ permission_set: 'admin_full_access', reason: 'renewed' });
   });
 });

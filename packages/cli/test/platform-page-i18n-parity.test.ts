@@ -788,9 +788,10 @@ describe('shipped platform record pages -- i18n ownership (#14817)', () => {
     // red here. What this refuses is the scan that finds NOTHING -- an empty
     // population would satisfy every `for` loop below and report success over
     // zero pages, which is the exact shape of the `0` that reads as "clean".
-    expect(RECORD_PAGES.length).toBeGreaterThanOrEqual(3);
+    // (`sys_position_detail` retired with the `sys_position` object, C3 stage 8.)
+    expect(RECORD_PAGES.length).toBeGreaterThanOrEqual(2);
     expect(RECORD_PAGES.map((p) => p.name).sort()).toEqual(
-      expect.arrayContaining(['sys_organization_detail', 'sys_position_detail', 'sys_user_detail']),
+      expect.arrayContaining(['sys_organization_detail', 'sys_user_detail']),
     );
     expect(SHIPPED_LOCALES).toContain(EN);
     expect(SHIPPED_LOCALES.length).toBeGreaterThan(1);
@@ -838,9 +839,10 @@ describe('shipped platform record pages -- i18n ownership (#14817)', () => {
     const maps = RECORD_PAGES.flatMap((page) => inlineLocaleMaps(page, page.name));
 
     // Same refusal as the population floor: zero maps means the walk broke, not
-    // that the pages went monolingual. [#15204 B2] 44: the user page's two
-    // grant lists dropped their `add` pickers, and with them two label maps.
-    expect(maps.length).toBeGreaterThanOrEqual(44);
+    // that the pages went monolingual. [#15204 B2] The user page's two grant
+    // lists dropped their `add` pickers, and with them two label maps.
+    // (`sys_position_detail` retired with the `sys_position` object, C3 stage 8.)
+    expect(maps.length).toBeGreaterThanOrEqual(39);
 
     const incomplete = maps
       .filter((m) => SHIPPED_LOCALES.some((locale) => !m.locales.includes(locale)))
@@ -1041,14 +1043,14 @@ describe('`pages.*` default-locale parity (#8764, moved off the nav roster by #1
     // The anti-vacuity floor, stated before the verdict runs. A verdict over an
     // empty or shrunken population is the ambiguous `0` this whole card is
     // about: every loop below would be satisfied and report success.
-    expect(SOURCE_BY_NAME.size).toBeGreaterThanOrEqual(6);
+    // (`sys_position_detail` retired with the `sys_position` object, C3 stage 8.)
+    expect(SOURCE_BY_NAME.size).toBeGreaterThanOrEqual(5);
     expect([...SOURCE_BY_NAME.keys()].sort()).toEqual(
       expect.arrayContaining([
         'cloud_connection_settings',
         'connect_agent',
         'marketplace_installed',
         'sys_organization_detail',
-        'sys_position_detail',
         'sys_user_detail',
       ]),
     );
@@ -1063,7 +1065,7 @@ describe('`pages.*` default-locale parity (#8764, moved off the nav roster by #1
     const enPages = pagesOf(EN);
     // Absence is loud: an `en` section that lost its entries would make the
     // verdict below compare nothing at all.
-    expect(Object.keys(enPages).length).toBeGreaterThanOrEqual(6);
+    expect(Object.keys(enPages).length).toBeGreaterThanOrEqual(5);
 
     const findings = defaultLocalePageDrift(enPages, SOURCE_BY_NAME).map((f) => ({
       ...f,
@@ -1202,10 +1204,11 @@ describe('platform record page labels are translated in every shipped locale (#1
    * wrong recorded source hash would serve the English source here and red this
    * assertion rather than shipping a silent regression.
    */
-  const RECORD_PAGE_NAMES = ['sys_user_detail', 'sys_organization_detail', 'sys_position_detail'];
+  // (`sys_position_detail` retired with the `sys_position` object, C3 stage 8.)
+  const RECORD_PAGE_NAMES = ['sys_user_detail', 'sys_organization_detail'];
   const TRANSLATED_LOCALES = SHIPPED_LOCALES.filter((locale) => locale !== EN);
 
-  it('has a real, non-English label for each of the three in each translated locale', () => {
+  it('has a real, non-English label for each record page in each translated locale', () => {
     expect(TRANSLATED_LOCALES.length).toBeGreaterThanOrEqual(3);
 
     const english = pagesOf(EN);

@@ -301,7 +301,6 @@ describe('the claim target is the existing platform admin, by the bootstrap rule
    */
   async function twoAdmins(file: string) {
     const engine = await openEngine(file);
-    await engine.insert('sys_permission_set', { id: 'ps_admin', name: 'admin_full_access', label: 'Admin', active: true }, SYS);
     for (const [id, createdAt] of [
       ['usr_amy', '2026-01-01T00:00:00.000Z'],
       ['usr_zed', '2026-06-01T00:00:00.000Z'],
