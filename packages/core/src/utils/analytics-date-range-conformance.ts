@@ -157,7 +157,7 @@ export const ANALYTICS_DATE_RANGE_NOT_A_WINDOW: readonly (readonly unknown[])[] 
   [null, null],
 ];
 
-/** The three presets whose upper bound is NOW rather than a calendar boundary. */
+/** The three rolling presets: their window runs through today and stops before tomorrow begins. */
 const ROLLING: readonly DateRangePreset[] = ['last_7_days', 'last_30_days', 'last_90_days'];
 
 interface ThrownEnvelope {
@@ -186,7 +186,8 @@ async function attempt(
  *
  * @param face - the backend under test.
  * @param options - the reference instant and timezone; the caller freezes the
- *   clock so the rolling presets (whose bound is NOW) are comparable at all.
+ *   clock so every preset, each anchored on that instant's calendar day, is
+ *   comparable at all.
  */
 export async function analyticsDateRangeConformanceFindings(
   face: AnalyticsDateRangeFace,
@@ -217,7 +218,7 @@ export async function analyticsDateRangeConformanceFindings(
     if (w.endExclusive !== expected.endExclusive) {
       say(
         `compares '${preset}''s upper bound ${w.endExclusive ? 'exclusively' : 'inclusively'}, `
-        + `but a ${ROLLING.includes(preset) ? 'rolling window ends at NOW and REACHES its bound' : 'calendar window stops BEFORE its end instant'}`,
+        + `but a ${ROLLING.includes(preset) ? 'rolling window stops BEFORE tomorrow begins, as today does' : 'calendar window stops BEFORE its end instant'}`,
       );
     }
     // The fallback's shape, named directly: its two bounds were the preset's
