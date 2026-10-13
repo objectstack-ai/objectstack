@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { BUILTIN_MEMBERSHIP_ROLES } from '@objectstack/spec';
+import { APPROVER_EXPRESSION_ROOTS, ApprovalNodeConfigSchema } from '@objectstack/spec/automation';
 import {
   validateApprovalApprovers as validateApprovalApproversUnrecorded,
   APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER,
@@ -854,5 +855,129 @@ describe('[#22161] one-line fixes — approval-approvers-may-resolve-empty, agai
     }
     // The override survives only as the no-administrator case.
     expect(text).toContain("only an organization with no administrator leaves the request on an empty");
+  });
+});
+
+// [#22161] Slice 16: the `fix:` lines of the other three `approval-*` ids. Each
+// names its remedy in one line; what each root holds, why `record` is unbound,
+// what each empty-slate policy does and why a business role is a position are
+// the explanations'. The bound reads every finding the cases above fired.
+describe('[#22161] one-line fixes — the expression and membership-tier ids', () => {
+  const SLICE_16 = [
+    APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER,
+    APPROVAL_EXPRESSION_INVALID,
+    APPROVAL_EXPRESSION_NO_EMPTY_POLICY,
+  ];
+  const stackWithConfig = (config: Record<string, unknown>): Record<string, unknown> => ({
+    flows: [{
+      name: 'expense_approval',
+      nodes: [
+        { id: 'start', type: 'start', config: {} },
+        { id: 'step1', type: 'approval', config },
+      ],
+      edges: [],
+    }],
+  });
+
+  it('every `fix:` line of the three ids the cases above fired is one line of at most 200 characters', () => {
+    // A long position name, so the bound is not read on short names alone.
+    validateApprovalApprovers(stackWithApprovers([
+      { type: 'org_membership_level', value: 'regional_vice_president_of_enterprise_sales' },
+    ]));
+    const converted = fired.filter((f) => SLICE_16.includes(f.rule));
+    // Coverage control: every arm of the three ids fired.
+    expect(converted.some((f) => f.rule === APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER)).toBe(true);
+    expect(converted.some((f) => f.rule === APPROVAL_EXPRESSION_NO_EMPTY_POLICY)).toBe(true);
+    const invalid = converted.filter((f) => f.rule === APPROVAL_EXPRESSION_INVALID);
+    for (const arm of ['empty expression', 'does not parse', 'references `record`', 'references `approvers_dynamic`', 'resolveAs has no effect']) {
+      expect(invalid.some((f) => f.message.includes(arm)), arm).toBe(true);
+    }
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('each arm reads as one remedy', () => {
+    const [tier] = validateApprovalApprovers(stackWithApprovers([{ type: 'org_membership_level', value: 'sales_manager' }]));
+    expect(tier.hint).toBe(
+      "If it is an org position, author { type: 'position', value: 'sales_manager' }; keep " +
+        "'org_membership_level' for the tiers the verdict lists",
+    );
+    const [empty] = validateApprovalApprovers(stackWithConfig({
+      approvers: [{ type: 'expression', value: '' }],
+      onEmptyApprovers: 'fail',
+    }));
+    expect(empty.hint).toBe('Write a CEL expression over current.*, trigger.* or vars.*, e.g. current.approvers_dynamic');
+    const [record] = validateApprovalApprovers(stackWithConfig({
+      approvers: [{ type: 'expression', value: 'record.owner_id' }],
+      onEmptyApprovers: 'fail',
+    }));
+    expect(record.hint).toBe(
+      'Write current.<field> for the live value at node entry or trigger.<field> for the submit-time ' +
+        'snapshot; vars.previous carries the pre-update row',
+    );
+    const [nudge] = validateApprovalApprovers(stackWithConfig({
+      approvers: [{ type: 'expression', value: 'vars.picked' }],
+    }));
+    expect(nudge.hint).toBe(
+      "Declare onEmptyApprovers on the node: 'admin_rescue', 'fail', 'auto_approve', or 'fallback' " +
+        'with a fallbackApprovers list',
+    );
+  });
+
+  it("the nudge's policies and the explanation's are the spec's `onEmptyApprovers` enum", () => {
+    // The explanation module imports nothing, so it spells the list out; this
+    // holds both it and the fix line to the schema.
+    const policies = (
+      ApprovalNodeConfigSchema.shape.onEmptyApprovers.unwrap() as unknown as { options: readonly string[] }
+    ).options;
+    expect([...policies].sort()).toEqual(['admin_rescue', 'auto_approve', 'fail', 'fallback']);
+    const [nudge] = validateApprovalApprovers(stackWithConfig({
+      approvers: [{ type: 'expression', value: 'vars.picked' }],
+    }));
+    const text = explainRule(APPROVAL_EXPRESSION_NO_EMPTY_POLICY)!.paragraphs.join('\n');
+    for (const policy of policies) {
+      expect(nudge.hint, policy).toContain(`'${policy}'`);
+      expect(text, policy).toContain(`\`${policy}\``);
+    }
+  });
+
+  it("the explanation's expression roots are the spec's `APPROVER_EXPRESSION_ROOTS`", () => {
+    const text = explainRule(APPROVAL_EXPRESSION_INVALID)!.paragraphs.join('\n');
+    expect(APPROVER_EXPRESSION_ROOTS.length).toBe(3);
+    for (const root of APPROVER_EXPRESSION_ROOTS) expect(text, root).toContain(`\`${root}.*\``);
+  });
+
+  it('`os explain` carries what the three `fix:` lines no longer say', () => {
+    const facts: Record<string, string[]> = {
+      [APPROVAL_EXPRESSION_INVALID]: [
+        "record's live state at node entry",
+        'the submit-time snapshot',
+        'no `{…}` template braces',
+        'record at event time',
+        '`vars.previous` carries the pre-update row',
+        'fails the node at entry',
+        '`resolveAs` means something only on an `expression` approver',
+      ],
+      [APPROVAL_EXPRESSION_NO_EMPTY_POLICY]: [
+        "the organization's administrators",
+        'its fault edge',
+        '`output.autoApproved = true`',
+        '`fallbackApprovers`',
+        'degrades to `admin_rescue`',
+      ],
+      [APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER]: [
+        'A business role is always a position',
+        '`sys_user_position`',
+        'ADR-0108',
+      ],
+    };
+    for (const [rule, list] of Object.entries(facts)) {
+      const entry = explainRule(rule);
+      expect(entry, `no \`os explain ${rule}\` entry`).toBeDefined();
+      const text = entry!.paragraphs.join('\n');
+      for (const fact of list) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+    }
   });
 });

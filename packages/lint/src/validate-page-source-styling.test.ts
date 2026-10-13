@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 import { describe, it, expect } from 'vitest';
 import { validatePageSourceStyling, PAGE_SOURCE_CLASSNAME } from './validate-page-source-styling.js';
+import { explainRule } from './rule-explanations.js';
 
 const page = (kind: string, source: string) => ({ pages: [{ name: 'p', kind, source }] });
 
@@ -36,5 +37,49 @@ describe('validatePageSourceStyling (ADR-0065 guardrail)', () => {
   it('also covers the deprecated jsx alias', () => {
     const f = validatePageSourceStyling(page('jsx', '<flex className="p-4" />'));
     expect(f.length).toBe(1);
+  });
+});
+
+// [#22161] Slice 16: the `fix:` line names the replacement for `className` in
+// one line per kind; why authored Tailwind produces no CSS, the theme tokens and
+// the overlay advice are `os explain page-source-className-tailwind`, an entry
+// this slice adds.
+describe('[#22161] one-line fix — page-source-className-tailwind', () => {
+  const NAME = 'regional_enterprise_account_overview_dashboard_page';
+  const fire = (kind: string, source: string) =>
+    validatePageSourceStyling({ pages: [{ name: NAME, kind, source }] });
+
+  it('each kind reads as one remedy line of at most 200 characters', () => {
+    const [react] = fire('react', 'function Page(){ return <div className="grid" />; }');
+    const [html] = fire('html', '<flex className="gap-4" />');
+    const [jsx] = fire('jsx', '<flex className="p-4" />');
+    expect(react!.hint).toBe(
+      "Replace className with inline style={{}} using hsl(var(--token)) theme colors, e.g. style={{ color: 'hsl(var(--foreground))' }}",
+    );
+    expect(html!.hint).toBe(
+      "Replace className with the components' structured props (<flex direction gap>, <grid columns>) and a JSON " +
+        'style object, e.g. style={{"color":"hsl(var(--foreground))"}}',
+    );
+    expect(jsx!.hint).toBe(html!.hint);
+    for (const f of [react!, html!, jsx!]) {
+      expect(f.hint).not.toContain('\n');
+      expect(f.hint.length, f.hint).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('`os explain` carries what the `fix:` lines no longer say', () => {
+    const entry = explainRule(PAGE_SOURCE_CLASSNAME);
+    expect(entry, 'no `os explain page-source-className-tailwind` entry').toBeDefined();
+    const text = entry!.paragraphs.join('\n');
+    for (const fact of [
+      'never an authored page string',
+      'ADR-0065',
+      "`background: 'hsl(var(--card))'`",
+      '`formType="drawer"`',
+      'hand-rolled overlay',
+      'JSON style object',
+    ]) {
+      expect(text, fact).toContain(fact);
+    }
   });
 });

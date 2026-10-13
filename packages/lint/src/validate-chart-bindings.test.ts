@@ -16,7 +16,7 @@ import { explainRule } from './rule-explanations.js';
 // verdict of those ids to one line of at most 200 characters — every position
 // and surface this suite exercises, not a chosen few. Run the whole file: those
 // cases read what the cases above fired.
-const fired: Array<{ rule: string; message: string; path: string }> = [];
+const fired: Array<{ rule: string; message: string; path: string; hint: string }> = [];
 const validateChartBindings: typeof validateChartBindingsUnrecorded = (...args) => {
   const findings = validateChartBindingsUnrecorded(...args);
   fired.push(...findings);
@@ -58,7 +58,9 @@ describe('validateChartBindings — report charts', () => {
     expect(findings[0].rule).toBe(CHART_MEASURE_UNKNOWN);
     expect(findings[0].path).toBe('reports[0].chart.yAxis');
     expect(findings[0].message).toContain('estimate_hours');
-    expect(findings[0].hint).toContain('est_hours');
+    // [#22161] The remedy alone: the dataset's measure list is no longer
+    // appended, and `estimate_hours` is no near miss of a declared measure.
+    expect(findings[0].hint).toBe('Bind a measure that dataset "task_metrics" declares, or declare "estimate_hours" on it.');
   });
 
   // #14577 — this rule used to carry a private Levenshtein-only `suggest`,
@@ -547,8 +549,11 @@ describe('validateChartBindings — binding vs presentation positions (#15575)',
     expect(findings[0].message).toContain('lands on nothing');
     expect(findings[0].message).not.toContain('comes back empty');
     // No surface here carries `suppressWarnings` (dashboard widgets only), and
-    // the hint says so rather than advertising a key that does not exist.
-    expect(findings[0].hint).toContain('no `suppressWarnings` key');
+    // nothing says otherwise: [#22161] the hint names the remedy alone, and the
+    // explanation says no key silences the advisory.
+    expect(findings[0].hint).toBe('Correct the name to a measure that dataset "task_metrics" declares, or drop the entry.');
+    expect(findings[0].hint).not.toContain('suppressWarnings');
+    expect(explainRule(CHART_MEASURE_UNKNOWN)!.paragraphs.join('\n')).toContain('carries a `suppressWarnings` key');
   });
 
   it('one report chart reports BOTH tiers — the query position gates, the presentation position advises', () => {
@@ -1158,5 +1163,50 @@ describe('[#22161] one-line verdicts — chart-measure-unknown, chart-axis-not-s
     // The surface paragraph is one text, printed under both ids it explains.
     const last = (rule: string) => explainRule(rule)!.paragraphs.at(-1);
     expect(last(CHART_AXIS_NOT_SELECTED)).toBe(last(CHART_MEASURE_UNKNOWN));
+  });
+});
+
+// [#22161] Slice 16: the `fix:` line of chart-measure-unknown. One remedy line
+// per position kind plus the nearest declared measure; the dataset's measure
+// list is no longer appended, and what each presentation position carries is
+// the explanation's.
+describe('[#22161] one-line fix — chart-measure-unknown', () => {
+  it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === CHART_MEASURE_UNKNOWN);
+    // Coverage control: a query position and every presentation position, a
+    // near miss and none.
+    for (const marker of ['comes back empty', 'DISPLAY-NAME override', 'REPLACES the authored array', 'axis PRESENTATION']) {
+      expect(converted.some((f) => f.message.includes(marker)), marker).toBe(true);
+    }
+    expect(converted.some((f) => f.hint.includes('Did you mean'))).toBe(true);
+    expect(converted.some((f) => !f.hint.includes('Did you mean'))).toBe(true);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+      expect(f.hint, f.rule).not.toContain('Dataset measures:');
+    }
+  });
+
+  it('keeps the nearest declared measure after the remedy', () => {
+    const [f] = validateChartBindings({
+      datasets: [{ name: 'sales_metrics', object: 'o', dimensions: [{ name: 'stage', field: 'stage' }], measures: [{ name: 'sum_amount', aggregate: 'sum', field: 'amount' }] }],
+      reports: [{ name: 'r', dataset: 'sales_metrics', values: ['sum_amount'], chart: { type: 'bar', xAxis: 'stage', yAxis: 'amount' } }],
+    });
+    expect(f!.hint).toBe(
+      'Bind a measure that dataset "sales_metrics" declares, or declare "amount" on it. Did you mean "sum_amount"?',
+    );
+  });
+
+  it('`os explain` carries what the presentation `fix:` line no longer says', () => {
+    const text = explainRule(CHART_MEASURE_UNKNOWN)!.paragraphs.join('\n');
+    for (const fact of [
+      'cannot add, remove or re-point one',
+      'membership belongs to the dataset selection',
+      'title, min/max, position, gridlines',
+      'carries a `suppressWarnings` key',
+      '"Did you mean"',
+    ]) {
+      expect(text, fact).toContain(fact);
+    }
   });
 });

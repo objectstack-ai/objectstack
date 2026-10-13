@@ -1,5 +1,318 @@
 # @objectstack/metadata
 
+## 18.0.0-next.0
+
+### Minor Changes
+
+- 117d34d: feat(metadata-core,metadata-protocol,metadata,platform-objects,spec)!: `sys_view_definition` retires as inert (ADR-0131 D13)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered sys-view-definition-retired -->
+  
+  **BREAKING**, graded `minor` on the v18 prerelease line: Changesets is in pre mode with the tag `next`, and the fixed group is already majored by the line's opening marker, so this ships in an `18.0.0-next.N` like every other stage.
+  
+  `sys_view_definition` was declared for runtime-authored shared and personal views (ADR-0017) and never used for them: no framework code writes or reads its rows, and the Studio console's view doors write the ADR-0005 `view` overlay in `sys_metadata` through the metadata API. ADR-0131 D13 retires it. A runtime-authored view is a `view` metadata item, written through `PUT /api/v1/meta/view/<name>` (the client's `meta.saveItem` for type `view`); nothing about that path changes.
+  
+  **What moves for consumers.**
+  
+  - **The object.** FROM `import { SysViewDefinitionObject } from '@objectstack/metadata-core'` (or from `@objectstack/platform-objects`, or its `/metadata` subpath) TO nothing: delete the import. Neither `MetadataPlugin` nor the metadata protocol assembly registers the object any more, so the generic data door no longer serves it.
+  - **The migration exports** of `@objectstack/metadata-protocol`. FROM `ensureViewDefinitionActiveIndex`, `resolveIndexExec`, `buildActiveIndexSql`, `VIEW_DEFINITION_TABLE`, `VIEW_ACTIVE_INDEX_NAME`, `VIEW_ACTIVE_PROBE_INDEX_NAME`, `VIEW_ACTIVE_INDEX_COLUMNS`, `EnsureViewIndexLogger`, `EnsureViewIndexStatus` and `EnsureViewIndexResult` TO nothing: delete the import. `classifyIndexFailure` and the `IndexExec` type are still exported, unchanged, from the shared index-migration module.
+  - **The name.** `PLATFORM_OBJECTS_BY_PACKAGE['metadata-core']` (`@objectstack/spec/system`) lists four objects, and `isPlatformProvidedObjectName` answers `false` for `sys_view_definition`. A stack that names it (a lookup target, a flow trigger, a permission entry, a platform-global declaration) is now flagged as naming an unknown object: remove the reference.
+  - **`os migrate duplicates`.** `runtimeIndexPreflight` carries three entries (the two `sys_metadata` overlay indexes and `sys_setting`'s row identity), with no `idx_sys_view_def_active` entry. A serving boot no longer runs the active-row index migration for the table, and no longer logs its `sys_view_definition active-row index` lines.
+  - **Translations.** The platform translation bundles no longer carry `sys_view_definition` keys.
+  
+  **Existing databases.** Schema sync is additive and never drops a table, so a database an earlier release provisioned keeps `sys_view_definition`, with any rows a caller wrote through the generic data door; nothing reads them. `os migrate apply --allow-destructive` does not drop it either, because it reconciles declared objects only (measured on one database: it dropped an orphaned column of a declared table and left this table and its row in place). On a project with a host config, `os migrate plan` lists it among the platform-prefixed tables nothing declares. Export any row worth keeping; dropping the table is the operator's call, by hand: `DROP TABLE sys_view_definition`.
+- 0fea05f: `os serve <config>`: a multi-package config now serves the top-level metadata no package declares, under the stack's `manifest.id`, and the boot says so, as an artifact boot of the same project already did
+  
+  Clause-②: yes
+  
+  A config boot (`os serve objectstack.config.ts`, with or without `--dev`, and no compiled artifact) of a stack that carries `packages[]` registers each package body and never the stack's top level. A top-level item that no package body declares was served by no door, and the boot said nothing. Three shapes reached it: flat `src/docs/*.md` pages when the stack's `manifest.id` names no `packages[]` entry, inline `docs` spread onto a composed stack's top level, and any other top-level collection (objects, views, …) that no package carries. `os build` of the same project, booted as an artifact, registered those items under the stack's `manifest.id` and warned.
+  
+  - **What changes.** The config boot now runs the same residual rule as the artifact boot, `MetadataPlugin.registerUnclaimedTopLevel`. Every top-level item no package body declares is registered under the stack's `manifest.id`, and the boot prints one `warn` line with the count: `config stack '<id>' carries N top-level metadata item(s) that none of its M package bodies declare`, followed by the remedy. `GET /api/v1/meta/<type>` lists those items under that id, as on an artifact boot of the same project. This includes the flat `src/docs/` pages of a stack whose `manifest.id` names no package, which a config boot did not list before. This entry supersedes, in the same release, the note in the `os serve <config>` flat `src/docs/` entry that "A config boot of such a stack still does not list them": it now does, under the stack's `manifest.id`, with the warning.
+  - **A new refusal, in one corner.** A residual view container is judged like any other: a top-level `defineView` container that no package declares, and whose own `name` is not the object it binds to, now refuses the config boot with ``Invalid `views:` container from manifest '<manifest id>': the container's own `name` is …``. On the previous release that config booted, because its top level was never read; an artifact boot of the same project already refused it. `os validate` and `os build` refuse the same container first, in the same words, so the refusal is never a boot-time surprise. A divergent container that a package body declares and the top level repeats is refused once, as that package's. **The one-line fix:** drop the container's `name`, or set it to the object it binds to.
+  - **The remedy the line names.** Declare each such item inside the `packages[]` entry of the package that owns it. A flat `src/docs/` page moves under `src/<package>/docs/`, where `<package>` is the package id or its last dot-separated segment.
+  - **What widens, in `@objectstack/metadata`.** Its root entry now exports `unclaimedTopLevel(stack)`, the pure residual decision both boot doors and `os validate` read, with its two types `UnclaimedTopLevel` and `UnclaimedTopLevelItem`, and `MetadataPlugin` gains the public static `registerUnclaimedTopLevel(sink, stack, source)`, the one residual rule both boot doors call.
+  - **What stays the same.** An artifact boot registers the same items and prints the same line, byte for byte. A single-package config (no `packages[]`) has no residual and is unchanged. A composed stack whose top level repeats its package bodies, as `composeStacks([…], { manifest: 'preserve' })` writes it, registers nothing extra and prints nothing.
+  - **What the residual is, on both doors.** It is metadata: a residual object is listed on `GET /api/v1/meta/object` under the stack's `manifest.id`, and `GET /api/v1/data/<object>` still answers `404`. That was already true on an artifact boot, and the config boot now gives the same answer.
+
+### Patch Changes
+
+- d0bb78e: fix(runtime,metadata): publishing or reverting a read-only package is refused with `422 WRITABLE_PACKAGE_REQUIRED`, and package membership reads the `_packageId` stamp
+  
+  Clause-②: no
+  
+  ADR-0070 D2 makes a code or installed package read-only. `POST /api/v1/packages/:id/publish` and `POST /api/v1/packages/:id/revert` did not check this. These two answers change:
+  
+  - **Publish of a code or installed package: 200 → 422.** Before, the publish door answered 200. For a package whose items carry an authored `packageId`, for example `com.example.showcase`'s two capabilities, it answered `success: true` and wrote `publishedDefinition`, `state` and `version` onto those read-only items. For every other code package it answered `success: false`, "No metadata items found". It now answers `422 WRITABLE_PACKAGE_REQUIRED` before anything is written, the same refusal that `PATCH /packages/:id/disable` and `DELETE /packages/:id` already give.
+  - **Revert of a code or installed package: 404 or 409 → 422.** Before, the revert door answered `404 RESOURCE_NOT_FOUND` "No metadata items found" (for example `com.objectstack.setup` and the platform packages that ship objects) or `409 RESOURCE_CONFLICT` "Package '…' has never been published" (for example `com.example.showcase`). It now answers `422 WRITABLE_PACKAGE_REQUIRED`. The check runs after the protocol's stored-row answer, so a revert of a code package that has a stored row bound to it, such as an organization overlay draft, keeps its answer.
+  
+  To customise what a code package provides, use an ADR-0005 organization overlay. Overlay drafts publish through `POST /api/v1/packages/:id/publish-drafts` and the per-item publish door, and this change leaves both alone.
+  
+  **Unchanged:** a writable package's publish and revert, and an id that nothing carries (revert 404; publish 200 with `success: false`).
+  
+  `MetadataManager.publishPackage` and `revertPackage` now find a package's members by `packageId`, `package` or the private `_packageId` stamp. The artifact loader writes that stamp through `applyProtection`, and the ObjectQL object bridge copies it onto every object it registers. Before, an item that carried only the stamp was not a member. `MetadataManager` has no notion of package kind; the refusal of read-only packages lives at the two doors above.
+- 1959aac: feat(spec)!: `defineStack` refuses two entries of one named collection under one identity, naming the collection, the identity and every index — for 27 collections (#22934)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered stack-collection-duplicate-entry-refused -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface, shipped as `minor` under the launch-window convention for breaking changes.
+  
+  The runtime registers the entries of these collections under one identity each, and a stack could author two entries under one identity with nothing refusing it: `defineStack` and `objectstack validate` accepted the pair (exit 0, `valid: true`, no finding naming it). Measured on a source boot (`objectstack serve`, no build) and on `objectstack build` followed by an artifact-backed boot:
+  
+  - `objects`, `pages`, `dashboards`, `reports`, `datasets`, `flows`, `jobs`, `emailTemplates`, `books`, `positions`, `permissions`, `capabilities`, `sharingRules`, `webhooks`, `mappings`, `analyticsCubes`, `connectors`, `picklists`, `tools`, `skills`, `views`, `apis`, `apps` and `objectExtensions` kept only the LAST entry on both paths, with no notice at the default log level (for `apis`, the first entry's path answered 404);
+  - `datasources`: the metadata described the last entry while the driver connected with the first one's configuration;
+  - `hooks`: the metadata listed one hook while both handlers were bound and ran;
+  - `docs`: `objectstack validate` and `objectstack build` refused the pair (`docs/duplicate-name`), while a source boot kept the last.
+  
+  **What is refused.** `defineStack`'s cross-reference pass refuses the stack with its existing envelope (`STACK_CROSS_REFERENCE_INVALID`, status 422, `defineStack cross-reference validation failed (N issues):`), one finding per collision, naming the collection, the identity and every index:
+  
+  ```text
+  ✗ Datasource 'crm_external' is declared twice in `datasources`: stack.datasources[0] and stack.datasources[1]. …
+  ```
+  
+  The identity is what the runtime keys an entry by: its `name`; the `(name, locale)` pair for `emailTemplates` (one name across several locales is an i18n bundle, and an entry with no `locale` counts as `en-US`); the extended object (`extend`) for `objectExtensions`; and for `views` the object a container binds to (`object`, else `list.data.object`, else `form.data.object`, else its `name`). The check runs in an object-less stack too, and every entry counts, byte-identical twins included. `objectstack validate`, `objectstack build` and a source boot all load the config through `defineStack`, so all three refuse it at load. Like every cross-reference check it is skipped under `defineStack(…, { strict: false })`. On an `app` package, two apps under one name now get this refusal, which runs before the single-app count.
+  
+  **Unchanged.** Distinct identities; an email-template i18n bundle (one name, one entry per locale); the map form under distinct keys (two keys whose entries spell one explicit `name` are one identity, and are refused); the same name reused by another package of a multi-package project (`composeStacks(…, { manifest: 'preserve' })` keeps each package's collections in its own `packages[i]` body, which this check does not read); `plugins` (last-one-wins with a warning is the kernel's declared contract), `agents` (withdrawn for app packages) and `picklistExtensions` (merged by option value); and the existing `actions` and `functions` refusals.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `pages: [{ name: 'home', … }, { name: 'home', … }]` (any of the 24 name-keyed collections) | one entry per name: rename one (`home_admin`) and every reference that meant it, or merge the two into one entry |
+  | `emailTemplates: [{ name: 'acme.welcome', … }, { name: 'acme.welcome', locale: 'en-US', … }]` | one entry per name and locale: give the second its own `locale` (`zh-CN`), or merge the two |
+  | `datasources: [{ name: 'ext', config: a }, { name: 'ext', config: b }]` | one datasource per name — the driver used to connect `a` while the metadata described `b` |
+  | `hooks: [{ name: 'audit', object: 'a', … }, { name: 'audit', object: 'b', … }]` | one hook with `object: ['a', 'b']`, or two hooks with two names |
+  | `apis: [{ name: 'feed', path: '/api/v1/apps/x/a' }, { name: 'feed', path: '/api/v1/apps/x/b' }]` | give each endpoint its own name |
+  | `views: [defineView({ object: 'task', list }), defineView({ object: 'task', form })]` | one container per object: `defineView({ object: 'task', list, form })` (named views go in `listViews` / `formViews`) |
+  | `objectExtensions: [{ extend: 'task', fields: { a } }, { extend: 'task', fields: { b } }]` | one extension per target: `{ extend: 'task', fields: { a, b } }` |
+  
+  **The one-line fix: give each entry of a collection its own identity, or merge the duplicates into one entry.**
+  
+  No D2 conversion rewrites it: which entry keeps the identity, and what the other one becomes, is the author's call. Its D3 record is the semantic entry `stack-collection-duplicate-entry-refused` (protocol 18).
+  
+  **`@objectstack/metadata`.** `deriveViewContainerObject` — the "which object does a `views` container bind to" derivation the registrars file containers by — moved into `@objectstack/spec` (exported from its root and `./ui`), because the stack contract now judges the same slot. `@objectstack/metadata` re-exports that one declaration under the same name, from its root and from `@objectstack/metadata/view-container`; behaviour is unchanged. That subpath used to import nothing and now loads the `@objectstack/spec` root entry, which every in-repo importer of it already loads.
+  
+  **Who is affected, measured.** The four example apps (`examples/app-crm`, `app-todo`, `app-showcase`, `app-multi-package`) carry no duplicate under these identities. Deployed metadata and other repositories were not measured.
+- 58f5c90: fix(metadata-core): an artifact declaring `engines.protocol: '^18'` that was built during the v18 prerelease boots on a later runtime that retired one of its shapes — the artifact door replays every retired conversion of protocol 18's step for a floor of `18.0.0`
+  
+  Clause-②: yes
+  
+  **What an operator saw.** A compiled artifact (`os build` → `dist/objectstack.json`) that declares `engines.protocol: '^18'` and was built before a protocol-18 retirement landed carries the retired shape, for example a defaulted key that every earlier parse emitted. Booted on a runtime that enforces the retirement, the metadata plugin's startup refused it at the strict parse and the boot rolled back. The artifact door compared the floor `18.0.0` with each retirement's `retiredAfter` stamp, and every retirement that lands during the v18 prerelease is stamped with the last 17.x release, below that floor, so nothing was replayed.
+  
+  **What an operator sees now.** The same artifact boots. One warning per conversion names it and its site count: `[MetadataPlugin] artifact 'LABEL' declares the first release of protocol 18 (authored engines.protocol floor 18.0.0), which a build from any 18.0.0 prerelease declares too, so it may predate retirements in the conversion step into protocol 18 that this runtime enforces (runtime spec VERSION) — converted N site(s) forward via ADR-0087 conversion 'ID' …`. The artifact file itself is unchanged, so it converts again on every boot until it is rebuilt with `os build`. An artifact built after the retirement boots exactly as before: the replay finds nothing to convert, and nothing is logged.
+  
+  - **`@objectstack/metadata-core`.** `applyArtifactForwardConversions` opens its window on a third condition. A declared floor of `M.0.0` at or above the runtime label replays every retired entry whose `toMajor` is `M`, except the default flips the door already refuses. An artifact cannot say which of those entries it predates: it carries no field naming the spec or CLI that built it. Each entry rewrites only its own old shape, so the replay changes nothing in an artifact that lacks that shape. `ArtifactForwardConversionVerdict` gains `'converted-major-step'`, so a consumer that switches exhaustively over the verdict adds that arm. `replayedRetirements` still lists only the entries the per-entry rule opened. The rule holds for every 18.0.0 prerelease label and at 18.0.0 itself. From 18.0.1 on, the label half replays the whole chain for such an artifact, as before.
+  - **`@objectstack/metadata`.** The artifact door places the new verdict on the open side of its window table and gives it its own clause, so the summary never claims that a `^18` artifact "predates" a runtime labelled below it. The bare-root form-predicate notice uses the same window.
+  
+  **Unchanged.** The protocol handshake still refuses a `^17` artifact on a protocol-18 runtime and prescribes `objectstack migrate meta --from 17`. A floor above `M.0.0` (such as `^18.0.1`) and a 17.x floor keep their previous verdicts.
+- Updated dependencies [317cddd]
+- Updated dependencies [fec87e7]
+- Updated dependencies [c28f317]
+- Updated dependencies [2e10c9a]
+- Updated dependencies [67b669e]
+- Updated dependencies [0253192]
+- Updated dependencies [bfc15d2]
+- Updated dependencies [2ff0825]
+- Updated dependencies [7aa8d51]
+- Updated dependencies [95a8435]
+- Updated dependencies [60bcfe7]
+- Updated dependencies [d112087]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [7de0265]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [c8b062f]
+- Updated dependencies [117d34d]
+- Updated dependencies [6729e10]
+- Updated dependencies [1920cf3]
+- Updated dependencies [41d0d40]
+- Updated dependencies [c52bfb4]
+- Updated dependencies [c7d6037]
+- Updated dependencies [72b26ed]
+- Updated dependencies [2d21b9c]
+- Updated dependencies [f66fdc7]
+- Updated dependencies [9fdb127]
+- Updated dependencies [615c696]
+- Updated dependencies [968acc8]
+- Updated dependencies [111ffff]
+- Updated dependencies [12b9daf]
+- Updated dependencies [d85615d]
+- Updated dependencies [6a06e3b]
+- Updated dependencies [0e9e7b7]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [9c93ce6]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [04e776b]
+- Updated dependencies [a7df552]
+- Updated dependencies [2f70c22]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [a87d8be]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [ad381fd]
+- Updated dependencies [2b61f2d]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3b49318]
+- Updated dependencies [4e9fe9f]
+- Updated dependencies [9ad3d24]
+- Updated dependencies [326a90a]
+- Updated dependencies [9fe7448]
+- Updated dependencies [2e11d90]
+- Updated dependencies [4578c56]
+- Updated dependencies [c512c25]
+- Updated dependencies [215e662]
+- Updated dependencies [3d886ee]
+- Updated dependencies [f4069c5]
+- Updated dependencies [d8d0711]
+- Updated dependencies [a45d5d8]
+- Updated dependencies [f6e1d49]
+- Updated dependencies [e9a1f5c]
+- Updated dependencies [40a6ee5]
+- Updated dependencies [5910b5e]
+- Updated dependencies [7098aca]
+- Updated dependencies [97610a5]
+- Updated dependencies [081e6a0]
+- Updated dependencies [1884948]
+- Updated dependencies [3089848]
+- Updated dependencies [e23eccb]
+- Updated dependencies [ac8f2c5]
+- Updated dependencies [db9cf80]
+- Updated dependencies [e75dced]
+- Updated dependencies [9af0005]
+- Updated dependencies [9af0005]
+- Updated dependencies [440bed6]
+- Updated dependencies [b2549a8]
+- Updated dependencies [ee8751d]
+- Updated dependencies [96e4be4]
+- Updated dependencies [35ef501]
+- Updated dependencies [faf6348]
+- Updated dependencies [557ae7c]
+- Updated dependencies [6a3fe25]
+- Updated dependencies [7731d70]
+- Updated dependencies [3073b72]
+- Updated dependencies [c76edeb]
+- Updated dependencies [5b12503]
+- Updated dependencies [514bf3c]
+- Updated dependencies [20e7d52]
+- Updated dependencies [b3a3634]
+- Updated dependencies [3e72f93]
+- Updated dependencies [f89b5f5]
+- Updated dependencies [d25b187]
+- Updated dependencies [0e00d36]
+- Updated dependencies [d748ae8]
+- Updated dependencies [dab6bf4]
+- Updated dependencies [ed1de8c]
+- Updated dependencies [a00cf99]
+- Updated dependencies [5fb1746]
+- Updated dependencies [29a163f]
+- Updated dependencies [e223152]
+- Updated dependencies [9f5eca5]
+- Updated dependencies [9963322]
+- Updated dependencies [b27b894]
+- Updated dependencies [874a38d]
+- Updated dependencies [02d9f69]
+- Updated dependencies [f53f14b]
+- Updated dependencies [a800912]
+- Updated dependencies [d973c34]
+- Updated dependencies [156ddfa]
+- Updated dependencies [5081090]
+- Updated dependencies [b6eb25f]
+- Updated dependencies [165587e]
+- Updated dependencies [e04759d]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [b32ee3e]
+- Updated dependencies [91f46d0]
+- Updated dependencies [e5899a6]
+- Updated dependencies [d7b26df]
+- Updated dependencies [490cb6d]
+- Updated dependencies [e865300]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [c74d843]
+- Updated dependencies [6d5191e]
+- Updated dependencies [85edd61]
+- Updated dependencies [e84aeb3]
+- Updated dependencies [322ff1e]
+- Updated dependencies [7b0a9c9]
+- Updated dependencies [5fc57b3]
+- Updated dependencies [fe58bbc]
+- Updated dependencies [c4e7fa5]
+- Updated dependencies [581ca7d]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [b7cd1af]
+- Updated dependencies [9814035]
+- Updated dependencies [55382dc]
+- Updated dependencies [b1d701b]
+- Updated dependencies [efcbac7]
+- Updated dependencies [51f36e7]
+- Updated dependencies [20028df]
+- Updated dependencies [69d4218]
+- Updated dependencies [5ce6773]
+- Updated dependencies [8532783]
+- Updated dependencies [9432bac]
+- Updated dependencies [3f69471]
+- Updated dependencies [8bc7836]
+- Updated dependencies [e5687cb]
+- Updated dependencies [1e62f71]
+- Updated dependencies [ec7f7f8]
+- Updated dependencies [038d4c9]
+- Updated dependencies [5677add]
+- Updated dependencies [147a0d1]
+- Updated dependencies [1959aac]
+- Updated dependencies [e1deaef]
+- Updated dependencies [1badd31]
+- Updated dependencies [58f5c90]
+- Updated dependencies [55828c5]
+- Updated dependencies [7856110]
+- Updated dependencies [9b37edb]
+- Updated dependencies [a22e67b]
+- Updated dependencies [62ce45d]
+- Updated dependencies [c5b43b6]
+- Updated dependencies [39e93ef]
+- Updated dependencies [02bec6c]
+- Updated dependencies [719183f]
+- Updated dependencies [8464380]
+- Updated dependencies [8c10776]
+- Updated dependencies [252a582]
+- Updated dependencies [f931e76]
+- Updated dependencies [a3d47c2]
+- Updated dependencies [e5f9f01]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [de70e97]
+- Updated dependencies [74c4b34]
+- Updated dependencies [e040b8c]
+- Updated dependencies [f451a59]
+- Updated dependencies [ba95607]
+- Updated dependencies [b53b949]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [1e44436]
+- Updated dependencies [2acff87]
+- Updated dependencies [299a2c6]
+- Updated dependencies [e23eccb]
+- Updated dependencies [bf492c8]
+- Updated dependencies [c7a3234]
+  - @objectstack/spec@18.0.0-next.0
+  - @objectstack/core@18.0.0-next.0
+  - @objectstack/metadata-core@18.0.0-next.0
+  - @objectstack/types@18.0.0-next.0
+  - @objectstack/metadata-fs@18.0.0-next.0
+
 ## 17.7.0
 
 ### Minor Changes

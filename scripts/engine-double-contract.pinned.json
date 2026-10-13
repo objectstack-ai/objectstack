@@ -1592,6 +1592,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.view-container-reset-expansions.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.view-container-reset-expansions.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.view-container-reset-expansions.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.write-response-internal-fields.tripwire.test.ts",
       "verb": "delete",
       "pinned": 1

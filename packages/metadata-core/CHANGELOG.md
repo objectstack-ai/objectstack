@@ -1,5 +1,447 @@
 # @objectstack/metadata-core
 
+## 18.0.0-next.0
+
+### Minor Changes
+
+- 06cc45d: Under a walled posture the security catalog is the platform operator's: tenants are refused creating, changing or deleting positions, permission sets and capabilities, and may only assign them
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered walled-catalog-tenant-writes-retired -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes (ADR-0131 D3: "Shared-DB multi-tenant (`group` / `isolated`): tenant admins cannot create or edit catalog items; the operator defines the catalog for every tenant … Creation through Setup or the API is refused with a message naming the posture and the capability.").
+  
+  **Why.** The catalog is environment-level, and every organization resolves it by name. Measured on a booted `isolated` and `group` stack: an organization owner granted `manage_metadata` inside their own organization saved `PUT /meta/permission/:name` over a permission set another organization's member holds, and that member's next resolution carried the change. One organization's write changed what another organization's members resolve.
+  
+  **FROM → TO**, on a `group` or `isolated` deployment, for a caller below the platform operator (the `PLATFORM_ADMIN` rung: the deployment's declared `OS_PLATFORM_OWNER_EMAIL` owner):
+  
+  - `PUT /meta/:type/:name`, `DELETE /meta/:type/:name`, `POST /meta/:type/:name/publish` and `POST /meta/:type/:name/rollback` on `@objectstack/rest`, and `PUT /meta/:type/:name` on the runtime dispatcher, for `position` or `permission`: **FROM** admitted to any `manage_metadata` holder **TO** `403 FORBIDDEN` (the dispatcher's `PUT` answers `403 PERMISSION_DENIED`). The message names the posture and the capability.
+  - The same doors for `capability`: admitted where they were admitted. `capability` is a code-only type, so these doors already refused its writes before this change; only the sentence the caller reads changes, to the posture refusal. For `capability`, the accept set narrows at the data door on `sys_capability`, below.
+  - `POST /security/permission-sets/:name/clone` (the permission-set clone door): **FROM** admitted to any `manage_metadata` holder **TO** `403 PERMISSION_DENIED`, before the source is read.
+  - A data-door insert, update or delete on `sys_position`, `sys_permission_set` or `sys_capability`: **FROM** admitted to any caller whose grants admit the table (a `sys_permission_set` create landed in the environment ledger; a `sys_position` create landed as an organization row with no definition) **TO** `403 PERMISSION_DENIED`, before anything is written. This includes an ADR-0090 D12 delegate whose `adminScope` carries `authorEnvironmentSets`: under a wall it can no longer author environment permission sets at the data door. Its assignment and binding paths are untouched.
+  
+  **Unchanged.** Assignments: `sys_user_position` and `sys_user_permission_set` rows stay organization rows that an organization's administrators write for their own members. The platform operator and the engine's own writes (seeders, installers, migrations) write the catalog as before. Every other metadata type is untouched. Under `single` (and with no `tenancy` service), catalog writes stay with `manage_metadata` holders, exactly as before. The catalog activation door already required the platform operator under a wall.
+  
+  **The remedy.** A tenant that needs a position or permission set asks the platform operator to define it in Studio, or through a managed package. The tenant's administrators then assign it to their members. `@objectstack/spec` registers the change as the ADR-0087 semantic entry `walled-catalog-tenant-writes-retired`. `@objectstack/metadata-core` exports the one predicate every door asks, `walledCatalogWriteVerdict`, beside `isSecurityCatalogType`, `SECURITY_CATALOG_TYPES` and `PLATFORM_OPERATOR_POSTURE`. A custom door that writes catalog items asks it after `metaWriteCapabilityVerdict`.
+- 7895671: feat(metadata-core,rest,runtime,plugin-email,spec)!: the `/meta` doors carry no organization; organization-admin metadata authoring closes and `manage_org_presentation` retires (ADR-0131 D6)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered manage-org-presentation-retired, meta-doors-organization-scope-retired -->
+  
+  **BREAKING**, graded `minor` on the v18 prerelease line: Changesets is in pre mode with the tag `next`, and the fixed group is already majored by the line's opening marker, so this ships in an `18.0.0-next.N`.
+  
+  ADR-0131 D6 retires the per-organization overlay axis: environment metadata written by Studio belongs to the whole deployment. The `/meta` doors of both transports (`@objectstack/rest` and the runtime dispatcher's `/meta` branch) used to thread the caller's active organization into writes and reads of the five `allowOrgOverride: true` types (`view`, `dashboard`, `report`, `translation`, `email_template`). They no longer do, for any type, and the read and the write flip together.
+  
+  **What changes.**
+  
+  - **Writes land environment-wide.** `PUT`, `DELETE`, `POST …/publish` and `POST …/rollback` on `/api/v1/meta/:type/:name` hand the protocol no organization, so the row and its audit and history rows carry `organization_id` NULL, whatever the caller's active organization.
+  - **Reads are environment → code.** The item read (both cache arms), the list, the layered view (`/layers` and `?layers=true`), `/published`, `?state=draft`, `GET /meta/_drafts`, `/history`, `/diff`, `/audit` (the environment rows, `organizationId: null`), `GET /meta/diagnostics` and `/references` name no organization.
+  - **An organization admin's metadata write is refused.** `metaWriteCapabilityVerdict` admits `isSystem` or `manage_metadata` only. A caller holding `manage_org_presentation` and not `manage_metadata` is answered `403` on all four item doors (`FORBIDDEN` on REST, `PERMISSION_DENIED` on the dispatcher) with `… requires the \`manage_metadata\` capability.`, for every type and whatever its active organization.
+  - **`manage_org_presentation` retires** from `PLATFORM_CAPABILITIES` (`@objectstack/spec/security`). A permission set naming it still parses and loads, and its other grants still apply; the grant itself admits nothing. The `sys_capability` row seeded for it earlier is not pruned (the seeder upserts only); an operator may delete it in Setup.
+  - **The email-template boot sweep** (`@objectstack/plugin-email`) reads the effective templates environment → code, as the door serves them; it no longer reads in the Default Organization.
+  
+  **What moves for consumers.**
+  
+  - FROM `import { organizationIdForMetaWrite } from '@objectstack/metadata-core'` TO nothing: a `/meta` write carries no organization. Delete the call and the `organizationId` it fed.
+  - FROM `import { ORG_PRESENTATION_AUTHORING_CAPABILITY } from '@objectstack/metadata-core'` TO nothing: delete the import.
+  - FROM `metaWriteCapabilityVerdict({ isSystem, systemPermissions, canonicalType, activeOrganizationId, operation })` TO `metaWriteCapabilityVerdict({ isSystem, systemPermissions, operation })`: drop the two members.
+  - FROM `import { metaReadOrganizationId } from '@objectstack/rest'` TO nothing: a `/meta` read carries no organization. `metaCallerOrganizationId` stays.
+  - FROM `bootstrapEffectiveEmailTemplates(engine, metadataService, { protocol, tenancy })` TO `{ protocol }`: the `tenancy` source is gone.
+  - A permission set granting `manage_org_presentation`: grant `manage_metadata` to whoever must author those five types, and delete the stale grant.
+  
+  **What a deployment observes.** An overlay row an earlier release stored under an organization stays in `sys_metadata` untouched, and is no longer served by any `/meta` read or projected by the email-template sweep until the promotion ceremony (ADR-0131 C7) carries it to the environment layer. Under the `single` posture that is every earlier Studio save of the five types, because it was filed under the Default Organization: on the `/meta` doors such an edit reads as reverted to the environment or code definition. Re-save the item in Studio to make the edit live on the `/meta` doors now. Public forms are the exception: until that ceremony the anonymous form doors read a form `view` in the Default Organization and prefer its overlay for the form's body, while a withdrawal in either layer closes the form, fail-closed. So a legacy organization overlay of a public form keeps serving its body there: a Studio re-save of that body (an environment row) does not change the body the public form serves, and a Studio withdrawal (an environment row) still closes it.
+  
+  **What does not change.** Saves of every other type were already environment-wide. Flow saves, the capability gate's answer for `manage_metadata` holders and `isSystem`, the protocol's own organization-scoped refusals, and the `/packages` doors are untouched by this change.
+- c8b062f: feat(metadata-protocol,metadata-core,objectql,rest,plugin-security,spec)!: every metadata read is environment → code; legacy organization rows and overlays of sealed managed content are reported at boot, not served (ADR-0131 D6)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered metadata-read-organization-scope-retired -->
+  
+  **BREAKING (narrowing).** No read that is refused today is admitted. Graded `minor` on the v18 prerelease line: Changesets is in pre mode with the tag `next`, and the fixed group is already majored by the line's opening marker, so this ships in an `18.0.0-next.N`.
+  
+  ADR-0131 D6 retires the per-organization overlay axis. The doors carry no organization and the protocol refuses every organization-scoped write; now every protocol read is environment → code as well.
+  
+  **What changes.**
+  
+  - The item, list, layered, cached (ETag), history, diff, audit, drafts and commit-timeline reads, the `_lock` gate's overlay layer, search's page sweep, diagnostics and references serve the environment's stored row, else the code packages' definition — whatever organization a caller names. A row stored organization-scoped by an earlier release is served by no read and loaded by no boot.
+  - `overlayScope` on the layered read is `'env'` or `null`; `'org'` is gone.
+  - `listDrafts` lists the environment's drafts only, and its rows carry no `organizationId`.
+  - `listCommits` lists the environment's commits only, for every caller: a legacy organization commit is not shown, so an operator on the packages door no longer sees every organization's legacy commits, and a rollback plan never contains one.
+  - [Triage ruling Q1 → C] An environment row that overlays an item a managed package ships, on a type sealed against overlays (any type whose registry entry admits no overlay — a managed flow, action, hook, object or datasource, for example — written through the `OS_METADATA_WRITABLE` hatch before the seal), is not served: the package's definition is. An `object` such row is not loaded at boot either, so the engine keeps the packaged schema. A stored fork of a code-declared permission set keeps its own ruling instead: the reads do not decline it, a cold boot refuses a deployment that holds one (ADR-0048), and the offline `os migrate security-catalog-overlays` removes it.
+  - `@objectstack/objectql` binds the environment's authored hook and action rows only; a legacy organization-scoped hook or action row is no longer bound.
+  - Boot names both populations, once each: `[metadata_org_scoped_unserved]` lists every legacy organization row per type (active and draft), plus the legacy rows of `sys_metadata_commit`, `sys_metadata_history` and `sys_metadata_audit`, and names the v18 migration ceremony (`os migrate`, ADR-0131 D10) that carries them; `[metadata_sealed_overlay_unserved]` lists the sealed overlays per type with the two remedies. Nothing is deleted or rewritten.
+  - The anonymous public-form doors keep reading the Default Organization's legacy `view` layer, fail-closed, until that ceremony (triage ruling Q3 A) — through the protocol-internal `legacyFormOrganizationId` key, which no spec request declares and which the protocol honours for `view` alone.
+  - The seed loader's refusal of an unowned record now prescribes `organization_id` on the record first: a seed published through a package carries no caller organization.
+  
+  **What moves for consumers.**
+  
+  | From | To |
+  |:--|:--|
+  | `organizationId` on a `GetMetaItems` / `GetMetaItem` / `GetMetaItemLayered` / `AuditMetaItem` / `HistoryMetaItem` / `GetMetaItemCached` request (`@objectstack/spec`) | drop it: the read is the environment's. The key is stripped at a spec parse (the schemas are not strict) and no longer type-checks |
+  | `organizationId` on a `listDrafts` / `listCommits` / `diffMetaItem` / `getMetaDiagnostics` / `findReferencesToMeta` request (`@objectstack/metadata-protocol`) | drop it |
+  | `ListDraftsResponse` draft `organizationId` | gone: every listed draft is the environment's |
+  | `SysMetadataRepository.listDrafts` row `organizationId` (`@objectstack/metadata-protocol`) | gone: every listed row is an environment draft, whichever repository asks |
+  | `overlayScope: 'org'` (`GetMetaItemLayeredResponse`) | only `'env'` or `null` |
+  | `declaresOrgOverride`, `organizationIdForMetaRead` (`@objectstack/metadata-core`) | removed — no read takes an organization. Read `allowOrgOverride` off `DEFAULT_METADATA_TYPE_REGISTRY` where a type's overlay channel is the question |
+  | `MetadataAuthoringGateContext.organizationId` (`@objectstack/metadata-protocol`) | removed — no write is organization-scoped, and no gate read it |
+  | `organizationId` on `projectPermissionMutation`'s `evt` (`@objectstack/plugin-security`) | drop it: the projection reads the environment → code layered read, whatever organization the event names |
+  | a legacy organization-scoped `sys_metadata` row a deployment relied on | re-save the item in Studio to make it environment-wide now, or wait for the v18 migration ceremony, which promotes it |
+  | an environment overlay of a managed item on a sealed type (flow, action, hook, object, datasource …) | re-express the change as a new item under a new name (a linkage-free clone), then delete the stored row; or delete the row |
+  
+  **What does not change.** No stored row is deleted, rewritten or migrated. The anonymous form doors' read of organization-layer withdrawals is unchanged.
+- 117d34d: feat(metadata-core,metadata-protocol,metadata,platform-objects,spec)!: `sys_view_definition` retires as inert (ADR-0131 D13)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered sys-view-definition-retired -->
+  
+  **BREAKING**, graded `minor` on the v18 prerelease line: Changesets is in pre mode with the tag `next`, and the fixed group is already majored by the line's opening marker, so this ships in an `18.0.0-next.N` like every other stage.
+  
+  `sys_view_definition` was declared for runtime-authored shared and personal views (ADR-0017) and never used for them: no framework code writes or reads its rows, and the Studio console's view doors write the ADR-0005 `view` overlay in `sys_metadata` through the metadata API. ADR-0131 D13 retires it. A runtime-authored view is a `view` metadata item, written through `PUT /api/v1/meta/view/<name>` (the client's `meta.saveItem` for type `view`); nothing about that path changes.
+  
+  **What moves for consumers.**
+  
+  - **The object.** FROM `import { SysViewDefinitionObject } from '@objectstack/metadata-core'` (or from `@objectstack/platform-objects`, or its `/metadata` subpath) TO nothing: delete the import. Neither `MetadataPlugin` nor the metadata protocol assembly registers the object any more, so the generic data door no longer serves it.
+  - **The migration exports** of `@objectstack/metadata-protocol`. FROM `ensureViewDefinitionActiveIndex`, `resolveIndexExec`, `buildActiveIndexSql`, `VIEW_DEFINITION_TABLE`, `VIEW_ACTIVE_INDEX_NAME`, `VIEW_ACTIVE_PROBE_INDEX_NAME`, `VIEW_ACTIVE_INDEX_COLUMNS`, `EnsureViewIndexLogger`, `EnsureViewIndexStatus` and `EnsureViewIndexResult` TO nothing: delete the import. `classifyIndexFailure` and the `IndexExec` type are still exported, unchanged, from the shared index-migration module.
+  - **The name.** `PLATFORM_OBJECTS_BY_PACKAGE['metadata-core']` (`@objectstack/spec/system`) lists four objects, and `isPlatformProvidedObjectName` answers `false` for `sys_view_definition`. A stack that names it (a lookup target, a flow trigger, a permission entry, a platform-global declaration) is now flagged as naming an unknown object: remove the reference.
+  - **`os migrate duplicates`.** `runtimeIndexPreflight` carries three entries (the two `sys_metadata` overlay indexes and `sys_setting`'s row identity), with no `idx_sys_view_def_active` entry. A serving boot no longer runs the active-row index migration for the table, and no longer logs its `sys_view_definition active-row index` lines.
+  - **Translations.** The platform translation bundles no longer carry `sys_view_definition` keys.
+  
+  **Existing databases.** Schema sync is additive and never drops a table, so a database an earlier release provisioned keeps `sys_view_definition`, with any rows a caller wrote through the generic data door; nothing reads them. `os migrate apply --allow-destructive` does not drop it either, because it reconciles declared objects only (measured on one database: it dropped an orphaned column of a declared table and left this table and its row in place). On a project with a host config, `os migrate plan` lists it among the platform-prefixed tables nothing declares. Export any row worth keeping; dropping the table is the operator's call, by hand: `DROP TABLE sys_view_definition`.
+- f4069c5: fix(metadata): the object read's `sortability` follows the caller's field permission for every caller class
+  
+  Clause-②: yes (widening)
+  
+  - **What was wrong.** ADR-0106 D4 serves a caller holding `manage_metadata`, `studio.access` or `setup.access` (a platform admin, and an organization admin through `setup.access`) the object schema UNMASKED, because Studio and Setup authoring need the whole definition. The `sortability` projection served beside it on `GET /meta/object/:name` (and the runtime dispatcher's `/metadata/object/:name`) was derived from that unmasked document, so it marked a field `sortable: true` that the same caller's field permission marks unreadable, while the data route refuses a sort or filter on that field with `403 PERMISSION_DENIED`. A client building its sort picker from the projection offered a click the server refuses.
+  - **What changes.** `sortability` is now derived from the caller's runtime view: the served document for every caller the mask projects (unchanged), and for a D4-exempt caller the fields their own field permission reads. The definition (`item.fields`) is unchanged for every class: whole for an exempt caller, masked for everyone else. The data route and `/auth/me/permissions` are unchanged.
+  - **Caching.** On the cached `GET /meta/object/:name` branch an exempt caller's ETag folds a fingerprint of the fields withheld from their projection, and the conditional request is judged after it is folded. An exempt caller whose permission withholds nothing keeps the byte-identical ETag. An exempt caller and a projected caller denied the same field never share a validator.
+  - **Failure posture.** The exempt caller's field permission is asked lazily, only by the item read that serves `sortability`, and never turns their definition read into a fault: if the security service throws or cannot answer, `sortability` is derived from the served document as before, with one `warn`.
+  - **New in `@objectstack/metadata-core`.** `resolveObjectSchemaRuntimeView(document, posture)` returns `{ document, withheld, fingerprint }`, the view the runtime projections beside an object schema are derived from. The types `ObjectSchemaRuntimeView` and `ObjectSchemaRuntimeFieldPosture` are exported with it, and the `passthrough` member of `ObjectSchemaMaskPosture` gains an optional `runtime` (set on an `exempt` posture for a capability-exempt caller in a deployment with a `security` service).
+  - **New in `@objectstack/rest`.** `translateMetaEnvelope` takes an optional fifth argument, `runtimeDocument` (default: the served document), and `MetaItemAnswerSources.translateEnvelope` an optional third. Nothing is removed, renamed or narrowed.
+- 8532783: feat(service-datasource,metadata-core)!: the datasource-admin plugin reads the environment's stored `datasource` rows only; a legacy organization-scoped row is neither loaded at boot nor served (ADR-0131 D6)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered metadata-read-organization-scope-retired) That entry retires every metadata read of a row stored organization-scoped, the boot hydration included, and states that such a row is served by no read and loaded by no boot. This changeset carries the same rule to the datasource-admin plugin's own reads of sys_metadata: no key, export or stored shape is removed, renamed or re-shaped, and nothing is rewritten. -->
+  
+  **BREAKING (narrowing).** Graded `minor` on the v18 prerelease line, as the read narrowing it completes.
+  
+  **What changes.** `DatasourceAdminServicePlugin` reads stored `datasource` rows in five places — the boot restore (`restoreRuntimeDatasources`), the by-name read behind cluster convergence and the `/meta` door's datasource projection, and the existence probes behind its own create, update and remove. Each now reads the environment's rows only, judged by the same row-value test the metadata reads apply. A row stored organization-scoped by an earlier release:
+  
+  - is no longer registered at boot, so the datasource-admin door and the metadata read door no longer serve it, and no live pool is opened from it;
+  - is never updated or deleted by an admin create, update or remove under its name — those write and remove an environment row of their own;
+  - stays at rest, and the boot report `[metadata_org_scoped_unserved]` keeps naming it. Nothing is deleted or rewritten; the v18 migration ceremony (`os migrate`, ADR-0131 D10) carries it.
+  
+  **What moves for consumers.**
+  
+  | From | To |
+  |:--|:--|
+  | a legacy organization-scoped runtime datasource a deployment relied on | re-create it through the datasource-admin door or save it through the `/meta` door to make it environment-wide now, or wait for the v18 migration ceremony |
+  
+  `@objectstack/metadata-core` exports `isLegacyOrganizationRow`, the one row-value test for such a row; `@objectstack/objectql`'s authored hook and action binders now read it from there, with no change in what they bind.
+- 58f5c90: fix(metadata-core): an artifact declaring `engines.protocol: '^18'` that was built during the v18 prerelease boots on a later runtime that retired one of its shapes — the artifact door replays every retired conversion of protocol 18's step for a floor of `18.0.0`
+  
+  Clause-②: yes
+  
+  **What an operator saw.** A compiled artifact (`os build` → `dist/objectstack.json`) that declares `engines.protocol: '^18'` and was built before a protocol-18 retirement landed carries the retired shape, for example a defaulted key that every earlier parse emitted. Booted on a runtime that enforces the retirement, the metadata plugin's startup refused it at the strict parse and the boot rolled back. The artifact door compared the floor `18.0.0` with each retirement's `retiredAfter` stamp, and every retirement that lands during the v18 prerelease is stamped with the last 17.x release, below that floor, so nothing was replayed.
+  
+  **What an operator sees now.** The same artifact boots. One warning per conversion names it and its site count: `[MetadataPlugin] artifact 'LABEL' declares the first release of protocol 18 (authored engines.protocol floor 18.0.0), which a build from any 18.0.0 prerelease declares too, so it may predate retirements in the conversion step into protocol 18 that this runtime enforces (runtime spec VERSION) — converted N site(s) forward via ADR-0087 conversion 'ID' …`. The artifact file itself is unchanged, so it converts again on every boot until it is rebuilt with `os build`. An artifact built after the retirement boots exactly as before: the replay finds nothing to convert, and nothing is logged.
+  
+  - **`@objectstack/metadata-core`.** `applyArtifactForwardConversions` opens its window on a third condition. A declared floor of `M.0.0` at or above the runtime label replays every retired entry whose `toMajor` is `M`, except the default flips the door already refuses. An artifact cannot say which of those entries it predates: it carries no field naming the spec or CLI that built it. Each entry rewrites only its own old shape, so the replay changes nothing in an artifact that lacks that shape. `ArtifactForwardConversionVerdict` gains `'converted-major-step'`, so a consumer that switches exhaustively over the verdict adds that arm. `replayedRetirements` still lists only the entries the per-entry rule opened. The rule holds for every 18.0.0 prerelease label and at 18.0.0 itself. From 18.0.1 on, the label half replays the whole chain for such an artifact, as before.
+  - **`@objectstack/metadata`.** The artifact door places the new verdict on the open side of its window table and gives it its own clause, so the summary never claims that a `^18` artifact "predates" a runtime labelled below it. The bare-root form-predicate notice uses the same window.
+  
+  **Unchanged.** The protocol handshake still refuses a `^17` artifact on a protocol-18 runtime and prescribes `objectstack migrate meta --from 17`. A floor above `M.0.0` (such as `^18.0.1`) and a 17.x floor keep their previous verdicts.
+
+### Patch Changes
+
+- 56c8844: `@objectstack/spec/ui` now exports the rule that decides which forms a `view` body opens to anonymous intake, so a console reads "published" from the same rule the server's anonymous form doors serve
+  
+  Clause-②: yes (widening)
+  
+  - **New on `@objectstack/spec/ui`:** `publicFormSlug`, `anonymousFormIntakeSlug`, `anonymousFormIntakeCandidates`, `anonymousFormIntakeSlugs` and the `AnonymousFormIntakeCandidate` type. They lived only in `@objectstack/metadata-core`, which a browser console should not depend on. They are pure functions with no imports, beside the `SharingConfigSchema` they read.
+  - **What they decide is unchanged.** A form is open when its `sharing` has `enabled === true`, `allowAnonymous === true` and a non-empty `publicLink`. The scan covers the same three shapes in the same order: the nested `form`, every `formViews` entry, then the `config` of a `viewKind: 'form'` item.
+  - **`@objectstack/metadata-core` re-exports the same functions** from `@objectstack/spec/ui`. They are the spec's own bindings, not wrappers or copies, so there is still one copy of the rule. Its exports, names and types are unchanged, and `@objectstack/rest` and `@objectstack/metadata-protocol` keep importing from it. Its built output now loads `@objectstack/spec/ui` to get them.
+  - **Not covered by the new export:** whether another metadata layer withdraws a form (`anonymousFormIntakeWithdrawnIn`), and whether the deployment's tenancy posture lets the form take an anonymous submission (`anonymousFormIntakeUnavailability`). These two read server state and stay in `@objectstack/metadata-core`. `anonymousFormObjectName`, which names the object a form submits into, stays there beside them; it is a pure read of the form and the view, not of server state. A form the new functions call open can still be withheld by a withdrawal in another layer or by the posture.
+- 3d886ee: A field can declare cell formatting rules: `conditionalFormatting: [{ condition, style }]`, the rule a list view already declares for its rows
+  
+  Clause-②: yes (widening)
+  
+  - **`FieldSchema.conditionalFormatting`** (optional) is an ordered list of `{ condition, style }` rules. The first rule whose CEL `condition` holds applies its CSS `style` map to that field's cell, wherever the field renders. A list view's row rules still style the row, and both may apply to one record. Example: `amount: Field.currency({ conditionalFormatting: [{ condition: P\`value < 0\`, style: { color: '#b91c1c' } }] })`.
+  - **One rule element, no second style vocabulary.** The `{ condition, style }` element moved out of `ListViewSchema` into its own spec module, and both `ListViewSchema.conditionalFormatting` and `FieldSchema.conditionalFormatting` mount it. The list view accepts exactly what it accepted before. Its refusal of an unknown rule key now reads the same on both members: for a `color` written beside `style`, it says to put the colour in `style` first, then points a list view at `rowColor`.
+  - **The scope is `value` and `record`.** `value` is this field's value on the record and `record` is the row. `@objectstack/lint` judges each condition at `objectstack build`, `objectstack validate` and the object save: it must parse, read fields as `record.<field>`, name declared fields, and read no other root (`previous`, `parent` and the user roots are refused, naming the field and the rule).
+  - **For presentation only.** Use it for rules that carry no meaning of their own, such as an amount below zero in red or stock under its safety level in amber. A deadline's overdue state stays a declaration (`dueLike` with `settledWhen`).
+  - **Display only.** Nothing on the write path reads the key, and every metadata that parsed before parses unchanged. Field-level security drops a rule whose condition reads a field the caller cannot read, keeping the other rules in order (`@objectstack/metadata-core`). The SQL driver classifies the key as presentation, so it never reaches column DDL (`@objectstack/driver-sql`).
+  - **Who reads it.** objectui's cell renderers read the rules in a follow-up release, once this spec version is published. Until then a rule is validated when it is authored and styles no cell.
+- 9af0005: The shared build validator (`@objectstack/lint`'s expression rule over `@objectstack/formula`) judges `record.<block>.<leaf>` against an object's declared read attachments (`ObjectSchema.attachedOnRead`)
+  
+  - **`@objectstack/lint`.** The field index the expression rule builds now adds each block an object declares under `attachedOnRead` to the names `record.<x>` resolves to, and hands the shared validator the block's declared leaves. A predicate such as `record.viewer.can_act` on an object that declares the `viewer` block is accepted where it was refused as an unknown field.
+  - **`@objectstack/formula`.** `ExprSchemaHint` gains an optional `attachedOnRead` (block name → declared leaf keys). When a `record.` or `previous.` reference names a declared block, its next segment must be a leaf the block declares. Anything else is refused with the existing `unknown-field` code: `field` is the dotted path as written (`viewer.can_actt`), `suggestion` the nearest declared leaf (`viewer.can_act`), and the new optional `block` and `leaves` params carry the leaves the block declares, which the message names. No new refusal code.
+  - **`@objectstack/metadata-core`.** The ADR-0106 field-level-security masker classifies the new top-level key as passed through unchanged (`OBJECT_REFERENCE_POSITIONS.attachedOnRead`): a block name and its leaf keys never name a field, so no caller's served object definition loses or gains anything.
+  - **Unchanged.** An object that declares no block keeps every verdict it had, and a second segment off any other field is not judged. Index access, a method call on a block and a third segment stay unjudged.
+- e5687cb: An `email` field can declare that it identifies a correspondent for inbound mail: `mailAssociation`
+  
+  Clause-②: yes (widening)
+  
+  - **`mailAssociation: boolean`** (optional, no default) on a field definition. TRUE marks this email field as identifying a message correspondent: when a mailbox service ingests a message, it associates the message with every record of the object whose value in this field equals one of the message's participant addresses (From, Sender, Reply-To, To and Cc, plus those of a forwarded message it carries; ASCII case-insensitive; the receiving mailbox's own addresses excluded; only within the mailbox's organization). A message no record matches waits in the mailbox's unassociated pool. Absent or FALSE: the field takes no part in matching.
+  - **The platform learns which fields carry a correspondent's address, never what a contact is.** Every object that flags a field is treated alike; no app code and no resolver service is involved.
+  - **The door that judges it.** `FieldSchema` refuses the key on any type other than `email`, naming the field's type and the fix (change the type to `email`, or drop the key). Every metadata that parsed before parses unchanged.
+  - **Who reads it.** Nothing yet: the mailbox service's ingest is the reader, and it ships separately. Until then `objectstack validate` and `objectstack lint` warn an author who sets it (`liveness-planned-property`) that no mailbox service reads it yet.
+  - **Where to author it.** The field designer offers it on email fields as "Match Inbound Mail".
+  - **`@objectstack/driver-sql`.** `FIELD_KEY_STORAGE_CLASS` classifies `mailAssociation` as `presentation`: the mailbox service reads it, never `createColumn`, so a declaration on a builtin column name is not reported as discarded storage. No behaviour changes.
+  - **`@objectstack/metadata-core`.** `FIELD_REFERENCE_POSITIONS` classifies `mailAssociation` as `keep`: the FLS scrub of a served object definition passes the flag through unchanged, because it names no field.
+  - **`@objectstack/platform-objects`.** The field designer's new row carries its label and help text in the metadata-form translation bundles for en, zh-CN, ja-JP and es-ES.
+- 5677add: fix(metadata-protocol): two locales of one email template saved through the metadata door both survive a restart — an overlay row is keyed by its bundle member (#22877)
+  
+  Clause-②: no
+  
+  **What an administrator sees.** Saving the same email template in two languages through the metadata door (`PUT /api/v1/meta/email_template/:name`, the Studio editor's save) keeps both. Before, the store kept one overlay row per template name, so the second language's save replaced the first language's row: both read back until the next restart, and then the first language mailed the package wording again. Each language now keeps its own wording across restarts, and each send in that language uses it.
+  
+  **What changed in the store.**
+  
+  - `sys_metadata` gains one nullable column, `bundle_member`. It holds the member of a metadata type whose identity is a pair — today `email_template`, identified by `(name, locale)`. NULL is the canonical member (`en-US`, the locale a send falls back to). Every other row stays NULL, so rows of every other type, and an `en-US` template row, are byte-identical to before.
+  - The value is taken from the saved body's `locale`; it is never authored. A body that declares no `locale` is the `en-US` member.
+  - The overlay uniqueness index becomes `(type, name, organization_id, COALESCE(package_id, ''), COALESCE(bundle_member, ''))`, for active rows and for draft rows, and the declared index in `metadata-core` carries the column too. A second row for the same template, language, package and state is refused by the index.
+  
+  **What a read or a door addresses.** A save addresses the language its body names. A read, delete, publish, history or revert by name that names no language addresses the `en-US` member: `GET /meta/email_template/:name` serves the `en-US` wording (the stored one when it was customized, else the package's), where before it served whichever row the name had. The layered list and the send path serve every language as before. A non-`en-US` language's own customization is reached through the list, and is replaced by a save that names its `locale`; a by-name reset (`DELETE`) removes the `en-US` customization only. The lineage counter stays one per template name, so a version number names one saved snapshot, and a revert by name restores only a version of the `en-US` member. Resetting, publishing or reading a non-`en-US` language by name needs the by-name member selector, which arrives with stage 2 of #22877; until then those doors address the `en-US` member.
+  
+  **What happens on the first boot after upgrading.** Nothing to configure.
+  
+  1. The schema sync adds the `bundle_member` column.
+  2. Boot hydration gives every `email_template` row stored before the column existed the member its body declares, so a row an earlier save left holding a second language's wording becomes that language's row, not the `en-US` one. Rows of every other type are not read or written.
+  3. The first metadata write rebuilds the overlay index with the new key, through the existing probe-then-replace order. Adding a key part only relaxes uniqueness, so no rows a store already holds can block the rebuild; a store that was already blocked is reported as before, with the duplicate-listing query and `os migrate duplicates`.
+  
+  **On a database without partial indexes (MySQL).** The rebuild above is refused there, as before, and reported in the server log at the first metadata write. A store that booted an earlier version keeps the four-column declared index under `idx_sys_metadata_overlay_active`, because the schema sync skips an index whose name already exists. That index has never constrained an environment-wide overlay row: those rows store no organization, and a UNIQUE key does not collide NULLs. So two languages of one template coexist there too, and no save is refused. `os migrate plan` lists the declaration change on that index as a destructive `recreate_index`. To bring the index to the five-column declaration, run `os migrate apply --allow-destructive`. A fresh store gets the five-column declaration.
+  
+  `os migrate duplicates` boots read-only and adds no column. Run against a store this version has not booted yet, it lists the two overlay indexes with every row read as the empty member — the value the column will hold — so a duplicate that will block the rebuild is still reported, and the entry's `duplicateSql` is the member-less statement that ran there.
+- c5b43b6: fix(metadata-core, runtime): a multi-package artifact built before a retirement boots at `os dev -a` and `os start`. The ADR-0087 forward conversion walks every `packages[].manifest` body, and the runtime's artifact load converts the bundle once, before any reader sees it
+  
+  Clause-②: no
+  
+  **What an operator saw.** A multi-package release artifact (ADR-0130 D4: `os build` of a `composeStacks(…, { manifest: 'preserve' })` project) carries its collections in `packages[i].manifest`. Take such an artifact built before a retirement, for example with a dashboard still spelled `refreshInterval`. `os dev -a dist/objectstack.json` and `os start` exited at boot with "`packages[1]` is not a package entry (ADR-0130 D4): manifest.dashboards.0.refreshInterval: `dashboard.refreshInterval` was renamed to `refreshIntervalSeconds`…". The metadata plugin's artifact door refused the same artifact at its strict parse. The ADR-0087 conversion converted that dashboard when it sat in the artifact's own `dashboards`, but it never read a package body, and the runtime read the bundle raw before any conversion ran.
+  
+  **What an operator sees now.** The same artifact boots at `os dev -a` and at `os start`. Each body's items are served converted (`refreshIntervalSeconds: 300`, valid), each owned by its own package. The boot log names each conversion once, with the body it found it in: `[MetadataPlugin] artifact '…' … converted 2 site(s) forward via ADR-0087 conversion 'dashboard-refresh-interval-to-refresh-interval-seconds' (first at packages[0].manifest.dashboards[0].refreshIntervalSeconds) …`. The artifact file itself is unchanged, so it converts again on every boot until it is rebuilt with `os build`. A body built after the retirement converts nothing and logs nothing. An artifact authored past every retirement is still refused with the tombstone inside its body.
+  
+  - **`@objectstack/metadata-core`.** `applyArtifactForwardConversions` runs the same conversion over each package body as over the artifact's own collections. It uses the same registry and the same window, decided once from the artifact's own `engines.protocol`; a body's own `engines.protocol` is not read. A notice from a body is located from the artifact root (`packages[1].manifest.…`).
+  - **`@objectstack/runtime`.** `loadArtifactBundle` converts the loaded artifact once, before it merges the runtime module and before the stack, `AppPlugin` or the `manifest` service read it. The database resolver reads the artifact file itself, and it runs the same conversion on what it reads. So a multi-package artifact that declares its default datasource in a package body opens that database, not the unified default.
+  
+  **Unchanged.** An artifact without `packages[]` converts exactly as before, with the same notices, paths and messages, and it is served the same way.
+- 8c10776: fix(metadata-protocol): a stored-metadata migration records the user who ran it, or nobody, never a label
+  
+  Clause-②: no
+  
+  - **What was wrong.** The stored-metadata migration pass (`os migrate meta --stored`, `POST /api/v1/meta/_migrate-stored`, the runtime dispatcher's `POST /metadata/_migrate-stored`, and `migrateStoredMetadata()` called in process) recorded a label as the writer of every row it rewrote: `'os migrate meta --stored'`, `'<user id> (POST /api/v1/meta/_migrate-stored)'`, `'POST /api/v1/meta/_migrate-stored'`, or `'migrate-stored'`. The writer lands in `sys_metadata_history.recorded_by` and in the row's `updated_by`. Both columns are references to `sys_user`, so the label pointed at no user. Nothing refused it, because metadata writes run as the system.
+  - **What it does now.** The pass records the id of the user who ran it, exactly as every other metadata write does. A REST or runtime call by a signed-in user with `manage_metadata` records that user's id. A run with no user records `null`, which means "system-initiated". That covers the CLI, which opens the database directly with no session, and a system caller. The pass still names itself on each history row's `source` (`migrate-stored`), as it did before.
+  - **What an operator sees.** History rows and rewritten rows written by a migration from this release on name the person who ran it, or nobody. They never name a command or a route. Rows a migration rewrote before this release keep the label they were given.
+  - **Contract text.** `MetadataItem.authoredBy`'s description now gives the same rule as `PutOptions.actor`: the acting user's id, or `null` for a system-initiated write, never a label such as `"system"` or `"cli"`. The schema accepts the same values as before.
+- ef1fcb2: A declared index states its uniqueness scope: bare `unique: true` on `indexes[]` is refused (protocol 18, ADR-0120 D1/D7), stored metadata converts it to `unique: 'global'` with zero drift, and `VISIBILITY_STRICT_OPTIONS` leaves `@objectstack/spec`'s public surface.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered declared-index-bare-unique-true-retired, visibility-strict-options-unexported -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface and one export removal, shipped as `minor` under the launch-window convention for accept-set narrowings (Changesets pre mode is not in on `main`).
+  
+  **Why.** On a declared index, bare `unique: true` was the one `unique` spelling whose scope was positional. It built the index over exactly `fields`, one holder across the whole installation, while reading like "unique per organization" to an author who knew the field-level meaning. 17.x warned (lint `unique/unscoped-declared-index`). Protocol 18 refuses it, so the scope is always stated.
+  
+  **What is refused.** A declared index (`objects[].indexes[]`, `objectExtensions[].indexes[]`) whose `unique` is bare `true`. The refusal names both replacements, and says which one keeps the index bare `true` built. It is raised by:
+  
+  - the schema (`IndexSchema.unique`, now `false | 'global' | 'organization'`), at every door that parses: `ObjectSchema.create()` and `ObjectSchema.parse()`, `defineStack`, `os validate`, `os build`, and the runtime save door (`422 INVALID_METADATA`). `tsc` refuses it too, because the input type no longer admits `true`;
+  - lint `unique/unscoped-declared-index`, now an `error` and a gating rule on all three commands. It is what refuses the spelling under `os lint`, which never parses.
+  
+  **What converts.** The protocol-18 ADR-0087 conversion `declared-index-unique-scope` rewrites a declared index's bare `true` to `'global'` on every data-at-rest seam: stored `sys_metadata` rows (`applyConversionsToStoredItem`), built artifacts inside their declared-floor window, and `os migrate meta --from 17`. `'global'` is exactly the index bare `true` built, so the physical index is byte-identical and the drift plan is empty. It is retired from the authoring funnel, so a live author is refused and taught instead of converted silently.
+  
+  **What stays accepted.** Field-level `unique: true` still means one holder per organization and stays valid indefinitely. On a declared index, `unique: false` or omitted, `'global'` and `'organization'` parse exactly as before.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `indexes: [{ fields: [...], unique: true }]` | `indexes: [{ fields: [...], unique: 'global' }]`: the same index, nothing on disk changes |
+  | …the same, when you meant one holder per organization | `unique: 'organization'`: the driver prepends the NULL-safe organization key part at registration, and `os migrate plan` shows the index change |
+  | `import { VISIBILITY_STRICT_OPTIONS } from '@objectstack/spec/shared'` (or the root entry) | delete the import: it was an internal option bag for the spec's own visibility-carrying schemas, and those schemas are unchanged |
+  
+  **The one-line fix: on every declared index, write `unique: 'global'` where you wrote `unique: true`.** Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.
+  
+  **Who is affected, measured.** At `e67ba80049`, an AST census found 48 declared indexes with bare `unique: true` in 39 source files of this repository, all platform and plugin objects. Every one is respelled `'global'` in this change, and the nine-key S5 corpus is pinned to build byte-identical indexes before and after (`driver-sql`'s `sql-driver-unique-tenancy.test.ts`). `examples/**` and `apps/**` carry none. Deployed metadata and other repositories were not measured.
+  
+  ### The kit
+  
+  - **The refusal.** `IndexSchema.unique` in `data/object.zod.ts`, with its own prescription. The lint rule moved from `warning` to `error` and from advisory to gating.
+  - **The conversion.** `declared-index-unique-scope` (`toMajor: 18`, retired from the load path, `retiredAfter: '17.7.0'`), with its S4/S5 fixture.
+  - **The ledger.** The D3 semantic entries `declared-index-bare-unique-true-retired` (the scope each respelled index really meant is the author's call) and `visibility-strict-options-unexported`, plus a step-18 rationale fragment.
+  - **The export.** `VISIBILITY_STRICT_OPTIONS` moved to the unbarrelled `shared/visibility-strict-options.ts`, beside its type `StrictObjectOptions`. `check:api-surface` counts the removal.
+  - **The pins.** The "`'global'` is a synonym of `true`" driver pin retired with the bare spelling. The verbatim pin is stated in `'global'`.
+- Updated dependencies [317cddd]
+- Updated dependencies [fec87e7]
+- Updated dependencies [0253192]
+- Updated dependencies [bfc15d2]
+- Updated dependencies [7aa8d51]
+- Updated dependencies [95a8435]
+- Updated dependencies [60bcfe7]
+- Updated dependencies [d112087]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [7de0265]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [c8b062f]
+- Updated dependencies [117d34d]
+- Updated dependencies [6729e10]
+- Updated dependencies [1920cf3]
+- Updated dependencies [41d0d40]
+- Updated dependencies [c52bfb4]
+- Updated dependencies [c7d6037]
+- Updated dependencies [72b26ed]
+- Updated dependencies [2d21b9c]
+- Updated dependencies [f66fdc7]
+- Updated dependencies [9fdb127]
+- Updated dependencies [615c696]
+- Updated dependencies [968acc8]
+- Updated dependencies [111ffff]
+- Updated dependencies [12b9daf]
+- Updated dependencies [d85615d]
+- Updated dependencies [6a06e3b]
+- Updated dependencies [0e9e7b7]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [9c93ce6]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [04e776b]
+- Updated dependencies [a7df552]
+- Updated dependencies [2f70c22]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [a87d8be]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [ad381fd]
+- Updated dependencies [2b61f2d]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3b49318]
+- Updated dependencies [4e9fe9f]
+- Updated dependencies [9ad3d24]
+- Updated dependencies [326a90a]
+- Updated dependencies [9fe7448]
+- Updated dependencies [2e11d90]
+- Updated dependencies [4578c56]
+- Updated dependencies [c512c25]
+- Updated dependencies [215e662]
+- Updated dependencies [3d886ee]
+- Updated dependencies [d8d0711]
+- Updated dependencies [40a6ee5]
+- Updated dependencies [5910b5e]
+- Updated dependencies [081e6a0]
+- Updated dependencies [1884948]
+- Updated dependencies [e23eccb]
+- Updated dependencies [ac8f2c5]
+- Updated dependencies [db9cf80]
+- Updated dependencies [e75dced]
+- Updated dependencies [9af0005]
+- Updated dependencies [440bed6]
+- Updated dependencies [b2549a8]
+- Updated dependencies [ee8751d]
+- Updated dependencies [96e4be4]
+- Updated dependencies [35ef501]
+- Updated dependencies [faf6348]
+- Updated dependencies [557ae7c]
+- Updated dependencies [6a3fe25]
+- Updated dependencies [7731d70]
+- Updated dependencies [3073b72]
+- Updated dependencies [c76edeb]
+- Updated dependencies [5b12503]
+- Updated dependencies [514bf3c]
+- Updated dependencies [20e7d52]
+- Updated dependencies [b3a3634]
+- Updated dependencies [3e72f93]
+- Updated dependencies [f89b5f5]
+- Updated dependencies [d25b187]
+- Updated dependencies [0e00d36]
+- Updated dependencies [d748ae8]
+- Updated dependencies [dab6bf4]
+- Updated dependencies [ed1de8c]
+- Updated dependencies [a00cf99]
+- Updated dependencies [5fb1746]
+- Updated dependencies [29a163f]
+- Updated dependencies [e223152]
+- Updated dependencies [9f5eca5]
+- Updated dependencies [9963322]
+- Updated dependencies [b27b894]
+- Updated dependencies [02d9f69]
+- Updated dependencies [f53f14b]
+- Updated dependencies [a800912]
+- Updated dependencies [d973c34]
+- Updated dependencies [156ddfa]
+- Updated dependencies [5081090]
+- Updated dependencies [b6eb25f]
+- Updated dependencies [165587e]
+- Updated dependencies [e04759d]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [b32ee3e]
+- Updated dependencies [e5899a6]
+- Updated dependencies [490cb6d]
+- Updated dependencies [e865300]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [85edd61]
+- Updated dependencies [e84aeb3]
+- Updated dependencies [322ff1e]
+- Updated dependencies [5fc57b3]
+- Updated dependencies [581ca7d]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [9814035]
+- Updated dependencies [55382dc]
+- Updated dependencies [b1d701b]
+- Updated dependencies [efcbac7]
+- Updated dependencies [20028df]
+- Updated dependencies [69d4218]
+- Updated dependencies [5ce6773]
+- Updated dependencies [9432bac]
+- Updated dependencies [3f69471]
+- Updated dependencies [e5687cb]
+- Updated dependencies [1e62f71]
+- Updated dependencies [ec7f7f8]
+- Updated dependencies [038d4c9]
+- Updated dependencies [147a0d1]
+- Updated dependencies [1959aac]
+- Updated dependencies [1badd31]
+- Updated dependencies [55828c5]
+- Updated dependencies [7856110]
+- Updated dependencies [9b37edb]
+- Updated dependencies [a22e67b]
+- Updated dependencies [62ce45d]
+- Updated dependencies [39e93ef]
+- Updated dependencies [02bec6c]
+- Updated dependencies [719183f]
+- Updated dependencies [8464380]
+- Updated dependencies [252a582]
+- Updated dependencies [f931e76]
+- Updated dependencies [e5f9f01]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [de70e97]
+- Updated dependencies [74c4b34]
+- Updated dependencies [e040b8c]
+- Updated dependencies [f451a59]
+- Updated dependencies [ba95607]
+- Updated dependencies [b53b949]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [1e44436]
+- Updated dependencies [2acff87]
+- Updated dependencies [299a2c6]
+- Updated dependencies [e23eccb]
+- Updated dependencies [bf492c8]
+  - @objectstack/spec@18.0.0-next.0
+
 ## 17.7.0
 
 ### Minor Changes
