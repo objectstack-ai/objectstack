@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 225 |
+| Write call sites | 228 |
 | Object name statically decidable | 155 |
-| Object name chosen at run time | 70 |
+| Object name chosen at run time | 73 |
 | Against a tenancy-enabled object | 154 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 164 |
+| Threading a tenant context | 167 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 53 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 120 |
+| Threading a decidably elevated context | 123 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 97 |
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-12 at `c60e08810`.
+Measured on 2026-10-13 at `ae14c39c5`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 629 |
-| engine-shaped types recognised | 71 |
-| declared objects in the registry | 117 |
-| same-named calls subtracted as non-engine | 161 |
+| tracked non-test sources scanned | 654 |
+| engine-shaped types recognised | 73 |
+| declared objects in the registry | 120 |
+| same-named calls subtracted as non-engine | 160 |
 
 ## Every site
 
@@ -208,6 +208,9 @@ Measured on 2026-10-12 at `c60e08810`.
 | `packages/services/service-job/src/db-job-adapter.ts` | `update` | `sys_job` | enabled | elevated | 3 |
 | `packages/services/service-job/src/db-job-adapter.ts` | `insert` | `sys_job_run` | enabled | elevated | 1 |
 | `packages/services/service-job/src/db-job-adapter.ts` | `update` | `sys_job_run` | enabled | elevated | 1 |
+| `packages/services/service-mailbox/src/ingest/mail-ingest-service.ts` | `insert` | `MAIL_ASSOCIATION_OBJECT` | undecidable | elevated | 1 |
+| `packages/services/service-mailbox/src/ingest/mail-ingest-service.ts` | `insert` | `MAIL_MESSAGE_OBJECT` | undecidable | elevated | 1 |
+| `packages/services/service-mailbox/src/ingest/mail-ingest-service.ts` | `update` | `MAIL_MESSAGE_OBJECT` | undecidable | elevated | 1 |
 | `packages/services/service-messaging/src/inbox-channel.ts` | `insert` | `objectName` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-messaging/src/inbox-channel.ts` | `insert` | `receiptObject` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-messaging/src/messaging-service.ts` | `insert` | `RECEIPT_OBJECT` | undecidable | context, elevation undecidable | 1 |

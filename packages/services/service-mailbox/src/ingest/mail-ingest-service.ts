@@ -280,7 +280,7 @@ export class MailIngestService {
       throw new MailboxServiceError('VALIDATION_ERROR', '`receivedAt` must be a valid timestamp or Date when it is given.');
     }
 
-    const engine = this.options.engine();
+    const engine: MailIngestEngine = this.options.engine();
     const mailbox = await this.mailbox(engine, input.mailboxId);
     const organizationId = this.organizationOf(mailbox);
 
@@ -377,7 +377,7 @@ export class MailIngestService {
       throw new MailboxServiceError('VALIDATION_ERROR', '`messageIds` must be a list of message ids when it is given.');
     }
 
-    const engine = this.options.engine();
+    const engine: MailIngestEngine = this.options.engine();
     const mailbox = await this.mailbox(engine, input.mailboxId);
     this.authorizeRematch(context, mailbox);
     const organizationId = this.organizationOf(mailbox);
