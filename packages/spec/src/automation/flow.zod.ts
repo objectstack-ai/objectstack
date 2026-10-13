@@ -1499,9 +1499,11 @@ export const FlowSchema = lazySchema(() => strictObject(
   //    `collection`, `map` with no `collection`, a CRUD node with no
   //    `objectName`, …). For a builtin (#21898) a present VALUE its contract
   //    refuses is refused too (`create_record` `outputVariable: 42`, a screen
-  //    field `min: '1'`), where the build can know what the run parses — never
-  //    a value carrying a `{token}`, a region slot, a ledger predicate or
-  //    value slot, or `http`'s run-resolved `signingSecret`. A KEY its
+  //    field `min: '1'`), where the build can know what the run parses — a
+  //    value carrying a `{token}` included since #23260 (`get_record`
+  //    `limit: '{x}'`), never a region slot, a ledger predicate or value slot,
+  //    a value or text slot whose own judge refuses its token, or `http`'s
+  //    run-resolved `signingSecret`. A KEY its
   //    contract does not declare is refused too (#21982), for every builtin
   //    `builtinNodeConfigKeysJudged` names (every one, `try_catch` included
   //    since #22343), a body-less legacy `loop` included. The one plugin node contract the spec declares, `approval`
