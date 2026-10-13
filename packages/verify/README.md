@@ -143,10 +143,11 @@ names, while the REST envelope names the route's object whatever was refused.
 A refusal holds only as the platform's `403 PERMISSION_DENIED` naming the
 detail and the operation; any other refusal (a rule, a hook's own code, a
 refusal on another object) is `unattributed`. The system door bypasses
-authorization and is not asked. Today's engine refuses every write to a detail
-two levels below its root master, even where the caller edits the middle
-master, so on an app that declares such a chain the family reports a
-contradiction and fails the run.
+authorization and is not asked. A detail two levels below its root master is
+answered the same way: its write is admitted exactly when the caller holds the
+verb on the detail and may update the middle master directly, which also needs
+edit access to the root, and refused otherwise, so the family reports such a
+chain `proven`.
 
 `--dashboard-windows` is opt-in, on a fresh boot of its own (it writes fixture
 rows). The population is every dashboard the spec's parse gives a `dateRange`,

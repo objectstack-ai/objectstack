@@ -3529,7 +3529,10 @@ const FormFieldBaseSchema = lazySchema(() => {
    * inside the `53ded82bf7...87af769e9` range, so the widest-tier-only
    * under-span this block used to record (#17328: one cell of two at
    * 720px) no longer reproduces at the pin this repo builds against
-   * (`.objectui-sha` = `7578323a5`, re-read there 2026-10-12:
+   * (`.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+   * `7578323a5`, re-read there 2026-10-12:
    * `autoLayout.ts`, `fields`' `field-type-alias.ts` and `form.tsx` are
    * byte-identical to `9646e2ed2` (`git diff --quiet`), so `resolveColSpan`
    * `:154`, `WIDE_FIELD_TYPES` `:58-69`, the `repeater` -> `field:grid` mapping,
@@ -3662,7 +3665,7 @@ const FormFieldBaseSchema = lazySchema(() => {
    * had changed only in its registration's input list, objectui#9910's
    * `children` slot; at `62597c588` it was byte-identical to `87af769e9`).
    */
-  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `7578323a544e`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
+  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `1fb1ced36243`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
 
   /** Custom widget override — only needed when auto-inference is insufficient */
   widget: z.string().optional().describe('Custom widget/component name (overrides type-based inference)'),
@@ -5143,9 +5146,11 @@ export const ViewSchema = lazySchema(() => strictObject({
     formViews: z.record(z.string(), FormViewSchema).optional().describe('Additional named form views'),
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package
-   * authors declare lock policy here; the loader translates it
-   * into the private `_lock` envelope at registration time and
-   * strips this block before persistence. See
+   * authors declare lock policy here, in a code package's source;
+   * the loader translates it into the private `_lock` envelope at
+   * registration time and strips this block. The metadata API's
+   * save door does not translate it and refuses it (`400
+   * VALIDATION_ERROR`), so that door never stores it. See
    * `shared/protection.zod.ts`.
    */
   protection: ProtectionSchema.optional().describe(
@@ -5363,8 +5368,9 @@ function viewItemBaseShape() {
     owner: retiredKey(VIEW_ITEM_OWNER_RETIRED),
     hidden: retiredKey(VIEW_ITEM_HIDDEN_RETIRED),
     /**
-     * Package author protection block — same envelope as {@link ViewSchema};
-     * the loader translates it into the private `_lock` envelope.
+     * Package author protection block — same envelope as {@link ViewSchema}:
+     * the loader translates it into the private `_lock` envelope, and the
+     * metadata API's save door refuses it.
      */
     protection: ProtectionSchema.optional().describe(
       'Package author protection block — lock policy for this view.',

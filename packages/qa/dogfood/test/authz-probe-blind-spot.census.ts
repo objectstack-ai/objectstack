@@ -486,7 +486,8 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'route registration sites — `this.routeManager.register(` call sites, LESS the one inside ' +
       '`registerPerItemRoute` (the shared forwarder, not a route; its extent is bounded by the declaration\'s own ' +
       'indentation and the subtrahend is pinned at 1 by the `forwarder slice:` control, never inferred from a ' +
-      'terminator spelling), PLUS `registerPerItemRoute(` call sites; ' +
+      'terminator spelling), PLUS `registerPerItemRoute(` call sites; counted over this file AND ' +
+      '`data-action-routes.ts`, the module `registerDataActionEndpoints`\' body moved to; ' +
       'reachable = those inside registerMetadataEndpoints',
     // [#15542 / #15854] ⭐ THE POPULATION RULE LEARNED A SECOND SPELLING, and
     // the numbers it produces did NOT move: 80 / 19 / 61, exactly as before.
@@ -593,9 +594,22 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // `registerMetadataEndpoints`, so it was a blind spot; its handler opened
     // with `enforceAuth`, so that control drops by one. The registrar
     // survives, so `private register*Endpoints(` stays 16.
+    // [#23050 slice 1] 70 / 19 / 51 UNCHANGED, and that is the measurement:
+    // `registerDataActionEndpoints`' body (nine routes, all outside
+    // `registerMetadataEndpoints`, so all nine in the blind spot) moved to
+    // `data-action-routes.ts`, and the population rule reads that module too —
+    // see the derivation. `this.routeManager.register(` stays 63 over both files
+    // (54 here + 9 there, the new control), `private register*Endpoints(` stays
+    // 16 (the registrar is still declared here), and `enforceAuth` 57 -> 61 is
+    // RE-ANCHORED, not relaxed: the nine call sites moved with their routes and
+    // are counted in both readings; the four new occurrences are the seam that
+    // carries the move — the host literal's forwarder (`enforceAuth: (...a) =>
+    // this.enforceAuth(...a)`, two) and the host interface's member
+    // (`enforceAuth: RestServer['enforceAuth']`, two). No call site was added.
     controls: {
       'private register*Endpoints(': 16,
       'this.routeManager.register(': 63,
+      'data-action-routes.ts: this.routeManager.register(': 9,
       // Both halves of the new rule carry their own control, so neither can go
       // silently to zero: a helper deleted and its routes inlined back would
       // still read population 80, and only these two controls would notice the
@@ -603,7 +617,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'registerPerItemRoute(': 8,
       'const registerPerItemRoute =': 1,
       'forwarder slice: this.routeManager.register(': 1,
-      enforceAuth: 57,
+      enforceAuth: 61,
     },
     note:
       'The single non-tripwire probe names ONE registrar of 16. The other 15 can never mint a key: ' +
@@ -896,6 +910,18 @@ export function deriveProbeFileCensus(): {
   // counting. Counting it would double-count every helper-routed route.
   {
     const src = read('packages/rest/src/rest-server.ts');
+    // [#23050 slice 1] ONE POPULATION, NOW TWO FILES — the same lesson as the
+    // second spelling above. `registerDataActionEndpoints`' body moved, whole and
+    // unedited, to `data-action-routes.ts`: its nine `this.routeManager.register(`
+    // sites still register `RestServer` routes (the private registrar is still
+    // here and calls the moved body), so they are still this row's population.
+    // Reading `rest-server.ts` alone would record 61 / 19 / 42 — a nine-route hole
+    // in the blind spot this census keeps honest, opened by a move that changed
+    // no route. The moved module defines no registrar (`private register…(`) and
+    // no `registerPerItemRoute`, so appending it moves neither the forwarder
+    // slice nor the `reachable` slice; its own control below proves it is read.
+    const moved = read('packages/rest/src/data-action-routes.ts');
+    const all = `${src}\n${moved}`;
     const registrarRe = /^\s*private\s+register[A-Za-z]*Endpoints\s*\(/gm;
     const mountRe = /this\.routeManager\.register\(/g;
     // Matches the CALL sites only. The declaration reads
@@ -991,11 +1017,14 @@ export function deriveProbeFileCensus(): {
     const start = decls[metaIdx]?.at ?? 0;
     const end = decls[metaIdx + 1]?.at ?? src.length;
     files.set('packages/rest/src/rest-server.ts', {
-      population: sites(src),
+      population: sites(all),
       reachable: sites(src.slice(start, end)),
       controls: {
         'private register*Endpoints(': occurrences(src, /private\s+register[A-Za-z]*Endpoints\s*\(/g),
-        'this.routeManager.register(': occurrences(src, /this\.routeManager\.register\(/g),
+        'this.routeManager.register(': occurrences(all, /this\.routeManager\.register\(/g),
+        // [#23050 slice 1] The moved module's own share, so a reading that
+        // silently stopped appending it cannot hide behind the total above.
+        'data-action-routes.ts: this.routeManager.register(': occurrences(moved, /this\.routeManager\.register\(/g),
         'registerPerItemRoute(': occurrences(src, /registerPerItemRoute\(/g),
         'const registerPerItemRoute =': occurrences(src, /const\s+registerPerItemRoute\s*=/g),
         // ⭐ The one control here that is NOT a whole-file count, deliberately:
@@ -1004,7 +1033,7 @@ export function deriveProbeFileCensus(): {
         // real population drop. The four counts around it cannot — all four are
         // green while the slice is running 3873 lines long.
         'forwarder slice: this.routeManager.register(': occurrences(forwarderSlice(src), mountRe),
-        enforceAuth: occurrences(src, /enforceAuth/g),
+        enforceAuth: occurrences(all, /enforceAuth/g),
       },
     });
   }

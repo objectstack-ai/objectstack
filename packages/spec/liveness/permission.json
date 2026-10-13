@@ -22,15 +22,14 @@
     },
     "packageId": {
       "status": "live",
-      "verifiedAt": "2026-07-30",
-      "evidence": "packages/plugins/plugin-security/src/bootstrap-declared-permissions.ts (author-declared fallback for the registry `_packageId` provenance; persisted to sys_permission_set.package_id)",
-      "note": "ADR-0086 D3 — owning package for a package-shipped set; proven by packages/qa/dogfood/test/showcase-permission-seeding.dogfood.test.ts."
+      "verifiedAt": "2026-10-11",
+      "evidence": "packages/cli/src/utils/permission-set-name-collisions.ts (`asId(ps.packageId)` — the author-declared owner a declared set is judged by at the compile-time name-collision door)",
+      "note": "ADR-0086 D3 — owning package for a package-shipped set. REPOINTED 2026-10-11 (#15204 stage 6b-2): the declared-permission seeder that read it as the `_packageId` fallback and persisted it to sys_permission_set.package_id is retired (ADR-0131 D3: the boot writes no catalog row); the compile-time collision door is the reader that remains."
     },
     "managedBy": {
-      "status": "live",
-      "verifiedAt": "2026-07-30",
-      "evidence": "packages/plugins/plugin-security/src/bootstrap-declared-permissions.ts (persisted per record as sys_permission_set.managed_by; 'package' rows re-seeded, platform/user rows never clobbered)",
-      "note": "ADR-0086 D3 — per-record provenance on the metadata-persistence axis (package | platform | user)."
+      "status": "dead",
+      "verifiedAt": "2026-10-11",
+      "note": "ADR-0086 D3 — per-record provenance on the metadata-persistence axis (package | platform | user). VERDICT CORRECTED 2026-10-11 (#15204 stage 6b-2): no code reads the AUTHORED key. The cited consumer, bootstrapDeclaredPermissions, stamped `managed_by: 'package'` on every row it wrote and never read `ps.managedBy`, so this row's `live` verdict pointed at a writer of the COLUMN, not a reader of the key; that seeder is now retired (ADR-0131 D3: the boot writes no catalog row). The sys_permission_set.managed_by column is unaffected. Retirement of the authored key is an enforce-or-remove item for the spec seat."
     },
     "adminScope": {
       "status": "live",

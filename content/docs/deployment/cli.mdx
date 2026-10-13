@@ -2012,10 +2012,11 @@ os verify --dashboard-windows                  # Also prove each dashboard date 
    naming the detail and the operation (a rule, a hook's own code, a refusal
    on another object) is reported inconclusive, never proven. An object
    with two `master_detail` fields, none, or a chain at the write gate's depth
-   bound is reported `excluded`. Today's engine refuses every write to a detail
-   two levels below its root master (a line under a quote under an account),
-   even where the caller edits the middle master, so an app that declares such
-   a chain fails the run.
+   bound is reported `excluded`. A detail two levels below its root master (a
+   line under a quote under an account) is answered the same way: its write is
+   admitted exactly when the caller holds the verb on the detail and may update
+   the middle master directly, which also needs edit access to the root, and
+   refused otherwise, so such a chain is reported proven.
    With `--dashboard-windows`, another fresh boot proves that every dashboard
    declaring a `dateRange` answers under each preset of its picker with the
    rows that window selects. A widget's window lands on the field its

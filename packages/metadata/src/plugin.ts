@@ -860,6 +860,12 @@ export class MetadataPlugin implements Plugin {
                 const { FileSystemRepository } = await import('@objectstack/metadata-fs');
                 const rootDir = this.options.rootDir || process.cwd();
                 const repoRoot = path.join(rootDir, REPO_SUBDIR);
+                // [#23086] The actor rule, stated rather than inherited: no
+                // `fsActor`. An edit seen on disk, or a file no recorded write
+                // produced, has no acting user here, so it records `null`
+                // (`PutOptions.actor`, #4556), and `source: 'fs'` names the
+                // origin. ⛔ Never pass a label as `fsActor`. Pinned in
+                // `plugin-fs-repository-actor.test.ts`.
                 const repo = new FileSystemRepository({
                     root: repoRoot,
                     org: this.options.organizationId ?? 'system',

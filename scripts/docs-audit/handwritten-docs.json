@@ -94,6 +94,7 @@
     "content/docs/deployment/cli.mdx",
     "content/docs/deployment/environment-variables.mdx",
     "content/docs/deployment/index.mdx",
+    "content/docs/deployment/install-modes.mdx",
     "content/docs/deployment/production-readiness.mdx",
     "content/docs/deployment/publish-and-preview.mdx",
     "content/docs/deployment/seed-tenancy-repair.mdx",

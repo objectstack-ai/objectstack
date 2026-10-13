@@ -1373,6 +1373,9 @@ const actionObject = () => strictObject({
    *
    * Liveness: the ledger row was `planned` until the console reader landed,
    * and it is `live` from the pin this repo builds against (`.objectui-sha` =
+   * `1fb1ced36`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
    * `7578323a5`, re-read there 2026-10-12:
    * `ActionRunner.composeSuccessMessage`, in `core/src/actions/ActionRunner.ts`, is
    * byte-identical in body to `9646e2ed2` and MOVED down by 11, `1498` -> `1509`

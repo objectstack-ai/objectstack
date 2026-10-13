@@ -90,6 +90,11 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const sourceOf = (file: string) => readFileSync(resolve(HERE, file), 'utf8');
 
 const REST_SERVER = sourceOf('rest-server.ts');
+// [#23050 slice 1] `RestServer#registerDataActionEndpoints`' body — the
+// import-job read, the import-job listing and the export chunk loop — moved to
+// its own module. Its literals are the same server-built literals, so the
+// census follows them there rather than losing them.
+const DATA_ACTION_ROUTES = sourceOf('data-action-routes.ts');
 // [#20919] The runner moved to `@objectstack/core`, beside `bulkWrite`.
 const IMPORT_RUNNER = readFileSync(resolve(HERE, '../../core/src/utils/import-runner.ts'), 'utf8');
 
@@ -117,7 +122,15 @@ const CENSUS: CensusEntry[] = [
     // tree before the deletion, 4 after (`req.query`, the import-job read and
     // the two remaining server-built literals). The floor equals the measured
     // count, so a slot that stops matching reds here as before.
-    { file: 'rest-server.ts', source: REST_SERVER, minQuerySlots: 4, noDoor: false },
+    //
+    // [#23050 slice 1] 4 -> 1 + 3, a MOVE: the import-job read and the two
+    // server-built literals left with the data-action body for
+    // `data-action-routes.ts`, which is censused below under the same rule (it
+    // parses `filter` / `orderby` off the caller's querystring too, so it is a
+    // door). Re-derived with `querySlots`: 1 slot left here (`req.query`), 3
+    // there, the same 4 in all. Each floor equals its file's measured count.
+    { file: 'rest-server.ts', source: REST_SERVER, minQuerySlots: 1, noDoor: false },
+    { file: 'data-action-routes.ts', source: DATA_ACTION_ROUTES, minQuerySlots: 3, noDoor: false },
     { file: 'import-runner.ts', source: IMPORT_RUNNER, minQuerySlots: 3, noDoor: true },
 ];
 
@@ -294,13 +307,15 @@ describe('[#16638] §1 CONTROLS on the census instrument itself', () => {
     });
 });
 
-describe('[#16337] §1 the two sites rest-server.ts names are canonical, by name', () => {
+describe('[#16337] §1 the two sites rest-server.ts named are canonical, by name', () => {
     it('names them', () => {
         // Belt to §1's braces: the class-wide assertions above would still pass
         // over a file that had lost these literals entirely. [#21180] There
         // were three; the public picker's literal left with its route.
-        expect(REST_SERVER).toContain("orderBy: [{ field: 'created_at', order: 'desc' }],");
-        expect(REST_SERVER).toMatch(/expand: Object\.fromEntries\(/);
+        // [#23050 slice 1] Both moved, unedited, with the data-action body; they
+        // are named where they now live.
+        expect(DATA_ACTION_ROUTES).toContain("orderBy: [{ field: 'created_at', order: 'desc' }],");
+        expect(DATA_ACTION_ROUTES).toMatch(/expand: Object\.fromEntries\(/);
     });
 });
 
