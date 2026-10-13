@@ -49,7 +49,7 @@ import {
 } from '@objectstack/service-settings';
 import { AuthPlugin } from './auth-plugin.js';
 
-const SYS = { context: { isSystem: true } } as never;
+const SYS = { isSystem: true } as const;
 const SEED_EMAIL = 'admin@objectos.ai';
 
 /** A zone no CI container runs in, so a write of it cannot be the container's own. */
@@ -101,7 +101,7 @@ function storedZoneAppPlugin(): Plugin {
     async init() {},
     async start(ctx: PluginContext) {
       const ql = ctx.getService<ObjectQL>('objectql');
-      const org = await ql.findOne('sys_organization', { where: { slug: 'default' }, ...SYS });
+      const org = await ql.findOne('sys_organization', { where: { slug: 'default' }, context: SYS });
       expect(org?.id, 'the Default Organization must exist before the seed for this case to mean anything').toBeTruthy();
       await ql.insert(
         'sys_setting',
@@ -115,7 +115,7 @@ function storedZoneAppPlugin(): Plugin {
           encrypted: false,
           locked: false,
         },
-        SYS,
+        { context: SYS },
       );
     },
   };
@@ -175,16 +175,16 @@ describe('the dev seed gives the workspace it lands its admin in the host time z
 
     /** The organizations the seeded admin is a member of — the workspace its session opens in. */
     const seededAdminOrganizations = async (): Promise<string[]> => {
-      const user = await ql.findOne('sys_user', { where: { email: SEED_EMAIL }, ...SYS });
+      const user = await ql.findOne('sys_user', { where: { email: SEED_EMAIL }, context: SYS });
       if (!user?.id) return [];
-      const rows = (await ql.find('sys_member', { where: { user_id: user.id }, ...SYS })) as Array<{
+      const rows = (await ql.find('sys_member', { where: { user_id: user.id }, context: SYS })) as Array<{
         organization_id?: string;
       }>;
       return rows.map((r) => String(r.organization_id));
     };
 
     const defaultOrganization = async (): Promise<string> => {
-      const org = await ql.findOne('sys_organization', { where: { slug: 'default' }, ...SYS });
+      const org = await ql.findOne('sys_organization', { where: { slug: 'default' }, context: SYS });
       expect(org?.id, 'the single posture boots with a Default Organization').toBeTruthy();
       return String(org!.id);
     };
