@@ -1308,6 +1308,9 @@ describe('ApprovalService (node era)', () => {
       });
       return { text, unresolved };
     };
+    /** The id of the request an ordinary open answers (never an auto-outcome in these cells). */
+    const openRequestId = async (...args: Parameters<ApprovalService['openNodeRequest']>): Promise<string> =>
+      ((await svc.openNodeRequest(...args)) as { id: string }).id;
 
     it('reads the answer: the copy carries at least one `${result.*}` token', () => {
       expect(approveCopy()).toMatch(/\$\{result\.[\w.]+\}/);
@@ -1315,8 +1318,8 @@ describe('ApprovalService (node era)', () => {
 
     it('a finalizing approve: the toast names the record, the way the inbox row\'s inline Approve does', async () => {
       engine._tables['opportunity'] = [{ id: 'opp1', name: 'Acme Renewal', amount: 100 }];
-      const req = await svc.openNodeRequest(openInput(['u9']), CTX);
-      const out = await svc.decide(req.id, { decision: 'approve', actorId: 'u9' }, SYS);
+      const id = await openRequestId(openInput(['u9']), CTX);
+      const out = await svc.decide(id, { decision: 'approve', actorId: 'u9' }, SYS);
       expect(out.finalized).toBe(true);
       const { text, unresolved } = fill(approveCopy(), out);
       expect(unresolved).toEqual([]);
@@ -1325,8 +1328,8 @@ describe('ApprovalService (node era)', () => {
 
     it('an approve that leaves the step waiting on others still names the record', async () => {
       engine._tables['opportunity'] = [{ id: 'opp1', name: 'Acme Renewal', amount: 100 }];
-      const req = await svc.openNodeRequest(openInput(['u1', 'u2'], {}, { behavior: 'unanimous' }), CTX);
-      const out = await svc.decide(req.id, { decision: 'approve', actorId: 'u1' }, SYS);
+      const id = await openRequestId(openInput(['u1', 'u2'], {}, { behavior: 'unanimous' }), CTX);
+      const out = await svc.decide(id, { decision: 'approve', actorId: 'u1' }, SYS);
       expect(out.finalized).toBe(false);
       const { text, unresolved } = fill(approveCopy(), out);
       expect(unresolved).toEqual([]);
@@ -1335,10 +1338,10 @@ describe('ApprovalService (node era)', () => {
     });
 
     it('a record whose row is gone is named from the payload snapshot, as the inbox names it', async () => {
-      const req = await svc.openNodeRequest(
+      const id = await openRequestId(
         openInput(['u9'], { record: { id: 'opp1', name: 'Snapshot Title', amount: 1 } }), CTX,
       );
-      const out = await svc.decide(req.id, { decision: 'approve', actorId: 'u9' }, SYS);
+      const out = await svc.decide(id, { decision: 'approve', actorId: 'u9' }, SYS);
       const { text, unresolved } = fill(approveCopy(), out);
       expect(unresolved).toEqual([]);
       expect(text).toBe('Approved "Snapshot Title"');
