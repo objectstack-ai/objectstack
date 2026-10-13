@@ -404,13 +404,14 @@ export interface VerifyHandle {
      *
      * `condition` is handed to the engine as given, in any shape it takes: an
      * envelope (`{ dialect: 'cel', source }`) or a string, which the engine
-     * reads as CEL unless it carries a `{var}` hole (the legacy template
-     * dialect). The handle never rewrites it. The engine's own flow sites
-     * hand it an envelope: a start node's `condition` and a `decision`
-     * branch's `expression` are wrapped as `{ dialect: 'cel', source }`, and
-     * an edge's condition already is one. So pass the envelope to model any
-     * of them; a bare string gets the reading a screen field's `visibleWhen`
-     * gets.
+     * reads as CEL — a `{var}` hole is the brace trap the engine refuses, and
+     * a `template` or `flow` envelope is refused too, since the legacy
+     * template dialect is deleted (#19939). The handle never rewrites it. The
+     * engine's own flow sites hand it an envelope: a start node's `condition`
+     * and a `decision` branch's `expression` are wrapped as
+     * `{ dialect: 'cel', source }`, and an edge's condition already is one. So
+     * pass the envelope to model any of them; a bare string gets the reading
+     * a screen field's `visibleWhen` gets.
      *
      * `variables` is a plain object, and each own key becomes one entry of
      * the `Map` the engine takes: `{ record, previous }` binds `record` and

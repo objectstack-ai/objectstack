@@ -9,11 +9,7 @@
  */
 
 import {
-  SysPermissionSet,
-  SysPosition,
-  SysCapability,
   SysUserPermissionSet,
-  SysPositionPermissionSet,
   SysUserPosition,
   SysAudienceBindingSuggestion,
   defaultPermissionSets,
@@ -22,13 +18,16 @@ import {
 export const SECURITY_PLUGIN_ID = 'com.objectstack.plugin-security';
 export const SECURITY_PLUGIN_VERSION = '1.0.0';
 
-/** Security objects owned by plugin-security. */
+/**
+ * Security objects owned by plugin-security.
+ *
+ * [ADR-0131 D3] The catalog itself — positions, permission sets, capabilities
+ * and the position → set binding — is no object: it lives in the security
+ * catalog (the environment registry). What stays here are the assignments and
+ * grants that name catalog items, and the audience-binding suggestions.
+ */
 export const securityObjects = [
-  SysPosition,
-  SysCapability,
-  SysPermissionSet,
   SysUserPermissionSet,
-  SysPositionPermissionSet,
   SysUserPosition,
   SysAudienceBindingSuggestion,
 ];

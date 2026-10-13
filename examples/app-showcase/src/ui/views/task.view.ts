@@ -155,15 +155,15 @@ export const TaskViews = defineView({
     //   Per-record (default) — each selected record is one dispatch:
     //   `showcase_mark_done`       — type `script`; its sandboxed body flips
     //     `done`/`progress` per record via the platform action route.
-    //   `showcase_recalc_estimate` — type `api`; POSTs the showcase's own
-    //     `/api/v1/showcase/recalc`, with `recordIdParam: 'recordId'` (already
-    //     declared for the row surface) carrying each record's id.
+    //   `showcase_recalc_estimate` — type `api`; POSTs the showcase's declared
+    //     `/api/v1/apps/showcase/recalc` endpoint, with `recordIdParam: 'recordId'`
+    //     (already declared for the row surface) carrying each record's id.
     //
     //   Aggregate (objectui#3139) — the whole selection in ONE dispatch:
     //   `showcase_recalc_selection` — the `bulkActionDefs` entry below opts in
     //     with `execution: 'aggregate'`, so the renderer POSTs the SAME recalc
     //     endpoint once, carrying every selected id in `params._selectedIds`
-    //     (the endpoint's batch branch). This is the "one zip for N devices"
+    //     (its flow runs the per-task recalculation for each). This is the "one zip for N devices"
     //     dispatch shape; results are all-or-nothing, no per-row retry.
     //
     // None declares `list_toolbar`: a bulk action is not a toolbar action,

@@ -10,6 +10,8 @@
  * Security (zero-tolerance):
  *  - Requires an authenticated principal; `user_id` is PINNED to that
  *    caller and is NEVER read from the request body (no impersonation).
+ *    The anonymous decision is the domain's FIRST statement (ADR-0138 D2),
+ *    ahead of the method check, so every face answers an anonymous caller 401.
  *  - Body is whitelisted to `name` (+ optional `expires_at`); any
  *    `key` / `id` / `user_id` / `revoked` in the body is ignored, so a
  *    caller cannot forge a known-secret or escalate.
@@ -31,7 +33,10 @@
  *    organization is re-checked here, against `sys_member`, at mint time.
  */
 
-import { isGrantActive, effectiveTenancyPosture, AuthzStoreUnavailableError } from '@objectstack/core';
+import {
+    isGrantActive, effectiveTenancyPosture, AuthzStoreUnavailableError,
+    shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
+} from '@objectstack/core';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 
 import { generateApiKey } from '../security/api-key.js';
@@ -65,13 +70,25 @@ export async function handleKeysRequest(
     body: any,
     context: HttpProtocolContext,
 ): Promise<HttpDispatcherResult> {
-    if (method !== 'POST') {
-        return { handled: true, response: deps.error('Method not allowed', 405) };
+    // ANONYMOUS BASELINE — the domain's FIRST statement (ADR-0138 D2: the
+    // decision is taken once per domain, never face by face). It used to sit
+    // below the method check, so an anonymous caller using any verb but POST
+    // was answered the 405 describing the route's shape instead of the 401
+    // every domain off the closed list of doors answers. A key is minted FOR a
+    // user, so the decision is asked about the user id alone: this domain has
+    // no system-context arm (an internal system context was refused here before
+    // as it is now), and the `!ec` / `!ec.userId` arms only narrow the type for
+    // the compiler.
+    const ec = context.executionContext;
+    if (shouldDenyAnonymous({ userId: ec?.userId }) || !ec || !ec.userId) {
+        return {
+            handled: true,
+            response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
+        };
     }
 
-    const ec = context.executionContext;
-    if (!ec || !ec.userId) {
-        return { handled: true, response: deps.error('Unauthorized: sign in to generate an API key', 401) };
+    if (method !== 'POST') {
+        return { handled: true, response: deps.error('Method not allowed', 405) };
     }
 
     // ── Whitelist the body. Only `name` and optional `expires_at`. ──

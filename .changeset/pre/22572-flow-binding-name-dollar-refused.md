@@ -38,7 +38,7 @@ Clause-②: no (narrowing)
 
 **The one-line fix: name the variable without the `$`, and rename every read of it with it.**
 
-No D2 conversion rewrites the name: the bare name may already be bound in the flow, and the reads of the old name sit in every dialect a flow string speaks (a text-slot hole, a CEL expression, a single-brace token in a value position), so the rename is the author's.
+No D2 conversion rewrites the name: the bare name may already be bound in the flow, and the reads of the old name sit in every dialect a flow string speaks (a text-slot hole, a CEL expression), so the rename is the author's.
 
 **Who is affected, measured.** The last published spec, `@objectstack/spec@17.7.0` (npm `latest`), types every one of these keys as a plain string. Measured on `main` at this change's base: the 35 flows `examples/app-crm`, `examples/app-todo` and `examples/app-showcase` ship all parse clean under the new rule, and a TypeScript-AST scan of `examples` (234 files), `packages/platform-objects` (167, which ships no flow), `packages/qa/dogfood` (280), the rest of `packages` and the `hotcrm` app found no `$`-led binding on any of these positions. The pinned `objectui` checkout binds none either. Deployed metadata and other repositories were not measured.
 

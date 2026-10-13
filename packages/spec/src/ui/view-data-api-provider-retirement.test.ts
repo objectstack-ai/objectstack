@@ -56,7 +56,7 @@ import { FormViewSchema, ListViewSchema, ViewDataSchema, ViewSchema } from './vi
 // The bare major, the house form of every prescription added since the v18
 // line opened (Changesets pre mode: the first release carrying this removal
 // is `18.0.0-next.N`, so a minted minor would name a version that never ships).
-const PRESCRIPTION = /`view\.data\.provider: 'api'` was removed in @objectstack\/spec 17 \(ADR-0049/;
+const PRESCRIPTION = /`view\.data\.provider: 'api'` was removed in @objectstack\/spec 18 \(ADR-0049/;
 
 /** The spelling that used to be legal, in its fullest form. */
 const RETIRED_SOURCE = {

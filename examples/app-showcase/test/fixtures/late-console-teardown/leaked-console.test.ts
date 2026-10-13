@@ -19,6 +19,14 @@
  * vitest fails a run on an unhandled error even with zero failed assertions.
  *
  * ⛔ Do not "fix" the leak here. The leak IS the instrument.
+ *
+ * [#23185] The first `tick()` runs INSIDE the test, synchronously, so a
+ * console RPC already exists before worker teardown takes its `rpcDone()`
+ * snapshot — a precondition of the hold reporter's guarantee
+ * (`hold-console-acks.reporter.ts`), stated by construction rather than left to
+ * how soon the first scheduled callback happens to fire. Every later tick is
+ * the leak proper: it keeps logging after the snapshot, which is what the hold
+ * needs to release the snapshot and what the sweep then finds pending.
  */
 
 import { it, expect } from 'vitest';
@@ -28,7 +36,7 @@ it('passes, and leaves a console.log rescheduling past the end of the file', () 
     console.log('late log from a callback that outlived the test file');
     setImmediate(tick).unref?.();
   };
-  setImmediate(tick).unref?.();
+  tick();
 
   expect(1).toBe(1);
 });

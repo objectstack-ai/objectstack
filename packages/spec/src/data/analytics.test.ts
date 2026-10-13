@@ -80,7 +80,7 @@ describe('TimeUpdateInterval', () => {
       if (parsed.success) continue;
       const [issue] = parsed.error.issues;
       expect(issue.message, retired).toContain(`'${retired}'`);
-      expect(issue.message, retired).toContain('retired in protocol 18');
+      expect(issue.message, retired).toContain('removed in @objectstack/spec 17.5.0');
       expect(issue.message, retired).toContain('day, week, month, quarter, year');
       expect(issue.message, retired).toContain('os migrate meta --from 17');
     }

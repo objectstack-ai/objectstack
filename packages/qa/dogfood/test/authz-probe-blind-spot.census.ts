@@ -302,7 +302,13 @@ export interface ProbeTableReading {
 // `webhook-redeliver-session` row covers one more key, the
 // `/webhooks/redeliver` dispatcher-domain key, which arrived classified rather
 // than through the baseline (the baseline still holds 30, its ceiling unmoved).
-export const PROBE_TABLE: ProbeTableReading = { entries: 20, files: 15, keys: 22 };
+// [ADR-0138 E2] 20 / 15 / 22 -> 23 / 18 / 29: the `/notifications`, `/keys` and
+// `/share-links` domain gates joined the table as GATE_PINs on their three
+// domain files, once each domain's anonymous decision moved to its first
+// statement; the three `anonymous-deny-*` rows cover each gate key plus its
+// dispatcher-domain key, and `anonymous-door-public-form` covers the `forms`
+// REST family key — four keys that left the shrink-only baseline (30 -> 26).
+export const PROBE_TABLE: ProbeTableReading = { entries: 23, files: 18, keys: 29 };
 
 /**
  * The probe count `authz-conformance.matrix.ts`'s header states.
@@ -325,8 +331,10 @@ export const PROBE_TABLE: ProbeTableReading = { entries: 20, files: 15, keys: 22
  * probe it counts, which is exactly what the inverted pin asks for.
  * [#22432] 19 -> 20, the same way: the `/i18n` gate pin and the header
  * sentence moved together.
+ * [ADR-0138 E2] 20 -> 23, the same way: the three domain gate pins and the
+ * header sentence moved together.
  */
-export const MATRIX_HEADER_PROBE_CLAIM = 20;
+export const MATRIX_HEADER_PROBE_CLAIM = 23;
 
 export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
   // ── the two LEDGER files: the population source since 2026-08-31 ───────
@@ -365,13 +373,15 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     controls: { "route: '": 81, "family: '": 81, RestRouteLedgerEntry: 2 },
     // [#22430] The `openapi` family is the second classified one, by the
     // `anonymous-deny-api-description` row; the note's 2 / 16 counts it.
+    // [ADR-0138 E2] The `forms` family is the third, by the D2 class 1 row
+    // `anonymous-door-public-form` (both of its routes are the class): 3 / 15.
     note:
       'The audited disposition of every route @objectstack/rest mounts, enumerated through ' +
       'RestServer.getRoutes() on a booted server and guarded per route by rest-route-ledger.conformance.test.ts. ' +
       'That guard is why this file can be a population source and a regex table cannot: a mounted route with no ' +
       'row here is already RED in another package, so a new family cannot be silently absent from this file, ' +
-      'and therefore cannot be silently absent from the authz ratchet either. 18 families; 2 classified by ' +
-      'matrix rows (metadata and openapi), 16 enumerated in the shrink-only baseline. Re-measured 82 -> 81 when the permission-set ' +
+      'and therefore cannot be silently absent from the authz ratchet either. 18 families; 3 classified by ' +
+      'matrix rows (metadata, openapi and forms), 15 enumerated in the shrink-only baseline. Re-measured 82 -> 81 when the permission-set ' +
       'overlay-discard row left with its route; it carried `family: security`, which the surviving security rows still carry. ' +
       'Earlier re-measured 83 -> 82 when the anonymous ' +
       'public-form lookup-picker row left with its route; it carried `family: forms`, which the surviving form rows ' +
@@ -464,15 +474,19 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // [#22755] `domains/webhooks.ts` is a seventeenth domain file with an
     // eighteenth plain prefix, named by no probe, and its key is the ninth
     // classified: 23 domains, 14 still in the baseline.
+    // [ADR-0138 E2] `domains/notifications.ts`, `domains/keys.ts` and
+    // `domains/share-links.ts` are now named by a probe (their domain floors'
+    // gate pins), and their three keys are the tenth to twelfth classified:
+    // 23 domains, 11 still in the baseline, 8 domain files no probe names.
     note:
       'The dispatcher half. Its machine contract is DOMAIN-level by live registry introspection ' +
       '(domainRegistry.list()), guarded in BOTH directions by route-ledger.conformance.test.ts: every ' +
       'registered domain needs a row, and every ledger domain must be a live prefix or a pinned legacy / ' +
       'non-dispatch branch. That two-way guard is what settles the FILE-SELECTION layer by ' +
       'construction — all 18 DomainRoute prefixes declared across the 17 domain files that declare one are ' +
-      'ledger domains today, including the 11 files no probe names. 23 domains; 9 classified ' +
+      'ledger domains today, including the 8 files no probe names. 23 domains; 12 classified ' +
       '(/meta, /actions, /automation, /packages, /mcp, /analytics, /i18n, /approvals/act, ' +
-      '/webhooks/redeliver), 14 in the shrink-only baseline.',
+      '/webhooks/redeliver, /notifications, /keys, /share-links), 11 in the shrink-only baseline.',
   },
   {
     file: 'packages/rest/src/rest-server.ts',
@@ -709,6 +723,51 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     populationRule: '`export async function handle*Request` entry points',
     controls: { 'shouldDenyAnonymous(': 1, handleI18nRequest: 3 },
     note: 'Same shape as domains/actions.ts.',
+  },
+  {
+    // [ADR-0138 E2] The three domains whose anonymous decision moved from a
+    // face to the handler's first statement; each row has the actions.ts
+    // shape. The handler-name control counts every occurrence of the name as a
+    // substring: notifications.ts carries it twice (the declaration and the
+    // DomainRoute call site); keys.ts four times (those two and two comment
+    // mentions in the mint body); share-links.ts six times, because the body it
+    // delegates to is `handleShareLinksRequestBody` and two comments name it.
+    file: 'packages/runtime/src/domains/notifications.ts',
+    kinds: ['GATE_PIN'],
+    probes: 1,
+    keys: 1,
+    population: 1,
+    reachable: 1,
+    blindSpot: 0,
+    populationRule: '`export async function handle*Request` entry points',
+    controls: { 'shouldDenyAnonymous(': 1, handleNotificationRequest: 2 },
+    note: 'Same shape as domains/actions.ts.',
+  },
+  {
+    file: 'packages/runtime/src/domains/keys.ts',
+    kinds: ['GATE_PIN'],
+    probes: 1,
+    keys: 1,
+    population: 1,
+    reachable: 1,
+    blindSpot: 0,
+    populationRule: '`export async function handle*Request` entry points',
+    controls: { 'shouldDenyAnonymous(': 1, handleKeysRequest: 4 },
+    note: 'Same shape as domains/actions.ts.',
+  },
+  {
+    file: 'packages/runtime/src/domains/share-links.ts',
+    kinds: ['GATE_PIN'],
+    probes: 1,
+    keys: 1,
+    population: 1,
+    reachable: 1,
+    blindSpot: 0,
+    populationRule: '`export async function handle*Request` entry points',
+    controls: { 'shouldDenyAnonymous(': 1, handleShareLinksRequest: 6 },
+    note:
+      'Same shape as domains/actions.ts, with the one exception ADR-0138 D2 names for this domain: the two ' +
+      'token faces (class 2) are selected past the floor by the predicate that marks them public.',
   },
   {
     file: 'packages/runtime/src/domains/mcp.ts',
@@ -1054,7 +1113,7 @@ export function deriveProbeFileCensus(): {
     });
   }
 
-  // ── the six runtime domain files (GATE_PIN) ─────────────────────────────
+  // ── the eight runtime domain files whose floor is a GATE_PIN ─────────────
   //
   // [#22432] The handler-name class admits digits: `handleI18nRequest` is a
   // `handle*Request` entry point like the others, and a letters-only class
@@ -1067,6 +1126,9 @@ export function deriveProbeFileCensus(): {
     ['packages/runtime/src/domains/packages.ts', 'shouldDenyAnonymous(', 'handlePackagesRequest'],
     ['packages/runtime/src/domains/analytics.ts', 'shouldDenyAnonymous(', 'handleAnalyticsRequest'],
     ['packages/runtime/src/domains/i18n.ts', 'shouldDenyAnonymous(', 'handleI18nRequest'],
+    ['packages/runtime/src/domains/notifications.ts', 'shouldDenyAnonymous(', 'handleNotificationRequest'],
+    ['packages/runtime/src/domains/keys.ts', 'shouldDenyAnonymous(', 'handleKeysRequest'],
+    ['packages/runtime/src/domains/share-links.ts', 'shouldDenyAnonymous(', 'handleShareLinksRequest'],
   ];
   for (const [rel, gate, handler] of domains) {
     const src = read(rel);

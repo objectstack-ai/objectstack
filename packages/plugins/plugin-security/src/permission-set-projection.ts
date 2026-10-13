@@ -739,6 +739,22 @@ export async function upsertEnvPermissionSet(
  * unstamped, as before, so the read keeps reporting the lock the doors keep
  * enforcing.
  *
+ * [#23233] ⭐ A tenant-authored echo also names its OWNER: `ownerPackageId`,
+ * the package its stored row is bound to, as the protocol's by-name read
+ * serves it ({@link readServedPackageBinding}). The security catalog reads a
+ * set the engine registry does not hold from this echo — on an environment
+ * kernel the protocol hydrates no stored row into the engine registry — and
+ * takes its owner from `_packageId` alone. Unstamped, a set published into a
+ * writable runtime package was served as UNOWNED while `getMetaItem` named the
+ * package, so the suggestion collector skipped its `isDefault: true` and no
+ * `everyone` suggestion was ever recorded (ADR-0090 D5: packages suggest,
+ * admins confirm). The owner is carried, never derived: `stripDecorations`
+ * still removes whatever `_packageId` the body arrived with (the layered read's
+ * `overlay` layer is the stored document and carries none), and only the
+ * protocol's answer is stamped back. A `packaged` or `unknown` verdict carries
+ * none, as before — a code-shipped set's owner is its artifact's, which the
+ * catalog reads from the engine registry ahead of this echo.
+ *
  * Best-effort: when the facade lacks `registerInMemory`, overlay-only names
  * still resolve via the DatabaseLoader / record dbLoader.
  */
@@ -748,6 +764,7 @@ async function syncEvaluatorRegistry(
   body: any,
   overlayBacked: boolean,
   tenantAuthored = false,
+  ownerPackageId?: string,
 ): Promise<void> {
   try {
     if (!metadata || typeof metadata.registerInMemory !== 'function' || !name) return;
@@ -755,6 +772,7 @@ async function syncEvaluatorRegistry(
       metadata.registerInMemory('permission', name, {
         ...stripDecorations(body),
         ...(tenantAuthored ? { _provenance: 'org' } : {}),
+        ...(tenantAuthored && ownerPackageId !== undefined ? { _packageId: ownerPackageId } : {}),
         [ENV_PROJECTION_MARKER]: true,
       });
       return;
@@ -768,6 +786,27 @@ async function syncEvaluatorRegistry(
       dropEvaluatorRegistryEntry(metadata, name);
     }
   } catch { /* best-effort */ }
+}
+
+/**
+ * [#23233] The package the stored row a by-name read SERVES for `name` is
+ * bound to: the `_packageId` the protocol's single-item read states on the
+ * item from that row's `package_id` column. `undefined` when the row is bound
+ * to no package, or the protocol has no single-item read (minimal embeddings,
+ * unit-test stubs), which keys no row by package either.
+ *
+ * ⛔ The one read of that binding in this module — the data door's update leg
+ * ({@link createPermissionSetWriteThrough}, #21861) and the registry echo
+ * ({@link syncEvaluatorRegistry}) both ask it. Never from a patch, the
+ * projected record or a registry item: those are copies, and the row is the
+ * fact. A read that fails is not caught here; each caller decides what a
+ * binding it could not read means for its own write.
+ */
+async function readServedPackageBinding(protocol: any, name: string): Promise<string | undefined> {
+  if (typeof protocol?.getMetaItem !== 'function') return undefined;
+  const served = await protocol.getMetaItem({ type: 'permission', name });
+  const packageId = served?.item?._packageId;
+  return typeof packageId === 'string' && packageId !== '' ? packageId : undefined;
 }
 
 /** Drop the in-memory `permission` entry for a retired definition. */
@@ -909,7 +948,27 @@ export async function projectPermissionMutation(
     // {@link syncEvaluatorRegistry}.
     const tenantAuthored = overlayBacked
       && classifyPackagedPermissionSet(evt.name, ql, layeredProbe).status === 'org';
-    await syncEvaluatorRegistry(metadata, evt.name, body, overlayBacked, tenantAuthored);
+    // [#23233] …and a tenant-authored echo names the package its stored row is
+    // bound to, read from the protocol — see {@link syncEvaluatorRegistry}.
+    let ownerPackageId: string | undefined;
+    if (tenantAuthored) {
+      try {
+        ownerPackageId = await readServedPackageBinding(protocol, evt.name);
+      } catch (e) {
+        // Functional, not durability: nothing persisted is lost and nothing
+        // grants differently — the echo is registered unowned, exactly as it
+        // was before it carried an owner, so it still enforces the new body.
+        // What is missing is said once, with what restores it.
+        logger?.warn?.(
+          '[security] the package binding of this permission set could not be read, so its registry echo ' +
+            'names no owning package: the security catalog serves the set as unowned, and an `isDefault: true` ' +
+            'set records no audience-binding suggestion (ADR-0090 D5), until the name is projected again — ' +
+            'the next save, publish or boot re-reads the binding. Enforcement is unaffected.',
+          { name: evt.name, error: String((e as Error)?.message ?? e) },
+        );
+      }
+    }
+    await syncEvaluatorRegistry(metadata, evt.name, body, overlayBacked, tenantAuthored, ownerPackageId);
   }
   return out;
 }
@@ -1122,12 +1181,11 @@ export function createPermissionSetWriteThrough(
   ): Promise<{ packageId?: string }> => {
     const overlay = (envelope as { overlay?: unknown } | null | undefined)?.overlay;
     if (overlay === null || overlay === undefined) return {};
-    // A protocol with no single-item read (minimal embeddings, unit-test stubs)
-    // keys no row by package either.
-    if (typeof protocol.getMetaItem !== 'function') return {};
-    const served = await protocol.getMetaItem({ type: 'permission', name });
-    const packageId = served?.item?._packageId;
-    return typeof packageId === 'string' && packageId !== '' ? { packageId } : {};
+    // [#23233] The module's one read of the binding — see
+    // `readServedPackageBinding`, which also answers nothing for a protocol
+    // with no single-item read.
+    const packageId = await readServedPackageBinding(protocol, name);
+    return packageId !== undefined ? { packageId } : {};
   };
 
   const projectAndFetch = async (protocol: any, name: string): Promise<any> => {

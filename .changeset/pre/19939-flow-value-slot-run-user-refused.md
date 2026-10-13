@@ -19,7 +19,7 @@ Clause-②: no (narrowing)
 
 **The expression remedy.** A refused `{…}` arithmetic token's CEL spelling now reads every variable path in it the way a lone path token's does — `{int * 2}` is `vars["int"] * 2`, `{items.0 * 2}` is `items[0] * 2` — instead of rewriting only its divisors, which printed envelopes that did not evaluate.
 
-**Still accepted, unchanged.** A CEL value envelope and every literal. `{$User.*}` keeps resolving where the single-brace dialect still lives, a CRUD `filter` value.
+**Still accepted, unchanged.** A CEL value envelope and every literal.
 
 ## FROM → TO
 
@@ -27,7 +27,7 @@ Clause-②: no (narrowing)
 |:--|:--|:--|
 | `'{$User.Id}'` | `{ dialect: 'cel', source: 'current_user.id' }` | nothing when the run has a user |
 | `'{$User.Id}'`, in a flow that can run without a user | `{ dialect: 'cel', source: 'current_user != null ? current_user.id : null' }` — or skip the node with `current_user != null` as a start condition or a `decision` | the guarded form writes `null` where the template wrote nothing, so on `update_record` it clears a stored value the template left alone |
-| `'{$User.Email}'`, `'{$User.Name}'`, any other `$User` path | an `assignment` of `uid: { dialect: 'cel', source: 'current_user.id' }`, a `get_record` on `sys_user` with `filter: { id: '{uid}' }` and `outputVariable: 'me'`, then `{ dialect: 'cel', source: 'me.email' }` | these never resolved in any shipped run: they wrote nothing |
+| `'{$User.Email}'`, `'{$User.Name}'`, any other `$User` path | a `get_record` on `sys_user` with `filter: { id: { dialect: 'cel', source: 'current_user.id' } }` and `outputVariable: 'me'`, then `{ dialect: 'cel', source: 'me.email' }` | these never resolved in any shipped run: they wrote nothing |
 | `'Owner: {$User.Id}'` | `{ dialect: 'cel', source: "'Owner: ' + current_user.id" }` | in a user-less run, write the hole as `(current_user != null ? current_user.id : '')` |
 | a text slot's `assignments: { by: '{$User.Id}' }`, then `'By {{ by }}'` | `assignments: { by: { dialect: 'cel', source: 'current_user.id' } }`, then `'By {{ by }}'` | nothing when the run has a user; where the flow can run without one, compute `current_user != null ? current_user.id : null`, which renders nothing where the template did |
 
@@ -41,5 +41,5 @@ Clause-②: no (narrowing)
 - **The refusal.** `valueSlotTemplateRefusals` / `flowNodeValueTemplateRefusals` (`@objectstack/spec/automation`); the text-slot judge's run-user remedy (`textSlotTemplateRefusal`) now computes the id with the CEL envelope.
 - **The ledger.** The step-18 D3 entries `flow-value-slot-template-dialect-refused` (amended to refuse the run-user paths), `flow-text-slot-single-brace-refused` and `flow-text-slot-unbound-dollar-root-refused` (their run-user remedy). No key is removed, so there is no tombstone, and there is no D2 conversion.
 - **`@objectstack/cli`.** `os explain flow`'s example writes `current_user.id` and gates on `current_user != null`.
-- **`@objectstack/lint`.** `flow-bare-dollar-reference`'s hint for a bare `$name.path` in a value slot names the CEL envelope the value-slot refusal writes for it — `current_user.id` and its guard for `$User.Id`, the variable the reference names for any other — where it named `{source.id}` and `{$User.Id}`, both refused there. A text slot's hint keeps the `{{ }}` hole, the hint at a node's literal names the value itself, and every other position keeps the single brace.
+- **`@objectstack/lint`.** `flow-bare-dollar-reference`'s hint for a bare `$name.path` in a value slot names the CEL envelope the value-slot refusal writes for it — `current_user.id` and its guard for `$User.Id`, the variable the reference names for any other — where it named `{source.id}` and `{$User.Id}`, both refused there. A text slot's hint keeps the `{{ }}` hole, and the hint at a node's literal, or at any other position, names the value itself.
 - **`@objectstack/service-automation`'s README.** Its *Expressions* section states the value-slot envelope and `current_user`.

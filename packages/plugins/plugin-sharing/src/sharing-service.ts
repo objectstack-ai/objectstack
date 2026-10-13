@@ -439,10 +439,7 @@ export class SharingService implements ISharingService {
       'sys_user',
       'sys_organization',
       'sys_member',
-      'sys_position',
-      'sys_permission_set',
       'sys_user_permission_set',
-      'sys_position_permission_set',
       ...(options.bypassObjects ?? []),
     ]);
   }

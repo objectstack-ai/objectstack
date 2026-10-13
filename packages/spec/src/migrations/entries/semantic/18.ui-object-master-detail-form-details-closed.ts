@@ -40,7 +40,7 @@ export const entry: SemanticMigration = {
     + 'entry is now a strict shape and its `columns` references the column schema, so every rule '
     + 'that schema holds applies here too, with its own prescription. The entry half is read where '
     + 'every page component\'s props are: the component-props gate reports a failing entry or '
-    + 'column as an advisory `component-props-unknown-key` / `component-props-invalid` finding on '
+    + 'column as a `component-props-unknown-key` / `component-props-invalid` error on '
     + '`objectstack validate`, `objectstack build` and `objectstack lint`, and a stored page still '
     + 'saves and loads, because a page component\'s `properties` is not parsed on the metadata save '
     + 'or load path. The identity-only half is `defineStack`\'s cross-reference check, which already '

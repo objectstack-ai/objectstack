@@ -91,12 +91,15 @@ export function isDateRangePresetName(value: unknown): value is DateRangePreset 
  * entry that picked the wrong one, and a reader of a mixed table cannot tell
  * which reading any single row intends.
  *
- * `end: null` is the open arm, and it is exactly the three ROLLING
- * `last_N_days` windows: those have no calendar upper bound at all, so the
- * resolver's clock is the bound and the prescription takes the `$gte`-only
- * form. ⛔ A CALENDAR preset — one that names a period, `today` included —
- * always closes on its own last day, because `$gte` alone also selects every
- * day AFTER the window on a column that carries future dates.
+ * **Every entry closes — there is no open arm.** A CALENDAR preset (one that
+ * names a period, `today` included) closes on its own last day, and the three
+ * ROLLING `last_N_days` windows close on `{today}`: the window runs from
+ * `{N_days_ago}` through the whole of today, the same last day `today` itself
+ * names. The reason is one reason for both families: `$gte` alone also
+ * selects every day AFTER the window on a column that carries future dates (a
+ * close date, a due date), so a `$gte`-only prescription for "last 30 days"
+ * would count next month's rows too. ⛔ So `end` is never absent: a reader
+ * that branches on a missing end is reading a shape this table no longer has.
  *
  * ## Why the table exists: PRESCRIPTION
  *
@@ -115,7 +118,7 @@ export function isDateRangePresetName(value: unknown): value is DateRangePreset 
  * spelling nor the convention can drift silently.
  */
 export const DATE_RANGE_PRESET_MACRO_WINDOWS: Readonly<
-  Record<DateRangePreset, readonly [start: string, end: string | null]>
+  Record<DateRangePreset, readonly [start: string, end: string]>
 > = {
   today:        ['{today}', '{today}'],
   yesterday:    ['{yesterday}', '{yesterday}'],
@@ -127,9 +130,9 @@ export const DATE_RANGE_PRESET_MACRO_WINDOWS: Readonly<
   last_quarter: ['{last_quarter_start}', '{last_quarter_end}'],
   this_year:    ['{year_start}', '{year_end}'],
   last_year:    ['{last_year_start}', '{last_year_end}'],
-  last_7_days:  ['{7_days_ago}', null],
-  last_30_days: ['{30_days_ago}', null],
-  last_90_days: ['{90_days_ago}', null],
+  last_7_days:  ['{7_days_ago}', '{today}'],
+  last_30_days: ['{30_days_ago}', '{today}'],
+  last_90_days: ['{90_days_ago}', '{today}'],
 };
 
 /**
@@ -158,10 +161,10 @@ export function bareDateRangePresetComparandMessage(
   preset: DateRangePreset,
   operator: string,
 ): string {
+  // Every preset's window is closed, so the prescription is always the
+  // two-bound `$between` from its first day through its last.
   const [start, end] = DATE_RANGE_PRESET_MACRO_WINDOWS[preset];
-  const window = end === null
-    ? `{ $gte: '${start}' }`
-    : `{ $between: ['${start}', '${end}'] }`;
+  const window = `{ $between: ['${start}', '${end}'] }`;
   return (
     `"${preset}" is a dashboard date-range PRESET name, not a filter value. It is only `
     + `understood by the dashboard date-filter positions (dateRange.defaultRange, a date `

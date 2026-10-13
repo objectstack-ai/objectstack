@@ -8,7 +8,7 @@
     "qa-scratch-authz": {
       "title": "Scratch authz parents (qa_vault / qa_shared / qa_nofiles) + two real member personas",
       "why": "Stock showcase has NO private files-enabled parent: its only `enable.files` object is showcase_project, which is public_read_write AND readable through the showcase `everyone` baseline. Without this recipe the entire authz core of this area — the 403 deny side of download-authz-both-sides, the invisible-parent case of read-inherits-parent-rls, and the read-but-not-edit split of attach-requires-parent-edit — is blocked(fixture) on every run. Run #7635 closed the gap at runtime and scored those items instead of blocking them; this block is that provisioning made permanent and replayable.",
-      "provenance": "run #7635 (framework 92f26f75) → #7670",
+      "provenance": "run #7635 (framework 92f26f75) → #7670 Step 6 gained persona B's sys_attachment read after QA run #23166 met the panel's up-front refusal (#23169).",
       "app": "showcase",
       "requires": [
         "an admin session that holds the `manage_metadata` capability — PUT /api/v1/meta/:type/:name is capability-gated per ADR-0066 D1 (#6603), so a bare authenticated session is NOT enough (packages/rest/src/rest-route-ledger.ts, the `PUT /api/v1/meta/:type/:name` row)",
@@ -53,7 +53,7 @@
         {
           "step": 6,
           "call": "bind each persona by inserting a sys_user_permission_set row in system context",
-          "expect": "persona A = read-but-NOT-edit on the scratch objects (the attach-requires-parent-edit split); persona B = no grant beyond the everyone baseline (the parent-invisible persona). Prove the split INDEPENDENTLY before scoring any storage clause: read the parent as each persona and confirm the intended visibility, so a later 403 is attributable to the storage gate rather than to a mis-bound persona.",
+          "expect": "persona A = read-but-NOT-edit on the scratch objects (the attach-requires-parent-edit split); persona B = no grant beyond the everyone baseline (the parent-invisible persona). Prove the split INDEPENDENTLY before scoring any storage clause: read the parent as each persona and confirm the intended visibility, so a later 403 is attributable to the storage gate rather than to a mis-bound persona. ⚠ Persona B needs READ on sys_attachment itself (and nothing on the scratch parents), unless its grants and the everyone baseline already carry it: without it the console's attachments panel refuses up front — 'You don't have access to these attachments.' — before any download is attempted, which is the listing gate answering, not the download gate the deny clauses score (QA run #23166). Check B's sys_attachment read as part of the independent split proof.",
           "source": "sys_user_permission_set insert in system context, mirroring showcase-permission-zoo.dogfood.test.ts — the binding shape access-security.json's permission-set items already replay. NOTE (ADR-0090 D5): every authenticated member ALSO holds the everyone baseline additively, so persona B's effective access is the UNION of its grants and that baseline — compute the union before calling a read 'invisible'."
         }
       ],
@@ -173,7 +173,7 @@
       "title": "Gated downloads: 401 anonymous, 403 parent-invisible, signed URL for the entitled — per gating class (attachments-scope / field-owned / public_read opt-out / ungated)",
       "since": "v15.1",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin (uploader/owner)", "signed-up member who cannot read the parent record", "anonymous"],
@@ -199,7 +199,7 @@
         "GET the same routes as the uploader/admin and follow the signed URL",
         "compare TTLs: the gated grant uses the short downloadTtl (default 300s), not the 3600s presignedTtl — read expiry material from the minted URL/descriptor where the adapter exposes it",
         "flip one file to acl='public_read' (system write) and GET /files/<fileId> anonymously — the opt-out must restore the stable anonymous capability URL",
-        "in the browser, open the parent record's RecordAttachmentsPanel as the denied member and capture the surfaced copy"
+        "in the browser, open the parent record's RecordAttachmentsPanel as the denied member — persona B, holding READ on sys_attachment (qa-scratch-authz step 6) — attempt the download, and capture the surfaced copy. Without that read the panel refuses up front ('You don't have access to these attachments.') before any download is attempted: that is the listing gate, not the download denial acceptance[4] scores"
       ],
       "acceptance": [
         {
@@ -253,6 +253,12 @@
           "date": "2026-08-18",
           "change": "clause 3 (acl='public_read' reopens the anonymous capability URL) pinned — QA run #9401 scored this item partial with the OPEN side of the anonymous gate unpinned, which is the half a deny-only suite cannot see: a download-authz suite made only of refusals stays green on a surface that has started refusing everything. automated.ref now names the both-sides pin, records that the TTL branch is read out of the minted URL so the public_read early return is distinguishable from an authorized grant, and states that clause 4 (the panel's denial copy) stays manual with no pin. knownGaps marks the public_read seed gap CLOSED for the API half only, and carries the run's cross-tenant marker so it is not re-derived every wave.",
           "ref": "#9483"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-13",
+          "change": "steps[6] names persona B's sys_attachment read, and the area recipe qa-scratch-authz step 6 now provisions it (persona recipe gap, #23166 A4; parked on #23121, carried by #23169). Without read on sys_attachment the attachments panel refuses before any download, so acceptance[4]'s friendly-denial screenshot would capture the listing refusal instead of the download one. QA run #23166 granted B that read and passed the clause. No clause changed",
+          "ref": "#23169"
         }
       ]
     },

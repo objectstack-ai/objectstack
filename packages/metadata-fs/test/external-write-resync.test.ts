@@ -39,6 +39,35 @@
  *
  * ⛔ These cases are NOT a claim about the CI mechanism, which was never
  * identified. They pin the repository's guarantee, not chokidar's behaviour.
+ *
+ * ## Which case waits for the sweep's clock, and why only one does
+ *
+ * The sweep runs every 2s on a private constant. Waiting out that cadence for
+ * every recovery and every "nothing more arrived" window made this file ~24s
+ * of wall that was almost all idle: three sequential sweeps in the first case
+ * and three 5s quiet windows. That is over the 10s per-file test budget
+ * (AGENTS.md, Build & Test), and the time measured nothing the sweep does.
+ *
+ * So the guarantee is pinned in two halves:
+ *
+ *   - **The sweep runs by itself.** Exactly one recovery, the lost create in
+ *     the first case, waits for the backstop's own timer with nobody calling
+ *     anything, and the case then requires the chain to have re-armed behind
+ *     it. A sweep that never starts, or one that runs once and never again,
+ *     fails there.
+ *   - **What a sweep does.** Every other recovery and every quiet window
+ *     drives `resync()` itself — the body the timer runs — at the seam
+ *     immediately below the clock. That is the discipline
+ *     `self-write-suppression.test.ts` and
+ *     `external-delete-requires-absence.test.ts` set for this package: assert
+ *     the contract, not the race. A driven sweep is awaited, so a quiet window
+ *     is a count of sweeps that really ran, not a span of time in which some
+ *     might have.
+ *
+ * The scheduled sweep keeps running beside the driven ones. A scheduled pass
+ * that lands between two driven passes is one more sweep over the same disk
+ * against the same content-keyed index: it can add a chance to fail an
+ * exactly-once or a said-once assertion, never remove one.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -58,8 +87,8 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
  */
 const RECOVERY_WAIT_MS = 15_000;
 
-/** Comfortably more than two sweeps, for the "did NOT republish" cases. */
-const QUIET_WINDOW_MS = 5_000;
+/** More than two sweeps, for the "did NOT republish" and "said once" cases. */
+const QUIET_SWEEPS = 3;
 
 const CASE_TIMEOUT_MS = 60_000;
 
@@ -75,7 +104,23 @@ interface WatcherHandle {
   } | null;
   resyncTimer: unknown;
   resyncEnabled: boolean;
+  resync(): Promise<void>;
 }
+
+/**
+ * Run ONE reconciliation sweep now: the body `scheduleResync`'s timer runs,
+ * without waiting out the cadence for it. It is awaited, so whatever it
+ * publishes has been published when it returns, or never will be.
+ */
+const sweep = (repo: FileSystemRepository): Promise<void> =>
+  (repo as unknown as WatcherHandle).resync();
+
+/**
+ * Enough turns for whatever a driven sweep published to reach the subscriber.
+ * It is not a race budget: the sweep was awaited, so this only lets the
+ * broker's queue drain into the array.
+ */
+const settle = () => sleep(50);
 
 const handleOf = (repo: FileSystemRepository) => {
   const w = (repo as unknown as WatcherHandle).watcher;
@@ -156,8 +201,12 @@ describe('FileSystemRepository — external writes survive a lost watcher event 
     // From here on chokidar can observe whatever it likes; none of it reaches
     // the repository. This is the state all six one-shot gates leave behind.
     blindWatcher(repo!);
+    const priv = repo as unknown as WatcherHandle;
 
-    // ── create ───────────────────────────────────────────────────────────
+    // ── create, recovered by the SCHEDULED sweep ─────────────────────────
+    // Nobody calls anything here. This is the one recovery in this file that
+    // waits for the backstop's own timer, so it is what pins that the sweep is
+    // armed with the watcher and runs by itself.
     const file = path.join(viewDir, 'late.json');
     await fs.writeFile(file, JSON.stringify({ label: 'late' }, null, 2));
     await waitFor(() => events.some((e) => e.ref.name === 'late'), RECOVERY_WAIT_MS);
@@ -171,16 +220,26 @@ describe('FileSystemRepository — external writes survive a lost watcher event 
     expect(created[0]!.actor).toBeNull();
     expect(created[0]!.parentHash).toBeNull();
 
-    // ── update ───────────────────────────────────────────────────────────
+    // The chain re-arms behind that sweep. The timer slot is emptied when a
+    // scheduled sweep starts and refilled only once it has finished, so it is
+    // empty at least from the publish above until the re-arm. A sweep that ran
+    // once and never again would recover this create and lose every later
+    // change, and it fails here.
+    await waitFor(() => priv.resyncTimer !== null, RECOVERY_WAIT_MS);
+    expect(priv.resyncTimer).not.toBeNull();
+
+    // ── update, recovered by a driven sweep ──────────────────────────────
     await fs.writeFile(file, JSON.stringify({ label: 'late, edited' }, null, 2));
+    await sweep(repo!);
     await waitFor(() => events.some((e) => e.ref.name === 'late' && e.op === 'update'), RECOVERY_WAIT_MS);
 
     const updated = events.filter((e) => e.ref.name === 'late' && e.op === 'update');
     expect(updated).toHaveLength(1);
     expect(updated[0]!.parentHash).toBe(created[0]!.hash);
 
-    // ── delete ───────────────────────────────────────────────────────────
+    // ── delete, recovered by a driven sweep ──────────────────────────────
     await fs.rm(file);
+    await sweep(repo!);
     await waitFor(() => events.some((e) => e.ref.name === 'late' && e.op === 'delete'), RECOVERY_WAIT_MS);
 
     const deleted = events.filter((e) => e.ref.name === 'late' && e.op === 'delete');
@@ -203,10 +262,13 @@ describe('FileSystemRepository — external writes survive a lost watcher event 
 
     // Our own write. `put()` publishes its own event; the sweep reads the same
     // bytes back and must recognise them as ours by content, not by a clock.
+    // (The watcher's face of that suppression is pinned at the handler seam by
+    // `self-write-suppression.test.ts`.)
     await repo!.put(ref('mine'), { label: 'mine' }, { parentVersion: null, actor: 'tester' });
 
-    // Several sweeps' worth of quiet.
-    await sleep(QUIET_WINDOW_MS);
+    // Several sweeps over that same disk, each one awaited.
+    for (let i = 0; i < QUIET_SWEEPS; i++) await sweep(repo!);
+    await settle();
 
     expect(events.filter((e) => e.ref.name === 'once')).toHaveLength(1);
 
@@ -220,7 +282,6 @@ describe('FileSystemRepository — external writes survive a lost watcher event 
     await start();
     // A tracked item, so the delete pass has something it could wrongly retire.
     await repo!.put(ref('kept'), { label: 'kept' }, { parentVersion: null, actor: 'tester' });
-    await sleep(200);
 
     const errors: string[] = [];
     const errSpy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
@@ -239,16 +300,21 @@ describe('FileSystemRepository — external writes survive a lost watcher event 
       return (realReaddir as (a: unknown, b?: unknown) => Promise<unknown>)(p, opts);
     }) as typeof fs.readdir);
 
+    let reportedByFirstSweep: number;
     try {
-      await waitFor(() => errors.length > 0, RECOVERY_WAIT_MS);
+      // The first sweep that meets the fault reports it.
+      await sweep(repo!);
+      reportedByFirstSweep = errors.length;
       // Keep failing across several more sweeps: a standing fault must not
       // reprint every 2s for the life of the process.
-      await sleep(QUIET_WINDOW_MS);
+      for (let i = 1; i < QUIET_SWEEPS; i++) await sweep(repo!);
     } finally {
       readdirSpy.mockRestore();
       errSpy.mockRestore();
     }
+    await settle();
 
+    expect(reportedByFirstSweep).toBe(1);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain(viewDir);
     expect(errors[0]).toContain('EACCES');
@@ -265,9 +331,14 @@ describe('FileSystemRepository — external writes survive a lost watcher event 
     const errSpy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
       errors.push(args.map(String).join(' '));
     });
+    // How many sweep reads of the type directory met the injected ENOENT. A
+    // silence nobody exercised is no evidence, so the case requires one per
+    // driven sweep.
+    let enoentServed = 0;
     const realReaddir = fs.readdir;
     const readdirSpy = vi.spyOn(fs, 'readdir').mockImplementation(((p: unknown, opts?: unknown) => {
       if (p === viewDir) {
+        enoentServed++;
         const gone: NodeJS.ErrnoException = new Error(`ENOENT: no such file or directory, scandir '${viewDir}'`);
         gone.code = 'ENOENT';
         return Promise.reject(gone);
@@ -276,12 +347,13 @@ describe('FileSystemRepository — external writes survive a lost watcher event 
     }) as typeof fs.readdir);
 
     try {
-      await sleep(QUIET_WINDOW_MS);
+      for (let i = 0; i < QUIET_SWEEPS; i++) await sweep(repo!);
     } finally {
       readdirSpy.mockRestore();
       errSpy.mockRestore();
     }
 
+    expect(enoentServed).toBeGreaterThanOrEqual(QUIET_SWEEPS);
     expect(errors).toEqual([]);
   }, CASE_TIMEOUT_MS);
 

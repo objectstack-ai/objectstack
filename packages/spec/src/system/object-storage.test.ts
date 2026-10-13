@@ -57,6 +57,7 @@ describe('StorageScopeSchema', () => {
       expect(result.success).toBe(false);
       const message = result.error!.issues[0]!.message;
       expect(message).toMatch(/`public` was removed from `StorageScope`.*ADR-0049/s);
+      expect(message).toContain('in @objectstack/spec 18 (ADR-0049');
       expect(message).toContain("acl: 'public_read'");
       expect(message).toContain('ADR-0104');
     });

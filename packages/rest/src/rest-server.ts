@@ -5858,7 +5858,9 @@ export class RestServer {
                         }
                         // [#6877] Both narrow the draft list to one package /
                         // one type; an array reached `listDrafts` untouched.
-                        if (refuseRepeatedQueryParams(req, res, ['packageId', 'type'])) return;
+                        // [#23214] The list lives beside the shared decision, so the
+                        // runtime dispatcher's twin refuses the same names.
+                        if (refuseRepeatedQueryParams(req, res, metaReadGate.META_QUERY_ARITY_DOORS.drafts)) return;
                         // [ADR-0131 D6] No organization: a draft is saved
                         // environment-wide, so the list reads the environment
                         // partition, symmetric with the save door. A legacy
@@ -6010,7 +6012,9 @@ export class RestServer {
                         // against. Refused, not resolved — see
                         // `query-multiplicity.ts` for why picking one of two
                         // conflicting intents is worse than a 400.
-                        if (refuseRepeatedQueryParams(req, res, ['package', 'preview', 'object', 'include', 'id'])) return;
+                        // [#23214] The list lives beside the shared decision, so the
+                        // runtime dispatcher's twin refuses the same names.
+                        if (refuseRepeatedQueryParams(req, res, metaReadGate.META_QUERY_ARITY_DOORS.list)) return;
                         // [#22188] Read through {@link metaItemPackageBinding}:
                         // `all`, this list's "show everything" scope, names no package.
                         const packageId = metaItemPackageBinding(req.query?.package);
@@ -6284,8 +6288,9 @@ export class RestServer {
                     try {
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
                         const prot = await this.resolveProtocol(environmentId, req);
-                        // [#6877] One package scopes the book lookup.
-                        if (refuseRepeatedQueryParams(req, res, ['package'])) return;
+                        // [#6877] One package scopes the book lookup. [#23214] The
+                        // list lives beside the shared decision, as the list door's.
+                        if (refuseRepeatedQueryParams(req, res, metaReadGate.META_QUERY_ARITY_DOORS['book-tree'])) return;
                         // [#22188] Read through {@link metaItemPackageBinding}: `all` names no package.
                         const packageId = metaItemPackageBinding(req.query?.package);
                         // [#20408] The route's whole answer is
@@ -8222,7 +8227,9 @@ export class RestServer {
                     // [#6877 shape] `?from=` narrows to ONE current state;
                     // an array would reach `legalNextStates` as a
                     // stringified pair and match no transition key.
-                    if (refuseRepeatedQueryParams(req, res, ['from'])) return;
+                    // [#23214] The list lives beside the shared decision, so the
+                    // runtime dispatcher's twin refuses the same name.
+                    if (refuseRepeatedQueryParams(req, res, metaReadGate.META_QUERY_ARITY_DOORS.state)) return;
                     const from = req.query?.from !== undefined ? String(req.query.from) : undefined;
                     // [#15405] The engine seam, reached the way its SIBLING at
                     // `computeExecCtx` already reaches it — `wiredEngineOrLoud`

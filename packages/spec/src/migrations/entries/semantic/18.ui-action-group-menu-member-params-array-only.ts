@@ -32,8 +32,8 @@ export const entry: SemanticMigration = {
     + 'values are not part of the inline action vocabulary at all, and the action that needs them is its own '
     + '`action:button` node. The member now refuses a non-array `params` on a non-`api` type at the gate, at '
     + '`actions.N.params`, with that prescription. The `api` member\'s object `params` is unchanged. It is read '
-    + 'where every page component\'s props are: the component-props gate reports the refusal as an advisory '
-    + '`component-props-invalid` finding on `objectstack validate`, `objectstack build` and `objectstack lint`, and a '
+    + 'where every page component\'s props are: the component-props gate reports the refusal as a '
+    + '`component-props-invalid` error on `objectstack validate`, `objectstack build` and `objectstack lint`, and a '
     + 'stored page still saves and loads, because a page component\'s `properties` is not parsed on the metadata '
     + 'save or load path. No conversion is registered: the static values belong on a different node, and the '
     + 'census found no writer. Deployed metadata NOT MEASURED.',

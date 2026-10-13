@@ -818,8 +818,9 @@ describe('migrateStoredMetadata — a site the chain leaves as stored is a TODO,
     it('MEASURED — the write path judges the two door kinds differently, and the TODO rides on either outcome', async () => {
         // `properties.filter` sits in the page component's open `properties` bag:
         // the runtime save door does not parse it by `type` (the props gate is
-        // `@objectstack/lint`'s, advisory). `dataSource.filter` is a declared key
-        // of the strict component schema, so the save door refuses it there.
+        // `@objectstack/lint`'s, an error at the CLI doors only).
+        // `dataSource.filter` is a declared key of the strict component schema,
+        // so the save door refuses it there.
         const bindingMixed = pageRow('deal_room', [
             grid({ stage: 'open' }),
             { type: 'object-kanban', dataSource: { object: 'deal', filter: COMBINATOR }, properties: { objectName: 'deal' } },

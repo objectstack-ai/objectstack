@@ -329,9 +329,10 @@ describe("#16042 — the rolling `last_N_days` window anchors on the zone's cale
      * Probes chosen to make the sixteen-hour difference VISIBLE as rows: two
      * sit inside the UTC window and outside the zone's, one sits outside both,
      * and three sit inside both. ⛔ None sits on the upper bound — that leg
-     * ends at NOW and is a separate question (`endExclusive` is false for the
-     * rolling family, `memory-analytics-date-range-token-end-exclusive.test.ts`
-     * owns the boundary reading).
+     * stops before tomorrow begins, as `today` does, and is a separate
+     * question (`endExclusive` is true for every preset;
+     * `memory-analytics-date-range-token-end-exclusive.test.ts` owns the
+     * boundary reading).
      */
     const PROBES = [
         '2026-08-29T23:59:59.999Z',   // before both windows

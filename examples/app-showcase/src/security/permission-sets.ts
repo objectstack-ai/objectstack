@@ -391,8 +391,6 @@ export const FieldOpsDelegatePermissionSet = definePermissionSet({
   label: 'Field Ops Delegate Admin',
   objects: {
     sys_user_position: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
-    sys_position: { allowRead: true },
-    sys_permission_set: { allowRead: true },
     sys_business_unit: { allowRead: true },
     sys_business_unit_member: { allowRead: true },
     sys_user: { allowRead: true },

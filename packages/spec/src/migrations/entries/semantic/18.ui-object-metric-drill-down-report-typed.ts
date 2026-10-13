@@ -26,7 +26,7 @@ export const entry: SemanticMigration = {
     + 'the records instead. The row now takes `ReportSchema` by reference — the declaration objectui already '
     + 'names for the member — and, since a joined report refuses a block that binds no `dataset`, every report it '
     + 'admits is one the drawer draws. It is read where every page component\'s props are: the component-props gate '
-    + 'reports a refused value as an advisory `component-props-invalid` / `component-props-unknown-key` finding on '
+    + 'reports a refused value as a `component-props-invalid` / `component-props-unknown-key` error on '
     + '`objectstack validate`, `objectstack build` and `objectstack lint`, and a stored page still saves and loads, '
     + 'because a page component\'s `properties` is not parsed on the metadata save or load path. No conversion is '
     + 'registered: nothing on the load path refuses the shape, and the authored census found no drawn report to '

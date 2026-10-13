@@ -660,13 +660,12 @@ export function lowerDatasetCompareDateRange(
  * `currentRange[1]` as the LAST bucket the window contains — so both bounds
  * must name days the window really covers.
  *
- * ⚠️ `endExclusive` is therefore load-bearing, not decoration: the ten calendar
- * presets report the first instant AFTER the window (`this_month` ends at the
- * next month's start), so the last day they cover is the one holding the
- * instant before that bound. Reading their bound as inclusive would make every
- * calendar preset one day too long and shift `previousPeriod` by a day. The
- * three rolling presets end at NOW, a moment they REACH, so their bound is
- * already the last day.
+ * ⚠️ `endExclusive` is therefore load-bearing, not decoration: every preset
+ * reports the first instant AFTER the window (`this_month` ends at the next
+ * month's start, and a rolling `last_N_days` window at tomorrow's start), so
+ * the last day it covers is the one holding the instant before that bound.
+ * Reading that bound as inclusive would make every preset one day too long and
+ * shift `previousPeriod` by a day.
  *
  * ## [#18245] ⭐ `timezone` decides WHICH calendar, and it is not optional here
  *

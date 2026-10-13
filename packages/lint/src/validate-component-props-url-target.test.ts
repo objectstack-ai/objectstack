@@ -10,7 +10,7 @@
 // executor's `target`. These pins hold that the gate reports that refusal at
 // the row's own `target` path, with the parse's own first sentence, and stays
 // silent on an admitted target. The finding is a `component-props-invalid`
-// warning, the gate's one tier (its module header says why).
+// error, like every finding of the gate (its module header says why).
 import { describe, expect, it } from 'vitest';
 import { validateComponentProps, COMPONENT_PROPS_INVALID } from './validate-component-props.js';
 

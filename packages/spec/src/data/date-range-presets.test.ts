@@ -49,7 +49,7 @@ describe('date-range preset vocabulary — one source of truth, read by both the
     // vocabulary rather than trusting the table.
     for (const preset of DATE_RANGE_PRESETS) {
       const [start, end] = DATE_RANGE_PRESET_MACRO_WINDOWS[preset];
-      for (const bound of end === null ? [start] : [start, end]) {
+      for (const bound of [start, end]) {
         const m = bound.match(DATE_MACRO_WRAPPED_RE);
         expect(m, `${preset} bound ${bound} must be a wrapped macro`).toBeTruthy();
         expect(isDateMacroToken(m![1]), `${preset} bound ${bound} must be a KNOWN macro`).toBe(true);
@@ -57,10 +57,10 @@ describe('date-range preset vocabulary — one source of truth, read by both the
     }
   });
 
-  it('the rolling last_N_days windows prescribe {N_days_ago} with no upper macro', () => {
-    expect(DATE_RANGE_PRESET_MACRO_WINDOWS.last_7_days).toEqual(['{7_days_ago}', null]);
-    expect(DATE_RANGE_PRESET_MACRO_WINDOWS.last_30_days).toEqual(['{30_days_ago}', null]);
-    expect(DATE_RANGE_PRESET_MACRO_WINDOWS.last_90_days).toEqual(['{90_days_ago}', null]);
+  it('the rolling last_N_days windows prescribe {N_days_ago} through {today}', () => {
+    expect(DATE_RANGE_PRESET_MACRO_WINDOWS.last_7_days).toEqual(['{7_days_ago}', '{today}']);
+    expect(DATE_RANGE_PRESET_MACRO_WINDOWS.last_30_days).toEqual(['{30_days_ago}', '{today}']);
+    expect(DATE_RANGE_PRESET_MACRO_WINDOWS.last_90_days).toEqual(['{90_days_ago}', '{today}']);
   });
 
   it('the refusal message names the value, the operator, the macro fix and the ISO fallback', () => {
@@ -77,6 +77,20 @@ describe('date-range preset vocabulary — one source of truth, read by both the
     const window = bareDateRangePresetComparandMessage('this_week', '$lt');
     expect(window).toContain('{week_start}');
     expect(window).toContain('{week_end}');
+  });
+
+  it('the refusal prescribes the CLOSED window for a rolling preset — never a $gte-only one', () => {
+    // A `$gte`-only prescription has no upper bound, so on a column that
+    // carries future dates it counts every later day too.
+    for (const [preset, start] of [
+      ['last_7_days', '{7_days_ago}'],
+      ['last_30_days', '{30_days_ago}'],
+      ['last_90_days', '{90_days_ago}'],
+    ] as const) {
+      const message = bareDateRangePresetComparandMessage(preset, '$gte');
+      expect(message, preset).toContain(`e.g. { $between: ['${start}', '{today}'] } — or an ISO date`);
+      expect(message, preset).not.toContain(`{ $gte: '${start}' }`);
+    }
   });
 });
 
@@ -96,10 +110,13 @@ describe('date-range preset vocabulary — one source of truth, read by both the
  */
 const REFERENCE_DAY = '2026-07-15'; // a Wednesday, mid-week / mid-month / mid-quarter
 
-/** What each token used by a CLOSED entry denotes on {@link REFERENCE_DAY}. */
+/** What each token the table uses denotes on {@link REFERENCE_DAY}. */
 const TOKEN_DAY_ON_REFERENCE: Readonly<Record<string, string>> = {
   '{today}': '2026-07-15',
   '{yesterday}': '2026-07-14',
+  '{7_days_ago}': '2026-07-08',
+  '{30_days_ago}': '2026-06-15',
+  '{90_days_ago}': '2026-04-16',
   '{week_start}': '2026-07-13', // Monday of that week
   '{week_end}': '2026-07-19', // Sunday of that week
   '{last_week_start}': '2026-07-06',
@@ -120,8 +137,8 @@ const TOKEN_DAY_ON_REFERENCE: Readonly<Record<string, string>> = {
 
 /**
  * The window each preset NAME denotes on {@link REFERENCE_DAY}, as
- * `[firstDay, lastDay]` — or `null` for a ROLLING preset, whose upper bound is
- * the resolver's clock rather than any calendar day.
+ * `[firstDay, lastDay]`. A ROLLING preset runs from `N` days ago through the
+ * whole of today — today is its last day, exactly as it is `today`'s.
  *
  * Every declared preset must appear here (the census is asserted below), so a
  * preset added later cannot reach `main` without its author stating the days
@@ -129,7 +146,7 @@ const TOKEN_DAY_ON_REFERENCE: Readonly<Record<string, string>> = {
  * becomes visible instead of silent.
  */
 const EXPECTED_WINDOW_DAYS: Readonly<
-  Record<DateRangePreset, readonly [first: string, last: string] | null>
+  Record<DateRangePreset, readonly [first: string, last: string]>
 > = {
   today: ['2026-07-15', '2026-07-15'],
   yesterday: ['2026-07-14', '2026-07-14'],
@@ -141,9 +158,9 @@ const EXPECTED_WINDOW_DAYS: Readonly<
   last_quarter: ['2026-04-01', '2026-06-30'],
   this_year: ['2026-01-01', '2026-12-31'],
   last_year: ['2025-01-01', '2025-12-31'],
-  last_7_days: null,
-  last_30_days: null,
-  last_90_days: null,
+  last_7_days: ['2026-07-08', '2026-07-15'],
+  last_30_days: ['2026-06-15', '2026-07-15'],
+  last_90_days: ['2026-04-16', '2026-07-15'],
 };
 
 const DAY_MS = 86_400_000;
@@ -171,28 +188,25 @@ describe('the prescribed window covers exactly the days the preset names', () =>
     expect(Object.keys(EXPECTED_WINDOW_DAYS).sort()).toEqual([...DATE_RANGE_PRESETS].sort());
   });
 
-  it('the open arm is exactly the three ROLLING last_N_days windows', () => {
-    // `end: null` is not a free choice — it says "this window has no calendar
-    // upper bound at all". A preset that names a period always closes, `today`
-    // included: `{ $gte: '{today}' }` also selects every day AFTER today on a
-    // column that carries future dates.
-    const open = DATE_RANGE_PRESETS.filter((p) => DATE_RANGE_PRESET_MACRO_WINDOWS[p][1] === null);
-    expect(open).toEqual(['last_7_days', 'last_30_days', 'last_90_days']);
+  it('there is no open arm — every entry closes, the rolling family on {today}', () => {
+    // A `$gte`-only window selects every day AFTER it on a column that carries
+    // future dates, which is why no entry may leave its end out — the three
+    // rolling `last_N_days` windows included.
     for (const preset of DATE_RANGE_PRESETS) {
-      expect(
-        DATE_RANGE_PRESET_MACRO_WINDOWS[preset][1] === null,
-        `${preset}: the open arm and the rolling family must be the same set`,
-      ).toBe(EXPECTED_WINDOW_DAYS[preset] === null);
+      const end: unknown = DATE_RANGE_PRESET_MACRO_WINDOWS[preset][1];
+      expect(typeof end, `${preset}: every window names its last day`).toBe('string');
+    }
+    for (const preset of ['last_7_days', 'last_30_days', 'last_90_days'] as const) {
+      expect(DATE_RANGE_PRESET_MACRO_WINDOWS[preset][1], preset).toBe(DATE_RANGE_PRESET_MACRO_WINDOWS.today[1]);
     }
   });
 
-  it('every closed entry names its FIRST day as start and its LAST day as end', () => {
+  it('every entry names its FIRST day as start and its LAST day as end', () => {
     for (const preset of DATE_RANGE_PRESETS) {
       const expected = EXPECTED_WINDOW_DAYS[preset];
-      if (expected === null) continue;
       const [start, end] = DATE_RANGE_PRESET_MACRO_WINDOWS[preset];
       const startDay = TOKEN_DAY_ON_REFERENCE[start];
-      const endDay = TOKEN_DAY_ON_REFERENCE[end!];
+      const endDay = TOKEN_DAY_ON_REFERENCE[end];
       expect(startDay, `${preset}: ${start} needs a denotation in TOKEN_DAY_ON_REFERENCE`).toBeTruthy();
       expect(endDay, `${preset}: ${end} needs a denotation in TOKEN_DAY_ON_REFERENCE`).toBeTruthy();
       expect(startDay, `${preset}: start must be the window's FIRST day`).toBe(expected[0]);
@@ -207,20 +221,39 @@ describe('the prescribed window covers exactly the days the preset names', () =>
     // because the defect was exactly a count: `['{yesterday}', '{today}']`
     // prescribed `>= yesterday 00:00 AND < tomorrow 00:00` — two days for a
     // one-day preset.
-    expect(prescribedDayCount('2026-07-14', TOKEN_DAY_ON_REFERENCE[DATE_RANGE_PRESET_MACRO_WINDOWS.yesterday[1]!])).toBe(1);
-    expect(prescribedDayCount('2026-07-15', TOKEN_DAY_ON_REFERENCE[DATE_RANGE_PRESET_MACRO_WINDOWS.today[1]!])).toBe(1);
-    expect(prescribedDayCount('2026-07-13', TOKEN_DAY_ON_REFERENCE[DATE_RANGE_PRESET_MACRO_WINDOWS.this_week[1]!])).toBe(7);
-    expect(prescribedDayCount('2026-07-06', TOKEN_DAY_ON_REFERENCE[DATE_RANGE_PRESET_MACRO_WINDOWS.last_week[1]!])).toBe(7);
+    expect(prescribedDayCount('2026-07-14', TOKEN_DAY_ON_REFERENCE[DATE_RANGE_PRESET_MACRO_WINDOWS.yesterday[1]])).toBe(1);
+    expect(prescribedDayCount('2026-07-15', TOKEN_DAY_ON_REFERENCE[DATE_RANGE_PRESET_MACRO_WINDOWS.today[1]])).toBe(1);
+    expect(prescribedDayCount('2026-07-13', TOKEN_DAY_ON_REFERENCE[DATE_RANGE_PRESET_MACRO_WINDOWS.this_week[1]])).toBe(7);
+    expect(prescribedDayCount('2026-07-06', TOKEN_DAY_ON_REFERENCE[DATE_RANGE_PRESET_MACRO_WINDOWS.last_week[1]])).toBe(7);
+    // The rolling windows run from `N` days ago through the whole of today.
+    expect(prescribedDayCount('2026-07-08', TOKEN_DAY_ON_REFERENCE[DATE_RANGE_PRESET_MACRO_WINDOWS.last_7_days[1]])).toBe(8);
+    expect(prescribedDayCount('2026-06-15', TOKEN_DAY_ON_REFERENCE[DATE_RANGE_PRESET_MACRO_WINDOWS.last_30_days[1]])).toBe(31);
+    expect(prescribedDayCount('2026-04-16', TOKEN_DAY_ON_REFERENCE[DATE_RANGE_PRESET_MACRO_WINDOWS.last_90_days[1]])).toBe(91);
 
-    // And the full census, so a period preset cannot drift either.
+    // And the full census, so no preset can drift either.
     for (const preset of DATE_RANGE_PRESETS) {
       const expected = EXPECTED_WINDOW_DAYS[preset];
-      if (expected === null) continue;
-      const end = DATE_RANGE_PRESET_MACRO_WINDOWS[preset][1]!;
+      const end = DATE_RANGE_PRESET_MACRO_WINDOWS[preset][1];
       expect(
         prescribedDayCount(expected[0], TOKEN_DAY_ON_REFERENCE[end]),
         `${preset}: prescribed extent must equal the named window`,
       ).toBe(prescribedDayCount(expected[0], expected[1]));
+    }
+  });
+
+  it('a rolling window counts a row five days ago and NOT a row five days ahead', () => {
+    // The measurement that found the open arm: one row dated today−5 and one
+    // dated today+5 on a `date` column. The console's lowering and the
+    // analytics preset arm count 1; a `$gte`-only window counts 2, because
+    // nothing stops it at today. Judged by the platform's own bare-day rule
+    // (`>= start` and `< nextUtcCalendarDay(end)`), as `$between` compiles it.
+    const rows = ['2026-07-10', '2026-07-20']; // REFERENCE_DAY − 5, REFERENCE_DAY + 5
+    for (const preset of ['last_7_days', 'last_30_days', 'last_90_days'] as const) {
+      const [start, end] = DATE_RANGE_PRESET_MACRO_WINDOWS[preset];
+      const from = midnightUtc(TOKEN_DAY_ON_REFERENCE[start]);
+      const stopsBefore = midnightUtc(nextUtcCalendarDay(TOKEN_DAY_ON_REFERENCE[end]) as string);
+      const counted = rows.filter((day) => midnightUtc(day) >= from && midnightUtc(day) < stopsBefore);
+      expect(counted, preset).toEqual(['2026-07-10']);
     }
   });
 
