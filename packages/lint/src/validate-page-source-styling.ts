@@ -54,10 +54,13 @@ export function validatePageSourceStyling(stack: AnyRec): SourceStyleFinding[] {
       where: `page "${name}"`,
       path: `${pagePath}.source`,
       message: `${count} \`className\` attribute${count > 1 ? 's' : ''} in ${String(kind)}-source page — Tailwind utilities in page source silently produce no CSS (the build never scans authored metadata; ADR-0065).`,
+      // [#22161] One remedy line per kind; why authored Tailwind produces no
+      // CSS, the theme tokens and the overlay advice are
+      // `os explain page-source-className-tailwind`.
       hint:
         kind === 'react'
-          ? "Style with inline style={{}} using hsl(var(--token)) theme colors (e.g. color:'hsl(var(--foreground))', background:'hsl(var(--card))'); render drawer/modal via <ObjectForm formType=\"drawer\"|\"modal\"> instead of hand-rolled overlays."
-          : "Lay out with the components' structured props (<flex direction gap>, <grid columns>) and add CSS via a JSON style object style={{\"color\":\"hsl(var(--foreground))\"}}; do not use Tailwind className.",
+          ? "Replace className with inline style={{}} using hsl(var(--token)) theme colors, e.g. style={{ color: 'hsl(var(--foreground))' }}"
+          : "Replace className with the components' structured props (<flex direction gap>, <grid columns>) and a JSON style object, e.g. style={{\"color\":\"hsl(var(--foreground))\"}}",
     });
   }
   return findings;

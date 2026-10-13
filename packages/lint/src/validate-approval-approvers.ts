@@ -386,10 +386,9 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
               where,
               path: `${path}.value`,
               message: `expression approver has an empty expression — the node fails at entry.`,
-              hint:
-                `Write a CEL expression over current.* (the record's live state at node entry), ` +
-                `trigger.* (the submit-time snapshot) or vars.* (flow variables), ` +
-                `e.g. current.approvers_dynamic or vars.approval_lead.picked_departments.`,
+              // [#22161] One remedy line; what each root holds is
+              // `os explain approval-expression-invalid`.
+              hint: `Write a CEL expression over current.*, trigger.* or vars.*, e.g. current.approvers_dynamic`,
             });
           } else {
             const parsed = collectCelRootIdentifiers(source);
@@ -416,11 +415,12 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
                   message:
                     `expression approver references \`${illegal.join('`, `')}\` — only current.*, ` +
                     `trigger.* and vars.* are available, and the node fails at entry on any other root.`,
+                  // [#22161] One remedy line per arm; why `record` and
+                  // `previous` are unbound at an approval node is
+                  // `os explain approval-expression-invalid`.
                   hint: wantsRecord
-                    ? `\`record\`/\`previous\` are not bound here (on this platform \`record\` always means ` +
-                      `"the record at event time", which is ambiguous at an approval node). Write ` +
-                      `current.<field> for the live value at node entry, trigger.<field> for the ` +
-                      `submit-time snapshot (vars.previous carries the pre-update row).`
+                    ? `Write current.<field> for the live value at node entry or trigger.<field> for the ` +
+                      `submit-time snapshot; vars.previous carries the pre-update row`
                     : `Did you mean current.<field> (live record), trigger.<field> (submit snapshot), ` +
                       `or vars.<name> (flow variable)?`,
                 });
@@ -456,11 +456,12 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
             message:
               `approver { type: '${type}', value: '${value}' } names no org-membership tier ` +
               `(${MEMBERSHIP_TIER_LIST}), so it matches nobody and the request stalls`,
+            // [#22161] One remedy line: the verdict already lists the tiers,
+            // and why a business role is always a position (the closed
+            // ADR-0108 vocabulary, `sys_user_position`) is the explanation's.
             hint:
-              `If '${value}' is an org position, author { type: 'position', value: '${value}' } ` +
-              `(resolved via sys_user_position, ADR-0090 D3). Keep type 'org_membership_level' ` +
-              `only for membership tiers (${MEMBERSHIP_TIER_LIST}) — the vocabulary is closed ` +
-              `(ADR-0108), so a business role is always a position.`,
+              `If '${value}' is an org position, author { type: 'position', value: '${value}' }; keep ` +
+              `'org_membership_level' for the tiers the verdict lists`,
           });
         } else if (type in DEPRECATED_APPROVER_TYPES) {
           const fix = canonicalApproverType(type);
@@ -617,11 +618,12 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
             `this node resolves approvers from an expression but declares no onEmptyApprovers — ` +
             `an empty result falls back to the default ('admin_rescue': request opens, only a ` +
             `privileged admin can act).`,
+          // [#22161] One remedy line naming the closed vocabulary (held to the
+          // spec's enum by the rule's test); what each policy does is
+          // `os explain approval-expression-no-empty-policy`.
           hint:
-            `Declare the empty-slate policy explicitly: onEmptyApprovers: 'admin_rescue' (hold for ` +
-            `admin takeover), 'fail' (fail the node — config bug), 'auto_approve' (wave through, ` +
-            `output.autoApproved = true), or 'fallback' with a sibling fallbackApprovers list (open ` +
-            `the request on those people instead).`,
+            `Declare onEmptyApprovers on the node: 'admin_rescue', 'fail', 'auto_approve', or 'fallback' ` +
+            `with a fallbackApprovers list`,
         });
       }
 

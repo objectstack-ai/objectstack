@@ -1461,9 +1461,11 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
   const universe = buildUniverse(stack);
 
   // [#22161] Every `translation-target-unknown` message below is one verdict
-  // sentence (plus the nearest declared name, when there is one). Why the
-  // resolver never reads an orphan key, why it gates, and what each leg may
-  // name are `os explain translation-target-unknown`.
+  // sentence (plus the nearest declared name, when there is one), and every
+  // hint one remedy line: the declared names are not listed, since the
+  // verdict's "Did you mean" already names the nearest. Why the resolver never
+  // reads an orphan key, why it gates, and what each leg may name are
+  // `os explain translation-target-unknown`.
   const orphan = (where: string, path: string, message: string, hint: string) => {
     findings.push({
       severity: TRANSLATION_TARGET_UNKNOWN_SEVERITY,
@@ -1521,8 +1523,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
                 `defines, so nothing reads this subtree and every label in it renders untranslated.` +
                 suggest(objectName, universe.objects.keys()),
             `Rename the key to the object it was written for, drop it, or ignore this if the ` +
-              `object is contributed by another installed package.` +
-              (universe.objects.size > 0 ? ` Defined objects: ${listNames(universe.objects.keys())}.` : ''),
+              `object is contributed by another installed package.`,
           );
           continue;
         }
@@ -1539,8 +1540,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
               `Translations are keyed to field "${fieldName}", which object "${objectName}" ` +
                 `does not declare, so its label renders untranslated in this locale.` +
                 suggest(fieldName, facts.fields.keys()),
-              `Point the key at a declared field, or drop it if the field was removed or renamed.` +
-                (facts.fields.size > 0 ? ` Declared fields: ${listNames(facts.fields.keys())}.` : ''),
+              `Point the key at a declared field, or drop it if the field was removed or renamed.`,
             );
             continue;
           }
@@ -1564,8 +1564,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `Translations are keyed to view "${viewName}", which no view of object ` +
               `"${objectName}" declares, so the view tab keeps its source-locale label.` +
               suggest(viewName, facts.views),
-            `Match the key to the view's \`name\` (not its label), or drop it.` +
-              (facts.views.size > 0 ? ` Declared views: ${listNames(facts.views)}.` : ''),
+            `Match the key to the view's \`name\` (not its label), or drop it.`,
           );
         }
 
@@ -1579,10 +1578,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
               `"${objectName}" declares, so the section heading stays in the source locale.` +
               suggest(sectionName, facts.sections),
             `Sections are translatable only through a STABLE NAME: give the group/section a ` +
-              `\`key\`/\`name\` and use it here, or drop the translation.` +
-              (facts.sections.size > 0
-                ? ` Declared sections: ${listNames(facts.sections)}.`
-                : ` Object "${objectName}" declares no named section at all.`),
+              `\`key\`/\`name\` and use it here, or drop the translation.`,
           );
         }
 
@@ -1604,12 +1600,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
               `object "${objectName}" declares, so the tab keeps its source-locale label.` +
               suggest(tabName, facts.tabs),
             `Match the key to the tab's \`name\` (not its label), or drop it if the preset was ` +
-              `renamed or removed.` +
-              (facts.tabs.size > 0
-                ? ` Declared tabs: ${listNames(facts.tabs)}.`
-                : ` No page over "${objectName}" declares a filter-preset tab bar at all. Note ` +
-                  `only a page's \`interfaceConfig.userFilters.tabs\` is resolvable — a list ` +
-                  `view's own \`tabs\` has no renderer, so nothing reads a key written for one.`),
+              `renamed or removed.`,
           );
         }
 
@@ -1629,10 +1620,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
               `"${objectName}" does not declare, so its refusal \`message\` stays in the source ` +
               `locale.` + suggest(ruleName, facts.validations),
             `Match the key to the rule's \`name\`, or drop it if the rule was renamed or ` +
-              `removed.` +
-              (facts.validations.size > 0
-                ? ` Declared rules: ${listNames(facts.validations)}.`
-                : ` Object "${objectName}" declares no named validation rules.`),
+              `removed.`,
           );
         }
 
@@ -1650,8 +1638,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
                 `neither declares nor has bound from \`stack.actions\`, so the button keeps its ` +
                 `source-locale label.` + suggest(actionName, facts.actions.keys()),
               `Match the key to a defined action name, move it under the object that owns the ` +
-                `action, or drop it.` +
-                (facts.actions.size > 0 ? ` Actions on this object: ${listNames(facts.actions.keys())}.` : ''),
+                `action, or drop it.`,
             );
             continue;
           }
@@ -1682,10 +1669,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
                 suggest(actionName, universe.globalActions.keys()),
             owner
               ? `Move these keys under \`objects.${owner}._actions.${actionName}\`.`
-              : `Match the key to an object-less action's name, or drop it.` +
-                (universe.globalActions.size > 0
-                  ? ` Object-less actions: ${listNames(universe.globalActions.keys())}.`
-                  : ''),
+              : `Match the key to an object-less action's name, or drop it.`,
           );
           continue;
         }
@@ -1709,13 +1693,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `Translations are keyed to app "${appName}", which this stack neither defines nor ` +
               `contributes into, so the app launcher shows the source-locale label.` +
               suggest(appName, universe.apps.keys()),
-            `Match the key to an app's \`name\`, or drop it.` +
-              // Every resolvable name, declared or only contributed into
-              // (#18442) — a remedy list that omitted the contribution targets
-              // would omit half the keys this rule accepts.
-              (universe.apps.size > 0
-                ? ` Apps this stack defines or contributes into: ${listNames(universe.apps.keys())}.`
-                : ''),
+            `Match the key to an app's \`name\`, or drop it.`,
           );
           continue;
         }
@@ -1740,12 +1718,8 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
                 suggest(navId, navIds),
             contributedOnly
               ? `Match the key to a contributed item's \`id\`, or move it to the package that ` +
-                `owns app "${appName}".` +
-                (navIds.size > 0
-                  ? ` Contributed navigation ids: ${listNames(navIds)}.`
-                  : ` This stack contributes no identified item into "${appName}" at all.`)
-              : `Match the key to the navigation item's \`id\`, or drop it.` +
-                (navIds.size > 0 ? ` Declared navigation ids: ${listNames(navIds)}.` : ''),
+                `owns app "${appName}".`
+              : `Match the key to the navigation item's \`id\`, or drop it.`,
           );
         }
       }
@@ -1761,8 +1735,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `Translations are keyed to dashboard "${dashName}", which this stack does not ` +
               `define, so the dashboard title stays in the source locale.` +
               suggest(dashName, universe.dashboards.keys()),
-            `Match the key to a dashboard's \`name\`, or drop it.` +
-              (universe.dashboards.size > 0 ? ` Defined dashboards: ${listNames(universe.dashboards.keys())}.` : ''),
+            `Match the key to a dashboard's \`name\`, or drop it.`,
           );
           continue;
         }
@@ -1775,8 +1748,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `Translations are keyed to widget "${widgetId}", which dashboard "${dashName}" ` +
               `does not declare, so the widget title stays in the source locale.` +
               suggest(widgetId, dash.widgets),
-            `Match the key to the widget's \`id\`, or drop it.` +
-              (dash.widgets.size > 0 ? ` Declared widget ids: ${listNames(dash.widgets)}.` : ''),
+            `Match the key to the widget's \`id\`, or drop it.`,
           );
         }
         for (const actionKey of Object.keys(asRecord(rawDash.actions))) {
@@ -1787,8 +1759,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `Translations are keyed to header action "${actionKey}", which dashboard ` +
               `"${dashName}" does not declare, so the button keeps its source-locale label.` +
               suggest(actionKey, dash.actions),
-            `Header-action translations are keyed by the action's \`actionUrl\`, not its label.` +
-              (dash.actions.size > 0 ? ` Declared header actions: ${listNames(dash.actions)}.` : ''),
+            `Header-action translations are keyed by the action's \`actionUrl\`, not its label.`,
           );
         }
       }
@@ -1804,8 +1775,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `Translations are keyed to flow "${flowName}", which this stack does not define, ` +
               `so the wizard renders its source-locale label and headings.` +
               suggest(flowName, universe.flows.keys()),
-            `Match the key to a flow's \`name\` (the machine name, not its label), or drop it.` +
-              (universe.flows.size > 0 ? ` Defined flows: ${listNames(universe.flows.keys())}.` : ''),
+            `Match the key to a flow's \`name\` (the machine name, not its label), or drop it.`,
           );
           continue;
         }
@@ -1838,10 +1808,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
                   `declares no screen node for, so the wizard step keeps its source-locale heading.` +
                   suggest(nodeId, flow.screens.keys()),
               `Screen translations are keyed by the node's \`id\` (the client's ` +
-                `\`ScreenSpec.nodeId\`), not its \`label\`.` +
-                (flow.screens.size > 0
-                  ? ` Declared screen node ids: ${listNames(flow.screens.keys())}.`
-                  : ` Flow "${flowName}" declares no \`type: 'screen'\` node at all.`),
+                `\`ScreenSpec.nodeId\`), not its \`label\`.`,
             );
             continue;
           }
@@ -1885,10 +1852,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
                   suggest(fieldName, screen.fields),
               objectForm
                 ? `Move this copy under \`objects.${objectForm}.fields.${fieldName}\`, or drop it.`
-                : `Match the key to a \`config.fields[].name\` on that screen, or drop it.` +
-                  (screen.fields.size > 0
-                    ? ` Declared screen field names: ${listNames(screen.fields)}.`
-                    : ` Screen "${nodeId}" declares no \`config.fields\` at all.`),
+                : `Match the key to a \`config.fields[].name\` on that screen, or drop it.`,
             );
           }
         }
@@ -1910,10 +1874,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
                   `declare, so the refusal keeps its source-locale message.` +
                   suggest(nodeId, flow.refusals),
             `Refusal translations are keyed by the \`id\` of an \`end\` node declaring ` +
-              `\`outcome: 'refused'\`.` +
-              (flow.refusals.size > 0
-                ? ` Declared refusing end node ids: ${listNames(flow.refusals)}.`
-                : ` Flow "${flowName}" declares no refusing \`end\` node at all.`),
+              `\`outcome: 'refused'\`.`,
           );
         }
       }
@@ -2078,9 +2039,7 @@ function checkActionParams(findings: TranslationRefFinding[], ctx: ActionEntryCo
         `Translations are keyed to parameter "${paramName}", which ${ctx.subject} does not ` +
         `declare, so its label and help text render untranslated in the action dialog.` +
         suggest(paramName, declared),
-      hint:
-        `Match the key to a declared param \`name\`, or drop it.` +
-        (declared.size > 0 ? ` Declared params: ${listNames(declared)}.` : ''),
+      hint: `Match the key to a declared param \`name\`, or drop it.`,
     });
   }
 }
@@ -2259,8 +2218,7 @@ function checkActionOutcomeMessages(findings: TranslationRefFinding[], ctx: Acti
             `\`outcomeMessages\` at all, so nothing reads this map and this copy is never shown.`),
       hint:
         `Match the key to an outcome the action's \`outcomeMessages\` declares, declare the ` +
-        `outcome there first, or drop it.` +
-        (declared.size > 0 ? ` Declared outcomes: ${listNames(declared)}.` : ''),
+        `outcome there first, or drop it.`,
     });
   }
 }
@@ -2338,9 +2296,7 @@ function checkActionResultDialogFields(findings: TranslationRefFinding[], ctx: A
           : `Translations are keyed to result field "${fieldPath}", but ${ctx.subject}'s ` +
             `\`resultDialog\` declares no \`fields\` (it renders the whole response as JSON), ` +
             `so nothing reads this label.`,
-      hint:
-        `Match the key to a declared field's literal \`path\` (dots included), or drop it.` +
-        (declared.size > 0 ? ` Declared paths: ${listNames(declared)}.` : ''),
+      hint: `Match the key to a declared field's literal \`path\` (dots included), or drop it.`,
     });
   }
 }

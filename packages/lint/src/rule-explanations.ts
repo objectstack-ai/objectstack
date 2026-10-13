@@ -533,12 +533,14 @@ const DATASET_INCLUDE_UNKNOWN_EXPLANATION: RuleExplanation = {
     'Joins are COMPILED from a dataset\'s `include` (ADR-0021): each entry must be a traversable ' +
       'relationship path — a lookup, master_detail, user or tree field, up to three hops (ADR-0071). An entry that ' +
       'resolves to nothing, or to a field that is not a relationship, produces no join at all, so ' +
-      'every dimension or measure written against that prefix addresses nothing.',
+      'every dimension or measure written against that prefix addresses nothing. ADR-0021 derives ' +
+      'every join from the object graph, so an entry names a relationship field and never an ON clause.',
     'Resolution is the shared object graph\'s, injected columns included: `owner_id` reads as the ' +
       'lookup it is and joins, `created_at` reads as a datetime and does not. Not reported: a dataset ' +
       'whose base object this stack does not define or cannot read the fields of.',
     'To fix it, declare a relationship that exists on the join chain from the dataset\'s object, or ' +
-      'drop the entry. Declaring `a.b` implicitly includes `a`.',
+      'drop the entry. Declaring `a.b` implicitly includes `a`. The verdict\'s "Did you mean" names the ' +
+      'nearest field of the object the entry was resolved on.',
   ],
 };
 
@@ -555,7 +557,8 @@ const DATASET_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
       'hole one level down: every binding resolves, the board renders, and the numbers are wrong. The ' +
       'rule is an error for that reason.',
     'Paths are resolved on the shared object graph — a dotted `relationship.field` path hop by hop — ' +
-      'and the verdict names the hop that failed. Not reported: an object this stack does not define, ' +
+      'and the verdict names the hop that failed and, when one is close, the nearest declared field ' +
+      '("Did you mean"). Not reported: an object this stack does not define, ' +
       'an object with no readable field map (an ADR-0015 external object, an introspected ' +
       'datasource), and a registry-injected system column, which is real at runtime.',
   ],
@@ -2400,6 +2403,89 @@ const APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const APPROVAL_EXPRESSION_INVALID_EXPLANATION: RuleExplanation = {
+  rule: 'approval-expression-invalid',
+  covers: 'what an expression approver may read',
+  paragraphs: [
+    // The three roots are held to the spec's `APPROVER_EXPRESSION_ROOTS` by the rule's test.
+    'An `expression` approver resolves its people from runtime data: its `value` is bare CEL, with ' +
+      'no `{…}` template braces, evaluated at node entry over three roots. `current.*` is the ' +
+      'record\'s live state at node entry; `trigger.*` is the submit-time snapshot; `vars.*` holds the ' +
+      'flow\'s variables, an upstream node\'s output included (for example ' +
+      '`vars.get_reviewers.record.owner_id` or `vars.approval_lead.picked_departments`). The result — ' +
+      'a user id, a comma-separated list or an array, or ids re-expanded per `resolveAs` — is the ' +
+      'approver slate.',
+    'The runtime rejects an expression that is empty, does not parse, or reads any other root, and ' +
+      'fails the node at entry: the CEL environment would resolve an unknown root as `dyn`, so it ' +
+      'would evaluate to null and leave a silently empty slate, and the pre-check fails the node ' +
+      'loudly instead. So each is an error here, on the CLI and at the runtime publish gate alike.',
+    '`record` and `previous` are deliberately not bound at an approval node. Everywhere else on the ' +
+      'platform (flow conditions, hooks) `record` means the record at event time, and reusing it here ' +
+      'would silently alias one of two times. Write `current.FIELD` for the live value at node entry ' +
+      'or `trigger.FIELD` for the submit-time snapshot; `vars.previous` carries the pre-update row.',
+    '`resolveAs` means something only on an `expression` approver: it says how the resolved values ' +
+      'become people (`user`, the default, or `department`, `position` or `team`, expanded through the ' +
+      'same lookups those approver types use). On any other type it does nothing, so it is reported ' +
+      'as dead config at `info`: remove it, or make the approver an expression.',
+  ],
+};
+
+const APPROVAL_EXPRESSION_NO_EMPTY_POLICY_EXPLANATION: RuleExplanation = {
+  rule: 'approval-expression-no-empty-policy',
+  covers: 'what each empty-slate policy does',
+  paragraphs: [
+    'A node with an `expression` approver resolves people from runtime data, so an empty result is ' +
+      'far likelier than for a static approver type: a field nobody has written yet mid-flow, or an ' +
+      'upstream output that came back empty. The rule asks the node to SAY what an empty slate should ' +
+      'do rather than inherit the default silently.',
+    // The four policies are held to the spec's `onEmptyApprovers` enum by the rule's test.
+    'The policies, in `onEmptyApprovers`: `admin_rescue`, the default — the request opens on the ' +
+      'organization\'s administrators, and only a privileged admin can act; `fail` — the node fails ' +
+      '(its fault edge, or the run), for a slate that can only be empty through a configuration bug; ' +
+      '`auto_approve` — the request is skipped and the run continues down the `approve` edge with ' +
+      '`output.autoApproved = true`, which waves the record through; `fallback` — the request opens on ' +
+      'the people a sibling `fallbackApprovers` list names instead, and a fallback that itself resolves ' +
+      'to nobody degrades to `admin_rescue`.',
+    'Advisory (`info`): declaring the default explicitly silences it, and an `info` finding never ' +
+      'blocks a build or a publish.',
+  ],
+};
+
+// ── Record titles (`validate-record-title.ts`) ──────────────────────────────
+
+const TITLE_FORMAT_RETIRED_EXPLANATION: RuleExplanation = {
+  rule: 'title-format-retired',
+  covers: 'why titleFormat is retired, and what replaces it',
+  paragraphs: [
+    'ADR-0079 makes a record\'s title a structural invariant: every object resolves one primary ' +
+      'title from a real field, the one `nameField` points at (`displayNameField` is its deprecated ' +
+      'alias), or one derived from the object\'s fields. `titleFormat` is a render-only template: the ' +
+      'server can neither return the title it draws nor query by it, the shared title predicate ' +
+      '(`objectTitleCompleteness`) never reads it, and an explicit `nameField` takes precedence over it.',
+    'For a single-field title, set `nameField` to that field. For a composite title, add a formula ' +
+      'field with `returnType: \'text\'` and point `nameField` at it: a formula whose result is text is ' +
+      'title-eligible. Then drop `titleFormat`, which this warning reports for as long as it is declared.',
+    'A warning, not an error: the schema still parses the key, so existing metadata keeps loading.',
+  ],
+};
+
+const TITLE_UNRESOLVABLE_EXPLANATION: RuleExplanation = {
+  rule: 'title-unresolvable',
+  covers: 'how a record title resolves, and its fallback',
+  paragraphs: [
+    // The eligible types are held to the spec's `TITLE_ELIGIBLE_TYPES` by the rule's test.
+    'A record\'s title resolves from the object\'s `nameField` pointer (or the deprecated ' +
+      '`displayNameField`), else by derivation from a title-eligible field: a `text`, `textarea`, ' +
+      '`email`, `url`, `markdown`, `html` or `richtext` field, or a `formula` whose `returnType` is ' +
+      '`text`, a field named like a title (`name`, `title`, `subject`, …) first. This finding means ' +
+      'neither exists: no pointer and nothing to derive one from (`objectTitleCompleteness` answers ' +
+      '`none`), so records have no meaningful name.',
+    'A warning, not an error: the runtime still auto-provisions a primary and falls back to a stable ' +
+      '`Record #ID` floor, so a green build never ships a title-less object. An explicit title is far ' +
+      'more useful to every surface that names the record.',
+  ],
+};
+
 // ── Data-model rules (`data-model-rules.ts`) ───────────────────────────────
 // The three ADR-0120 uniqueness ids run on `os validate` and `os build` as
 // registry entries and on `os lint` through `lintDataModel`; the other three
@@ -2676,6 +2762,12 @@ const CHART_MEASURE_UNKNOWN_EXPLANATION: RuleExplanation = {
       'chart\'s `series[]` is replaced wholesale by one derived entry per selected measure; and a ' +
       'page chart\'s `yAxis[].field` keeps its slot (the count turns on a secondary axis) and its ' +
       'scale, while the plotted columns come from `values`.',
+    'So at a presentation position the fix is the name or nothing: `series[].name` selects WHICH ' +
+      'derived series a label and its presentation land on and cannot add, remove or re-point one ' +
+      '(membership belongs to the dataset selection), and `yAxis[]` carries presentation only — title, ' +
+      'min/max, position, gridlines. None of these surfaces carries a `suppressWarnings` key, so ' +
+      'correcting the name or dropping the entry is the only way to clear the advisory. The fix line ' +
+      'names the nearest declared measure ("Did you mean") rather than listing the dataset\'s measures.',
     CHART_BINDING_SURFACES,
   ],
 };
@@ -2840,7 +2932,7 @@ const LIST_VIEW_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
       '`userFilters.tabs[].filter`, and every binding inside a `kanban`, `calendar`, `gantt`, ' +
       '`timeline`, `gallery`, `map` or `tree` block. Nothing resolves the name at render time: the ' +
       'view renders successfully with a blank, empty or wrong result, and nothing else reports the ' +
-      'miss.',
+      'miss. The verdict\'s "Did you mean" names the nearest field the object declares.',
     'An error where the miss changes what the view returns or collapses what it lays out — for ' +
       'example, a filter key, user filter or gantt quick filter matches no record; a column is sent as the ' +
       'projection, where the REST ingress answers `400 INVALID_FIELD`; a `kanban.groupByField` ' +
@@ -2879,6 +2971,10 @@ const LIST_VIEW_FIELD_DOTTED_EXPLANATION: RuleExplanation = {
       '(`assertFilterIsMaterializable` and the REST ingress, `400 INVALID_FIELD`) rather than ' +
       'answered with an empty list. A structured or JSON head, an array (`multiple: true`) head, a ' +
       'file head and an unreadable head are served by the door, so they are not reported.',
+    'The ways out are the doors\' own. At a projection position, name the whole column and read ' +
+      'into its value in the client, or read the related record with `expand`; at a filter position, ' +
+      'filter on a column of the bound object itself. At either, denormalise the value onto the bound ' +
+      'object — a stored field, written when the source changes — and name that.',
     'Not judged, because each is read client-side out of the fetched row, where a dotted path ' +
       'walks an embedded record: `gantt.quickFilters[].field`, `gantt.tooltipFields[]` and every ' +
       'renderer binding. `sort` keeps its own rule. Always an error: every judged position is ' +
@@ -2906,6 +3002,8 @@ const TRANSLATION_TARGET_UNKNOWN_EXPLANATION: RuleExplanation = {
       'long after the field, view, section or navigation entry it was written for was deleted. The ' +
       'forward half of the same parity, a declared surface with no translation, already fails, so ' +
       'the two halves gate alike.',
+    'The verdict names the nearest declared name when one is close ("Did you mean"), and the fix ' +
+      'line names the remedy only, without listing what is declared; what each key may name follows.',
     'Under `objects.OBJECT` (an object this stack, or a sibling package of the same artifact, ' +
       'defines): `fields.FIELD` a declared field (a system column, `_id`, `name` and `space` are ' +
       'never reported); `_views.VIEW` a view\'s `name`, not its label; `_sections.KEY` a ' +
@@ -3127,6 +3225,8 @@ const OBJECT_FIELD_REF_UNKNOWN_EXPLANATION: RuleExplanation = {
       'object and misses under `ownership: \'none\'`), and the positions other rules own: ' +
       '`searchableFields` (`searchable-field-unknown`), list views (the list-view rules) and the ' +
       'scalar role pointers.',
+    'The verdict names the nearest field of the addressed object when one is close ("Did you mean"), ' +
+      'and the fix line names the position\'s remedy only, without listing that object\'s fields.',
   ],
 };
 
@@ -3326,6 +3426,28 @@ const VIEW_CONTAINER_SHAPE_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// ── Source-tier page styling (`validate-page-source-styling.ts`) ────────────
+
+const PAGE_SOURCE_CLASSNAME_TAILWIND_EXPLANATION: RuleExplanation = {
+  rule: 'page-source-className-tailwind',
+  covers: 'why Tailwind classes in page source produce no CSS',
+  paragraphs: [
+    'A `kind: \'html\'`, `\'react\'` or `\'jsx\'` page\'s `source` is runtime metadata, and the ' +
+      'Console\'s Tailwind build scans only the renderer\'s own source, never an authored page string. ' +
+      'So a Tailwind `className` in page source produces no CSS (ADR-0065): it styles the page only by ' +
+      'coincidence, when the class happens to be one the renderer already ships.',
+    'On a react page, style with an inline `style={{…}}` object that uses the theme\'s tokens as ' +
+      '`hsl(var(--token))` — `color: \'hsl(var(--foreground))\'`, `background: \'hsl(var(--card))\'` — ' +
+      'so the page follows the theme. Render a drawer or a modal through ' +
+      '`ObjectForm` with `formType="drawer"` or `formType="modal"` rather than a hand-rolled overlay.',
+    'On an html page, lay out with the components\' structured props (`flex` with `direction` and ' +
+      '`gap`, `grid` with `columns`) and add CSS through a JSON style object, ' +
+      '`style={{"color":"hsl(var(--foreground))"}}`.',
+    'A warning: the page still renders, without the styling the classes asked for. The verdict counts ' +
+      'the `className` attributes in the source.',
+  ],
+};
+
 // ── Interface page visualizations (`validate-page-visualization-bindings.ts`) ──
 
 const PAGE_VISUALIZATION_WITHOUT_BINDING_EXPLANATION: RuleExplanation = {
@@ -3424,6 +3546,9 @@ const AI_SKILL_SURFACE_MISMATCH_EXPLANATION: RuleExplanation = {
       'that resolves to no declared skill is skipped, not reported: kernel skills (`schema_reader`, ' +
       'the `ask` and `build` bundles) are registered at run time and invisible to a static read, so ' +
       'resolving names against `stack.skills` alone would flag every one of them.',
+    'To fix it, move the skill to an agent of its own surface, or change the skill\'s `surface` to the ' +
+      'agent\'s. Declare `surface: \'both\'` only for a genuinely shared, read-only capability, since ' +
+      'a `both` skill attaches to an agent of either surface.',
   ],
 };
 
@@ -3608,7 +3733,8 @@ const SEED_INSERT_MODE_DUPLICATES_ON_REPLAY_EXPLANATION: RuleExplanation = {
       'then six, then nine).',
     // The modes are held to the rule by its test, each one silent.
     'The fix line names the idempotent modes, `ignore` (skip rows that already exist) and `upsert` ' +
-      '(create or update), each matching on the dataset\'s `externalId`: a single natural-key field, ' +
+      '(create or update), each matching on the dataset\'s `externalId`: a single natural-key field ' +
+      '(`externalId: \'code\'`), ' +
       'or a composite list of fields for a join or junction table with no single natural key ' +
       '(`[\'team\', \'project\']`).',
     'A warning, not a refusal: an insert seed loads and works on a fresh database, and the defect ' +
@@ -3630,7 +3756,8 @@ const SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION: RuleExplanation = {
     'So a seeded value need not be an initial state, but it must be a state the machine DECLARES: ' +
       'the union of its `initialStates`, the keys of its `transitions` map and every transition ' +
       'target. The verdict names the first three declared states in alphabetical order and counts ' +
-      'the rest.',
+      'the rest. The exemption lets a seed be born mid-lifecycle; it is not a licence to write an ' +
+      'unknown state.',
     'Not judged: an absent or empty value, a value that is not a plain string (an unresolved ' +
       'expression envelope, a number), and a `state_machine` rule that declares no state at all. A ' +
       'warning: a curated value the machine does not know is suspicious, not necessarily wrong.',
@@ -3989,6 +4116,10 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [FILTER_PRESET_COMPARAND_EXPLANATION.rule]: FILTER_PRESET_COMPARAND_EXPLANATION,
   [APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY_EXPLANATION.rule]: APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY_EXPLANATION,
   [APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER_EXPLANATION.rule]: APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER_EXPLANATION,
+  [APPROVAL_EXPRESSION_INVALID_EXPLANATION.rule]: APPROVAL_EXPRESSION_INVALID_EXPLANATION,
+  [APPROVAL_EXPRESSION_NO_EMPTY_POLICY_EXPLANATION.rule]: APPROVAL_EXPRESSION_NO_EMPTY_POLICY_EXPLANATION,
+  [TITLE_FORMAT_RETIRED_EXPLANATION.rule]: TITLE_FORMAT_RETIRED_EXPLANATION,
+  [TITLE_UNRESOLVABLE_EXPLANATION.rule]: TITLE_UNRESOLVABLE_EXPLANATION,
   [UNIQUE_LEGACY_ORGANIZATION_COMPOSITE_EXPLANATION.rule]: UNIQUE_LEGACY_ORGANIZATION_COMPOSITE_EXPLANATION,
   [UNIQUE_UNSCOPED_DECLARED_INDEX_EXPLANATION.rule]: UNIQUE_UNSCOPED_DECLARED_INDEX_EXPLANATION,
   [UNIQUE_DOUBLE_DECLARATION_EXPLANATION.rule]: UNIQUE_DOUBLE_DECLARATION_EXPLANATION,
@@ -4021,6 +4152,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [ACTION_NAME_UNDEFINED_EXPLANATION.rule]: ACTION_NAME_UNDEFINED_EXPLANATION,
   [MAPPING_TARGET_FIELD_UNKNOWN_EXPLANATION.rule]: MAPPING_TARGET_FIELD_UNKNOWN_EXPLANATION,
   [VIEW_CONTAINER_SHAPE_EXPLANATION.rule]: VIEW_CONTAINER_SHAPE_EXPLANATION,
+  [PAGE_SOURCE_CLASSNAME_TAILWIND_EXPLANATION.rule]: PAGE_SOURCE_CLASSNAME_TAILWIND_EXPLANATION,
   [PAGE_VISUALIZATION_WITHOUT_BINDING_EXPLANATION.rule]: PAGE_VISUALIZATION_WITHOUT_BINDING_EXPLANATION,
   [FLOW_CREDENTIAL_LITERAL_EXPLANATION.rule]: FLOW_CREDENTIAL_LITERAL_EXPLANATION,
   [AI_SKILL_SURFACE_MISMATCH_EXPLANATION.rule]: AI_SKILL_SURFACE_MISMATCH_EXPLANATION,
