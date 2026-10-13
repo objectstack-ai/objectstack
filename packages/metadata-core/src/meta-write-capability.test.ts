@@ -98,61 +98,80 @@ describe('metaWriteCapabilityVerdict — who is admitted', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// [ADR-0131 D3] The walled catalog refusal
+// [ADR-0131 D3 · D12 items 7–8 · D11] The walled environment-metadata refusal
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('[ADR-0131 D3] walledCatalogWriteVerdict — under a wall the security catalog is the platform operator\'s', () => {
+describe('[ADR-0131 D12 items 7–8] walledCatalogWriteVerdict — under a wall the environment\'s metadata is the platform operator\'s', () => {
     const TENANT = { isSystem: false, callerPosture: 'TENANT_ADMIN' };
+    /** Catalog and non-catalog types alike, plus the package doors' subject. */
+    const TYPES = [...SECURITY_CATALOG_TYPES, 'object', 'view', 'flow', 'app', 'dashboard', 'translation', 'package'];
 
-    it('refuses a non-operator write of each catalog type under `isolated` and `group`', () => {
+    it('refuses a non-operator write of every type under `isolated` and `group`', () => {
         for (const tenancyPosture of ['isolated', 'group'] as const) {
-            for (const type of SECURITY_CATALOG_TYPES) {
+            for (const type of TYPES) {
                 const v = walledCatalogWriteVerdict({ type, tenancyPosture, ...TENANT });
                 expect(v.allowed, `${type} under ${tenancyPosture}`).toBe(false);
             }
         }
     });
 
-    it('the sentence names the posture and the capability, and nothing about the caller', () => {
-        const v = walledCatalogWriteVerdict({ type: 'permission', tenancyPosture: 'group', ...TENANT });
-        expect(v.allowed).toBe(false);
-        const message = (v as { message: string }).message;
-        expect(message.split(': ')[0]).toBe('Creating, changing or deleting a permission set requires the platform operator');
-        expect(message).toContain("'group' tenancy posture");
-        expect(message).toContain('`manage_metadata`');
-        expect(message).not.toContain('TENANT_ADMIN');
-    });
-
-    it('a URL spelling the protocol folds to a catalog type is judged as that type', () => {
-        for (const type of ['positions', 'permissions', 'capabilities']) {
-            expect(isSecurityCatalogType(type), type).toBe(true);
-            expect(walledCatalogWriteVerdict({ type, tenancyPosture: 'isolated', ...TENANT }).allowed, type).toBe(false);
+    it('a MEMBER-rung holder is refused as a TENANT_ADMIN-rung one is: the rung decides, not what is held', () => {
+        for (const type of ['object', 'permission']) {
+            expect(walledCatalogWriteVerdict({ type, tenancyPosture: 'group', callerPosture: 'MEMBER' }).allowed, type).toBe(false);
         }
     });
 
-    it('admits the platform operator rung and a system write', () => {
-        expect(walledCatalogWriteVerdict({ type: 'position', tenancyPosture: 'isolated', callerPosture: PLATFORM_OPERATOR_POSTURE }))
-            .toEqual({ allowed: true });
-        expect(walledCatalogWriteVerdict({ type: 'position', tenancyPosture: 'isolated', isSystem: true }))
-            .toEqual({ allowed: true });
+    it('the sentence names the written type, the posture and the ruling, and nothing about the caller', () => {
+        const subjects: Record<string, string> = {
+            permission: 'a permission set',
+            position: 'a position',
+            capability: 'a capability',
+            package: 'a package',
+            view: "a 'view' metadata item",
+            flow: "a 'flow' metadata item",
+        };
+        for (const [type, subject] of Object.entries(subjects)) {
+            const v = walledCatalogWriteVerdict({ type, tenancyPosture: 'group', ...TENANT });
+            expect(v.allowed).toBe(false);
+            const message = (v as { message: string }).message;
+            expect(message.split(': ')[0], type).toBe(`Creating, changing or deleting ${subject} requires the platform operator`);
+            expect(message, type).toContain("'group' tenancy posture");
+            expect(message, type).toContain('ADR-0131 D3, D12 items 7–8, D11');
+            expect(message, type).toContain('`manage_metadata`');
+            expect(message, type).toContain('an environment of its own');
+            expect(message, type).not.toContain('TENANT_ADMIN');
+        }
+    });
+
+    it('a URL spelling the protocol folds is named as the type it writes', () => {
+        for (const [type, subject] of [['permissions', 'a permission set'], ['views', "a 'view' metadata item"]] as const) {
+            const v = walledCatalogWriteVerdict({ type, tenancyPosture: 'isolated', ...TENANT });
+            expect(v.allowed, type).toBe(false);
+            expect((v as { message: string }).message.startsWith(`Creating, changing or deleting ${subject} `), type).toBe(true);
+        }
+        expect(isSecurityCatalogType('positions')).toBe(true);
+        expect(isSecurityCatalogType('views')).toBe(false);
+    });
+
+    it('CONTROL: admits the platform operator rung and a system write, for every type', () => {
+        for (const type of TYPES) {
+            expect(walledCatalogWriteVerdict({ type, tenancyPosture: 'isolated', callerPosture: PLATFORM_OPERATOR_POSTURE }), type)
+                .toEqual({ allowed: true });
+            expect(walledCatalogWriteVerdict({ type, tenancyPosture: 'group', isSystem: true }), type)
+                .toEqual({ allowed: true });
+        }
     });
 
     it('a caller with no rung at all is not the operator', () => {
-        expect(walledCatalogWriteVerdict({ type: 'position', tenancyPosture: 'isolated' }).allowed).toBe(false);
+        expect(walledCatalogWriteVerdict({ type: 'view', tenancyPosture: 'isolated' }).allowed).toBe(false);
     });
 
-    it('is inert under `single` and with no posture (no `tenancy` service): the capability gate decides alone', () => {
+    it('CONTROL: inert under `single` and with no posture (no `tenancy` service): the capability gate decides alone', () => {
         for (const tenancyPosture of ['single', undefined] as const) {
-            for (const type of SECURITY_CATALOG_TYPES) {
-                expect(walledCatalogWriteVerdict({ type, tenancyPosture, ...TENANT })).toEqual({ allowed: true });
+            for (const type of TYPES) {
+                expect(walledCatalogWriteVerdict({ type, tenancyPosture, ...TENANT }), `${type} under ${tenancyPosture}`)
+                    .toEqual({ allowed: true });
             }
-        }
-    });
-
-    it('admits every other type under a wall — the refusal is the catalog\'s, not the metadata door\'s', () => {
-        for (const type of ['object', 'view', 'flow', 'app']) {
-            expect(isSecurityCatalogType(type), type).toBe(false);
-            expect(walledCatalogWriteVerdict({ type, tenancyPosture: 'isolated', ...TENANT })).toEqual({ allowed: true });
         }
     });
 

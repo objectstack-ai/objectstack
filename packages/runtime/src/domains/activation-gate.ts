@@ -106,10 +106,12 @@ export const ACTIVATION_AUTHORING_CAPABILITY = 'manage_metadata';
  * refused caller can do instead.
  *
  * `remedy` is a whole sentence rather than a noun because the sanctioned path
- * genuinely differs by artifact and ADR-0126 §7 requires a refusal to name one:
- * a flow can be cloned under a new name (§7.1), while **action-clone is not
- * chartered** (§8 item 2) — recommending one for actions would advertise
- * machinery that does not exist, which is the failure Prime Directive #10 names.
+ * genuinely differs by artifact and ADR-0126 §7 requires a refusal to name one.
+ * The refusal is answered only under a wall, where ADR-0131 D12 items 7–8 make
+ * every environment-metadata write the platform operator's: a clone (§7.1) or
+ * a sibling item is environment authoring there, so no remedy may recommend
+ * one — that would advertise a door that refuses the reader, which is the
+ * failure Prime Directive #10 names.
  */
 export interface ActivationSubject {
     /** Noun phrase completing "Enabling or disabling …" — e.g. `a packaged flow`. */
@@ -118,10 +120,20 @@ export interface ActivationSubject {
     remedy: string;
 }
 
-/** The flow door's wording (#12157) — byte-identical to what it shipped with. */
+/**
+ * The flow door's wording (#12157).
+ *
+ * [ADR-0131 D6 · D12 items 7–8] This refusal is answered only under a wall,
+ * where cloning is environment authoring and the platform operator's like
+ * every other environment-metadata write (the `/automation` clone door and the
+ * `/meta` save refuse the organization's caller there), so the remedy names
+ * the operator and the organization's own environment, never a clone.
+ */
 export const FLOW_ACTIVATION_SUBJECT: ActivationSubject = {
     subject: 'a packaged flow',
-    remedy: 'To customize this flow for your organization, clone it under a new name instead.',
+    remedy:
+        'To switch or customize this flow for the installation, ask your platform operator; an organization that needs ' +
+        'flows of its own is given an environment of its own.',
 };
 
 /**
@@ -129,14 +141,13 @@ export const FLOW_ACTIVATION_SUBJECT: ActivationSubject = {
  *
  * ⛔ It does NOT recommend a clone. The action-clone half is deliberately
  * unchartered ("it stays on §3's pre-chart discipline until real pull
- * appears"), so the honest alternatives are the operator, and authoring an
- * ordinary sibling action — which Regime C leaves open exactly as today.
+ * appears"). [ADR-0131 D12 items 7–8] Nor does it recommend authoring a
+ * sibling action: this refusal is answered only under a wall, where authoring
+ * one is the platform operator's too. The operator is the honest alternative.
  */
 export const ACTION_ACTIVATION_SUBJECT: ActivationSubject = {
     subject: 'a packaged action',
-    remedy:
-        'To switch a packaged action off for this installation, ask your platform operator; authoring your own action ' +
-        'alongside it stays open to you.',
+    remedy: 'To switch a packaged action off for this installation, ask your platform operator.',
 };
 
 /**
@@ -156,12 +167,16 @@ export const POSITION_ACTIVATION_SUBJECT: ActivationSubject = {
 
 /**
  * [ADR-0126 §3 regime C, as ADR-0131 D6 amends it] The permission-set door's
- * wording. Regime C charters the clone for permission sets (the "Clone" action
- * the packaged-base refusal already names), so the remedy is the flow door's.
+ * wording. Regime C charters the clone for permission sets, but this refusal is
+ * answered only under a wall, where the clone door refuses the organization's
+ * caller (ADR-0131 D3), so the remedy names the operator, as the flow door's
+ * does.
  */
 export const PERMISSION_SET_ACTIVATION_SUBJECT: ActivationSubject = {
     subject: 'a permission set',
-    remedy: 'To customize this permission set for your organization, clone it under a new name instead.',
+    remedy:
+        'To switch or customize this permission set for the installation, ask your platform operator; an organization ' +
+        'that needs a catalog of its own is given an environment of its own.',
 };
 
 /**
@@ -226,9 +241,10 @@ export function readActivationBody(
  * same deployment shape as `single` — and a loud
  * `AuthzStoreUnavailableError('tenancy')` when one is registered and cannot
  * answer, because the posture is an authorization input and was never decided.
- * [ADR-0131 D3] The metadata door's walled catalog refusal reads it through
- * this same function, so the two posture-conditional gates of this transport
- * cannot read two different postures.
+ * [ADR-0131 D3 · D12 items 7–8] The walled refusal at the metadata, package
+ * and automation write doors reads it through this same function, so the
+ * posture-conditional gates of this transport cannot read two different
+ * postures.
  */
 export async function readEffectiveTenancyPosture(
     deps: DomainHandlerDeps,

@@ -41,6 +41,11 @@
  *   - The read path, which carries no capability gate (ADR-0106 masking is
  *     the read-side posture).
  *
+ * Under a wall, the doors that write the environment's metadata ask a second
+ * predicate after their capability gate, {@link walledCatalogWriteVerdict}:
+ * the `/meta` item write doors, the `/packages` write doors, the `/automation`
+ * definition writes and `install-local`.
+ *
  * ── Refusal messages (#7450) ──────────────────────────────────────────────
  *
  * A refusal names the capability that would admit ANY caller and says nothing
@@ -96,7 +101,7 @@ export function metaWriteCapabilityVerdict(input: {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// [ADR-0131 D3] The walled catalog refusal
+// [ADR-0131 D3 · D12 items 7–8 · D11] The walled environment-metadata refusal
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -104,24 +109,34 @@ export function metaWriteCapabilityVerdict(input: {
  * definitions every organization resolves BY NAME, from the one environment
  * registry. A walled deployment's organizations share them, so a write to one
  * reaches every organization that holds it.
+ *
+ * [#23231] The walled refusal no longer narrows to these three: under a wall
+ * every environment-metadata write is the platform operator's
+ * ({@link walledCatalogWriteVerdict}). The list still names the refusal's
+ * subject for a catalog type.
  */
 export const SECURITY_CATALOG_TYPES: readonly string[] = Object.freeze(['position', 'permission', 'capability']);
 
 /**
  * Is `type` — in any URL spelling `saveMetaItem` accepts — a security catalog
- * type? A door asks this before it pays for the tenancy posture read that
- * {@link walledCatalogWriteVerdict} needs, so a write of any other type reads
- * no posture at all.
+ * type? It decides no refusal: {@link walledCatalogWriteVerdict} judges every
+ * type alike, and a door asks that verdict for every write rather than
+ * pre-filtering on this predicate.
  */
 export function isSecurityCatalogType(type: string): boolean {
     return SECURITY_CATALOG_TYPES.includes(canonicalMetaUrlType(type));
 }
 
-/** The noun the refusal names, per catalog type. */
-const CATALOG_NOUN: Readonly<Record<string, string>> = {
+/**
+ * The subject the refusal names, per written type: the catalog's own nouns, a
+ * package for the package doors (which act on a package's items, whatever
+ * their types), and any other metadata type by its name.
+ */
+const WRITTEN_SUBJECT: Readonly<Record<string, string>> = {
     position: 'a position',
     permission: 'a permission set',
     capability: 'a capability',
+    package: 'a package',
 };
 
 /**
@@ -135,26 +150,36 @@ const CATALOG_NOUN: Readonly<Record<string, string>> = {
 export const PLATFORM_OPERATOR_POSTURE = 'PLATFORM_ADMIN';
 
 /**
- * [ADR-0131 D3] May this caller write this item of the security catalog, on a
- * deployment running this tenancy posture?
+ * [ADR-0131 D3 · D12 items 7–8 · D11] May this caller write the environment's
+ * metadata, on a deployment running this tenancy posture?
  *
- * ADR-0131 D3, verbatim: "Shared-DB multi-tenant (`group` / `isolated`): tenant
- * admins cannot create or edit catalog items; the operator defines the catalog
- * for every tenant (managed packages, Studio). Creation through Setup or the
- * API is refused with a message naming the posture and the capability." The
- * catalog is environment-level and organizations resolve it by name, so under
- * a wall a write by one organization's principal changes what every other
- * organization's members resolve. That was measured, not argued: an
- * organization-scoped `manage_metadata` holder edited a permission set another
- * organization's member holds, and that member's next resolution carried the
- * edit (`wall-catalog-refusal.dogfood.test.ts`).
+ * ADR-0131 D12 item 7: a walled deployment is "one environment, one schema, one
+ * catalog … The metadata-authoring capability (`manage_metadata` /
+ * `studio.access`) is what headquarters IT holds and plant admins do not."
+ * Item 8: a plant "cannot create a position, a permission set, a capability, a
+ * template or any metadata … A plant that needs its own catalog is given its
+ * own environment." D11: the rules are identical in every posture, and only
+ * whether the wall is enforced differs. The environment definition ledger
+ * carries no organization column (D6/D7), so under a wall a write by one
+ * organization's principal changes what every other organization resolves.
+ * That was measured, not argued, for every type and every door this predicate
+ * guards: an organization-scoped `manage_metadata` holder created an object, a
+ * view and a flow, edited, published, rolled back and reset the operator's
+ * items, and installed, upgraded and removed packages, and another
+ * organization's member read each result
+ * (`wall-environment-metadata-refusal.dogfood.test.ts`). The security catalog
+ * (D3) was the first case refused (`wall-catalog-refusal.dogfood.test.ts`);
+ * ruling A on #23231 (record 6145019463) stops special-casing it.
  *
- * This is the ONE predicate for that refusal. Every door that writes a catalog
- * item asks it, after its own capability gate: the `/meta` item write doors on
- * both transports (save, reset, publish, rollback) and the security plugin's
- * data door on the catalog objects. Under `single` it is inert: the
- * organization is the environment, and the capability gate decides alone
- * (#22621 → A: catalog writes stay with `manage_metadata` holders).
+ * This is the ONE predicate for that refusal, and it judges every type alike:
+ * no door pre-filters on the written type before asking it. Every door that
+ * writes the environment's metadata asks it after its own capability gate: the
+ * `/meta` item write doors on both transports (save, reset, publish,
+ * rollback), the `/packages` write doors, the `/automation` definition writes,
+ * `install-local` (install, upgrade, uninstall), the permission-set clone
+ * door and the security plugin's data door on the catalog objects. Under
+ * `single` it is inert: the organization is the environment, and the
+ * capability gate decides alone.
  *
  * Admitted under a wall: `isSystem` (the engine's own writes: seeders,
  * installers, migrations) and the platform operator rung. Refused: everyone
@@ -162,12 +187,18 @@ export const PLATFORM_OPERATOR_POSTURE = 'PLATFORM_ADMIN';
  * as at the activation gate: ADR-0093 D4/D5 resolve a requested-but-absent wall
  * to `single`, so absent and `single` are the same deployment shape.
  *
- * Assignments are not catalog writes and never reach this predicate:
+ * Assignments are not metadata writes and never reach this predicate:
  * `sys_user_position` and `sys_user_permission_set` rows are organization rows
  * (ADR-0131 D3, "Assignments are organization rows, in every posture").
+ *
+ * The name keeps "catalog": the security catalog was the refusal's first
+ * scope, and the export is read under this name.
  */
 export function walledCatalogWriteVerdict(input: {
-    /** The metadata type written. A type outside {@link SECURITY_CATALOG_TYPES} is always admitted. */
+    /**
+     * The metadata type written (`package` at the package doors). It names the
+     * refusal's subject and never decides the verdict.
+     */
     type: string;
     /** The deployment's EFFECTIVE tenancy posture; `undefined` when no `tenancy` service answers. */
     tenancyPosture: TenancyPosture | undefined;
@@ -175,20 +206,21 @@ export function walledCatalogWriteVerdict(input: {
     /** The caller's ADR-0095 posture rung, off its execution context. */
     callerPosture?: unknown;
 }): MetaWriteCapabilityVerdict {
-    // The fold `saveMetaItem` applies at its own request boundary, so a URL
-    // spelling the protocol accepts (a plural) is judged as the type it writes.
-    if (!isSecurityCatalogType(input.type)) return { allowed: true };
-    const type = canonicalMetaUrlType(input.type);
     if (!input.tenancyPosture || !postureEnforcesWall(input.tenancyPosture)) return { allowed: true };
     if (input.isSystem === true) return { allowed: true };
     if (input.callerPosture === PLATFORM_OPERATOR_POSTURE) return { allowed: true };
+    // The fold `saveMetaItem` applies at its own request boundary, so a URL
+    // spelling the protocol accepts (a plural) is named as the type it writes.
+    const type = canonicalMetaUrlType(input.type);
+    const subject = WRITTEN_SUBJECT[type] ?? `a '${type}' metadata item`;
     return {
         allowed: false,
         message:
-            `Creating, changing or deleting ${CATALOG_NOUN[type]} requires the platform operator: this ` +
-            `deployment runs the '${input.tenancyPosture}' tenancy posture, where the security catalog is shared ` +
-            `by every organization (ADR-0131 D3). Holding the \`manage_metadata\` capability inside an ` +
-            `organization does not admit it. An organization's administrators assign the catalog's positions ` +
-            `and permission sets to their own members instead.`,
+            `Creating, changing or deleting ${subject} requires the platform operator: this deployment runs the ` +
+            `'${input.tenancyPosture}' tenancy posture, where every organization shares the environment's metadata, ` +
+            `the security catalog included (ADR-0131 D3, D12 items 7–8, D11). Holding the \`manage_metadata\` ` +
+            `capability inside an organization does not admit it. An organization's administrators assign the ` +
+            `catalog's positions and permission sets to their own members; an organization that needs metadata of ` +
+            `its own is given an environment of its own.`,
     };
 }
