@@ -796,8 +796,10 @@ describe('[#7474] the six refusal legs answer with six envelopes, not one', () =
     expect(err.statusCode).toBe(422);
     // The remedy has to be IN the message: `details` is not a carrier the
     // client can rely on (#7450), so the sentence is the whole fix-it.
-    expect(err.message).toContain('no master_detail relation');
-    expect(err.message).toContain('Declare a required master_detail field');
+    // [#23100] Reworded with the rule: "no relation" is now "not exactly one
+    // required master_detail" (ADR-0055 §1), and the remedy says so.
+    expect(err.message).toContain('not exactly one required master_detail field');
+    expect(err.message).toContain('Declare one master_detail field with required: true');
     // …and it must NOT wear the 403's costume: that prefix is a MATCHER at both
     // transports, so borrowing it would re-flatten this to PERMISSION_DENIED.
     expect(err.message).not.toContain('[Security] Access denied');
