@@ -31,9 +31,7 @@ import { installBuiltinNodes } from './index.js';
 import type { MessagingServiceSurface } from './notify-node.js';
 import {
     FlowTextTemplateError,
-    interpolateString,
     renderTextSlot,
-    stringifyForTemplate,
     textTemplateScope,
     type VariableMap,
 } from './template.js';
@@ -236,19 +234,20 @@ describe('#22110 — renderTextSlot, the one text renderer', () => {
     });
 
     it('measured against the 17.x interpolator: SAME on a string, number, boolean, null and an ISO date string, DIFF on a Date and a whole-slot object', () => {
-        const old = (source: string, variables: VariableMap) =>
-            stringifyForTemplate(interpolateString(source, variables, {} as AutomationContext));
-        for (const value of ['Acme', 1234.5, 0, true, null, '2026-10-08']) {
-            const variables = vars({ x: value });
-            expect(renderTextSlot('v={{ x }}', variables), String(value)).toBe(old('v={x}', variables));
+        // What the 17.x interpolator wrote for `v={x}`, measured while it lived
+        // (it is deleted, #19939 S7).
+        for (const [value, old] of [
+            ['Acme', 'v=Acme'], [1234.5, 'v=1234.5'], [0, 'v=0'], [true, 'v=true'], [null, 'v='], ['2026-10-08', 'v=2026-10-08'],
+        ] as const) {
+            expect(renderTextSlot('v={{ x }}', vars({ x: value })), String(value)).toBe(old);
         }
         // The two inputs that make the path spelling lossy (ADR-0087 D2), so no
-        // conversion rewrites `{x}` to `{{ x }}`: a Date rendered JSON-quoted…
+        // conversion rewrites `{x}` to `{{ x }}`: a Date it rendered JSON-quoted
+        // (`v="2026-10-08T09:30:00.000Z"`)…
         const date = new Date('2026-10-08T09:30:00.000Z');
-        expect(old('v={x}', vars({ x: date }))).toBe('v="2026-10-08T09:30:00.000Z"');
         expect(renderTextSlot('v={{ x }}', vars({ x: date }))).toBe('v=2026-10-08T09:30:00.000Z');
-        // …and a screen / end text that was one token holding an object rendered `String(value)`.
-        expect(String(interpolateString('{x}', vars({ x: { a: 1 } }), {} as AutomationContext))).toBe('[object Object]');
+        // …and a screen / end text that was one token holding an object, which
+        // it rendered `String(value)` (`[object Object]`).
         expect(renderTextSlot('{{ x }}', vars({ x: { a: 1 } }))).toBe('{"a":1}');
     });
 

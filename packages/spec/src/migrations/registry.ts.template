@@ -1998,8 +1998,9 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '(JSON-quoted against ISO text), and a whole-slot object differently in a screen or `end` text or a '
       + 'notify link, and an `http` url or header that was one token holding anything but a string was refused '
       + 'after the interpolation where the engine renders it as text, so '
-      + 'the rewrite is the author\'s to check. Every other flow string keeps the single-brace dialect. Its '
-      + 'D3 record is the semantic entry `flow-text-slot-single-brace-refused`.',
+      + 'the rewrite is the author\'s to check. No other flow string reads the single-brace dialect either: '
+      + 'the value slots take a CEL value envelope, a node\'s literals are read as written, and the 17.x '
+      + 'interpolator is deleted. Its D3 record is the semantic entry `flow-text-slot-single-brace-refused`.',
   },
   {
     id: 'flow-text-slot-unbound-dollar-root-refused',
