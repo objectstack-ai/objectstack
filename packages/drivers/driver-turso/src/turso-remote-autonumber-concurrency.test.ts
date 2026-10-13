@@ -16,8 +16,8 @@
  * Node process, whose native calls run on the one JS thread.
  *
  * So this file spawns two child processes, each running the package's SOURCE
- * compiled by `tsx`, as `packages/spec`'s process-boundary pins do. For each round
- * the parent creates a fresh database, and each writer opens its own
+ * compiled by `tsx`, as `packages/spec`'s process-boundary pins do. For each
+ * round the parent creates a fresh database, and each writer opens its own
  * `@libsql/client` connection to it — the native `file:` backend, which is
  * libSQL itself, the engine behind a Turso endpoint — drives its own
  * `TursoDriver` in REMOTE mode, and writes through `TursoDriver.create`. The
@@ -107,6 +107,14 @@
  * what this pin distinguishes is a counter that can hand out one number
  * twice, and on a declared-unique column that surfaces as refused writes
  * before it surfaces as duplicate rows.
+ *
+ * Re-measured on the current shape (writers started once, no fsync) at
+ * `794b74409`, with the same mutation: red in 6 of 8 runs with no gap and 5 of
+ * 5 with a 1 ms gap, every time on the same "no write failed" pin. The earlier
+ * shape, on the same box and day, went red in 1 of 5 runs with no gap. Without
+ * the fsync the two writers interleave far more finely (about 100 to 200
+ * writer changes per round, against 2 to 40 before), so a round gives a
+ * read-then-write counter more chances to hand out one number twice, not fewer.
  */
 
 import { describe, it, expect, afterAll } from 'vitest';
@@ -164,8 +172,8 @@ interface WorkerReport {
  * tsx through its public CJS API and requires the driver's SOURCE, like the
  * test itself does — so the source is compiled by tsx, to CJS (this package
  * has no `"type": "module"`), and its requires of those dependencies are cache
- * hits. It pays that start-up once for every round. It reads one JSON command
- * per line on stdin and answers one JSON line on stdout:
+ * hits. It pays that start-up once, for all the rounds. It reads one JSON
+ * command per line on stdin and answers one JSON line on stdout:
  *
  * - `{ open: <db path> }` — connect to that round's database, register the
  *   schema (the tables already exist — the parent created them — so
@@ -219,7 +227,7 @@ interface Writer {
   send(command: Record<string, unknown>): void;
   /** The writer's next answer; rejects with its stderr if it dies or stays silent past the deadline. */
   next<T>(what: string): Promise<T>;
-  /** Close stdin and wait for a clean exit; a writer that does not leave is killed. */
+  /** Close stdin and wait for the writer to exit; one still running 10 s later is killed. */
   stop(): Promise<void>;
 }
 
@@ -258,6 +266,8 @@ function startWriter(tag: string): Writer {
   });
   const exited = new Promise<number | null>((resolve) => child.on('close', resolve));
   child.on('error', fail);
+  // A command written to a writer that already died fails here, with its stderr.
+  child.stdin.on('error', (e) => fail(new Error(`writer ${tag} could not take a command: ${String(e)}\nstderr:\n${stderr}`)));
   child.on('close', (code) => fail(new Error(`writer ${tag} exited ${code}\nstderr:\n${stderr}`)));
   return {
     tag,
