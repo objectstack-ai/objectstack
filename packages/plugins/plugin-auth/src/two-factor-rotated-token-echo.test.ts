@@ -25,7 +25,7 @@
 // `auth.api.getSession({ headers })` — literally what
 // `runtime/src/security/resolve-session-principal.ts` calls.
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import { createHmac } from 'node:crypto';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
@@ -39,6 +39,27 @@ import {
 // fake would be a second looseness risk and a new `check:engine-double-contract`
 // ledger entry, for no added fidelity.
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
+import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
+// [#23184] better-auth's first module load is paid HERE, at module load, and
+// not inside the first clocked case: clocked windows measure behaviour, never
+// loading (AGENTS.md, Build & Test). `AuthManager` reaches every vendor module
+// through a lazy `await import()` (the package root stays light on purpose), so
+// without these lines the file's first case paid about half a second of vendor
+// module evaluation on a dev container. The list is what the managers in this
+// file (and the bearer-rotation cases it imports) boot through; a module it
+// misses is still loaded in the first case, as before. The module cache hands
+// `AuthManager` these same instances, and this file changes no environment the
+// vendor reads at load (better-auth captures `NODE_ENV` when its env module is
+// first evaluated), so nothing a case runs is different.
+import 'better-auth';
+import 'better-auth/api';
+import 'better-auth/plugins';
+import 'better-auth/plugins/bearer';
+import '@better-auth/oauth-provider';
+import '@better-auth/core/context';
+import '@better-auth/core/error';
+import 'better-auth/plugins/admin';
+import 'better-auth/plugins/two-factor';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const PASSWORD = 'S3cure!Passw0rd-10701';
@@ -319,8 +340,11 @@ beforeEach(() => {
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
-afterEach(async () => {
-  vi.restoreAllMocks();
+afterEach(() => vi.restoreAllMocks());
+// [#23184] Once the file is done, not after each case: the cases run
+// concurrently (below), and an `afterEach` here would close a database a
+// still-running case holds. Each in-memory sqlite database is its own case's.
+afterAll(async () => {
   while (engines.length) {
     const e = engines.pop();
     try {
@@ -331,8 +355,23 @@ afterEach(async () => {
   }
 });
 
+/**
+ * [#23184] Every arrangement signs one user up (one production-parameter
+ * scrypt derivation under a fresh salt), and every later password check
+ * (`enable`, `get-totp-uri`, the challenge sign-in) derives the same password
+ * against the same salt, which the memo answers from the bytes the sign-up
+ * produced (`__tests__/scrypt-memo.testkit.ts`). Each case builds its own
+ * backend (in-memory engine, or its own `:memory:` sqlite database), manager
+ * and user and reads no state another case writes, so the suites run their
+ * cases concurrently. The console stubs above are the only shared state;
+ * lifted early by another case's `restoreAllMocks`, they cost log output and
+ * no assertion.
+ */
+const scrypt = memoizeScrypt();
+afterAll(scrypt.restore);
+
 // ───────────────────────────────────────────────────────────────────────────
-describe('#10701 — the three cases from the card, one arrangement', () => {
+describe.concurrent('#10701 — the three cases from the card, one arrangement', () => {
   it('the echoed token, the cookie, and the two together all resolve to the user', async () => {
     const { manager, userId, echoedToken, rotatedCookie } = await arrangeCompletedEnrolment();
 
@@ -370,7 +409,7 @@ describe('#10701 — the three cases from the card, one arrangement', () => {
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-describe('#10701 — the echoed token is the LIVE session, named exactly', () => {
+describe.concurrent('#10701 — the echoed token is the LIVE session, named exactly', () => {
   it('it is the rotated session row, and not the deleted pre-enrolment one', async () => {
     // Corroborates the resolution assertions at the storage layer, and pins
     // the exact wrong value: asserting only "the echo changed" would be
@@ -397,7 +436,7 @@ describe('#10701 — the echoed token is the LIVE session, named exactly', () =>
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-describe('#10701 — nothing was loosened', () => {
+describe.concurrent('#10701 — nothing was loosened', () => {
   // Direction (b) from the card — the resolver falling back to the cookie when
   // the bearer is unusable — was ruled OUT of scope precisely because it stops
   // an invalid credential from failing loud. These two pins are what would go
@@ -427,7 +466,7 @@ describe('#10701 — nothing was loosened', () => {
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-describe('#10701 — the sign-in-challenge lane is untouched', () => {
+describe.concurrent('#10701 — the sign-in-challenge lane is untouched', () => {
   it('completing a 2FA SIGN-IN still echoes a token that authenticates', async () => {
     // The lane where the vendor mints the session it echoes: the two already
     // agreed, so the repair is a no-op here. Pinned because "fix the broken
@@ -517,7 +556,7 @@ const expectRowSaysEnabled = async (backend: EnrolmentBackend): Promise<boolean>
 };
 
 // ───────────────────────────────────────────────────────────────────────────
-describe('#16535 — the echoed `user` describes the row, on the in-memory engine', () => {
+describe.concurrent('#16535 — the echoed `user` describes the row, on the in-memory engine', () => {
   it('condition ①: `user.twoFactorEnabled` equals the value stored for that row', async () => {
     const { backend, echoedUser } = await arrangeCompletedEnrolment();
 
@@ -595,7 +634,7 @@ describe('#16535 — the echoed `user` describes the row, on the in-memory engin
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-describe('#16535 — condition ②: every rotating path in the table is covered', () => {
+describe.concurrent('#16535 — condition ②: every rotating path in the table is covered', () => {
   // `/two-factor/verify-otp` travels the byte-identical rotate-then-`valid(ctx)`
   // block (`otp/index.mjs`) and is already in the table the `token` repair keys
   // on. It cannot be driven end-to-end here — the manager builds `twoFactor()`
@@ -657,7 +696,7 @@ describe('#16535 — condition ②: every rotating path in the table is covered'
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-describe('#16535 — the two narrowings the repair is built on', () => {
+describe.concurrent('#16535 — the two narrowings the repair is built on', () => {
   // Neither is decoration: ablating the key-set ceiling reddens exactly ONE pin
   // in this file — the widening one — while condition ① and both
   // `verify-backup-code` controls stay green. That single pin is the whole
@@ -731,7 +770,7 @@ describe('#16535 — the two narrowings the repair is built on', () => {
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-describe('#16535 — condition ④: the failure posture is inherited', () => {
+describe.concurrent('#16535 — condition ④: the failure posture is inherited', () => {
   it('a row read that THROWS leaves the old echo and never fails the verification', async () => {
     // Measured through the REAL pipeline, because the claim is about the
     // RESPONSE, not about the helper: the verification already succeeded, the
@@ -803,7 +842,7 @@ describe('#16535 — condition ④: the failure posture is inherited', () => {
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-describe('#16535 — the same measurement on a real SqlDriver', () => {
+describe.concurrent('#16535 — the same measurement on a real SqlDriver', () => {
   it('condition ①, at driver level: the echo equals the stored column', async () => {
     // The card measured this twice for a reason: a test that never reaches an
     // adapter cannot tell "the echo tracks the row" from "the echo happens to
