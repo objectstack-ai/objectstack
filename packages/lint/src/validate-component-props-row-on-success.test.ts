@@ -76,3 +76,35 @@ describe("the props gate refuses `'navigation'` at a page action row's executor 
     expect(validateComponentProps(stackWith(node({ [key]: 'url', target: '/apps/crm/tasks' })))).toEqual([]);
   });
 });
+
+// `onSuccess` beside the row's effective executor: `ActionSchema`'s "only beside
+// `api` / `script`", carried to the rows on the runner's built-in vocabulary.
+// Refused beside `url`, `navigation`, `modal`, `flow` and `form` and beside a
+// row with no executor; a host-registered handler name stays open.
+
+/** How a refusal on a row's own key opens, read off the row's `navigation` subject. */
+const ownerOf = (subject: string) => subject.slice(0, subject.lastIndexOf(' `'));
+
+describe("the props gate refuses a page action row's `onSuccess` beside an executor it cannot follow", () => {
+  it.each(ROWS)('REFUSAL: %s with `form` and `onSuccess` is one finding at `onSuccess`', (_row, node, at, key, subject) => {
+    const findings = validateComponentProps(stackWith(node({
+      [key]: 'form', target: 'task_form', onSuccess: { navigate: '/tasks' },
+    })));
+    expect(findings.map((f) => [f.rule, f.path])).toEqual([[COMPONENT_PROPS_INVALID, `${at}.onSuccess`]]);
+    expect(findings[0].message).toContain(`${ownerOf(subject)} \`onSuccess\` (\`${key}: 'form'\`)`);
+  });
+
+  it.each(ROWS)('REFUSAL: %s with no executor key and no `name` is one finding at `onSuccess`', (_row, node, at, key, subject) => {
+    const findings = validateComponentProps(stackWith(node({ onSuccess: { navigate: '/tasks' } })));
+    expect(findings.map((f) => [f.rule, f.path])).toEqual([[COMPONENT_PROPS_INVALID, `${at}.onSuccess`]]);
+    expect(findings[0].message).toContain(`${ownerOf(subject)} \`onSuccess\` (no \`${key}\` and no \`name\`)`);
+  });
+
+  it.each(ROWS)('ACCEPTED CONTROL: %s with a host-registered handler and `onSuccess` reports nothing', (_row, node, _at, key) => {
+    expect(validateComponentProps(stackWith(node({ [key]: 'run', onSuccess: { navigate: '/tasks' } })))).toEqual([]);
+  });
+
+  it.each(ROWS)('ACCEPTED CONTROL: %s with `form` and no `onSuccess` reports nothing', (_row, node, _at, key) => {
+    expect(validateComponentProps(stackWith(node({ [key]: 'form', target: 'task_form' })))).toEqual([]);
+  });
+});
