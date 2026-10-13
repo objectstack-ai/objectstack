@@ -1,5 +1,251 @@
 # @objectstack/plugin-mcp-server
 
+## 18.0.0-next.0
+
+### Minor Changes
+
+- c4e7fa5: fix(mcp)!: on the stdio transport, a nested-relation filter condition asks the related object its declared exposure, and is refused when that object does not serve `list` (#22777)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is one runtime read position on one transport: the MCP stdio data bridge stops evaluating a filter condition on a lookup's target object whose existing `enable` declaration already refuses a query of it on every data door, and the remedy is a filter the caller can already write. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no exported declaration is removed or narrowed (not runtime-interface-only or type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  A nested-relation filter condition, `{ <lookup>: { <field of the related object>: … } }`, is evaluated on the RELATED object: the engine queries that object for the matching records and keeps the source rows that point at one.
+  
+  **FROM.** On the MCP stdio transport (`OS_MCP_STDIO_API_KEY`), the `query_records` and `aggregate_records` tools judged only the object they address against its `enable` block, so such a condition in `where` was evaluated whatever the related object's `enable` block declared — including a related object those same tools refuse when it is addressed.
+  
+  **TO.** The stdio data bridge asks each condition's related object the same exposure gate it applies to an addressed object, for `list` (the operation a query of that object is judged as), before the engine is asked. A related object the gate does not serve refuses the call with the bridge's existing exposure refusal, the one an addressed object gets:
+  
+  - `enable.apiEnabled: false` → `OBJECT_API_DISABLED` (404).
+  - an `enable.apiMethods` whitelist without `list` (for example `['get']`, `['create']` or the deny-all `[]`) → `OBJECT_API_METHOD_NOT_ALLOWED` (405), with the effective operation set.
+  
+  The tool's error text names the related object and the condition's position (`where.<lookup>`), with the remedy. It applies at the top level and under `$and` / `$or` / `$not`. The generic data door has given the same answer for the same condition since #22737.
+  
+  **Migration.** Filter on the lookup's stored id (`{ <lookup>: '<id>' }` or `{ <lookup>: { $in: [...] } }`), which is the source object's own column, or remove the condition. To keep the condition, declare `list` on the related object's `enable.apiMethods`.
+  
+  **Bindings.**
+  
+  - **Refused, not withheld.** Dropping a condition would widen the result.
+  - **One decision, one walk.** The gate is the one the bridge already applies to an addressed object, and the conditions are found by `relationConditionSites` from `@objectstack/core`, the walk the data door uses.
+  - **The engine is untouched.** A flow's or a hook's own query calls the engine directly and never passes this bridge.
+  - **No new error code.**
+
+### Patch Changes
+
+- 4e9fe9f: feat(spec)!: `PROTOCOL_VERSION` is `18.0.0`; the runtime handshake accepts `engines.protocol: '^18'` and refuses `'^17'`
+  
+  Clause-②: yes (narrowing: the handshake refuses a manifest pinned to protocol 17 (`'^17'`, `'^17.x.y'`, `'17.x'`), while the exported `PROTOCOL_VERSION` moves to `'18.0.0'` and a `'^18'` manifest is admitted)
+  
+  <!-- adr-0087: not-required (already-registered field-malformed-scale-precision-removed, record-chatter-position-vocabulary, element-input-target-variable-removed, element-filter-removed, element-form-removed, field-column-lists-canonicalized, metric-filters-removed, cube-sub-day-granularities-removed, cube-join-sql-and-relationship-removed, record-highlights-field-icon-removed, mapping-lookup-params-removed, translation-component-submit-label-removed, page-component-responsive-removed, object-grid-default-sort-removed, object-kanban-quick-add-removed, permission-allow-restore-purge-removed, form-view-option-default-removed, field-reference-to-alias, connector-error-mapping-removed, connector-connection-timeout-ms-removed, hook-timeout-to-timeout-ms, job-timeout-to-timeout-ms, api-endpoint-cache-ttl-to-cache-ttl-seconds, dashboard-refresh-interval-to-refresh-interval-seconds, connector-resilience-keys-removed, connector-triggers-removed, memory-persistence-auto-save-interval-to-ms, turso-config-timeout-to-timeout-ms, view-page-mount-removed, list-view-sort-string-clause-to-array, page-assigned-profiles-removed, chart-config-aria-removed, dashboard-widget-chart-config-structure-removed, translation-per-app-settings-removed, object-tenancy-organization-field-removed, page-component-filter-record-to-rule-array, view-item-owner-hidden-removed, report-joined-chart-removed, view-overlay-owner-hidden-removed, form-layout-inline-grid-to-vertical, currency-config-precision-removed, permission-rls-tags-removed, action-aria-removed, cube-member-inner-name-removed, flow-decision-mode-inclusive-explicit, view-list-tabs-removed, cube-refresh-key-removed, time-default-utc-suffix-dropped, page-header-breadcrumb-removed, connector-sync-keys-removed, form-view-subform-columns-canonicalized, action-block-endpoint-to-target, form-field-public-picker-removed, dataset-count-measure-empty-field-removed, agent-structured-output-refused-members-removed, translation-widget-sub-caption-removed, agent-memory-long-term-store-removed, agent-lifecycle-removed, object-grid-resizable-columns-removed, page-requires-non-compiled-kind-removed, element-text-variant-heading-levels, object-master-detail-form-detail-sort-field-removed, declared-index-unique-scope, manifest-permissions-string-list-removed) The protocol major moves, and that move publishes the already-registered step-18 chain as the current upgrade path: these are its 64 D2 conversions, which `os migrate meta --from 17` replays together with the step's 329 D3 semantic entries. Each entry was registered by the change that made its break, under that change's own disposition; this diff adds, renames and removes none. The one edit outside that chain is the manifest's `engines.protocol` range: it is the ADR-0087 D1 handshake's input rather than a metadata shape any conversion rewrites, and `os migrate meta --write` rewrites it from `'^17'` to `'^18'`. The other categories are closed on facts: the package publishes (not unpublished); a consumer has an edit to make (not no-migration-prescription); and an exported value and the load door move, not a TypeScript declaration alone (not runtime-interface-only or type-surface-only). -->
+  
+  **BREAKING**, graded `major`: Changesets is in pre mode (`next`) for the v18 line, so this ships in an `18.0.0-next.N` prerelease. The protocol major moves in this reviewed change, not in the version pass (ruling record 6049734955, Q1 → B). Until that line's first version pass, `PROTOCOL_VERSION` is one major ahead of the package version; `check-changeset-no-major.mjs` admits that only in pre mode with a pending `major` for `@objectstack/spec` (ruling record 6056808625).
+  
+  - **`PROTOCOL_VERSION` reads `'18.0.0'`** and `PROTOCOL_MAJOR` reads `18`. The ADR-0087 D1 handshake on every load and install door (the app load seam, `POST /api/v1/packages`, `POST /api/v1/marketplace/install-local`) now admits a package whose `engines.protocol` admits major 18, and refuses one pinned to 17 (`'^17'`, `'^17.x.y'`, `'17.x'`) with `OS_PROTOCOL_INCOMPATIBLE` (422), naming `objectstack migrate meta --from 17`.
+  - **What you change.** Run `objectstack migrate meta --from 17` to list the edits for existing sources; `--write` applies the ones it can prove, including the declared `engines.protocol` range, rewritten in place from `'^17'` to `'^18'`, and you apply the rest by hand.
+  - **`spec-changes.json` and the protocol upgrade guide** now carry the protocol 17 → 18 record, generated from the registries: 64 mechanical conversions and 329 semantic entries. The aggregate record spans 16 → 18.
+  - **`os init`** stamps `'^18'` in the manifests it writes, and `os lint`'s `protocol/missing-engines-range` fix names `'^18'`. The `create-objectstack` template keeps `'^17'` until the version pass stamps it together with its `@objectstack/*` dependency ranges.
+  - **`@objectstack/mcp`**: the README's `defineStack` examples declare `'^18'`.
+- Updated dependencies [317cddd]
+- Updated dependencies [fec87e7]
+- Updated dependencies [c28f317]
+- Updated dependencies [2e10c9a]
+- Updated dependencies [67b669e]
+- Updated dependencies [0253192]
+- Updated dependencies [bfc15d2]
+- Updated dependencies [2ff0825]
+- Updated dependencies [7aa8d51]
+- Updated dependencies [95a8435]
+- Updated dependencies [60bcfe7]
+- Updated dependencies [d112087]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [7de0265]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [c8b062f]
+- Updated dependencies [117d34d]
+- Updated dependencies [6729e10]
+- Updated dependencies [1920cf3]
+- Updated dependencies [41d0d40]
+- Updated dependencies [c52bfb4]
+- Updated dependencies [c7d6037]
+- Updated dependencies [72b26ed]
+- Updated dependencies [2d21b9c]
+- Updated dependencies [f66fdc7]
+- Updated dependencies [9fdb127]
+- Updated dependencies [615c696]
+- Updated dependencies [968acc8]
+- Updated dependencies [111ffff]
+- Updated dependencies [12b9daf]
+- Updated dependencies [d85615d]
+- Updated dependencies [6a06e3b]
+- Updated dependencies [0e9e7b7]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [9c93ce6]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [04e776b]
+- Updated dependencies [a7df552]
+- Updated dependencies [2f70c22]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [a87d8be]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [ad381fd]
+- Updated dependencies [2b61f2d]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3b49318]
+- Updated dependencies [4e9fe9f]
+- Updated dependencies [9ad3d24]
+- Updated dependencies [326a90a]
+- Updated dependencies [9fe7448]
+- Updated dependencies [2e11d90]
+- Updated dependencies [4578c56]
+- Updated dependencies [c512c25]
+- Updated dependencies [215e662]
+- Updated dependencies [3d886ee]
+- Updated dependencies [d8d0711]
+- Updated dependencies [a45d5d8]
+- Updated dependencies [f6e1d49]
+- Updated dependencies [345d3f3]
+- Updated dependencies [e9a1f5c]
+- Updated dependencies [40a6ee5]
+- Updated dependencies [5910b5e]
+- Updated dependencies [7098aca]
+- Updated dependencies [97610a5]
+- Updated dependencies [081e6a0]
+- Updated dependencies [1884948]
+- Updated dependencies [3089848]
+- Updated dependencies [e23eccb]
+- Updated dependencies [ac8f2c5]
+- Updated dependencies [db9cf80]
+- Updated dependencies [e75dced]
+- Updated dependencies [9af0005]
+- Updated dependencies [9af0005]
+- Updated dependencies [440bed6]
+- Updated dependencies [94379f4]
+- Updated dependencies [b2549a8]
+- Updated dependencies [ee8751d]
+- Updated dependencies [96e4be4]
+- Updated dependencies [35ef501]
+- Updated dependencies [faf6348]
+- Updated dependencies [557ae7c]
+- Updated dependencies [6a3fe25]
+- Updated dependencies [7731d70]
+- Updated dependencies [3073b72]
+- Updated dependencies [c76edeb]
+- Updated dependencies [5b12503]
+- Updated dependencies [514bf3c]
+- Updated dependencies [20e7d52]
+- Updated dependencies [b3a3634]
+- Updated dependencies [3e72f93]
+- Updated dependencies [f89b5f5]
+- Updated dependencies [d25b187]
+- Updated dependencies [0e00d36]
+- Updated dependencies [d748ae8]
+- Updated dependencies [dab6bf4]
+- Updated dependencies [ed1de8c]
+- Updated dependencies [a00cf99]
+- Updated dependencies [5fb1746]
+- Updated dependencies [29a163f]
+- Updated dependencies [e223152]
+- Updated dependencies [9f5eca5]
+- Updated dependencies [9963322]
+- Updated dependencies [b27b894]
+- Updated dependencies [874a38d]
+- Updated dependencies [02d9f69]
+- Updated dependencies [f53f14b]
+- Updated dependencies [a800912]
+- Updated dependencies [d973c34]
+- Updated dependencies [156ddfa]
+- Updated dependencies [5081090]
+- Updated dependencies [b6eb25f]
+- Updated dependencies [165587e]
+- Updated dependencies [e04759d]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [b32ee3e]
+- Updated dependencies [91f46d0]
+- Updated dependencies [e5899a6]
+- Updated dependencies [d7b26df]
+- Updated dependencies [490cb6d]
+- Updated dependencies [e865300]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [c74d843]
+- Updated dependencies [6d5191e]
+- Updated dependencies [85edd61]
+- Updated dependencies [e84aeb3]
+- Updated dependencies [322ff1e]
+- Updated dependencies [7b0a9c9]
+- Updated dependencies [5fc57b3]
+- Updated dependencies [fe58bbc]
+- Updated dependencies [c4e7fa5]
+- Updated dependencies [581ca7d]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [b7cd1af]
+- Updated dependencies [9814035]
+- Updated dependencies [55382dc]
+- Updated dependencies [b1d701b]
+- Updated dependencies [efcbac7]
+- Updated dependencies [51f36e7]
+- Updated dependencies [20028df]
+- Updated dependencies [69d4218]
+- Updated dependencies [5ce6773]
+- Updated dependencies [9432bac]
+- Updated dependencies [3f69471]
+- Updated dependencies [8bc7836]
+- Updated dependencies [e5687cb]
+- Updated dependencies [1e62f71]
+- Updated dependencies [ec7f7f8]
+- Updated dependencies [038d4c9]
+- Updated dependencies [147a0d1]
+- Updated dependencies [1959aac]
+- Updated dependencies [e1deaef]
+- Updated dependencies [1badd31]
+- Updated dependencies [55828c5]
+- Updated dependencies [7856110]
+- Updated dependencies [9b37edb]
+- Updated dependencies [a22e67b]
+- Updated dependencies [62ce45d]
+- Updated dependencies [39e93ef]
+- Updated dependencies [02bec6c]
+- Updated dependencies [719183f]
+- Updated dependencies [8464380]
+- Updated dependencies [252a582]
+- Updated dependencies [f931e76]
+- Updated dependencies [e5f9f01]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [de70e97]
+- Updated dependencies [74c4b34]
+- Updated dependencies [e040b8c]
+- Updated dependencies [f451a59]
+- Updated dependencies [ba95607]
+- Updated dependencies [b53b949]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [1e44436]
+- Updated dependencies [2acff87]
+- Updated dependencies [299a2c6]
+- Updated dependencies [e23eccb]
+- Updated dependencies [bf492c8]
+- Updated dependencies [c7a3234]
+  - @objectstack/spec@18.0.0-next.0
+  - @objectstack/core@18.0.0-next.0
+  - @objectstack/types@18.0.0-next.0
+  - @objectstack/formula@18.0.0-next.0
+
 ## 17.7.0
 
 ### Minor Changes
