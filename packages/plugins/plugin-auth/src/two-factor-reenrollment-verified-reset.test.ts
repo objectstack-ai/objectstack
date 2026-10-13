@@ -52,13 +52,34 @@
 // `auth.api.getSession` — the same seam
 // `runtime/src/security/resolve-session-principal.ts` calls.
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import { createHmac } from 'node:crypto';
 import { AuthManager } from './auth-manager';
 // The SAME in-memory engine the #8243 and #10701 harnesses drive. A third fake
 // would be a third looseness risk and a new `check:engine-double-contract`
 // ledger entry, for no added fidelity.
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
+import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
+// [#23184] better-auth's first module load is paid HERE, at module load, and
+// not inside the first clocked case: clocked windows measure behaviour, never
+// loading (AGENTS.md, Build & Test). `AuthManager` reaches every vendor module
+// through a lazy `await import()` (the package root stays light on purpose), so
+// without these lines the file's first case paid about half a second of vendor
+// module evaluation on a dev container. The list is what the managers in this
+// file (and the bearer-rotation cases it imports) boot through; a module it
+// misses is still loaded in the first case, as before. The module cache hands
+// `AuthManager` these same instances, and this file changes no environment the
+// vendor reads at load (better-auth captures `NODE_ENV` when its env module is
+// first evaluated), so nothing a case runs is different.
+import 'better-auth';
+import 'better-auth/api';
+import 'better-auth/plugins';
+import 'better-auth/plugins/bearer';
+import '@better-auth/oauth-provider';
+import '@better-auth/core/context';
+import '@better-auth/core/error';
+import 'better-auth/plugins/admin';
+import 'better-auth/plugins/two-factor';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const PASSWORD = 'S3cure!Passw0rd-10700';
@@ -285,8 +306,22 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
+/**
+ * [#23184] Every case signs one user up (one production-parameter scrypt
+ * derivation under a fresh salt), and every later password check (`enable`,
+ * the challenge sign-in, `disable`) derives the same password against the
+ * same salt, which the memo answers from the bytes the sign-up produced
+ * (`__tests__/scrypt-memo.testkit.ts`). Each case builds its own engine,
+ * manager and user and reads no state another case writes, so the suites
+ * below run their cases concurrently. The console stubs above are the only
+ * shared state; lifted early by another case's `restoreAllMocks`, they cost
+ * log output and no assertion.
+ */
+const scrypt = memoizeScrypt();
+afterAll(scrypt.restore);
+
 // ───────────────────────────────────────────────────────────────────────────
-describe('#10700 — first enrollment still completes (the still-works floor)', () => {
+describe.concurrent('#10700 — first enrollment still completes (the still-works floor)', () => {
   it('enable → confirm → the challenge accepts the confirmed secret and signs the user in', async () => {
     const { manager, userId, firstSecret } = await arrangeConfirmedEnrolment();
 
@@ -302,7 +337,7 @@ describe('#10700 — first enrollment still completes (the still-works floor)', 
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-describe('#10700 — the inheritance path is now REFUSED at the route (better-auth 1.7.3)', () => {
+describe.concurrent('#10700 — the inheritance path is now REFUSED at the route (better-auth 1.7.3)', () => {
   /**
    * [#17440] What changed under the family lift, and why this is a stronger
    * pin rather than a weaker one.
@@ -429,7 +464,7 @@ describe('#10700 — the inheritance path is now REFUSED at the route (better-au
  * every re-enrollment would satisfy the refusal pins above while breaking
  * every legitimate secret rotation.
  */
-describe('#10700 — a legitimate rotation still completes, end to end', () => {
+describe.concurrent('#10700 — a legitimate rotation still completes, end to end', () => {
   it('disable → enable → confirm makes the NEW secret live and the old one dead', async () => {
     const { engine, manager, userId, firstSecret, sessionCookie } = await arrangeConfirmedEnrolment();
 

@@ -26,24 +26,12 @@
  *    another organization's set row, a set row whose name the catalog does not
  *    resolve (a row-only set) — stay unnamed, and an unnamed grant confers
  *    nothing.
- * 4. **Positions with no definition** — `sys_position` rows whose name the
- *    catalog does not resolve, by name and organization. Under a walled
- *    posture these are the positions an organization authored in Setup: there
- *    is no organization-level catalog (ADR-0131 D3), so they have no registry
- *    home. Under `single` they are the row-only positions the row-only
- *    position backfill (`position-environment-backfill.ts`) could not define,
- *    each marked `refusedName` when its name is one the metadata door refuses
- *    (that class is final for the backfill, which records its verdict and
- *    stops reporting it).
  *
- * And, under `single` only, where a position name is unique per deployment:
- *
- * 5. **Conflicting position names** — a name carried by more than one
- *    `sys_position` row (two organizations' rows, or an organization's row
- *    beside the row a package or a built-in seeded). Reported, never guessed
- *    and never merged (ADR-0131 D10, fate 4). Under a walled posture the
- *    catalog rows are materialized per organization, so one name on several
- *    rows is the expected shape there, not a conflict.
+ * It reads no `sys_position` row. The catalog row objects are retired (C3
+ * stage 8), so no composition provisions that table, and a Setup-authored
+ * position row with no definition — or a name several such rows carry — is
+ * the upgrade ceremony's to convert or report (ADR-0131 D10, C7), never a boot
+ * report's.
  *
  * ## What it does not do
  *
@@ -60,27 +48,23 @@
  * raises `AuthzStoreUnavailableError` for a reader that failed), stops the
  * report: it says which store could not be read and reports no finding past
  * that point, because an unread answer is never taken for an absent name. A
- * composition without one of the three objects reads the others and names the
+ * composition without one of the two objects reads the other and names the
  * absent one in the result.
  *
  * ## When it runs
  *
  * At `kernel:bootstrapped`, from `SecurityPlugin.start`, AFTER the grant-name
- * and row-only position backfills registered beside it (handlers run in
- * registration order): every `kernel:ready` handler has settled, so every
- * code, package and environment definition this boot registers is in the
- * catalog, and a name either backfill gives a definition or a grant this boot
- * is not reported. A package installed into the running process later is not
+ * backfill registered beside it (handlers run in registration order): every
+ * `kernel:ready` handler has settled, so every code, package and environment
+ * definition this boot registers is in the catalog, and a name the backfill
+ * gives a grant this boot is not reported. A package installed into the running process later is not
  * re-judged until the next boot, which is why every line says "at this boot".
  *
- * ADR anchors: ADR-0131 D3 (one catalog home, no organization-level catalog),
- * D4 (references by name), D10 (a conflict is reported, never guessed).
+ * ADR anchors: ADR-0131 D3 (one catalog home), D4 (references by name).
  */
 
-import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import type { SecurityCatalogReader, SecurityCatalogType } from '@objectstack/core';
 import { GRANT_OBJECT, GRANT_SET_ID_FIELD, GRANT_SET_NAME_FIELD } from './grant-permission-set-name.js';
-import { POSITION_OBJECT, metadataDoorAcceptsPositionName } from './position-write-through.js';
 
 /** The user ↔ position assignment object (ADR-0057 D4). */
 export const POSITION_ASSIGNMENT_OBJECT = 'sys_user_position';
@@ -108,8 +92,6 @@ export interface CatalogReferenceReportLogger {
 }
 
 export interface CatalogReferenceReportDeps {
-  /** The tenancy posture in force: it decides whether a shared position name is a conflict. */
-  posture: TenancyPosture;
   /** The security catalog read every name is resolved through. */
   catalog: SecurityCatalogReader;
   logger?: CatalogReferenceReportLogger;
@@ -132,29 +114,12 @@ export interface UnnamedGrant {
   permissionSetId: string | null;
 }
 
-/** One position name an organization holds rows of, with no definition in the catalog. */
-export interface PositionWithoutDefinition {
-  name: string;
-  /** The metadata door refuses this name, so no definition can ever carry it. */
-  refusedName: boolean;
-}
-
 /** Everything the report found for one organization; `null` is the organization-less bucket. */
 export interface OrganizationCatalogReferences {
   organizationId: string | null;
   positionAssignments: UnresolvedReference[];
   permissionSetGrants: UnresolvedReference[];
   unnamedGrants: UnnamedGrant[];
-  positionsWithoutDefinition: PositionWithoutDefinition[];
-}
-
-/** A position name more than one `sys_position` row carries under `single`. */
-export interface ConflictingPositionName {
-  name: string;
-  /** The organization of each row carrying it, `null` for an organization-less row; sorted, repeats kept. */
-  organizationIds: Array<string | null>;
-  /** Whether the catalog resolves the name (a package, a built-in or the environment holds it). */
-  resolves: boolean;
 }
 
 /** Why the report stopped before it judged every reference. */
@@ -164,10 +129,7 @@ export type CatalogReferenceReportStop =
 
 /** What one report found. Only organizations with a finding are listed, the organization-less bucket first. */
 export interface CatalogReferenceReport {
-  posture: TenancyPosture;
   organizations: OrganizationCatalogReferences[];
-  /** Under `single` only; always empty under a walled posture. */
-  conflictingPositionNames: ConflictingPositionName[];
   /** The objects this composition does not provision; their part of the report was not read. */
   absent: string[];
   /** Set when a read did not happen; no finding is reported past it. */
@@ -267,12 +229,10 @@ function catalogResolver(catalog: SecurityCatalogReader): (type: SecurityCatalog
  */
 export async function collectCatalogReferences(
   engine: CatalogReferenceReportEngine,
-  deps: Pick<CatalogReferenceReportDeps, 'posture' | 'catalog'>,
+  deps: Pick<CatalogReferenceReportDeps, 'catalog'>,
 ): Promise<CatalogReferenceReport> {
   const report: CatalogReferenceReport = {
-    posture: deps.posture,
     organizations: [],
-    conflictingPositionNames: [],
     absent: [],
   };
   const has = (object: string): boolean => {
@@ -282,7 +242,6 @@ export async function collectCatalogReferences(
   };
   const readAssignments = has(POSITION_ASSIGNMENT_OBJECT);
   const readGrants = has(GRANT_OBJECT);
-  const readPositions = has(POSITION_OBJECT);
 
   const byOrganization = new Map<string | null, OrganizationCatalogReferences>();
   const bucket = (organizationId: string | null): OrganizationCatalogReferences => {
@@ -293,7 +252,6 @@ export async function collectCatalogReferences(
         positionAssignments: [],
         permissionSetGrants: [],
         unnamedGrants: [],
-        positionsWithoutDefinition: [],
       };
       byOrganization.set(organizationId, found);
     }
@@ -332,41 +290,12 @@ export async function collectCatalogReferences(
       }
     }
 
-    if (readPositions) {
-      // No field projection: the organization column is the one the tenancy
-      // layer provisions, not one the object declares.
-      const rows = await scanAll(engine, POSITION_OBJECT);
-      const organizationsByName = new Map<string, Array<string | null>>();
-      for (const row of rows) {
-        const name = nameOf(row.name);
-        if (name === undefined) continue;
-        const list = organizationsByName.get(name);
-        if (list) list.push(organizationOf(row));
-        else organizationsByName.set(name, [organizationOf(row)]);
-      }
-      const single = !postureEnforcesWall(deps.posture);
-      for (const name of [...organizationsByName.keys()].sort()) {
-        const organizationIds = organizationsByName.get(name)!.sort(compareKeys);
-        const resolved = await resolves('position', name);
-        if (!resolved) {
-          for (const organizationId of new Set(organizationIds)) {
-            bucket(organizationId).positionsWithoutDefinition.push({
-              name, refusedName: !metadataDoorAcceptsPositionName(name),
-            });
-          }
-        }
-        if (single && organizationIds.length > 1) {
-          report.conflictingPositionNames.push({ name, organizationIds, resolves: resolved });
-        }
-      }
-    }
   } catch (e) {
     if (!(e instanceof ReportStop)) throw e;
     report.stopped = e.stop;
     report.stoppedReading = e.reading;
     report.stoppedError = errorText(e.reason);
     report.organizations = [];
-    report.conflictingPositionNames = [];
     return report;
   }
 
@@ -466,53 +395,12 @@ function logReport(report: CatalogReferenceReport, logger?: CatalogReferenceRepo
     );
   }
 
-  const positions = perOrganization(report, (o) => o.positionsWithoutDefinition, (items) => ({
-    positions: listed(items.map((i) => i.name)),
-    refusedNames: items.filter((i) => i.refusedName).map((i) => i.name),
-  }));
-  if (positions.count > 0) {
-    const walled = postureEnforcesWall(report.posture);
-    logError(
-      logger,
-      `[security] ${positions.count} position(s), listed by name and organization, have ${POSITION_OBJECT} rows ` +
-        'and no definition the security catalog resolves at this boot, so assignments to them distribute no ' +
-        'permission set. ' +
-        (walled
-          ? 'Under a walled posture a position an organization authored in Setup has no catalog home: the catalog ' +
-            'is environment-level (ADR-0131 D3). Fix: define the position in the environment catalog through the ' +
-            'metadata door, or remove it and its assignments.'
-          : 'Under single the row-only position backfill gives such a position its environment definition, except ' +
-            'a name the metadata door refuses (refusedNames) or a name whose rows disagree. Fix: rename a refused ' +
-            'name in Setup to a lowercase snake_case name; make disagreeing rows agree; or remove the position and ' +
-            'its assignments.') +
-        ' Nothing was changed.',
-      { count: positions.count, organizations: positions.organizations },
-    );
-  }
-
-  if (report.conflictingPositionNames.length > 0) {
-    logError(
-      logger,
-      `[security] ${report.conflictingPositionNames.length} position name(s) are carried by more than one ` +
-        `${POSITION_OBJECT} row under the single posture, where a position name is unique per deployment. Each is ` +
-        'reported as conflicting, never guessed and never merged (ADR-0131 D10): an assignment names only the ' +
-        'name, so at most one of those rows can be what it means. Nothing was changed. Fix: keep one row per name ' +
-        '— rename or remove the others in Setup.',
-      {
-        count: report.conflictingPositionNames.length,
-        conflicting: listed(report.conflictingPositionNames.map((c) => ({
-          name: c.name, organizationIds: c.organizationIds, resolves: c.resolves,
-        }))),
-      },
-    );
-  }
-
-  const clean = report.organizations.length === 0 && report.conflictingPositionNames.length === 0;
-  // A composition with none of the three objects has nothing to report on.
-  if (clean && report.absent.length < 3) {
+  const clean = report.organizations.length === 0;
+  // A composition with neither object has nothing to report on.
+  if (clean && report.absent.length < 2) {
     logger?.info?.(
       '[security] catalog reference report: every position assignment and permission-set grant names an item ' +
-        'the security catalog resolves at this boot, and no position row is without a definition',
+        'the security catalog resolves at this boot',
       { absent: report.absent },
     );
   }

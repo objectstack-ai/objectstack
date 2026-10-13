@@ -670,9 +670,12 @@ export {
  * [#22877] The closed set of `DELETE {metaPath}/:type/:name` (the reset).
  * **Measured**: `state` (the draft discard) and `dropStorage` (the opt-in
  * table teardown); the OCC pin and the actor ride headers and the session.
- * Plus {@link META_ITEM_MEMBER_PARAM}.
+ * Plus {@link META_ITEM_MEMBER_PARAM}. [#23165, ADR-0048] Plus `package`, the
+ * row the delete removes, read through {@link metaItemPackageBinding} as the
+ * other doors of the item read it: a delete naming no package of an item two
+ * packages hold is refused `409`, and naming the package is its remedy.
  */
-export const META_ITEM_RESET_PARAMS: readonly string[] = ['state', 'dropStorage', META_ITEM_MEMBER_PARAM];
+export const META_ITEM_RESET_PARAMS: readonly string[] = ['state', 'dropStorage', 'package', META_ITEM_MEMBER_PARAM];
 
 /**
  * [#22877] The closed set of `GET {metaPath}/:type/:name/history`.
@@ -7327,7 +7330,7 @@ export class RestServer {
                     // is not what the request asked for.
                     // [#22877] Recognition first, over the measured closed set.
                     if (refuseUnknownQueryParams(req, res, META_ITEM_RESET_PARAMS)) return;
-                    if (refuseRepeatedQueryParams(req, res, ['state', 'dropStorage', META_ITEM_MEMBER_PARAM])) return;
+                    if (refuseRepeatedQueryParams(req, res, ['state', 'dropStorage', 'package', META_ITEM_MEMBER_PARAM])) return;
                     const stateParam = typeof req.query?.state === 'string'
                         && req.query.state.toLowerCase() === 'draft'
                         ? 'draft' as const
@@ -7338,6 +7341,7 @@ export class RestServer {
                     // previewed object" flow so a publish-to-preview leaves no
                     // orphan table. Destructive — opt-in, defaults off.
                     const dropStorage = req.query?.dropStorage === 'true' || req.query?.dropStorage === '1';
+                    const deletePackageId = metaItemPackageBinding(req.query?.package);
 
                     // [ADR-0131 D6] No organization, as on the `PUT` twin: the
                     // reset reaches the environment-wide row.
@@ -7367,6 +7371,10 @@ export class RestServer {
                         ...(dropStorage ? { dropStorage: true } : {}),
                         // [#22877] Resets ONE member of a bundled type.
                         ...metaMemberSelector(req.query),
+                        // [#23165, ADR-0048] The package whose row the delete
+                        // removes; `all` and an empty value name none, as on
+                        // the save door, and the protocol then resolves it.
+                        ...(deletePackageId ? { packageId: deletePackageId } : {}),
                     };
                     const result = await p.deleteMetaItem(deleteRequest);
                     res.json(result);

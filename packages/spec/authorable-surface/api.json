@@ -498,6 +498,7 @@
     "api/DeleteMetaItemRequest:dropStorage",
     "api/DeleteMetaItemRequest:member",
     "api/DeleteMetaItemRequest:name",
+    "api/DeleteMetaItemRequest:packageId",
     "api/DeleteMetaItemRequest:parentVersion",
     "api/DeleteMetaItemRequest:state",
     "api/DeleteMetaItemRequest:type",
