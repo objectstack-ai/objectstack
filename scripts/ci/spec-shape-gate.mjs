@@ -1140,9 +1140,9 @@ export function renderSummary({ sha, downstreamSha = null, commit = null, event 
       `⛔ The typecheck failed (exit ${status}) and **no diagnostic could be attributed to a file**.`,
       '',
       `That is not a shape break this gate can hand to anybody: the whole point of compiling a consumer is that the ` +
-        `objectstack change which moved the shape is identifiable from the objectui file that stopped compiling. Read the ` +
-        `job log -- the failure is upstream of the compiler (an install, a build, the spec's own build) or the compiler's ` +
-        `output shape moved. This run is exit 2: not a pass, not a shape break.`,
+        `change in objectstack which moved the shape is identifiable from the objectui file that stopped compiling. Read ` +
+        `the job log -- the failure is upstream of the compiler (an install, a build, the spec's own build) or the ` +
+        `compiler's output shape moved. This run is exit 2: not a pass, not a shape break.`,
     );
   } else {
     const unknownRows = distinctRows(unknown);

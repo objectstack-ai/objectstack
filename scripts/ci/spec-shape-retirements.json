@@ -1,4 +1,39 @@
 {
   "$comment": "Intentional spec retirements the Spec Shape Gate reads as `known` instead of red. One entry per retirement, written by the accepting seat when the downstream (objectui) card is filed, deleted when that card closes. Every entry carries exactly: retired, objectstack_pr, objectstack_commit (40-hex merge commit), downstream_card (owner/repo#N), registered_at (YYYY-MM-DD), matches (non-empty; each pattern names a repo-relative objectui `file` -- `*` within a segment, `**` across -- plus at least one of `code` (TS<digits>) or `message` (substring)). A file alone is refused. The reader, its grammar and its refusals: scripts/ci/spec-shape-gate.mjs (THE REGISTRY).",
-  "retirements": []
+  "retirements": [
+    {
+      "retired": "view-level data source provider 'api' (ViewDataSchema arm; ruling C on #23082, executed by PR #23160) -- the downstream still compares against the '\"api\"' literal, reads the arm's read/write keys, and casts test fixtures to its { data: { read } } shape",
+      "objectstack_pr": 23160,
+      "objectstack_commit": "1912af47ba6e3b250f7c717fea0d56e181029b9c",
+      "downstream_card": "objectstack-ai/objectui#12325",
+      "registered_at": "2026-10-13",
+      "matches": [
+        {
+          "file": "packages/**",
+          "code": "TS2367",
+          "message": "'\"api\"'"
+        },
+        {
+          "file": "packages/**",
+          "code": "TS2678",
+          "message": "'\"api\"'"
+        },
+        {
+          "file": "packages/core/src/adapters/resolveDataSource.ts",
+          "code": "TS2339",
+          "message": "does not exist on type 'never'"
+        },
+        {
+          "file": "packages/plugin-gantt/src/ObjectGantt.tsx",
+          "code": "TS2339",
+          "message": "does not exist on type 'never'"
+        },
+        {
+          "file": "packages/types/src/__tests__/*.test.ts",
+          "code": "TS2352",
+          "message": "data: { read: Record<string, unknown>; }"
+        }
+      ]
+    }
+  ]
 }
