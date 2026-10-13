@@ -1288,16 +1288,15 @@ describe('ApprovalService (node era)', () => {
     expect(rows[0].record_title).toBe('Snapshot Title');
   });
 
-  // [#23157] The approve action is `type: 'api'` against the decide route,
-  // which answers decide()'s result verbatim; its success copy interpolates
-  // `${result.*}` over that answer (the scope `ActionSchema.successMessage`
-  // declares). So the toast names what was approved only while decide()'s
-  // answer carries the title the copy reads, finalized or not.
-  describe('the approve action\'s success copy, filled from decide()\'s answer', () => {
-    const approveCopy = (): string => {
-      const action = (SysApprovalRequest as any).actions.find((a: any) => a.name === 'approval_approve');
-      return action.successMessage;
-    };
+  // [#23157] Every request action is `type: 'api'` against a route that
+  // answers its service method's result verbatim, and each of those results
+  // carries `request`, the read-back row with its display enrichment. Each
+  // action's success copy interpolates `${result.*}` over that answer (the
+  // scope `ActionSchema.successMessage` declares), so the toast names the
+  // request only while the answer carries the title the copy reads.
+  describe('each request action\'s success copy, filled from its route\'s answer', () => {
+    const copyOf = (name: string): string =>
+      ((SysApprovalRequest as any).actions as any[]).find((a) => a.name === name).successMessage;
     /** The copy's `${result.<path>}` tokens, each filled from the answer; an unresolved path reads as ''. */
     const fill = (copy: string, result: unknown): { text: string; unresolved: string[] } => {
       const unresolved: string[] = [];
@@ -1308,43 +1307,110 @@ describe('ApprovalService (node era)', () => {
       });
       return { text, unresolved };
     };
+    const named = (action: string, answer: unknown): string => {
+      const { text, unresolved } = fill(copyOf(action), answer);
+      expect(unresolved, `${action}: every token resolves on the answer`).toEqual([]);
+      return text;
+    };
     /** The id of the request an ordinary open answers (never an auto-outcome in these cells). */
     const openRequestId = async (...args: Parameters<ApprovalService['openNodeRequest']>): Promise<string> =>
       ((await svc.openNodeRequest(...args)) as { id: string }).id;
+    /** A flow whose approval node declares the `revise` out-edge send-back needs (#3823). */
+    const REVISE_FLOW = {
+      name: 'deal_approval',
+      nodes: [
+        { id: 'approve_step', type: 'approval' },
+        { id: 'wait_revision', type: APPROVAL_REVISE_NODE_TYPE },
+      ],
+      edges: [{ id: 'e_rev', source: 'approve_step', target: 'wait_revision', label: 'revise' }],
+    };
 
-    it('reads the answer: the copy carries at least one `${result.*}` token', () => {
-      expect(approveCopy()).toMatch(/\$\{result\.[\w.]+\}/);
+    beforeEach(() => {
+      engine._tables['opportunity'] = [{ id: 'opp1', name: 'Acme Renewal', amount: 100 }];
+      svc.attachAutomation({
+        async resume() { /* resumed */ },
+        async cancelRun() { /* handed back */ },
+        async getFlow() { return REVISE_FLOW; },
+      } as any);
     });
 
-    it('a finalizing approve: the toast names the record, the way the inbox row\'s inline Approve does', async () => {
-      engine._tables['opportunity'] = [{ id: 'opp1', name: 'Acme Renewal', amount: 100 }];
+    it('reads the answer: every action\'s copy carries a `${result.*}` token', () => {
+      for (const a of (SysApprovalRequest as any).actions as any[]) {
+        expect(a.successMessage, `${a.name}.successMessage`).toMatch(/\$\{result\.[\w.]+\}/);
+      }
+    });
+
+    it('approve, finalizing: the toast names the record, the way the inbox row\'s inline Approve does', async () => {
       const id = await openRequestId(openInput(['u9']), CTX);
       const out = await svc.decide(id, { decision: 'approve', actorId: 'u9' }, SYS);
       expect(out.finalized).toBe(true);
-      const { text, unresolved } = fill(approveCopy(), out);
-      expect(unresolved).toEqual([]);
-      expect(text).toBe('Approved "Acme Renewal"');
+      expect(named('approval_approve', out)).toBe('Approved "Acme Renewal"');
     });
 
-    it('an approve that leaves the step waiting on others still names the record', async () => {
-      engine._tables['opportunity'] = [{ id: 'opp1', name: 'Acme Renewal', amount: 100 }];
+    it('approve, leaving the step waiting on others: still names the record', async () => {
       const id = await openRequestId(openInput(['u1', 'u2'], {}, { behavior: 'unanimous' }), CTX);
       const out = await svc.decide(id, { decision: 'approve', actorId: 'u1' }, SYS);
       expect(out.finalized).toBe(false);
-      const { text, unresolved } = fill(approveCopy(), out);
-      expect(unresolved).toEqual([]);
-      expect(text).toContain('Acme Renewal');
-      expect(text).not.toBe('Approved.');
+      expect(named('approval_approve', out)).toBe('Approved "Acme Renewal"');
     });
 
-    it('a record whose row is gone is named from the payload snapshot, as the inbox names it', async () => {
-      const id = await openRequestId(
-        openInput(['u9'], { record: { id: 'opp1', name: 'Snapshot Title', amount: 1 } }), CTX,
-      );
+    it('approve, on a record whose row is gone: named from the payload snapshot, as the inbox names it', async () => {
+      engine._tables['opportunity'] = [];
+      const id = await openRequestId(openInput(['u9'], { record: { id: 'opp1', name: 'Snapshot Title', amount: 1 } }), CTX);
       const out = await svc.decide(id, { decision: 'approve', actorId: 'u9' }, SYS);
-      const { text, unresolved } = fill(approveCopy(), out);
-      expect(unresolved).toEqual([]);
-      expect(text).toBe('Approved "Snapshot Title"');
+      expect(named('approval_approve', out)).toBe('Approved "Snapshot Title"');
+    });
+
+    it('reject: names the record, the way the inbox row\'s inline Reject does', async () => {
+      const id = await openRequestId(openInput(['u9']), CTX);
+      const out = await svc.decide(id, { decision: 'reject', actorId: 'u9' }, SYS);
+      expect(out.request.status).toBe('rejected');
+      expect(named('approval_reject', out)).toBe('Rejected "Acme Renewal"');
+    });
+
+    it('reassign: names the record', async () => {
+      const id = await openRequestId(openInput(['u9']), CTX);
+      const out = await svc.reassign(id, { actorId: 'u9', to: 'u7' }, asUser('u9'));
+      expect(named('approval_reassign', out)).toBe('Reassigned "Acme Renewal"');
+    });
+
+    it('send back for revision: names the record', async () => {
+      const id = await openRequestId(openInput(['u9']), CTX);
+      const out = await svc.sendBack(id, { actorId: 'u9', comment: 'split the lines' }, asUser('u9'));
+      expect(out.request.status).toBe('returned');
+      expect(named('approval_send_back', out)).toBe('Sent "Acme Renewal" back for revision');
+    });
+
+    it('request information: names the record', async () => {
+      const id = await openRequestId(openInput(['u9']), CTX);
+      const out = await svc.requestInfo(id, { actorId: 'u9', comment: 'which cost centre?' }, asUser('u9'));
+      expect(named('approval_request_info', out)).toBe('Information requested on "Acme Renewal"');
+    });
+
+    it('remind: names the record', async () => {
+      const id = await openRequestId(openInput(['u9']), CTX);
+      const out = await svc.remind(id, { actorId: 'u1' }, CTX);
+      expect(named('approval_remind', out)).toBe('Reminder sent for "Acme Renewal"');
+    });
+
+    it('recall: names the record', async () => {
+      const id = await openRequestId(openInput(['u9']), CTX);
+      const out = await svc.recall(id, { actorId: 'u1' }, CTX);
+      expect(out.request.status).toBe('recalled');
+      expect(named('approval_recall', out)).toBe('Recalled "Acme Renewal"');
+    });
+
+    it('resubmit: names the record', async () => {
+      const id = await openRequestId(openInput(['u9']), CTX);
+      await svc.sendBack(id, { actorId: 'u9', comment: 'split the lines' }, asUser('u9'));
+      const out = await svc.resubmit(id, { actorId: 'u1', comment: 'split' }, CTX);
+      expect(named('approval_resubmit', out)).toBe('Resubmitted "Acme Renewal"');
+    });
+
+    it('reply: names the record', async () => {
+      const id = await openRequestId(openInput(['u9']), CTX);
+      const out = await svc.comment(id, { actorId: 'u1', comment: 'attached the receipt' }, CTX);
+      expect(named('approval_comment', out)).toBe('Reply posted on "Acme Renewal"');
     });
   });
 

@@ -138,7 +138,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       approval_reject: {
         label: "拒绝",
         description: "拒绝该请求？拒绝对所有审批人立即生效。",
-        successMessage: "已拒绝。",
+        successMessage: "已拒绝“${result.request.record_title}”",
         params: {
           comment: {
             label: "审批意见"
@@ -150,7 +150,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_reassign: {
         label: "转签",
-        successMessage: "已转签。",
+        successMessage: "已转签“${result.request.record_title}”",
         params: {
           to: {
             label: "新审批人",
@@ -163,7 +163,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_send_back: {
         label: "退回修改",
-        successMessage: "已退回修改。",
+        successMessage: "已将“${result.request.record_title}”退回修改",
         params: {
           comment: {
             label: "原因"
@@ -172,7 +172,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_request_info: {
         label: "退回补充",
-        successMessage: "已退回给申请人补充材料。",
+        successMessage: "已就“${result.request.record_title}”退回给申请人补充材料",
         params: {
           comment: {
             label: "需要申请人补充什么？"
@@ -181,7 +181,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_remind: {
         label: "催办",
-        successMessage: "已发送催办。",
+        successMessage: "已就“${result.request.record_title}”发送催办",
         params: {
           comment: {
             label: "备注"
@@ -191,7 +191,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       approval_recall: {
         label: "撤回",
         description: "撤回该请求？撤回后审批人将无法继续处理，记录随即解锁。",
-        successMessage: "已撤回。",
+        successMessage: "已撤回“${result.request.record_title}”",
         params: {
           comment: {
             label: "备注"
@@ -200,7 +200,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_resubmit: {
         label: "重新提交",
-        successMessage: "已重新提交。",
+        successMessage: "已重新提交“${result.request.record_title}”",
         params: {
           comment: {
             label: "你修改了什么？"
@@ -209,7 +209,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_comment: {
         label: "回复",
-        successMessage: "已发送回复。",
+        successMessage: "已在“${result.request.record_title}”上发送回复",
         params: {
           comment: {
             label: "回复内容"

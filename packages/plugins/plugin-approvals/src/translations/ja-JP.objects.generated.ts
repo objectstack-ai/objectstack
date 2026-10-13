@@ -138,7 +138,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       approval_reject: {
         label: "却下",
         description: "このリクエストを却下しますか？却下はすべての承認者に対して最終決定になります。",
-        successMessage: "却下しました。",
+        successMessage: "「${result.request.record_title}」を却下しました",
         params: {
           comment: {
             label: "コメント"
@@ -150,7 +150,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_reassign: {
         label: "再割り当て",
-        successMessage: "再割り当てしました。",
+        successMessage: "「${result.request.record_title}」を再割り当てしました",
         params: {
           to: {
             label: "新しい承認者",
@@ -163,7 +163,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_send_back: {
         label: "差し戻し",
-        successMessage: "修正のため差し戻しました。",
+        successMessage: "「${result.request.record_title}」を修正のため差し戻しました",
         params: {
           comment: {
             label: "理由"
@@ -172,7 +172,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_request_info: {
         label: "追加情報を依頼",
-        successMessage: "追加情報を依頼しました。",
+        successMessage: "「${result.request.record_title}」について追加情報を依頼しました",
         params: {
           comment: {
             label: "何が必要ですか？"
@@ -181,7 +181,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_remind: {
         label: "リマインダー送信",
-        successMessage: "リマインダーを送信しました。",
+        successMessage: "「${result.request.record_title}」のリマインダーを送信しました",
         params: {
           comment: {
             label: "メモ"
@@ -191,7 +191,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       approval_recall: {
         label: "取り下げ",
         description: "このリクエストを取り下げますか？承認者は操作できなくなり、レコードのロックが解除されます。",
-        successMessage: "取り下げました。",
+        successMessage: "「${result.request.record_title}」を取り下げました",
         params: {
           comment: {
             label: "コメント"
@@ -200,7 +200,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_resubmit: {
         label: "再提出",
-        successMessage: "再提出しました。",
+        successMessage: "「${result.request.record_title}」を再提出しました",
         params: {
           comment: {
             label: "何を変更しましたか？"
@@ -209,7 +209,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_comment: {
         label: "返信",
-        successMessage: "返信を投稿しました。",
+        successMessage: "「${result.request.record_title}」に返信を投稿しました",
         params: {
           comment: {
             label: "コメント"
