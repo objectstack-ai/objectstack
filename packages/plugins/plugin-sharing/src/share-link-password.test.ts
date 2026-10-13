@@ -73,12 +73,10 @@ import type { SharingEngine } from './sharing-service.js';
 vi.mock('node:crypto', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:crypto')>();
   const derived = new Map<string, Buffer>();
-  const part = (v: unknown) =>
-    typeof v === 'string' ? `s:${v}` : `b:${Buffer.from(v as Uint8Array).toString('hex')}`;
   function scrypt(password: unknown, salt: unknown, keylen: number, options: unknown, callback?: unknown): void {
     const [opts, done] = typeof options === 'function' ? [{}, options] : [options ?? {}, callback];
     const reply = done as (err: Error | null, key: Buffer) => void;
-    const key = JSON.stringify([part(password), part(salt), keylen, opts]);
+    const key = JSON.stringify([password, salt, keylen, opts]);
     const hit = derived.get(key);
     if (hit) {
       // Asynchronous like the real call, and a copy: no caller can alter the memo.
