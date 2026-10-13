@@ -227,6 +227,55 @@ describe('SharingService.buildReadFilter', () => {
   });
 });
 
+// [ADR-0138 D3 item 6, as the maintainer's ruling C amends it — comment
+// 6148183570 on #23266] The guest reaches rows through share links only, never
+// through the object's sharing model: its read filter is deny-all on every
+// object record sharing scopes. Share links are redeemed at their own door and
+// never pass through this filter (the door-level control is in
+// `packages/qa/dogfood/test/guest-grants-channel.dogfood.test.ts`).
+describe('SharingService.buildReadFilter — the guest never takes the OWD branch', () => {
+  const GUEST = { principalKind: 'guest', positions: ['guest'], permissions: ['bound_reader'], isSystem: false } as const;
+  const DENY_ALL = { id: '__deny_all__' };
+  let svc: SharingService;
+  beforeEach(() => {
+    svc = new SharingService({
+      engine: makeFakeEngine({
+        account: ACCOUNT_SCHEMA,
+        lead: LEAD_SCHEMA,
+        whiteboard: CANON_PUBLIC_RW_SCHEMA,
+        line_item: {
+          name: 'line_item',
+          sharingModel: 'controlled_by_parent',
+          fields: { id: {}, name: {}, owner_id: {}, account: {} },
+        },
+        note: ORPHAN_SCHEMA,
+        sys_record_share: { name: 'sys_record_share' },
+      }),
+    });
+  });
+
+  for (const [object, model] of [
+    ['account', 'private'],
+    ['lead', 'public_read'],
+    ['whiteboard', 'public_read_write'],
+    ['line_item', 'controlled_by_parent'],
+    ['note', 'private, with no owner column (the OWD-public fall-through)'],
+  ] as const) {
+    it(`${model}: the guest's read filter is deny-all`, async () => {
+      expect(await svc.buildReadFilter(object, { ...GUEST } as any)).toEqual(DENY_ALL);
+    });
+  }
+
+  it('control: a signed-in member still takes the OWD branch — no filter on public_read and public_read_write', async () => {
+    expect(await svc.buildReadFilter('lead', { principalKind: 'human', userId: 'u1' } as any)).toBeNull();
+    expect(await svc.buildReadFilter('whiteboard', { principalKind: 'human', userId: 'u1' } as any)).toBeNull();
+  });
+
+  it('control: the system context is never the guest — no filter', async () => {
+    expect(await svc.buildReadFilter('lead', { principalKind: 'guest', isSystem: true } as any)).toBeNull();
+  });
+});
+
 describe('SharingService.canEdit', () => {
   let engine: ReturnType<typeof makeFakeEngine>;
   let svc: SharingService;

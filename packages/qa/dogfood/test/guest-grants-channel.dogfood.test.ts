@@ -16,7 +16,10 @@
 //  - D4: the organization is derived when it is unique; a deployment that holds
 //    several answers the located refusal at the door that needs one.
 //  - D4 item 4: the public form doors keep their own posture, unchanged.
-//  - D3 item 6: the guest's row scope for each sharing model, one pipeline.
+//  - D3 item 6, as the maintainer's ruling C amends it (comment 6148183570 on
+//    #23266): the guest's row scope is share links only — it never takes the
+//    OWD branch, so a bound read set reads 0 rows under every sharing model,
+//    while a share link still serves its one record.
 //
 // THE BINDING IS INSTALLED THROUGH THE REGISTRY'S BARE SLOT, by the test. The
 // `guest` anchor is a built-in position `@objectstack/plugin-security` declares
@@ -71,7 +74,11 @@ const object = (name: string, sharingModel: string, extra: Record<string, unknow
 
 const objects = [
   object(OBJ.private, 'private'),
-  object(OBJ.publicRead, 'public_read'),
+  // The share-link control's object: links on, and an eligibility predicate
+  // only the first seed row meets.
+  object(OBJ.publicRead, 'public_read', {
+    publicSharing: { enabled: true, eligibility: `record.name == '${OBJ.publicRead}-seed-1'` },
+  }),
   object(OBJ.publicReadExternal, 'public_read', { externalSharingModel: 'public_read' }),
   object(OBJ.publicReadWrite, 'public_read_write'),
   object(OBJ.parent, 'public_read'),
@@ -352,35 +359,70 @@ describe('ADR-0138 E1 — a bound read set grants that object only (D3 item 1, D
   });
 });
 
-describe('ADR-0138 E1 — the guest\'s row scope for each sharing model (D3 item 6)', () => {
+describe('ADR-0138 E1 — the guest\'s row scope is share links only, under every sharing model (D3 item 6, ruling C)', () => {
   beforeAll(() => bindAnchor('guest', [GUEST_SET]));
 
-  // Measured on this boot, and pinned AS MEASURED: ADR-0138 D3 item 6 executed
-  // as written. The row-level pipeline is the one every caller runs; the guest
-  // carries no user id and no external audience, so it is judged against the
-  // INTERNAL dial (`sharingModel`), and `externalSharingModel` is not read for
-  // it (that dial has no runtime reader for any principal: #23268).
-  //
-  // ⚠️ PENDING RULING: #23266. This reading departs from ADR-0090 D9's division
-  // of labour and D11 (the guest is not an OWD audience), and which row scope
-  // the guest gets is the maintainer's decision there. These numbers are the
-  // one place that decision lands: a ruling other than the measured reading
-  // changes them HERE, in the same change as the runtime work it orders.
-  const cases: Array<[keyof typeof OBJ, number]> = [
-    ['private', 0],
-    ['publicRead', 2],
-    ['publicReadExternal', 2],
-    ['publicReadWrite', 3],
-    ['parent', 2],
-    ['child', 2],
-  ];
-  for (const [key, expected] of cases) {
-    it(`${OBJ[key]}: the guest reads ${expected} row(s)`, async () => {
+  // [ADR-0138 D3 item 6, as the maintainer's ruling C amends it — comment
+  // 6148183570 on #23266] The guest never takes the OWD branch of the
+  // row-level pipeline: not `sharingModel`, and not `externalSharingModel`
+  // (which no runtime reads for anyone, #23268). It owns nothing (D1), so it
+  // reaches rows only through share links. A guest with a bound read set and
+  // no link is ADMITTED to each object (200: the set grants read) and reads
+  // ZERO rows of it, whatever the object's sharing model — the `public_read`
+  // object that also declares `externalSharingModel: 'public_read'` included.
+  // The link control is the next block.
+  const cases: Array<keyof typeof OBJ> = ['private', 'publicRead', 'publicReadExternal', 'publicReadWrite', 'parent', 'child'];
+  for (const key of cases) {
+    it(`${OBJ[key]}: the guest is admitted and reads 0 rows`, async () => {
       const res = await anonymous(key);
       expect(res.status, res.text).toBe(200);
-      expect(rowsOf(res.body)).toHaveLength(expected);
+      expect(rowsOf(res.body)).toHaveLength(0);
+      // Control: the rows are there, and the object serves them — to the admin.
+      const admin = await stack.apiAs(adminToken, 'GET', `/data/${OBJ[key]}`);
+      expect(admin.status).toBe(200);
+      expect(rowsOf(await admin.json()).length).toBeGreaterThan(0);
     });
   }
+});
+
+describe('ADR-0138 E1 — a share link still serves the guest its one record (ruling C closes the OWD branch, not links)', () => {
+  const ELIGIBLE = `${OBJ.publicRead}-seed-1`;
+  const idOf = async (name: string): Promise<string> =>
+    String((await ql.find(OBJ.publicRead, { where: { name }, limit: 1, ...SYS }))[0].id);
+
+  it('the guest redeems a link and reads the linked record, on an object whose rows it otherwise reads none of', async () => {
+    const id = await idOf(ELIGIBLE);
+    const minted = await stack.apiAs(adminToken, 'POST', '/share-links', { object: OBJ.publicRead, recordId: id });
+    expect(minted.status, await minted.clone().text()).toBe(201);
+    const { token } = ((await minted.json()) as { data: { token: string } }).data;
+
+    const resolved = await stack.api(`/share-links/${encodeURIComponent(token)}/resolve`);
+    const text = await resolved.text();
+    expect(resolved.status, text).toBe(200);
+    expect(JSON.parse(text).data.record.id).toBe(id);
+
+    // Eligibility is held at every redemption: a record that stops qualifying
+    // stops being served through the link already minted for it.
+    await ql.update(OBJ.publicRead, { id, name: `${ELIGIBLE}-withdrawn` }, SYS);
+    try {
+      const after = await stack.api(`/share-links/${encodeURIComponent(token)}/resolve`);
+      const afterText = await after.text();
+      expect(after.status, afterText).toBe(404);
+      expect(JSON.parse(afterText).error?.code).toBe('INVALID_OR_EXPIRED');
+    } finally {
+      await ql.update(OBJ.publicRead, { id, name: ELIGIBLE }, SYS);
+    }
+  });
+
+  it('eligibility is held at the mint: a record that does not qualify gets no link', async () => {
+    const res = await stack.apiAs(adminToken, 'POST', '/share-links', {
+      object: OBJ.publicRead,
+      recordId: await idOf(`${OBJ.publicRead}-seed-2`),
+    });
+    const text = await res.text();
+    expect(res.status, text).toBe(422);
+    expect(JSON.parse(text).error?.code).toBe('RECORD_NOT_ELIGIBLE');
+  });
 });
 
 describe('ADR-0138 E1 — the form doors are unchanged (D4 item 4)', () => {
