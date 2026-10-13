@@ -70,22 +70,6 @@ export type {
   CollisionReportSink,
   PermissionSetNameCollisionDiagnostic,
 } from './permission-set-name-collision.js';
-// [ADR-0094] sys_permission_set pure-projection machinery.
-export {
-  permissionSetRowFields,
-  permissionSetBodyFromRow,
-  upsertEnvPermissionSet,
-  projectPermissionMutation,
-  registerPermissionSetProjection,
-  createPermissionSetWriteThrough,
-  reconcilePermissionSetProjection,
-} from './permission-set-projection.js';
-export type {
-  PermissionSeedOutcome,
-  ProjectionDeps,
-  ProjectionReconcileOutcome,
-  WriteThroughDeps,
-} from './permission-set-projection.js';
 export { cleanupPackagePermissions } from './cleanup-package-permissions.js';
 export type { PackagePermissionCleanupOutcome } from './cleanup-package-permissions.js';
 export { objectPostureGate, registerObjectPostureGate } from './object-posture-gate.js';

@@ -2296,14 +2296,6 @@ export class SecurityPlugin implements Plugin {
       });
     }
 
-    // [#20013] The writes the ADR-0094 permission-set data door executed
-    // ITSELF — it returned without calling `next()`, so no engine write ran.
-    // Filled by the wrapper that registers the door (below), read by the
-    // security middleware's post-`next()` assertion. Keyed by the operation
-    // context the two middlewares share, and private to this plugin, so no
-    // other middleware can put a write in it.
-    const writesExecutedByDataDoor = new WeakSet<object>();
-
     // Register security middleware
     ql.registerMiddleware(async (opCtx: any, chainNext: () => Promise<void>) => {
       // [#21771] Whether THIS operation was issued from inside another engine
@@ -4258,27 +4250,7 @@ export class SecurityPlugin implements Plugin {
       // that silently stops gating and a deployment that never finds out.
       // ⛔ Do not soften this into a warning: a middleware that cannot say a
       // write was checked must not report that it was.
-      //
-      // [#20013] It covers the Layer 0 tenant wall's stored-row judgement too,
-      // with ONE stand-down, and only for a seam that carries the wall alone:
-      // the ADR-0094 permission-set data door (registered below, inside this
-      // middleware) executes an insert or update of `sys_permission_set`
-      // ITSELF, through the metadata protocol, and never calls `next()`. No
-      // engine write runs there, so no hook chain runs, and the only
-      // `organization_id` such a write can carry is the one the payload
-      // judgement above already cleared; the stored-row half has nothing left
-      // to judge. Measured on the base: a platform administrator's insert
-      // there, under the `isolated` posture, is admitted while Layer 0 walls
-      // the object, so without this stand-down the guard would refuse a write
-      // it has no reason to. The fact is OBSERVED by the wrapper that
-      // registers the data door (it records a write the door never passed on
-      // to `next()`), never declared by an operation field another middleware
-      // could set. A seam carrying a row-level `check` is NOT stood down: that
-      // judgement has no payload half for an insert, and the data door keeps
-      // failing closed under one exactly as before.
-      const standsDown =
-        !businessCheckSeamInstalled && tenantWallSeamInstalled && writesExecutedByDataDoor.has(opCtx);
-      if (writeImageCheckSeam && writeImageCheckSeam.honoured !== true && !standsDown) {
+      if (writeImageCheckSeam && writeImageCheckSeam.honoured !== true) {
         const developerMessage = businessCheckSeamInstalled
           ? `[Security] Access denied: the ${opCtx.operation} on '${opCtx.object}' was executed without the row-level CHECK ` +
             `being evaluated — the engine did not run OperationContext.postHookWriteImageCheck. ` +

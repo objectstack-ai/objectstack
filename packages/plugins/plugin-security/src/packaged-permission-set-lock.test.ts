@@ -8,267 +8,59 @@
  * the server with a message that names the sanctioned path (clone it), so no
  * silent overlay row is ever minted again.
  *
- * ## The harness models the hole, not the happy path
+ * The lock's one door is the metadata door's authoring gate
+ * (`packaged-permission-set-lock-gate.ts`, pinned end to end in
+ * `packaged-permission-set-lock-gate.test.ts`). The `sys_permission_set` data
+ * door that also consulted it retired with the catalog row objects (ADR-0131
+ * D3), and its pins with it. This file pins the two halves that do not depend
+ * on a door:
  *
- * The protocol double here has the `OS_METADATA_WRITABLE=permission` operator
- * hatch OPEN — its `saveMetaItem` does NOT refuse an artifact-backed name. That
- * is deliberate and it is the whole point: with the hatch closed the producer's
- * own ADR-0005 tier gate already answers 403 `NOT_OVERRIDABLE`, so a suite
- * written against a refusing double would score green on a door that is still
- * wide open in exactly the deployment the field report came from. The hatch is
- * documented, reachable, and is the one path that mints a fresh overlay of a
- * packaged set today.
- *
- * ## The pins, and why each one is not optional
- *
- *  1. the refusal fires AND its MESSAGE names the clone path — the ruling's
- *     point is that the admin learns what to do instead, so asserting only the
- *     rejection would pass on a bare "no";
- *  2. ⭐ an ordinary org-owned set is STILL accepted. The control: an
- *     implementation that refuses everything satisfies pin 1 perfectly;
- *  3. the clone path works end to end — org-owned row, no upgrade linkage —
- *     and the package-declared base is untouched by it;
- *  5. fail-closed on ambiguity: a provenance read that cannot ANSWER refuses,
- *     never accepts;
- *  6. ⭐ what the clone ACTION SENDS (commit 5cb62d88b) — pin 3 drives the door with a
- *     hand-written payload, so it could not see that the ACTION ITSELF listed
- *     only two of the row's six definition facets. Pin 6 reads the payload out
- *     of the action definition, so editing that params list is what moves it.
- *
- * (Pin 4 — the detection reading for overlays that already exist — lives in its
- * own suite at the bottom of this file, because it reads rather than writes.)
- *
- * ## ⭐ The fail-open this must not inherit (repaired by commit e1d773eb7)
- *
- * `buildExistingByName`'s UNSCOPED page cap (`limit: names.length`,
- * `seed-name-lookup.ts`) truncated as soon as one name could carry more than one
- * row, and a truncated page read as "absent". Asking THAT oracle "is this set
- * package-declared?" would turn a truncation into "not package-declared" — and
- * the save this ruling exists to refuse would be accepted. A silent fork
- * produced by the code written to stop silent forks.
- *
- * Commit e1d773eb7 has since repaired the cap itself — an overflowing page is now detected
- * and degrades to the per-item read rather than answering — so the controls
- * below no longer guard against THAT truncation reaching this verdict. They are
- * kept, and they still pass, because what they actually pin is structural and
- * outlives the repair: this verdict is not decided by a name-keyed page read at
- * all. Unscoped, `buildExistingByName` still answers with the FIRST row by id
- * for a name, so on a name several organizations hold it answers with somebody
- * else's row — the same question, a different wrong answer, and one no page
- * budget reaches.
- *
- * So the provenance question is decided from the engine's SchemaRegistry — the
- * same source `readDeclared` already uses,
- * an in-memory array with no page, no cap and no `$in`. Two controls prove the
- * immunity structurally rather than asserting it:
- *
- *  - CONTROL A builds the exact multi-row shape that truncated before commit e1d773eb7, in a
- *    double whose `find` HONOURS `limit` (the projection suite's double ignores
- *    it, so the trap cannot even be expressed there), shows the truncation is
- *    live, and pins that the refusal still fires;
- *  - CONTROL B makes every NAME-KEYED page read over `sys_permission_set` fail
- *    outright — the most extreme form of "this read did not answer" — while
- *    by-id reads keep working so the middleware still reaches the question.
- *    The verdict is unchanged, which is only possible if the question was never
- *    asked of that table. That is a structural proof, not an assertion.
+ *  - the CLASSIFIER — "shipped by a code package" is judged from the
+ *    provenance the SchemaRegistry carries, never from a name-keyed page read
+ *    over a table (#21789);
+ *  - the refusal's END-USER copy — the guidance reaches the wire as
+ *    `userMessage`, through the producer's own error resolution.
  */
 
 import { describe, it, expect } from 'vitest';
-import { PermissionSetSchema } from '@objectstack/spec/security';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
-import { mapDataError, resolveThrownHttpError } from '@objectstack/types';
+import { resolveThrownHttpError } from '@objectstack/types';
 import {
   classifyPackagedPermissionSet,
   PackagedPermissionSetLockedError,
   PackagedPermissionSetProvenanceUnknownError,
 } from './packaged-permission-set-lock.js';
 import { registerPackagedPermissionSetLockGate } from './packaged-permission-set-lock-gate.js';
-import {
-  createPermissionSetWriteThrough,
-  permissionSetRowFields,
-  registerPermissionSetProjection,
-} from './permission-set-projection.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Doubles
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * In-memory ql over `sys_permission_set` + `sys_metadata`.
- *
- * ⚠️ `find` HONOURS `limit`. The sibling double in
- * `permission-set-projection.test.ts` does not, which is why the page-cap
- * truncation commit e1d773eb7 repaired cannot be reproduced there — a page cap that the double
- * ignores is a page cap that no test in that file can ever measure.
+ * The engine surface the classifier reads: its SchemaRegistry, and nothing
+ * else. `null` models a kernel with no readable registry.
  */
 function makeQl(declared: any[] | null = null) {
-  const permRows: any[] = [];
-  const metaRows: any[] = [];
-  const tableFor = (object: string): any[] | null =>
-    object === 'sys_permission_set' ? permRows : object === 'sys_metadata' ? metaRows : null;
-  const matches = (r: any, where: any) =>
-    Object.entries(where ?? {}).every(([k, v]) => {
-      // Refuse combinators rather than reading `$and`/`$or` as a column name
-      // (check:where-matcher / #8494): no path under test issues one, and a
-      // matcher that treated a combinator as a field would answer the wrong
-      // rows while this suite stayed green.
-      if (k.startsWith('$')) throw new Error(`fake driver: unsupported combinator ${k}`);
-      if (v && typeof v === 'object' && !Array.isArray(v)) {
-        const inList = (v as any).$in;
-        if (Array.isArray(inList)) return inList.includes(r[k]);
-        throw new Error(`fake driver: unsupported operator ${Object.keys(v).join(',')}`);
-      }
-      return v === null ? (r[k] ?? null) === null : r[k] === v;
-    });
-  /** Set to fail exactly the NAME-KEYED page reads — CONTROL B. */
-  let nameKeyedFindThrows = false;
-  const ql: any = {
-    permRows,
-    metaRows,
-    /**
-     * Break precisely the read commit e1d773eb7 is about: a name-keyed page over
-     * `sys_permission_set`. Reads by `id` (target resolution) keep working, so
-     * the middleware still reaches the provenance question — which is the only
-     * way to observe what that question answers when the paged table is
-     * unavailable.
-     */
-    breakNameKeyedFind() { nameKeyedFindThrows = true; },
-    async find(object: string, q: any) {
-      if (
-        nameKeyedFindThrows
-        && object === 'sys_permission_set'
-        && q?.where && Object.prototype.hasOwnProperty.call(q.where, 'name')
-      ) {
-        throw new Error('fake driver: name-keyed page read unavailable');
-      }
-      const rows = tableFor(object);
-      if (!rows) return [];
-      const hit = rows.filter((r) => matches(r, q?.where));
-      // The cap a real driver applies — and the one commit e1d773eb7 stopped turning into a false
-      // "absent". Modelled, not ignored.
-      return typeof q?.limit === 'number' ? hit.slice(0, q.limit) : hit;
-    },
-    async findOne(object: string, q: any) {
-      assertEngineFindOnePredicate(object, q);
-      const rows = tableFor(object);
-      return rows?.find((r) => matches(r, q?.where)) ?? null;
-    },
-    async insert(object: string, data: any) {
-      const rows = tableFor(object);
-      if (!rows) return null;
-      rows.push({ ...data });
-      return { id: data.id };
-    },
-    // Routed through the PRODUCER's own dispatch predicates
-    // (check:engine-double-contract / #4434, #5480): a double looser than
-    // `ObjectQL.update` / `ObjectQL.delete` converts a green suite into no
-    // suite at all on precisely the paths a double was introduced for.
-    async update(object: string, data: any, options?: any) {
-      const dispatch = assertEngineUpdateDispatch(data, options);
-      const rows = tableFor(object) ?? [];
-      const targets = dispatch.kind === 'by-id'
-        ? rows.filter((r: any) => r.id === dispatch.id)
-        : rows.filter((r: any) => matches(r, options?.where));
-      for (const r of targets) Object.assign(r, data);
-      return dispatch.kind === 'by-id' ? (targets[0] ?? null) : targets.length;
-    },
-    async delete(object: string, options?: any) {
-      const dispatch = assertEngineDeleteDispatch(options);
-      const rows = tableFor(object) ?? [];
-      const targets = dispatch.kind === 'by-id'
-        ? rows.filter((r: any) => r.id === dispatch.id)
-        : rows.filter((r: any) => matches(r, options?.where));
-      for (const r of targets) rows.splice(rows.indexOf(r), 1);
-      return targets.length > 0;
-    },
-  };
+  const ql: any = {};
   if (declared !== null) {
     ql.registry = { listItems: (type: string) => (type === 'permission' ? declared : []) };
   }
   return ql;
 }
 
-/**
- * Metadata protocol double with the operator hatch OPEN.
- *
- * ⛔ `saveMetaItem` deliberately models NO ADR-0005 tier gate. That gate is
- * what `OS_METADATA_WRITABLE=permission` switches off, and this suite exists to
- * pin the door that stays open when it is off. `declared` still feeds the
- * layered read's `code` layer, because that is a READ and the hatch does not
- * change it.
- */
-function makeHatchOpenProtocol(ql: any, declared: Record<string, any> = {}) {
-  let projector: ((evt: any) => Promise<void>) | null = null;
-  const overlayFor = (name: string) =>
-    ql.metaRows.find(
-      (r: any) => r.type === 'permission' && r.name === name
-        && r.state === 'active' && (r.organization_id ?? null) === null,
-    );
-  const protocol: any = {
-    saves: [] as any[],
-    deletes: [] as any[],
-    registerMutationProjector(_type: string, fn: (evt: any) => Promise<void>) { projector = fn; },
-    async saveMetaItem(req: { type: string; name: string; item: any; actor?: string }) {
-      // The REAL `PermissionSetSchema`, exactly as `saveMetaItem` runs it
-      // (`resolveOverlaySchema`), same `[invalid_metadata]` 422 envelope. Only
-      // the ADR-0005 TIER gate is absent here — that is the hatch. Without the
-      // schema the double would accept any object and this suite could stay
-      // green while every real write failed (#4001 / #4669).
-      const parsed = PermissionSetSchema.safeParse(req.item);
-      if (!parsed.success) {
-        const summary = parsed.error.issues
-          .map((i: any) => `${i.path.join('.') || '<root>'}: ${i.message}`)
-          .join('; ');
-        const err: any = new Error(`[invalid_metadata] permission/${req.name} failed spec validation: ${summary}`);
-        err.code = 'INVALID_METADATA';
-        err.status = 422;
-        throw err;
-      }
-      const existing = overlayFor(req.name);
-      if (existing) existing.metadata = JSON.stringify(req.item);
-      else {
-        ql.metaRows.push({
-          id: `meta_${req.name}`, type: 'permission', name: req.name, state: 'active',
-          organization_id: null, metadata: JSON.stringify(req.item),
-        });
-      }
-      protocol.saves.push({ ...req });
-      if (projector) await projector({ type: 'permission', name: req.name, state: 'active', organizationId: null });
-      return { success: true };
-    },
-    async deleteMetaItem(req: { type: string; name: string }) {
-      const i = ql.metaRows.findIndex(
-        (r: any) => r.type === 'permission' && r.name === req.name && (r.organization_id ?? null) === null,
-      );
-      if (i >= 0) ql.metaRows.splice(i, 1);
-      protocol.deletes.push({ ...req });
-      if (projector) await projector({ type: 'permission', name: req.name, state: 'deleted', organizationId: null });
-      return { success: true };
-    },
-    async getMetaItemLayered(req: { type: string; name: string }) {
-      const code = declared[req.name] ?? null;
-      const o = overlayFor(req.name);
-      const overlay = o ? JSON.parse(o.metadata) : null;
-      return {
-        type: 'permission', name: req.name, code, overlay,
-        overlayScope: overlay ? 'env' : null, effective: overlay ?? code,
-      };
-    },
+/** Register the lock on a protocol double and hand back the gate it registered. */
+function lockGate(
+  ql: any,
+  getMetaItemLayered: (req: { name: string }) => Promise<unknown> = async ({ name }) =>
+    ({ type: 'permission', name, code: null, overlay: null, effective: null }),
+) {
+  let gate: ((ctx: { type: string; name: string; body: unknown }) => Promise<void>) | undefined;
+  const protocol = {
+    registerAuthoringGate: (_type: string, g: typeof gate) => { gate = g; },
+    getMetaItemLayered,
   };
-  return protocol;
+  expect(registerPackagedPermissionSetLockGate(protocol, ql)).toBe(true);
+  return gate!;
 }
-
-const makeMiddleware = (ql: any, protocol: any) =>
-  createPermissionSetWriteThrough({ ql, getProtocol: () => protocol });
-
-/** Drive one middleware call; reports whether the driver leg would have run. */
-async function run(mw: any, opCtx: any): Promise<boolean> {
-  let nextCalled = false;
-  await mw(opCtx, async () => { nextCalled = true; });
-  return nextCalled;
-}
-
-const userCtx = { userId: 'usr_admin' };
 
 /** A shipped artifact: a body as the SchemaRegistry stamps it (ADR-0010). */
 const packagedSet = (over: Record<string, any> = {}) => ({
@@ -289,365 +81,6 @@ const orgSet = (over: Record<string, any> = {}) => ({
   ...over,
 });
 
-/** The row the package door materializes for a shipped artifact. */
-const packagedRow = (over: Record<string, any> = {}) => ({
-  id: 'ps_pkg',
-  name: 'ehr_quality_inspector',
-  managed_by: 'package',
-  package_id: 'com.example.ehr',
-  active: true,
-  ...permissionSetRowFields(packagedSet()),
-  ...over,
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PIN 1 — the silent fork path closes at the server, and the refusal TEACHES
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('pin 1 — a save targeting a package-declared set is refused, and the message names the clone path', () => {
-  it('UPDATE through the data door is refused with the clone remedy, and mints NO overlay row', async () => {
-    const ql = makeQl([packagedSet()]);
-    const protocol = makeHatchOpenProtocol(ql, { ehr_quality_inspector: packagedSet() });
-    registerPermissionSetProjection(protocol, { ql });
-    ql.permRows.push(packagedRow());
-    const mw = makeMiddleware(ql, protocol);
-
-    // Rejection-class assertion is the ENVELOPE (`code` + `status`), never a
-    // bare toThrow: an unfixed door throws nothing at all here, and a stub that
-    // threw for some other reason would read identical to a real refusal.
-    const rejection = await run(mw, {
-      object: 'sys_permission_set', operation: 'update', context: userCtx,
-      data: { id: 'ps_pkg', system_permissions: '["customized"]' },
-    }).then(() => null, (e: any) => e);
-
-    expect(rejection, 'the save must be refused, not accepted').not.toBeNull();
-    expect(rejection).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
-    // ⭐ The ruling's whole point: the admin has to learn what to do instead.
-    expect(String(rejection.message)).toMatch(/clone/i);
-    expect(String(rejection.message)).toContain('ehr_quality_inspector');
-    expect(String(rejection.message)).toContain('com.example.ehr');
-
-    // Refused, not "refused after writing".
-    expect(ql.metaRows.length, 'no silent overlay row was minted').toBe(0);
-    expect(protocol.saves.length, 'the metadata write never even ran').toBe(0);
-    expect(
-      JSON.parse(ql.permRows[0].system_permissions),
-      'the record still projects the shipped declaration',
-    ).toEqual(['pkg.baseline']);
-  });
-
-  it('INSERT of a name a package already declares is refused the same way (the other overlay-minting door)', async () => {
-    // Reachable whenever a declaration ships but its record was never
-    // materialized: the duplicate-name probe finds no row, so the insert would
-    // otherwise walk straight into `saveMetaItem` on a packaged name and mint
-    // a fresh overlay of it.
-    const ql = makeQl([packagedSet()]);
-    const protocol = makeHatchOpenProtocol(ql, { ehr_quality_inspector: packagedSet() });
-    registerPermissionSetProjection(protocol, { ql });
-    const mw = makeMiddleware(ql, protocol);
-
-    const rejection = await run(mw, {
-      object: 'sys_permission_set', operation: 'insert', context: userCtx,
-      data: { name: 'ehr_quality_inspector', label: 'Mine', object_permissions: '{}' },
-    }).then(() => null, (e: any) => e);
-
-    expect(rejection).not.toBeNull();
-    expect(rejection).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
-    expect(String(rejection.message)).toMatch(/clone/i);
-    expect(ql.metaRows.length).toBe(0);
-    expect(ql.permRows.length).toBe(0);
-  });
-
-  it('a pure row-state patch (activate/deactivate) is NOT a save of the definition and still passes through', async () => {
-    // Over-denial guard inside pin 1's own subject: the lifecycle actions send
-    // `{ active }` and nothing else. Switching a packaged set off is not a
-    // customization of it (#4669), so the lock must not swallow the column
-    // write — a lock that refuses the on/off switch has broken the surface it
-    // was supposed to protect.
-    const ql = makeQl([packagedSet()]);
-    const protocol = makeHatchOpenProtocol(ql, { ehr_quality_inspector: packagedSet() });
-    registerPermissionSetProjection(protocol, { ql });
-    ql.permRows.push(packagedRow());
-    const mw = makeMiddleware(ql, protocol);
-
-    const nextCalled = await run(mw, {
-      object: 'sys_permission_set', operation: 'update', context: userCtx,
-      data: { id: 'ps_pkg', active: false },
-    });
-    expect(nextCalled, 'the driver performs the column write with its ordinary semantics').toBe(true);
-    expect(ql.metaRows.length).toBe(0);
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ⭐ PIN 2 — THE CONTROL. Not optional: pin 1 alone scores green on a door
-// that refuses everything.
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('pin 2 (control) — an ordinary org-owned permission set is STILL accepted', () => {
-  it('UPDATE of an env-authored set lands in the metadata store and projects onto the record', async () => {
-    const ql = makeQl([packagedSet()]); // a package IS installed — just not this name
-    const protocol = makeHatchOpenProtocol(ql, { ehr_quality_inspector: packagedSet() });
-    registerPermissionSetProjection(protocol, { ql });
-    await protocol.saveMetaItem({ type: 'permission', name: 'org_support_agent', item: orgSet() });
-    const row = ql.permRows.find((r: any) => r.name === 'org_support_agent');
-    expect(row, 'precondition: the env-authored row exists').toBeTruthy();
-    const savesBefore = protocol.saves.length;
-    const mw = makeMiddleware(ql, protocol);
-
-    const opCtx: any = {
-      object: 'sys_permission_set', operation: 'update', context: userCtx,
-      data: { id: row.id, system_permissions: '["support.use","support.escalate"]' },
-    };
-    const nextCalled = await run(mw, opCtx);
-
-    expect(nextCalled, 'the driver write is skipped — the record is projector-owned').toBe(false);
-    expect(protocol.saves.length, 'the definition write LANDED').toBe(savesBefore + 1);
-    expect(JSON.parse(ql.permRows.find((r: any) => r.name === 'org_support_agent').system_permissions))
-      .toEqual(['support.use', 'support.escalate']);
-    expect(opCtx.result?.id).toBe(row.id);
-  });
-
-  it('INSERT of a brand-new env-authored set is accepted and lands org-owned', async () => {
-    const ql = makeQl([packagedSet()]);
-    const protocol = makeHatchOpenProtocol(ql, { ehr_quality_inspector: packagedSet() });
-    registerPermissionSetProjection(protocol, { ql });
-    const mw = makeMiddleware(ql, protocol);
-
-    const opCtx: any = {
-      object: 'sys_permission_set', operation: 'insert', context: userCtx,
-      data: {
-        name: 'org_support_agent', label: 'Support Agent',
-        object_permissions: JSON.stringify({ ticket: { allowRead: true } }),
-      },
-    };
-    await run(mw, opCtx);
-
-    expect(protocol.saves.length).toBe(1);
-    const created = ql.permRows.find((r: any) => r.name === 'org_support_agent');
-    expect(created?.managed_by).toBe('admin');
-    expect(created?.package_id ?? null).toBeNull();
-  });
-
-  it('a `managed_by:package` row with NO artifact behind it keeps editing in place (the ADR-0094 D5-R surviving tier)', async () => {
-    // The boundary the lock must NOT cross. This row was materialized by the
-    // ADR-0086 P2 publish path from a definition that lives only in
-    // `sys_metadata` (authored + published through the METADATA door, ADR-0070)
-    // — no code artifact backs the name, so an edit of it is a direct edit of
-    // the one stored definition and forks nothing. The ruling's subject is the
-    // package-DECLARED set; a `managed_by` column is measurably not that fact
-    // (`permission-set-projection.ts` header), and locking on it would take
-    // the surviving `allowRuntimeCreate` tier down with it.
-    const ql = makeQl([]); // registry present, nothing declared
-    const protocol = makeHatchOpenProtocol(ql, {}); // no artifact for the name
-    registerPermissionSetProjection(protocol, { ql });
-    ql.permRows.push({
-      id: 'ps_mat', name: 'crm_rep', managed_by: 'package', package_id: 'com.example.crm',
-      system_permissions: '["materialized.baseline"]',
-    });
-    const mw = makeMiddleware(ql, protocol);
-
-    const nextCalled = await run(mw, {
-      object: 'sys_permission_set', operation: 'update', context: userCtx,
-      data: { id: 'ps_mat', system_permissions: '["customized"]' },
-    });
-    expect(nextCalled).toBe(false);
-    expect(JSON.parse(ql.metaRows[0].metadata).systemPermissions).toEqual(['customized']);
-    expect(ql.permRows[0].managed_by, 'the package still owns the row').toBe('package');
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PIN 3 — clone-to-customize is the sanctioned path, and it works
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('pin 3 — the clone path yields an org-owned set with no upgrade linkage, base untouched', () => {
-  it('cloning a package-declared set produces an admin-owned row and leaves the base byte-identical', async () => {
-    const ql = makeQl([packagedSet()]);
-    const protocol = makeHatchOpenProtocol(ql, { ehr_quality_inspector: packagedSet() });
-    registerPermissionSetProjection(protocol, { ql });
-    ql.permRows.push(packagedRow());
-    const baseBefore = JSON.stringify(ql.permRows[0]);
-    const mw = makeMiddleware(ql, protocol);
-
-    // Exactly what the `clone_permission_set` action POSTs: a NEW machine name
-    // plus the base's facets, at /api/v1/data/sys_permission_set.
-    const opCtx: any = {
-      object: 'sys_permission_set', operation: 'insert', context: userCtx,
-      data: {
-        name: 'ehr_quality_inspector_local',
-        label: 'Quality Inspector (local)',
-        active: true,
-        object_permissions: ql.permRows[0].object_permissions,
-        field_permissions: ql.permRows[0].field_permissions,
-      },
-    };
-    await run(mw, opCtx);
-
-    const clone = ql.permRows.find((r: any) => r.name === 'ehr_quality_inspector_local');
-    expect(clone, 'the clone exists').toBeTruthy();
-    expect(clone.managed_by, "this org's row").toBe('admin');
-    expect(clone.package_id ?? null, 'NO upgrade linkage — upgrades keep flowing to the base').toBeNull();
-    expect(JSON.parse(clone.object_permissions), 'the grants came across').toEqual(packagedSet().objects);
-
-    const base = ql.permRows.find((r: any) => r.id === 'ps_pkg');
-    expect(JSON.stringify(base), 'the package-declared base is unchanged by the clone').toBe(baseBefore);
-    expect(
-      ql.metaRows.some((r: any) => r.name === 'ehr_quality_inspector'),
-      'cloning mints no overlay of the base',
-    ).toBe(false);
-  });
-
-  it('the clone is an ordinary set: editing IT is accepted', async () => {
-    // Without this the "sanctioned path" could be a dead end — a clone that
-    // exists and then refuses every edit satisfies nothing the ruling asked for.
-    const ql = makeQl([packagedSet()]);
-    const protocol = makeHatchOpenProtocol(ql, { ehr_quality_inspector: packagedSet() });
-    registerPermissionSetProjection(protocol, { ql });
-    ql.permRows.push(packagedRow());
-    const mw = makeMiddleware(ql, protocol);
-    await run(mw, {
-      object: 'sys_permission_set', operation: 'insert', context: userCtx,
-      data: { name: 'ehr_quality_inspector_local', label: 'Local', object_permissions: '{}' },
-    });
-    const clone = ql.permRows.find((r: any) => r.name === 'ehr_quality_inspector_local');
-
-    const nextCalled = await run(mw, {
-      object: 'sys_permission_set', operation: 'update', context: userCtx,
-      data: { id: clone.id, system_permissions: '["local.only"]' },
-    });
-    expect(nextCalled).toBe(false);
-    expect(JSON.parse(ql.permRows.find((r: any) => r.id === clone.id).system_permissions)).toEqual(['local.only']);
-  });
-});
-
-// [C3 stage 8] Pin 6 pinned the `clone_permission_set` action declared on the
-// retired `sys_permission_set` object; the clone is the security catalog's
-// `POST /security/permission-sets/:name/clone` door now, pinned beside it
-// (`runtime/src/domains/permission-set-clone.test.ts`).
-
-describe('pin 5 — provenance that cannot be DETERMINED refuses the save', () => {
-  it('a SchemaRegistry that throws is not the answer "not package-declared"', async () => {
-    const ql = makeQl([]);
-    ql.registry = { listItems: () => { throw new Error('registry unavailable'); } };
-    // The layered read cannot answer either — so nothing on this kernel can
-    // say whether the name is packaged, and accepting would be a guess.
-    const protocol = makeHatchOpenProtocol(ql, {});
-    protocol.getMetaItemLayered = async () => { throw new Error('metadata store unavailable'); };
-    registerPermissionSetProjection(protocol, { ql });
-    ql.permRows.push({ id: 'ps_x', name: 'unknown_provenance', managed_by: 'admin', system_permissions: '[]' });
-    const mw = makeMiddleware(ql, protocol);
-
-    const rejection = await run(mw, {
-      object: 'sys_permission_set', operation: 'update', context: userCtx,
-      data: { id: 'ps_x', system_permissions: '["whatever"]' },
-    }).then(() => null, (e: any) => e);
-
-    expect(rejection, 'an unanswerable provenance read must refuse, never accept').not.toBeNull();
-    expect(rejection).toMatchObject({ status: 403 });
-    expect(ql.metaRows.length, 'nothing was written on the way to the refusal').toBe(0);
-  });
-
-  it('a SchemaRegistry that answers with a non-list is the same ambiguity', async () => {
-    const ql = makeQl([]);
-    ql.registry = { listItems: () => undefined as any };
-    const protocol = makeHatchOpenProtocol(ql, {});
-    protocol.getMetaItemLayered = async () => { throw new Error('metadata store unavailable'); };
-    registerPermissionSetProjection(protocol, { ql });
-    ql.permRows.push({ id: 'ps_x', name: 'unknown_provenance', managed_by: 'admin', system_permissions: '[]' });
-    const mw = makeMiddleware(ql, protocol);
-
-    const rejection = await run(mw, {
-      object: 'sys_permission_set', operation: 'update', context: userCtx,
-      data: { id: 'ps_x', system_permissions: '["whatever"]' },
-    }).then(() => null, (e: any) => e);
-
-    expect(rejection).not.toBeNull();
-    expect(rejection).toMatchObject({ status: 403 });
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ⭐ CONTROLS — the provenance read cannot inherit the fail-open commit e1d773eb7 repaired
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('control A — #11518 shape: a name carrying MORE THAN ONE row still refuses', () => {
-  it('positive control: this double truncates exactly the way #11518 describes', async () => {
-    // Harness-level and stable: it pins the DOUBLE, so it holds before and
-    // after the fix, and it is what makes the next test meaningful. Without
-    // it, "the refusal still fires" could be green simply because the trap was
-    // never armed. (The sibling double in `permission-set-projection.test.ts`
-    // ignores `limit` entirely — there, this control cannot even be written.)
-    const ql = makeQl([packagedSet()]);
-    ql.permRows.push(packagedRow());
-    ql.permRows.push(packagedRow({ id: 'ps_pkg_residue', organization_id: null }));
-
-    const names = ['ehr_quality_inspector'];
-    const capped = await ql.find('sys_permission_set', {
-      where: { name: { $in: names } },
-      limit: names.length, // ← the UNSCOPED cap seed-name-lookup.ts carried before commit e1d773eb7
-    });
-    expect(ql.permRows.filter((r: any) => r.name === 'ehr_quality_inspector')).toHaveLength(2);
-    expect(capped, 'the page is truncated — half the rows for this name are invisible').toHaveLength(1);
-  });
-
-  it('the refusal fires on a name that carries two rows', async () => {
-    const ql = makeQl([packagedSet()]);
-    const protocol = makeHatchOpenProtocol(ql, { ehr_quality_inspector: packagedSet() });
-    registerPermissionSetProjection(protocol, { ql });
-    ql.permRows.push(packagedRow());
-    ql.permRows.push(packagedRow({ id: 'ps_pkg_residue' }));
-    const mw = makeMiddleware(ql, protocol);
-
-    const rejection = await run(mw, {
-      object: 'sys_permission_set', operation: 'update', context: userCtx,
-      data: { id: 'ps_pkg', system_permissions: '["customized"]' },
-    }).then(() => null, (e: any) => e);
-
-    expect(rejection, 'a truncating name-keyed oracle would have read "absent" here and ACCEPTED').not.toBeNull();
-    expect(rejection).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
-    expect(ql.metaRows.length).toBe(0);
-  });
-});
-
-describe('control B — the provenance read is not a name-keyed table read at all', () => {
-  it('every NAME-KEYED page read fails, and the verdict is STILL "package-declared"', async () => {
-    // The structural proof of immunity. Commit e1d773eb7 repaired a defect of a name-keyed
-    // page read over `sys_permission_set`; here every such read is made to
-    // fail outright — the most extreme form of "this read did not answer" —
-    // while the by-id target resolution keeps working so the middleware still
-    // reaches the provenance question. The verdict is unchanged, which is
-    // only possible if the question was never asked of that table.
-    //
-    // If the provenance question is ever re-routed through
-    // `buildExistingByName` (or any other name-keyed page), this test goes RED
-    // instead of silently inheriting the fail-open.
-    const ql = makeQl([packagedSet()]);
-    const protocol = makeHatchOpenProtocol(ql, { ehr_quality_inspector: packagedSet() });
-    ql.permRows.push(packagedRow());
-    // Positive control for the break itself: without this, "the read failed"
-    // could quietly be "the read was never armed".
-    ql.breakNameKeyedFind();
-    await expect(
-      ql.find('sys_permission_set', { where: { name: 'ehr_quality_inspector' }, limit: 1 }),
-    ).rejects.toThrow(/name-keyed page read unavailable/);
-    expect(
-      await ql.find('sys_permission_set', { where: { id: 'ps_pkg' }, limit: 1 }),
-      'by-id reads still work, so the middleware reaches the provenance question',
-    ).toHaveLength(1);
-
-    const mw = makeMiddleware(ql, protocol);
-    const rejection = await run(mw, {
-      object: 'sys_permission_set', operation: 'update', context: userCtx,
-      data: { id: 'ps_pkg', system_permissions: '["customized"]' },
-    }).then(() => null, (e: any) => e);
-
-    expect(rejection, 'a failed name-keyed read must never soften the verdict to "not packaged"').not.toBeNull();
-    expect(rejection).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
-    expect(ql.metaRows.length).toBe(0);
-  });
-});
-
 // ─────────────────────────────────────────────────────────────────────────────
 // [#21789] The lock reads the ROW's provenance, not the presence of a package id
 // ─────────────────────────────────────────────────────────────────────────────
@@ -660,9 +93,7 @@ describe('control B — the provenance read is not a name-keyed table read at al
  * written over it, and, only where a code artifact ships the name, the
  * artifact's envelope written over that. These builders produce exactly those
  * three bodies, so the verdicts below are about the shapes the boot really
- * registers, measured on a booted showcase (the dogfood pin
- * `permission-set-lock-row-provenance.dogfood.test.ts` asserts the hydrated
- * shape before it asserts the edit).
+ * registers, measured on a booted showcase.
  */
 const RUNTIME_PACKAGE = 'app.crm_workspace';
 /** Shape 1: a set saved into a writable runtime package, as hydrated. */
@@ -710,38 +141,12 @@ describe('[#21789] the lock judges "shipped by a code package" from the row\'s p
       .toEqual({ status: 'packaged', packageId: 'com.example.ehr' });
   });
 
-  it('the data door accepts an edit of a runtime-package set, and the edit lands', async () => {
-    const ql = makeQl([hydratedRuntimePackageRow()]);
-    const protocol = makeHatchOpenProtocol(ql, {});
-    registerPermissionSetProjection(protocol, { ql });
-    await protocol.saveMetaItem({ type: 'permission', name: 'workspace_rep', item: orgSet({ name: 'workspace_rep' }) });
-    const row = ql.permRows.find((r: any) => r.name === 'workspace_rep');
-    expect(row, 'precondition: the projected row exists').toBeTruthy();
-    const savesBefore = protocol.saves.length;
-
-    const rejection = await run(makeMiddleware(ql, protocol), {
-      object: 'sys_permission_set', operation: 'update', context: userCtx,
-      data: { id: row.id, system_permissions: '["support.use","workspace.only"]' },
-    }).then(() => null, (e: any) => e);
-
-    expect(rejection, 'the lock must not refuse a set no code package ships').toBeNull();
-    expect(protocol.saves.length, 'the definition write LANDED').toBe(savesBefore + 1);
-    expect(JSON.parse(ql.permRows.find((r: any) => r.name === 'workspace_rep').system_permissions))
-      .toEqual(['support.use', 'workspace.only']);
-  });
-
   it('the metadata door accepts a runtime-package set and still refuses a code-shipped one with 403 NOT_OVERRIDABLE', async () => {
-    const ql = makeQl([hydratedRuntimePackageRow(), shippedArtifact()]);
-    let gate: ((ctx: { type: string; name: string; body: unknown }) => Promise<void>) | undefined;
-    const protocol = {
-      registerAuthoringGate: (_type: string, g: typeof gate) => { gate = g; },
-      getMetaItemLayered: async ({ name }: { name: string }) => ({ type: 'permission', name, code: null, overlay: null, effective: null }),
-    };
-    expect(registerPackagedPermissionSetLockGate(protocol, ql)).toBe(true);
+    const gate = lockGate(makeQl([hydratedRuntimePackageRow(), shippedArtifact()]));
 
-    await expect(gate!({ type: 'permission', name: 'workspace_rep', body: orgSet({ name: 'workspace_rep' }) }))
+    await expect(gate({ type: 'permission', name: 'workspace_rep', body: orgSet({ name: 'workspace_rep' }) }))
       .resolves.toBeUndefined();
-    await expect(gate!({ type: 'permission', name: 'ehr_quality_inspector', body: packagedSet() }))
+    await expect(gate({ type: 'permission', name: 'ehr_quality_inspector', body: packagedSet() }))
       .rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
   });
 });
@@ -759,13 +164,8 @@ describe('[#21789] the lock judges "shipped by a code package" from the row\'s p
  * the whole point of the ruling the lock implements.
  *
  * The wire envelope is computed by the producer's own mapping, not restated:
- *
- *  - `mapDataError` is the call the REST `/data` door makes in its catch
- *    (`PATCH` and `POST /data/:object[/:id]`, `rest-server.ts`) — the door that
- *    serves Setup's save, measured on a booted showcase as the flat
- *    `{ error, code, object }` body;
- *  - `resolveThrownHttpError` is the dispatcher door's resolution of the same
- *    throw.
+ * `resolveThrownHttpError` is the dispatcher door's resolution of the throw the
+ * metadata door's gate raises.
  *
  * Every case asserts the envelope (`status` + `code`) AND the `userMessage`:
  * the code and status are the refusal's identity and must not move, and the
@@ -788,106 +188,40 @@ describe('the lock refusal carries its guidance as `userMessage` on the wire env
     expect(text, 'userMessage must not carry an API path').not.toMatch(/\/api\//);
   };
 
-  const refusedUpdate = async () => {
-    const ql = makeQl([packagedSet()]);
-    const protocol = makeHatchOpenProtocol(ql, { [SET_NAME]: packagedSet() });
-    registerPermissionSetProjection(protocol, { ql });
-    ql.permRows.push(packagedRow());
-    return run(makeMiddleware(ql, protocol), {
-      object: 'sys_permission_set', operation: 'update', context: userCtx,
-      data: { id: 'ps_pkg', description: 'edit' },
-    }).then(() => null, (e: any) => e);
-  };
-
-  it('UPDATE at the data door: 403 NOT_OVERRIDABLE with the clone guidance in `userMessage`', async () => {
-    const rejection = await refusedUpdate();
-    expect(rejection).toBeInstanceOf(PackagedPermissionSetLockedError);
-
-    const wire = mapDataError(rejection, 'sys_permission_set');
-    expect(wire.status).toBe(403);
-    expect(wire.body.code).toBe('NOT_OVERRIDABLE');
-    expectEndUserCopy(wire.body.userMessage, SET_NAME, PACKAGE_ID, 'sys_permission_set');
-    expect(String(wire.body.userMessage)).toMatch(/clone it instead/i);
-    // The diagnostic channel is untouched: it still names the set and the
-    // package for logs and developers. The mark never replaces `message`.
-    expect(String(wire.body.error)).toContain(SET_NAME);
-    expect(String(wire.body.error)).toContain(PACKAGE_ID);
-  });
-
-  it('INSERT of a packaged name at the data door: 403 NOT_OVERRIDABLE with its own guidance (choose another name, or clone)', async () => {
-    const ql = makeQl([packagedSet()]);
-    const protocol = makeHatchOpenProtocol(ql, { [SET_NAME]: packagedSet() });
-    registerPermissionSetProjection(protocol, { ql });
-    const rejection = await run(makeMiddleware(ql, protocol), {
-      object: 'sys_permission_set', operation: 'insert', context: userCtx,
-      data: { name: SET_NAME, label: 'Mine', object_permissions: '{}' },
-    }).then(() => null, (e: any) => e);
-    expect(rejection).toBeInstanceOf(PackagedPermissionSetLockedError);
-
-    const wire = mapDataError(rejection, 'sys_permission_set');
-    expect(wire.status).toBe(403);
-    expect(wire.body.code).toBe('NOT_OVERRIDABLE');
-    expectEndUserCopy(wire.body.userMessage, SET_NAME, PACKAGE_ID, 'sys_permission_set');
-    expect(String(wire.body.userMessage)).toMatch(/different name/i);
-    expect(String(wire.body.userMessage)).toMatch(/clone/i);
-
-    // Each operation carries the guidance that fits it.
-    const update = mapDataError(await refusedUpdate(), 'sys_permission_set');
-    expect(wire.body.userMessage).not.toBe(update.body.userMessage);
-  });
-
-  it('the dispatcher door resolves the same throw to the same status, code and `userMessage`', async () => {
-    const rejection = await refusedUpdate();
-    const rest = mapDataError(rejection, 'sys_permission_set');
-    const resolved = resolveThrownHttpError(rejection);
-    expect(resolved.status).toBe(403);
-    expect(resolved.code).toBe('NOT_OVERRIDABLE');
-    expectEndUserCopy(resolved.userMessage, SET_NAME, PACKAGE_ID);
-    expect(resolved.userMessage).toBe(rest.body.userMessage);
-  });
-
-  it('the metadata door\'s registered lock throws the same class with the same `userMessage`', async () => {
-    const ql = makeQl([shippedArtifact()]);
-    let gate: ((ctx: { type: string; name: string; body: unknown }) => Promise<void>) | undefined;
-    const protocol = {
-      registerAuthoringGate: (_type: string, g: typeof gate) => { gate = g; },
-      getMetaItemLayered: async ({ name }: { name: string }) => ({ type: 'permission', name, code: null, overlay: null, effective: null }),
-    };
-    expect(registerPackagedPermissionSetLockGate(protocol, ql)).toBe(true);
-
-    const rejection = await gate!({ type: 'permission', name: SET_NAME, body: packagedSet() })
+  it('a save of a package-declared set: 403 NOT_OVERRIDABLE with the clone guidance in `userMessage`', async () => {
+    const gate = lockGate(makeQl([shippedArtifact()]));
+    const rejection = await gate({ type: 'permission', name: SET_NAME, body: packagedSet() })
       .then(() => null, (e: any) => e);
     expect(rejection).toBeInstanceOf(PackagedPermissionSetLockedError);
+
     const resolved = resolveThrownHttpError(rejection);
     expect(resolved.status).toBe(403);
     expect(resolved.code).toBe('NOT_OVERRIDABLE');
     expectEndUserCopy(resolved.userMessage, SET_NAME, PACKAGE_ID);
-    expect(resolved.userMessage).toBe(mapDataError(await refusedUpdate(), 'sys_permission_set').body.userMessage);
+    expect(String(resolved.userMessage)).toMatch(/clone it instead/i);
+    // The diagnostic channel is untouched: it still names the set and the
+    // package for logs and developers. The mark never replaces `message`.
+    expect(String(rejection.message)).toContain(SET_NAME);
+    expect(String(rejection.message)).toContain(PACKAGE_ID);
   });
 
   it('the fail-closed sibling (provenance unknown): 403 NOT_OVERRIDABLE with retry-or-clone guidance, and no diagnostic reason', async () => {
     const ql = makeQl([]);
     ql.registry = { listItems: () => { throw new Error('registry unavailable'); } };
-    const protocol = makeHatchOpenProtocol(ql, {});
-    protocol.getMetaItemLayered = async () => { throw new Error('metadata store unavailable'); };
-    registerPermissionSetProjection(protocol, { ql });
-    ql.permRows.push({ id: 'ps_x', name: 'unknown_provenance', managed_by: 'admin', system_permissions: '[]' });
-    const rejection = await run(makeMiddleware(ql, protocol), {
-      object: 'sys_permission_set', operation: 'update', context: userCtx,
-      data: { id: 'ps_x', system_permissions: '["whatever"]' },
-    }).then(() => null, (e: any) => e);
+    const gate = lockGate(ql, async () => { throw new Error('metadata store unavailable'); });
+    const rejection = await gate({ type: 'permission', name: 'unknown_provenance', body: {} })
+      .then(() => null, (e: any) => e);
     expect(rejection).toBeInstanceOf(PackagedPermissionSetProvenanceUnknownError);
 
-    const wire = mapDataError(rejection, 'sys_permission_set');
-    expect(wire.status).toBe(403);
-    expect(wire.body.code).toBe('NOT_OVERRIDABLE');
+    const resolved = resolveThrownHttpError(rejection);
+    expect(resolved.status).toBe(403);
+    expect(resolved.code).toBe('NOT_OVERRIDABLE');
     expectEndUserCopy(
-      wire.body.userMessage, 'unknown_provenance', 'sys_permission_set',
-      'registry unavailable', 'metadata store unavailable',
+      resolved.userMessage, 'unknown_provenance', 'registry unavailable', 'metadata store unavailable',
     );
-    expect(String(wire.body.userMessage)).toMatch(/try again/i);
-    expect(String(wire.body.userMessage)).toMatch(/clone/i);
+    expect(String(resolved.userMessage)).toMatch(/try again/i);
+    expect(String(resolved.userMessage)).toMatch(/clone/i);
     // The reason stays where it was: the diagnostic channel.
-    expect(String(wire.body.error)).toContain('registry unavailable');
+    expect(String(rejection.message)).toContain('registry unavailable');
   });
 });
