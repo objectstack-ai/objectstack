@@ -3006,7 +3006,8 @@ const TRANSLATION_TARGET_UNKNOWN_EXPLANATION: RuleExplanation = {
       'line names the remedy only, without listing what is declared; what each key may name follows.',
     'Under `objects.OBJECT` (an object this stack, or a sibling package of the same artifact, ' +
       'defines): `fields.FIELD` a declared field (a system column, `_id`, `name` and `space` are ' +
-      'never reported); `_views.VIEW` a view\'s `name`, not its label; `_sections.KEY` a ' +
+      'never reported); `_views.VIEW` a view\'s `name`, not its label — the runtime keys a nameless ' +
+      'default `list` `default`, never `list`; `_sections.KEY` a ' +
       '`fieldGroups[].key`, a named form-view section or a named `record:details` section — a ' +
       'section is translatable only through a stable name; `_tabs.TAB` a filter-preset tab that a ' +
       'page over the object declares in `interfaceConfig.userFilters.tabs` (a list view\'s own ' +

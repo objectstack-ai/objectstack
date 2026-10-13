@@ -1564,7 +1564,10 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `Translations are keyed to view "${viewName}", which no view of object ` +
               `"${objectName}" declares, so the view tab keeps its source-locale label.` +
               suggest(viewName, facts.views),
-            `Match the key to the view's \`name\` (not its label), or drop it.`,
+            // [#22161] The one fact the declared-view list used to carry for
+            // the commonest stale key (`list`): a nameless default list's key.
+            `Match the key to the view's \`name\` (not its label; a nameless default \`list\` is ` +
+              `\`default\`), or drop it.`,
           );
         }
 
@@ -1599,8 +1602,14 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `Translations are keyed to filter-preset tab "${tabName}", which no page over ` +
               `object "${objectName}" declares, so the tab keeps its source-locale label.` +
               suggest(tabName, facts.tabs),
-            `Match the key to the tab's \`name\` (not its label), or drop it if the preset was ` +
-              `renamed or removed.`,
+            // [#22161] With no preset bar over the object, the one remedy names
+            // the carrier that resolves — never a list view's own `tabs`, which
+            // has no renderer, so an author does not "fix" it by moving there.
+            facts.tabs.size > 0
+              ? `Match the key to the tab's \`name\` (not its label), or drop it if the preset was ` +
+                `renamed or removed.`
+              : `Declare the tab in a page's \`interfaceConfig.userFilters.tabs\` (a list view's own ` +
+                `\`tabs\` has no renderer), or drop the key.`,
           );
         }
 

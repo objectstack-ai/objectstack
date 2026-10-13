@@ -460,7 +460,7 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
             // and why a business role is always a position (the closed
             // ADR-0108 vocabulary, `sys_user_position`) is the explanation's.
             hint:
-              `If '${value}' is an org position, author { type: 'position', value: '${value}' }; keep ` +
+              `If it is an org position, author { type: 'position', value: '${value}' }; keep ` +
               `'org_membership_level' for the tiers the verdict lists`,
           });
         } else if (type in DEPRECATED_APPROVER_TYPES) {
