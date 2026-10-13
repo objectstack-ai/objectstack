@@ -12,7 +12,7 @@
 
 feat(plugin-security)!: the four security-catalog row objects are retired — `sys_position`, `sys_permission_set`, `sys_position_permission_set` and `sys_capability` (ADR-0131 D3)
 
-Clause-②: yes (narrowing)
+Clause-②: no (narrowing)
 
 <!-- adr-0087: registered catalog-row-objects-retired -->
 
