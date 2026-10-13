@@ -2133,6 +2133,23 @@ The plugin is a **soft dependency** on `metadata` — it tolerates running
 without `MetadataPlugin` and it logs (not throws) on per-flow registration
 failures so one broken flow does not abort startup.
 
+A flow the engine refuses is not served as running. The metadata read keeps
+the stored `status` as you wrote it, and serves the engine's verdict beside
+the item: `registration` on `GET /api/v1/meta/flow/:name`, and `registrations`,
+keyed by flow name, on `GET /api/v1/meta/flow`. The verdict is one of three:
+
+| `state` | Meaning |
+|:---|:---|
+| `registered` | The engine holds the flow. Whether its trigger is bound is `GET /api/v1/automation/_status`'s answer. |
+| `refused` | The engine refused the stored flow and holds nothing under its name, so it never fires. `reason` is what the engine threw, verbatim: its `message`, and its `code` when it set one. |
+| `unregistered` | The engine holds nothing under the name and refused nothing: the read came during boot, or between a save and the engine following it, or the flow was unregistered on purpose. |
+
+A save, a publish or a reload that registers a corrected body ends the
+`refused` state. The field is absent where no automation service answered the
+read. On the item read it is published where `lock` is, by the uncached read,
+and not by the default cached one; the list carries it on every deployment.
+It is the verdict of the engine in the process that answered.
+
 ## Expressions in flows
 
 A flow computes with **one expression dialect, CEL**: every condition is bare
