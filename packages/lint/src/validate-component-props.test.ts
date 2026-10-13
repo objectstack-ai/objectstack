@@ -904,9 +904,9 @@ describe('validateComponentProps — every other class is an error too (#23147)'
       expect(findings.every((f) => f.rule === COMPONENT_PROPS_INVALID && f.severity === 'error')).toBe(true);
     });
 
-    it('a retired enum VALUE — an enum issue, not a tombstone (`element:text` `variant: heading`)', () => {
-      expect(verdicts({ type: 'element:text', properties: { content: 'Hi', variant: 'heading' } }))
-        .toEqual([[COMPONENT_PROPS_INVALID, 'error', at('properties.variant')]]);
+    it('a retired enum VALUE — an enum issue, not a tombstone (`object-grid` `exportOptions.formats` `pdf`)', () => {
+      expect(verdicts({ type: 'object-grid', properties: { objectName: 'task', exportOptions: { formats: ['pdf'] } } }))
+        .toEqual([[COMPONENT_PROPS_INVALID, 'error', at('properties.exportOptions.formats.0')]]);
     });
 
     it('a missing `dataSource.object` binding on a data-source-bound element', () => {
