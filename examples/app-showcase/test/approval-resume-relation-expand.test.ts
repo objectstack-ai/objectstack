@@ -727,6 +727,31 @@ describe('#10106 — the inbox watch reports WHY it ended, not just what it had'
     expect(verdict.hits).toHaveLength(1);
   });
 
+  it('the settle point needs BOTH halves: the run in its named status, and an outbox owing nothing', async () => {
+    // `inboxSettled` over a fake run log and a fake outbox — its two reads are
+    // the whole of its input, so this pins each half without a kernel.
+    const settledOver = (runStatus: string, deliveryStates: readonly string[]) =>
+      inboxSettled(
+        {
+          automation: { listRuns: async () => [{ status: runStatus }] },
+          data: { find: async () => deliveryStates.map((status) => ({ status })) },
+        } as unknown as Booted,
+        'showcase_invoice_signoff',
+        'failed',
+      )();
+
+    expect(await settledOver('failed', []), 'a failed run with an empty outbox').toBe(true);
+    expect(await settledOver('failed', ['success', 'dead', 'suppressed']), 'only final deliveries').toBe(true);
+    // A delivery still owed can still land in the inbox, so it holds the watch open...
+    expect(await settledOver('failed', ['success', 'pending']), 'a pending delivery').toBe(false);
+    expect(await settledOver('failed', ['in_flight']), 'an in-flight delivery').toBe(false);
+    // ...and so does a state this predicate has never heard of: fail-safe.
+    expect(await settledOver('failed', ['some_future_state']), 'an unknown delivery state').toBe(false);
+    // A run that has not reached the named status can still emit.
+    expect(await settledOver('paused', []), 'a paused run').toBe(false);
+    expect(await settledOver('completed', []), 'a run that ended some OTHER way').toBe(false);
+  });
+
   it('a positive watch that runs out of window THROWS, and names a timeout rather than an absence', async () => {
     const err: Error = await deliveredInbox(fakeBooted(async () => []), 'Invoice cleared', 1, 300)
       .then(() => new Error('NO THROW: the watch returned short instead of failing loudly'))
