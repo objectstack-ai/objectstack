@@ -11,9 +11,12 @@
 //     found, and the first is named inert;
 //   • the ATTRIBUTION control: an app hook that rewrites the window's field on
 //     write makes the probe not run, never contradicted — the family judges a
-//     window only over rows that read back as written.
+//     window only over rows that read back as written;
+//   • the DAY TURN: a run that crosses UTC midnight between its start (where
+//     the presets resolve) and a measure's probe does not run that measure,
+//     never contradicts it.
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 
 import { defineStack } from '@objectstack/spec';
 import { DATE_RANGE_PRESETS } from '@objectstack/spec/data';
@@ -369,5 +372,78 @@ describe.each(['drop', 'zero'] as const)("NEGATIVE CONTROL — an app plugin tha
     expect(audited.status).toBe('inconclusive');
     expect(audited.reason).toMatch(/reads back no audited_at \(the read does not return that field\), so what was written there cannot be confirmed$/);
     expect(report.summary.widgets).toMatchObject({ contradicted: 1, inconclusive: 2, proven: 0 });
+  });
+});
+
+// ── The day turn ────────────────────────────────────────────────────────────
+
+const dayTurnSource = {
+  manifest: { id: 'com.example.dashboard-window-day-turn', namespace: 'wnt', version: '0.0.1', type: 'app', name: 'Dashboard Window Day Turn' },
+  objects: [
+    { name: 'wnt_case', label: 'Case', fields: { subject: { type: 'text', label: 'Subject', required: true }, opened_at: { type: 'datetime', label: 'Opened at' } } },
+  ],
+  datasets: [{ name: 'turn_metrics', label: 'Cases', object: 'wnt_case', dimensions: [], measures: [{ name: 'case_count', label: 'Cases', aggregate: 'count' }] }],
+  dashboards: [
+    {
+      name: 'wnt_board',
+      label: 'Board',
+      dateRange: { field: 'opened_at', defaultRange: 'last_7_days' },
+      widgets: [{ id: 'cases', type: 'metric', dataset: 'turn_metrics', values: ['case_count'] }],
+    },
+  ],
+};
+
+const DAY_MS = 86_400_000;
+const nextDay = (day: string) => new Date(Date.parse(`${day}T00:00:00.000Z`) + DAY_MS).toISOString().slice(0, 10);
+
+describe("THE DAY TURN — a run that crosses UTC midnight between its start and a measure's probe", () => {
+  let stack: VerifyStack;
+  let report: DashboardWindowReport;
+  const app = defineStack(dayTurnSource as never) as unknown as typeof dayTurnSource;
+
+  beforeAll(async () => {
+    stack = await bootStack(app as never);
+    const token = await stack.signIn();
+    // The family reads the clock through `Date` alone: once when the run
+    // starts (the presets resolve there), then per measure for its fixture day.
+    // So only `Date` is faked (every timer stays real), frozen at the real
+    // instant, and moved one day on the run's first door call: the measure's
+    // control leg, which falls between those two reads.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    let turned = false;
+    const turning: VerifyStack = {
+      ...stack,
+      apiAs: (...args: Parameters<VerifyStack['apiAs']>) => {
+        if (!turned) {
+          turned = true;
+          vi.setSystemTime(Date.now() + DAY_MS);
+        }
+        return stack.apiAs(...args);
+      },
+    };
+    try {
+      report = await runDashboardWindowProofs(turning, token, app);
+    } finally {
+      vi.useRealTimers();
+    }
+  }, BOOT_TIMEOUT + RUN_TIMEOUT);
+
+  afterAll(async () => {
+    await stack?.stop();
+  });
+
+  it('does not run the measure, never contradicts it, and writes no fixture', () => {
+    const r = widgetOf(report, 'cases');
+    expect(r.status, formatDashboardWindowReport(report)).toBe('inconclusive');
+    const m = r.measures[0]!;
+    expect(m.status).toBe('probed');
+    expect(m.presets.map((p) => p.outcome)).toEqual(DATE_RANGE_PRESETS.map(() => 'not-run'));
+    // Stopped before a fixture day was chosen: nothing was written.
+    expect(m.days).toBeUndefined();
+    // The detail names both days: the one the run started on, and the next.
+    const startDay = report.presets.find((p) => p.preset === 'today')!.resolved.$gte as string;
+    expect(m.presets[0]!.detail).toContain(startDay);
+    expect(m.presets[0]!.detail).toContain(nextDay(startDay));
+    expect(report.summary).toMatchObject({ contradictions: 0, hardFailures: 0, notRun: DATE_RANGE_PRESETS.length });
   });
 });

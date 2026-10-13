@@ -65,7 +65,7 @@
 
 import { FieldSchema, REFERENCE_VALUE_TYPES, isMultiValueField, referenceTargetOf } from '@objectstack/spec/data';
 import { declaredCollection } from './artifact-collections.js';
-import { deriveCrudCases, fillRelationalRefs, type CrudCase } from './derive.js';
+import { deriveCrudCases, fillRelationalRefs, laterBy, uniqueFields, type CrudCase } from './derive.js';
 import type { VerifyStack } from './harness.js';
 
 /** A behaviour a declaration can state (`FieldSchema.deleteBehavior`). */
@@ -260,32 +260,6 @@ function references(value: unknown, id: string): boolean {
 }
 
 /**
- * The fields of `objectDef` a uniqueness constraint covers: a field declaring a
- * `unique` scope, and every field of a unique `indexes[]` entry.
- */
-function uniqueFields(objectDef: any): Set<string> {
-  const out = new Set<string>();
-  for (const [name, def] of Object.entries<any>(objectDef?.fields ?? {})) {
-    if (def?.unique !== undefined && def?.unique !== false) out.add(name);
-  }
-  for (const index of Array.isArray(objectDef?.indexes) ? objectDef.indexes : []) {
-    if (index?.unique) for (const f of Array.isArray(index.fields) ? index.fields : []) out.add(String(f));
-  }
-  return out;
-}
-
-const DAY_MS = 86_400_000;
-
-/** A synthesized `date` / `datetime` value moved `days` later, in the same spelling. */
-function laterBy(value: unknown, days: number): unknown {
-  if (typeof value !== 'string' || days === 0) return value;
-  const at = Date.parse(value);
-  if (Number.isNaN(at)) return value;
-  const moved = new Date(at + days * DAY_MS).toISOString();
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? moved.slice(0, 10) : moved;
-}
-
-/**
  * The smallest record of `objectDef` the CRUD derivation can offer: the values
  * `deriveCrudCases` synthesized for the fields the object REQUIRES (its
  * required relations already filled), and nothing else, so every optional
@@ -295,6 +269,12 @@ function laterBy(value: unknown, days: number): unknown {
  * delete: each `date` / `datetime` value is one day later than the one declared
  * before it (a "starts before it ends" rule holds), and each unique-constrained
  * value is made distinct by `n`.
+ *
+ * This is not `derive.ts`'s `fixtureBody`, which the other families share, and
+ * no parameter could make it one without changing a value this family writes:
+ * here a unique string always takes a plain `-n` (an email before its `@`), a
+ * date, URL or phone number included, and every `date` / `datetime` field
+ * counts toward the next one's offset, whether its value is a string or not.
  */
 function fixtureBody(body: Record<string, unknown>, objectDef: any, n: number): Record<string, unknown> {
   const unique = uniqueFields(objectDef);

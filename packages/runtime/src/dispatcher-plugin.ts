@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { Plugin, PluginContext, IHttpServer, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS } from '@objectstack/core';
-import { looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, serverFaultProvenance, declaredRefusalMessage, demotedDeclaredCode, logServerFault, describeFaultRequest } from '@objectstack/types';
+import { Plugin, PluginContext, IHttpServer, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS, AuthzStoreUnavailableError } from '@objectstack/core';
+import { looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, serverFaultProvenance, declaredRefusalMessage, demotedDeclaredCode, logServerFault, describeFaultRequest, inProcessSessionReadInput } from '@objectstack/types';
 import { DispatcherErrorCode } from '@objectstack/spec/api';
 import type { IAuthService, IMetadataService, Logger } from '@objectstack/spec/contracts';
 import type { CounterStore } from '@objectstack/plugin-auth/rate-limit-storage';
@@ -165,6 +165,56 @@ function safeGetService<T>(ctx: PluginContext, name: string): T | undefined {
         return ctx.getService<T>(name) ?? undefined;
     } catch {
         return undefined;
+    }
+}
+
+/**
+ * ADR-0069: the session USER the declared-endpoint fallback asks the
+ * authentication-policy gate about (`EndpointPolicyContext.resolveGatedSessionUser`).
+ *
+ * It mirrors REST's posture read (`RestServer.computeExecCtx`) case for case:
+ *
+ *  - No gate feature is active, or the probe is absent or throws: the answer
+ *    is `undefined` and no session is read. The gate costs nothing while it
+ *    is off, and a host whose probe faults never declared a gate.
+ *  - The gate is active: a dedicated session read. The answer is its user, or
+ *    `undefined` when there is no session. The API-key caller and the
+ *    anonymous caller have none, and no policy holds them.
+ *  - The gate is active and the read FAILS: the branded authorization-store
+ *    outage, answered `503 SERVICE_UNAVAILABLE` by the fallback's error exit.
+ *    It is never `undefined`: an enforcement the deployment declared active
+ *    must not vanish into "no session" (#13906, decision 2 option B).
+ *
+ * The principal lookup beside it (`resolveSessionPrincipalId`) swallows every
+ * failure as anonymous, which is right for keying a rate-limit bucket and
+ * wrong here. That is why this is a read of its own, as it is on REST.
+ */
+async function readGatedSessionUser(
+    authService: IAuthService | undefined,
+    headers: Record<string, unknown>,
+): Promise<unknown> {
+    let active = false;
+    try {
+        active = authService?.isAuthGateActive?.() === true;
+    } catch {
+        active = false;
+    }
+    if (!authService || !active) return undefined;
+    try {
+        const api = authService.api ?? (await authService.getApi?.());
+        // A provider that mounts no session API has no session to hold.
+        if (!api || typeof api.getSession !== 'function') return undefined;
+        const webHeaders = new Headers();
+        for (const [name, value] of Object.entries(headers)) {
+            if (value != null) webHeaders.set(name, Array.isArray(value) ? value.join(',') : String(value));
+        }
+        // [#22258] The in-process session-read rule: a cookie request reads
+        // without renewal, because this door's response never carries a
+        // renewed cookie.
+        const session: any = await api.getSession(inProcessSessionReadInput(webHeaders));
+        return session?.user;
+    } catch (err) {
+        throw new AuthzStoreUnavailableError('auth_gate', err);
     }
 }
 
@@ -1977,6 +2027,14 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                                 // disagree about what counts as authenticated.
                                 resolvePrincipalId: (headers) =>
                                     resolveSessionPrincipalId(
+                                        safeGetService<IAuthService>(ctx, 'auth'),
+                                        headers as Record<string, unknown>,
+                                    ),
+                                // ADR-0069: the session the authentication-policy
+                                // gate is asked about, read only while a gate feature
+                                // is active. Same `auth` occupant as the lookup above.
+                                resolveGatedSessionUser: (headers) =>
+                                    readGatedSessionUser(
                                         safeGetService<IAuthService>(ctx, 'auth'),
                                         headers as Record<string, unknown>,
                                     ),
