@@ -28,7 +28,9 @@
 //      nothing (#5090);
 //   5. do the two machine-readable faces — `GET /meta/api` and
 //      `GET /openapi.json` — describe exactly what is mounted (ADR-0076 §4:
-//      a machine-readable surface must not lie).
+//      a machine-readable surface must not lie);
+//   6. does a flow endpoint that WRITES do so as its caller — the recalc
+//      behind the showcase's two `api` actions (section 3b).
 //
 // ## RED-first
 //
@@ -394,6 +396,8 @@ describe('[#23128] the recalc flow endpoint writes as its caller', () => {
   let ql: any;
   let memberToken: string;
   let ids: string[];
+  /** The data door's own answer to the member editing the row: the security layer's refusal, as it speaks. */
+  let dataDoorEdit: { status: number; body: { code?: string; error?: string } };
 
   const estimateOf = async (id: string): Promise<unknown> =>
     (await ql.findOne('showcase_task', { where: { id }, fields: ['estimate_hours'], context: SYS }))?.estimate_hours;
@@ -409,13 +413,30 @@ describe('[#23128] the recalc flow endpoint writes as its caller', () => {
     }
   };
 
-  /** The refusal every refused case answers, read off the envelope's own fields. */
-  const expectRefused = async (res: Response): Promise<void> => {
+  /**
+   * The refusal every refused case answers. A flow endpoint answers a run that
+   * failed with the shared flow-dispatch table's `400 FLOW_FAILED` (the same
+   * answer as `POST /automation/:name/trigger`), so the code says "the run was
+   * refused", not why.
+   */
+  const expectRefused = async (res: Response): Promise<{ message?: string }> => {
     const text = await res.clone().text();
     expect(res.status, text).toBe(400);
-    const body = (await res.json()) as { success?: boolean; error?: { code?: string } };
+    const body = (await res.json()) as { success?: boolean; error?: { code?: string; message?: string } };
     expect(body.success).toBe(false);
     expect(body.error?.code, text).toBe('FLOW_FAILED');
+    return body.error ?? {};
+  };
+
+  /**
+   * …and the why: the run's error carries the security layer's own refusal of
+   * the edit, the words the data door answers the same member with under
+   * `403 PERMISSION_DENIED`. Compared with that live answer rather than a
+   * copied sentence, so this holds the source of the refusal, not its wording.
+   */
+  const expectSecurityRefusal = (error: { message?: string }): void => {
+    expect(dataDoorEdit.body.error, 'the data door states its refusal').toBeTruthy();
+    expect(error.message, 'the flow was refused by the security layer, not by anything else').toContain(dataDoorEdit.body.error);
   };
 
   beforeAll(async () => {
@@ -424,6 +445,9 @@ describe('[#23128] the recalc flow endpoint writes as its caller', () => {
     ids = rows.map((r) => String(r.id));
     expect(ids, 'the showcase seed carries at least three tasks').toHaveLength(WINDOWS.length);
     memberToken = await stack.signUp('recalc-member-23128@example.com', 'Recalc!Member23128', 'Recalc Member');
+    await resetFixtures();
+    const edit = await stack.apiAs(memberToken, 'PATCH', `/data/showcase_task/${ids[0]}`, { estimate_hours: 99 });
+    dataDoorEdit = { status: edit.status, body: (await edit.json()) as { code?: string; error?: string } };
   }, 60_000);
 
   it('precondition: the member can READ the row and the data door refuses its edit', async () => {
@@ -433,8 +457,8 @@ describe('[#23128] the recalc flow endpoint writes as its caller', () => {
     await resetFixtures();
     const read = await stack.apiAs(memberToken, 'GET', `/data/showcase_task/${ids[0]}`);
     expect(read.status, await read.clone().text()).toBe(200);
-    const edit = await stack.apiAs(memberToken, 'PATCH', `/data/showcase_task/${ids[0]}`, { estimate_hours: 99 });
-    expect(edit.status, await edit.clone().text()).toBe(403);
+    expect(dataDoorEdit.status, JSON.stringify(dataDoorEdit.body)).toBe(403);
+    expect(dataDoorEdit.body.code).toBe('PERMISSION_DENIED');
     expect(await estimateOf(ids[0])).toBe(SENTINEL);
   });
 
@@ -452,7 +476,7 @@ describe('[#23128] the recalc flow endpoint writes as its caller', () => {
   it('a member without edit rights is REFUSED for one task, and nothing is written', async () => {
     await resetFixtures();
     const res = await stack.apiAs(memberToken, 'POST', RECALC, { recordId: ids[0] });
-    await expectRefused(res);
+    expectSecurityRefusal(await expectRefused(res));
     expect(await estimateOf(ids[0]), 'a refused recalc writes nothing').toBe(SENTINEL);
   });
 
@@ -471,7 +495,7 @@ describe('[#23128] the recalc flow endpoint writes as its caller', () => {
   it('a member without edit rights is REFUSED for a selection, and no task is written', async () => {
     await resetFixtures();
     const res = await stack.apiAs(memberToken, 'POST', RECALC, { _selectedIds: ids });
-    await expectRefused(res);
+    expectSecurityRefusal(await expectRefused(res));
     for (const [i] of WINDOWS.entries()) {
       expect(await estimateOf(ids[i]), `task ${i}`).toBe(SENTINEL);
     }
