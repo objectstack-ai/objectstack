@@ -200,7 +200,7 @@ describe('[#23198] the write-through and the heal both end in the one reconcile'
     it('every path of the hydrator that registers the row hydrates its expansions first', () => {
         const body = bodyOf('hydrateOverlayIntoRegistry');
         const lines = body.split('\n').filter((l) => !COMMENT_LINE.test(l) && l.trim() !== '');
-        const registers = lines.map((l, i) => ({ l, i })).filter(({ l }) => l.trim() === 'return true;');
+        const registers = lines.map((l, i) => ({ l, i })).filter(({ l }) => l.trim().startsWith('return true;'));
         expect(registers.length, 'the registering paths').toBe(2);
         for (const { i } of registers) {
             expect(lines[i - 1].trim()).toBe('await this.hydrateExpandedViewItems(type, data, options);');
