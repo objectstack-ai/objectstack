@@ -4,6 +4,7 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import type { II18nService } from '@objectstack/spec/contracts';
 import { SysMailAssociation, SysMailbox, SysMailMessage } from './objects/index.js';
 import { installMailReadVisibility, type MailGateEngine } from './mail-read-visibility.js';
+import { MAILBOX_SERVICE, MailIngestService, type MailIngestEngine } from './ingest/index.js';
 
 /** The manifest id this plugin registers its objects under. */
 export const MAILBOX_SERVICE_MANIFEST_ID = 'com.objectstack.service.mailbox';
@@ -22,9 +23,15 @@ export const MAILBOX_SERVICE_MANIFEST_ID = 'com.objectstack.service.mailbox';
  * owner, and to holders of `manage_mailboxes` — so the unassociated pool is
  * restricted by default, never organization-wide.
  *
- * The ingest engine that writes these rows (the IMAP connector, dedupe,
- * association stamping and re-match) is the next half of the inbound-mail
- * programme and lands in this package.
+ * Registers the ingest seam as the kernel service `mailbox`
+ * ({@link MAILBOX_SERVICE}, a {@link MailIngestService}): `ingest` turns one
+ * raw RFC 822 message into one `sys_mail_message` row, deduplicated per
+ * mailbox, with automatic mail (auto-replies, bounces) suppressed, and stamps
+ * its associations from the email fields an app flags with `mailAssociation`;
+ * `rematch` replays a mailbox's stored participant sets against the records
+ * that exist now and adds the missing links. Nothing feeds `ingest` yet: the
+ * IMAP connector that fetches a mailbox's mail is the next half of the
+ * inbound-mail programme.
  */
 export class MailboxServicePlugin implements Plugin {
   name = MAILBOX_SERVICE_MANIFEST_ID;
@@ -42,6 +49,16 @@ export class MailboxServicePlugin implements Plugin {
       namespace: 'sys',
       objects: [SysMailbox, SysMailMessage, SysMailAssociation],
     });
+
+    // The engine is resolved on each call, not here: the seam is reachable
+    // as soon as it is registered, and reads the engine only when used.
+    ctx.registerService(
+      MAILBOX_SERVICE,
+      new MailIngestService({
+        engine: () => ctx.getService<MailIngestEngine>('objectql'),
+        logger: ctx.logger,
+      }),
+    );
 
     // ADR-0029 D8 — contribute the objects' translations on kernel:ready.
     ctx.hook('kernel:ready', async () => {
