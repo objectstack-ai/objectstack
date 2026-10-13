@@ -30,6 +30,7 @@ import {
   isComposedReadableIds,
   filterSubtreeProvenanceOf,
 } from '@objectstack/spec/data';
+import { matchesFilterCondition } from '@objectstack/formula';
 import { ObjectQL } from './engine.js';
 
 interface SeenCall { verb: string; object: string; ast: any }
@@ -302,16 +303,30 @@ describe('[ADR-0139 D2] the executor boundary composes the ReadableIds leaf', ()
     expect(isComposedReadableIds(calls[0].ast.where.record_id.$in)).toBe(true);
   });
 
-  it("a deny ANDed with another layer is composed, and its scope keeps the sentinel's arm by identity (fail-safe)", async () => {
-    const composite = { $and: [RLS_DENY_FILTER, { owner: 'u1' }] };
-    const { svc } = makeSecurity({ scope: () => composite });
-    engine.registerSecurityServiceSource(() => svc);
-    await engine.find('rid_child', { where: branch() });
-    const composed = inComparandOf(calls[0].ast.where) as any;
-    expect(isComposedReadableIds(composed)).toBe(true);
-    // The subquery's scope requires `id` to equal a value no record carries,
-    // so it matches no row of the parent on any driver that evaluates it.
-    expect(composed.scope.$and[0]).toBe(RLS_DENY_FILTER);
+  it('a deny the identity arm misses composes to a scope that matches no row of the parent (fail-safe)', async () => {
+    // Three shapes `getReadFilter` can answer a deny in that are NOT the
+    // sentinel by identity: the sentinel ANDed with another layer, a copy of
+    // it (a second package instance), and plugin-sharing's own deny-all for a
+    // context with no user id. Each is composed as an ordinary scope; the JS
+    // two-valued evaluator stands in for a driver evaluating the subquery.
+    const parentRows = [{ id: 'p1', owner: 'u1' }, { id: 'p2', owner: 'u2' }];
+    const scopes: Record<string, Record<string, unknown>> = {
+      'ANDed with another layer': { $and: [RLS_DENY_FILTER, { owner: 'u1' }] },
+      'a copy of the sentinel': { ...RLS_DENY_FILTER },
+      "sharing's deny-all": { id: '__deny_all__' },
+    };
+    for (const [label, scope] of Object.entries(scopes)) {
+      const { svc } = makeSecurity({ scope: () => scope });
+      engine.registerSecurityServiceSource(() => svc);
+      calls.length = 0;
+      await engine.find('rid_child', { where: branch() });
+      const composed = inComparandOf(calls[0].ast.where) as any;
+      expect(isComposedReadableIds(composed), label).toBe(true);
+      expect(composed.scope, label).toBe(scope);
+      for (const row of parentRows) expect(matchesFilterCondition(row, composed.scope), `${label}: ${row.id}`).toBe(false);
+    }
+    // The control: the evaluator answers yes for the other layer alone.
+    expect(matchesFilterCondition(parentRows[0], { owner: 'u1' })).toBe(true);
   });
 
   it('LIT CONTROL — a read without a leaf reaches the driver as written, and the security source is never read', async () => {
