@@ -41,6 +41,7 @@ import { SharingServicePlugin } from '@objectstack/plugin-sharing';
 import { SettingsServicePlugin, LocalCryptoProvider } from '@objectstack/service-settings';
 import { AnalyticsServicePlugin } from '@objectstack/service-analytics';
 import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
+import { MetadataPlugin } from '@objectstack/metadata';
 // Node-only subpath (#4700). Optional packages supplied by the app under
 // verification — `@objectstack/organizations` above all — must be resolved from
 // THAT app, not from `packages/verify`'s own realpath inside this workspace.
@@ -800,7 +801,11 @@ function claimConfiguration(config: unknown): ConfigurationClaim {
  * ## What it composes — one composition rule (#22301, ruling A)
  *
  * For one configuration, what `objectstack serve` composes from it: the
- * harness's service set; the providers `serve` mounts for it — the ones the
+ * harness's service set, its `metadata` slot held by the artifact-less
+ * `MetadataPlugin` (`@objectstack/metadata`) `serve` composes for a host
+ * configuration, so a declared `apis` endpoint is matched as `serve` matches
+ * it (a `MetadataPlugin` in {@link BootOptions.extraPlugins} or in the app's
+ * `plugins` takes its place); the providers `serve` mounts for it — the ones the
  * app's `requires` names and the always-on slate `serve` mounts for every app
  * (`queue`, `job`, `cache`, `settings`, `email`, `storage`, `sms`, `sharing`,
  * `messaging`, `analytics`, `package-registry`), each built from the app's
@@ -973,6 +978,37 @@ async function bootClaimed(
   // dispatcher plugins mount their routes onto). Port 0 = ephemeral; we never
   // hit the socket — requests are injected through the Hono app directly.
   await kernel.use(new HonoServerPlugin({ port: 0 }));
+
+  // [#23088] The `metadata` slot, filled the way `objectstack serve` fills it
+  // for a host configuration (#22989, `hostConfigMetadataDoor` in the CLI's
+  // `serve.ts`): `@objectstack/metadata`'s `MetadataPlugin` with no artifact,
+  // the same options, in `serve`'s slot for it — after the HTTP server, before
+  // the app. Without it the slot is the kernel's in-memory fallback, which has
+  // no `matchEndpoint`, so every `apis` endpoint a stack declares answered
+  // `404 ENDPOINT_NOT_FOUND` here and its declared answer under `serve`.
+  //   - It reads none of the stack (no `artifactSource`; `lazy` skips the
+  //     filesystem priming pass), so `AppPlugin` below stays the single
+  //     registrar of the stack's metadata, `apis` and the four security
+  //     collections included.
+  //   - `rootDir` is the app's root, as `serve` hands it, so the repository the
+  //     plugin attaches sits under the app; attaching writes nothing.
+  //   - A `MetadataPlugin` the caller hands in `extraPlugins`, or the app
+  //     declares in its own `plugins`, takes its place by identity — `serve`'s
+  //     "no MetadataPlugin in `plugins`" condition, read on the same two keys.
+  // No catch: a boot that cannot compose its `metadata` occupant fails, rather
+  // than falling back to the matcher-less one quietly.
+  const declaredPlugins = (config as { plugins?: unknown } | null | undefined)?.plugins;
+  const holdsMetadataPlugin = [
+    ...(opts.extraPlugins ?? []),
+    ...(Array.isArray(declaredPlugins) ? declaredPlugins : []),
+  ].some(
+    (plugin) =>
+      registeredName(plugin) === 'com.objectstack.metadata' ||
+      (plugin as { constructor?: { name?: unknown } } | null | undefined)?.constructor?.name === 'MetadataPlugin',
+  );
+  if (!holdsMetadataPlugin) {
+    await kernel.use(new MetadataPlugin({ watch: false, config: { bootstrap: 'lazy' }, rootDir: hostRoot }));
+  }
 
   // The app under test (objects, datasets, cubes, flows, seed data): the
   // configuration, or [#22301] the compiled artifact `BootOptions.artifact`

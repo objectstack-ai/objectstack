@@ -147,6 +147,11 @@
  * caller who guessed wrong can fix the request from the response alone,
  * without reading our source or our docs.
  *
+ * A route whose closed set is EMPTY reads no query parameter at all (#23072:
+ * `GET /meta/:type/:name/references` and `/published`), and the second half
+ * says so in words: `Supported parameters: .` would read as a truncated
+ * answer, where the remedy is to send none.
+ *
  * @param unknown    the unrecognised names, in the order they should be
  *                   reported (the caller sorts them for determinism)
  * @param supported  every name this route accepts, sorted
@@ -158,9 +163,12 @@ export function unknownQueryParamMessage(
   const subject = unknown.length === 1
     ? `The "${unknown[0]}" query parameter is not supported by this endpoint.`
     : `The query parameters ${unknown.map(n => `"${n}"`).join(', ')} are not supported by this endpoint.`;
+  const accepted = supported.length === 0
+    ? 'This endpoint takes no query parameters.'
+    : `Supported parameters: ${supported.join(', ')}.`;
   return `${subject} This endpoint will not silently ignore a parameter it does not `
     + `understand — an ignored filter is indistinguishable from one that matched everything. `
-    + `Supported parameters: ${supported.join(', ')}.`;
+    + accepted;
 }
 
 /**
