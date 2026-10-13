@@ -6,7 +6,7 @@ Retirement prescriptions for shapes `@objectstack/spec` 17.7.0 still accepts now
 
 Clause-②: no
 
-17.7.0, the newest 17.x release (npm `latest`), still accepts every shape below, and `18.0.0-next.0` is the first release that refuses them. No 17.x release removes them: the 18 line does. Their refusals, and their `[REMOVED]` JSON Schema descriptions, named a different release:
+17.7.0, the newest 17.x release (npm `latest`), still accepts every shape in the two tables below. No 17.x release removes them: the 18 line does. `18.0.0-next.0` is the first release that refuses the shapes in this first table. Their refusals, and their `[REMOVED]` JSON Schema descriptions, named a different release:
 
 | Surface | Was | Now |
 | --- | --- | --- |
@@ -18,6 +18,14 @@ Clause-②: no
 | `MetadataTypeRegistryEntry.allowOrgOverride` → `allowEnvironmentOverlay` | renamed (no release named) | renamed in @objectstack/spec 18 |
 
 The `18.0.0-next.0` release notes quoted the two `email_template` prescriptions with the earlier version, 17; from this release on they name 18.
+
+`18.0.0-next.0` still accepts the shapes in this second table, so the first release that refuses them is the one after it. Their refusals named 17, or no release at all:
+
+| Surface | Was | Now |
+| --- | --- | --- |
+| `view.data.provider: 'api'` | removed in @objectstack/spec 17 | removed in @objectstack/spec 18 |
+| `'navigation'` as a page action row's executor (`actionType` on `action:button` / `action:icon`, member `type` on `action:group` / `action:menu`) | no release named | refused on page action rows since @objectstack/spec 18 |
+| a `controlled_by_parent` object with no `master_detail` declared `required: true` | no release named | the one-required-master rule holds since @objectstack/spec 18 |
 
 One prescription was wrong the other way. 17.4.0 accepts the sub-day `TimeUpdateInterval` members `second`, `minute` and `hour`, and 17.5.0 refuses them, but the refusal said "retired in protocol 18". It now says "removed in @objectstack/spec 17.5.0".
 
