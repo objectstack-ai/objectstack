@@ -28,6 +28,7 @@
   "dependencies": {
     "@objectstack/core": "workspace:*",
     "@objectstack/mcp": "workspace:*",
+    "@objectstack/metadata": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
     "@objectstack/plugin-approvals": "workspace:*",
