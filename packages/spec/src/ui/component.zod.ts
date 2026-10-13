@@ -298,10 +298,11 @@ import { INLINE_GRID_SORT_FIELD_LIST } from '../data/inline-grid-sort-fields';
 //    findings this gate reported on the platform pages (34 label + 8 content).
 //
 // The page rewrites (`page:card.visible` → the component-level `visibleWhen`,
-// #5776's tab `key` → `value`) closed the third, and #23026 took the upgrade
-// for one class once the inventory measured empty: a `retiredKey()`
-// tombstone's verdict is an `error` at `os validate` / `os build` / `os lint`.
-// Every other finding of the gate stays a warning (#23147 carries the rest).
+// #5776's tab `key` → `value`) closed the third, and the upgrade followed in
+// two steps once the inventory measured empty: #23026 made a `retiredKey()`
+// tombstone's verdict an `error` at `os validate` / `os build` / `os lint`,
+// and #23147 made every other finding of the gate one too, on an inventory
+// that also covered a corpus authored outside this repository.
 //
 // ⚠️ One inventory item batch A ADDED rather than closed, because measuring the
 // renderers turned it up: objectui's Studio block designer publishes inputs that
@@ -4878,8 +4879,8 @@ export type ElementRepeaterPropsParsed = z.infer<typeof ElementRepeaterPropsSche
  * entries were advisory, gated on the #5068 inventory (the ruling:
  * 「warning 层先行,error 升级仍以 inventory 为闸,本裁定不改那个闸」). Once
  * that inventory measured empty, #23026 made one class an `error` — a
- * `retiredKey()` tombstone's verdict, such as a retired key these rows carry;
- * every other finding on them stays advisory (#23147 carries the rest).
+ * `retiredKey()` tombstone's verdict, such as a retired key these rows carry —
+ * and #23147 made every other finding on them an `error` too.
  *
  * Deliberately NOT declared, each with its reason:
  *
@@ -5711,9 +5712,10 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * own retirement text) and a key the block does not declare.
    *
    * No conversion lifts the array: it never worked on this surface. Read by the
-   * component-props gate (advisory); a stored page still saves and loads,
-   * because page-component `properties` is not parsed on the metadata save or
-   * load path (the `ui-object-grid-export-options-closed` semantic entry).
+   * component-props gate (refused as an error); a stored page still saves and
+   * loads, because page-component `properties` is not parsed on the metadata
+   * save or load path (the `ui-object-grid-export-options-closed` semantic
+   * entry).
    */
   exportOptions: ListViewExportOptionsSchema.optional()
     .describe("Export config — the object `{ formats?, maxRecords?, includeHeaders?, fileNamePrefix?, streaming? }`, the same block a list view's `exportOptions` declares, with `formats` drawn from `csv`, `xlsx` and `json`. A bare format array is refused: the grid reads `exportOptions.formats`, so write `{ formats: ['csv', 'xlsx'] }`"),
