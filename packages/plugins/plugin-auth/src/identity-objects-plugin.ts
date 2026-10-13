@@ -25,6 +25,18 @@
  * `AuthPlugin`, and with it these objects. An app suite that boots through it
  * needs nothing from this module; it is for kits that compose their own kernel.
  *
+ * ## The Default Organization (ADR-0131 D3)
+ *
+ * Registering `sys_organization` is what makes the engine's ADR-0131 D9 branch
+ * refuse a system insert on a tenant-scoped object when the install holds no
+ * organization under the `single` posture: a composition that registers no
+ * organization object keeps the unstamped branch, one that registers it must
+ * hold its Default Organization. So the plugin that registers the object keeps
+ * the invariant too: under `single`, `start()` runs the same
+ * `ensureDefaultOrganizationExists` `AuthPlugin.start()` runs, and a failure
+ * fails the boot. The invariant is not exported for a host to call — a step the
+ * host must remember is a step a composition can forget.
+ *
  * ## Why the objects keep plugin-auth's package id
  *
  * The manifest is registered under `AUTH_PLUGIN_ID`, the id `AuthPlugin` uses,
@@ -45,6 +57,10 @@
  */
 
 import type { Plugin, PluginContext } from '@objectstack/core';
+import type { IDataEngine } from '@objectstack/spec/contracts';
+import type { TenancyPosture } from '@objectstack/spec/security';
+import { resolveTenancyPosture } from '@objectstack/types';
+import { ensureDefaultOrganizationExists } from './default-organization-invariant.js';
 import { authIdentityManifest } from './manifest.js';
 
 /** The kernel plugin name of {@link IdentityObjectsPlugin}. */
@@ -95,6 +111,27 @@ export class IdentityObjectsPlugin implements Plugin {
       authIdentityManifest({ datasource: this.options.manifestDatasource }),
     );
   }
+
+  /**
+   * [ADR-0131 D3] Under the `single` posture, the Default Organization exists
+   * before this `start()` returns: found, or created. The same invariant, and
+   * the same call, as `AuthPlugin.start()`; see the module header for why this
+   * plugin keeps it. A failure throws and fails the boot, never warn-only.
+   */
+  async start(ctx: PluginContext): Promise<void> {
+    if (postureInForce(ctx) !== 'single') return;
+    const invariant = await ensureDefaultOrganizationExists(ctx.getService<IDataEngine>('objectql'), {
+      logger: ctx.logger,
+    });
+    if (invariant.ambiguous) {
+      ctx.logger.warn(
+        `${IDENTITY_OBJECTS_PLUGIN_NAME}: the 'single' tenancy posture holds `
+          + `${invariant.ambiguous.organizationCount} organizations and none is the Default Organization `
+          + "(slug 'default'), so no owner is derivable: system writes and seed rows that need one are "
+          + 'refused (ADR-0131 D9), and each refusal names how to carry the organization instead.',
+      );
+    }
+  }
 }
 
 /** A new {@link IdentityObjectsPlugin}. */
@@ -115,4 +152,22 @@ function authPluginComposed(ctx: PluginContext): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * The tenancy posture in force, judged the way `AppPlugin` judges whether it
+ * loads its seed inline: the `tenancy` service's posture when one is
+ * registered, otherwise the posture the deployment requested
+ * (`resolveTenancyPosture()`, which throws on an unrecognized value). Without
+ * `AuthPlugin` nothing in the platform registers that service, so the request
+ * usually decides; a host that registers one decides for both.
+ */
+function postureInForce(ctx: PluginContext): TenancyPosture {
+  try {
+    const posture = ctx.getService<{ posture?: TenancyPosture } | undefined>('tenancy')?.posture;
+    if (posture) return posture;
+  } catch {
+    /* no `tenancy` service in this composition */
+  }
+  return resolveTenancyPosture();
 }
