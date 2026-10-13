@@ -378,6 +378,10 @@ export default class MigrateApply extends Command {
           stack.kernel,
           'objectql',
         );
+        // [#23281] Both refusals below exit 1 under `--json` as well, as the
+        // human face and the `sys_comment.reactions` sibling do: a document
+        // that says "refused" beside exit 0 reads as a successful apply to a
+        // caller gating on the status. Each emitted with 0 until this card.
         let preflight;
         try {
           preflight = await probeAccountIdentityCollisions(engine as never);
@@ -388,7 +392,7 @@ export default class MigrateApply extends Command {
             await emitJson({
               ...target, created: [], applied: [], skipped: drift, pending,
               message: 'refused_account_issuer_preflight_unreadable', detail,
-            }, 0, { compact: true });
+            }, 1, { compact: true });
             return;
           }
           printError(
@@ -402,7 +406,7 @@ export default class MigrateApply extends Command {
             await emitJson({
               ...target, created: [], applied: [], skipped: drift, pending,
               message: 'refused_account_issuer_collisions', preflight,
-            }, 0, { compact: true });
+            }, 1, { compact: true });
             return;
           }
           console.log('');
