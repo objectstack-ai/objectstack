@@ -263,12 +263,14 @@ async function anonymous(key: keyof typeof OBJ, init?: RequestInit): Promise<{ s
   return { status: res.status, body, text };
 }
 
+/**
+ * The rows a class-4 `find` endpoint answered. The answer's SHAPE is asserted,
+ * never defaulted: a zero-row pin must not pass on a body it failed to read.
+ */
 function rowsOf(body: any): any[] {
-  const data = body?.data;
-  if (Array.isArray(data)) return data;
-  if (Array.isArray(data?.records)) return data.records;
-  if (Array.isArray(data?.value)) return data.value;
-  return [];
+  const records = body?.data?.records;
+  expect(Array.isArray(records), JSON.stringify(body)).toBe(true);
+  return records;
 }
 
 /** The permission-set names the security service resolves for the context the engine was last handed. */
@@ -380,7 +382,8 @@ describe('ADR-0138 E1 — the guest\'s row scope is share links only, under ever
       // Control: the rows are there, and the object serves them — to the admin.
       const admin = await stack.apiAs(adminToken, 'GET', `/data/${OBJ[key]}`);
       expect(admin.status).toBe(200);
-      expect(rowsOf(await admin.json()).length).toBeGreaterThan(0);
+      const adminRows = ((await admin.json()) as { records?: unknown[] }).records;
+      expect(adminRows?.length).toBeGreaterThan(0);
     });
   }
 });
