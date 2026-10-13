@@ -16,8 +16,9 @@
  *   1. A `retiredKey()` tombstone on `PageHeaderProps`, a `strictObject` — the
  *      refusal carries the prescription, and the key's input type is `never`.
  *      `PageComponentSchema.properties` is an open bag, so the props schema is
- *      reached by the advisory props lint and never by the page parse: an
- *      existing page is never hard-refused.
+ *      reached by the props lint — which refuses this tombstone as an `error`
+ *      at `os validate` / `os build` / `os lint` — and never by the page parse:
+ *      an existing page is never hard-refused at load.
  *   2. D2 conversion `page-header-breadcrumb-removed` (step 18), a strip of
  *      both values from every `page:header`, retired from the load path: a
  *      stored or built page replays clean, with a notice.
