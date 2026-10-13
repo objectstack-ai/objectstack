@@ -2255,14 +2255,14 @@ const CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION: readonly string[] = [
  * One site a registration check refuses (#23317): where it is, the shape
  * found there, and the check's own words for it.
  *
- * A check does not throw: it returns a {@link FlowRegistrationRefusal}, which
+ * A check does not throw: it returns a {@link RegistrationCheckRefusal}, which
  * {@link AutomationEngine.registerFlow} throws and
  * {@link AutomationEngine.canonicalizeStoredFlow} lists site by site. So the
  * stored pass (`os migrate meta --stored`) previews exactly what registration
  * refuses, through the same checks, and a check added to registration is
  * previewed with no second change.
  */
-interface FlowRegistrationSite {
+interface RegistrationCheckSite {
     /**
      * The site's path in the stack the stored pass wraps one flow in —
      * `flows[0].nodes[2].config.title`, `flows[0].edges[1].condition` — the
@@ -2280,9 +2280,9 @@ interface FlowRegistrationSite {
  * What one registration check refuses in a flow: the error `registerFlow`
  * throws, byte for byte, and every site it names.
  */
-interface FlowRegistrationRefusal {
+interface RegistrationCheckRefusal {
     readonly message: string;
-    readonly sites: readonly FlowRegistrationSite[];
+    readonly sites: readonly RegistrationCheckSite[];
 }
 
 /**
@@ -2330,7 +2330,7 @@ function storedGraphMemberPath(graph: FlowGraph, list: 'nodes' | 'edges', index:
  * check's own words follow, as a refused-shape TODO's do: the site stays as
  * stored, and the flow does not register.
  */
-function flowRegistrationTodo(flowName: string, site: FlowRegistrationSite): ConversionTodoNotice {
+function flowRegistrationTodo(flowName: string, site: RegistrationCheckSite): ConversionTodoNotice {
     const reason = 'No conversion rewrites it, and registerFlow refuses it: left as stored, the flow is not '
         + `registered at boot and never runs. Flow \`${flowName}\`, ${site.detail}`;
     return {
@@ -4456,7 +4456,7 @@ export class AutomationEngine implements IAutomationService {
      *
      * [#23317] `todos` also carries every site {@link registerFlow} refuses
      * once the parse has accepted the flow: the same registration checks, run
-     * here without registering ({@link flowRegistrationRefusals}), each site
+     * here without registering ({@link registrationCheckRefusals}), each site
      * listed under {@link FLOW_REGISTRATION_TODO_ID}. A text slot's template
      * hole, a decision's `mode`, a malformed predicate, a plugin node's
      * undeclared config key and an `api` flow with no secret are among them.
@@ -4482,7 +4482,7 @@ export class AutomationEngine implements IAutomationService {
         // names the retirement; the registration check's line for it is the
         // same refusal and is not repeated.
         const listed = new Set(canonical.todos.map((todo) => todo.path));
-        for (const refusal of this.flowRegistrationRefusals(name, canonical.parsed)) {
+        for (const refusal of this.registrationCheckRefusals(name, canonical.parsed)) {
             for (const site of refusal.sites) {
                 if (listed.has(site.path)) continue;
                 canonical.todos.push(flowRegistrationTodo(name, site));
@@ -10460,7 +10460,7 @@ export class AutomationEngine implements IAutomationService {
      * [#23317] What {@link registerFlow} judges a canonical flow by after the
      * parse — every registration check, in the order it runs them. The ONE
      * list: `registerFlow` throws the first refusal, and
-     * {@link flowRegistrationRefusals} collects them all for the stored pass,
+     * {@link registrationCheckRefusals} collects them all for the stored pass,
      * so a check added here is refused at registration and previewed by
      * `os migrate meta --stored` alike.
      *
@@ -10470,7 +10470,7 @@ export class AutomationEngine implements IAutomationService {
      */
     private registrationChecks(
         { advisory }: { advisory: boolean },
-    ): ReadonlyArray<(flowName: string, flow: FlowParsed) => FlowRegistrationRefusal | undefined> {
+    ): ReadonlyArray<(flowName: string, flow: FlowParsed) => RegistrationCheckRefusal | undefined> {
         return [
             // #4277 — config keys the node's descriptor does not declare (the
             // tightened #4059 warning; a `visibleIf` typo used to register in
@@ -10509,10 +10509,10 @@ export class AutomationEngine implements IAutomationService {
      * is listed as one refusal at the flow itself: the doors that canonicalize
      * without registering must not start throwing for a check they never ran.
      */
-    private flowRegistrationRefusals(flowName: string, flow: FlowParsed): FlowRegistrationRefusal[] {
-        const refusals: FlowRegistrationRefusal[] = [];
+    private registrationCheckRefusals(flowName: string, flow: FlowParsed): RegistrationCheckRefusal[] {
+        const refusals: RegistrationCheckRefusal[] = [];
         for (const check of this.registrationChecks({ advisory: false })) {
-            let refusal: FlowRegistrationRefusal | undefined;
+            let refusal: RegistrationCheckRefusal | undefined;
             try {
                 refusal = check(flowName, flow);
             } catch (e) {
@@ -10590,9 +10590,9 @@ export class AutomationEngine implements IAutomationService {
      * rather than crashing the kernel. [#23317] The refusal is returned, not
      * thrown: `registerFlow` throws it ({@link registrationChecks}).
      */
-    private validateNodeConfigKeys(flowName: string, flow: FlowParsed): FlowRegistrationRefusal | undefined {
+    private validateNodeConfigKeys(flowName: string, flow: FlowParsed): RegistrationCheckRefusal | undefined {
         const violations: string[] = [];
-        const sites: FlowRegistrationSite[] = [];
+        const sites: RegistrationCheckSite[] = [];
         // #4389 — every graph, not just the flow's own. `visibleIf` is the typo
         // this check exists to catch, and moving the node into a `loop` body
         // used to restore the silence #4277 closed. No double-reporting from the
@@ -10668,9 +10668,9 @@ export class AutomationEngine implements IAutomationService {
      * gateway that would run as something the author did not write. [#23317]
      * The refusal is returned, not thrown: `registerFlow` throws it.
      */
-    private validateDecisionModes(flowName: string, flow: FlowParsed): FlowRegistrationRefusal | undefined {
+    private validateDecisionModes(flowName: string, flow: FlowParsed): RegistrationCheckRefusal | undefined {
         const failures: string[] = [];
-        const sites: FlowRegistrationSite[] = [];
+        const sites: RegistrationCheckSite[] = [];
         for (const graph of collectFlowGraphs(flow)) {
             const at = graph.scope ? `${graph.scope}: ` : '';
             graph.nodes.forEach((node, index) => {
@@ -10722,7 +10722,7 @@ export class AutomationEngine implements IAutomationService {
      * VALIDATION_FAILED`. [#23317] The refusal is returned, not thrown:
      * `registerFlow` throws it.
      */
-    private validateApiTriggerSecret(flowName: string, flow: FlowParsed): FlowRegistrationRefusal | undefined {
+    private validateApiTriggerSecret(flowName: string, flow: FlowParsed): RegistrationCheckRefusal | undefined {
         const resolved = this.deriveTriggerBinding(flowName, flow);
         if (resolved?.triggerType !== 'api') return undefined;
         const config = (resolved.binding.config ?? {}) as Record<string, unknown>;
@@ -10864,7 +10864,7 @@ export class AutomationEngine implements IAutomationService {
      * bind the record's fields flat, so the schema pass uses `flattened` scope.
      * The fatal set is unchanged — a resolver can never break a flow that used to
      * register cleanly. `advisory: false` skips that pass: the stored pass
-     * previews refusals ({@link flowRegistrationRefusals}), and an advisory
+     * previews refusals ({@link registrationCheckRefusals}), and an advisory
      * finding is none.
      *
      * [#23317] The refusal is returned, not thrown: `registerFlow` throws it.
@@ -10875,9 +10875,9 @@ export class AutomationEngine implements IAutomationService {
         flowName: string,
         flow: FlowParsed,
         { advisory }: { advisory: boolean },
-    ): FlowRegistrationRefusal | undefined {
+    ): RegistrationCheckRefusal | undefined {
         const failures: string[] = [];
-        const sites: FlowRegistrationSite[] = [];
+        const sites: RegistrationCheckSite[] = [];
         /** One failure: its line in the thrown message, and its site for the stored pass. */
         const refuse = (path: string, where: string, message: string, source: unknown): void => {
             failures.push(`  • ${where}: ${message}\n      source: \`${source}\``);
