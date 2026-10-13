@@ -511,13 +511,6 @@ jobs:
         continue-on-error: true
         run: pnpm check:engine-double-contract
 
-      # THROWAWAY (#23191 proof, reverted before review): a gate its own if: turns off.
-      - name: THROWAWAY proof gate turned off by its own if
-        id: throwaway-proof-own-if
-        if: ${{ false }}
-        continue-on-error: true
-        run: exit 1
-
       # ── THE LANE'S VERDICT (#23191): the last step, and the one that keeps a
       # red gate red. The EVERY GATE RUNS note above `jobs:` argues it. ─────
       #
@@ -4363,10 +4356,6 @@ jobs:
           OS_GATE_MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
         run: |
           bash scripts/ci/select-gate-families.sh
-
-      # THROWAWAY (#23191 proof, reverted before review): a fail-fast step that fails.
-      - name: THROWAWAY proof fail-fast step
-        run: exit 1
 
       # Engine query-options erasure ratchet (#4918). The slot-lookup rule
       # (`lint-scoped-slot-corpus` since #22991) protects the service LOOKUP; this one protects what you pass to the
