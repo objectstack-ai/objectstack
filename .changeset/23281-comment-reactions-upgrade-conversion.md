@@ -7,7 +7,7 @@ feat(cli)!: the v18 upgrade carries stored comment reactions — `os migrate com
 
 Clause-②: no (narrowing) — `os migrate apply --allow-destructive` now refuses the `sys_comment.reactions` drop it accepted before, until a verified conversion is recorded; the conversion itself only writes records of an existing object, so nothing widens.
 
-<!-- adr-0087: already-registered sys-comment-reactions-column-retired The narrowed input is the drop of the column that semantic entry retired, and the entry already reaches every upgrading deployment through `os migrate meta` and the upgrade guide. This changeset's prescription (convert, verify, then drop) is carried by that entry: this PR rewrites its replacement, reason and acceptance criteria to name the conversion and order it before the drop, with its id and surface unchanged. No spec key, export or stored shape moves. -->
+<!-- adr-0087: not-required (already-registered sys-comment-reactions-column-retired) The narrowed input is the drop of the column that semantic entry retired, and the entry already reaches every upgrading deployment through `os migrate meta` and the upgrade guide. This changeset's prescription (convert, verify, then drop) is carried by that entry: this PR rewrites its replacement, reason and acceptance criteria to name the conversion and order it before the drop, with its id and surface unchanged. No spec key, export or stored shape moves. -->
 
 **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
 
