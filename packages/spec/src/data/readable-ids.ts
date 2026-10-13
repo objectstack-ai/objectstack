@@ -74,9 +74,6 @@
  *    composed leaf, so "an uncomposed leaf reached this driver" is the one
  *    question `isReadableIds` asks, and a driver refuses on it (D2's last
  *    paragraph, D3).
- *
- * The per-driver case-set the composed leaf joins (D3) is
- * `./readable-ids-conformance.ts`.
  */
 
 import type { FilterCondition } from './filter.zod';
@@ -254,10 +251,10 @@ export const ReadableIds: {
    * scope: frozen, branded under {@link COMPOSED_READABLE_IDS_BRAND}, carrying
    * `{ object: leaf.object, scope }`.
    *
-   * The engine's executor boundary is the caller (ADR-0139 D2); a driver suite
-   * builds one the same way to run `./readable-ids-conformance.ts`. The
-   * function judges its arguments and nothing else: it asks no security
-   * service, lowers nothing and marks nothing.
+   * The engine's executor boundary is the caller (ADR-0139 D2); a driver's
+   * conformance suite (D3) builds one the same way. The function judges its
+   * arguments and nothing else: it asks no security service, lowers nothing
+   * and marks nothing.
    *
    * @param leaf  the uncomposed leaf being composed; its `object` is the
    *              composed leaf's `object`.
