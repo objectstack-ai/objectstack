@@ -39,6 +39,10 @@
  *      platform's not-visible refusal instead of the named one (#21755); see
  *      {@link refuseNotVisible}. The named refusal is what a caller who can
  *      read the parent, but may not edit it, receives.
+ *    * The edit stamp (#23124, ruling A): a SECOND `beforeUpdate` handler, not
+ *      part of the authorization above, sets `is_edited` / `edited_at` when the
+ *      body changes — see {@link stampCommentBodyEdit}. The create hook sets
+ *      both to "not edited" over a client value.
  *  - {@link installCommentReadVisibility} — the read side: a
  *    `find`/`findOne`/`count`/`aggregate` middleware that intersects the query
  *    with the threads whose parent record the caller can actually read.
@@ -319,6 +323,58 @@ function refuseNotVisible(
   throw err;
 }
 
+/**
+ * [#23124, maintainer ruling A] The platform marks a comment edited: when an
+ * update's `body` differs from the stored body, set `is_edited: true` and
+ * `edited_at` to the server clock. Both fields are `readonly` on
+ * `sys_comment`, so this hook is their one writer for a non-system caller
+ * (`objects/sys-comment.object.ts`, "Platform-written").
+ *
+ * What counts as an edit is the BODY and nothing else: an update that does not
+ * name `body`, or names the stored text again (the console rewrites `mentions`
+ * beside it), stamps nothing. A row with no readable pre-image is stamped —
+ * the engine binds `previous` on both update paths, and a mark that cannot be
+ * proven unneeded is the safe side of a reader's trust signal.
+ *
+ * Every caller is stamped, system included, the way the engine's `updated_at`
+ * stamp is: the mark records that the text changed after it was posted, not
+ * who was allowed to change it (the authorization handler is separate and
+ * exempts system callers; this one does not). The one exception is the
+ * engine's own: a `preserveAudit` write (a historical import) keeps a value it
+ * supplies, as `updated_at` does, and is stamped only where it supplies none.
+ *
+ * Why the stamp is an assignment and the client's value needs no handling here:
+ * the engine hides a non-system caller's `readonly` values from the hooks and
+ * strips them after, and keeps a value a hook ASSIGNED (`hookWrittenKeys`). So
+ * on an edit the stamp lands whatever the client sent, and without one the
+ * client's value is dropped and reported as `droppedFields`.
+ *
+ * A predicate (`multi: true`) update dispatches this handler once per matched
+ * row, with that row as `previous`, over ONE shared payload. If every row's
+ * body changes, every row is stamped; if none does, none is. A batch whose rows
+ * disagree is refused whole by the engine (`MULTI_UPDATE_HOOK_KEY_DIVERGENCE`,
+ * 400, nothing written) — one SET clause cannot mark some rows and not others,
+ * and stamping all of them would mark text that never changed.
+ */
+async function stampCommentBodyEdit(ctx: any): Promise<void> {
+  const data: unknown = ctx?.input?.data;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return;
+  const payload = data as Record<string, unknown>;
+  if (!Object.prototype.hasOwnProperty.call(payload, 'body')) return;
+  const previous: unknown = ctx?.previous;
+  if (previous && typeof previous === 'object' && Object.is((previous as Record<string, unknown>).body, payload.body)) {
+    return;
+  }
+  const now = new Date().toISOString();
+  if (ctx?.session?.preserveAudit === true) {
+    payload.is_edited = payload.is_edited ?? true;
+    payload.edited_at = payload.edited_at ?? now;
+    return;
+  }
+  payload.is_edited = true;
+  payload.edited_at = now;
+}
+
 function asIdList(id: unknown): Array<string | number> | null {
   if (typeof id === 'string' || typeof id === 'number') return [id];
   if (id && typeof id === 'object' && Array.isArray((id as any).$in)) {
@@ -539,6 +595,14 @@ export function installCommentAccessHooks(
     // spoofable — a caller could post as anyone, then "author-delete" it.
     if (ctx.session.userId) data.author_id = ctx.session.userId;
 
+    // [#23124] A new comment is not an edited one, whatever the client sent.
+    // The engine's create-side `readonly` strip leaves `sys_` objects to their
+    // own guards, so this is the guard: the platform's value, assigned over a
+    // client's, exactly as `author_id` above. Only a key the client named is
+    // touched; an absent one takes the field's default.
+    if (Object.prototype.hasOwnProperty.call(data, 'is_edited')) data.is_edited = false;
+    if (Object.prototype.hasOwnProperty.call(data, 'edited_at')) data.edited_at = null;
+
     const target = parseCommentThreadId(data.thread_id);
     if (!target) {
       forbid(
@@ -728,6 +792,13 @@ export function installCommentAccessHooks(
     // Same declaration the `beforeDelete` registration below carries.
     { object: 'sys_comment', packageId: PACKAGE_ID, dispatchUnscopedMultiWrite: true },
   );
+
+  // ── Update: the platform stamps an edit of the body (#23124) ─────────
+  // Its own registration, deliberately: the authorization handler above
+  // returns early for system and context-less callers and declares the
+  // whole-operation dispatch, and the stamp wants neither — see
+  // {@link stampCommentBodyEdit}.
+  engine.registerHook('beforeUpdate', stampCommentBodyEdit, { object: COMMENT_OBJECT, packageId: PACKAGE_ID });
 
   // ── Delete: author or parent editor ─────────────────────────────────
   engine.registerHook(

@@ -71,8 +71,11 @@ function install(opts: {
   const parentReads: Array<{ object: string; options: any }> = [];
   const parentFind = readableParentFind(opts.readable ?? [], parentReads);
   const engine: CommentAccessEngine = {
+    // The FIRST handler per event is the authorization gate these tests drive:
+    // `beforeUpdate` also carries the edit stamp (#23124), registered after it
+    // and pinned on the real engine in `comment-edit-stamp.integration.test.ts`.
     registerHook: (event, handler) => {
-      hooks.set(event, handler as any);
+      if (!hooks.has(event)) hooks.set(event, handler as any);
     },
     find: async (object, options: any) => {
       if (object !== 'sys_comment') return parentFind(object, options);
