@@ -1124,41 +1124,69 @@ function authoredLockFamilyRefusal(
 }
 
 /**
- * [#23165, ADR-0048] The save door's refusal of a direct save that names no
- * package, of an item whose active rows are bound to two or more packages.
+ * [#23165, ADR-0048] The refusal of a direct save, or a delete, that names no
+ * package, of an item whose rows at the address are bound to two or more
+ * packages ({@link ObjectStackProtocolImplementation.packagelessAddress}).
  *
  * A `sys_metadata` row is keyed `(org, type, name, package_id)`, so such a
- * save has no one row to write. Before this refusal it wrote a package-less
- * row beside the packages' rows and answered `200`, for a row the item read
- * does not serve. Choosing one of the packages instead would be the
- * package-agnostic `findOne`'s driver-order coin toss (#8907). The remedy is
- * the request's: name the package, which is the address every other door of
- * the item already takes (`?package=`, ADR-0048).
+ * write has no one row to write or remove. Before this refusal the save wrote
+ * a package-less row beside the packages' rows and answered `200`, for a row
+ * the item read does not serve, and the delete removed whichever row the
+ * package-agnostic `findOne` met first and answered "it no longer exists"
+ * while another package's row stayed served. Choosing one of the packages is
+ * that driver-order coin toss (#8907). The remedy is the request's: name the
+ * package, which is the address every door of the item takes (`?package=`,
+ * ADR-0048).
  *
  * `RESOURCE_CONFLICT` / 409, no code minted: the standard catalog's member for
  * a refusal that comes from environment state rather than the body (the same
- * body is accepted once the request names its package), and the code this
+ * request is accepted once it names its package), and the code this
  * package already answers when a name is held by more than one owner
  * (`importUnmanagedPackage`). The prescription first, because a 4xx message
  * crosses the REST boundary bounded at 500 characters with its tail
  * truncated; the candidates follow, sorted, so the message is the same on
  * every driver.
  */
-function packagelessSaveAmbiguityRefusal(
+function packagelessAddressAmbiguityRefusal(
+    verb: 'save' | 'delete',
     type: string,
     name: string,
     packageIds: readonly string[],
 ): Error & { code: 'RESOURCE_CONFLICT'; status: 409 } {
     const shown = packageIds.slice(0, 5).map((id) => `'${id}'`).join(', ');
     const more = packageIds.length > 5 ? ` and ${packageIds.length - 5} more` : '';
+    const [nothing, single] = verb === 'save'
+        ? ['Nothing was written.', 'no single row to write']
+        : ['Nothing was deleted.', 'no single row to remove'];
     const err = new Error(
-        `Name the package this save is for, then send it again: on the REST door add ?package= with the package id, `
-        + `in process pass packageId. Nothing was written. ${type} '${name}' belongs to ${packageIds.length} packages `
-        + `(${shown}${more}), and a save that names none has no single row to write.`,
+        `Name the package this ${verb} is for, then send it again: on the REST door add ?package= with the package id, `
+        + `in process pass packageId. ${nothing} ${type} '${name}' belongs to ${packageIds.length} packages `
+        + `(${shown}${more}), and a ${verb} that names none has ${single}.`,
     ) as Error & { code: 'RESOURCE_CONFLICT'; status: 409 };
     err.code = 'RESOURCE_CONFLICT';
     err.status = 409;
     return err;
+}
+
+/**
+ * [#23165] The rows of an item a delete leaves stored at its address, in
+ * words, for the delete receipt: its rows bound to other packages (sorted, as
+ * {@link ObjectStackProtocolImplementation.packagelessAddress} answers them,
+ * at most five named) and its package-less row. The receipt names them
+ * instead of claiming the item gone or back at its artifact default.
+ */
+function remainingRowsPhrase(packageIds: readonly string[], unbound: boolean, noun: 'row' | 'draft'): string {
+    const parts: string[] = [];
+    if (packageIds.length > 0) {
+        const shown = packageIds.slice(0, 5).map((id) => `'${id}'`).join(', ');
+        const more = packageIds.length > 5 ? ` and ${packageIds.length - 5} more` : '';
+        parts.push(packageIds.length === 1
+            ? `its ${noun} bound to package ${shown}`
+            : `its ${noun}s bound to packages ${shown}${more}`);
+    }
+    if (unbound) parts.push(`its package-less ${noun}`);
+    const count = packageIds.length + (unbound ? 1 : 0);
+    return `${parts.join(' and ')} ${count === 1 ? 'remains' : 'remain'}`;
 }
 
 /**
@@ -18537,10 +18565,10 @@ export class ObjectStackProtocolImplementation implements
      * draft bound to the package of the item's active row when there is one
      * (#11087) — the address the save resolves, not the key it was handed.
      * [#23165] The active read that names no package likewise serves the token
-     * of the row a direct save naming none writes: the one package's row the
-     * item is bound to ({@link packagelessSaveAddress}). For an item several
-     * packages hold, that save is refused whatever it carries, and the token
-     * stays the package-unbound row's.
+     * of the row a direct save (or a delete) naming none writes: the one
+     * package's row the item is bound to ({@link packagelessAddress}). For an
+     * item several packages hold, that save and that delete are refused
+     * whatever they carry, and the token stays the package-unbound row's.
      */
     private async readVersionToken(
         /** [#22877] `member` — the bundle member the read addressed; omitted, the canonical one. */
@@ -18554,64 +18582,73 @@ export class ObjectStackProtocolImplementation implements
             org: 'env',
         } as Parameters<typeof repo.headAt>[0];
         const packageId = request.packageId == null && state === 'active'
-            ? (await this.packagelessSaveAddress(ref.type, ref.name, request.member)).packageId
+            ? (await this.packagelessAddress(ref.type, ref.name, request.member)).packageId
             : request.packageId ?? null;
         const stored = await this.storedHeadAt(repo, ref, state, packageId, request.member);
         return stored === null ? null : this.receiptVersion(stored);
     }
 
     /**
-     * [#23165, ADR-0048] Where a DIRECT (active) save that names no package
-     * writes: the item's own package when its active rows are bound to exactly
+     * [#23165, ADR-0048] THE package-less write address: which row of an item a
+     * write that names no package addresses, read from the item's stored rows
+     * at `state`. The item's own package when those rows are bound to exactly
      * one, else the package-unbound row. `candidates` is every distinct
-     * binding, sorted; two or more is a name several packages hold, which
-     * {@link saveMetaItem} refuses ({@link packagelessSaveAmbiguityRefusal})
-     * and for which `packageId` is `null`.
+     * binding, sorted; two or more is a name several packages hold, which the
+     * doors refuse ({@link packagelessAddressAmbiguityRefusal}) and for which
+     * `packageId` is `null`. `unbound` says whether a package-unbound row sits
+     * beside them, which is what a delete of a package's row leaves served.
      *
-     * The one resolution its two readers take, so they cannot disagree: the
-     * save door, which then writes as a save naming that package does, and
-     * {@link readVersionToken}, whose `version` a save at the same address
-     * accepts.
+     * The one resolution its three readers take, so they cannot disagree:
+     * {@link saveMetaItem}'s direct (active) save, which then writes as a save
+     * naming that package does; {@link deleteMetaItem}, which then removes as a
+     * delete naming that package does, its draft discard reading the draft
+     * rows; and {@link readVersionToken}, whose `version` a save or a delete at
+     * the same address accepts.
      *
-     * Why the package's row: a save writes exactly one
+     * Why the package's row: a write addresses exactly one
      * `(org, type, name, package_id)` row, and the item read that names no
      * package serves the package's row whenever it is the item's only row. A
      * save that wrote the package-unbound row instead minted a second row
-     * beside it and answered `200` for a write that read never served. The
-     * draft save has resolved its address from the item's active row since
-     * #11087 (`SysMetadataRepository.resolveWriteHead`); the direct save did
-     * not, and this is that half.
+     * beside it and answered `200` for a write that read never served; a
+     * delete that took the first row a package-agnostic `findOne` met removed
+     * one package's row of an item two packages hold, or the package-less row
+     * beside a package's, and claimed the item gone. The draft save has
+     * resolved its address from the item's active row since #11087
+     * (`SysMetadataRepository.resolveWriteHead`, unchanged); the direct save
+     * and the delete did not, and this is that half.
      *
      * The rows are the ones the item read chooses among
      * ({@link findServedOverlayRow}): the environment's (ADR-0131 D6), the
-     * active state, the canonical type the save writes under, the bundle
-     * member the save addresses (#22877), and no package predicate. They are
-     * read in full, never sampled: with two packages' rows at one address a
-     * package-agnostic `findOne` is a driver-order coin toss (#8907). A
-     * package-less row beside the package's row (minted by the defect this
-     * fixes) is not a second package, and stays as it is. An item with no
-     * binding keeps the package-unbound row, as before. An unprovisioned store
-     * holds no row; any other failed read propagates (#5532), because guessing
-     * the binding would choose the row the save lands in.
+     * state the write addresses, the canonical type, the bundle member
+     * (#22877), and no package predicate. They are read in full, never
+     * sampled: with two packages' rows at one address a package-agnostic
+     * `findOne` is a driver-order coin toss (#8907). A package-less row beside
+     * the package's row is not a second package, and stays as it is (no
+     * conversion: the card's existing-rows line). An item with no binding
+     * keeps the package-unbound row, as before. An unprovisioned store holds
+     * no row; any other failed read propagates (#5532), because guessing the
+     * binding would choose the row the write lands in.
      *
-     * ⛔ Not the repository's write-address default: `put` and `headAt` keep
-     * `PutOptions.packageId`'s documented one (omitted = the package-unbound
-     * row), because the callers that reach them with no package
-     * (`promoteDraft` and `restoreVersion` of a package-less row) mean that
-     * row, as do the server-stated rewrites the save door does not resolve
-     * for. The save door resolves, then names the package.
+     * ⛔ Not the repository's write-address default: `put`, `headAt` and
+     * `delete` keep their documented ones (omitted = the package-unbound row
+     * for `put`/`headAt`, any row for `delete`), because the callers that reach
+     * them with no package (`promoteDraft` and `restoreVersion` of a
+     * package-less row) mean that row, as do the server-stated rewrites the
+     * save door does not resolve for. The doors resolve, then name the
+     * package.
      */
-    private async packagelessSaveAddress(
+    private async packagelessAddress(
         type: string,
         name: string,
-        /** [#22877] The bundle member the save addresses (its body's); omitted, the canonical one. */
+        /** [#22877] The bundle member the write addresses (a save's body's, a delete's selector); omitted, the canonical one. */
         member?: string,
-    ): Promise<{ packageId: string | null; candidates: readonly string[] }> {
+        state: 'active' | 'draft' = 'active',
+    ): Promise<{ packageId: string | null; candidates: readonly string[]; unbound: boolean }> {
         let rows: Array<{ package_id?: unknown }> | null | undefined;
         try {
             // [#21911] The explicit system opt-in — see findServedOverlayRow.
             rows = await this.engine.find('sys_metadata', {
-                where: { type, name, state: 'active', organization_id: null, ...overlayMemberWhere(type, member) },
+                where: { type, name, state, organization_id: null, ...overlayMemberWhere(type, member) },
                 context: { isSystem: true },
             });
         } catch (error) {
@@ -18620,11 +18657,13 @@ export class ObjectStackProtocolImplementation implements
             this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
         }
         const bindings = new Set<string>();
+        let unbound = false;
         for (const row of rows ?? []) {
             if (typeof row?.package_id === 'string' && row.package_id !== '') bindings.add(row.package_id);
+            else unbound = true;
         }
         const candidates = [...bindings].sort();
-        return { packageId: candidates.length === 1 ? candidates[0] ?? null : null, candidates };
+        return { packageId: candidates.length === 1 ? candidates[0] ?? null : null, candidates, unbound };
     }
 
     /**
@@ -21087,7 +21126,7 @@ export class ObjectStackProtocolImplementation implements
 
         // [#23165, ADR-0048] THE WRITE ADDRESS of a direct save that names no
         // package: the item's own package when its active rows are bound to
-        // exactly one ({@link packagelessSaveAddress}). It used to be the
+        // exactly one ({@link packagelessAddress}). It used to be the
         // package-unbound row, always, so a save of a package's item minted a
         // second row beside the package's and answered `200` while the item
         // read kept serving the package's row. The draft save already resolved
@@ -21126,11 +21165,11 @@ export class ObjectStackProtocolImplementation implements
             && request.writeFace !== 'package-duplicate'
         ) {
             const writeType = PLURAL_TO_SINGULAR[request.type] ?? request.type;
-            const address = await this.packagelessSaveAddress(
+            const address = await this.packagelessAddress(
                 writeType, request.name, itemDiscriminator(writeType, request.item),
             );
             if (address.candidates.length > 1) {
-                throw packagelessSaveAmbiguityRefusal(request.type, request.name, address.candidates);
+                throw packagelessAddressAmbiguityRefusal('save', request.type, request.name, address.candidates);
             }
             if (address.packageId !== null) request = { ...request, packageId: address.packageId };
         }
@@ -22069,7 +22108,7 @@ export class ObjectStackProtocolImplementation implements
                 // [#23165] …and it names the package whose row this save wrote,
                 // when the save's address names one: the package the caller
                 // named, or the one a direct save naming none resolved to
-                // ({@link packagelessSaveAddress}). A save into the
+                // ({@link packagelessAddress}). A save into the
                 // package-unbound row reads exactly as it did.
                 message: artifactBacked
                     ? `Saved customization overlay (env-wide${receiptPackage}, state=${mode === 'draft' ? 'draft' : 'active'}) — type=${request.type}, name=${request.name} [seq=${result.seq}]`
@@ -24792,7 +24831,7 @@ export class ObjectStackProtocolImplementation implements
          * canonical member's was addressed for every draft of the name, so a
          * second locale's draft answered "no pending draft" and stayed.
          */
-        draft: { type: string; name: string; member?: string },
+        draft: { type: string; name: string; member?: string; packageId?: string | null },
         actor: string | undefined,
     ): Promise<void> {
         await this.deleteMetaItem({
@@ -24801,6 +24840,10 @@ export class ObjectStackProtocolImplementation implements
             state: 'draft',
             ...(actor ? { actor } : {}),
             ...(draft.member !== undefined ? { member: draft.member } : {}),
+            // [#23165, ADR-0048] The package the draft was listed under: the
+            // discard removes THAT package's draft, never another package's
+            // draft of the same name.
+            ...(draft.packageId !== undefined ? { packageId: draft.packageId } : {}),
         });
     }
 
@@ -25072,6 +25115,12 @@ export class ObjectStackProtocolImplementation implements
                         type: row.type,
                         name: row.name,
                         state,
+                        // [#23165, ADR-0048] The package being uninstalled
+                        // owns this row, so the delete names it. Named no
+                        // package, the delete of a name a second package also
+                        // holds was a driver-order pick between the two rows
+                        // (and is now refused).
+                        packageId: request.packageId,
                         ...(request.actor ? { actor: request.actor } : {}),
                         ...(dropStorage ? { dropStorage: true } : {}),
                     });
@@ -27484,6 +27533,16 @@ export class ObjectStackProtocolImplementation implements
         dropStorage?: boolean;
         /** [#22877] The bundle member to reset — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
         member?: string;
+        /**
+         * [#23165, ADR-0048] The package whose row this delete removes, as a
+         * save names the row it writes (`?package=` on the REST door). Named,
+         * the delete removes that package's row and no other. Absent or `null`
+         * names no package: the delete removes the row of the one package the
+         * item's rows at its state are bound to, is refused `409
+         * RESOURCE_CONFLICT` when they are bound to two or more, and with none
+         * removes the package-unbound row ({@link packagelessAddress}).
+         */
+        packageId?: string | null;
     }): Promise<{
         success: boolean;
         message?: string;
@@ -27657,18 +27716,70 @@ export class ObjectStackProtocolImplementation implements
                 name: request.name,
                 org: orgId ?? 'env',
             } as Parameters<typeof repo.delete>[0];
+            // [#23165] The refusal of a package-less delete of an item two or
+            // more packages hold: the door's own verdict, rethrown as it is by
+            // the `catch` below, never re-wrapped as a delete that failed.
+            let addressRefusal: Error | undefined;
 
             try {
                 const targetState: 'active' | 'draft' = request.state === 'draft' ? 'draft' : 'active';
+                // [#23165, ADR-0048] THE ADDRESS of the row this delete removes.
+                // It used to be no address at all: `repo.get` and `repo.delete`
+                // were handed no package, so each took the first row a
+                // package-agnostic `findOne` met — one package's row of an item
+                // two packages hold (the other package's row then served, and
+                // the receipt said "it no longer exists"), or the package's row
+                // when a package-less row sat beside it.
+                //
+                // Named, the delete removes that package's row and no other.
+                // Naming none, it takes the save door's resolution
+                // ({@link packagelessAddress}), read from the rows at the state
+                // it removes: the one package those rows are bound to, the
+                // package-unbound row when they are bound to none, and a
+                // refusal when they are bound to two or more. A draft discard
+                // reads the draft rows, so it removes the draft that exists,
+                // wherever the draft save put it (#11087).
+                //
+                // Resolved here, below every door that judges the item rather
+                // than its row (the organization refusal, the packaged-base
+                // door, the creatable check and the `_lock` gate), as the save
+                // door orders it. The rows read here are also what the receipt
+                // below tells the truth about: what is still stored, and so
+                // still served, once this row is gone.
+                const rowsAtAddress = await this.packagelessAddress(
+                    singularTypeForRepo, request.name, member, targetState,
+                );
+                if (request.packageId == null && rowsAtAddress.candidates.length > 1) {
+                    addressRefusal = packagelessAddressAmbiguityRefusal(
+                        'delete', request.type, request.name, rowsAtAddress.candidates,
+                    );
+                    throw addressRefusal;
+                }
+                const packageId: string | null = request.packageId ?? rowsAtAddress.packageId;
                 // Probe first — "no overlay exists" is a success/no-op, not
                 // a conflict. The repo would otherwise throw ConflictError.
-                const current = await repo.get(ref, { state: targetState, ...memberOption(member) });
+                const current = await repo.get(ref, { state: targetState, packageId, ...memberOption(member) });
                 // [#21899] An origin-gated code-defined item with NO stored row:
                 // the delete would remove nothing, and the item itself is not
                 // removable at runtime — refused with the package door's own
                 // verdict, the one its save gets. Rethrown as it is by the
                 // `catch` below.
                 if (!current && originGatedRefusal !== null) throw originGatedRefusal;
+                // [#23165] A delete NAMING a package that holds no row here, of
+                // an item whose other rows are stored: nothing is removed and
+                // those rows are still served, so neither the registry heal
+                // below nor its "already at artifact default" / "nothing to
+                // delete" claim holds. A delete naming none never lands here:
+                // it addresses a row the read above found.
+                if (!current && request.packageId != null && (rowsAtAddress.candidates.length > 0 || rowsAtAddress.unbound)) {
+                    return {
+                        success: true,
+                        reset: false,
+                        message: targetState === 'draft'
+                            ? `No pending draft of ${request.type}/${request.name} is bound to package '${request.packageId}', so nothing was discarded: ${remainingRowsPhrase(rowsAtAddress.candidates, rowsAtAddress.unbound, 'draft')}.`
+                            : `No row of ${request.type}/${request.name} is bound to package '${request.packageId}', so nothing was deleted: ${remainingRowsPhrase(rowsAtAddress.candidates, rowsAtAddress.unbound, 'row')}.`,
+                    };
+                }
                 if (!current) {
                     // Self-heal: even with no overlay row, a stale runtime
                     // shadow may linger in the registry (e.g. pollution from
@@ -27729,6 +27840,10 @@ export class ObjectStackProtocolImplementation implements
                         ? 'override-artifact'
                         : 'runtime-only',
                     state: targetState,
+                    // [#23165] The row the probe read, by its key — never the
+                    // repository's "any package" match, which takes the first
+                    // row it meets.
+                    packageId,
                     ...memberOption(member),
                 });
 
@@ -27785,6 +27900,12 @@ export class ObjectStackProtocolImplementation implements
                     organizationId: orgId,
                     ...mutationEventMember(singularTypeForRepo, member),
                 });
+                // [#23165] What is still stored at this address once this row
+                // is gone, from the rows the address read already holds.
+                const remainingPackages = rowsAtAddress.candidates.filter((id) => id !== packageId);
+                const unboundRemains = rowsAtAddress.unbound && packageId !== null;
+                const remains = remainingPackages.length > 0 || unboundRemains;
+                const deletedPackage = packageId !== null ? ` (package=${packageId})` : '';
                 return {
                     success: true,
                     reset: true,
@@ -27809,17 +27930,31 @@ export class ObjectStackProtocolImplementation implements
                     // The draft leg discards a pending draft and never claimed
                     // a reset, so it is unchanged. `[seq=…]` stays on every
                     // branch — HMR cursors read it.
+                    //
+                    // [#23165] Both active sentences claim what is left once
+                    // this row is gone, and that is true only when no other row
+                    // of the item is stored at this address: a delete of one
+                    // package's row leaves another package's row, or the
+                    // package-less row beside it, stored and served. Then the
+                    // receipt names what remains instead. A delete of a
+                    // package's row names the package, as the save receipt
+                    // does; a delete of the package-unbound row with nothing
+                    // left reads byte for byte as before.
                     message: (request.state === 'draft')
                         ? `Draft discarded — ${request.type}/${request.name}. [seq=${result.seq}]`
                         : artifactBacked
-                            ? `Customization overlay deleted — ${request.type}/${request.name} reset to artifact default. [seq=${result.seq}]`
-                            : `Deleted ${singularTypeForRepo} '${request.name}' — it no longer exists. [seq=${result.seq}]`,
+                            ? (remains
+                                ? `Customization overlay deleted${deletedPackage} — ${request.type}/${request.name} still carries another overlay: ${remainingRowsPhrase(remainingPackages, unboundRemains, 'row')}. [seq=${result.seq}]`
+                                : `Customization overlay deleted${deletedPackage} — ${request.type}/${request.name} reset to artifact default. [seq=${result.seq}]`)
+                            : (remains
+                                ? `Deleted ${singularTypeForRepo} '${request.name}'${deletedPackage}, and it still exists: ${remainingRowsPhrase(remainingPackages, unboundRemains, 'row')}. [seq=${result.seq}]`
+                                : `Deleted ${singularTypeForRepo} '${request.name}'${deletedPackage} — it no longer exists. [seq=${result.seq}]`),
                 };
             } catch (err: any) {
                 // [#21899] The door's own verdict, not a store failure: it
                 // leaves with its envelope and sentence, never re-wrapped as an
                 // overlay delete that failed.
-                if (err === originGatedRefusal) throw err;
+                if (err === originGatedRefusal || (addressRefusal !== undefined && err === addressRefusal)) throw err;
                 if (err instanceof ConflictError) {
                     // [#21207] Keyed values or none in the text and attributes.
                     const conflict = await this.metadataConflictRefusal(
