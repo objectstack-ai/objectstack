@@ -1643,11 +1643,11 @@ describe('the object/field walk, against a synthetic ledger directory (#19268)',
     // warns on its own since #16094 — but a parse refuses it first, so it is no
     // subject for #11385 either. `mailAssociation` (#22870) opted in as
     // `planned` + `authorWarn` — the inbound-mail correspondent flag on an email
-    // field, declared ahead of the mailbox ingest that reads it — and it leaves
-    // this set when that reader lands and the row flips `live`: a verdict
-    // scheduled to move, so no stable subject either. The synthetic slot below
-    // is warned by nothing shipped.
-    expect([...authorWarnedProperties('field')]).toEqual(['conditionalRequired', 'mailAssociation']);
+    // field, declared ahead of the mailbox ingest that reads it — and left this
+    // set when that reader landed and the row flipped `live` (#22871): a
+    // verdict that moved, so it was never a stable subject either. The
+    // synthetic slot below is warned by nothing shipped.
+    expect([...authorWarnedProperties('field')]).toEqual(['conditionalRequired']);
     expect(
       lintLivenessProperties({
         objects: [{ name: 'widget', fields: [{ name: 'a', synthWarnedSlot: true }] }],
