@@ -61,8 +61,9 @@
  *     IDIOM note at the top of `.github/workflows/lint.yml` carries that lane's
  *     verbatim scope, and it is pointed at rather than restated here.
  *   - INDEPENDENTLY REPRODUCIBLE. Anyone can audit a ceiling without running
- *     this script: `ceil($(wc -c < file) / 4)`. A tokenizer's count can only be
- *     checked by re-running the tokenizer.
+ *     this script: `ceil($(wc -c < file) / 4)` — on a prerelease tree, first
+ *     subtract the release stamp's prerelease bytes (the one exclusion below).
+ *     A tokenizer's count can only be checked by re-running the tokenizer.
  *
  * ~4 bytes per token is the standard rule of thumb for BPE over English prose
  * and markdown, which is what this catalog is. Its KNOWN limitation, stated
@@ -72,6 +73,26 @@
  * units — 0.2%, an order of magnitude below the ratchet's own resolution. If
  * the catalog ever turns substantially non-Latin, the convention needs
  * revisiting rather than the ceilings.
+ *
+ * ONE EXCLUSION — the release stamp's prerelease segment (maintainer ruling,
+ * route A of decision record 6138951701, verbatim: 「A 剥预发布后缀 (Recommended)」).
+ * A published SKILL.md's frontmatter `metadata.version` is not authored text:
+ * the root `version` script writes it from `@objectstack/spec`'s version
+ * (`scripts/check-skill-compatibility-version.mjs --fix`, whose check reds on
+ * any other value). Under Changesets pre mode that stamp grows from `"17.7.0"`
+ * to `"18.0.0-next.0"` — 7 bytes no author wrote and no author can pay for by
+ * deleting text — so a file at zero headroom went red on the Version Packages
+ * PR alone. The semver prerelease segment of that ONE stamp (`-next.0`,
+ * `-next.12`) is therefore not priced: the stamp counts at its stable width,
+ * the width every ceiling was measured at. Nothing else moves — a
+ * prerelease-shaped string anywhere else in a file, a stamp-shaped line in a
+ * file the version script does not stamp, and every byte of a stable tree
+ * (so `main`'s reading) are priced exactly as before. Where the stamp is, and
+ * which files carry one, are read through that script's own
+ * `extractMetadataVersion` and `stampedSkillPaths`, never a second parser here.
+ * Hand audit on a prerelease tree: `ceil(($(wc -c < file) - N) / 4)`, where N
+ * is the byte length of the segment after the stamp's patch number (`-next.0`
+ * is 7, `-next.12` is 8); on a stable stamp N is 0.
  *
  * ⚠️ Counts produced here are comparable ONLY against other counts produced
  * here. They are not an estimate of any specific model's tokenizer, and the
@@ -172,6 +193,9 @@ import { isEntrypoint } from './invoked-as.mjs';
 // see the boundary section in the header. #11705's ruling forbids a second
 // mechanism, so this gate consults the register the governed-merge fork owns.
 import { generatedExceptionFor } from './pm/check-governed-merges.mjs';
+// The stamp's ONE reader and the stamped set, from the script that writes the
+// stamp — see "ONE EXCLUSION" in the header.
+import { extractMetadataVersion, stampedSkillPaths } from './check-skill-compatibility-version.mjs';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const REPO_ROOT = resolve(HERE, '..');
@@ -595,6 +619,38 @@ export function countTokens(text) {
   return Math.ceil(Buffer.byteLength(text, 'utf8') / 4);
 }
 
+/** A semver version carrying a prerelease segment; group 1 is the segment. Build metadata never matches. */
+const STAMP_PRERELEASE_RE = /^\d+\.\d+\.\d+(-[0-9A-Za-z][0-9A-Za-z.-]*)$/;
+
+/**
+ * The prerelease segment of a file's frontmatter `metadata.version` stamp
+ * (`-next.0` of `18.0.0-next.0`), or `''` when the file has no stamp or a
+ * stable one. Read with the stamp writer's own parser — see "ONE EXCLUSION".
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+export function stampPrerelease(text) {
+  const stamp = extractMetadataVersion(text);
+  if (!stamp.ok) return '';
+  return STAMP_PRERELEASE_RE.exec(stamp.value)?.[1] ?? '';
+}
+
+/**
+ * The count the gate judges: `countTokens`, less the stamp's prerelease
+ * segment when the file is one the version script stamps. Every other file,
+ * and every file on a stable tree, prices byte-for-byte as `countTokens`.
+ *
+ * @param {string} text
+ * @param {{stamped?: boolean}} [options] is this file in `stampedSkillPaths()`?
+ * @returns {number}
+ */
+export function pricedTokens(text, { stamped = false } = {}) {
+  if (text.length === 0) return 0;
+  const unpriced = stamped ? Buffer.byteLength(stampPrerelease(text), 'utf8') : 0;
+  return Math.ceil((Buffer.byteLength(text, 'utf8') - unpriced) / 4);
+}
+
 /**
  * Every file that ships inside a published skill — read off the filesystem,
  * never a hand list, walked RECURSIVELY (#12392).
@@ -749,6 +805,7 @@ export function reportLines(rows) {
 
 function run() {
   const covered = [...new Set([...discoverBundleFiles(), ...CEILINGS.keys()])].sort();
+  const stampedSet = new Set(stampedSkillPaths());
   const rows = [];
   let failed = 0;
 
@@ -761,17 +818,24 @@ function run() {
       failed++;
       continue;
     }
-    const tokens = countTokens(text);
+    const stamped = stampedSet.has(rel);
+    const tokens = pricedTokens(text, { stamped });
+    const segment = stamped ? stampPrerelease(text) : '';
+    // Empty on a stable tree, so `main`'s lines are byte-identical to before.
+    const note = segment
+      ? ` (the \`${segment}\` prerelease segment of its metadata.version stamp, `
+        + `${Buffer.byteLength(segment, 'utf8')} bytes, is not priced)`
+      : '';
     const ceiling = CEILINGS.get(rel);
     const generated = generatorOwning(rel);
     rows.push({ rel, tokens, ceiling, generated });
     const v = verdict(rel, tokens, ceiling, generated);
     if (!v.ok) {
       failed++;
-      console.error(`✗ check-skills-token-ratchet: ${v.msg}`);
+      console.error(`✗ check-skills-token-ratchet: ${v.msg}${note}`);
       continue;
     }
-    console.log(`✓ check-skills-token-ratchet: ${v.msg}`);
+    console.log(`✓ check-skills-token-ratchet: ${v.msg}${note}`);
   }
 
   const ratcheted = rows.filter((r) => !r.generated).length;
@@ -866,6 +930,17 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'five ASCII bytes round up to two': 1,
   'the unit is UTF-8 BYTES, not JS characters (a 3-byte CJK char is not free)': 1,
   'empty text counts zero, which the verdict turns red': 1,
+  'the stamp\'s prerelease segment is read off metadata.version': 1,
+  'a zero-headroom SKILL.md stamped -next.0 is green: the stamp prices at stable width': 1,
+  'priced whole, that same file is red (the row above is not vacuous)': 1,
+  'one authored byte over a zero-headroom ceiling is red under a stable stamp': 1,
+  'one authored byte over is red under a prerelease stamp too: the strip buys an author nothing': 1,
+  'a multi-digit prerelease (-next.12) prices the same as a stable stamp': 1,
+  'a stable stamp prices byte-for-byte as countTokens': 1,
+  'every real bundle file without a prerelease stamp prices exactly as countTokens': 1,
+  'a prerelease-shaped string outside the stamp is priced': 1,
+  'a file the version script does not stamp is priced whole': 1,
+  'the stamped set is the version script\'s: exactly the real SKILL.md files': 1,
   'the catalog is discovered from disk': 1,
   'every discovered file lives under a published skill directory': 1,
   'a discovered file with no ceiling is RED': 1,
@@ -920,7 +995,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // the literal above, so the roster falls below this number; the table
 // cross-check in the floor block is the other half, and names WHICH label
 // collided.
-const SELF_TEST_BATTERY_FLOOR = 64;
+const SELF_TEST_BATTERY_FLOOR = 75;
 
 function selfTest() {
   const rel = 'skills/objectstack-ui/SKILL.md';
@@ -955,6 +1030,25 @@ function selfTest() {
   // and the case below asks only that every one of them is priced.
   const skillMdOnDisk = discoverBundleFiles().filter((p) => /^skills\/[^/]+\/SKILL\.md$/.test(p)).length;
 
+  // The release-stamp fixtures ("ONE EXCLUSION" in the header). Padded so the
+  // STABLE spelling is a whole number of tokens: a ceiling set at its count has
+  // zero headroom, so one more byte anywhere is red — the row that proves the
+  // padding is right is the "one authored byte over" pair below.
+  const stampHead = (v) => `---\nname: x\nmetadata:\n  author: objectstack-ai\n  version: "${v}"\n---\n\n# body\n`;
+  const stampPad = '.'.repeat((4 - (Buffer.byteLength(stampHead('18.0.0'), 'utf8') % 4)) % 4);
+  const stampFixture = (v, extra = '') => `${stampHead(v)}${stampPad}${extra}`;
+  const stableStamp = stampFixture('18.0.0');
+  const next0Stamp = stampFixture('18.0.0-next.0');
+  const zeroHeadroom = countTokens(stableStamp);
+  const proseStamp = stampFixture('18.0.0', 'pin 18.0.0-next.0 in prose\n');
+  const stampedOnDisk = new Set(stampedSkillPaths());
+  const repricedOnStableStamp = discovered.filter((p) => {
+    const text = readFileSync(join(REPO_ROOT, p), 'utf8');
+    const stamped = stampedOnDisk.has(p);
+    if (stamped && stampPrerelease(text) !== '') return false;
+    return pricedTokens(text, { stamped }) !== countTokens(text);
+  });
+
   const cases = [
     // ── ratchet semantics ────────────────────────────────────────────────
     ['under the ceiling -> green', verdict(rel, 25000, 25154).ok, true],
@@ -988,6 +1082,28 @@ function selfTest() {
     ['five ASCII bytes round up to two', countTokens('abcde'), 2],
     ['the unit is UTF-8 BYTES, not JS characters (a 3-byte CJK char is not free)', countTokens('中'), 1],
     ['empty text counts zero, which the verdict turns red', countTokens(''), 0],
+
+    // ── the release stamp's prerelease segment (ruling record 6138951701) ──
+    ['the stamp\'s prerelease segment is read off metadata.version', stampPrerelease(next0Stamp), '-next.0'],
+    ['a zero-headroom SKILL.md stamped -next.0 is green: the stamp prices at stable width',
+      verdict(rel, pricedTokens(next0Stamp, { stamped: true }), zeroHeadroom).ok, true],
+    ['priced whole, that same file is red (the row above is not vacuous)',
+      verdict(rel, countTokens(next0Stamp), zeroHeadroom).ok, false],
+    ['one authored byte over a zero-headroom ceiling is red under a stable stamp',
+      verdict(rel, pricedTokens(stampFixture('18.0.0', 'x'), { stamped: true }), zeroHeadroom).ok, false],
+    ['one authored byte over is red under a prerelease stamp too: the strip buys an author nothing',
+      verdict(rel, pricedTokens(stampFixture('18.0.0-next.0', 'x'), { stamped: true }), zeroHeadroom).ok, false],
+    ['a multi-digit prerelease (-next.12) prices the same as a stable stamp',
+      pricedTokens(stampFixture('18.0.0-next.12'), { stamped: true }), zeroHeadroom],
+    ['a stable stamp prices byte-for-byte as countTokens',
+      pricedTokens(stableStamp, { stamped: true }), countTokens(stableStamp)],
+    ['every real bundle file without a prerelease stamp prices exactly as countTokens', repricedOnStableStamp, []],
+    ['a prerelease-shaped string outside the stamp is priced',
+      pricedTokens(proseStamp, { stamped: true }), countTokens(proseStamp)],
+    ['a file the version script does not stamp is priced whole',
+      pricedTokens(next0Stamp, { stamped: false }), countTokens(next0Stamp)],
+    ['the stamped set is the version script\'s: exactly the real SKILL.md files',
+      [...stampedOnDisk], discovered.filter((p) => /^skills\/[^/]+\/SKILL\.md$/.test(p))],
 
     // ── enumeration, never a hand list ───────────────────────────────────
     ['the catalog is discovered from disk', discovered.length > 0, true],
