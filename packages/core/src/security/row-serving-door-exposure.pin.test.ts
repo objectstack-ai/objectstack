@@ -95,6 +95,13 @@ const CALLERS: Record<string, Classification> = {
     kind: 'not-a-door',
     reason: 'the provider: it implements the admission and binds it into the security service it registers; it serves no rows',
   },
+  'packages/objectql/src/engine.ts': {
+    kind: 'not-a-door',
+    reason:
+      'the ReadableIds composition (ADR-0139 D2): it asks the admission of a PARENT object to compose the scope of a `$in` leaf '
+      + 'that only narrows the read the caller addressed, whose own door already admitted it; no row and no field of the '
+      + 'parent is served, and a refused parent answers `$in: []`',
+  },
 };
 
 const SCAN_TIMEOUT_MS = 60_000;
