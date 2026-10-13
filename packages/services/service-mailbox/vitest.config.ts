@@ -20,6 +20,8 @@ export default defineConfig({
   },
   resolve: {
     alias: [
+      { find: /^@objectstack\/connector-imap$/, replacement: path.resolve(__dirname, '../../connectors/connector-imap/src/index.ts') },
+      { find: /^@objectstack\/connector-imap\/testing$/, replacement: path.resolve(__dirname, '../../connectors/connector-imap/src/testing.ts') },
       { find: /^@objectstack\/lint$/, replacement: path.resolve(__dirname, '../../lint/src/index.ts') },
       { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
       { find: /^@objectstack\/types$/, replacement: path.resolve(__dirname, '../../types/src/index.ts') },

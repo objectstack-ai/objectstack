@@ -5,7 +5,10 @@ import { ADMIN_FULL_ACCESS_CAPABILITIES } from '@objectstack/spec';
 import { PLATFORM_CAPABILITIES } from '@objectstack/spec/security';
 import { CAPABILITY_PROVIDERS } from '@objectstack/core';
 import {
+  DEFAULT_MAILBOX_POLL_INTERVAL_MS,
+  MAILBOX_SYNC_JOB,
   MailboxServicePlugin,
+  MailboxSyncService,
   MailIngestService,
   MAILBOX_ADMIN_CAPABILITY,
   MAILBOX_SERVICE,
@@ -80,6 +83,51 @@ describe('MailboxServicePlugin', () => {
   });
 });
 
+describe('MailboxServicePlugin — the IMAP sync composition', () => {
+  const accountFor = () => null;
+
+  async function ready(plugin: MailboxServicePlugin, services: Record<string, unknown> = {}) {
+    const { ctx, hooks } = fakeContext();
+    const logs: Record<'info' | 'warn' | 'error', string[]> = { info: [], warn: [], error: [] };
+    ctx.logger = {
+      info: (m: string) => logs.info.push(m),
+      warn: (m: string) => logs.warn.push(m),
+      error: (m: string) => logs.error.push(m),
+    };
+    const getService = ctx.getService;
+    ctx.getService = (name: string) => (name in services ? services[name] : getService(name));
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    for (const fn of hooks['kernel:ready'] ?? []) await fn();
+    return logs;
+  }
+
+  it('says at boot, once and at info, that no mailbox is synced when no IMAP account source is composed', async () => {
+    const logs = await ready(new MailboxServicePlugin());
+    expect(logs.info.filter((m) => /no IMAP account source is composed/.test(m))).toHaveLength(1);
+    expect(new MailboxServicePlugin().syncService).toBeUndefined();
+  });
+
+  it('warns that nothing is polled when the IMAP sync is composed without a job service', async () => {
+    const logs = await ready(new MailboxServicePlugin({ imap: { accountFor } }));
+    expect(logs.warn.filter((m) => /no job service is, so no mailbox is polled/.test(m))).toHaveLength(1);
+  });
+
+  it('schedules the sync as one interval job, at the default poll interval unless composed otherwise', async () => {
+    const scheduled: Array<[string, unknown]> = [];
+    const job = { schedule: async (name: string, schedule: unknown) => void scheduled.push([name, schedule]), cancel: async () => {} };
+    const plugin = new MailboxServicePlugin({ imap: { accountFor } });
+    await ready(plugin, { job });
+    expect(scheduled).toEqual([[MAILBOX_SYNC_JOB, { type: 'interval', intervalMs: DEFAULT_MAILBOX_POLL_INTERVAL_MS }]]);
+    expect(plugin.syncService).toBeInstanceOf(MailboxSyncService);
+  });
+
+  it('refuses an IMAP composition without an account source at init, instead of syncing nothing', async () => {
+    const { ctx } = fakeContext();
+    await expect(new MailboxServicePlugin({ imap: {} as never }).init(ctx)).rejects.toThrow(/imap\.accountFor/);
+  });
+});
+
 describe('the mailbox administrator capability', () => {
   it('is the curated organization capability the platform declares', () => {
     expect(PLATFORM_CAPABILITIES.find((c) => c.name === MAILBOX_ADMIN_CAPABILITY)?.scope).toBe('org');
@@ -104,6 +152,13 @@ describe('the inbound-mail objects', () => {
       expect(object.managedBy, object.name).toBe('engine-owned');
       expect(object.enable?.apiMethods, object.name).toEqual(['get', 'list']);
     }
+  });
+
+  it('keep the IMAP sync cursor on the mailbox, written by the sync only, and no credential at all', () => {
+    for (const field of ['imap_folder', 'imap_uid_validity', 'imap_last_uid', 'imap_synced_at']) {
+      expect(SysMailbox.fields[field as keyof typeof SysMailbox.fields]?.readonly, field).toBe(true);
+    }
+    expect(Object.values(SysMailbox.fields).some((f) => f.type === 'secret' || f.type === 'password')).toBe(false);
   });
 
   it('let a message carry attachments by file reference', () => {

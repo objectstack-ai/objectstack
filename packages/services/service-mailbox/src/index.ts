@@ -1,6 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-export { MailboxServicePlugin, MAILBOX_SERVICE_MANIFEST_ID } from './mailbox-service-plugin.js';
+export {
+  MailboxServicePlugin,
+  MAILBOX_SERVICE_MANIFEST_ID,
+  MAILBOX_SYNC_JOB,
+  DEFAULT_MAILBOX_POLL_INTERVAL_MS,
+  type MailboxImapSyncOptions,
+  type MailboxServicePluginOptions,
+} from './mailbox-service-plugin.js';
 export { SysMailbox, SysMailMessage, SysMailAssociation } from './objects/index.js';
 export {
   MAILBOX_ADMIN_CAPABILITY,
@@ -35,3 +42,19 @@ export {
   type MailboxServiceErrorCode,
   type RawMailMessage,
 } from './ingest/index.js';
+export {
+  DEFAULT_SYNC_BATCH_SIZE,
+  DEFAULT_SYNC_FOLDER,
+  DEFAULT_SYNC_MAX_MESSAGE_BYTES,
+  DEFAULT_SYNC_MAX_MESSAGES_PER_RUN,
+  MailboxSyncService,
+  type MailboxAccountResolver,
+  type MailboxImapAccount,
+  type MailboxSyncAllResult,
+  type MailboxSyncResult,
+  type MailboxSyncServiceOptions,
+  type MailboxSyncSkipReason,
+  type MailboxSyncTarget,
+  type MailSyncEngine,
+  type MailSyncLogger,
+} from './sync/index.js';
