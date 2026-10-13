@@ -1,5 +1,256 @@
 # @objectstack/trigger-api
 
+## 18.0.0-next.0
+
+### Major Changes
+
+- 5ce6773: feat(trigger-api)!: the inbound hook door refuses the body-only `x-objectstack-signature` form, so only the timestamped, replay-protected form verifies
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing an ObjectStack author writes moves: no spec key, metadata shape, authorable spelling, stored row, type or export signature is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a runtime HTTP door's accept set: a signature value a third-party sender computes, outside any project's metadata or code. The sending side's guidance already teaches the one accepted form, and this changeset points to it rather than prescribing a rewrite. The other categories are closed on facts: both bumped packages publish (not unpublished); no ADR-0087 id covers this door and this diff adds none (not registered / already-registered); and no TypeScript declaration moves, since `verifySignature` keeps its signature and only its answer for one input narrows (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: an accept-set narrowing on a runtime door, shipped as `major` on the v18 line (`.changeset/pre.json` is open on `main` in `next` pre mode, so the release is `18.0.0-next.*`).
+  
+  **What narrows, from → to.**
+  
+  - `POST /api/v1/automation/hooks/:flowName/:hookId`, through the self-hosted mount and through `ITriggerApiService.handleInboundHook` alike. A post whose `x-objectstack-signature` was the body-only value (`sha256=` and the hex HMAC-SHA256 of the raw body under the flow's secret) was accepted, `202` and enqueued, with a deprecation `warn` line once per armed hook. It now gets the same `401 INVALID_SIGNATURE` every post that does not verify gets, and nothing is enqueued, even when the value is the secret's HMAC of the body. The body-only form signs no time, so it carries no replay protection.
+  - The one accepted form is the timestamped one: `t=<unix seconds>,v1=<hex>`, the HMAC-SHA256 of `<t>.<raw body>` under the flow's secret, refused when `t` is more than 300 seconds from the server clock.
+  - The deprecation line is gone. The refusal's `warn` line carries the cause `signature-body-only`, beside `unknown-flow`, `wrong-hook-id`, `signature-absent`, `signature-malformed`, `signature-mismatch` and `signature-outside-window`. It never carries the secret, the signature value or the body.
+  - `verifySignature(secret, rawBody, header)`, exported by `@objectstack/trigger-api`, answers as the door does: `true` only for the timestamped form inside its window, `false` for a body-only value. Its signature is unchanged.
+  
+  **Unchanged: the outbound contract.** `@objectstack/core`'s `verifyHttpSignature` still verifies both forms, and `signHttpBody` still writes the body-only value: the messaging outbox and the flow `http` node sign it for third-party receivers, as the outbound webhook contract publishes. Only this inbound door refuses it.
+  
+  **Who sees a difference.** A sender that signs the timestamped form, as the inbound-hook guidance teaches (the `objectstack-automation` skill's Inbound webhook section, `os explain flow-api-trigger-secret-missing`, `signHttpBodyAt` in `@objectstack/core`), sees none. A sender still on the body-only value now gets `401`, and the trigger's `warn` line for its post names `signature-body-only`, which tells an operator its secret is right and its signing form is the retired one.
+  
+  **`@objectstack/spec`.** The `ITriggerApiService.handleInboundHook` docblock names the timestamped form as the only one accepted and the body-only form as refused. The type is unchanged.
+
+### Minor Changes
+
+- 7b0a9c9: feat(core,trigger-api): a timestamped `X-Objectstack-Signature` form with a five-minute tolerance window, accepted by the inbound flow hook beside the body-only form
+  
+  Clause-②: yes
+  
+  - **The new form.** `x-objectstack-signature: t=<unix seconds>,v1=<hex>`, where the hex is the lowercase HMAC-SHA256 of `<t>.<raw body>` under the flow's secret. The timestamp is inside the signed material, so it cannot be changed without the secret. The inbound hook (`POST /api/v1/automation/hooks/:flowName/:hookId`) refuses the value once `t` is more than 300 seconds from the server's clock, in either direction, so a captured post stops verifying five minutes after it was signed.
+  - **Refusals.** A value that starts with `t=` is judged by the timestamped form alone. If it is malformed, carries the wrong HMAC, carries the body-only HMAC, or has a `t` outside the window, the answer is the same `401 INVALID_SIGNATURE` a bad signature gets, and nothing is enqueued.
+  - **Body-only signatures keep working.** `sha256=<hex HMAC-SHA256 of the raw body>` is still accepted, so no existing sender breaks. It signs no time, so a captured post can be replayed, and it is now deprecated: the trigger logs one `warn` line per armed hook that names the flow and the hook, the first time that hook accepts a body-only post.
+  - **`@objectstack/core` exports.** `signHttpBodyAt(body, secret, timestampSeconds)` signs the new form. `verifyHttpSignature(body, secret, header)` verifies both forms and returns an `HttpSignatureVerdict` (`{ valid: true, scheme: 'v1' | 'body-only' }`, or `{ valid: false, reason }`). `HTTP_SIGNATURE_TOLERANCE_SECONDS` is `300`. They sit beside `signHttpBody` and `HTTP_SIGNATURE_HEADER` in the one definition of the scheme. `@objectstack/trigger-api`'s `verifySignature` keeps its signature and now verifies through it, so it accepts both forms.
+  - **Unchanged.** ObjectStack's own senders, the messaging HTTP outbox (webhooks) and the flow `http` node, still send the body-only form. Receivers outside ObjectStack verify exactly that today.
+  
+  **To adopt it as a sender.** Sign at send time, not at enqueue: `t = Math.floor(Date.now() / 1000)`, then send `t=<t>,v1=<hex HMAC-SHA256 of "<t>.<raw body>">` in `x-objectstack-signature`. From TypeScript, call `signHttpBodyAt(rawBody, secret, t)`.
+- 75b6d6a: feat(trigger-api): the `trigger-api` service serves the inbound hook from a web-standard `Request` (`ITriggerApiService.handleInboundHook`), and the self-hosted route is found under `http.server` too (#22774)
+  
+  Clause-②: yes
+  
+  - **What is new.** Wherever `ApiTriggerPlugin` installs its `api` trigger, it now registers the `trigger-api` service and implements its optional `ITriggerApiService.handleInboundHook(request, hook)` member. That member is the inbound hook, `POST /api/v1/automation/hooks/:flowName/:hookId`, taking a `Request` and returning a `Response`, with no raw app, no Hono context and no `http.server`. A hosted tenant kernel owns no socket, so this is how the door reaches it. Its one caller is the runtime HTTP dispatcher's exact `POST /automation/hooks/:flowName/:hookId` domain, which lands separately. The flow name and the hook id come from `hook`, the route the caller matched, and are never parsed again from the URL. The body is read once, from the request itself, and verified as the sender's own bytes.
+  - **One door, two faces.** The member and the self-hosted route run the same code: the same hook match, the same per-hook secret, read at that moment, the same constant-time verification of `x-objectstack-signature` (the timestamped form and the deprecated body-only form alike), done before anything is enqueued, and the same answer for every outcome. For the same request they answer the same status, the same `Content-Type: application/json` and the same bytes: `401 INVALID_SIGNATURE` for every post that does not verify, `503 SERVICE_UNAVAILABLE` when the hook's secret cannot be read or no queue service is registered, `400 INVALID_REQUEST` for a body that is not a JSON object, `503 ENQUEUE_FAILED`, or `202` with `{ accepted: true, messageId }`.
+  - **No trigger, no service.** Where the automation service is absent, no trigger is installed, so the `trigger-api` slot stays empty (as no route is mounted). The member's caller then answers its typed absence. The boot `warn` line says so.
+  - **The route is found under `http.server` too.** The plugin reads `http.server` first, then the deprecated `http-server` alias. A host that registers its server only as `http.server` (the runtime's `config.server` path) now gets the self-hosted route. One that registers a single server under both names still gets it once. Where the two names hold two servers, the route goes on the `http.server` one.
+  - **The self-hosted route is otherwise unchanged.** Where it was mounted before, it answers the same status, headers and bytes for the same request, and the path is never mounted twice.
+- efcbac7: fix(trigger-api,spec): every inbound hook post that does not verify gets one answer, `401 INVALID_SIGNATURE`, whatever its flow and hook id
+  
+  Clause-②: yes
+  
+  - **FROM → TO.** On `POST /api/v1/automation/hooks/:flowName/:hookId`, a post that named no armed flow, or the wrong hook id, answered `404 RESOURCE_NOT_FOUND`, while a post naming an armed flow and its hook id with an absent or bad `x-objectstack-signature` answered `401 INVALID_SIGNATURE`. Now all four answer `401 INVALID_SIGNATURE` with the same body, so the answer no longer tells an armed flow name from an unarmed one, whichever hook id a flow is armed with.
+  - **Who sees a difference.** A correctly configured sender (the flow's URL, its hook id, its secret) sees none: it still gets `202`. A sender posting to a flow that is not armed, or with a hook id that was rotated away, now gets `401` where it got `404`. A sender with a wrong secret or signing code still gets `401`, as before.
+  - **The cause is in the server log.** The trigger logs one `warn` line per refused post, with the cause and the flow name the post carried as structured fields: `cause` is one of `unknown-flow`, `wrong-hook-id`, `signature-absent`, `signature-malformed`, `signature-mismatch` or `signature-outside-window`. The line never carries the secret, the signature value or the body.
+  - **Unchanged: the `503` residual.** A post that names an armed flow and its hook id while that hook's secret cannot be read still answers `503 SERVICE_UNAVAILABLE`, signed or not, without verifying. It stays a `503` on purpose: it is the deployment's fault, a sender retries it, and it lasts only while the secret cannot be read. A wrong hook id never reaches the secret read, so it gets the uniform `401` even then.
+  - **`@objectstack/spec`.** The `ITriggerApiService.handleInboundHook` docblock states the one refusal and names the `503` as its residual. The type is unchanged.
+  
+  **To adopt it.** A sender or monitor that read `404` from this route as "wrong URL" can no longer tell that from a bad signature by the answer: read the trigger's `warn` line for the post instead, whose `cause` names which one it was.
+
+### Patch Changes
+
+- Updated dependencies [317cddd]
+- Updated dependencies [fec87e7]
+- Updated dependencies [c28f317]
+- Updated dependencies [2e10c9a]
+- Updated dependencies [67b669e]
+- Updated dependencies [0253192]
+- Updated dependencies [bfc15d2]
+- Updated dependencies [2ff0825]
+- Updated dependencies [7aa8d51]
+- Updated dependencies [95a8435]
+- Updated dependencies [60bcfe7]
+- Updated dependencies [d112087]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [7de0265]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [c8b062f]
+- Updated dependencies [117d34d]
+- Updated dependencies [6729e10]
+- Updated dependencies [1920cf3]
+- Updated dependencies [41d0d40]
+- Updated dependencies [c52bfb4]
+- Updated dependencies [c7d6037]
+- Updated dependencies [72b26ed]
+- Updated dependencies [2d21b9c]
+- Updated dependencies [f66fdc7]
+- Updated dependencies [9fdb127]
+- Updated dependencies [615c696]
+- Updated dependencies [968acc8]
+- Updated dependencies [111ffff]
+- Updated dependencies [12b9daf]
+- Updated dependencies [d85615d]
+- Updated dependencies [6a06e3b]
+- Updated dependencies [0e9e7b7]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [9c93ce6]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [04e776b]
+- Updated dependencies [a7df552]
+- Updated dependencies [2f70c22]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [a87d8be]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [ad381fd]
+- Updated dependencies [2b61f2d]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3b49318]
+- Updated dependencies [4e9fe9f]
+- Updated dependencies [9ad3d24]
+- Updated dependencies [326a90a]
+- Updated dependencies [9fe7448]
+- Updated dependencies [2e11d90]
+- Updated dependencies [4578c56]
+- Updated dependencies [c512c25]
+- Updated dependencies [215e662]
+- Updated dependencies [3d886ee]
+- Updated dependencies [d8d0711]
+- Updated dependencies [f6e1d49]
+- Updated dependencies [e9a1f5c]
+- Updated dependencies [40a6ee5]
+- Updated dependencies [5910b5e]
+- Updated dependencies [7098aca]
+- Updated dependencies [97610a5]
+- Updated dependencies [081e6a0]
+- Updated dependencies [1884948]
+- Updated dependencies [3089848]
+- Updated dependencies [e23eccb]
+- Updated dependencies [ac8f2c5]
+- Updated dependencies [db9cf80]
+- Updated dependencies [e75dced]
+- Updated dependencies [9af0005]
+- Updated dependencies [440bed6]
+- Updated dependencies [b2549a8]
+- Updated dependencies [ee8751d]
+- Updated dependencies [96e4be4]
+- Updated dependencies [35ef501]
+- Updated dependencies [faf6348]
+- Updated dependencies [557ae7c]
+- Updated dependencies [6a3fe25]
+- Updated dependencies [7731d70]
+- Updated dependencies [3073b72]
+- Updated dependencies [c76edeb]
+- Updated dependencies [5b12503]
+- Updated dependencies [514bf3c]
+- Updated dependencies [20e7d52]
+- Updated dependencies [b3a3634]
+- Updated dependencies [3e72f93]
+- Updated dependencies [f89b5f5]
+- Updated dependencies [d25b187]
+- Updated dependencies [0e00d36]
+- Updated dependencies [d748ae8]
+- Updated dependencies [dab6bf4]
+- Updated dependencies [ed1de8c]
+- Updated dependencies [a00cf99]
+- Updated dependencies [5fb1746]
+- Updated dependencies [29a163f]
+- Updated dependencies [e223152]
+- Updated dependencies [9f5eca5]
+- Updated dependencies [9963322]
+- Updated dependencies [b27b894]
+- Updated dependencies [874a38d]
+- Updated dependencies [02d9f69]
+- Updated dependencies [f53f14b]
+- Updated dependencies [a800912]
+- Updated dependencies [d973c34]
+- Updated dependencies [156ddfa]
+- Updated dependencies [5081090]
+- Updated dependencies [b6eb25f]
+- Updated dependencies [165587e]
+- Updated dependencies [e04759d]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [b32ee3e]
+- Updated dependencies [91f46d0]
+- Updated dependencies [e5899a6]
+- Updated dependencies [d7b26df]
+- Updated dependencies [490cb6d]
+- Updated dependencies [e865300]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [c74d843]
+- Updated dependencies [6d5191e]
+- Updated dependencies [85edd61]
+- Updated dependencies [e84aeb3]
+- Updated dependencies [322ff1e]
+- Updated dependencies [7b0a9c9]
+- Updated dependencies [5fc57b3]
+- Updated dependencies [fe58bbc]
+- Updated dependencies [c4e7fa5]
+- Updated dependencies [581ca7d]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [b7cd1af]
+- Updated dependencies [9814035]
+- Updated dependencies [55382dc]
+- Updated dependencies [b1d701b]
+- Updated dependencies [efcbac7]
+- Updated dependencies [51f36e7]
+- Updated dependencies [20028df]
+- Updated dependencies [69d4218]
+- Updated dependencies [5ce6773]
+- Updated dependencies [9432bac]
+- Updated dependencies [3f69471]
+- Updated dependencies [e5687cb]
+- Updated dependencies [1e62f71]
+- Updated dependencies [ec7f7f8]
+- Updated dependencies [038d4c9]
+- Updated dependencies [147a0d1]
+- Updated dependencies [1959aac]
+- Updated dependencies [e1deaef]
+- Updated dependencies [1badd31]
+- Updated dependencies [55828c5]
+- Updated dependencies [7856110]
+- Updated dependencies [9b37edb]
+- Updated dependencies [a22e67b]
+- Updated dependencies [62ce45d]
+- Updated dependencies [39e93ef]
+- Updated dependencies [02bec6c]
+- Updated dependencies [719183f]
+- Updated dependencies [8464380]
+- Updated dependencies [252a582]
+- Updated dependencies [f931e76]
+- Updated dependencies [e5f9f01]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [de70e97]
+- Updated dependencies [74c4b34]
+- Updated dependencies [e040b8c]
+- Updated dependencies [f451a59]
+- Updated dependencies [ba95607]
+- Updated dependencies [b53b949]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [1e44436]
+- Updated dependencies [2acff87]
+- Updated dependencies [299a2c6]
+- Updated dependencies [e23eccb]
+- Updated dependencies [bf492c8]
+- Updated dependencies [c7a3234]
+  - @objectstack/spec@18.0.0-next.0
+  - @objectstack/core@18.0.0-next.0
+
 ## 17.7.0
 
 ### Minor Changes

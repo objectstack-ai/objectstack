@@ -12,7 +12,7 @@ import { explainRule } from './rule-explanations.js';
 // one line of at most 200 characters — every firing variant this suite
 // exercises, not a chosen few. Run the whole file: those cases read what the
 // cases above fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateViewContainers: typeof validateViewContainersUnrecorded = (...args) => {
   const findings = validateViewContainersUnrecorded(...args);
   fired.push(...findings);
@@ -192,5 +192,32 @@ describe('[#22161] one-line verdicts — view-container-shape', () => {
       expect(f.message, f.rule).not.toContain('\n');
       expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
     }
+  });
+});
+
+// [#22161] Slice 16: the `fix:` lines. The ViewItem arm names its two ways out
+// in one line; that machine-assembled manifests carry it under `viewItems:` is
+// the explanation's.
+describe('[#22161] one-line fixes — view-container-shape', () => {
+  it('every `fix:` line the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === VIEW_CONTAINER_SHAPE);
+    // Coverage control: all four arms fired.
+    for (const arm of ['A ViewItem record', '`viewItems` is', 'Flat list-view object', 'View container defines no views']) {
+      expect(converted.some((f) => f.message.startsWith(arm)), arm).toBe(true);
+    }
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('the ViewItem arm reads as one remedy', () => {
+    const [f] = validateViewContainers({
+      views: [{ name: 'task.pipeline', object: 'task', viewKind: 'list', config: { type: 'kanban', columns: ['title'] } }],
+    });
+    expect(f!.hint).toBe(
+      'Wrap it in a defineView container (defineView({ list: { type, data, columns, ... }, listViews: { ... } })), ' +
+        'or author it through the metadata door (Studio / `PUT /api/v1/meta/view`)',
+    );
   });
 });

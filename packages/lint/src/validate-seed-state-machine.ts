@@ -157,10 +157,11 @@ export function validateSeedStateMachine(stack: AnyRec): SeedStateMachineFinding
             `seeds '${rule.field}=${value}', which the '${objectName}' state machine does not declare ` +
             `(known states: ${atMostThree([...rule.states].sort())}), and seed writes skip that rule, ` +
             'so a typo lands silently',
+          // [#22161] One remedy line; that the seed exemption allows a
+          // mid-lifecycle state but never an undeclared one is the explanation's.
           hint:
-            `If '${value}' is a real state, add it to the state machine (as an initial state or a ` +
-            `transition endpoint). If it is a typo, correct it to a declared state. The exemption lets ` +
-            'a seed be born mid-lifecycle; it is not a licence to write an unknown state.',
+            `Correct '${value}' to a declared state, or, if it is a real state, add it to the state machine ` +
+            'as an initial state or a transition endpoint',
         });
       }
     });
