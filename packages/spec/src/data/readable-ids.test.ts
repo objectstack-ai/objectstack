@@ -268,6 +268,21 @@ describe('isComposedReadableIds — disjoint from isReadableIds, and every copy 
     expect(isComposedReadableIds(leaf)).toBe(false);
   });
 
+  it('a hand-built value carrying BOTH brands is not composed: it reads as an uncomposed leaf, whichever recogniser is asked first', () => {
+    // Both keys are global-registry symbols, so in-process code can build this.
+    const both = { object: 'x', scope: undefined };
+    Object.defineProperty(both, READABLE_IDS_BRAND, { value: true });
+    Object.defineProperty(both, COMPOSED_READABLE_IDS_BRAND, { value: true });
+    expect(isComposedReadableIds(both)).toBe(false);
+    expect(isReadableIds(both)).toBe(true);
+    // The comparand door, as measured: it admits the value as an UNCOMPOSED leaf
+    // for the composing caller (so the engine composes it from the caller's
+    // access) and refuses it for every other caller.
+    expect(() => assertListComparandShapes({ record_id: { $in: both } }, undefined, 'where', ADMIT)).not.toThrow();
+    const err = refusalOf(() => assertListComparandShapes({ record_id: { $in: both } }));
+    expect(envelopeOf(err)).toEqual(ENVELOPE);
+  });
+
   it('a JSON round-trip, a structured clone, a spread and Object.assign all drop the brand', () => {
     const copies = {
       json: JSON.parse(JSON.stringify(composed)),

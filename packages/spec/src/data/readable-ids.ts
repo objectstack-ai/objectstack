@@ -200,25 +200,31 @@ export interface ComposedReadableIds {
 /**
  * Is `value` a branded {@link ComposedReadableIds} leaf?
  *
- * Own symbol key only, and only the declared value `true`; `object` a
- * non-empty string; `scope` an own key holding `undefined` or a plain,
- * non-array object. Every copy that lost the brand, every hand-built shape that
- * breaks one of those, an uncomposed {@link ReadableIds} leaf, `null` and every
- * primitive answer `false`.
+ * Own symbol key only, and only the declared value `true`; no own
+ * {@link READABLE_IDS_BRAND} beside it; `object` a non-empty string; `scope`
+ * an own key holding `undefined` or a non-null, non-array object. Every copy
+ * that lost the brand, every hand-built shape that breaks one of those, an
+ * uncomposed {@link ReadableIds} leaf, `null` and every primitive answer
+ * `false`.
  *
- * Disjoint from {@link isReadableIds}: no value answers `true` to both.
+ * Disjoint from {@link isReadableIds}: no value answers `true` to both. A
+ * value that carries both brands answers `false` here, so it is never a
+ * composed leaf: when its uncomposed brand is valid, {@link isReadableIds}
+ * answers `true` and the value is refused as an uncomposed leaf, whichever of
+ * the two recognisers is asked first.
  */
 export function isComposedReadableIds(value: unknown): value is ComposedReadableIds {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
   if (!Object.prototype.hasOwnProperty.call(value, COMPOSED_READABLE_IDS_BRAND)) return false;
   if ((value as Record<symbol, unknown>)[COMPOSED_READABLE_IDS_BRAND] !== true) return false;
+  if (Object.prototype.hasOwnProperty.call(value, READABLE_IDS_BRAND)) return false;
   const object = (value as { object?: unknown }).object;
   if (typeof object !== 'string' || object.length === 0) return false;
   if (!Object.prototype.hasOwnProperty.call(value, 'scope')) return false;
   return isComposableScope((value as { scope?: unknown }).scope);
 }
 
-/** `undefined` (no restriction) or a plain, non-array object — the scope's two declared spellings. */
+/** `undefined` (no restriction) or a non-null, non-array object — the scope's two declared spellings. */
 function isComposableScope(scope: unknown): boolean {
   return scope === undefined || (scope !== null && typeof scope === 'object' && !Array.isArray(scope));
 }
@@ -261,7 +267,7 @@ export const ReadableIds: {
    * @param scope the parent's lowered read scope, or `undefined` for "no row
    *              restriction" (`getReadFilter`'s own spelling of it).
    * @throws TypeError when `leaf` is not a branded {@link ReadableIds} leaf;
-   *         when `scope` is neither `undefined` nor a plain, non-array object;
+   *         when `scope` is neither `undefined` nor a non-null, non-array object;
    *         or when `scope` IS {@link RLS_DENY_FILTER}, which D2 step 2
    *         answers `$in: []` and never composes.
    */
