@@ -101,17 +101,17 @@ export function validateManagedApiMethods(stack: unknown): ManagedApiMethodFindi
       rule: MANAGED_API_METHOD_UNAFFORDABLE,
       where: `object "${obj.name}"`,
       path: `objects[${oi}].enable.apiMethods`,
-      // [#22161] One verdict sentence; `where` names the object. The verb →
-      // affordance table, the boot-time strip it predicts and why this
-      // refuses are `os explain object/managed-api-method-unaffordable`.
+      // [#22161] One verdict sentence and one remedy line; `where` names the
+      // object. The verb → affordance table, the boot-time strip it predicts,
+      // why this refuses, and that an affordance opens only for a write a user
+      // context may really perform (ADR-0092 D4) are
+      // `os explain object/managed-api-method-unaffordable`.
       message:
         `\`enable.apiMethods\` advertises [${verbs}], which \`managedBy: '${String(obj.def.managedBy)}'\` ` +
         `affordances refuse (needs userActions ${flags.join('/')}), so the registry strips them`,
       hint:
-        `Either add \`userActions: { ${flags.map((f) => `${f}: true`).join(', ')} }\` to the object ` +
-        `— only if the write is genuinely one a user context may perform, and only once the guard ` +
-        `enforcing it exists (ADR-0092 D4: affordance never ships ahead of the guard) — or remove ` +
-        `[${verbs}] from \`enable.apiMethods\`, which is what the runtime does for you today.`,
+        `Remove [${verbs}] from \`enable.apiMethods\`, or add ` +
+        `\`userActions: { ${flags.map((f) => `${f}: true`).join(', ')} }\` once a guard enforces the write`,
     });
   }
 

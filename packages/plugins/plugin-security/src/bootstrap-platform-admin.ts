@@ -3,12 +3,8 @@
 /**
  * bootstrapPlatformAdmin — first-boot platform admin promotion.
  *
- * Two responsibilities, both idempotent and run on `kernel:ready`:
- *
- *  1. **Seed `sys_permission_set` rows** for each `defaultPermissionSets`
- *     entry (admin_full_access / member_default / viewer_readonly).
- *
- *  2. **Answer the platform-admin question, POSTURE-KEYED** (#11184 ruling
+ * One responsibility, idempotent and run on `kernel:ready`: **answer the
+ * platform-admin question, POSTURE-KEYED** (#11184 ruling
  *     2026-08-23; re-anchored by #11663, maintainer acceptance 2026-08-25,
  *     leg L4 = #11974):
  *       - `single`: promote the first registered human user by inserting a
@@ -48,31 +44,12 @@
  * `ensureDefaultOrganization`). Install that plugin to get
  * multi-tenant bootstrap.
  *
- * ## Provenance of the seeded permission-set rows (commit 712e185db, ruled 2026-08-15)
- *
- * The seed insert stamps `managed_by: 'platform'` **explicitly**, so a fresh
- * install's default sets are platform-owned and `os meta resync` reconciles
- * them — which is what #2705 built the resync flag for. This also puts the
- * seeder in line with its two siblings this package had (the built-in position
- * and system capability seeders, both since retired by ADR-0131), which always
- * stamped `'platform'` rather than inheriting a default.
- *
- * ⚠️ **Installs created BEFORE that ruling carry `'admin'` on these rows.**
- * The pre-ruling insert omitted `managed_by` altogether, so the value came from
- * the declared `defaultValue: 'admin'` in `objects/sys-permission-set.object.ts`
- * — measured on a real engine (commit db923a3a8: a seeded row stored `'admin'`, and a real
- * resync returned `resynced 0 / resyncSkipped 8`, skipping every shipped
- * default set).
- *
- * For those legacy rows the resync SKIP stands, permanently and by decision:
- * a stored `'admin'` is **indistinguishable** between "the old seeder's field
- * default" and "an administrator took this set over in Setup". So there is
- * deliberately **no migration and no restamp** — rewriting them to `'platform'`
- * would make genuine admin customizations reconcilable and could silently
- * overwrite them on the next `os meta resync`. Report, don't rewrite. A legacy
- * install that wants the platform defaults reconciled has to re-own the rows
- * deliberately (or re-seed with `--fresh`); that is an operator's choice to
- * make, not one a boot should make on their behalf.
+ * [ADR-0131 D3/D4] It writes no `sys_permission_set` row. The platform's
+ * default sets (admin_full_access / member_default / viewer_readonly …) are
+ * definitions this plugin ships on its manifest and the security catalog
+ * serves; the promotion grant names its set. The materialization that used to
+ * seed those rows insert-once — and the `os meta resync` reconcile of them —
+ * retired with the rest of the catalog seeders.
  */
 
 import { postureEnforcesWall, type PermissionSet } from '@objectstack/spec/security';
@@ -85,12 +62,6 @@ import {
 import { normalizePlatformAdminEmail, resolvePlatformAdminEmails } from '@objectstack/core';
 import type { SeedSettlementSnapshot } from '@objectstack/spec/contracts';
 import { claimSeedOwnership } from './claim-seed-ownership.js';
-import {
-  createSeedWriteRefusals,
-  reportSeedWriteRefusals,
-  type SeedWriteRefusals,
-} from './write-refusals.js';
-import { reportThroughSink } from './seed-refusal-sink.js';
 import {
   resolvePlatformAdminStanding,
   type PlatformAdminStandingEntry,
@@ -105,6 +76,7 @@ import {
   serializePlatformAdminStandingSnapshot,
 } from './platform-admin-standing-audit.js';
 import { GRANT_SET_NAME_FIELD, grantSetNameOf } from './grant-permission-set-name.js';
+import { reportThroughSink } from './seed-refusal-sink.js';
 
 /**
  * The order the standing-audit read states TO THE DRIVER.
@@ -219,7 +191,7 @@ async function recordPlatformAdminStandingChange(
   // for that context to be forgotten — it is also a second row on the
   // tenant-audit write-call-site census for one write.
   let insertRefusal: unknown;
-  await tryInsert(ql, PLATFORM_ADMIN_STANDING_LEDGER, row, undefined, (e) => {
+  await tryInsert(ql, PLATFORM_ADMIN_STANDING_LEDGER, row, (e) => {
     insertRefusal = e;
   });
   if (insertRefusal !== undefined) {
@@ -252,24 +224,6 @@ interface BootstrapOptions {
     error?: (message: string, meta?: any) => void;
   };
   /**
-   * [#2705] Force re-materialization of the default permission-set rows from
-   * the compiled declaration.
-   *
-   * Default (`false`) keeps the insert-once shape: an existing row is left
-   * untouched so an admin's Setup customizations survive every restart. This is
-   * correct for prod boot.
-   *
-   * `os meta resync` sets it to `true` to reconcile the DB rows to the shipped
-   * `dist` after a source edit — the dev loop that insert-once otherwise makes
-   * silently stale (a changed default set is served with its OLD value until a
-   * `--fresh` wipe). Only platform-owned rows (`managed_by` absent or
-   * `'platform'`) are overwritten. Rows carrying any other provenance are left
-   * alone: `'user'` / `'admin'` (taken over in Setup — or, on an install older
-   * than commit 712e185db, seeded before the platform stamped its own rows) and
-   * `'package'` (owned by package metadata).
-   */
-  resync?: boolean;
-  /**
    * The seed pipeline's tally at the moment this bootstrap runs, read by the
    * caller through the published `seed-settlement` contract.
    *
@@ -277,7 +231,7 @@ interface BootstrapOptions {
    * the claim pass is the only step here whose answer depends on whether the
    * platform's own seeder has finished writing, and a pass that cannot say so
    * reports "claimed 0 of 0" for both "nothing to claim" and "nothing had
-   * landed yet". Absent for callers with no kernel context (`os meta resync`),
+   * landed yet". Absent for callers with no kernel context,
    * which the claim reports as `unattested` rather than guessing.
    */
   seedSettlement?: SeedSettlementSnapshot | undefined;
@@ -391,37 +345,19 @@ async function tryFind(
   }
 }
 
-// ⛔ The `catch` RECORDS the refusal before it answers, when the caller passed
-// a log to record into. Answering `null`/`false` alone is what made a refused
-// write indistinguishable from "nothing to do": `seeded` never grows, the pass
-// returns normally, and the boot reports a successful seed of zero rows. Still
-// no rethrow — this pass reports, it does not decide whether the deployment
-// boots. See `reportSeedWriteRefusals` in `write-refusals.ts`.
+// Never rethrows — this pass reports, it does not decide whether the
+// deployment boots. A caller that must tell a refused write from "nothing to
+// do" passes `onRefusal` and is told.
 async function tryInsert(
-  ql: any, object: string, data: any, refusals?: SeedWriteRefusals,
-  // Symmetric with {@link tryFind}'s observer, and for the same reason: a
-  // caller outside the SEED pass needs the refusal itself, not a `null` that
-  // the seed reporter will later summarize on a channel that is not its own.
+  ql: any, object: string, data: any,
+  // Symmetric with {@link tryFind}'s observer, and for the same reason.
   onRefusal?: (error: unknown) => void,
 ): Promise<any | null> {
   try {
     return await ql.insert(object, data, { context: SYSTEM_CTX });
   } catch (e) {
-    refusals?.record(object, e);
     onRefusal?.(e);
     return null;
-  }
-}
-
-async function tryUpdate(
-  ql: any, object: string, data: any, refusals?: SeedWriteRefusals,
-): Promise<boolean> {
-  try {
-    await ql.update(object, data, { context: SYSTEM_CTX });
-    return true;
-  } catch (e) {
-    refusals?.record(object, e);
-    return false;
   }
 }
 
@@ -505,40 +441,6 @@ export function shouldReplayBootstrapFor(opCtx: {
   if (!data || typeof data !== 'object') return false;
   if (!('email_verified' in data) && !('email' in data)) return false;
   return resolvePlatformAdminEmails().emails.length > 0;
-}
-
-/**
- * The platform-owned definition facets of a default permission set — the
- * fields the runtime resolver hydrates back into ExecutionContext
- * (`resolve-authz-context.ts` → systemPermissions / tabPermissions / object &
- * field masks). Single source for both the first-boot insert and the `#2705`
- * resync update so the two paths can never drift. Identity/provenance columns
- * (`id`, `name`, `active`, `managed_by`, `package_id`) are deliberately NOT
- * here — resync reconciles the declaration, never the ownership.
- *
- * [commit 712e185db] `managed_by` must stay out of this helper even though the seed insert
- * now stamps it. Both paths share these fields, so adding it here would make
- * every resync RESTAMP the row it reconciles -- silently converting a legacy
- * `admin`-owned row (which may be a real Setup takeover) into a platform-owned
- * one and clobbering it on that same pass. The insert stamps provenance at its
- * own call site precisely so the resync update cannot.
- *
- * `description` / `adminScope` are read defensively: neither is on the typed
- * PermissionSet shape (name/label/objects/fields/...), but both persist when a
- * runtime declaration provides them without tripping the dts typecheck.
- */
-function platformOwnedFields(ps: PermissionSet): Record<string, any> {
-  return {
-    label: ps.label ?? ps.name,
-    description: (ps as any).description ?? null,
-    object_permissions: JSON.stringify(ps.objects ?? {}),
-    field_permissions: JSON.stringify(ps.fields ?? {}),
-    system_permissions: JSON.stringify(ps.systemPermissions ?? []),
-    row_level_security: JSON.stringify(ps.rowLevelSecurity ?? []),
-    tab_permissions: JSON.stringify(ps.tabPermissions ?? {}),
-    // [ADR-0090 D12] Delegated-admin scope travels with the set row.
-    admin_scope: (ps as any).adminScope ? JSON.stringify((ps as any).adminScope) : null,
-  };
 }
 
 /**
@@ -753,17 +655,15 @@ export async function findExistingPlatformAdmin(
 }
 
 /**
- * Persist seed permission sets and answer the posture-keyed platform-admin
- * question: promote the first registered human user under `single`, report
- * config-derived standing (and write nothing) under walled postures. Safe to
- * call multiple times.
+ * Answer the posture-keyed platform-admin question: promote the first
+ * registered human user under `single`, report config-derived standing (and
+ * write nothing) under walled postures. Safe to call multiple times.
  */
 export async function bootstrapPlatformAdmin(
   ql: any,
   bootstrapPermissionSets: PermissionSet[],
   options: BootstrapOptions = {},
 ): Promise<{
-  seeded: number;
   adminPromoted: boolean;
   reason?: string;
   /** Count of seeded rows re-owned to the freshly-promoted admin. */
@@ -787,10 +687,6 @@ export async function bootstrapPlatformAdmin(
    * to get right).
    */
   adminUserId?: string;
-  /** [#2705] Existing platform-owned rows reconciled to dist under `resync`. */
-  resynced?: number;
-  /** [#2705] Existing rows left untouched by `resync` (admin/package-owned). */
-  resyncSkipped?: number;
   /**
    * [commit 9b9581b11] WHY this target was chosen, when one was. `declared-owner` means
    * `OS_PLATFORM_OWNER_EMAIL` named them; `oldest-authenticable` means nobody
@@ -810,128 +706,22 @@ export async function bootstrapPlatformAdmin(
 }> {
   const logger = options.logger;
   if (!ql || typeof ql.find !== 'function' || typeof ql.insert !== 'function') {
-    return { seeded: 0, adminPromoted: false, reason: 'objectql_unavailable' };
+    return { adminPromoted: false, reason: 'objectql_unavailable' };
   }
 
-  // 1. Seed permission set rows.
-  const seeded: Record<string, string> = {};
-  let resynced = 0;
-  let resyncSkipped = 0;
-  // One log per pass, not per refused row: a legacy platform-wide unique index
-  // refuses EVERY default permission set, and a line each would bury the remedy.
-  const refusals = createSeedWriteRefusals();
-  // [#22169] Names whose existence read was REFUSED, so nothing was inserted
-  // for them — reported once below, after the loop.
-  const unreadable: string[] = [];
-  for (const ps of bootstrapPermissionSets) {
-    if (!ps.name) continue;
-    // ⛔ "Refused" is not "absent". `tryFind` answers `[]` for both, and this
-    // loop used to INSERT on both: on a table without the per-organization
-    // unique index (remote tables built before its retrofit) a refused read
-    // minted a second row of a set that already existed, and a table holding
-    // such duplicates can never build that index again. The observer tells
-    // the two apart; a read that could not answer declines the insert.
-    let readRefused = false;
-    const existing = await tryFind(
-      ql, 'sys_permission_set', { name: ps.name }, 1, undefined, undefined,
-      () => { readRefused = true; },
-    );
-    if (readRefused) {
-      unreadable.push(ps.name);
-      continue;
-    }
-    if (existing.length > 0 && existing[0].id) {
-      const row = existing[0];
-      seeded[ps.name] = row.id;
-      // Insert-once by default: an existing row is never clobbered on restart,
-      // which is what protects an admin's Setup edits. Under `resync`
-      // (`os meta resync`, #2705) reconcile the row to the shipped dist so a dev
-      // source edit takes effect without `--fresh` -- but only for rows the
-      // platform still owns.
-      if (options.resync) {
-        if (!row.managed_by || row.managed_by === 'platform') {
-          if (await tryUpdate(ql, 'sys_permission_set', { id: row.id, ...platformOwnedFields(ps) }, refusals)) {
-            resynced += 1;
-          }
-        } else {
-          resyncSkipped += 1;
-          // [commit 712e185db] Neutral by ruling: state the provenance and the action, and
-          // claim NOTHING about intent. This used to say "(intentional
-          // override)", which is a lie for every row on a pre-ruling install --
-          // there the only writer may have been this very seeder one call
-          // earlier, inheriting `defaultValue: 'admin'` rather than any admin
-          // deciding anything. The stored value cannot tell the two apart, so
-          // the log must not pretend it can.
-          logger?.warn?.(
-            `[security] resync left ${ps.name} untouched — row is ${row.managed_by}-owned`,
-            { name: ps.name, managedBy: row.managed_by },
-          );
-        }
-      }
-      continue;
-    }
-    const id = genId('ps');
-    const created = await tryInsert(ql, 'sys_permission_set', {
-      id,
-      name: ps.name,
-      ...platformOwnedFields(ps),
-      active: true,
-      // [commit 712e185db] Stamp provenance EXPLICITLY rather than letting it fall to the
-      // declaration's `defaultValue: 'admin'`. Without this the platform's own
-      // default sets are stored indistinguishably from admin-authored ones, so
-      // `os meta resync` skips every single one of them (measured in commit db923a3a8:
-      // resynced 0 / resyncSkipped 8) -- the exact inverse of what #2705 built
-      // the flag for. Matched the built-in position and system capability
-      // seeders (both since retired by ADR-0131), which stamped `'platform'`.
-      managed_by: 'platform',
-    }, refusals);
-    if (created?.id) seeded[ps.name] = created.id;
-    else if (created) seeded[ps.name] = id;
-  }
-
-  // Reported HERE rather than at function end: every `return` below this point
-  // is an early exit of the PROMOTION half, and the catalog seed above is
-  // finished either way. Placing it at the end would make the diagnosis
-  // conditional on how promotion happened to resolve.
-  reportSeedWriteRefusals(logger, refusals);
-  if (unreadable.length > 0) {
-    // [#22169] ONCE per pass with the names, never a line per set: a refused
-    // read usually means the whole table is unreadable, and a per-name line
-    // would bury its own remedy. `warn`, through the sink derivation the
-    // sibling seeders' unreadable lines use, so it is heard with no logger
-    // injected: nothing was written, so nothing claims to have landed.
-    reportThroughSink(
-      logger,
-      '[security] platform default permission sets left untouched — their sys_permission_set rows could not ' +
-        'be read, so none was inserted: a read that did not answer is not an absent row, and inserting on it ' +
-        'duplicates a set that may already exist. A set that is genuinely absent is seeded by the next boot ' +
-        'whose read answers.',
-      { unreadable: unreadable.length, total: bootstrapPermissionSets.length, names: unreadable },
-    );
-  }
-
-  const seededCount = Object.keys(seeded).length;
-  // [#11532] Under a walled posture these rows are organization-less BY RULING
-  // (#10103, 2026-08-20) and unreadable through the wall, and the catalog pass
-  // that runs next reports them once per organization. Saying so HERE is what
-  // stops the operator's first sight of them being a warning that calls the
-  // platform's own output legacy state: the fresh walled rig logged
-  // `seeded: 8` with nothing to indicate the rows carried no organization at
-  // all. Not a behaviour change — the seeding above is byte-identical.
-  if (seededCount > 0 && postureEnforcesWall(resolveTenancyPosture())) {
-    logger?.info?.(
-      '[security] platform default permission sets seeded WITHOUT an organization (the platform ' +
-        'bucket) — ruled 2026-08-20 and unchanged: the platform-admin grant points at the ' +
-        'admin_full_access row by id. Under a walled posture they are unreadable through the ' +
-        'tenant wall; each organization gets its own copies from the per-organization catalog ' +
-        'pass, so no principal is missing a set.',
-      { seeded: seededCount, names: Object.keys(seeded).sort() },
-    );
-  }
-  // Attached to every return below so `os meta resync` can report the reconcile
-  // outcome even when admin promotion short-circuits (the common dev case: a DB
-  // that already has an admin returns `already_have_admin`).
-  const resyncCounts = { resynced, resyncSkipped };
+  // 1. [ADR-0131 D3/D4] No catalog row is written: the platform's default
+  //    sets are definitions this plugin ships on its manifest, served from
+  //    the registry, and a grant names its set. The one read left is the
+  //    LEGACY `admin_full_access` row an older release seeded, whose id is how
+  //    leg C of {@link findPlatformAdminGrantHolder} reaches a grant written
+  //    before the name column existed. ⛔ "Refused" is not "absent": a read
+  //    that did not answer cannot say no such grant exists, so the promotion
+  //    is withheld below rather than risk minting a second administrator.
+  let legacyAdminRowUnreadable = false;
+  const legacyAdminRows = await tryFind(
+    ql, 'sys_permission_set', { name: PLATFORM_ADMIN_PERMISSION_SET_NAME }, 1, undefined, undefined,
+    () => { legacyAdminRowUnreadable = true; },
+  );
 
   // 2. The platform-admin question, POSTURE-KEYED (#11184 ruling 2026-08-23,
   //    verbatim: 「1509 选择 env 指定 owner 邮箱」; re-anchored by #11663 L4):
@@ -954,18 +744,28 @@ export async function bootstrapPlatformAdmin(
 
   // [ADR-0131 D4] The grant names `admin_full_access`; the set is the catalog
   // definition this plugin ships, so no `sys_permission_set` row is needed to
-  // grant it. The seeded row's id, when there is one, feeds only the legacy
+  // grant it. The legacy row's id, when there is one, feeds only the
   // restrict-only leg of the holder scan ({@link findPlatformAdminGrantHolder}).
   if (!bootstrapPermissionSets.some((ps) => ps.name === PLATFORM_ADMIN_PERMISSION_SET_NAME)) {
-    return { seeded: seededCount, adminPromoted: false, reason: 'admin_permission_set_missing', ...resyncCounts };
+    return { adminPromoted: false, reason: 'admin_permission_set_missing' };
   }
-  if (unreadable.includes(PLATFORM_ADMIN_PERMISSION_SET_NAME)) {
+  if (legacyAdminRowUnreadable) {
     // [#22169] The set's row table did not answer, so the legacy leg cannot ask
     // whether an unnamed grant already makes someone the administrator; no
-    // promotion is made on a question this pass could not ask.
-    return { seeded: seededCount, adminPromoted: false, reason: 'admin_permission_set_unreadable', ...resyncCounts };
+    // promotion is made on a question this pass could not ask. Said through
+    // the sink derivation, so it is heard with no logger injected.
+    reportThroughSink(
+      logger,
+      '[security] platform-admin promotion WITHHELD: the legacy admin_full_access sys_permission_set row ' +
+        'could not be read, so this pass cannot ask whether a grant written before the name column existed ' +
+        'already makes someone the platform administrator. Nothing was written; the next pass whose read ' +
+        'answers decides.',
+      { name: PLATFORM_ADMIN_PERMISSION_SET_NAME },
+    );
+    return { adminPromoted: false, reason: 'admin_permission_set_unreadable' };
   }
-  const adminPsId: string | undefined = seeded[PLATFORM_ADMIN_PERMISSION_SET_NAME];
+  const adminPsId: string | undefined =
+    typeof legacyAdminRows[0]?.id === 'string' && legacyAdminRows[0].id !== '' ? legacyAdminRows[0].id : undefined;
 
   // ── Does this deployment ALREADY have a platform admin? (commit 1c83ca226) ─
   //
@@ -1010,7 +810,6 @@ export async function bootstrapPlatformAdmin(
   // config-derived standing, or to refuse fail-closed when nobody is declared.
   if (!walled && unscopedHolder) {
     return {
-      seeded: seededCount,
       adminPromoted: false,
       reason: 'already_have_admin',
       // The promotion is a no-op forever; the CLAIM is not. The seed-settle
@@ -1018,7 +817,6 @@ export async function bootstrapPlatformAdmin(
       // has run at all, asks {@link findExistingPlatformAdmin}, which answers
       // with this same holder (see `adminUserId` above).
       ...(unscopedHolder.user_id ? { adminUserId: String(unscopedHolder.user_id) } : {}),
-      ...resyncCounts,
       ...grantScanCounts,
     };
   }
@@ -1040,10 +838,8 @@ export async function bootstrapPlatformAdmin(
     if (logger?.warn) logger.warn(withheld);
     else logger?.info?.(withheld);
     return {
-      seeded: seededCount,
       adminPromoted: false,
       reason: 'admin_grant_unnamed',
-      ...resyncCounts,
       ...grantScanCounts,
     };
   }
@@ -1071,7 +867,7 @@ export async function bootstrapPlatformAdmin(
     // process). The startup half (walled + undeclared ⇒ REFUSE BOOT, naming
     // the variable) lives in plugin-auth's `init()`; this is the
     // defense-in-depth line for paths that reach the bootstrap without that
-    // guard (`os meta resync`, embeddings without plugin-auth).
+    // guard (embeddings without plugin-auth).
     //
     // [#11663 L5] ⛔ This line is no longer skipped when a legacy holder exists.
     // It used to be, and the reason it used to be has expired: L4's skip was
@@ -1106,10 +902,8 @@ export async function bootstrapPlatformAdmin(
       if (logger?.error) logger.error(message);
       else logger?.warn?.(message);
       return {
-        seeded: seededCount,
         adminPromoted: false,
         reason: 'walled_owner_email_undeclared',
-        ...resyncCounts,
         ...grantScanCounts,
       };
     }
@@ -1142,10 +936,8 @@ export async function bootstrapPlatformAdmin(
     // CHANGE of standing, plus the first-boot baseline.
     await recordPlatformAdminStandingChange(ql, standing, logger);
     return {
-      seeded: seededCount,
       adminPromoted: false,
       reason: 'walled_config_derived',
-      ...resyncCounts,
       ...grantScanCounts,
     };
   }
@@ -1251,10 +1043,8 @@ export async function bootstrapPlatformAdmin(
     if (!inserted) {
       logger?.warn?.(`[security] failed to grant admin_full_access to first user ${chosen.email ?? chosen.id}`);
       return {
-        seeded: seededCount,
         adminPromoted: false,
         reason: 'insert_failed',
-        ...resyncCounts,
         ...grantScanCounts,
       };
     }
@@ -1286,12 +1076,10 @@ export async function bootstrapPlatformAdmin(
     }
 
     return {
-      seeded: seededCount,
       adminPromoted: true,
       ownershipClaimed,
       adminUserId: String(chosen.id),
       basis: audit.basis,
-      ...resyncCounts,
       ...grantScanCounts,
     };
   };
@@ -1454,7 +1242,6 @@ export async function bootstrapPlatformAdmin(
     if (logger?.warn) logger.warn(message);
     else logger?.info?.(message);
     return {
-      seeded: seededCount,
       adminPromoted: false,
       // [commit 9b9581b11, batch #100] The ruling allows either a distinct code or a
       // fold into `declared_owner_not_authenticable` with verification named
@@ -1463,7 +1250,6 @@ export async function bootstrapPlatformAdmin(
       // reading a structured sink can tell "register a login" apart from
       // "click the link in your mailbox".
       reason: unverifiedOnly ? 'declared_owner_not_verified' : 'declared_owner_not_authenticable',
-      ...resyncCounts,
       ...grantScanCounts,
     };
   }
@@ -1487,7 +1273,7 @@ export async function bootstrapPlatformAdmin(
   }
   if (scannedHumans === 0) {
     logger?.info?.('[security] no human users yet — first sign-up will be promoted to platform admin');
-    return { seeded: seededCount, adminPromoted: false, reason: 'no_users', ...resyncCounts, ...grantScanCounts };
+    return { adminPromoted: false, reason: 'no_users', ...grantScanCounts };
   }
   if (!target) {
     // [#14348] Humans exist, but not one of them can sign in. Measured on a
@@ -1522,10 +1308,8 @@ export async function bootstrapPlatformAdmin(
       else logger?.info?.(truncation);
     }
     return {
-      seeded: seededCount,
       adminPromoted: false,
       reason: 'no_authenticable_user',
-      ...resyncCounts,
       ...grantScanCounts,
     };
   }

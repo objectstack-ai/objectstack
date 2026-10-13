@@ -38,7 +38,7 @@ The refusal at each position says what it serves.
 
 **Newly accepted.** A CEL value envelope at `recordId`, which `z.string()` refused before this change: the published JSON Schema for `recordId` gains the envelope arm (a string, or the envelope object), and so does the inferred `ScreenConfig['recordId']`.
 
-**Still accepted, unchanged.** A CEL value envelope at `defaults` and at a field's `defaultValue`, and every literal at all three, a string `recordId` included. The single-brace dialect keeps resolving where it still lives: a `map` or `loop` `collection`, a `filter` value, a `notify` `recipients` entry, an `http` body. The value-slot retirement's earlier changesets on this line list a screen's `defaults` among those positions; this one supersedes that line.
+**Still accepted, unchanged.** A CEL value envelope at `defaults` and at a field's `defaultValue`, and every literal at all three, a string `recordId` included. The single-brace dialect keeps resolving where it still lives, a CRUD `filter` value.
 
 ### The kit
 

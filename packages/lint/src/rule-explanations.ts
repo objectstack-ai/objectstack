@@ -383,8 +383,9 @@ const UNPROVISIONED_ANCHOR_CAUSE =
 /**
  * The three ways out of an unprovisioned anchor, which the one-line `fix:` of
  * the converted anchor ids (`unprovisionedAnchorFix()`) names without the how:
- * `sort-field-unprovisioned`, `searchable-field-unprovisioned` and
- * `hook-body-write-unprovisioned-anchor` write it out.
+ * `sort-field-unprovisioned`, `searchable-field-unprovisioned`,
+ * `react-chart-field-unprovisioned` and the hook, action and flow-node
+ * write-anchor ids write it out.
  */
 const UNPROVISIONED_ANCHOR_REMEDY =
   'To fix it, check the remote table. If it really carries the column, declare it in the object\'s ' +
@@ -950,6 +951,11 @@ const ACTION_BODY_WRITE_UNKNOWN_FIELD_EXPLANATION: RuleExplanation = {
     'The nested write lands nothing, and its refusal escapes the body and fails the action. Hook bodies ' +
       'get the same check (`hook-body-write-unknown-field`) through the same extractor, so the two rules ' +
       'judge the same write shape the same way.',
+    'Only the literal write shapes in `ACTION_BODY_WRITE_PATTERNS` are checked — today the ' +
+      '`ctx.api.object(NAME)` call with a literal payload — so a clean run does not prove every write ' +
+      'lands, and the `ctx.input` shapes are excluded because an action\'s input is its params bag. The ' +
+      'warning never blocks a build. The `fix:` line suggests the nearest declared or system column when ' +
+      'one is close.',
   ],
 };
 
@@ -968,7 +974,8 @@ const ACTION_RECORD_WRITE_DISCARDED_EXPLANATION: RuleExplanation = {
     'It is reported only when the write is provably dead: `ctx.record` never leaves the body as a ' +
       'value. Handed to anything — an argument, an assignment, a spread, a return — the snapshot may be ' +
       'a payload under construction, so every write in that body is skipped. An alias ' +
-      '(`const r = ctx.record`) counts as an escape; a property read does not.',
+      '(`const r = ctx.record`) counts as an escape; a property read does not. The warning never blocks ' +
+      'a build.',
   ],
 };
 
@@ -991,6 +998,7 @@ const ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION: RuleExplanation = {
     'On an action body only the `ctx.api.object(NAME)` write is judged: an action\'s `ctx.input` is its ' +
       'params bag, not a record, and its `ctx.record` is a snapshot the runtime never writes back ' +
       '(`action-record-write-discarded`).',
+    UNPROVISIONED_ANCHOR_REMEDY,
   ],
 };
 
@@ -1022,6 +1030,7 @@ const FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION: RuleExplanation = {
       'node\'s literal object name. This finding is a warning where the node\'s undeclared-field finding ' +
       'is an error: that one is a certainty about this stack, this one is a claim about a remote schema ' +
       'the build cannot see.',
+    UNPROVISIONED_ANCHOR_REMEDY,
   ],
 };
 
@@ -1722,6 +1731,11 @@ const VALIDATION_RULE_REGEX_UNCOMPILABLE_EXPLANATION: RuleExplanation = {
     'The pattern is compiled exactly as `checkFormat` compiles it — `new RegExp(source)`, no flags — and ' +
       'the verdict quotes the engine\'s reason; the `fix:` line quotes the source. The source is a STRING, ' +
       'so a backslash in it is written twice in TypeScript.',
+    'To fix it, escape a literal `(`, `[` or `\\`: in TypeScript source that is `\\\\(`, `\\\\[` and ' +
+      '`\\\\\\\\`, and a pattern such as `^\\d{2}-\\d{7}$` is written `\'^\\\\d{2}-\\\\d{7}$\'`. A rule that only ' +
+      'checks a common shape can drop `regex` and name a `format` instead: ' +
+      // Held equal to `FormatValidationSchema`'s `format` enum by the rule's test.
+      '`email`, `url`, `phone` or `json`.',
   ],
 };
 
@@ -1737,6 +1751,10 @@ const VALIDATION_RULE_JSON_SCHEMA_UNCOMPILABLE_EXPLANATION: RuleExplanation = {
       'outcome that depends on which schema the runtime happened to compile first — is not judged here. ' +
       'A misspelled `format` name compiles in both environments; that is ' +
       '`validation-rule-json-schema-unknown-format`\'s verdict, not this one\'s.',
+    'To fix it, correct the keyword the verdict names. The usual offenders: `type` must be one of ' +
+      '`null`, `boolean`, `object`, `array`, `number`, `string` or `integer` (or an array of those), ' +
+      '`required` an array of strings, and every `$ref` must resolve. A vendor keyword is fine, because ' +
+      'the runtime runs `strict: false`; a MALFORMED standard keyword is not.',
   ],
 };
 
@@ -1914,6 +1932,7 @@ const REACT_CHART_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
       'name maps a remote column the author vouches for and is never reported. The finding is a warning ' +
       'because the rule cannot see the remote table, only that the platform provisions no storage for ' +
       'the anchor.',
+    UNPROVISIONED_ANCHOR_REMEDY,
   ],
 };
 
@@ -1929,6 +1948,10 @@ const REACT_BLOCK_NEEDS_RECORD_CONTEXT_EXPLANATION: RuleExplanation = {
       'binding makes the block render. A component the page declares itself under the same name ' +
       'shadows the injected one and is not judged. The `fix:` line names the block\'s react-tier ' +
       'replacement, or a record page.',
+    'On a react page the record is ordinary React state, so the replacement binds it itself: ' +
+      '`<ObjectForm>` by its own `objectName` / `recordId` props, `<ListView>` with the parent binding ' +
+      'as an ordinary filter, and a strip or a stage bar by reading the record with ' +
+      '`useAdapter().findOne` and laying it out in JSX.',
   ],
 };
 
@@ -2527,6 +2550,12 @@ const PLATFORM_AGENT_ROSTER =
   'for old bookmarks and persisted `agent_id`s, never separate records, and the agent catalog ' +
   'shows each agent once under its canonical name.';
 
+/** How an app reaches the platform agents without an agent of its own — the two agent ids it fixes. */
+const SKILLS_ATTACH_BY_SURFACE =
+  'A capability or persona an app wants from an agent is authored as skills: a skill attaches to the ' +
+  'platform agent (`ask` or `build`) by `surface` affinity, not through a custom agent or a custom ' +
+  '`defaultAgent` value, so the skills a stack declares reach the agent that serves their surface.';
+
 const DEFAULT_AGENT_LEGACY_ALIAS_EXPLANATION: RuleExplanation = {
   rule: 'default-agent-legacy-alias',
   covers: 'why a retired agent alias is the wrong spelling',
@@ -2551,6 +2580,7 @@ const DEFAULT_AGENT_OUTSIDE_ROSTER_EXPLANATION: RuleExplanation = {
     'The key is a plain snake_case identifier in the schema, so any value parses, validates and ' +
       'builds. The check is a warning rather than a schema enum on purpose: narrowing the key is a ' +
       'breaking authoring change ADR-0063 already walked back once.',
+    SKILLS_ATTACH_BY_SURFACE,
   ],
 };
 
@@ -2572,6 +2602,10 @@ const AGENT_AUTHORING_WITHDRAWN_EXPLANATION: RuleExplanation = {
       'the rule cannot tell a platform package from an app package by reading the stack alone — the ' +
       'runtime is what gates. Not a schema refinement either: an existing stack must keep parsing ' +
       '(ADR-0078).',
+    SKILLS_ATTACH_BY_SURFACE,
+    'Everything an agent carries that a skill does not is persona text, so the useful parts of its ' +
+      '`instructions` move into the skills\' own instructions. The skills the agent references ' +
+      'already carry its capability, so nothing is lost by dropping the persona.',
   ],
 };
 
@@ -2946,7 +2980,9 @@ const TRANSLATION_SECTION_NAME_MISSING_EXPLANATION: RuleExplanation = {
     'Why the renderer does not fall back to a key slugified from the label: that would fossilise ' +
       'a second contract (`_sections.SLUG_OF_LABEL`) beside the declared one, and the slug would ' +
       'move the day anyone edits the heading text. The defect is at the producer, so this rule is ' +
-      'where the producer hears about it.',
+      'where the producer hears about it. For the same reason the name the `fix:` line suggests is a ' +
+      'suggestion to write down, never a key derived from the label: the renderers look the heading ' +
+      'up by name only, so renaming the heading later cannot break the lookup.',
     'A warning: the section is real and renders, and only its heading stays in the source locale. ' +
       'Judged only on an object that some `stack.translations` bundle carries a node for (a ' +
       'monolingual stack owes nobody a section name), and only on the array form of `sections`: a ' +

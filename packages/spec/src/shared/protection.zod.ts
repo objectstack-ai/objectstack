@@ -39,6 +39,12 @@
  * the underscored fields directly — they are an implementation
  * detail.
  *
+ * That loader is the block's only door (ADR-0010 Phase 4.3). The
+ * metadata API's save door (`PUT /api/v1/meta/{type}/{name}`) writes
+ * environment-authored items, which take no package lock (ADR-0010
+ * §3.5), so it does not translate the block: it refuses it with
+ * `400 VALIDATION_ERROR` and stores nothing.
+ *
  * See also:
  *  - ADR-0010 §3.7 — Future work → now implemented.
  *  - `kernel/metadata-protection.zod.ts` — the runtime envelope.

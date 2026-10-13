@@ -516,9 +516,11 @@ export const ReportSchema = lazySchema(() => strictObject({
   blocks: z.array(JoinedReportBlockSchema).optional().describe('Sub-reports for type=joined'),
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package
-   * authors declare lock policy here; the loader translates it
-   * into the private `_lock` envelope at registration time and
-   * strips this block before persistence. See
+   * authors declare lock policy here, in a code package's source;
+   * the loader translates it into the private `_lock` envelope at
+   * registration time and strips this block. The metadata API's
+   * save door does not translate it and refuses it (`400
+   * VALIDATION_ERROR`), so that door never stores it. See
    * `shared/protection.zod.ts`.
    */
   protection: ProtectionSchema.optional().describe(

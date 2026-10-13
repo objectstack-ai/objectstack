@@ -314,9 +314,9 @@ export function validateTranslatableSections(stack: AnyRec): TranslatableSection
         rule: TRANSLATION_SECTION_NAME_MISSING,
         where: joinWhere(`object "${objectName}"`, site.surface, `section "${heading}"`),
         path: `${site.path}[${i}]`,
-        // [#22161] One verdict sentence; why no gate sees the hole, and why
-        // the fix is a written name and never a derived key, are
-        // `os explain translation-section-name-missing`.
+        // [#22161] One verdict sentence and one remedy line; why no gate sees
+        // the hole, and why the fix is a written name and never a derived key,
+        // are `os explain translation-section-name-missing`.
         message:
           `Section "${heading}" declares a label but no \`name\`, so no ` +
           `\`objects.${objectName}._sections.<name>.label\` key can address it and its heading ` +
@@ -325,9 +325,7 @@ export function validateTranslatableSections(stack: AnyRec): TranslatableSection
           `Give the section a stable \`name\` (snake_case)` +
           (slug ? `, e.g. \`name: '${slug}'\`` : '') +
           `, then translate it as \`objects.${objectName}._sections.${slug ?? '<name>'}.label\` in ` +
-          `each locale bundle. The renderers look the heading up by name only — the name above ` +
-          `is a suggestion to write down, never a key derived from the label, so renaming the ` +
-          `heading later cannot break the lookup.`,
+          `each locale bundle`,
       });
     }
   }

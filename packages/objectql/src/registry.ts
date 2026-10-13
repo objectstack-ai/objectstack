@@ -2506,6 +2506,29 @@ export class SchemaRegistry {
   }
 
   /**
+   * Every `type` name `packageId` holds in the security catalog: its claims,
+   * its composite `<packageId>:<name>` item slots, and any bare slot stamped
+   * with it — sorted, and unfiltered by disable (a disabled package is still
+   * installed, and still holds its names).
+   *
+   * Read by the uninstall doors just BEFORE {@link uninstallPackage}, which
+   * releases all of it: the cleanups run after the withdrawal, and this is the
+   * last moment the names are known (ADR-0090 D5, ADR-0131 D4).
+   */
+  securityCatalogNamesHeldBy(packageId: string, type: SecurityCatalogType): string[] {
+    const names = new Set<string>();
+    for (const [name, claimant] of this.securityCatalogClaims.get(type) ?? []) {
+      if (claimant === packageId) names.add(name);
+    }
+    const prefix = `${packageId}:`;
+    for (const [key, item] of this.metadata.get(type) ?? []) {
+      if (key.startsWith(prefix)) names.add(key.slice(prefix.length));
+      else if ((item as { _packageId?: unknown } | null | undefined)?._packageId === packageId) names.add(key);
+    }
+    return [...names].sort();
+  }
+
+  /**
    * The cold-boot half of the rule (`security-catalog-namespace.ts`, "The cold
    * boot"; maintainer ruling letter A on #22307, record 6063176077): every
    * package-held position and permission-set name the environment catalog also

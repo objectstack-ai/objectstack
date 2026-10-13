@@ -95,7 +95,7 @@ import {
   UNDECLARED_FIELD_WRITE_REFUSAL,
   unprovisionedAnchorWriteVerdict,
 } from './validate-hook-body-writes.js';
-import { indexUnprovisionedAnchors, unprovisionedAnchorHint } from './system-fields.js';
+import { indexUnprovisionedAnchors, unprovisionedAnchorFix } from './system-fields.js';
 import { walkFlowNodes, flowNodeLabel } from './flow-walk.js';
 import { recordsOf } from './object-graph.js';
 
@@ -264,7 +264,7 @@ export function validateFlowNodeWrites(stack: AnyRec): FlowNodeWriteFinding[] {
             where: `flow "${flowName}" › ${nodeWhere}`,
             path: `${nodePath}.config.fields.${fieldName}`,
             message: unprovisionedAnchorWriteVerdict(objectName, fieldName, `this ${node.type} write`),
-            hint: unprovisionedAnchorHint(objectName, fieldName),
+            hint: unprovisionedAnchorFix(objectName, fieldName),
           });
           continue;
         }
@@ -304,10 +304,7 @@ export function validateFlowNodeWrites(stack: AnyRec): FlowNodeWriteFinding[] {
 /** Did-you-mean (declared + system columns as candidates) plus the fix. */
 function fixHint(field: string, declared: string[]): string {
   const suggestion = formatSuggestion(findClosestMatches(field, [...declared, ...IMPLICIT_FIELDS]));
-  return (
-    (suggestion ? `${suggestion} ` : '') +
-    `Fix the field name, or declare '${field}' on the object. This gates the build rather than warning: ` +
-    `the key is literal and so is the object, so unlike the hook/action body rules there is nothing here ` +
-    `that could have been mis-extracted.`
-  );
+  // [#22161] One remedy line; why this gates where the hook and action body
+  // rules advise is `os explain flow-node-write-unknown-field`.
+  return `${suggestion ? `${suggestion} ` : ''}Fix the field name, or declare '${field}' on the object`;
 }

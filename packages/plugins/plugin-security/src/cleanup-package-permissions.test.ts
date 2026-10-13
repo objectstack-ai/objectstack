@@ -150,3 +150,33 @@ describe('cleanupPackagePermissions (#2747)', () => {
     });
   });
 });
+
+describe('[ADR-0131 D4, ADR-0090 D5] the grants naming a set the package declared', () => {
+  // A set served from the registry has no row: the door hands the cleanup the
+  // names it captured before the withdrawal, and the grants naming them go.
+  function withNamedGrants() {
+    const ql = makeQl();
+    ql.tables.sys_user_permission_set.push(
+      { id: 'ups_named_1', user_id: 'u2', permission_set: 'crm_catalog_user' },
+      { id: 'ups_named_2', user_id: 'u3', permission_set: 'crm_catalog_user' },
+      { id: 'ups_named_other', user_id: 'u2', permission_set: 'other_catalog_set' },
+    );
+    return ql;
+  }
+
+  it('revokes every user grant naming a declared set, and only those', async () => {
+    const ql = withNamedGrants();
+    const out = await cleanupPackagePermissions(ql, 'com.example.crm', undefined, { permission: ['crm_catalog_user'] });
+
+    expect(out.userGrants).toBe(3); // the legacy row's grant (ups_1) and the two naming the declared set
+    expect(ql.tables.sys_user_permission_set.map((r: any) => r.id)).toEqual(['ups_env', 'ups_named_other']);
+  });
+
+  it('control — handed no names, a grant naming a catalog set survives: the cleanup is as it was', async () => {
+    const ql = withNamedGrants();
+    const out = await cleanupPackagePermissions(ql, 'com.example.crm');
+
+    expect(out).toEqual({ sets: 2, positionBindings: 2, userGrants: 1, suggestions: 2, refused: 0 });
+    expect(ql.tables.sys_user_permission_set.map((r: any) => r.id)).toEqual(['ups_env', 'ups_named_1', 'ups_named_2', 'ups_named_other']);
+  });
+});
