@@ -48,8 +48,10 @@
  *    client reads "a code package ships this". For a permission set the
  *    verdict is the packaged-permission-set lock's, the classifier both write
  *    doors ask, so the reported and the enforced state are one judgment. For
- *    a position it always holds, since only a name no artifact declares is
- *    echoed (below).
+ *    a position it is "no declaration of the name is served": the echo is
+ *    only registered when neither the engine registry nor the metadata
+ *    service holds one (below), and a stored position row is otherwise
+ *    tenant-authored, as a host kernel's hydrator stamps every stored row.
  *  - `_packageId` (#23233): the package the stored row is bound to, as the
  *    protocol's by-name read serves it. The catalog takes an item's owner
  *    from `_packageId` alone, and the suggestion collector skips an unowned
@@ -58,13 +60,23 @@
  *
  * ## What is not echoed
  *
- * A name the engine registry already serves: every stored row on a host
- * kernel (its metadata door hydrates them there), and a declared artifact on
- * any kernel. The catalog reads the registry first, so an echo of those would
- * never be read — and a second copy is what a delete's registry heal or a
- * package uninstall would strand. When the overlay is gone our echo is
- * dropped; a package uninstall deletes each of its rows through
- * `deleteMetaItem`, so the same projector drops those.
+ *  - A name the engine registry already serves: every stored row on a host
+ *    kernel (its metadata door hydrates them there), and a package's declared
+ *    artifact on any kernel. The catalog reads the registry first, so an echo
+ *    of those would never be read — and a second copy is what a delete's
+ *    registry heal would strand.
+ *  - A name the metadata service already holds as something other than our
+ *    echo: a STACK-declared position (or set), which `AppPlugin` registers in
+ *    the metadata service only, so the registry check cannot see it. An echo
+ *    would overwrite that declaration with the stored row, and the overlay's
+ *    delete would then remove the declaration until restart.
+ *
+ * When the overlay is gone our echo is dropped; a package uninstall deletes
+ * each of its rows through `deleteMetaItem`, so the same projector drops
+ * those. Nothing else ever removes a metadata-service entry: the service's
+ * one removal, `unregister`, also deletes through its writable `datasource:`
+ * loaders and announces a `deleted` event, so it is called only once the
+ * stored row is gone.
  */
 
 import { seedCtx } from './organization-scope.js';
@@ -192,18 +204,21 @@ export async function echoSecurityCatalogMutation(
   }
 
   // The engine registry already serves this name — a host kernel hydrates
-  // every stored row there, and a declared artifact is there on every kernel —
-  // so the catalog never reaches the metadata service for it, and an echo
-  // would only be a second copy for a delete or an uninstall to strand.
-  if (registryServes(ql, type, name)) {
-    if (isProjectionEcho(current)) await dropEcho(ql, metadata, type, name);
-    return 'skipped';
-  }
+  // every stored row there, and a package's artifact is there on every
+  // kernel — so the catalog never reaches the metadata service for it. Skip,
+  // and leave an echo of ours (registered before the artifact arrived) in
+  // place: it is not read, and dropping it would delete through the
+  // service's writable loaders while the stored row still exists. The
+  // overlay's delete drops it.
+  if (registryServes(ql, type, name)) return 'skipped';
 
-  // The registry serves nothing for the name, so no artifact declares it: a
-  // position here is tenant-authored. A permission set asks the lock, which
-  // also reads the layered read's `code` layer and answers `unknown` when it
-  // cannot tell.
+  // The metadata service holds a declaration of this name — a stack-declared
+  // position lives only there. Never echo over it: see the module doc.
+  if (current !== undefined && current !== null && !isProjectionEcho(current)) return 'skipped';
+
+  // No declaration of the name is served. A permission set asks the lock,
+  // which also reads the layered read's `code` layer and answers `unknown`
+  // when it cannot tell; a stored position is tenant-authored.
   const tenantAuthored = type === 'permission'
     ? classifyPackagedPermissionSet(name, ql, { status: 'read', envelope }).status === 'org'
     : true;

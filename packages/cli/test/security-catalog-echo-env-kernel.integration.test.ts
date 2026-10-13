@@ -60,25 +60,37 @@ const LOOSE_SET = 'echo_loose_reader';
 /** A position saved into no package, naming the set the stack declares. */
 const POSITION = 'echo_position';
 const DECLARED_SET = 'echo_declared_reader';
+/** A position the STACK declares (held by the metadata service only), naming the declared set. */
+const STACK_POSITION = 'echo_stack_position';
 
 const stack: any = {
   manifest: { id: 'com.example.catalog_echo', name: 'catalog_echo', version: '0.0.1', type: 'app' },
   objects: [{ name: 'echo_doc', label: 'Echo Doc', fields: { title: { type: 'text', label: 'Title' } } }],
   permissions: [{ name: DECLARED_SET, label: 'Declared reader', objects: { echo_doc: { allowRead: true } } }],
+  positions: [{ name: STACK_POSITION, label: 'Stack position', permissionSets: [DECLARED_SET] }],
 };
+
+/**
+ * The same app before it declared {@link STACK_POSITION}. The metadata door
+ * refuses a save under a name the running stack declares (the item is
+ * artifact-backed), so the only way a stored row and a stack declaration of
+ * one position name meet is in this order: the row is stored first, and a
+ * later deploy of the stack declares the name.
+ */
+const stackBeforePosition: any = { ...stack, positions: [] };
 
 type Kind = 'environment' | 'host';
 
-async function boot(kind: Kind, dbFile: string, rootDir: string): Promise<any> {
+async function boot(kind: Kind, dbFile: string, rootDir: string, app: any): Promise<any> {
   const kernel = new ObjectKernel();
   await kernel.use(new ObjectQLPlugin(kind === 'environment' ? { environmentId: ENV, registerProtocol: false } : {}) as any);
   await kernel.use(new (DefaultDatasourcePlugin as any)({ driver: 'sqlite', config: { filename: dbFile } }, { dev: false }));
   if (kind === 'environment') await kernel.use(createMetadataProtocolPlugin({ environmentId: ENV }) as any);
   await kernel.use(new MetadataPlugin({ watch: false, config: { bootstrap: 'lazy' }, rootDir }) as any);
-  await kernel.use(new AppPlugin(stack) as any);
+  await kernel.use(new AppPlugin(app) as any);
   await kernel.use(new PlatformObjectsPlugin() as any);
   await kernel.use(new AuthPlugin({ secret: 'catalog-echo-secret-catalog-echo-secret' }) as any);
-  await kernel.use(new SecurityPlugin(appSecurityPluginOptions(stack)) as any);
+  await kernel.use(new SecurityPlugin(appSecurityPluginOptions(app)) as any);
   await kernel.bootstrap();
   return kernel;
 }
@@ -99,7 +111,9 @@ async function readAs(ql: any, userId: string, org: string): Promise<'granted' |
   }
 }
 
-const USERS = { pkg: 'usr_echo_pkg', loose: 'usr_echo_loose', position: 'usr_echo_position' } as const;
+const USERS = {
+  pkg: 'usr_echo_pkg', loose: 'usr_echo_loose', position: 'usr_echo_position', stackPosition: 'usr_echo_stack_position',
+} as const;
 
 /**
  * One kind's scenario: author the two sets and the position through the
@@ -111,8 +125,8 @@ function scenario(kind: Kind) {
   const dbFile = join(dir, 'echo.db');
   const state: { kernel?: any; ql?: any; protocol?: any; org?: string; beforeGrant?: string } = {};
 
-  const open = async () => {
-    state.kernel = await boot(kind, dbFile, dir);
+  const open = async (app: any = stack) => {
+    state.kernel = await boot(kind, dbFile, dir, app);
     state.ql = await state.kernel.getServiceAsync('objectql');
     state.protocol = await state.kernel.getServiceAsync('protocol');
     const orgs = (await state.ql.find('sys_organization', { where: {} }, SYS)) as any[];
@@ -134,6 +148,16 @@ function scenario(kind: Kind) {
     await protocol.saveMetaItem({
       type: 'position', name: POSITION, item: { name: POSITION, label: 'Echo position', permissionSets: [DECLARED_SET] },
     });
+    if (kind === 'environment') {
+      // A metadata-door row under the name the stack declares on the NEXT
+      // deploy (see `stackBeforePosition`), binding nothing. After that deploy
+      // the echo must not serve it over the stack's declaration. (A host
+      // kernel serves the stored row from its registry on every tree; that is
+      // not this file's question.)
+      await protocol.saveMetaItem({
+        type: 'position', name: STACK_POSITION, item: { name: STACK_POSITION, label: 'Overlay', permissionSets: [] },
+      });
+    }
 
     await ql.insert('echo_doc', { id: 'doc_1', title: 'only a grant reads this', organization_id: org }, SYS);
     for (const id of Object.values(USERS)) {
@@ -144,6 +168,22 @@ function scenario(kind: Kind) {
     await ql.insert('sys_user_permission_set', { id: 'ups_pkg', user_id: USERS.pkg, permission_set: PKG_SET, organization_id: org }, SYS);
     await ql.insert('sys_user_permission_set', { id: 'ups_loose', user_id: USERS.loose, permission_set: LOOSE_SET, organization_id: org }, SYS);
     await ql.insert('sys_user_position', { id: 'upos_1', user_id: USERS.position, position: POSITION, organization_id: org }, SYS);
+    await ql.insert('sys_user_position', { id: 'upos_2', user_id: USERS.stackPosition, position: STACK_POSITION, organization_id: org }, SYS);
+  };
+
+  /**
+   * The stack's declaration of {@link STACK_POSITION} is what the catalog
+   * serves, and it grants. Measured on this composition: `AppPlugin` puts
+   * the declaration in the engine registry too, so the catalog answers
+   * `source: 'registry'`; the source is not asserted, because a composition
+   * that declares a stack's positions in the metadata service only is the
+   * shape `security-catalog-echo.test.ts` pins.
+   */
+  const expectStackPositionDeclared = async () => {
+    expect(await resolve('position', STACK_POSITION)).toMatchObject({
+      definition: { label: 'Stack position', permissionSets: [DECLARED_SET] },
+    });
+    expect(await readAs(state.ql, USERS.stackPosition, state.org!)).toBe('granted');
   };
 
   const resolve = (type: 'permission' | 'position', name: string) => securityCatalogReaderOf(state.ql)!.resolve(type, name);
@@ -159,14 +199,14 @@ function scenario(kind: Kind) {
     expect(uninstall, JSON.stringify(uninstall)).toBeTruthy();
   };
 
-  return { dir, dbFile, state, open, close, author, retire, resolve, pendingSuggestions };
+  return { dir, dbFile, state, open, close, author, retire, resolve, pendingSuggestions, expectStackPositionDeclared };
 }
 
 describe('environment kernel: a metadata-door permission set or position is in the security catalog', () => {
   const s = scenario('environment');
 
   beforeAll(async () => {
-    await s.open();
+    await s.open(stackBeforePosition);
     await s.author();
   }, 180_000);
   afterAll(async () => {
@@ -222,6 +262,9 @@ describe('environment kernel: a metadata-door permission set or position is in t
     expect(await readAs(s.state.ql, USERS.loose, s.state.org!)).toBe('granted');
     expect(await readAs(s.state.ql, USERS.position, s.state.org!)).toBe('granted');
     expect(await s.pendingSuggestions()).toHaveLength(1);
+    // The redeploy declares the stack position the stored row is named after:
+    // the boot pass does not echo the row over the declaration.
+    await s.expectStackPositionDeclared();
   }, 180_000);
 
   it('a deleted set and an uninstalled package\'s set are no longer served, and grant nothing', async () => {
@@ -232,6 +275,13 @@ describe('environment kernel: a metadata-door permission set or position is in t
     expect(await readAs(s.state.ql, USERS.pkg, s.state.org!)).toBe('refused');
     // Control: the position, untouched by either, still resolves.
     expect(await s.resolve('position', POSITION)).toMatchObject({ source: 'metadata' });
+    // The stored row under the stack position's name is removed too: the
+    // declaration is still what is served.
+    const stored = await s.state.protocol.deleteMetaItem({ type: 'position', name: STACK_POSITION }).then(
+      () => 'deleted', (e: any) => `refused: ${String(e?.message ?? e).slice(0, 80)}`,
+    );
+    expect(stored).toBe('deleted');
+    await s.expectStackPositionDeclared();
   }, 60_000);
 });
 

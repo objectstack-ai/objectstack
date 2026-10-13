@@ -389,13 +389,23 @@ describe('the echo follows the overlay: healed, dropped, skipped', () => {
     expect(metadata.store.has('ops_reader')).toBe(false);
     expect(items).toEqual([]);
 
-    // A real artifact arriving later is what the registry serves; a stale echo is dropped.
+    // A real artifact arriving later is what the registry serves. The echo
+    // registered before it is left alone while the stored row exists (the
+    // service's removal would delete through its loaders); the overlay's
+    // delete drops it.
     metadata.registerInMemory('permission', 'ops_reader', { ...body(), _envProjection: true });
     items.push({ ...body(), _packageId: 'com.example.ops', _provenance: 'package' });
     overlays['permission/ops_reader'] = { body: body() };
+    const unregistered: string[] = [];
+    const unregister = metadata.unregister;
+    metadata.unregister = (type: string, name: string) => { unregistered.push(`${type}/${name}`); unregister(type, name); };
     expect(await echoSecurityCatalogMutation(protocol, { ql: engine, metadata }, { type: 'permission', name: 'ops_reader', state: 'active' })).toBe('skipped');
-    expect(metadata.store.has('ops_reader')).toBe(false);
+    expect(unregistered, 'no removal while the stored row exists').toEqual([]);
     expect(items).toHaveLength(1);
+    delete overlays['permission/ops_reader'];
+    expect(await echoSecurityCatalogMutation(protocol, { ql: engine, metadata }, { type: 'permission', name: 'ops_reader', state: 'deleted' })).toBe('dropped');
+    expect(unregistered).toEqual(['permission/ops_reader']);
+    expect(items, 'the artifact stays').toHaveLength(1);
   });
 
   it('a delete that leaves no body drops the echo', async () => {
@@ -447,6 +457,30 @@ describe('positions are echoed too', () => {
     engine.registry.getItem = (type: string, name: string) => engine.registry.listItems(type).find((i: Row) => i.name === name);
     expect(await echoSecurityCatalogMutation(protocol, { ql: engine, metadata }, { type: 'position', name: 'field_lead', state: 'active' })).toBe('skipped');
     expect(metadata.of('position').size).toBe(0);
+  });
+
+  it('a STACK-declared position (held by the metadata service only) is neither shadowed by an overlay of its name nor removed by its delete', async () => {
+    // The way `AppPlugin` declares a stack's positions: in the metadata
+    // service, not the engine registry, so the registry check cannot see it.
+    const declared = position({ permissionSets: [CODE_SET] });
+    const metadata = makeMetadataService();
+    metadata.registerInMemory('position', 'field_lead', declared);
+    const overlays: Record<string, { body: Row; packageId?: string }> = {
+      'position/field_lead': { body: position({ permissionSets: ['something_else'] }) },
+    };
+    const protocol = stubProtocol(overlays);
+    const deps = { ql: engineDeclaring(), metadata };
+
+    expect(await echoSecurityCatalogMutation(protocol, deps, { type: 'position', name: 'field_lead', state: 'active' })).toBe('skipped');
+    expect(metadata.of('position').get('field_lead')).toBe(declared);
+    // The boot pass takes the same path.
+    const engine = { ...engineDeclaring(), find: async () => [{ type: 'position', name: 'field_lead', state: 'active', organization_id: null }] };
+    expect(await echoStoredSecurityCatalogOverlays(protocol, { ql: engine, metadata })).toBe(0);
+    expect(metadata.of('position').get('field_lead')).toBe(declared);
+
+    delete overlays['position/field_lead'];
+    expect(await echoSecurityCatalogMutation(protocol, deps, { type: 'position', name: 'field_lead', state: 'deleted' })).toBe('skipped');
+    expect(metadata.of('position').get('field_lead')).toBe(declared);
   });
 
   it('a position saved through the real environment protocol resolves in the catalog', async () => {
