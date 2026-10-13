@@ -34,8 +34,12 @@
  * lock and its prose (`_lockReason`, `_lockDocsUrl`, `_lockSource`). A layer
  * that declares `'none'`, or declares nothing, does not bind. `'none'` declares
  * no lock: it is not a grant over a lower layer's lock (the triage ruling on
- * #21738: an artifact's explicit `'none'` leaves an administrator's stored lock
- * binding, because letting it override would widen the door). When no layer
+ * #21738, as amended on #23119: an artifact's explicit `'none'` leaves a stored
+ * row's lock binding, because letting it override would widen the door). A
+ * stored row's lock is one the runtime stamped (a loader's or a plugin's
+ * `applyProtection`, an install, a migration's re-save), never one an author
+ * wrote: the save door keeps the family a row stores and refuses a body that
+ * would set, change or remove it (ADR-0010 §3.5 and §4.1). When no layer
  * binds, the answer is `'none'` with no prose: a lock reason explains a
  * refusal, and there is none to explain.
  *

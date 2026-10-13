@@ -830,7 +830,9 @@ describe('Storage REST Routes', () => {
       } as any);
       const putRes = createMockRes();
       await putHandler(putReq, putRes);
-      expect(putRes._status).toBe(403);
+      // Every refusal case on both byte routes: storage-routes.raw-token-refusal.test.ts.
+      expect(putRes._status).toBe(401);
+      expect(putRes._json?.error?.code).toBe('INVALID_TOKEN');
     });
   });
 

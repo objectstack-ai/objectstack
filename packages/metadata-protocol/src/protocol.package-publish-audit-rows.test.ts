@@ -542,6 +542,8 @@ describe('[#8400] publishPackageDrafts audits the batch it publishes', () => {
             type: 'view', name: 'locked_grid',
             item: viewBody('locked_grid', 'protected', { _lock: 'no-overlay' }),
             packageId: PKG, actor: 'admin',
+            // [#23119] A stored lock is one a server face stamps: an author's save never sets one.
+            source: 'migrate-stored', force: true,
         } as any);
 
         const auditedBefore = h.auditRows.length;
@@ -738,6 +740,8 @@ describe('[#8594] a refused publish leaves the INNER verdict, in its own vocabul
             type: 'view', name: 'solo_locked',
             item: viewBody('solo_locked', 'protected', { _lock: 'no-overlay' }),
             packageId: PKG, actor: 'admin',
+            // [#23119] A stored lock is one a server face stamps: an author's save never sets one.
+            source: 'migrate-stored', force: true,
         } as any);
 
         let caught: any;
@@ -779,6 +783,8 @@ describe('[#8594] a refused publish leaves the INNER verdict, in its own vocabul
             type: 'view', name: 'locked_grid',
             item: viewBody('locked_grid', 'protected', { _lock: 'no-overlay' }),
             packageId: PKG, actor: 'admin',
+            // [#23119] A stored lock is one a server face stamps: an author's save never sets one.
+            source: 'migrate-stored', force: true,
         } as any);
 
         const res = await protocol.publishPackageDrafts({
@@ -845,6 +851,8 @@ describe('[#8594] a refused publish leaves the INNER verdict, in its own vocabul
             type: 'view', name: 'locked_grid',
             item: viewBody('locked_grid', 'protected', { _lock: 'no-overlay' }),
             packageId: PKG, actor: 'admin',
+            // [#23119] A stored lock is one a server face stamps: an author's save never sets one.
+            source: 'migrate-stored', force: true,
         } as any);
         await protocol.publishPackageDrafts({
             packageId: PKG, actor: 'admin',
@@ -943,6 +951,8 @@ describe('[#8594] a refused publish leaves the INNER verdict, in its own vocabul
             type: 'view', name: 'locked_grid',
             item: viewBody('locked_grid', 'protected', { _lock: 'no-overlay' }),
             packageId: PKG, actor: 'admin',
+            // [#23119] A stored lock is one a server face stamps: an author's save never sets one.
+            source: 'migrate-stored', force: true,
         } as any);
 
         const res = await protocol.publishPackageDrafts({

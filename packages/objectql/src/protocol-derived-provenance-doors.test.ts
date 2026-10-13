@@ -28,8 +28,9 @@
  * accumulating lies. Both land here.
  *
  * ⚠️ The keys stripped are EXACTLY those three. The `_lock*` family is NOT
- * touched: a lock is author-declarable, and dropping one is the fail-open
- * direction (the line cloud PR #2065 drew at its own producer).
+ * stripped: dropping a lock is the fail-open direction (the line cloud PR #2065
+ * drew at its own producer). [#23119] An author's save keeps the family the
+ * row stores, and refuses a body that would set, change or remove it.
  *
  * This file lives in `@objectstack/objectql` for the same reason
  * `protocol-writepath-object-ownership.test.ts` does: the subject is the REAL
@@ -255,10 +256,36 @@ describe('#16702 door 1 — saveMetaItem strips exactly the three DERIVED keys',
         expect(body).toMatchObject({ name: 'pet_hospital', label: 'Pet Hospital' });
     });
 
-    it('⛔ does NOT touch the _lock* family — dropping a lock is the fail-open direction', async () => {
+    // [#23119] The `_lock*` family is never silently stripped either — dropping
+    // a lock is the fail-open direction. An author's save keeps the family the
+    // row stores, and a body that would set one is refused, loudly.
+    it('⛔ does NOT strip the _lock* family: a stored lock is kept while the three keys go', async () => {
         const { driver } = makeStubDriver();
         const { engine, protocol } = await boot(driver);
+        const family = {
+            _lock: 'no-delete', _lockReason: 'stamped by a migration', _lockSource: 'package',
+            _lockDocsUrl: 'https://example.invalid/locks',
+        };
+        // A server face stamps the lock: a migration's re-save carries the stored family.
         await protocol.saveMetaItem({
+            type: 'app', name: 'pet_hospital', packageId: PKG, source: 'migrate-stored', force: true,
+            item: { name: 'pet_hospital', label: 'Pet Hospital', ...family },
+        });
+        // The author's round trip echoes the derived keys and sends no family.
+        await protocol.saveMetaItem({
+            type: 'app', name: 'pet_hospital', packageId: PKG,
+            item: { name: 'pet_hospital', label: 'Edited', _packageId: PKG, _provenance: 'package' },
+        });
+        const body = await storedBody(engine);
+        expect(body).toMatchObject({ label: 'Edited', ...family });
+        expect(body).not.toHaveProperty('_packageId');
+        expect(body).not.toHaveProperty('_provenance');
+    });
+
+    it('⛔ does NOT strip a family an author sends to set a lock: the save is refused, and nothing is written', async () => {
+        const { driver } = makeStubDriver();
+        const { engine, protocol } = await boot(driver);
+        await expect(protocol.saveMetaItem({
             type: 'app', name: 'pet_hospital', packageId: PKG,
             item: {
                 name: 'pet_hospital', label: 'Pet Hospital',
@@ -266,14 +293,8 @@ describe('#16702 door 1 — saveMetaItem strips exactly the three DERIVED keys',
                 _lockDocsUrl: 'https://example.invalid/locks',
                 _packageId: PKG, _provenance: 'package',
             },
-        });
-        const body = await storedBody(engine);
-        expect(body._lock).toBe('full');
-        expect(body._lockReason).toBe('author declared');
-        expect(body._lockSource).toBe('package');
-        expect(body._lockDocsUrl).toBe('https://example.invalid/locks');
-        expect(body).not.toHaveProperty('_packageId');
-        expect(body).not.toHaveProperty('_provenance');
+        })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+        expect(await engine.find('sys_metadata', { where: { type: 'app', name: 'pet_hospital' } })).toEqual([]);
     });
 });
 

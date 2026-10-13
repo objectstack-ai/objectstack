@@ -19,8 +19,9 @@
  *      carries the prescription, which names the derived field set from its
  *      one declaration (`data/inline-grid-sort-fields.ts`), and the key's
  *      input type is `never`. `PageComponentSchema.properties` is an open bag,
- *      so the props schema is reached by the advisory props lint and never by
- *      the page parse: an existing page is never hard-refused.
+ *      so the props schema is reached by the props lint — which refuses this
+ *      tombstone as an `error` at `os validate` / `os build` / `os lint` — and
+ *      never by the page parse: an existing page is never hard-refused at load.
  *   2. D2 conversion `object-master-detail-form-detail-sort-field-removed`
  *      (step 18), a strip scoped by component type and by position, retired
  *      from the load path: a stored or built page replays clean, with a notice.
@@ -443,7 +444,7 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
   const EXCLUDED = new Set([
     // This pin authors the key to assert its refusal and its conversion.
     THIS_FILE,
-    // The props-lint pin authors the key to assert the advisory warning an
+    // The props-lint pin authors the key to assert the refusal (an `error`) an
     // author meets at `os validate` / `os build` / `os lint`.
     'packages/lint/src/validate-component-props.test.ts',
   ]);
