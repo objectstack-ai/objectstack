@@ -227,7 +227,8 @@ for (const writeFace of AUTHOR_FACES) {
             await protocol.saveMetaItem({ type: 'app', name, item: app(name), writeFace });
             for (const family of [{ _lock: 'full' }, { _lock: 'no-overlay' }, { _lock: 'no-delete' }, { _lock: 'none' }, { _lockReason: 'why' }]) {
                 const err = await refusalOf(() => protocol.saveMetaItem({ type: 'app', name, item: app(name, family), writeFace }));
-                expectLockFamilyRefusal(err, Object.keys(family), 'set a lock on it');
+                // A lone prose key, or `none`, binds nothing: it adds keys, not a lock.
+                expectLockFamilyRefusal(err, Object.keys(family), family._lock && family._lock !== 'none' ? 'set a lock on it' : 'add lock keys to it');
             }
             expect(storedFamily('app', name)).toEqual({});
         });

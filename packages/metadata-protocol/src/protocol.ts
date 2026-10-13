@@ -1103,7 +1103,7 @@ function authoredLockFamilyRefusal(
     const servedLock = served._lock ?? 'none';
     const sentLock = sent._lock ?? 'none';
     const effect = servedLock === 'none'
-        ? 'set a lock on it'
+        ? (sentLock === 'none' ? 'add lock keys to it' : 'set a lock on it')
         : sentLock === 'none' ? 'remove its lock' : 'change its lock';
     const err = new Error(
         `Remove ${keys.map((key) => `\`${key}\``).join(', ')} from ${type} '${saveName}' and send it again. `
