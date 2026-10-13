@@ -64,6 +64,7 @@ export const SysPermissionSet = ObjectSchema.create({
  * AND models an existing database's bucket rows, whether or not the plugin
  * still declares the table.
  */
-export function withLegacyPermissionSetTable<T extends { name?: string }>(objects: readonly T[]): Array<T | typeof SysPermissionSet> {
-  return objects.some((o) => o?.name === SysPermissionSet.name) ? [...objects] : [...objects, SysPermissionSet];
+export function withLegacyPermissionSetTable(objects: readonly unknown[]): unknown[] {
+  const declared = objects.some((o) => (o as { name?: unknown } | null | undefined)?.name === SysPermissionSet.name);
+  return declared ? [...objects] : [...objects, SysPermissionSet];
 }
