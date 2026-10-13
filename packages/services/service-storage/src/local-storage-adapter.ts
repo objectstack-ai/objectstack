@@ -92,6 +92,49 @@ interface PresignTokenPayload {
 }
 
 /**
+ * The one message every refused presigned token carries — the wording the
+ * published `INVALID_TOKEN` entry shows. It never says WHICH check failed:
+ * telling a forger "signature" apart from "expired" tells them how close they
+ * got.
+ */
+export const STORAGE_TOKEN_REFUSAL_MESSAGE = 'Invalid or expired token';
+
+/**
+ * The own-property brand {@link isStorageTokenRefusal} tests for — a brand
+ * rather than `instanceof`, so a second copy of this module (an ESM host
+ * handing a CJS-built adapter to the routes) still recognises the refusal
+ * instead of answering it as an internal fault. Same reasoning as
+ * `@objectstack/core`'s `AuthzStoreUnavailableError`.
+ */
+const STORAGE_TOKEN_REFUSAL_BRAND = '__objectstackStorageTokenRefused' as const;
+
+/**
+ * Thrown by {@link LocalStorageAdapter.verifyToken} for every token it will not
+ * honour — malformed, forged, minted for the other verb, or expired alike, all
+ * with {@link STORAGE_TOKEN_REFUSAL_MESSAGE}. The `_local/raw/:token` routes
+ * answer it as the caller's refusal (`401 INVALID_TOKEN`); anything else they
+ * catch is a genuine fault and stays 5xx.
+ */
+export class StorageTokenRefusedError extends Error {
+  /** Brand — see {@link STORAGE_TOKEN_REFUSAL_BRAND}. */
+  readonly [STORAGE_TOKEN_REFUSAL_BRAND] = true as const;
+
+  constructor() {
+    super(STORAGE_TOKEN_REFUSAL_MESSAGE);
+    this.name = 'StorageTokenRefusedError';
+  }
+}
+
+/** True for the refusal {@link LocalStorageAdapter.verifyToken} throws, and for nothing else. */
+export function isStorageTokenRefusal(err: unknown): err is StorageTokenRefusedError {
+  return (
+    typeof err === 'object'
+    && err !== null
+    && (err as Record<string, unknown>)[STORAGE_TOKEN_REFUSAL_BRAND] === true
+  );
+}
+
+/**
  * Local filesystem storage adapter implementing IStorageService.
  *
  * Stores committed files under `rootDir/`, in-flight multipart parts under
@@ -367,29 +410,29 @@ export class LocalStorageAdapter implements IStorageService {
   }
 
   /**
-   * Verify and decode a presigned token. Throws on invalid signature or
-   * expiration.
+   * Verify and decode a presigned token.
+   *
+   * Every token this adapter will not honour — malformed, forged (bad
+   * signature or an unreadable signed payload), minted for the other verb, or
+   * expired — throws the same {@link StorageTokenRefusedError}, so the caller
+   * learns the token was refused and never which check refused it.
    */
   verifyToken(token: string, expectedOp: 'put' | 'get'): PresignTokenPayload {
     const [b64, sig] = token.split('.');
-    if (!b64 || !sig) throw new Error('Invalid storage token format');
+    if (!b64 || !sig) throw new StorageTokenRefusedError();
 
     const expected = createHmac('sha256', this.signingSecret).update(b64).digest('base64url');
-    if (expected !== sig) throw new Error('Invalid storage token signature');
+    if (expected !== sig) throw new StorageTokenRefusedError();
 
     let payload: PresignTokenPayload;
     try {
       payload = JSON.parse(Buffer.from(b64, 'base64url').toString('utf8'));
     } catch {
-      throw new Error('Malformed storage token payload');
+      throw new StorageTokenRefusedError();
     }
 
-    if (payload.op !== expectedOp) {
-      throw new Error(`Storage token op mismatch (expected="${expectedOp}", actual="${payload.op}")`);
-    }
-    if (Date.now() / 1000 > payload.exp) {
-      throw new Error('Storage token expired');
-    }
+    if (payload.op !== expectedOp) throw new StorageTokenRefusedError();
+    if (Date.now() / 1000 > payload.exp) throw new StorageTokenRefusedError();
     return payload;
   }
 

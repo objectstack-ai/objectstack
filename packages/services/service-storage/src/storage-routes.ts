@@ -25,6 +25,10 @@ import type {
 // door's conditional progress write.
 import { organizationOutOfWriteReach, updateSessionProgressIfUnchanged } from './metadata-store.js';
 import type { LocalStorageAdapter } from './local-storage-adapter.js';
+// The ONE refusal `verifyToken` throws, recognised by its brand — never by
+// reading the message, which once let a genuine fault whose text said
+// "expired" answer as a refused token.
+import { isStorageTokenRefusal, STORAGE_TOKEN_REFUSAL_MESSAGE } from './local-storage-adapter.js';
 // [#22046] The ONE upload ownership rule. Declared in its own module and only
 // CALLED here — the three doors below share it rather than each carrying a
 // copy of the comparison.
@@ -207,6 +211,21 @@ function declaredContentLength(req: IHttpRequest): number | undefined {
   if (first === undefined || first === null || String(first).trim() === '') return undefined;
   const n = Number(first);
   return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
+/**
+ * The answer a `_local/raw/:token` byte route gives a throw. A token
+ * `verifyToken` refused — malformed, forged, minted for the other verb, or
+ * expired — is the caller's to fix: `401 INVALID_TOKEN`, with one message for
+ * every case so the answer never says which check failed. Anything else is a
+ * genuine fault and stays `500 INTERNAL`, whatever its text says.
+ */
+function sendRawByteRouteFailure(res: IHttpResponse, err: any, fallbackMessage: string): void {
+  if (isStorageTokenRefusal(err)) {
+    sendError(res, 401, 'INVALID_TOKEN', STORAGE_TOKEN_REFUSAL_MESSAGE);
+    return;
+  }
+  sendError(res, 500, 'INTERNAL', err?.message ?? fallbackMessage);
 }
 
 /**
@@ -1454,13 +1473,7 @@ export function registerStorageRoutes(
       // observable to conformance tests and to curl, not to a caller.
       sendOk(res, { key: payload.k });
     } catch (err: any) {
-      const invalidToken = err?.message?.includes('expired') || err?.message?.includes('signature');
-      sendError(
-        res,
-        invalidToken ? 403 : 500,
-        invalidToken ? 'INVALID_TOKEN' : 'INTERNAL',
-        err?.message ?? 'Upload failed',
-      );
+      sendRawByteRouteFailure(res, err, 'Upload failed');
     }
   });
 
@@ -1488,13 +1501,7 @@ export function registerStorageRoutes(
       }
       res.send(data);
     } catch (err: any) {
-      const invalidToken = err?.message?.includes('expired') || err?.message?.includes('signature');
-      sendError(
-        res,
-        invalidToken ? 403 : 500,
-        invalidToken ? 'INVALID_TOKEN' : 'INTERNAL',
-        err?.message ?? 'Download failed',
-      );
+      sendRawByteRouteFailure(res, err, 'Download failed');
     }
   });
 }
