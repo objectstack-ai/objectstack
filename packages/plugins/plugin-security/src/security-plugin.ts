@@ -458,6 +458,11 @@ interface RlsFilterOptions {
    *     sits directly below it on the same middleware pass, guarded by a
    *     SUPERSET of step 2.7's own condition (same `permissionSets`/`userId`/
    *     `ql` triple, same single target id, one extra operation — `insert`);
+   *   • [#23093] the chain walk's master-edit leg
+   *     ({@link SecurityPlugin.assertMasterRowEditable}) sets it on a hop whose
+   *     master is itself `controlled_by_parent`, on a non-delegated write. Why
+   *     the walk covers that master's write is stated once, at that call site's
+   *     `masterGateCoversThisWrite` bullet — not restated here;
    *   • the BULK write path does NOT, and must not: with no single id,
    *     `assertControlledByParentWrite` returns early and nothing replaces the
    *     floor. Reading the posture alone here would have widened bulk writes on
@@ -9477,15 +9482,34 @@ export class SecurityPlugin implements Plugin {
     //  • the verb is `update`, matching the object-level check above and leg 2
     //    below: this gate's question is EDIT access to the master, never the
     //    detail's own verb;
-    //  • `masterGateCoversThisWrite` is deliberately NOT set. That knob is
-    //    commit 6feac910b's, and it hands a `controlled_by_parent` object's floor to THIS
-    //    gate; setting it here would hand a nested master's floor to a gate that
-    //    is already running, on a path no measurement covers. A master that is
-    //    itself a detail keeps its floor exactly as it does today.
+    //  • [#23093] `masterGateCoversThisWrite` IS set for a master that is itself
+    //    `controlled_by_parent`, on a non-delegated write. Maintainer ruling on
+    //    #23093 (letter A, 2026-10-12) extends the 2026-08-15 ruling — commit
+    //    6feac910b, which hands such an object's platform floor to its master
+    //    gate on its own by-id write (step 2.7) — to this hop. Before it, one
+    //    principal and one middle master row got two answers to one `update`:
+    //    the master's own door dropped the floor, a write to any of its details
+    //    kept it here. So an organization member who could edit a quote could
+    //    not edit its lines unless they had created the quote, and the quote's
+    //    creator could edit the lines of a quote an app policy refused them
+    //    (the floor and that policy compose as alternatives). The hop now asks
+    //    the composition that door asks, clause for clause: only the PLATFORM
+    //    floor yields; an app-authored update policy on the master and the
+    //    #7665 derive-from-select floor still run, and refuse here exactly as
+    //    they refuse the door. The vouch holds structurally, as step 2.7's
+    //    does: the flag is set on the very predicate
+    //    (`declaresControlledByParent(rel.master)`) that makes the walk in
+    //    {@link SecurityPlugin.assertControlledByParentWrite} continue to this
+    //    master's own master, so this master's own master gate runs next, for
+    //    this principal, on this pass — or the walk refuses (cycle, depth bound,
+    //    broken chain). A master that governs its own rows never sets it.
+    //    Pinned in `controlled-by-parent-chain-middle-master.test.ts`.
     //
     // [ADR-0090 D10] The on-behalf-of path is EXCLUDED, mirroring step 2.7's
-    // `floorApplies`. The delegation fact is read off `opCtx.context` rather
-    // than off `context`, because THIS METHOD RUNS TWICE for a delegated write
+    // `floorApplies` and its `masterGateCoversThisWrite = !delegatorSets` — from
+    // the sharing-verdict floor drop and from the vouch alike. The delegation
+    // fact is read off `opCtx.context` rather than off `context`, because THIS
+    // METHOD RUNS TWICE for a delegated write
     // — once per principal, with the delegator's own context substituted — and
     // only the shared `opCtx` carries the link on both passes. (At this point
     // `!!opCtx.context?.onBehalfOf?.userId` is the middleware's `!!delegatorSets`:
@@ -9515,6 +9539,7 @@ export class SecurityPlugin implements Plugin {
       : false;
     const masterWriteFilter = await this.computeRlsFilter(permissionSets, rel.master, 'update', context, {
       dropPlatformOwnershipFloor,
+      masterGateCoversThisWrite: !delegatedWrite && this.declaresControlledByParent(rel.master),
     });
     if (masterWriteFilter) {
       let visible: unknown = null;

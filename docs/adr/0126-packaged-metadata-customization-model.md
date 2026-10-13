@@ -310,8 +310,9 @@ contract they consume.
 
 - **New machine name, mandatory** (the #11513 shape exactly). ⛔ No same-name clone in a second
   package: storage legitimately holds both — the uniqueness index keys on
-  `(type, name, organization_id, COALESCE(package_id, ''))` (ADR-0005 amendment, #6825; ADR-0048
-  governs the cross-package coexistence) — and the engine's name-keyed flow map makes the winner
+  `(type, name, organization_id, COALESCE(package_id, ''), COALESCE(bundle_member, ''))`
+  (ADR-0005, amended 2026-08-09 by #6825 and 2026-10-12 by #22877 ruling A; ADR-0048 governs the
+  cross-package coexistence) — and the engine's name-keyed flow map makes the winner
   insertion-order: measured as a silent, non-deterministic replacement (#11665 §2.2; #11997
   tracks the shadow diagnostics independently of this model).
 - **Whole-definition copy — ⛔ never param-list assembly.** The clone copies the parsed
