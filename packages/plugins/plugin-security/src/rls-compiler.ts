@@ -52,8 +52,8 @@ import {
 // [ADR-0139 D2 step 2] The RLS deny sentinel is declared ONCE, in the spec's
 // `data` entry, because the engine recognises it by identity and cannot import
 // this plugin. This file holds no second literal: it returns the spec's object
-// and re-exports it under the name every consumer here already imports.
-import { RLS_DENY_FILTER } from '@objectstack/spec/data';
+// and exports it under the name every consumer here already imports.
+import { RLS_DENY_FILTER as SPEC_RLS_DENY_FILTER } from '@objectstack/spec/data';
 
 /**
  * Why a policy's predicate produced no filter — the compiler's OWN answer,
@@ -679,13 +679,15 @@ function rlsLowering(fieldGuard: RlsFieldGuard | undefined): FilterLoweringOptio
  * handle a thrown `PermissionDeniedError` for what is conceptually an
  * empty result set.
  *
- * [ADR-0139 D2 step 2] It IS `@objectstack/spec/data`'s `RLS_DENY_FILTER`,
- * re-exported — the same object, not a copy — because the engine's
- * composition recognises it by identity. Every producer in this plugin
- * returns this reference ({@link RLSCompiler.compileFilter}, the tenant wall's
- * deny, `getReadFilter`'s fail-closed branches); ⛔ never spread it.
+ * [ADR-0139 D2 step 2] It IS `@objectstack/spec/data`'s `RLS_DENY_FILTER` —
+ * the same object, not a copy — because the engine's composition recognises
+ * it by identity. Bound under this plugin's published name and type, so the
+ * package's export reads exactly as it did before the declaration moved.
+ * Every producer in this plugin returns this reference
+ * ({@link RLSCompiler.compileFilter}, the tenant wall's deny, `getReadFilter`'s
+ * fail-closed branches); ⛔ never spread it.
  */
-export { RLS_DENY_FILTER };
+export const RLS_DENY_FILTER: Record<string, unknown> = SPEC_RLS_DENY_FILTER;
 
 /**
  * [#20355] Which policy each compiled policy filter came from — recorded by

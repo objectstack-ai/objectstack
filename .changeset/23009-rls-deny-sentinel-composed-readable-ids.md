@@ -1,0 +1,13 @@
+---
+"@objectstack/spec": minor
+"@objectstack/plugin-security": patch
+---
+
+The RLS deny sentinel and the composed `ReadableIds` leaf are declared once in `@objectstack/spec/data`, and every deny `getReadFilter` answers is that one object (ADR-0139 D2)
+
+Clause-②: yes (widening: new exported members of the published spec `data` entry)
+
+- **`RLS_DENY_FILTER` moves into the spec.** FROM `@objectstack/plugin-security`'s own frozen literal TO `RLS_DENY_FILTER` exported by `@objectstack/spec/data`. The value is unchanged: `{ id: '__rls_deny__:00000000-0000-0000-0000-000000000000' }`, an `id` equality no record satisfies, so a consumer that never heard of it still reads zero rows. `@objectstack/plugin-security` keeps exporting `RLS_DENY_FILTER` under the same name and type; it is now the spec's object, not a second copy. Nothing to change in code that imports it from either package.
+- **One object, compared by identity.** `getReadFilter` (`ISecurityService`) now returns the sentinel itself on every deny path: a principal-less caller, a sharing scope that cannot be resolved, an on-behalf-of caller, a caller with no permission set, a resolution failure, the tenant wall's deny, every applicable policy dropped, and a `controlled_by_parent` object whose master cannot be resolved. Before this release most of those returned a spread copy, which matched the same zero rows but was a different object. The engine's `ReadableIds` composition (ADR-0139 D2 step 2) recognises the deny by `scope === RLS_DENY_FILTER`. The object is frozen: code that edited the filter `getReadFilter` returned now gets a `TypeError` instead of silently changing a deny. A deny ANDed with another layer is still returned as the composed `$and`.
+- **The composed leaf.** `ReadableIds.compose(leaf, scope)` builds the frozen value `{ object, scope }` the engine hands a driver in place of a `ReadableIds` leaf (D2 step 3). It is branded under `COMPOSED_READABLE_IDS_BRAND` (`Symbol.for('objectstack.filter.readableIds.composed')`), so a JSON round-trip, a structured clone or a spread drops the brand. `isComposedReadableIds(value)` recognises it. The type `ComposedReadableIds` is exported. `scope` is `undefined` for "no row restriction"; `compose` throws a `TypeError` for anything but a `ReadableIds.of` leaf, for a scope that is not a plain filter object, and for `RLS_DENY_FILTER` itself, which D2 step 2 answers `$in: []`.
+- **`isReadableIds` answers as before.** It answers `false` for a composed leaf, so it still means "an uncomposed leaf", and a driver refuses on it. The comparand-shape door's `admitReadableIds` admits the uncomposed leaf only: a composed leaf handed to the engine from outside is refused `INVALID_FILTER` / 400 as a non-list comparand.
