@@ -63,16 +63,16 @@ export function validateSeedReplaySafety(stack: AnyRec): SeedReplaySafetyFinding
       rule: SEED_INSERT_MODE_DUPLICATES_ON_REPLAY,
       where,
       path: `data[${i}].mode`,
-      // [#22161] One verdict sentence; why seeds are replayed and what the
-      // idempotent modes match on are `os explain seed-insert-mode-duplicates-on-replay`.
+      // [#22161] One verdict sentence and one remedy line; why seeds are
+      // replayed, what each idempotent mode does and the composite
+      // `externalId` of a junction table are
+      // `os explain seed-insert-mode-duplicates-on-replay`.
       message:
         "`mode: 'insert'` re-inserts every record on each replay boot (dev-server restart, " +
         'package re-publish) with no existing-row check, so every restart duplicates its rows',
       hint:
-        "Use `mode: 'ignore'` (skip rows that already exist) or `'upsert'` (create-or-update), " +
-        "and declare an `externalId` to match on: a single natural-key field (e.g. `externalId: 'code'`), " +
-        'or a COMPOSITE list of fields for a join / junction table with no single natural key ' +
-        "(e.g. `externalId: ['team', 'project']`).",
+        "Use `mode: 'ignore'` or `'upsert'` with an `externalId` to match on (a natural-key field, or a " +
+        'list of fields for a junction table)',
     });
   });
 

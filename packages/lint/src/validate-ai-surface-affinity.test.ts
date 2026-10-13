@@ -13,7 +13,7 @@ import { explainRule } from './rule-explanations.js';
 // verdict to one line of at most 200 characters — every firing variant this
 // suite exercises, not a chosen few. Run the whole file: those cases read what
 // the cases above fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateAiSurfaceAffinity: typeof validateAiSurfaceAffinityUnrecorded = (...args) => {
   const findings = validateAiSurfaceAffinityUnrecorded(...args);
   fired.push(...findings);
@@ -194,5 +194,32 @@ describe('[#22161] one-line verdicts — ai-skill-surface-mismatch', () => {
       expect(f.message, f.rule).not.toContain('\n');
       expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
     }
+  });
+});
+
+// [#22161] Slice 16: the `fix:` line names the three ways out in one line; when
+// `surface: 'both'` is right is the explanation's.
+describe('[#22161] one-line fix — ai-skill-surface-mismatch', () => {
+  it('reads as one remedy, a long skill name included, at most 200 characters', () => {
+    const ref = 'regional_enterprise_pipeline_forecast_reviewer';
+    const [f] = validateAiSurfaceAffinity({
+      agents: [{ name: 'sales_assistant', surface: 'ask', skills: [ref] }],
+      skills: [{ name: ref, surface: 'build' }],
+    });
+    expect(f!.hint).toBe(
+      `Move "${ref}" to a 'build'-surface agent, change its \`surface\` to 'ask', or declare \`surface: 'both'\` ` +
+        'for a shared, read-only skill',
+    );
+    const converted = fired.filter((x) => x.rule === AI_SKILL_SURFACE_MISMATCH);
+    expect(converted.length).toBeGreaterThan(1);
+    for (const x of converted) {
+      expect(x.hint, x.rule).not.toContain('\n');
+      expect(x.hint.length, `${x.rule}: ${x.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('`os explain` carries what the `fix:` line no longer says', () => {
+    const text = explainRule(AI_SKILL_SURFACE_MISMATCH)!.paragraphs.join('\n');
+    expect(text).toContain("Declare `surface: 'both'` only for a genuinely shared, read-only capability");
   });
 });

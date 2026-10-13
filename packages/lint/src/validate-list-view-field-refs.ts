@@ -565,9 +565,10 @@ function describeDottedRefusal(
   meta: { type?: string; multiple?: boolean } | undefined,
   subject: string,
 ): { message: string; hint: string } | undefined {
-  const denormalise =
-    `Denormalise the value onto "${object}" (a stored field, written when the source changes) ` +
-    'and name that.';
+  // [#22161] One remedy line per door, still in the doors' words ("denormalise
+  // the value onto … and name that"); what a denormalised field is (stored,
+  // written when the source changes) is `os explain list-view-field-dotted`.
+  const denormalise = `denormalise the value onto "${object}" and name that`;
 
   if (axis === 'projection') {
     // No classification: `assertProjectionHasNoDottedPaths` filters on
@@ -577,8 +578,8 @@ function describeDottedRefusal(
         `${subject} "${written}" is a dotted path, so the query projection refuses it ` +
         `(\`assertProjectionHasNoDottedPaths\`) and the view's first fetch answers 400 INVALID_FIELD`,
       hint:
-        `Name a whole column of "${object}" — "${head}" — and read into its value in the client, ` +
-        `or read the related record with \`expand\`. ${denormalise}`,
+        `Name the whole column "${head}" and read into it in the client, read the related record ` +
+        `with \`expand\`, or ${denormalise}`,
     };
   }
 
@@ -596,7 +597,7 @@ function describeDottedRefusal(
     message:
       `${subject} "${written}" is a dotted path whose head "${head}" is a ${type} field on ` +
       `"${object}" (${because}), so no backend serves the path (400 INVALID_FIELD)`,
-    hint: `Filter on a column of "${object}" itself. ${denormalise}`,
+    hint: `Filter on a column of "${object}" itself, or ${denormalise}`,
   };
 }
 
@@ -682,8 +683,10 @@ export function validateListViewFieldRefs(stack: AnyRec): ListViewFieldRefFindin
       message:
         account.message
         + (dotted ? ` (the head of "${written}": a list view compiles no joins)` : ''),
-      hint:
-        `Name a field that exists on "${object}", or drop the entry. ${account.detail}`,
+      // [#22161] The remedy alone: the verdict's "Did you mean" names the
+      // nearest field, so the object's field list (`account.detail`) is not
+      // echoed.
+      hint: `Name a field that exists on "${object}", or drop the entry`,
     });
   };
 

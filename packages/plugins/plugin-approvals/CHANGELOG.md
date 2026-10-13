@@ -1,5 +1,405 @@
 # @objectstack/plugin-approvals
 
+## 18.0.0-next.0
+
+### Minor Changes
+
+- 5495331: feat(plugin-approvals): serve the approval request's record page, and declare the thread reply as `approval_comment`
+  
+  Clause-②: no
+  
+  **The request's record page is now metadata this plugin serves.** `ApprovalsServicePlugin` registers `sys_approval_request_detail` through its manifest `pages`: a slotted record page, default for every `sys_approval_request` record, that the metadata API serves like any other page. Its slots:
+  
+  - `actions`: one `record:approval_decision` node (the decision panel: the request's decision progress and its declared decision actions);
+  - `highlights`: the object's `highlightFields` without `record_id`, so `record_id` stays in the details grid, where the console draws the target record of the `record_id` / `object_name` pointer pair. The object's own `highlightFields` is unchanged;
+  - `tabs`: Details (`record:details`) and Timeline (`sys_approval_action` as a related list on `request_id`, newest first);
+  - `discussion: []`: no generic discussion thread. The request's thread is its timeline.
+  
+  The page label is translated in the plugin's bundle as `pages.sys_approval_request_detail.label` (en, zh-CN, ja-JP, es-ES). The page stays module-internal: nothing new is exported from the package entry.
+  
+  **`approval_comment` declares the thread reply.** `sys_approval_request` now declares a ninth action, `approval_comment` ("Reply"). It posts `comment` (a required textarea) and `attachments` (optional, several files) to `POST /api/v1/approvals/requests/{id}/comment`, the route the console drawer posted to by hand. The service stores the reply as a `sys_approval_action` row with action `comment`, which the Timeline lists. Its `visible` gate is the route's own admission: a pending approver (`record.viewer.can_act`), or the submitter while the request is `pending`. It has no admin-override arm, because the comment route admits none.
+- a00cf99: feat(plugin-approvals): the record-reader approval tier honours an object's own `enable.approvalsVisibleToReaders` declaration
+  
+  Clause-②: yes (widening)
+  
+  - **Before this,** the read-only record-reader tier could be switched on only through the `recordReaderVisibleObjects` constructor option. A config-driven app, whose host builds the plugin with no options, had no way to reach it.
+  - **Now** the tier is on for an object when either source turns it on: the host's `recordReaderVisibleObjects`, or the object's own `enable.approvalsVisibleToReaders: true`. With neither, visibility is exactly as before.
+  - **Read where it is used.** The service reads the declaration from the object's live registered definition on each read that names a record, not once at start. An object registered after boot (an installed package, a Studio edit, a dev reload) takes effect at once. Removing the flag turns the tier off at once, with no restart.
+  - **Fails closed.** An engine that cannot answer an object definition, an unknown object, or any value other than `true` leaves the tier off. Default OFF costs one in-memory registry lookup on a read that names a record. The business record is never probed for an object that declares nothing.
+  - **Unchanged.** The rule itself: who counts as a reader, the read-only boundary, the request tables it covers on both doors, and the constructor option.
+- 3d0eeef: feat(plugin-approvals): `ApprovalService.handleActionPage` serves the ADR-0043 action page from a web-standard `Request` (#22578)
+  
+  Clause-②: yes
+  
+  - **What is new.** `ApprovalService` implements the optional `IApprovalService.handleActionPage(request)` member: the session-less page an approver reaches from the approve or reject link in an e-mail or IM message, from a `Request` to a `Response`, with no raw app, no Hono context and no `http.server`. `GET` renders the confirm page from the `token` query parameter and never decides. `POST` redeems the `token` field of the form body as the approver the token binds, and answers the result page. A dead link (unknown, expired, consumed, decided or reassigned) is told on the page with `200`. Any other method answers `405` with `Allow: GET, POST`.
+  - **The same pages, the same checks.** The member answers what the plugin's self-hosted pages answer for the same token and method: the same status, `Content-Type: text/html; charset=utf-8` and bytes. It goes through the same `peekActionToken` / `redeemActionToken` and the same page renderers, and both doors share one token store, so a link used at one is dead at the other. The token is the only credential: no session, cookie or `Authorization` header is read.
+  - **Its one caller** is the runtime HTTP dispatcher's `/approvals/act` domain (#22576), which reaches a hosted tenant kernel that owns no socket.
+  - **The self-hosted mount is unchanged.** Where `http.server` exposes a raw app, the plugin mounts `GET` and `POST /api/v1/approvals/act` exactly as before, and the path is never mounted twice. Where there is none, the plugin now logs one `info` line at boot saying the pages are served through the dispatcher's `/approvals/act` domain; it was silent.
+- e8c6666: feat(plugin-approvals): opening an approval step tells each resolved approver (`approval.requested`)
+  
+  Clause-②: yes (widening)
+  
+  - **What is new.** When an approval node opens a request, every concrete approver on the slate it opened on gets one notification on the new topic `approval.requested`: title "Approval requested", body "A decision on OBJECT/RECORD is waiting on you.", linked to that request in the Approvals Inbox, with the person whose run opened the step as its actor. It goes through the installed `messaging` service exactly as `approval.reminder`, `approval.reassigned`, `approval.escalated` and `approval.returned` do, so the same channels and delivery preferences apply. Before this, the opening was the one lifecycle step that published nothing: an approver learned that a step was waiting only by opening the inbox.
+  - **Who is told.** A named user, every holder of a staffed position or member of a team, and, when `onEmptyApprovers: 'fallback'` replaced an empty slate, the declared `fallbackApprovers`. Each person is told once, even when the slate lists them under two groups.
+  - **Who is not.** A `type:value` slot no one holds (`position:NAME` with no holders) names no person, so a step that resolves to nobody notifies no one, and `onEmptyApprovers` decides that case: `admin_rescue` opens on the literal slot and tells nobody, `auto_approve` and `fail` open no request. An out-of-office delegate gets one message, the existing `approval.ooo_substituted`, not a second one for the opening. Without a `messaging` service nothing is delivered, as before.
+  - **Not included.** The opening carries no one-tap Approve / Reject links. Those links are still minted only by a reminder.
+  - **If your flow already tells the approvers itself, remove that.** The approvals guide used to say that opening a request notifies nobody, and suggested a `notify` node next to the approval node as the workaround. A flow that followed that advice now tells the same approvers twice. Remove the `notify` node, or narrow its recipients to people the approval does not address. Keep `notify` nodes that tell the submitter or a watcher, or that report the decision. No flow in this repository's examples, `objectstack-ai/hotcrm` or `objectstack-ai/hotclm` has that workaround: every `notify` node in their approval flows runs after the decision.
+- 86da194: fix(plugin-approvals)!: `sys_approval_token`, the action-link tokens, is no longer exposed through the automatic API
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata an author writes moves: the narrowed declaration is the `enable` block of an engine-owned object this package ships and registers itself, objects are not overridable per organization, and no stored row is read, rewritten, converted or dropped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a runtime door: the automatic API no longer serves this object's rows to any caller. Measured consumers of that door in this repository and in the pinned console: none outside one internal QA checklist procedure. The other categories are closed on facts: the bumped package publishes (not unpublished); no ADR-0087 id covers this path and this diff adds none (not registered / already-registered); and nothing exported changes (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing on a runtime door), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  The object's own declaration already said its tokens are minted and consumed by the approval engine, never through the data API. It now says so in the form every door enforces, so the generic doors serve token rows to no caller, as the approvals door (`/api/v1/approvals/*`) serves them to nobody.
+  
+  **What narrows, from → to.**
+  
+  - The declaration: `enable.apiMethods: ['get', 'list']` becomes `enable.apiEnabled: false` with `enable.apiMethods: []`. `apiEnabled: false` is the automatic API's off switch, judged first for every operation; `apiMethods: []` is the declared fully-closed whitelist, so the whitelist no longer advertises the read methods either (an absent whitelist would read as fully open).
+  - The REST data routes (list, query, by id, export, and every write): a caller granted read on the object was served its rows, which name the request, the identity a link is bound to, the action, the expiry and the consumption state, and so was an administrator. Every caller, an administrator included, now receives `404 OBJECT_API_DISABLED`. The dispatcher and the MCP data tools judge the same switch first.
+  - Without a grant, the answer moves from `403 PERMISSION_DENIED` to `404 OBJECT_API_DISABLED`: the exposure gate is judged before the permission check.
+  - The cross-object search (`GET /api/v1/search`) no longer sweeps the object, for any caller.
+  
+  **Unchanged.** The approval engine's own token path, which runs as the system: a reminder still mints one approve and one reject link per concrete pending approver, the link's confirm page still validates without consuming, one POST still decides as the bound approver, and a replay is still refused as already used. The digest is still stored, indexed and withheld from every generic exit (`internal: true`).
+  
+  **What changes for you.** Nothing in the platform, the console or Setup reads this object through a generic door, so no shipped surface changes. A script or integration that read token rows through the data API now receives `404 OBJECT_API_DISABLED`. There is no replacement read, by design: a link's state is what its confirm page answers, and a decision taken through a link is recorded in the request's action history on the approvals door.
+- 896a434: fix(plugin-approvals,plugin-audit)!: a lookup target's title is read only when the TARGET object's declared exposure serves `get` — the approvals inbox's `payload_display` and the activity summary (#22738)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is two served titles: each stops naming a lookup's target object whose existing `enable` declaration already refuses `get` on every data route, and the remedy is the declaration the author already wrote. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no exported declaration is removed or narrowed (not runtime-interface-only or type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  The data routes judge an object's `enable` block through the spec's one exposure decision (`apiExposureDenialReason` / `canServeApiOperation`), and the data door's `$expand` and the dataset door's labels already ask it of a lookup's TARGET. Two more reads follow a lookup to its target's title under a system context and never asked it.
+  
+  **FROM.** For an administrator and a member alike:
+  
+  - **Approvals inbox** (`@objectstack/plugin-approvals`): `GET /api/v1/approvals/requests` and `GET /api/v1/approvals/requests/:id` carried, in `payload_display`, the title of a snapshot lookup's target whose declaration refuses `get`.
+  - **Activity summary** (`@objectstack/plugin-audit`): an update's tracked-change summary, and a fired milestone's summary, named such a target's records by title in the `sys_activity` row served by `GET /api/v1/data/sys_activity`.
+  
+  **TO.** Each title read first asks the decision of the TARGET object, for `get` (turning an id into the record it names, the read `GET /api/v1/data/:target/:id` performs):
+  
+  - A refused target is not read. The inbox carries no `payload_display` entry for that key, so the snapshot's stored id stands, which is what a deleted target already answers. The activity summary names the record by its stored id, which is what an unresolvable reference already answers.
+  - A declaration that cannot be read withholds the title too (fail-closed, at `warn`).
+  - Only activity rows written from now on change. A written row is a snapshot and is never rewritten, and no other activity column changes.
+  
+  A target declaring `apiEnabled: false`, the deny-all `apiMethods: []`, or a whitelist without `get` (for example `['list']`) is withheld; a target with no `enable` block, or a whitelist that grants `get`, is served exactly as before. The decision takes no caller.
+  
+  **Measured producers.** Read on `origin/main` `bf515e724d` over every non-test `.ts` source under `packages/` and `examples/`: ten objects refuse `get` by declaration, and exactly one lookup points into any of them, from an object that is itself `apiEnabled: false` (control: 88 lookups into `sys_user`). So no shipped object's served title changes. Deployed and cloud-held object definitions were NOT MEASURED.
+- 69d4218: feat(plugin-approvals): an approval step whose approvers resolve to no one opens on the organization's administrators under the default `onEmptyApprovers: 'admin_rescue'`, as ordinary approvers in their inbox
+  
+  Clause-②: yes
+  
+  **FROM → TO: who receives an `admin_rescue` request.** A node whose approvers resolve to no concrete person (an unstaffed position, an empty team or department, an unset manager, an expression that yields no one) under the default `onEmptyApprovers: 'admin_rescue'`:
+  
+  - **FROM:** the request opened on a slate that named no one, such as the literal `position:sales_manager`. It was in no one's "My Pending", the bell counted 0, no one was told, and a `lockRecord: true` record stayed locked until a platform or tenant admin found it under **All** and decided it through the privileged override.
+  - **TO:** the request opens on the request organization's administrators: the people who hold the organization-admin capability (`organization_admin` or `organization_admin_no_bypass`, ADR-0095 D3) in that organization. That is the same authority that lets a tenant admin override a request, resolved to the people who hold it, through the same grant resolution every request runs. An organization's owners and admins receive the capability automatically.
+  
+  They are ordinary approvers. The request is listed and counted for each of them under their own `approverId`, each is told once by `approval.requested`, out-of-office delegation applies to them, and a decision by one of them is an ordinary approval or rejection, recorded with `via_override: false`. The node's `behavior` reads them as one group. A platform administrator is not added for being one; one who also holds the organization's capability, such as its owner, is on the slate for that.
+  
+  The request says why. Its timeline carries a note, for example "Routed to this organization's administrators because the approver slate named no one: position 'sales_manager' has no holder.", and its node-config snapshot keeps the abandoned slate and the reason under `__resolvedFrom` (`admin_rescue:abandoned`, `admin_rescue:reason`). The abandoned slate is replaced, not kept beside the administrators, so a holder staffed into the position after the request opened does not receive it; an administrator can reassign it to them.
+  
+  **Unchanged.** A slate that names a person; `fallback`, `auto_approve` and `fail`; a `fallback` whose own list resolves to no one still degrades to `admin_rescue`, which now opens on the administrators. The privileged override stays for what the administrators' slate cannot reach: a request whose named approvers have all left after it opened, and an organization with no administrator (or a request with no organization), where the request still opens on the slate that names no one and the server logs a warning.
+  
+  **To name the person who should decide instead of the administrators,** declare `onEmptyApprovers: 'fallback'` with a `fallbackApprovers` list.
+  
+  **`@objectstack/spec`:** the `onEmptyApprovers` description says that `admin_rescue` opens on the organization's administrators and that `fallback` names who decides instead.
+  
+  **`@objectstack/lint`:** `approval-approvers-may-resolve-empty` no longer says the request "waits forever": it says the request opens on the organization's administrators, its remedy names `onEmptyApprovers: 'fallback'` as the way to name who decides, and its `os explain` text says the same.
+
+### Patch Changes
+
+- f0022c4: Setup → Approvals → Requests opens on every approval request, not on the requests pending on the administrator. Before this, the entry named no view, and `sys_approval_request` declared the caller-scoped "My Pending" view (`pending_approvers contains {current_user_id}`) first, so the console opened it.
+  
+  Clause-②: no
+  
+  - `sys_approval_request` now declares its unscoped "All" view (`all_requests`) first. "My Pending", "I Submitted" and "Completed" follow it in their previous order, still as tabs. A route that names no view, such as a record page's object breadcrumb or the object switcher, now opens "All". No view is added, removed or changed.
+  - The Setup entry `nav_approval_requests` now names `all_requests` with `viewName`, so it does not depend on the declared order. The Account app's Approvals entry opens the Approvals Inbox component and reads neither.
+  - The declared order decides which view opens, not which rows a caller may read.
+  - The generated translation bundles follow the new view order. No translated text changed.
+  - ⛔ No schema, parse, export or accept-set change.
+- 0b7ba4d: fix(plugin-approvals): Approve asks its decision question in the dialog, as Reject does
+  
+  Clause-②: no
+  
+  `approval_approve` on `sys_approval_request` declares a `description`: "Approve this request? Your approval is recorded, and the request moves on once this step has the approvals it requires." The console shows it as the parameter dialog's subtitle, where a generic "Please provide the required information to continue." showed before; `approval_reject` beside it already declared its question this way. The zh-CN, ja-JP and es-ES bundles carry a translation of it.
+- 3403be8: fix(plugin-approvals): `sys_approval_request` declares its per-caller `viewer` block under `attachedOnRead`, so the shared validator accepts the object's own action predicates (#22211, #22387)
+  
+  `sys_approval_request` ships eight action `visible` predicates that read `record.viewer.can_act`, `record.viewer.can_override` or `record.viewer.is_submitter`. `viewer` is the block the approvals service attaches to every request it serves through `listRequests` and `getRequest`, computed from the caller. The object never declared it, so `os build` / `os validate` refused all eight with ``unknown field `viewer` on `sys_approval_request` ``, and the object save door's authoring gate refused a save of the shipped body the same way.
+  
+  The object now declares `attachedOnRead: { viewer: { can_act: 'boolean', can_override: 'boolean', is_submitter: 'boolean' } }`. The eight predicates pass the build and the save door's gate. A misspelt leaf (`record.viewer.can_actt`) is still refused, and the refusal names the three declared leaves.
+  
+  Unchanged: who sees which decision button. `viewer` is computed as before and served on the same two reads only; the generic data door, a record-change flow's `record` and a flow action's subject row do not carry it. The served object definition gains the `attachedOnRead` key. The exported `SysApprovalRequest` type resolves to the same type.
+- b98e984: fix(plugin-approvals): a `manager` approver whose record owner has no manager adds no slot to the request, instead of the literal `manager:undefined`
+  
+  Clause-②: no
+  
+  An approval request whose user-resolving approver resolves to nobody now opens on an empty `pending_approvers`, and the node's `onEmptyApprovers` policy applies, as `content/docs/automation/approvals.mdx` documents ("An entry that resolves to nobody is not an error: the request opens with an empty `pending_approvers`"). This covers `{ type: 'manager' }` when the record's owner has no `sys_user.manager_id`, or the manager is outside the request's organization, and `{ type: 'field' }` when there is no record to read.
+  
+  Before this fix the expansion stored a literal `manager:<value>` slot: `manager:undefined` when the approver authors no `value`, which is the usual case. Both read doors (`GET /api/v1/approvals/requests` and `GET /api/v1/data/sys_approval_request`) served that slot. Nobody can ever act under it: a caller acts only under their user id, their own account's email, or the `position:<name>` address of a position they hold.
+  
+  What changes, and for whom:
+  
+  - **A slate made only of such rungs** opens with `pending_approvers: []` under the default `onEmptyApprovers: 'admin_rescue'`, where it held `["manager:undefined"]` before. `fail`, `auto_approve` and `fallback` behave as before, because those policies already treated a slate of literals as empty.
+  - **A slate with other approvers** (for example `[{ type: 'manager' }, { type: 'user', value: 'u9' }]`) is carried by the others. Under `unanimous`, `quorum` or `per_group`, the dead literal used to be an unapprovable slot: it held the request open after every real approver had approved, until an admin overrode it. Now the real approvers' approvals finish the step. This is the "second approver entry that cannot resolve empty" escape that the docs name for an unset manager.
+  - **Group approvers are unchanged.** An unstaffed `position` still opens on its `position:<name>` literal, which a holder staffed into the position later decides. `team`, `department` and `org_membership_level` still fall back to their `type:value` literal.
+  - The `manager` rung still logs a warning when it resolves to nobody. The warning now says that the rung adds no slot, and names the subject user.
+  
+  Stored requests are not rewritten. A pending request that already holds a `manager:…` or `field:…` slot keeps it, and it stays recoverable as before: a platform or tenant admin can approve, reject, reassign or recall it. To list such requests, filter `sys_approval_request` on `status = pending` and on `pending_approvers` containing `manager:` or `field:`.
+- 76bc1e0: fix(plugin-approvals): the generic data door serves `sys_approval_request` rows by the approvals door's visibility
+  
+  Clause-②: no
+  
+  A read of `sys_approval_request` through the generic data door (`find`, `findOne`, `count` and `aggregate`, so the REST data routes, the export route, the MCP data tool and every other engine read) now returns only the requests the approvals door (`/api/v1/approvals/*`) serves the same caller:
+  
+  - the requests the caller submitted, is a current approver of, or has acted on;
+  - every request, for an administrator holding the approval override;
+  - read-only, on an object named in `recordReaderVisibleObjects`, the requests of a record the caller can read, on a read that names that record (`object_name` and `record_id`, or the request's id).
+  
+  Before this, a deployment that granted read on the object served every request of the organization on that door, including the payload snapshots of records the caller cannot open.
+  
+  - **One rule for both doors.** The gate asks the approvals service for its own visibility (the same rule `listRequests` and `getRequest` apply), through an in-package handle: the published `ApprovalService` type is unchanged. It is not the activity stream's parent-record gate, which admits every reader of the record: the record-reader tier stays off unless the deployment names the object.
+  - **Absence, not refusal.** A request the caller may not see answers a by-id read exactly as a missing one does, `404 RECORD_NOT_FOUND`. A list's `total` and a grouped count are narrowed like its rows. A failed visibility answer denies the read and logs a warning.
+  - **Unchanged.** The approvals door, an administrator's view (Setup → Approvals → Requests), and the approval engine's own reads. A deployment that grants no read on the object still answers `403`.
+  - The record-reader tier no longer anchors on `sys_approval_request` itself, even when `recordReaderVisibleObjects` names it.
+- 83b8b80: fix(plugin-approvals): the generic data door serves `sys_approval_action` and `sys_approval_approver` rows by their request's visibility
+  
+  Clause-②: no
+  
+  A read of a request's two child tables through the generic data door (`find`, `findOne`, `count` and `aggregate`, so the REST data routes, the export route, the MCP data tool and every other engine read) now returns only the rows whose request the approvals door (`/api/v1/approvals/*`) serves the same caller:
+  
+  - `sys_approval_action`, the decision log (actor, decision, comment text);
+  - `sys_approval_approver`, the pending-approver index.
+  
+  Before this, a deployment that granted read on either object served every row of the organization on that door, including the decision log and comment text of requests the caller does not take part in.
+  
+  - **One rule for both doors, and for all three tables.** The gates ask the approvals service the same question the `sys_approval_request` gate asks, keyed by the row's `request_id`: the request's submitter, its current approvers and those who acted on it see its rows; an administrator holding the approval override sees every row; and, read-only, on an object named in `recordReaderVisibleObjects`, a reader of the record sees its request's rows on a read that names the request (`request_id`) or the row (its id). The published `ApprovalService` type is unchanged.
+  - **The record page's Timeline keeps its readers.** A request's Timeline (a list of `sys_approval_action` keyed on `request_id`) serves the rows `listActions` serves the same caller; a row read by id is served exactly when a decision attachment on it would be (`authorizeFileRead`, which now shares the gate's read of the row's request).
+  - **Absence, not refusal.** A row the caller may not see answers a by-id read exactly as a missing one does, `404 RECORD_NOT_FOUND`. A list's `total` and a grouped count are narrowed like its rows. A failed visibility answer denies the read and logs a warning.
+  - **Unchanged.** The approvals door, an administrator's view, and the approval engine's own reads. A deployment that grants no read on either object still answers `403`.
+  - The record-reader tier no longer anchors on a row of either table, even when `recordReaderVisibleObjects` names it, as it already never anchored on `sys_approval_request`.
+- Updated dependencies [317cddd]
+- Updated dependencies [fec87e7]
+- Updated dependencies [c28f317]
+- Updated dependencies [2e10c9a]
+- Updated dependencies [67b669e]
+- Updated dependencies [0253192]
+- Updated dependencies [0253192]
+- Updated dependencies [48cca4a]
+- Updated dependencies [bfc15d2]
+- Updated dependencies [2ff0825]
+- Updated dependencies [7aa8d51]
+- Updated dependencies [95a8435]
+- Updated dependencies [60bcfe7]
+- Updated dependencies [d112087]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [8c5aa50]
+- Updated dependencies [7de0265]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [c8b062f]
+- Updated dependencies [117d34d]
+- Updated dependencies [6729e10]
+- Updated dependencies [1920cf3]
+- Updated dependencies [41d0d40]
+- Updated dependencies [c52bfb4]
+- Updated dependencies [c7d6037]
+- Updated dependencies [72b26ed]
+- Updated dependencies [2d21b9c]
+- Updated dependencies [f66fdc7]
+- Updated dependencies [9fdb127]
+- Updated dependencies [615c696]
+- Updated dependencies [968acc8]
+- Updated dependencies [111ffff]
+- Updated dependencies [12b9daf]
+- Updated dependencies [d85615d]
+- Updated dependencies [6a06e3b]
+- Updated dependencies [0e9e7b7]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [9c93ce6]
+- Updated dependencies [77a94d8]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [879bd38]
+- Updated dependencies [04e776b]
+- Updated dependencies [1c563af]
+- Updated dependencies [a7df552]
+- Updated dependencies [2f70c22]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [a87d8be]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [ad381fd]
+- Updated dependencies [4e4111c]
+- Updated dependencies [2b61f2d]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3b49318]
+- Updated dependencies [4e9fe9f]
+- Updated dependencies [9ad3d24]
+- Updated dependencies [326a90a]
+- Updated dependencies [9fe7448]
+- Updated dependencies [2e11d90]
+- Updated dependencies [0b7ba4d]
+- Updated dependencies [4578c56]
+- Updated dependencies [c512c25]
+- Updated dependencies [215e662]
+- Updated dependencies [3d886ee]
+- Updated dependencies [f4069c5]
+- Updated dependencies [d8d0711]
+- Updated dependencies [a45d5d8]
+- Updated dependencies [f6e1d49]
+- Updated dependencies [345d3f3]
+- Updated dependencies [e9a1f5c]
+- Updated dependencies [40a6ee5]
+- Updated dependencies [5910b5e]
+- Updated dependencies [7098aca]
+- Updated dependencies [97610a5]
+- Updated dependencies [081e6a0]
+- Updated dependencies [1884948]
+- Updated dependencies [3089848]
+- Updated dependencies [e23eccb]
+- Updated dependencies [ac8f2c5]
+- Updated dependencies [746637e]
+- Updated dependencies [db9cf80]
+- Updated dependencies [e75dced]
+- Updated dependencies [9af0005]
+- Updated dependencies [9af0005]
+- Updated dependencies [440bed6]
+- Updated dependencies [94379f4]
+- Updated dependencies [b2549a8]
+- Updated dependencies [ee8751d]
+- Updated dependencies [96e4be4]
+- Updated dependencies [35ef501]
+- Updated dependencies [faf6348]
+- Updated dependencies [557ae7c]
+- Updated dependencies [6a3fe25]
+- Updated dependencies [7731d70]
+- Updated dependencies [3073b72]
+- Updated dependencies [c76edeb]
+- Updated dependencies [5b12503]
+- Updated dependencies [514bf3c]
+- Updated dependencies [20e7d52]
+- Updated dependencies [b3a3634]
+- Updated dependencies [3e72f93]
+- Updated dependencies [f89b5f5]
+- Updated dependencies [d25b187]
+- Updated dependencies [0e00d36]
+- Updated dependencies [d748ae8]
+- Updated dependencies [dab6bf4]
+- Updated dependencies [ed1de8c]
+- Updated dependencies [a00cf99]
+- Updated dependencies [a00cf99]
+- Updated dependencies [5fb1746]
+- Updated dependencies [29a163f]
+- Updated dependencies [e223152]
+- Updated dependencies [9f5eca5]
+- Updated dependencies [9963322]
+- Updated dependencies [b27b894]
+- Updated dependencies [874a38d]
+- Updated dependencies [02d9f69]
+- Updated dependencies [f53f14b]
+- Updated dependencies [a800912]
+- Updated dependencies [d973c34]
+- Updated dependencies [156ddfa]
+- Updated dependencies [5081090]
+- Updated dependencies [b6eb25f]
+- Updated dependencies [165587e]
+- Updated dependencies [e04759d]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [b32ee3e]
+- Updated dependencies [91f46d0]
+- Updated dependencies [e5899a6]
+- Updated dependencies [d7b26df]
+- Updated dependencies [490cb6d]
+- Updated dependencies [e865300]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [c74d843]
+- Updated dependencies [6d5191e]
+- Updated dependencies [85edd61]
+- Updated dependencies [e84aeb3]
+- Updated dependencies [322ff1e]
+- Updated dependencies [7b0a9c9]
+- Updated dependencies [5fc57b3]
+- Updated dependencies [fe58bbc]
+- Updated dependencies [c4e7fa5]
+- Updated dependencies [581ca7d]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [b7cd1af]
+- Updated dependencies [9814035]
+- Updated dependencies [55382dc]
+- Updated dependencies [b1d701b]
+- Updated dependencies [efcbac7]
+- Updated dependencies [51f36e7]
+- Updated dependencies [31b5a5f]
+- Updated dependencies [20028df]
+- Updated dependencies [69d4218]
+- Updated dependencies [5ce6773]
+- Updated dependencies [8532783]
+- Updated dependencies [9432bac]
+- Updated dependencies [3f69471]
+- Updated dependencies [8bc7836]
+- Updated dependencies [e5687cb]
+- Updated dependencies [1e62f71]
+- Updated dependencies [ec7f7f8]
+- Updated dependencies [038d4c9]
+- Updated dependencies [5677add]
+- Updated dependencies [147a0d1]
+- Updated dependencies [1959aac]
+- Updated dependencies [e1deaef]
+- Updated dependencies [3071d3e]
+- Updated dependencies [1badd31]
+- Updated dependencies [58f5c90]
+- Updated dependencies [55828c5]
+- Updated dependencies [7856110]
+- Updated dependencies [9b37edb]
+- Updated dependencies [a22e67b]
+- Updated dependencies [62ce45d]
+- Updated dependencies [c5b43b6]
+- Updated dependencies [39e93ef]
+- Updated dependencies [02bec6c]
+- Updated dependencies [719183f]
+- Updated dependencies [8464380]
+- Updated dependencies [8c10776]
+- Updated dependencies [252a582]
+- Updated dependencies [f931e76]
+- Updated dependencies [e5f9f01]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [8311650]
+- Updated dependencies [de70e97]
+- Updated dependencies [74c4b34]
+- Updated dependencies [e040b8c]
+- Updated dependencies [f451a59]
+- Updated dependencies [ba95607]
+- Updated dependencies [b53b949]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [1e44436]
+- Updated dependencies [2acff87]
+- Updated dependencies [299a2c6]
+- Updated dependencies [e23eccb]
+- Updated dependencies [bf492c8]
+- Updated dependencies [c7a3234]
+  - @objectstack/spec@18.0.0-next.0
+  - @objectstack/core@18.0.0-next.0
+  - @objectstack/platform-objects@18.0.0-next.0
+  - @objectstack/metadata-core@18.0.0-next.0
+  - @objectstack/types@18.0.0-next.0
+  - @objectstack/formula@18.0.0-next.0
+
 ## 17.7.0
 
 ### Minor Changes
