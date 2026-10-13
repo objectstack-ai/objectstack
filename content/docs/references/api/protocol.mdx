@@ -1329,6 +1329,7 @@ This schema accepts one of the following structures:
 | **cacheControl** | `{ directives: Enum<'public' \| 'private' \| 'no-cache' \| 'no-store' \| 'must-revalidate' \| 'max-age'>[]; maxAge?: number; staleWhileRevalidate?: number; staleIfError?: number }` | optional | Cache control directives |
 | **notModified** | `boolean` | optional (default: `false`) | True if resource has not been modified (304 response) |
 | **version** | `string` | optional | Metadata version identifier |
+| **registration** | `{ state: 'registered' } \| { state: 'refused'; reason: object } \| { state: 'unregistered' }` | optional | The automation engine's verdict on the flow in `data`, read live on every call and never part of `etag` (see `FlowRegistrationSchema`). Present only for a `flow` read answered by a process that runs an automation service; a read that carries it is never answered `notModified`. Absent otherwise, and absence means no engine judged it, never `registered`. |
 
 ### Nested Shape: `GetMetaItemCachedResponse.etag`
 
@@ -1345,6 +1346,25 @@ This schema accepts one of the following structures:
 | **maxAge** | `number` | optional | Maximum cache age in seconds (unit per HTTP Cache-Control `max-age` (RFC 9111 §5.2.2.1)) |
 | **staleWhileRevalidate** | `number` | optional | Allow serving stale content while revalidating (seconds) (unit per HTTP Cache-Control `stale-while-revalidate` (RFC 5861 §3)) |
 | **staleIfError** | `number` | optional | Allow serving stale content on error (seconds) (unit per HTTP Cache-Control `stale-if-error` (RFC 5861 §4)) |
+
+### Nested Shape: `GetMetaItemCachedResponse.registration[state='registered']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **state** | `'registered'` | ✅ | The engine holds a registration under the flow's name. |
+
+### Nested Shape: `GetMetaItemCachedResponse.registration[state='refused']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **state** | `'refused'` | ✅ | The engine refused to register the stored flow and holds nothing under its name: it never runs. |
+| **reason** | `{ code?: string; message: string }` | ✅ | What the engine threw, verbatim. |
+
+### Nested Shape: `GetMetaItemCachedResponse.registration[state='unregistered']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **state** | `'unregistered'` | ✅ | The engine holds nothing under the flow's name and recorded no refusal for it. |
 
 
 ---
@@ -1434,7 +1454,7 @@ This schema accepts one of the following structures:
 | **deletable** | `boolean` | optional | Whether deleting the overlay is permitted — false iff `lock` is `no-delete` or `full`. |
 | **resettable** | `boolean` | optional | Whether the item can be reset to its packaged default — true iff it is artifact-backed, i.e. there is a baseline to reset TO. |
 | **version** | `string \| null` | optional | ADR-0008 version token of the STORED row a save to this item compares against, at this read's scope (the environment's partition and `?package=`) and lifecycle (`?state=draft` reads the draft row, the plain read the active row). The same keyed token a save receipt's `version` serves for that row: send it back as the `If-Match` request header on `PUT /meta/:type/:name` (with `?mode=draft` for the draft) and a concurrent edit is refused 409 `METADATA_CONFLICT` instead of overwritten. `null` when no stored row is there — an item served from code or a package artifact, or from a row in another scope (a package-less row a package read falls back to) — so the next save creates one: pin it with `If-None-Match: *`. ABSENT on the cached published-value branch and on a `?preview=draft` read, which publish no version: absence means "not published here", never "no row". Opaque — echo it verbatim, never parse it. |
-| **registration** | `{ state: 'registered' } \| { state: 'refused'; reason: object } \| { state: 'unregistered' }` | optional | The automation engine's verdict on this flow (see `FlowRegistrationSchema`): `registered`, or `refused` with the engine's `reason` verbatim, or `unregistered`. Present only on a `flow` read answered by a process that runs an automation service; absent otherwise, and absence means no engine judged it, never `registered`. Like the protection keys it is published by the uncached branch only, and it is absent on a draft read, whose pending body no engine holds. The verdict is the answering process's engine. Beside `item`, never inside it: the item's `status` stays what its author declared. |
+| **registration** | `{ state: 'registered' } \| { state: 'refused'; reason: object } \| { state: 'unregistered' }` | optional | The automation engine's verdict on this flow (see `FlowRegistrationSchema`): `registered`, or `refused` with the engine's `reason` verbatim, or `unregistered`. Present only on a `flow` read answered by a process that runs an automation service; absent otherwise, and absence means no engine judged it, never `registered`. Unlike the protection keys it is published by the cached branch too, read live and never part of the ETag, so a cached read that carries it is never answered 304; it is absent on a draft read, whose pending body no engine holds. The verdict is the answering process's engine. Beside `item`, never inside it: the item's `status` stays what its author declared. |
 
 ### Nested Shape: `GetMetaItemResponse.sortability`
 

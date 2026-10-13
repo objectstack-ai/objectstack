@@ -759,6 +759,7 @@
     "api/GetMetaItemCachedResponse:etag",
     "api/GetMetaItemCachedResponse:lastModified",
     "api/GetMetaItemCachedResponse:notModified",
+    "api/GetMetaItemCachedResponse:registration",
     "api/GetMetaItemCachedResponse:version",
     "api/GetMetaItemLayeredRequest:name",
     "api/GetMetaItemLayeredRequest:packageId",
