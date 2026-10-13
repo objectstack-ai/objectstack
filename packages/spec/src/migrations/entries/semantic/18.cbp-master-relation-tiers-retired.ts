@@ -24,7 +24,7 @@ export const entry: SemanticMigration = {
     + 'refused with 422 INVALID_METADATA. Data at rest whose one `master_detail` merely omits `required` '
     + 'is converted, not refused: the D2 conversion `cbp-master-detail-required-defaulted` gives it the '
     + '`required: true` that `ObjectSchema.create()` would have given it. It runs on stored rows, built '
-    + 'artifacts and `os migrate meta --from 17`, never on a live authoring parse. A required `lookup` to the master becomes `type: \'master_detail\'` '
+    + 'artifacts and `os migrate meta`, never on a live authoring parse. A required `lookup` to the master becomes `type: \'master_detail\'` '
     + '(its rows are then deleted with their master; declare `deleteBehavior: \'restrict\'` to refuse deleting '
     + 'a master that still has rows instead). An object whose rows must outlive their parent leaves '
     + '`controlled_by_parent` for its own sharing model (`private`, `public_read` or `public_read_write`).',
