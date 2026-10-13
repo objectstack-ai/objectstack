@@ -9,10 +9,11 @@ export const entry: SemanticMigration = {
   replacement: '`required: true` on the master reference (or nothing at all — the builder now '
     + 'forces `required: true` when the key is omitted). An explicit `required: false` on that '
     + 'shape is refused at `ObjectSchema.create()` with a located error carrying this same '
-    + 'prescription. Metadata at rest is untouched: raw `.parse()`/`.safeParse()` still accept '
-    + 'the old shape, the security gate\'s derived enforcement stays, and the lint rule '
-    + '`relationship/master-detail-required` stays `warning` until its own v18 promotion '
-    + '(Direction 1 of the 2026-08-16 maintainer ruling whose Direction 2 this is)',
+    + 'prescription. The builder does not rewrite metadata at rest; a raw `.parse()`/`.safeParse()` of a '
+    + '`controlled_by_parent` object whose only `master_detail` is not `required: true` is refused, and '
+    + 'the security gate derives no master from it, by the later step-18 entry '
+    + '`cbp-master-relation-tiers-retired`; the lint rule `relationship/master-detail-required` reports '
+    + 'the shape at `error` under `cbp-master-detail-required-lint-error`',
   reason:
     'A `controlled_by_parent` detail derives ALL of its record access from the master that its '
     + '`master_detail` reference names (ADR-0055). With the reference not `required`, an insert '
@@ -32,6 +33,7 @@ export const entry: SemanticMigration = {
     + '`required: true`) or declares `required: true` explicitly; the authored app builds and '
     + 'boots. An explicit `required: false` there fails the build with '
     + '`ObjectSchema.create(...): field ... declares required: false on a master_detail '
-    + 'reference under sharingModel: controlled_by_parent`. Stored metadata keeps loading '
-    + 'byte-identically (`safeParse` green, `required` unrewritten).',
+    + 'reference under sharingModel: controlled_by_parent`. Stored metadata is not rewritten by '
+    + 'the builder (`required` stays as stored); what a raw parse does with it is '
+    + '`cbp-master-relation-tiers-retired`\'s acceptance criterion.',
 };

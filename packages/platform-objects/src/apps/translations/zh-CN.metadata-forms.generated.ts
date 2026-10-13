@@ -1307,7 +1307,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       isDefault: {
         label: "默认",
-        helpText: "设为该页面类型的默认页"
+        helpText: "打开该对象的记录时使用此记录页。每个对象只能有一个默认记录页：第二个会被拒绝。"
       },
       kind: {
         label: "模式",

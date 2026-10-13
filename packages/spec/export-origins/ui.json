@@ -490,6 +490,7 @@
     "compileListViewGroupRowsQuery": "src/ui/view-grouping-query.ts#compileListViewGroupRowsQuery (function)",
     "dashboardForm": "src/ui/dashboard.form.ts#dashboardForm (const)",
     "datasetForm": "src/ui/dataset.form.ts#datasetForm (const)",
+    "defaultRecordPageObject": "src/ui/default-record-page.ts#defaultRecordPageObject (function)",
     "defineAction": "src/ui/action.zod.ts#defineAction (function)",
     "defineApp": "src/ui/app.zod.ts#defineApp (function)",
     "defineDataset": "src/ui/dataset.zod.ts#defineDataset (function)",

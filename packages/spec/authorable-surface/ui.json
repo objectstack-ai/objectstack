@@ -1231,6 +1231,7 @@
     "ui/RecordRelatedListProps:filter",
     "ui/RecordRelatedListProps:limit",
     "ui/RecordRelatedListProps:objectName",
+    "ui/RecordRelatedListProps:parentDataSource",
     "ui/RecordRelatedListProps:redactFields",
     "ui/RecordRelatedListProps:relationshipField",
     "ui/RecordRelatedListProps:relationshipValueField",

@@ -48,6 +48,7 @@ import { matchesFilterCondition } from '@objectstack/formula';
 // to the source in the checkout rather than a prebuilt dist.
 import { validateRecord, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import type { PermissionSet } from '@objectstack/spec/security';
+import { ObjectSchema } from '@objectstack/spec/data';
 
 const REP = 'usr_rep';
 const OTHER = 'usr_other';
@@ -76,9 +77,9 @@ const CONTACT_SCHEMA = {
 
 /**
  * [#7474] The same detail, AUTHORED WRONG: `controlled_by_parent` with nothing
- * to derive access from — no master_detail field, and no required lookup for
- * `resolveCbpRelation` to fall back to. The gate's metadata-defect leg is the
- * only thing between this object and a write that answers a false 403.
+ * to derive access from — no master_detail field at all. The gate's
+ * metadata-defect leg is the only thing between this object and a write that
+ * answers a false 403.
  */
 const CONTACT_SCHEMA_NO_MASTER_DETAIL = {
   name: 'crm_contact',
@@ -86,25 +87,29 @@ const CONTACT_SCHEMA_NO_MASTER_DETAIL = {
   fields: {
     id: { name: 'id', type: 'text' },
     name: { name: 'name', type: 'text' },
-    // A lookup, but OPTIONAL — the third fallback `resolveCbpRelation` tries
-    // requires `required: true`, so this object resolves to no relation at all.
+    // A lookup, and OPTIONAL — no relation at all, before #23100 and after it
+    // (a required lookup no longer resolves either; see the retired tiers).
     account: { name: 'account', type: 'lookup', reference: 'crm_account' },
   },
 };
 
 /**
- * [#8688] The three declarations required-field validation does NOT cover, and
- * the reason the insert-leg stand-down is conditional rather than flat.
+ * [#8688] The declarations required-field validation does NOT cover, and the
+ * reason the insert-leg stand-down is conditional rather than flat.
  *
  * `validateRecord` (`@objectstack/objectql`) walks every declared field on an
  * insert but skips provenance-flagged ones outright — `if (def.system ||
  * def.readonly) continue;` — before the required check, and never fires on a
- * field that is not `required` at all. All three shapes below are AUTHORABLE:
- * `resolveCbpRelation`'s second fallback accepts a `master_detail` with no
- * `required` test, and nothing at runtime refuses `readonly`/`system` on one.
- * On each of them this gate is the only refusal an absent master FK meets, so
- * each must still answer 422 — the suite asserts that against the REAL
- * validator rather than against a belief about it.
+ * field that is not `required` at all. The `readonly` / `system` shapes below
+ * are AUTHORABLE (nothing at runtime refuses either flag on a required
+ * `master_detail`), so on each of them this gate is the only refusal an absent
+ * master FK meets, and each must still answer 422 — the suite asserts that
+ * against the REAL validator rather than against a belief about it.
+ *
+ * [#23100] The first shape, a `master_detail` with no `required`, was the third
+ * member of this set while `resolveCbpRelation`'s second fallback resolved it.
+ * Ruling B retired that fallback, so it resolves NO relation now and meets the
+ * metadata-defect leg instead — pinned with the other retired tier below.
  */
 const CONTACT_SCHEMA_MASTER_NOT_REQUIRED = {
   name: 'crm_contact',
@@ -141,10 +146,10 @@ const CONTACT_SCHEMA_MASTER_SYSTEM = {
 };
 
 /**
- * [#8688] `controlled_by_parent` with no `master_detail` but a REQUIRED lookup
- * — `resolveCbpRelation`'s third fallback, and the one shape where the gate's
- * answer is narrower than validation strictly requires. See the case that pins
- * it for why that is deliberate.
+ * [#8688 → #23100] `controlled_by_parent` with no `master_detail` but a
+ * REQUIRED lookup — `resolveCbpRelation`'s third fallback until ruling B
+ * retired it, and HotCRM's `crm_campaign_member` / `crm_event_attendee` /
+ * `crm_article_feedback` shape. It resolves no relation now.
  */
 const CONTACT_SCHEMA_MASTER_REQUIRED_LOOKUP = {
   name: 'crm_contact',
@@ -161,6 +166,22 @@ const CONTACT_SCHEMA_MASTER_REQUIRED_LOOKUP = {
  * selector. `valid` is the shape the ruling covers; the rest are the shapes it
  * deliberately does not.
  */
+/**
+ * [#23100] Two REQUIRED master_details: the one tie left after the retired
+ * tiers. The runtime used to take the first by field order; ADR-0055 §1 says
+ * exactly one, so it derives none.
+ */
+const CONTACT_SCHEMA_TWO_MASTERS = {
+  name: 'crm_contact',
+  sharingModel: 'controlled_by_parent',
+  fields: {
+    id: { name: 'id', type: 'text' },
+    name: { name: 'name', type: 'text' },
+    account: { name: 'account', type: 'master_detail', required: true, reference: 'crm_account' },
+    billing_account: { name: 'billing_account', type: 'master_detail', required: true, reference: 'crm_account' },
+  },
+};
+
 const DETAIL_SCHEMAS = {
   'valid': CONTACT_SCHEMA,
   'no-master-detail': CONTACT_SCHEMA_NO_MASTER_DETAIL,
@@ -168,6 +189,7 @@ const DETAIL_SCHEMAS = {
   'master-readonly': CONTACT_SCHEMA_MASTER_READONLY,
   'master-system': CONTACT_SCHEMA_MASTER_SYSTEM,
   'master-required-lookup': CONTACT_SCHEMA_MASTER_REQUIRED_LOOKUP,
+  'two-masters': CONTACT_SCHEMA_TWO_MASTERS,
 } as const;
 
 type DetailVariant = keyof typeof DETAIL_SCHEMAS;
@@ -301,9 +323,11 @@ interface BootOptions {
    * DEFECT the metadata-defect leg exists to report: `controlled_by_parent`
    * declared on an object with no relation to derive access from.
    *
-   * [#8688] `'master-not-required'` / `'master-readonly'` / `'master-system'`
-   * swap in the three master-reference declarations required-field validation
-   * does not cover — see {@link DETAIL_SCHEMAS}.
+   * [#8688] `'master-readonly'` / `'master-system'` swap in the
+   * master-reference declarations required-field validation does not cover —
+   * see {@link DETAIL_SCHEMAS}. [#23100] `'master-not-required'`,
+   * `'master-required-lookup'` and `'two-masters'` are the shapes ruling B
+   * stopped resolving.
    */
   detail?: DetailVariant;
   /** [#7474] Replace the detail rows — e.g. one whose master FK is null. */
@@ -772,8 +796,10 @@ describe('[#7474] the six refusal legs answer with six envelopes, not one', () =
     expect(err.statusCode).toBe(422);
     // The remedy has to be IN the message: `details` is not a carrier the
     // client can rely on (#7450), so the sentence is the whole fix-it.
-    expect(err.message).toContain('no master_detail relation');
-    expect(err.message).toContain('Declare a required master_detail field');
+    // [#23100] Reworded with the rule: "no relation" is now "not exactly one
+    // required master_detail" (ADR-0055 §1), and the remedy says so.
+    expect(err.message).toContain('not exactly one required master_detail field');
+    expect(err.message).toContain('Declare one master_detail field with required: true');
     // …and it must NOT wear the 403's costume: that prefix is a MATCHER at both
     // transports, so borrowing it would re-flatten this to PERMISSION_DENIED.
     expect(err.message).not.toContain('[Security] Access denied');
@@ -900,7 +926,6 @@ describe('[#7474] the six refusal legs answer with six envelopes, not one', () =
    * refuses, AND the real validator raises nothing, which is why it must.
    */
   it.each([
-    ['a master_detail with no `required`', 'master-not-required' as const, CONTACT_SCHEMA_MASTER_NOT_REQUIRED],
     ['`required` + `readonly`', 'master-readonly' as const, CONTACT_SCHEMA_MASTER_READONLY],
     ['`required` + `system`', 'master-system' as const, CONTACT_SCHEMA_MASTER_SYSTEM],
   ])('[#8688] 422 MISSING_REQUIRED_FIELD survives on insert: %s', async (_label, detail, schema) => {
@@ -917,21 +942,6 @@ describe('[#7474] the six refusal legs answer with six envelopes, not one', () =
     expect(err.statusCode).toBe(422);
     expect(err.message).toContain("did not supply 'account'");
     expect(err.message).not.toContain('requires edit access to its master record');
-  });
-
-  it('[#8688] 422 survives on insert when the relation resolves through the required-LOOKUP fallback', async () => {
-    // A deliberate narrowing, recorded so it is not "simplified" away later.
-    // `validateRecord` WOULD refuse this omission (the field is required and
-    // carries no provenance flag), but the ruling covers `master_detail` only,
-    // and `resolveCbpRelation`'s third fallback is a different shape — an
-    // object that declares `controlled_by_parent` with no master_detail at all.
-    // Standing down there would be the implementer widening a ruling; keeping
-    // the gate is the fail-closed direction and costs one residual envelope.
-    const h = await boot({ shareLevel: 'edit', detail: 'master-required-lookup' });
-    const err = await refusalOf(h.insertContact({ name: 'New contact' }));
-    expect(err.code).toBe('MISSING_REQUIRED_FIELD');
-    expect(err.status).toBe(422);
-    expect(err.message).toContain("did not supply 'account'");
   });
 
   it('[#8688] the master-access verdict SURVIVES the stand-down: present but not writable is still 403', async () => {
@@ -981,6 +991,87 @@ describe('[#7474] the six refusal legs answer with six envelopes, not one', () =
     // The two 422s share a status and must still be told apart by `code` —
     // which is the field ADR-0112 makes the branch point.
     expect(metadataDefect.code).not.toBe(nullMaster.code);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * [ADR-0055 §1 · #23100, maintainer ruling B] The runtime derives a master from
+ * EXACTLY ONE required `master_detail` and from nothing else. Its second tier
+ * (any `master_detail`) and third tier (a required `lookup`) retired, and two
+ * required `master_detail` fields are no longer resolved by field order — so
+ * each of those three shapes now meets BOTH fail-closed halves the no-relation
+ * object always met: every read denied, every by-id write and every insert
+ * refused with `422 INVALID_METADATA`, and the object reported once.
+ *
+ * Each shape is also held against `ObjectSchema`'s parse, which refuses it with
+ * the same rule — the card behind the ruling was precisely the parse, the lint
+ * and this gate disagreeing about which objects the rule covers.
+ */
+describe('[#23100] the retired master tiers derive NO master — fail-closed on both faces', () => {
+  const refusalOf = async (run: Promise<unknown>): Promise<any> => {
+    try {
+      await run;
+    } catch (e) {
+      return e;
+    }
+    throw new Error('expected the write to be refused, but it resolved');
+  };
+
+  /** The parse's controlled_by_parent issues on one schema, by path. */
+  const cbpParseIssuePaths = (schema: Record<string, unknown>) => {
+    const parsed = ObjectSchema.safeParse(schema);
+    if (parsed.success) return [];
+    return parsed.error.issues
+      .filter((i) => /declares sharingModel 'controlled_by_parent'/.test(i.message))
+      .map((i) => i.path.join('.'));
+  };
+
+  const unresolvedReports = (h: Awaited<ReturnType<typeof boot>>) =>
+    (h.ctx.logger.warn as ReturnType<typeof vi.fn>).mock.calls.filter(([msg]) =>
+      String(msg).startsWith('[security/controlled-by-parent] object "crm_contact"'),
+    );
+
+  // ── ACCEPTED CONTROL — the one tier ADR-0055 §1 records ──────────────────
+  it('CONTROL: one required master_detail derives — rows readable, writes reach the executor, nothing reported', async () => {
+    const h = await boot({ shareLevel: 'edit' });
+    expect(await h.visibleContacts()).toEqual(['ct_us', 'ct_own']);
+    await expect(h.updateContact('ct_own')).resolves.toBeUndefined();
+    await expect(h.insertContact({ name: 'New contact', account: 'acct_own' })).resolves.toBe(true);
+    expect(unresolvedReports(h)).toEqual([]);
+    expect(cbpParseIssuePaths(CONTACT_SCHEMA)).toEqual([]);
+  });
+
+  it.each([
+    ['a master_detail without `required` (the retired second tier)', 'master-not-required' as const, CONTACT_SCHEMA_MASTER_NOT_REQUIRED, 'sharingModel', /no required master_detail field; master_detail without required: true: account/],
+    ['a required lookup (the retired third tier — the HotCRM shape)', 'master-required-lookup' as const, CONTACT_SCHEMA_MASTER_REQUIRED_LOOKUP, 'sharingModel', /no required master_detail field; required lookup: account/],
+    ['two required master_details (no longer resolved by field order)', 'two-masters' as const, CONTACT_SCHEMA_TWO_MASTERS, 'fields', /2 required master_detail fields \(account, billing_account\)/],
+  ])('%s: every read DENIED, every write 422 INVALID_METADATA, reported once', async (_label, detail, schema, parsePath, why) => {
+    const h = await boot({ shareLevel: 'edit', detail });
+
+    // READ: the master the old tier would have picked holds readable rows
+    // (the control above reads two of them) — none survive now.
+    expect(await h.visibleContacts()).toEqual([]);
+    expect(await h.analyticsVisibleContacts()).toEqual([]);
+
+    // WRITE: a by-id update under a master the caller CAN edit, and an insert
+    // naming one — the metadata-defect leg, not an authorization verdict, and
+    // not the null-FK leg the second tier used to reach.
+    for (const run of [h.updateContact('ct_own'), h.insertContact({ name: 'New contact', account: 'acct_own' })]) {
+      const err = await refusalOf(run);
+      expect(err.code).toBe('INVALID_METADATA');
+      expect(err.status).toBe(422);
+      expect(err.message).toMatch(/^\[Security\] Configuration defect: (update|insert) on 'crm_contact' cannot be authorized because/);
+    }
+
+    // REPORTED, once per object per cache generation — not once per request.
+    const reports = unresolvedReports(h);
+    expect(reports).toHaveLength(1);
+    expect(String(reports[0][0])).toMatch(why);
+
+    // …and the parse refuses the same object, at the path the lint shares.
+    expect(cbpParseIssuePaths(schema)).toEqual([parsePath]);
   });
 });
 
