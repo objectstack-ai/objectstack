@@ -7,7 +7,7 @@
  * nothing without `--apply`, and is refused there too.
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { fileURLToPath } from 'node:url';
 
 const boot = vi.hoisted(() => vi.fn(async () => {
@@ -15,7 +15,16 @@ const boot = vi.hoisted(() => vi.fn(async () => {
 }));
 vi.mock('../../utils/schema-migrate.js', () => ({ bootSchemaStack: boot }));
 
-const { default: MigrateOrganizationOwnership } = await import('./organization-ownership.js');
+type Command = (typeof import('./organization-ownership.js'))['default'];
+let MigrateOrganizationOwnership: Command;
+
+// The command's module graph is large, and oclif reads the package's config on
+// the first run: both are paid outside the 5 s default (CASE_TIMEOUT_MS).
+beforeAll(async () => {
+  ({ default: MigrateOrganizationOwnership } = await import('./organization-ownership.js'));
+}, 60_000);
+
+const CASE_TIMEOUT_MS = 60_000;
 
 const CLI_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 
@@ -50,19 +59,19 @@ describe('os migrate organization-ownership --apply — the backup precondition'
     expect(payload).toMatchObject({ error: 'apply_refused', reason: 'backup-unacknowledged' });
     expect(exitCode).toBe(1);
     expect(boot).not.toHaveBeenCalled();
-  });
+  }, CASE_TIMEOUT_MS);
 
   it('refuses --backup-taken without --apply, before the boot', async () => {
     const { payload, exitCode } = await runJson(['--backup-taken', '--json']);
     expect(payload).toMatchObject({ error: 'plan_refused', reason: 'flag-without-apply' });
     expect(exitCode).toBe(1);
     expect(boot).not.toHaveBeenCalled();
-  });
+  }, CASE_TIMEOUT_MS);
 
   it('with --backup-taken, goes on to the boot', async () => {
     const { payload } = await runJson(['--apply', '--backup-taken', '--json']);
     expect(payload).toMatchObject({ error: 'boot_failed', reason: 'boot-failed' });
     expect(boot).toHaveBeenCalledTimes(1);
     expect(boot.mock.calls[0]).toEqual([expect.objectContaining({ deferSchemaDdl: true, composeHostStack: true })]);
-  });
+  }, CASE_TIMEOUT_MS);
 });

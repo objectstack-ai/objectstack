@@ -2,6 +2,7 @@
 
 import {
   convertPositionBindingRows,
+  emailTemplateDefinitionFromRow,
   permissionSetDefinitionFromRow,
   positionDefinitionFromRow,
 } from '@objectstack/core';
@@ -42,6 +43,17 @@ import {
  *     (`convertPositionBindingRows`). Only under `single` (ADR-0131 D3: a
  *     Setup catalog write is an environment metadata write under `single` and
  *     refused under a wall); under a wall the rows are reported.
+ *  2b. `template-promotion` — ruling C on ADR-0131 §6 Q1: every
+ *     `sys_email_template` row an organization customized or authored becomes
+ *     an environment `email_template` item through the metadata door (core's
+ *     `emailTemplateDefinitionFromRow`), so the deletion that follows loses no
+ *     customer edit. Under `single` only; under a wall one organization's edit
+ *     would become every organization's, so the rows are reported and kept.
+ *  2c. `settings-move` — the inventory's `global-rung-move` departure,
+ *     executed (#15207's ruling: "C7's ceremony moving the existing rows"):
+ *     each `sys_setting` row of `scope = 'global'` is copied, by the database
+ *     itself, into `sys_platform_setting` and then removed from `sys_setting`.
+ *     A key the new table already holds with a different value is a blocker.
  *  3. `rewrite` — the verified id→name rewrite (D4):
  *     `sys_user_permission_set.permission_set` is named from the set row its
  *     `permission_set_id` points at, then EVERY grant is verified to name a set
@@ -77,7 +89,15 @@ import {
 /** The `sys_migration` row the ceremony checkpoints into and completes. */
 export const ORGANIZATION_OWNERSHIP_MIGRATION_ID = 'adr-0131-organization-ownership';
 
-export const CEREMONY_STEPS = ['attribution', 'authored-conversion', 'rewrite', 'mirror-deletion', 'column-drops'] as const;
+export const CEREMONY_STEPS = [
+  'attribution',
+  'authored-conversion',
+  'template-promotion',
+  'settings-move',
+  'rewrite',
+  'mirror-deletion',
+  'column-drops',
+] as const;
 export type CeremonyStep = (typeof CEREMONY_STEPS)[number];
 
 /** The raw-SQL seam: the plan's reader plus the one write verb. */
@@ -92,7 +112,12 @@ export interface CatalogPort {
 
 /** The metadata door: an environment metadata save. Throws when the door refuses. */
 export interface MetadataDoorPort {
-  save(type: 'position' | 'permission', name: string, body: Record<string, unknown>): Promise<void>;
+  save(type: 'position' | 'permission' | 'email_template', name: string, body: Record<string, unknown>): Promise<void>;
+}
+
+/** The `email_template` item the registry serves for one `(name, locale)` bundle member. */
+export interface TemplatePort {
+  find(name: string, locale: string): Promise<{ definition: Readonly<Record<string, unknown>>; environment: boolean } | undefined>;
 }
 
 /** One table's column drop, as the schema-drift ceremony answered it. */
@@ -138,6 +163,9 @@ export interface TableOutcome {
   after: { total: number; organizationNull: number } | null;
   attributed: number;
   deleted: number;
+  /** Rows a `moved` departure carried out of this table, and into it. */
+  movedOut: number;
+  movedIn: number;
   /** Fate 1: the column is gone after this run. */
   columnDropped: boolean;
   /** Rows still NULL and listed by id — reported, never guessed. */
@@ -173,6 +201,7 @@ export interface ApplyOptions {
   database: string;
   catalog: CatalogPort;
   door: MetadataDoorPort;
+  templates: TemplatePort;
   columnDrops: ColumnDropPort;
   ledger: CeremonyLedgerPort;
   inventory?: readonly InventoryEntry[];
@@ -191,6 +220,48 @@ const SETS = 'sys_permission_set';
 const POSITIONS = 'sys_position';
 const BINDINGS = 'sys_position_permission_set';
 const CAPABILITIES = 'sys_capability';
+const TEMPLATES = 'sys_email_template';
+const SETTINGS = 'sys_setting';
+const PLATFORM_SETTINGS = 'sys_platform_setting';
+
+/** Provenance the seeders stamped: such a row is a copy of code unless an admin customized it. */
+const SEEDED_BY = ['package', 'platform', 'system'];
+
+/**
+ * The `sys_email_template` rows the promotion carries: customized seeded rows
+ * and every row an admin authored. A seeded, uncustomized row — NULL residue or
+ * an organization's copy — is a copy of code and is not promoted.
+ */
+const templatePromotionSql = (sql: Sql, cols: ReadonlySet<string>): { text: string; params: unknown[] } => {
+  const t = TEMPLATES;
+  const customized = cols.has('customized') ? `${sql.q('customized', t)} = ?` : '1 = 0';
+  const params: unknown[] = cols.has('customized') ? [sql.bind(true)] : [];
+  if (!cols.has('managed_by')) return { text: '1 = 1', params: [] };
+  const managed = sql.q('managed_by', t);
+  return {
+    text: `${customized} OR ${managed} IS NULL OR ${managed} NOT IN (${SEEDED_BY.map(() => '?').join(', ')})`,
+    params: [...params, ...SEEDED_BY],
+  };
+};
+
+/**
+ * Categories of a fate-2 object that the promotion discharges: once it has
+ * run (under `single`), the rows they claim have their environment copy and
+ * are mirrors like the rest.
+ */
+const DISCHARGED_BY_PROMOTION: Readonly<Record<string, readonly string[]>> = {
+  [TEMPLATES]: ['template-promotion', 'organization-stamped'],
+};
+
+/** The `moved` departures the ceremony executes, by departure id. */
+const MOVES: Readonly<Record<string, { from: string; to: string; key: readonly string[]; compare: readonly string[] }>> = {
+  'global-rung-move': {
+    from: SETTINGS,
+    to: PLATFORM_SETTINGS,
+    key: ['namespace', 'key'],
+    compare: ['value', 'value_enc', 'encrypted', 'locked', 'locked_reason'],
+  },
+};
 
 const text = (value: unknown): string | null =>
   value === null || value === undefined || String(value) === '' ? null : String(value);
@@ -203,6 +274,8 @@ interface Run {
   columns: Map<string, Set<string> | null>;
   attributed: Map<string, number>;
   deleted: Map<string, number>;
+  movedOut: Map<string, number>;
+  movedIn: Map<string, number>;
   /**
    * What the door accepted this run. The registry hydrates environment
    * metadata at boot, so a definition saved a moment ago is not in it until
@@ -535,6 +608,159 @@ async function runAuthoredConversion(run: Run): Promise<StepReport> {
   return { step: 'authored-conversion', status: blockers.length ? 'blocked' : 'done', summary, blockers, notes };
 }
 
+// ── Step 2b: template promotion (ruling C) ──────────────────────────────────
+
+async function runTemplatePromotion(run: Run): Promise<StepReport> {
+  const summary: Record<string, number> = { promoted: 0, alreadyPromoted: 0, reported: 0 };
+  const blockers: string[] = [];
+  const notes: string[] = [];
+  const cols = await columnsOf(run, TEMPLATES);
+  if (!cols) return { step: 'template-promotion', status: 'done', summary, blockers, notes };
+  const rows = await readAll(run, TEMPLATES, [...cols], templatePromotionSql(run.sql, cols));
+  if (rows.length === 0) return { step: 'template-promotion', status: 'done', summary, blockers, notes };
+  if (run.opts.posture !== 'single') {
+    summary.reported = rows.length;
+    notes.push(
+      `${rows.length} customized or authored ${TEMPLATES} row(s) are reported and kept, not promoted: under the ` +
+        `${run.opts.posture} posture an environment template would carry one organization's edit to every organization.`,
+    );
+    return { step: 'template-promotion', status: 'done', summary, blockers, notes };
+  }
+  const groups = new Map<string, { name: string; locale: string; rows: Record<string, unknown>[]; bodies: Record<string, unknown>[] }>();
+  for (const row of rows) {
+    const body = emailTemplateDefinitionFromRow(row);
+    const name = text(body.name);
+    if (!name) {
+      summary.reported++;
+      notes.push(`A ${TEMPLATES} row (${String(row.id)}) carries no name and is reported, never promoted.`);
+      continue;
+    }
+    const locale = String(body.locale);
+    const key = `${name}\u0000${locale}`;
+    const group = groups.get(key) ?? { name, locale, rows: [], bodies: [] };
+    group.rows.push(row);
+    group.bodies.push(body);
+    groups.set(key, group);
+  }
+  for (const { name, locale, rows: group, bodies } of groups.values()) {
+    const keys = [...new Set(bodies.flatMap(Object.keys))];
+    if (new Set(bodies.map((b) => bodyKey(b, keys))).size > 1) {
+      blockers.push(
+        `The template ${name} (${locale}) is held by ${group.length} customized or authored rows ` +
+          `(${group.map((r) => String(r.id)).join(', ')}) that differ. Which edit the environment keeps is never ` +
+          'guessed: make them agree, or delete all but one, then re-run.',
+      );
+      continue;
+    }
+    const body = bodies[0]!;
+    const existing = await run.opts.templates.find(name, locale);
+    const saved = run.saved.get(`email_template|${name}|${locale}`);
+    const current = saved ?? existing?.definition;
+    if (current && bodyKey(current, Object.keys(body)) === bodyKey(body, Object.keys(body))) {
+      summary.alreadyPromoted++;
+      continue;
+    }
+    if (existing?.environment && !saved) {
+      blockers.push(
+        `The environment already holds its own template ${name} (${locale}), and it differs from the customized row(s) ` +
+          `${group.map((r) => String(r.id)).join(', ')}. The environment's edit is never overwritten: carry the ` +
+          'row\'s change into it in Studio (or delete the row), then re-run.',
+      );
+      continue;
+    }
+    try {
+      await run.opts.door.save('email_template', name, body);
+      run.saved.set(`email_template|${name}|${locale}`, body);
+      summary.promoted++;
+      run.opts.onProgress?.(`promoted the template ${name} (${locale}) to environment metadata`);
+    } catch (error) {
+      blockers.push(
+        `The metadata door refused the template ${name} (${locale}): ${error instanceof Error ? error.message : String(error)}. ` +
+          'Correct the row so the definition validates, then re-run.',
+      );
+    }
+  }
+  return { step: 'template-promotion', status: blockers.length ? 'blocked' : 'done', summary, blockers, notes };
+}
+
+// ── Step 2c: the settings global rung moves (D7) ────────────────────────────
+
+async function runSettingsMove(run: Run): Promise<StepReport> {
+  const summary: Record<string, number> = { moved: 0, alreadyMoved: 0 };
+  const blockers: string[] = [];
+  for (const entry of run.opts.inventory ?? [inventoryEntryFor(SETTINGS)!]) {
+    for (const departure of entry?.departures ?? []) {
+      const move = MOVES[departure.id];
+      if (departure.as !== 'moved' || !move || entry.object !== move.from) continue;
+      const fromCols = await columnsOf(run, move.from);
+      if (!fromCols) continue;
+      const where = predicateSql(run.sql, move.from, fromCols, departure.where);
+      const rows = await readAll(run, move.from, [...move.key, ...move.compare].filter((c) => fromCols.has(c)), where);
+      if (rows.length === 0) continue;
+      const toCols = await columnsOf(run, move.to);
+      if (!toCols) {
+        blockers.push(
+          `${rows.length} ${move.from} row(s) move to ${move.to}, which this database does not have. Boot this release ` +
+            'against it once (its schema sync creates the table), then re-run.',
+        );
+        continue;
+      }
+      const same = (a: Record<string, unknown>, b: Record<string, unknown>): boolean =>
+        move.compare.every((c) => JSON.stringify(a[c] ?? null) === JSON.stringify(b[c] ?? null));
+      const keyOf = (r: Record<string, unknown>): string => move.key.map((k) => String(r[k])).join('.');
+      const byKey = new Map<string, Record<string, unknown>[]>();
+      for (const row of rows) byKey.set(keyOf(row), [...(byKey.get(keyOf(row)) ?? []), row]);
+      const shared = [...fromCols].filter((c) => toCols.has(c));
+      const sql = run.sql;
+      for (const [key, group] of byKey) {
+        if (group.some((r) => !same(r, group[0]!))) {
+          blockers.push(
+            `${move.from} holds ${group.length} differing ${departure.id} rows for ${key} (${group.map((r) => String(r.id)).join(', ')}). ` +
+              'Which value the deployment keeps is never guessed: delete all but one, then re-run.',
+          );
+          continue;
+        }
+        const target = (await readAll(run, move.to, move.compare.filter((c) => toCols.has(c)), {
+          text: move.key.map((k) => `${sql.q(k, move.to)} = ?`).join(' AND '),
+          params: move.key.map((k) => group[0]![k]),
+        }));
+        if (target.length > 0 && !same(target[0]!, group[0]!)) {
+          blockers.push(
+            `${move.to} already holds ${key} with a different value — the one the runtime serves — and the ${move.from} ` +
+              `row(s) ${group.map((r) => String(r.id)).join(', ')} hold another. Delete the stale ${move.from} row(s) or ` +
+              'align them, then re-run.',
+          );
+          continue;
+        }
+        if (target.length === 0) {
+          const list = shared.map((c) => sql.q(c, move.to)).join(', ');
+          await execute(
+            run,
+            move.to,
+            `INSERT INTO ${sql.q(move.to, move.to)} (${list}) SELECT ${shared.map((c) => sql.q(c, move.from)).join(', ')} ` +
+              `FROM ${sql.q(move.from, move.from)} WHERE ${sql.q('id', move.from)} = ?`,
+            [group[0]!.id],
+          );
+          summary.moved++;
+          run.movedIn.set(move.to, (run.movedIn.get(move.to) ?? 0) + 1);
+        } else {
+          summary.alreadyMoved++;
+        }
+        const ids = group.map((r) => r.id);
+        await execute(
+          run,
+          move.from,
+          `DELETE FROM ${sql.q(move.from, move.from)} WHERE (${where.text}) AND ${sql.q('id', move.from)} IN (${ids.map(() => '?').join(', ')})`,
+          [...where.params, ...ids],
+        );
+        run.movedOut.set(move.from, (run.movedOut.get(move.from) ?? 0) + ids.length);
+      }
+      if (summary.moved) run.opts.onProgress?.(`settings move: ${summary.moved} ${departure.id} key(s) now in ${move.to}`);
+    }
+  }
+  return { step: 'settings-move', status: blockers.length ? 'blocked' : 'done', summary, blockers, notes: [] };
+}
+
 // ── Step 3: the verified id→name rewrite (D4) ───────────────────────────────
 
 interface Verification {
@@ -700,8 +926,17 @@ function deletableWhere(run: Run, table: string, cols: ReadonlySet<string>, entr
     parts.push(`(${mirror.text})`);
     params.push(...mirror.params);
   }
+  // The promotion runs under `single` only; elsewhere its rows were not
+  // carried anywhere, so they stay, whatever category claims them or not.
+  const promoted = run.opts.posture === 'single';
+  const discharged = promoted ? DISCHARGED_BY_PROMOTION[entry.object] ?? [] : [];
+  if (!promoted && entry.object === TEMPLATES) {
+    const kept = templatePromotionSql(run.sql, cols);
+    parts.push(`(CASE WHEN ${kept.text} THEN 1 ELSE 0 END) = 0`);
+    params.push(...kept.params);
+  }
   for (const category of entry.categories ?? []) {
-    if (!category.where || category.conflictBy) continue;
+    if (!category.where || category.conflictBy || discharged.includes(category.id)) continue;
     const claimed = predicateSql(run.sql, table, cols, category.where);
     parts.push(`(CASE WHEN ${claimed.text} THEN 1 ELSE 0 END) = 0`);
     params.push(...claimed.params);
@@ -796,6 +1031,8 @@ async function runColumnDrops(run: Run): Promise<StepReport> {
 const RUNNERS: Record<CeremonyStep, (run: Run) => Promise<StepReport>> = {
   attribution: runAttribution,
   'authored-conversion': runAuthoredConversion,
+  'template-promotion': runTemplatePromotion,
+  'settings-move': runSettingsMove,
   rewrite: runRewrite,
   'mirror-deletion': runMirrorDeletion,
   'column-drops': runColumnDrops,
@@ -806,7 +1043,8 @@ async function remainingFor(run: Run, table: TablePlan, complete: boolean): Prom
   if (table.physical !== 'present' || !table.rows) return 0;
   switch (table.fate) {
     case 'attribution':
-      return Number(table.fateCounts.rowsToAttribute ?? 0);
+      return Number(table.fateCounts.rowsToAttribute ?? 0)
+        + table.departures.filter((d) => d.as === 'moved' && MOVES[d.id]).reduce((n, d) => n + d.rows, 0);
     case 'mirror-deletion': {
       const entry = mirrorEntry(run, table.object);
       if (!entry) return 0;
@@ -839,6 +1077,8 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
     columns: new Map(),
     attributed: new Map(),
     deleted: new Map(),
+    movedOut: new Map(),
+    movedIn: new Map(),
     saved: new Map(),
   };
   // Refuses (driver, catalog, an uninventoried table) before anything is written.
@@ -900,6 +1140,8 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
       after: a?.rows ? { total: a.rows.total, organizationNull: a.rows.organizationNull } : null,
       attributed: run.attributed.get(object) ?? 0,
       deleted: run.deleted.get(object) ?? 0,
+      movedOut: run.movedOut.get(object) ?? 0,
+      movedIn: run.movedIn.get(object) ?? 0,
       columnDropped: b?.organizationColumn === 'present' && a?.organizationColumn === 'absent',
       unattributable: a?.unattributable ?? [],
       remaining,
