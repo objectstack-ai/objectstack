@@ -46,6 +46,17 @@
  *  - an expansion name another package ships is never touched by the heal;
  *  - an organization-scoped heal touches none of the container's expansions,
  *    and an environment-wide heal after it still heals them.
+ *
+ * ## [#23198] One reconcile, after every write
+ *
+ * A republish that dropped a member registered the new expansion set and
+ * retired nothing, so the dropped member was served until a restart. Now every
+ * write that changes a container's stored row (a publish, a republish, a reset,
+ * a delete) ends in one reconcile, which leaves the registry holding the set the
+ * stored row now implies. The second block pins it per write, each on the list,
+ * the `?object=` list and the by-name read, plus the two rows of one container
+ * name. `protocol.view-expansion-reconcile-call-sites.test.ts` pins that no
+ * write reaches the registry around the reconcile.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -318,10 +329,10 @@ async function listItems(protocol: ObjectStackProtocolImplementation, type = 'vi
 }
 
 /** The views every read door serves under `name`: the list, the `?object=` list, the by-name read. */
-async function doors(protocol: ObjectStackProtocolImplementation, name: string) {
+async function doors(protocol: ObjectStackProtocolImplementation, name: string, object = OBJ) {
     const all = await listItems(protocol);
     // The object-bound predicate the `?object=` list and the switcher filter on.
-    const byObject = all.filter((v: any) => v && v.viewKind && v.object === OBJ);
+    const byObject = all.filter((v: any) => v && v.viewKind && v.object === object);
     const one: any = await protocol.getMetaItem({ type: 'view', name }).catch(() => undefined);
     return {
         list: all.filter((v: any) => v?.name === name).map((v) => [labelOf(v), columnCountOf(v)]),
@@ -449,5 +460,167 @@ describe('[#23149] a reset of a packaged view container heals the expansions its
         expect(registry.bare('view', DEFAULT_VIEW)).toBeUndefined();
         expect(registry.bare('view', IN_PROGRESS_VIEW)).toBeUndefined();
         expect(registry.bare('view', OBJ)).toBeUndefined();
+    });
+});
+
+const ADDED_VIEW = `${OBJ}.added_by_overlay`;
+const addedMember = () => ({ label: 'Added', type: 'grid', data, columns: [{ field: 'title' }] });
+const NOT_SERVED = { list: [], objectList: [], item: undefined };
+/** One view, served alike by the list, the `?object=` list and the by-name read. */
+const servedOnEveryDoor = (label: string, columns: number) =>
+    ({ list: [[label, columns]], objectList: [[label, columns]], item: [label, columns] });
+
+/** A container no package ships, on an object no package owns: its delete retires, never un-shadows. */
+const RT_OBJ = 'rt_ticket';
+const rtData = { provider: 'object' as const, object: RT_OBJ };
+const rtContainer = (listViews: Record<string, unknown>) => ({
+    name: RT_OBJ,
+    object: RT_OBJ,
+    list: { label: 'All Tickets', type: 'grid', data: rtData, columns: [{ field: 'title' }, { field: 'status' }] },
+    listViews,
+});
+const rtMember = (label: string) => ({ label, type: 'grid', data: rtData, columns: [{ field: 'title' }] });
+
+describe('[#23198] after every write the registry holds the expansion set the stored container row implies', () => {
+    it('a republish that adds a member serves it on every door', async () => {
+        const { protocol } = boot();
+        await publishContainerOverlay(protocol, xEdit('All Tasks (X)', true));
+        expect(await doors(protocol, ADDED_VIEW)).toEqual(NOT_SERVED);
+
+        await publishContainerOverlay(protocol, (container) => {
+            container.listViews = { ...container.listViews, added_by_overlay: addedMember() };
+        });
+
+        expect(await doors(protocol, ADDED_VIEW)).toEqual(servedOnEveryDoor('Added', 1));
+        expect(await doors(protocol, DEFAULT_VIEW)).toEqual(servedOnEveryDoor('All Tasks (X)', 6));
+    });
+
+    it("the card's repro: a republish that drops members stops serving them, and a packaged view of a dropped name is served again", async () => {
+        const { protocol, registry } = boot();
+        await publishContainerOverlay(protocol, (container) => {
+            container.listViews = {
+                in_progress: { ...container.listViews.in_progress, label: 'In Progress (X)' },
+                added_by_overlay: addedMember(),
+            };
+        });
+        expect(await doors(protocol, ADDED_VIEW)).toEqual(servedOnEveryDoor('Added', 1));
+        expect(await doors(protocol, IN_PROGRESS_VIEW)).toEqual(servedOnEveryDoor('In Progress (X)', 2));
+
+        // The republish keeps the list and drops both members.
+        await publishContainerOverlay(protocol, (container) => {
+            delete container.listViews;
+        });
+
+        // The member no package ships is served by no door; the packaged
+        // member's name serves the package's view, once.
+        expect(await doors(protocol, ADDED_VIEW)).toEqual(NOT_SERVED);
+        expect(await doors(protocol, IN_PROGRESS_VIEW)).toEqual(servedOnEveryDoor('In Progress', 2));
+        expect(registry.bare('view', ADDED_VIEW)).toBeUndefined();
+        expect(registry.bare('view', IN_PROGRESS_VIEW)).toBeUndefined();
+        expect(labelOf(registry.getArtifactItem('view', IN_PROGRESS_VIEW, PKG))).toBe('In Progress');
+        // The member the republish kept is still the overlay's own registration.
+        expect(registry.bare('view', DEFAULT_VIEW)).toBeDefined();
+        expect(await doors(protocol, DEFAULT_VIEW)).toEqual(servedOnEveryDoor(...(PACKAGED_DEFAULT as [string, number])));
+    });
+
+    it('a reset after a republish heals the set the container registers now, and no name it dropped before', async () => {
+        const { protocol, registry } = boot();
+        await publishContainerOverlay(protocol, (container) => {
+            container.listViews = { ...container.listViews, added_by_overlay: addedMember() };
+        });
+        await publishContainerOverlay(protocol, (container) => {
+            delete container.listViews.added_by_overlay;
+            xEdit('All Tasks (X)', true)(container);
+        });
+        // The dropped name is held by another source now. The container no
+        // longer registers it, so its reset must leave it.
+        const held = { name: ADDED_VIEW, object: OBJ, viewKind: 'list', label: 'Held elsewhere', _provenance: 'org' };
+        registry.registerItem('view', held, 'name');
+
+        const reset: any = await protocol.deleteMetaItem({ type: 'view', name: OBJ });
+        expect(reset).toMatchObject({ success: true, reset: true });
+
+        expect(registry.bare('view', ADDED_VIEW)).toBe(held);
+        expect(await doors(protocol, DEFAULT_VIEW)).toEqual(servedOnEveryDoor(...(PACKAGED_DEFAULT as [string, number])));
+        expect(await doors(protocol, IN_PROGRESS_VIEW)).toEqual(servedOnEveryDoor('In Progress', 2));
+        expect(registry.bare('view', DEFAULT_VIEW)).toBeUndefined();
+        expect(registry.bare('view', IN_PROGRESS_VIEW)).toBeUndefined();
+    });
+
+    it('a delete of a container no package ships retires the set its last publish registered', async () => {
+        const { protocol, registry } = boot();
+        const OPEN = `${RT_OBJ}.open`;
+        const CLOSED = `${RT_OBJ}.closed`;
+        const RT_DEFAULT = `${RT_OBJ}.default`;
+        expect(await protocol.saveMetaItem({
+            type: 'view', name: RT_OBJ, item: rtContainer({ open: rtMember('Open'), closed: rtMember('Closed') }),
+        })).toMatchObject({ success: true });
+        expect(await doors(protocol, CLOSED, RT_OBJ)).toEqual(servedOnEveryDoor('Closed', 1));
+
+        // The republish drops `closed`: retired on every door, the rest kept.
+        expect(await protocol.saveMetaItem({
+            type: 'view', name: RT_OBJ, item: rtContainer({ open: rtMember('Open') }),
+        })).toMatchObject({ success: true });
+        expect(await doors(protocol, CLOSED, RT_OBJ)).toEqual(NOT_SERVED);
+        expect(registry.bare('view', CLOSED)).toBeUndefined();
+        expect(await doors(protocol, OPEN, RT_OBJ)).toEqual(servedOnEveryDoor('Open', 1));
+
+        const deleted: any = await protocol.deleteMetaItem({ type: 'view', name: RT_OBJ });
+        expect(deleted).toMatchObject({ success: true });
+
+        for (const name of [RT_DEFAULT, OPEN, CLOSED, RT_OBJ]) {
+            expect(await doors(protocol, name, RT_OBJ), name).toEqual(NOT_SERVED);
+            expect(registry.bare('view', name), name).toBeUndefined();
+        }
+    });
+
+    it('two rows of one container name: each row reconciles against its own registrations', async () => {
+        const { protocol, registry, rows } = boot();
+        const A_ONLY = `${OBJ}.a_only`;
+        const B_ONLY = `${OBJ}.b_only`;
+        const SHARED = `${OBJ}.shared`;
+        const member = (label: string) => ({ label, type: 'grid', data, columns: [{ field: 'title' }] });
+        const { list } = shippedContainer();
+        // A package-less overlay row and a row bound to the package, of one name
+        // (ADR-0048). Each has a member of its own, and both have `shared`.
+        const seed = (packageId: string | null, item: Record<string, unknown>) => {
+            const row: Row = {
+                id: `seed_${packageId ?? 'none'}`, type: 'view', name: OBJ, organization_id: null,
+                package_id: packageId, state: 'active', metadata: JSON.stringify(item),
+            };
+            rows.set(keyOf(row), row);
+            return row;
+        };
+        const unbound = seed(null, { name: OBJ, list, listViews: { a_only: member('A only'), shared: member('A shared') } });
+        seed(PKG, { name: OBJ, list, listViews: { b_only: member('B only'), shared: member('B shared') } });
+
+        // Each list read hydrates both rows. Neither row's names are healed by
+        // the other's hydration, however often the list is read.
+        for (let read = 1; read <= 2; read++) {
+            await listItems(protocol);
+            expect(labelOf(registry.bare('view', A_ONLY)), `read ${read}`).toBe('A only');
+            expect(labelOf(registry.bare('view', B_ONLY)), `read ${read}`).toBe('B only');
+            expect(registry.bare('view', SHARED), `read ${read}`).toBeDefined();
+        }
+
+        // The package-less row is republished without its members: the write
+        // the door makes after persisting it.
+        const republished = { name: OBJ, list };
+        unbound.metadata = JSON.stringify(republished);
+        await (protocol as any).applyRegistryWriteThrough({
+            type: 'view', name: OBJ, item: republished, packageId: null, organizationId: null,
+        });
+
+        // Its own member is retired, and the member both rows had leaves the
+        // registry with it. The other row's own member is untouched.
+        expect(registry.bare('view', A_ONLY)).toBeUndefined();
+        expect(registry.bare('view', SHARED)).toBeUndefined();
+        expect(labelOf(registry.bare('view', B_ONLY))).toBe('B only');
+        // The first read after it: every door serves the other row's `shared`
+        // from its stored row, and the read registers it again.
+        expect(await doors(protocol, SHARED)).toEqual(servedOnEveryDoor('B shared', 1));
+        expect(labelOf(registry.bare('view', SHARED))).toBe('B shared');
+        expect(await doors(protocol, A_ONLY)).toEqual(NOT_SERVED);
+        expect(await doors(protocol, B_ONLY)).toEqual(servedOnEveryDoor('B only', 1));
     });
 });
