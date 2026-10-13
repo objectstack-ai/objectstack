@@ -2,7 +2,9 @@
 
 Inbound mail for ObjectStack: the mirrored message, its links to an app's records, and the read gates that keep a mailbox's unmatched mail restricted.
 
-> ⚠️ **No mail source is connected yet.** This package ships the objects, their read gates and the ingest seam that writes them. The IMAP connector that fetches a mailbox's mail and hands each message to the seam is not yet shipped, so on a deployment today no message arrives unless server code calls the seam itself.
+> ⚠️ **Mail arrives only where an IMAP account source is composed.** The capability boot (`requires: ['mailbox']`) constructs the plugin with no options, so it mounts the objects, their read gates and the ingest seam, and syncs no mailbox — it says so once at boot. Compose the plugin yourself with `imap.accountFor` (below) to poll mailboxes.
+>
+> ⚠️ **Attachments are not stored.** Nothing on the server writes `sys_attachment` rows today, so a message's attachments — and the body of a message forwarded as an attachment — are not kept; only its participants are read.
 
 ## What this package provides
 
@@ -16,7 +18,7 @@ Inbound mail for ObjectStack: the mirrored message, its links to an app's record
 - **`manage_mailboxes`** — an organization capability declared in `@objectstack/spec`. Platform administrators and organization administrators hold it by default; every other position only by explicit grant. Object grants and field-level security still apply to a holder.
 - **The ingest seam** — `MailIngestService`, registered as the kernel service `mailbox` (`MAILBOX_SERVICE`):
   - **`ingest({ mailboxId, raw, receivedAt? }, context)`** reads one raw RFC 822 message and writes at most one `sys_mail_message` row, answering `stored`, `duplicate` or `suppressed`:
-    - **participants** are the addresses of From, Sender, Reply-To, To and Cc, plus the same headers of a message forwarded as an attachment (a `message/rfc822` part). The mailbox's own address is left out. They are stored on the row in `match_addresses`, each with its source (`outer` or `attachment`). A forward quoted inline in the body is not read yet;
+    - **participants** are the addresses of From, Sender, Reply-To, To and Cc, plus the same headers of a message forwarded as an attachment (a `message/rfc822` part, or its internationalized twin `message/global`, RFC 6532). At most `MAX_FORWARDED_PARTS` (20) forwarded parts of one message are read; the rest, and any part the MIME parser refuses, take no part in matching, and the message is stored without them (a warning names how many). The mailbox's own address is left out. They are stored on the row in `match_addresses`, each with its source (`outer` or `attachment`). A forward quoted inline in the body is not read yet;
     - **association** — every record of every object whose email field declares `mailAssociation: true` and holds one of those addresses (ASCII case-insensitive) is linked to the message, inside the mailbox's organization only, with one `sys_mail_association` row each (`matched_by: 'ingest'`). A message no record matches waits in the pool (`association_state: 'unassociated'`);
     - **dedupe** — one row per message per mailbox, keyed on the Message-ID (or, for a message without one, on its header block as received), so a second fetch answers `duplicate` and writes nothing;
     - **threading** — `message_id`, `in_reply_to` and `reference_ids` hold the ids of RFC 5322 §3.6.4, angle brackets stripped;
@@ -25,6 +27,13 @@ Inbound mail for ObjectStack: the mirrored message, its links to an app's record
     Only the system context may ingest: a message enters a mailbox from its mail source, never from a user.
   - **`rematch({ mailboxId, messageIds? }, context)`** replays each message's stored participant set against the records that exist now and adds the links that are missing (`matched_by: 'rematch'`), moving a pool message to `associated` once it has one. It never removes a link. The system context may run it, and so may the mailbox's owner and a `manage_mailboxes` holder of the mailbox's organization; anyone else is refused (`PERMISSION_DENIED`), and another organization's mailbox is not found (`RECORD_NOT_FOUND`).
   - Attachments are not stored yet, so a message forwarded as an attachment is stored with the forwarder's own text, and the forwarded message's body is not kept.
+- **The IMAP sync** — `MailboxSyncService`, composed with `MailboxServicePlugin({ imap })` and run as the interval job `mailbox:imap-sync` on the composed job service (`requires: ['job']`):
+  - for every mailbox your `accountFor` answers, it opens a **read-only** session on its IMAP account through `@objectstack/connector-imap` — the folder is opened with `EXAMINE` and bodies are fetched with `BODY.PEEK[]`, so the mailbox is never altered — and hands each message above the stored cursor, in UID order, to `ingest` under the system context. Dedupe, threading, association, the pool and suppression are the seam's, unchanged;
+  - **the cursor** is kept on the mailbox row — `imap_folder`, `imap_uid_validity`, `imap_last_uid`, `imap_synced_at` — and written by the sync only. A cursor taken under another UIDVALIDITY, or in another folder, is discarded and the folder is read from its start; every message already stored then answers `duplicate`;
+  - the cursor moves after each batch, past every message stored, already stored, suppressed or deliberately skipped. A store failure stops the run below the failed message, so the next run retries it. A message above `maxMessageBytes` (32 MiB by default) or one the seam refuses as unreadable is skipped and logged at `error`, once, with its UID — it stays in the IMAP folder;
+  - runs are bounded (`maxMessagesPerRun`, 500 by default, fetched `batchSize` — 25 — at a time); one mailbox is never synced twice at once in one process, and two processes syncing it at once store nothing twice;
+  - a run in which a mailbox could not be synced (an unreachable server, a refused credential) reports `degraded` to the job service, and logs the mailbox and the reason. Without a job service the boot says so, and `plugin.syncService.syncAll({ isSystem: true })` runs a pass on your own schedule.
+- **No credential is stored by this package.** The account and its credential come from your `accountFor`, asked per mailbox per run, so they live wherever your host keeps secrets (the environment, a vault) — the way every open connector takes its credential.
 
 ## Usage
 
@@ -52,3 +61,34 @@ export const Contact = ObjectSchema.create({
 ```
 
 Grant object read on `sys_mail_message` and `sys_mail_association` to the positions that should see mail on the records they can read; grant `manage_mailboxes` to the people who administer mailboxes and their unassociated pool.
+
+Poll a shared mailbox over IMAP — compose the plugin with an account source, and a job service:
+
+```typescript
+import { defineStack } from '@objectstack/spec';
+import { MailboxServicePlugin } from '@objectstack/service-mailbox';
+import { staticCredentials } from '@objectstack/connector-imap';
+
+export default defineStack({
+  // …
+  requires: ['job'],
+  plugins: [
+    new MailboxServicePlugin({
+      imap: {
+        // Asked per mailbox per run; answer null for a mailbox this host does not sync.
+        accountFor: (mailbox) =>
+          mailbox.address === 'sales@corp.example'
+            ? {
+                account: { id: mailbox.id, username: 'sales@corp.example', imap: { host: 'imap.corp.example' } },
+                credentials: staticCredentials({ type: 'password', password: process.env.OS_MAILBOX_SALES_PASSWORD! }),
+                folder: 'INBOX',
+              }
+            : null,
+        pollIntervalMs: 60_000,
+      },
+    }),
+  ],
+});
+```
+
+The `sys_mailbox` row itself (its organization, address and owner) is written by server code under the system context; this package ships no administration screen for it.
