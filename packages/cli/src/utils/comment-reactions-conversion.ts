@@ -207,8 +207,8 @@ const isPlainMap = (value: unknown): value is Record<string, unknown> =>
 /**
  * Read one stored `sys_comment.reactions` value.
  *
- * `null`, `undefined`, the empty string and a stored JSON `null` hold no
- * reaction. A string is parsed as JSON; a value a driver already decoded is
+ * `null`, `undefined`, the empty string, a stored JSON `null` and `{}` hold
+ * no reaction. A string is parsed as JSON; a value a driver already decoded is
  * taken as it is. `emojiMaxLength` is the reaction object's own declared bound,
  * read from the registry by the caller, never a copy of it.
  */
@@ -226,11 +226,13 @@ export function parseStoredReactions(raw: unknown, emojiMaxLength?: number): Par
     }
   }
   if (value === null) return out;
-  out.stored = true;
   if (!isPlainMap(value)) {
+    out.stored = true;
     out.unreadable.push({ reason: 'not_a_map', stored: quote(raw) });
     return out;
   }
+  // `{}` is what a client stored once the last reaction was taken back.
+  out.stored = Object.keys(value).length > 0;
   for (const [emoji, ids] of Object.entries(value)) {
     if (emoji === '' || (typeof emojiMaxLength === 'number' && emoji.length > emojiMaxLength)) {
       out.unreadable.push({ reason: 'emoji_not_storable', emoji, stored: quote({ [emoji]: ids }) });
@@ -402,6 +404,11 @@ export async function convertStoredCommentReactions(
     }
     if (page.length < pageSize) break;
   }
+  // One order for the list, whatever order the walk met the entries in.
+  const byCodeUnit = (x: string, y: string): number => (x < y ? -1 : x > y ? 1 : 0);
+  report.unreadable.sort((a, b) =>
+    byCodeUnit(a.commentId, b.commentId) || byCodeUnit(a.emoji ?? '', b.emoji ?? '')
+    || byCodeUnit(a.reason, b.reason) || byCodeUnit(a.stored, b.stored));
   return report;
 }
 
