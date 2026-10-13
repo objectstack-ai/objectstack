@@ -169,11 +169,13 @@ describe('[#23152] the identity import invitation link', () => {
     const link = new URL(String(mail.data.resetUrl));
     const token = String(mail.data.token);
     expect(link.origin + link.pathname).toBe(`${ORIGIN}${BASE}/reset-password/${token}`);
-    expect(link.searchParams.get('callbackURL')).toBe(SET_PASSWORD_PAGE);
 
+    // Where the invitee lands first: before the fix this read
+    // `${ORIGIN}${BASE}/error?error=INVALID_TOKEN`.
     const landed = await follow(manager, link.href);
     expect(landed.status).toBe(302);
     expect(landed.headers.get('location')).toBe(`${SET_PASSWORD_PAGE}?token=${token}`);
+    expect(link.searchParams.get('callbackURL')).toBe(SET_PASSWORD_PAGE);
 
     // Control: the same token with a callbackURL on a foreign origin is refused
     // rather than redirected, so the landing above was judged, not waved through.
