@@ -5133,8 +5133,10 @@ const pageHeaderSubtitleAlias: MetadataConversion = {
  * conversion can honour at a nested site, not only at region level.
  *
  * All three are **retired from the load path**: each key is tombstoned in
- * `ui/component.zod.ts`, so the loader rejects it loudly with the prescription
- * and only `os migrate meta` lists the mechanical edits for existing sources.
+ * `ui/component.zod.ts`, so `os validate`, `os build` and `os lint` refuse it
+ * with the prescription (the component-props gate, `@objectstack/lint`; the
+ * load path keeps the open `properties` bag as written) and only
+ * `os migrate meta` lists the mechanical edits for existing sources.
  */
 const RECORD_PICKER_COMPONENT_TYPE = 'element:record_picker';
 
@@ -5832,7 +5834,9 @@ const inlineActionApiParamsToBodyExtra: MetadataConversion = {
  * component's inner `type` (an action's `type: 'url'`, a tab item's fields)
  * into a rewrite target: only `properties.type` on a node whose own `type` is
  * `page:tabs` moves. The tombstone still carries the refusal at the authoring
- * site (`tsc`) and at load (the parse), whatever the walk reached.
+ * site (`tsc`) and at `os validate` / `os build` / `os lint`, where the
+ * component-props gate refuses it as an `error` (the load path keeps the open
+ * `properties` bag as written), whatever the walk reached.
  *
  * `retiredFromLoadPath: true`: no alias window, deliberately. The tombstone owns
  * the refusal; this entry exists so `spec-changes.json`, the upgrade guide and
@@ -8025,8 +8029,12 @@ const translationPerAppSettingsRemoved: MetadataConversion = {
  * Reach: the literal defaults the narrowed gates judge — a `time` field's
  * (`objects[]`, `objectExtensions[]`) and an action param typed `time`
  * (`actions[]`, `objects[].actions[]`, an `element:button`'s inline action).
- * Retired from the load path: an author is refused at parse, and data at rest
- * and `os migrate meta` replay it.
+ * Retired from the load path: an author is refused at parse — except on an
+ * `element:button`'s inline action, which sits in the open `properties` bag the
+ * load path keeps as written, where the refusal is an advisory
+ * `component-props-invalid` finding at `os validate` / `os build` / `os lint`
+ * (the component-props gate, `@objectstack/lint`) — and data at rest and
+ * `os migrate meta` replay it.
  */
 const timeDefaultUtcSuffixDropped: MetadataConversion = {
   id: 'time-default-utc-suffix-dropped',
@@ -8322,8 +8330,12 @@ const translationComponentSubmitLabelRemoved: MetadataConversion = {
  * positions the component-props gate judges. `variant` on any other component
  * type is that component's own vocabulary and is never read here.
  *
- * `retiredFromLoadPath`: an author is refused at parse with the prescription
- * rather than silently rewritten; stored rows replay it at rehydration
+ * `retiredFromLoadPath`: an author is not silently rewritten — `os validate`,
+ * `os build` and `os lint` report an old spelling as an advisory
+ * `component-props-invalid` finding carrying the prescription (the
+ * component-props gate, `@objectstack/lint`: a retired enum value is a value
+ * verdict, a warning; the load path keeps the open `properties` bag as
+ * written); stored rows replay it at rehydration
  * (`applyConversionsToStoredItem`) and `os migrate meta` lists the edit for
  * existing sources. Idempotent by construction: the rewrite's output is
  * outside its own input set.
@@ -9818,7 +9830,8 @@ function gridFilterHasContent(value: unknown): boolean {
  * Zero authored occurrences in this repository (the showcase pins it at zero),
  * so the entry exists for stored `sys_metadata` rows and for authors outside
  * the repo. Retired from the load path: an author writing the key is refused
- * at the parse with the prescription.
+ * by `os validate`, `os build` and `os lint` (the component-props gate) with
+ * the prescription.
  */
 const objectGridDefaultFiltersRemoved: MetadataConversion = {
   id: 'object-grid-default-filters-removed',
@@ -10606,8 +10619,10 @@ const objectKanbanQuickAddRemoved: MetadataConversion = {
  * nothing fills the slot. The console draws the navigation trail once, in the
  * shell (`@object-ui/app-shell` `AppHeader`, inside `/apps/:appName/*`), so the
  * retirement takes the key away rather than building a second trail. The
- * tombstone on `PageHeaderProps` refuses it for a live author (advisory, via
- * the props lint: `PageComponentSchema.properties` is an open bag).
+ * tombstone on `PageHeaderProps` refuses it for a live author: `os validate`,
+ * `os build` and `os lint` refuse it as an `error` with the prescription (the
+ * component-props gate, `@objectstack/lint`; the load path keeps the open
+ * `properties` bag as written).
  *
  * **A delete of both values.** `true` and `false` go alike: neither ever drew
  * a trail, so there is no value to preserve and no rewrite target. The one
@@ -13738,8 +13753,10 @@ const dashboardWidgetChartConfigStructureRemoved: MetadataConversion = {
  * `sort_field` (`:874`). An authored value changed nothing on that console, so
  * deleting it preserves observed behaviour exactly; the line order is kept by
  * the child object's own field, which the entry's tombstone names. The
- * tombstone refuses the key for a live author (advisory, via the props lint:
- * `PageComponentSchema.properties` is an open bag).
+ * tombstone refuses the key for a live author: `os validate`, `os build` and
+ * `os lint` refuse it as an `error` with the prescription (the component-props
+ * gate, `@objectstack/lint`; the load path keeps the open `properties` bag as
+ * written).
  *
  * ⚠️ Scoped by component `type` and by POSITION — `properties.details[]` of an
  * `object-master-detail-form` — never by key name: `sortField` is an ordinary

@@ -348,10 +348,10 @@ describe('computeTenantLayer0Verdict — what the wall decided, per exit (#15813
     }
   });
 
-  it('projecting `deny` spreads the sentinel — equal by value, never the frozen object itself', () => {
+  it('[ADR-0139 D2 step 2] projecting `deny` returns the frozen sentinel itself, by reference — never a spread copy', () => {
     const projected = tenantLayer0FilterOf({ kind: 'deny' });
-    expect(projected).toEqual(RLS_DENY_FILTER);
-    expect(projected).not.toBe(RLS_DENY_FILTER);
+    expect(projected).toBe(RLS_DENY_FILTER);
+    expect(Object.isFrozen(projected)).toBe(true);
   });
 
   it('projecting `organizations` copies the set (a later mutation cannot reach the compiled filter)', () => {

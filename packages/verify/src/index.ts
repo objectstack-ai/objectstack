@@ -3,13 +3,14 @@
 // @objectstack/verify — public API.
 //
 // Boot any ObjectStack app in-process and verify it through the real HTTP
-// stack. Six proof families, all app-agnostic (derived from your metadata):
+// stack. Seven proof families, all app-agnostic (derived from your metadata):
 //   - data fidelity   : runCrudVerification     — author → write → read → assert
 //   - authorization   : runRlsProofs            — "you can't write what you can't read"
 //   - value shape     : runReferenceShapeProofs — "a reference refuses a value that is not a record id"
 //   - delete behaviour: runDeleteBehaviorProofs — "a declared deleteBehavior is what a delete does"
 //   - unique scope    : runUniqueScopeProofs    — "a declared unique collides where its scope says"
 //   - parent write    : runParentWriteReachProofs — "a detail write needs edit on its master, and its own verb"
+//   - dashboard window: runDashboardWindowProofs — "a dashboard's date picker counts the rows its window selects"
 
 export { bootStack, bootStackOnce } from './harness.js';
 export type { VerifyStack, BootOptions } from './harness.js';
@@ -151,6 +152,31 @@ export type {
   ParentWriteReachPersona,
   ParentWriteReachReport,
 } from './parent-write-reach.js';
+
+// The dashboard date-window family: every widget a dashboard's `dateRange`
+// binds counts, under each preset of the picker, the rows that window selects
+// — the window read from the spec (`filterBindings`, the preset macro
+// windows), asked of the dataset door as the signed-in principal, and compared
+// with fixture rows written on known days.
+export {
+  deriveDashboardWindowCases,
+  runDashboardWindowProofs,
+  formatDashboardWindowReport,
+} from './dashboard-window.js';
+export type {
+  DashboardWindowExclusion,
+  DashboardWindowMeasureCase,
+  DashboardWindowCase,
+  DashboardWindowDashboard,
+  DashboardWindowPreset,
+  DashboardWindowAnswer,
+  DashboardWindowPresetProbe,
+  DashboardWindowMeasureResult,
+  DashboardWindowWidgetStatus,
+  DashboardWindowWidgetResult,
+  DashboardWindowReport,
+  DashboardWindowProofOptions,
+} from './dashboard-window.js';
 
 // ADR-0060 — reusable conformance-ledger helper (static complement to the
 // runtime harness): classify every declarable property, fail closed on drift.

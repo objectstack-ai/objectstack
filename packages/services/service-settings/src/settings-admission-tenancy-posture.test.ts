@@ -33,6 +33,13 @@
  * | a CURRENT member's key (control)    | 200, row lands | 200, row lands — unchanged |
  * | no credential (control)             | 403 | 403 — unchanged |
  *
+ * Since the family took the shared anonymous floor (ADR-0056 D2), every
+ * refusal in that "after" column — the three `403`s and the empty listing —
+ * answers `401 UNAUTHENTICATED`: a refused key resolves to NO principal (the
+ * last case of the vetted-tenant block pins that), and a caller with no
+ * principal is an anonymous one. What this file owns is unchanged — the
+ * refusal itself, and zero rows in the store.
+ *
  * ## The wiring ablation, held permanently
  *
  * The three `mount()` shapes below differ in NOTHING but whether this seam can
@@ -454,8 +461,9 @@ describe('#15351 — under a wall-enforcing posture the settings doors refuse an
     const m = await mount({ kind: 'service', posture: 'isolated' });
     const res = await put(m, KEY(RAW_EXMEMBER_KEY));
 
-    expect(res.status).toBe(403);
-    expect(res.body?.error?.code).toBe('SETTINGS_FORBIDDEN');
+    // The refused key resolves to no principal, so the anonymous floor answers.
+    expect(res.status).toBe(401);
+    expect(res.body?.error?.code).toBe('UNAUTHENTICATED');
     // Read back FROM THE STORE, never off the response body.
     expect(m.settingRows()).toHaveLength(0);
     expect(m.auditRows()).toHaveLength(0);
@@ -464,25 +472,29 @@ describe('#15351 — under a wall-enforcing posture the settings doors refuse an
   it("refuses an ex-member's org-stamped key at GET /:namespace (the read leak)", async () => {
     const m = await mount({ kind: 'service', posture: 'isolated' });
     const res = await getNs(m, KEY(RAW_EXMEMBER_KEY));
-    expect(res.status).toBe(403);
-    expect(res.body?.error?.code).toBe('SETTINGS_FORBIDDEN');
+    expect(res.status).toBe(401);
+    expect(res.body?.error?.code).toBe('UNAUTHENTICATED');
+    expect(res.body?.data).toBeUndefined();
   });
 
   it('stops an ex-member enumerating the namespace through GET /api/settings', async () => {
-    // The listing is not a refusal but a FILTER (`listManifests`): an enforced
-    // caller sees only what it may read. With no capabilities resolved, that is
-    // the empty list — pinned so the leak cannot come back as a 200 that still
+    // The listing used to be a FILTER (`listManifests`) for this caller — an
+    // enforced caller with no capabilities saw the empty list. The refused key
+    // resolves to no principal, so the anonymous floor now refuses the listing
+    // outright — pinned so the leak cannot come back as a 200 that still
     // names the namespace.
     const m = await mount({ kind: 'service', posture: 'isolated' });
     const res = await listNs(m, KEY(RAW_EXMEMBER_KEY));
-    expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ success: true, data: { manifests: [] } });
+    expect(res.status).toBe(401);
+    expect(res.body).toMatchObject({ success: false, error: { code: 'UNAUTHENTICATED' } });
+    expect(res.body?.data).toBeUndefined();
   });
 
   it('refuses an organization-less key where the posture requires one', async () => {
     const m = await mount({ kind: 'service', posture: 'isolated' });
     const res = await put(m, KEY(RAW_ORGLESS_KEY));
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
+    expect(res.body?.error?.code).toBe('UNAUTHENTICATED');
     expect(m.settingRows()).toHaveLength(0);
   });
 
@@ -504,7 +516,8 @@ describe('#15351 — under a wall-enforcing posture the settings doors refuse an
   it('CONTROL — no credential is still the anonymous refusal, and writes nothing', async () => {
     const m = await mount({ kind: 'service', posture: 'isolated' });
     const res = await put(m, {});
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
+    expect(res.body?.error?.code).toBe('UNAUTHENTICATED');
     expect(m.settingRows()).toHaveLength(0);
   });
 });
@@ -553,7 +566,8 @@ describe('#15351 — the posture is the EFFECTIVE one, never the requested one',
     delete process.env.OS_TENANCY_POSTURE;
     const m = await mount({ kind: 'service', posture: 'isolated' });
     const res = await put(m, KEY(RAW_EXMEMBER_KEY));
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
+    expect(res.body?.error?.code).toBe('UNAUTHENTICATED');
     expect(m.settingRows()).toHaveLength(0);
   });
 });

@@ -48,38 +48,59 @@
  * author's view — and without this file needing to know which posture the spec
  * is at.
  *
- * ## Why WARNING, and only warning, in this PR
+ * ## Severity — a RETIRED key is an `error`, every other finding a `warning`
  *
- * Wiring the parse is the precondition for enforcement, not the enforcement
- * (the #5020 lesson, one surface over). The corpus this landed on carries live
- * violations that are open contract questions, not authoring mistakes:
- * `I18nLabelSchema` is a plain `z.string()` while three published platform
- * pages author inline `{ en, 'zh-CN', … }` maps that objectui resolves
- * (#5728), and the record picker declared a required `displayField` that no
- * renderer reads while honouring an undeclared `labelField` (#5775). Gating
- * those would fail the platform's own pages to enforce declarations the
- * platform does not itself keep. So every finding here is advisory, the
- * warning-period inventory is the acceptance baseline for the error upgrade,
- * and the upgrade is its own step once the inventory is empty.
+ * Wiring the parse was the precondition for enforcement, not the enforcement
+ * (the #5020 lesson, one surface over), so this rule landed advisory: the
+ * corpus it landed on carried live violations that were open contract
+ * questions, not authoring mistakes — inline `{ en, 'zh-CN', … }` label maps
+ * against a plain-string `I18nLabelSchema` on three platform pages (#5728), the
+ * record picker's required-but-unread `displayField` (#5775), five props the
+ * renderers read and the map did not declare (#6776), and two page rewrites
+ * (`page:card.visible` → `visibleWhen`; #5776's tab `key` → `value`). Gating
+ * then would have failed the platform's own pages to enforce declarations the
+ * platform did not keep. The plan was recorded here: the warning-period
+ * inventory is the acceptance baseline for the error upgrade, and the upgrade
+ * is its own step once the inventory is empty. Every blocker above is closed.
  *
- * #5775 settled most of the spec side of that inventory — four keys nothing read
- * are tombstoned with ADR-0087 conversions. Its stronger claim, that every key
- * the renderers honour is now declared, was **incomplete**: #6776 re-counted
- * against objectui `origin/main` and found five more author-facing props the
- * renderers read and this map did not declare — `page:header`'s
- * `recordChrome` / `showStar` / `showCopyId`, `page:accordion.variant`, and the
- * tab strip's visual style, which the spec did declare but under a spelling
- * (`page:tabs.type`) that collides with a page component's own dispatch key and
- * is therefore unauthorable in the flat and JSX carriers. #6776 declares the
- * four and renames the fifth to the `tabStyle` every carrier can express. Both
- * cards are named here rather than only in a changelog because THIS comment is
- * the inventory the error upgrade is measured against, and a count that reports
- * itself complete while it is not is how the second half went unnoticed for a
- * release.
+ * #23026 took that step for ONE class: a value verdict raised by a
+ * `retiredKey()` tombstone (`shared/retired-key.ts`, `@objectstack/spec`). A
+ * tombstone keeps a key declared only so that writing it raises the
+ * prescription, so reporting it as advice had `os validate` print
+ * "✓ Validation passed" over a key the ADR-0087 conversion registry tells
+ * authors is refused. The inventory, measured before the upgrade at
+ * objectstack `21c86444e`: `os validate` over `examples/app-crm`, `app-todo`,
+ * `app-multi-package` and `app-showcase`, and this rule over the five shipped
+ * pages outside them (`platform-objects` ×3, `plugin-approvals`,
+ * `qa/downstream-contract`); `packages/apps/*` and the `create-objectstack`
+ * template author no page. Retired-key findings: 0. Every other finding of
+ * this rule: 0 as well.
  *
- * What stands between this rule and `error` is now #5728 and two page rewrites
- * (`page:card.visible` → the ADR-0089 component-level `visibleWhen`; #5776's tab
- * `key` → `value`), not the props map.
+ * The class is read off the ISSUE, never off its text ({@link isRetiredKeyVerdict}):
+ *
+ * - the tombstone's own issue, `invalid_type` expecting `never` — the shape a
+ *   `retiredKey()` raises, and the discriminator the spec's own flow-node
+ *   refusals use. A retired ELEMENT's row (`retiredComponentProps` in
+ *   `ui/component.zod.ts`: `z.never` over the whole bag, with the element's
+ *   prescription) raises the same shape and is the same class;
+ * - inside a collapsed `invalid_union`, when exactly one arm raised tombstone
+ *   issues and nothing else — the one-arm rule of
+ *   {@link unrecognizedKeysFromUnionArm}, for the same reason. It is live on
+ *   `object-form` / `object-master-detail-form` `sections[].fields[]`, whose
+ *   object arm tombstones `publicPicker`.
+ *
+ * What stays a `warning`, deliberately: a value rejected for any other reason
+ * (a wrong type, a missing required prop, a closed-set refusal such as a url
+ * action's `target` scheme or a `record:details` section's `count`), a
+ * retired enum VALUE (`enumWithRetiredValues` raises an enum issue, not a
+ * tombstone), an undeclared key, and the missing `dataSource.object` binding.
+ * Their inventory above (0) is the next step's baseline; moving them is a
+ * decision of its own, not a rider on this one.
+ *
+ * Where it refuses: the three CLI doors — `os validate`, `os build`, `os lint`
+ * — run every gating rule. The runtime publish door (the Studio, REST and MCP
+ * write path) does not run this rule (`surfaces` in `authoring-rules.ts`), so a
+ * page saved there is not refused for a retired key.
  *
  * ## Unregistered types are SKIPPED — a required semantic, not leniency
  *
@@ -115,12 +136,12 @@ export const COMPONENT_PROPS_UNKNOWN_KEY = 'component-props-unknown-key';
 export const COMPONENT_PROPS_INVALID = 'component-props-invalid';
 
 /**
- * Advisory on every finding this rule emits — see the module header. The type
- * is a single literal rather than a union so the tier claim in
- * `authoring-rules.ts` is provable from this file's source, which is exactly
- * what `authoring-rule-wiring.test.ts` reads it for.
+ * `error` for a retired key ({@link isRetiredKeyVerdict}), `warning` for every
+ * other finding — see the module header. Emitting `error` makes the rule
+ * `gating` in `authoring-rules.ts`, which `authoring-rule-wiring.test.ts`
+ * verifies against this file's source.
  */
-export type ComponentPropsSeverity = 'warning';
+export type ComponentPropsSeverity = 'error' | 'warning';
 
 export interface ComponentPropsFinding {
   severity: ComponentPropsSeverity;
@@ -222,6 +243,42 @@ function unrecognizedKeysFromUnionArm(issue: LintZodIssue): LintZodIssue | undef
     // such arm, or we cannot say which shape the author was reaching for.
     if (keyIssues.length !== arm.length || found) return undefined;
     found = keyIssues[0];
+  }
+  return found;
+}
+
+/**
+ * A `retiredKey()` tombstone's own issue: `z.never` refuses every value as
+ * `invalid_type` expecting `never`, carrying the prescription as its message.
+ * `expected` is read structurally, as the spec's flow-node refusals read it,
+ * because {@link LintZodIssue} declares only the fields the renderer needs.
+ */
+function isTombstoneIssue(issue: LintZodIssue): boolean {
+  return issue.code === 'invalid_type' && (issue as { readonly expected?: unknown }).expected === 'never';
+}
+
+/**
+ * Is this value verdict a RETIRED key the author wrote — the class this rule
+ * refuses as an `error` (module header, "Severity")?
+ *
+ * Directly, when the issue is the tombstone's own. Inside a collapsed
+ * `invalid_union`, only under the one-arm rule {@link unrecognizedKeysFromUnionArm}
+ * states: exactly one arm raised tombstone issues, and that arm raised nothing
+ * else. Two arms each refusing a retired key, or one arm refusing a retired key
+ * beside a value it rejects for another reason, do not say which shape the
+ * author meant, so the verdict stays the ordinary `warning` — `describeIssue`
+ * still prints every arm's message, the prescription included.
+ */
+function isRetiredKeyVerdict(issue: LintZodIssue): boolean {
+  if (isTombstoneIssue(issue)) return true;
+  if (issue.code !== 'invalid_union') return false;
+  const arms = issue.errors;
+  if (!arms || arms.length === 0) return false;
+  let found = false;
+  for (const arm of arms) {
+    if (!arm.some(isRetiredKeyVerdict)) continue;
+    if (found || !arm.every(isRetiredKeyVerdict)) return false;
+    found = true;
   }
   return found;
 }
@@ -349,6 +406,24 @@ export function validateComponentProps(stack: AnyRec): ComponentPropsFinding[] {
           }
           continue;
         }
+        const subject = `${at.slice(base.length + 1) || 'properties'}: ${describeIssue(issue, props)}`;
+        // A retired key is refused; it is the one `error` this rule files. Its
+        // fix is the prescription the message already carries, so the hint
+        // never offers the other branch below — re-declaring a retired key in
+        // the schema would undo its retirement.
+        if (isRetiredKeyVerdict(issue)) {
+          findings.push({
+            severity: 'error',
+            rule: COMPONENT_PROPS_INVALID,
+            where,
+            path: at,
+            message: `${subject} — a retired key is refused, so this stack does not pass until it is gone`,
+            hint:
+              `Apply the prescription above: \`${type}\`'s props schema keeps a retired key only to refuse ` +
+              'it, so the fix is the rename or removal it names, never a schema change.',
+          });
+          continue;
+        }
         findings.push({
           severity: 'warning',
           rule: COMPONENT_PROPS_INVALID,
@@ -358,9 +433,7 @@ export function validateComponentProps(stack: AnyRec): ComponentPropsFinding[] {
           // advisory posture it used to explain (judged here as a warning, and
           // the props bag is not parsed on the storage path) is the verdict's
           // consequence and rides the message.
-          message:
-            `${at.slice(base.length + 1) || 'properties'}: ${describeIssue(issue, props)} — ` +
-            'nothing refuses it today, so the renderer receives the props as written',
+          message: `${subject} — nothing refuses it today, so the renderer receives the props as written`,
           hint:
             `Give \`${type}\` props its schema accepts (ComponentPropsMap, @objectstack/spec/ui) — the ` +
             'rejection above names what it expects — or, if the component really does honour what is ' +
