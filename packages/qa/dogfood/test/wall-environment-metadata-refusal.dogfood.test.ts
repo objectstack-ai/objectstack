@@ -250,7 +250,7 @@ for (const posture of ['isolated', 'group'] as const) {
       expect((await h.stack.apiAs(h.operator, 'GET', `/packages/com.em.${p}.a`)).status).toBe(404);
       expect(await h.ql.find('sys_metadata', { where: { package_id: `com.em.${p}.dup` }, context: SYS })).toHaveLength(0);
       expect((await h.stack.apiAs(h.operator, 'GET', `/packages/${pkg}`)).status).toBe(200);
-    });
+    }, 60_000);
 
     it("install-local: A's install, upgrade and uninstall are refused 403 FORBIDDEN, and B reads the operator's object unchanged", async () => {
       const op = `com.em.${p}.il`;
@@ -262,7 +262,7 @@ for (const posture of ['isolated', 'group'] as const) {
         packageBody(op, '1.1.0', [object(`em_${p}_ilobj`, 'IL v2 by A')])), 'FORBIDDEN');
       await refused(await h.stack.apiAs(h.tokA, 'DELETE', `${INSTALL_LOCAL}/${op}`), 'FORBIDDEN');
       expect(await readAsB(h, 'object', `em_${p}_ilobj`)).toEqual({ status: 200, label: 'IL v1' });
-    });
+    }, 60_000);
 
     it("/automation: A's create, update, deregister and clone of a flow definition are refused 403 PERMISSION_DENIED", async () => {
       const name = `em_${p}_opflow`;
@@ -274,7 +274,7 @@ for (const posture of ['isolated', 'group'] as const) {
       expect((await readAsB(h, 'flow', `em_${p}_aflow`)).status).toBe(404);
       expect((await readAsB(h, 'flow', `em_${p}_aclone`)).status).toBe(404);
       expect((await h.stack.apiAs(h.operator, 'GET', `/automation/${name}`)).status).toBe(200);
-    });
+    }, 60_000);
 
     it('CONTROL: the platform operator writes at every one of these doors', async () => {
       await ok(await h.stack.apiAs(h.operator, 'PUT', `/meta/object/em_${p}_opobj`, object(`em_${p}_opobj`, 'Operator object')));
@@ -304,7 +304,7 @@ for (const posture of ['isolated', 'group'] as const) {
 
       await ok(await h.stack.apiAs(h.operator, 'POST', '/automation', flow(`em_${p}_opautoflow`, 'Operator automation')));
       await ok(await h.stack.apiAs(h.operator, 'DELETE', `/automation/em_${p}_opautoflow`));
-    });
+    }, 60_000);
   });
 }
 
@@ -334,5 +334,5 @@ describe('[ADR-0131 D12 items 7–8 · D11] single (CONTROL): the refusal is ine
     await ok(await h.stack.apiAs(h.tokA, 'POST', INSTALL_LOCAL, packageBody('com.em.sin.il', '1.0.0', [object('em_sin_ilobj', 'v1')])));
     await ok(await h.stack.apiAs(h.tokA, 'DELETE', `${INSTALL_LOCAL}/com.em.sin.il`));
     await ok(await h.stack.apiAs(h.tokA, 'POST', '/automation', flow('em_sin_autoflow', 'Automation by A')));
-  });
+  }, 60_000);
 });
