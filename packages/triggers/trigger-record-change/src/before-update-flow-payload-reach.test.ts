@@ -755,7 +755,7 @@ describe('[#15356] can a record-before-update flow reach a multi:true batch payl
       id: 'probe', type: 'update_record', label: 'Update',
       config: {
         objectName: object,
-        filter: { id: '{record.id}' },
+        filter: { id: { dialect: 'cel', source: 'record.id' } },
         fields: { residue: { dialect: 'cel', source: "'REACHED-' + previous.title" } },
       },
     }) as any);
@@ -783,7 +783,7 @@ describe('[#15356] can a record-before-update flow reach a multi:true batch payl
       id: 'probe', type: 'update_record', label: 'Update',
       config: {
         objectName: object,
-        filter: { id: '{record.id}' },
+        filter: { id: { dialect: 'cel', source: 'record.id' } },
         // The path resolves to the array itself; the question is whether the
         // second write's own passes mutate the shared array.
         fields: { tags: { dialect: 'cel', source: 'record.tags' }, residue: 'copied' },

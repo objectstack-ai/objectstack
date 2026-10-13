@@ -351,7 +351,7 @@ function idempotentSweepFlow(name: string, shape: 'healthy' | 'dead_gate') {
     const lookup = {
         id: 'find_existing', type: 'get_record', label: 'Already handled?',
         // No `limit` ⇒ findOne ⇒ `selected: 1` when it finds one, `0` when not.
-        config: { objectName: 'nudge', filter: { deal: '{row.id}' }, outputVariable: 'existing' },
+        config: { objectName: 'nudge', filter: { deal: { dialect: 'cel', source: 'row.id' } }, outputVariable: 'existing' },
     };
     const gate = { id: 'gate', type: 'decision', label: 'Gate' };
     const nudge = { id: 'nudge', type: 'create_record', label: 'Nudge', config: { objectName: 'nudge', fields: { note: 'x' } } };

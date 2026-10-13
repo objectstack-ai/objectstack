@@ -1344,9 +1344,9 @@ function scanBranchRouting(
  * Everything else is left alone, deliberately:
  *
  *  - **any node carrying a real predicate** (verdict `'clause'`) — including an
- *    authored `{token}` that will interpolate to nothing. That is the #3810
- *    guard's fact, judged at run time against the interpolation result, and this
- *    rule must not pre-empt it: at authoring time the condition IS written.
+ *    operand envelope that will evaluate to nothing. That is the #3810 guard's
+ *    fact, judged at run time against the evaluated operand, and this rule must
+ *    not pre-empt it: at authoring time the condition IS written.
  *  - **a non-object `filter`** (string, array, number). `DeleteRecordConfigSchema`
  *    /`UpdateRecordConfigSchema` type it `z.record(z.string(), z.unknown())`, so
  *    the node is refused BY NAME at execute time (`parseNodeConfig`). Warning
@@ -1412,7 +1412,8 @@ function previewFilter(filter: unknown): string {
  * ## Not a second copy of the #3810 guard
  *
  * `crud-nodes.ts` refuses a node at run time when a condition the author WROTE
- * interpolated to nothing (`{record.ownr}` — a typo — leaving `{}`), and it is
+ * evaluated to nothing (an operand envelope answering `null`, which would
+ * leave `{}` or match every empty field), and it is
  * deliberately keyed on "a condition the author wrote is gone", not on "the
  * filter is empty": losing one of two conditions still widens the blast radius,
  * and an intentionally empty filter erases nothing, so `crud-filter-guard.test.ts`
@@ -1425,8 +1426,9 @@ function previewFilter(filter: unknown): string {
  * | a written condition vanished          | #3810 filter guard   | run time  | refuse  |
  * | no condition was ever written         | this rule            | authoring | warn    |
  *
- * A node with `filter: { owner: '{record.ownr}' }` is silent here (a condition
- * IS written) and refused there. A node with no `filter` at all is warned about
+ * A node with `filter: { owner: { dialect: 'cel', source: 'record.owner' } }` is
+ * silent here (a condition IS written) and refused there when the record has
+ * no owner. A node with no `filter` at all is warned about
  * here and — correctly — allowed there.
  */
 function scanUnboundedBulkWrites(
@@ -1464,7 +1466,7 @@ function scanUnboundedBulkWrites(
         `the engine admits a whole-object write declared that way, so this is a warning, not a gate, and the ` +
         `run-time path stays open. Distinct from the run-time erased-condition guard, which REFUSES this node ` +
         `at run time when ` +
-        `a condition you WROTE interpolated to nothing — that guard is keyed on "a written condition is gone" ` +
+        `a condition you WROTE evaluated to nothing — that guard is keyed on "a written condition is gone" ` +
         `and deliberately not on "the filter is empty", which is the fact this rule judges at authoring ` +
         `time.`,
       // Warning, not `error`: see the severity policy at the top of this file.

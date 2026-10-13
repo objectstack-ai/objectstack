@@ -3,6 +3,8 @@
 import type { PluginContext } from '@objectstack/core';
 import {
     defineActionDescriptor,
+    flowFilterOperands,
+    isExpressionEnvelopeShaped,
     GetRecordConfigSchema,
     CreateRecordConfigSchema,
     UpdateRecordConfigSchema,
@@ -29,92 +31,108 @@ import {
     type StoredHashDigest,
 } from '@objectstack/metadata-protocol';
 import type { AutomationEngine } from '../engine.js';
-import { interpolateFilter, type VariableMap } from './template.js';
+import type { VariableMap } from './template.js';
 import { resolveValueSlotMap } from './value-slot-map.js';
 import { refuseNode } from '../guard-refusal.js';
 import { parseNodeConfig } from './parse-config.js';
 import { resolveRunDataContext, stampSystemInsertOwner } from '../runtime-identity.js';
 
 /**
- * A filter condition that an author WROTE but that interpolation erased
- * (framework#3810).
+ * Resolve a node's `filter` to the one the query runs (#19939, Fork R17 → A;
+ * ADR-0032 Decision 2: a computed filter value is a CEL envelope).
  *
- * The flow interpolator expresses "this token did not resolve" as `undefined`.
- * In every other config block that is harmless — an unresolved `{x}` in a
- * message renders as empty text. In a FILTER it is the opposite of harmless:
- * a condition whose value is `undefined` is not a narrower query, it is an
- * ABSENT one, and an absent condition matches MORE rows. When the erased
- * condition was the only one, `{ owner: '{record.ownr}' }` becomes `{}` — and
- * `{}` handed to `deleteMany` is every row in the table.
+ * Each OPERAND of the filter — a field's value, an operator's comparand, each
+ * element of a list comparand — is a value slot, located by the spec's
+ * `flowFilterOperands`, the walk every door reads, so "which positions the
+ * doors judge" and "which positions the executor evaluates" cannot drift
+ * apart. An operand that is a CEL value envelope is EVALUATED by
+ * `AutomationEngine.evaluateValueEnvelope` in the run's scope and context —
+ * the call every value slot makes; a malformed one, or one that faults on the
+ * live variables (an absent variable or key), throws with its source, before
+ * any query. Every other operand is handed to the query as written: a literal,
+ * or a query placeholder (`{current_user_id}`, `{today}`) the query engine
+ * resolves itself. A flow `{…}` token never reaches this point: the
+ * executor's `parseNodeConfig` refused it through the node contract (the
+ * judge `registerFlow` and `objectstack validate` call). The filter is copied,
+ * so the node's config is never written into.
  *
- * So a single mistyped field name in a `delete_record` node silently emptied
- * the object. Not a hypothetical: `{record.ownr}` (typo), `{someInput}` (an
- * input the run did not receive) and `{record.account.name}` (a lookup hop —
- * the trigger record carries a scalar id) all reach this state, and none of
- * them produced a diagnostic anywhere.
+ * **The #3810 guard, kept.** An operand envelope that evaluates to `null` (or
+ * to nothing) REFUSES the node. A condition whose comparand is nothing is not
+ * a narrower query, it is a different one — dropped, it matches MORE rows; as
+ * `null`, it matches every row whose field is empty. When the erased condition
+ * was the only one, `{}` handed to `deleteMany` is every row in the table. The
+ * 17.x template reached this state silently through a mistyped field name, an
+ * input the run did not receive or a lookup hop, until this guard refused it;
+ * an operand that evaluates to `null` is the same state, and it is refused
+ * whatever the operator. An author who means "the field is empty" writes the
+ * literal `null` (or `{ $null: true }`), never a computed one. The guard is
+ * keyed on "an operand the author wrote is nothing", not on "the filter is
+ * empty": losing ONE of two conditions still widens the blast radius from "my
+ * open records" to "all open records".
  *
- * The guard below refuses to execute such a node. It is deliberately keyed on
- * "a condition the author wrote is gone", not on "the filter is empty": losing
- * ONE of two conditions still silently widens the blast radius from "my open
- * records" to "all open records".
- */
-function erasedFilterConditions(
-    before: unknown,
-    after: unknown,
-    path: string[] = [],
-): Array<{ path: string; template: string }> {
-    const out: Array<{ path: string; template: string }> = [];
-    const at = (p: string[]) => p.join('.') || '(root)';
-
-    if (typeof before === 'string') {
-        if (after === undefined && before.includes('{')) {
-            out.push({ path: at(path), template: before });
-        }
-        return out;
-    }
-    if (Array.isArray(before)) {
-        before.forEach((v, i) =>
-            out.push(...erasedFilterConditions(v, (after as unknown[] | undefined)?.[i], [...path, String(i)])),
-        );
-        return out;
-    }
-    if (before && typeof before === 'object') {
-        const afterRec = (after ?? {}) as Record<string, unknown>;
-        for (const [k, v] of Object.entries(before as Record<string, unknown>)) {
-            out.push(...erasedFilterConditions(v, afterRec[k], [...path, k]));
-        }
-    }
-    return out;
-}
-
-/**
- * Interpolate a node's filter and refuse the node if any authored condition was
- * erased. Returns either the usable filter or a ready-to-return failure.
- *
- * `verb` names the operation in the error so the message says what WOULD have
- * happened ("would have matched every row and deleted it").
+ * `consequence` names the operation in the refusal, so the message says what
+ * WOULD have happened ("would have matched every remaining row and deleted it").
  */
 function resolveNodeFilter(
+    engine: AutomationEngine,
     rawFilter: unknown,
     variables: VariableMap,
-    context: Parameters<typeof interpolateFilter>[2],
+    context: AutomationContext,
     nodeType: string,
     consequence: string,
 ): { filter: Record<string, unknown> } | { error: string } {
-    const filter = interpolateFilter(rawFilter ?? {}, variables, context) as Record<string, unknown>;
-    const erased = erasedFilterConditions(rawFilter ?? {}, filter);
-    if (erased.length > 0) {
-        const detail = erased.map((e) => `\`${e.template}\` (at ${e.path})`).join(', ');
+    const authored = rawFilter ?? {};
+    const filter = copyFilter(authored) as Record<string, unknown>;
+    const nothing: Array<{ path: string; source: string }> = [];
+    for (const operand of flowFilterOperands(authored)) {
+        if (!isExpressionEnvelopeShaped(operand.value)) continue;
+        const at = filterOperandPath(operand.path);
+        const value = engine.evaluateValueEnvelope(operand.value, variables, at, context);
+        if (value === null || value === undefined) {
+            const source = (operand.value as { source?: unknown }).source;
+            nothing.push({ path: at, source: typeof source === 'string' ? source : '' });
+            continue;
+        }
+        setFilterOperand(filter, operand.path, value);
+    }
+    if (nothing.length > 0) {
+        const detail = nothing.map((e) => `\`${e.source}\` (at ${e.path})`).join(', ');
         return {
             error:
-                `${nodeType}: refusing to run — ${erased.length} filter condition(s) resolved to nothing ` +
-                `and were dropped from the query: ${detail}. An absent condition does not narrow a query, ` +
-                `it widens it, so this ${consequence}. Check the field name, confirm the flow variable is ` +
-                `set on this run, and note that a relation field holds a scalar id — a \`{record.<lookup>.<field>}\` ` +
-                `hop needs the relation in the start node's \`config.expand\`.`,
+                `${nodeType}: refusing to run — ${nothing.length} filter operand(s) evaluated to nothing: ${detail}. ` +
+                `An absent condition does not narrow a query, it widens it, so this ${consequence}. A filter ` +
+                `operand must evaluate to a value on every run that reaches this node: check the expression and ` +
+                `confirm the variable is set on this run, and where the value may be absent, route around this node ` +
+                `with a \`decision\`. To match an empty field, write the literal \`null\` as the operand.`,
         };
     }
     return { filter };
+}
+
+/** A filter operand's path, in the ledger's spelling (`filter.id.$in[0]`). */
+function filterOperandPath(path: readonly (string | number)[]): string {
+    let out = 'filter';
+    for (const segment of path) out += typeof segment === 'number' ? `[${segment}]` : `.${segment}`;
+    return out;
+}
+
+/** A copy of a filter's plain objects and lists; every other value is shared, as the query only reads it. */
+function copyFilter(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(copyFilter);
+    const proto = value !== null && typeof value === 'object' ? Object.getPrototypeOf(value) : undefined;
+    if (proto === Object.prototype || proto === null) {
+        const out: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = copyFilter(v);
+        return out;
+    }
+    return value;
+}
+
+/** Write an evaluated operand into the copied filter, at the path `flowFilterOperands` located it. */
+function setFilterOperand(filter: Record<string, unknown>, path: readonly (string | number)[], value: unknown): void {
+    let at: Record<PropertyKey, unknown> = filter;
+    for (const segment of path.slice(0, -1)) at = at[segment] as Record<PropertyKey, unknown>;
+    at[path[path.length - 1]!] = value;
 }
 
 /**
@@ -310,10 +328,10 @@ function projectionNamingId(fields: string[] | undefined): string[] | undefined 
  *    then the content-hash refusal (`storedMetadataHashEvaluateRefusal`).
  *
  * `query` is the option bag the node hands the engine, so the collector reads
- * exactly the filter the engine would run: the INTERPOLATED one, since a
- * `{token}` can resolve to a whole condition (a `$and` list, a comparand) whose
- * columns the authored template does not show. The node configs declare no
- * sort and no grouping, so the refusals are fed filter fields only.
+ * exactly the filter the engine would run: the RESOLVED one, since an operand
+ * envelope can evaluate to a comparand (a `{ $field }` reference among them)
+ * whose columns the authored envelope does not show. The node configs declare
+ * no sort and no grouping, so the refusals are fed filter fields only.
  *
  * The answer is a guard refusal ({@link refuseNode}: the metadata is wrong,
  * and re-running it unchanged never succeeds) carrying the door's own error
@@ -397,15 +415,17 @@ function storedMetadataWriteRefusal(
  * seeds them directly (ADR-0018) rather than shipping a separate plugin.
  *
  * Each executor:
- *  1. Interpolates `{var}` / `{var.path}` / `{$User.*}` / `{NOW()}` tokens in
- *     `node.config` against the running flow's variable context — except in
- *     the `create_record` / `update_record` `fields` map, a value slot, where
- *     a CEL value envelope is evaluated to the value written and the `{…}`
- *     dialect is retired (#19939; {@link resolveFieldValues}).
+ *  1. Parses its config as authored against its contract, then evaluates its
+ *     value slots in the running flow's scope — the `create_record` /
+ *     `update_record` `fields` map ({@link resolveFieldValues}) and each
+ *     operand of the `filter` ({@link resolveNodeFilter}): a CEL value
+ *     envelope is evaluated, every other value is a literal, and the `{…}`
+ *     template dialect is retired from both (#19939) — a query placeholder in
+ *     a filter is the query engine's, handed on.
  *  2. Calls the resolved data engine via `ctx.getService('data')`.
  *  3. Writes the result back to the variable context under `outputVariable`
  *     (or under `<nodeId>.id` / `<nodeId>.records` by default), so downstream
- *     nodes can reference fields like `{leadRecord.company}`.
+ *     nodes can read fields like `leadRecord.company`.
  *
  * If no data engine is registered, executors degrade to a no-op success so
  * test environments without ObjectQL still complete the flow without errors.
@@ -431,12 +451,13 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 // string-keyed map (JSON-Schema `additionalProperties`), which the
                 // designer renders with its flat keyValue editor; values stay
                 // `true`-permissive because real metadata carries operator objects
-                // (e.g. `{"$ne": null}`) alongside `{var}` templates and literals.
+                // (e.g. `{"$ne": null}`) alongside CEL value envelopes, query
+                // placeholders and literals (#19939: each operand a value slot).
                 configSchema: {
                     type: 'object',
                     properties: {
                         objectName: { type: 'string', title: 'Object', xRef: { kind: 'object' } },
-                        filter: { type: 'object', additionalProperties: true, title: 'Filter', description: 'Field/value pairs to match (e.g. status → active). Operator values like {"$ne": null} are preserved.' },
+                        filter: { type: 'object', additionalProperties: true, title: 'Filter', description: 'Field/value pairs to match (e.g. status → active). Operator values like {"$ne": null} are preserved; each operand is a CEL value envelope evaluated before the query, a query placeholder such as {today}, or a literal.' },
                         // Declared in #4045: the executor has always passed this
                         // straight into find/findOne as the projection, but no
                         // form offered it — authorable only by hand until now.
@@ -454,10 +475,10 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 // `filters` → `filter` and `object` → `objectName` are handled at
                 // load by the ADR-0087 D2 conversion layer ('flow-node-crud-filter-alias',
                 // 'flow-node-crud-object-alias'), so the parse sees canonical keys
-                // (PD #12 fallbacks retired). Parsed BEFORE interpolation: every
-                // typed slot the contract declares beyond strings is read raw by
-                // this executor too (`limit` never honored a template), so a
-                // template in one was already dead config — now it is loud.
+                // (PD #12 fallbacks retired). Parsed as authored: every typed
+                // slot the contract declares beyond strings is read raw by this
+                // executor too (`limit` never honored a template), and a flow
+                // `{…}` token at a filter operand is refused here (#19939).
                 const parsed = parseNodeConfig<GetRecordConfigParsed>('get_record', node.id, GetRecordConfigSchema, node.config);
                 if (!parsed.ok) return parsed.refusal;
                 const cfg = parsed.config;
@@ -465,7 +486,7 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 if (!objectName) return refuseNode('get_record: objectName required');
 
                 const filterResult = resolveNodeFilter(
-                    cfg.filter, variables, context, 'get_record',
+                    engine, cfg.filter, variables, context, 'get_record',
                     'would have read rows the filter was written to exclude',
                 );
                 if ('error' in filterResult) return refuseNode(filterResult.error);
@@ -477,7 +498,7 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 // [#21623] A filter that evaluates the stored-metadata family's
                 // body or content hash is refused before the engine is asked,
                 // with the data door's own code, under either run identity. It
-                // reads the interpolated filter, in the `where` slot both
+                // reads the resolved filter, in the `where` slot both
                 // engine reads below hand it in.
                 const familyRefusal = storedMetadataFilterRefusal('get_record', objectName, { where: filter });
                 if (familyRefusal) return familyRefusal;
@@ -682,7 +703,7 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                     type: 'object',
                     properties: {
                         objectName: { type: 'string', title: 'Object', xRef: { kind: 'object' } },
-                        filter: { type: 'object', additionalProperties: true, title: 'Filter', description: 'Field/value pairs identifying the record(s) to update (e.g. id → {recordId}).' },
+                        filter: { type: 'object', additionalProperties: true, title: 'Filter', description: 'Field/value pairs identifying the record(s) to update. Each operand is a CEL value envelope evaluated before the query, a query placeholder such as {current_user_id}, or a literal.' },
                         fields: { type: 'object', additionalProperties: true, title: 'Field values', description: 'Field values to write.' },
                         // #5393 — the author's bulk DECLARATION. Off (default)
                         // the engine accepts only a write that names one row by
@@ -709,7 +730,7 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
 
                 // `filters` → `filter` converted at load (ADR-0087 D2); read canonical.
                 const filterResult = resolveNodeFilter(
-                    cfg.filter, variables, context, 'update_record',
+                    engine, cfg.filter, variables, context, 'update_record',
                     'would have matched — and overwritten — rows the filter was written to exclude',
                 );
                 if ('error' in filterResult) return refuseNode(filterResult.error);
@@ -782,7 +803,7 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                     type: 'object',
                     properties: {
                         objectName: { type: 'string', title: 'Object', xRef: { kind: 'object' } },
-                        filter: { type: 'object', additionalProperties: true, title: 'Filter', description: 'Field/value pairs identifying the record(s) to delete.' },
+                        filter: { type: 'object', additionalProperties: true, title: 'Filter', description: 'Field/value pairs identifying the record(s) to delete. Each operand is a CEL value envelope evaluated before the query, a query placeholder such as {current_user_id}, or a literal.' },
                         // #5393 — see update_record. Highest-stakes declaration
                         // the flow language has: without it a predicate delete
                         // is refused by the engine, with it every matched row
@@ -810,7 +831,7 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 // The highest-stakes of the three: an erased condition here is the
                 // difference between deleting one row and emptying the object.
                 const filterResult = resolveNodeFilter(
-                    cfg.filter, variables, context, 'delete_record',
+                    engine, cfg.filter, variables, context, 'delete_record',
                     'would have matched every remaining row and deleted it',
                 );
                 if ('error' in filterResult) return refuseNode(filterResult.error);

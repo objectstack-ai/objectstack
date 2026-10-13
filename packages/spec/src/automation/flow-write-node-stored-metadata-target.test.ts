@@ -45,9 +45,9 @@ type WriteNode = (typeof WRITE_NODES)[number];
 /** A whole, valid config for `nodeType` aimed at `objectName` — the accept control's shape. */
 function configFor(nodeType: WriteNode | 'get_record', objectName: unknown): Config {
   if (nodeType === 'create_record') return { objectName, fields: { name: 'pin' } };
-  if (nodeType === 'update_record') return { objectName, filter: { id: '{record.id}' }, fields: { state: 'archived' } };
-  if (nodeType === 'delete_record') return { objectName, filter: { id: '{record.id}' } };
-  return { objectName, filter: { id: '{record.id}' }, outputVariable: 'row' };
+  if (nodeType === 'update_record') return { objectName, filter: { id: { dialect: 'cel', source: 'record.id' } }, fields: { state: 'archived' } };
+  if (nodeType === 'delete_record') return { objectName, filter: { id: { dialect: 'cel', source: 'record.id' } } };
+  return { objectName, filter: { id: { dialect: 'cel', source: 'record.id' } }, outputVariable: 'row' };
 }
 
 /** start → the probe node → end. */

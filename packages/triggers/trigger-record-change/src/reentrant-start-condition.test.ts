@@ -225,7 +225,7 @@ const escalationFlow = (name: string, object: string) => ({
       // whole point: the author's guard is what should stop the re-fire.
       config: {
         objectName: object,
-        filter: { id: '{record.id}' },
+        filter: { id: { dialect: 'cel', source: 'record.id' } },
         fields: { status: 'escalated', escalated_date: '2026-08-14T13:14:38.628Z' },
       },
     },

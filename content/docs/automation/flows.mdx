@@ -283,7 +283,7 @@ for some input, so the rewrite is yours to judge.
 | `'Follow up on {record.name}'` | `source: "'Follow up on ' + record.name"` | wrap a non-string hole in `string(…)`, one that may be null in `coalesce(…, '')` |
 | braces meant literally, `'{"a": 1}'` | `source: "'{\"a\": 1}'"` | a CEL string literal |
 | `'{$User.Id}'` | `source: 'current_user.id'` | `current_user` is the run's user, and `null` in a run with none (a schedule, a record change made by a system write), where this read fails the run. In a flow that can run without a user, write `current_user != null ? current_user.id : null`: it writes `null` where the template wrote nothing, which on `update_record` clears a stored value the template left alone — or skip the node on `current_user != null` |
-| `'{$User.Email}'`, `'{$User.Name}'`, any other `$User` path | read the user record by `current_user.id`: an `assignment` (`uid: { dialect: 'cel', source: 'current_user.id' }`), a `get_record` on `sys_user` with `filter: { id: '{uid}' }` and `outputVariable: 'me'`, then `source: 'me.email'` | these never resolved in any shipped run — they wrote nothing. `current_user` carries only what the run holds: `id`, `positions`, `organizationId`, `isPlatformAdmin` |
+| `'{$User.Email}'`, `'{$User.Name}'`, any other `$User` path | read the user record by `current_user.id`: a `get_record` on `sys_user` with `filter: { id: { dialect: 'cel', source: 'current_user.id' } }` and `outputVariable: 'me'`, then `source: 'me.email'` | these never resolved in any shipped run — they wrote nothing. `current_user` carries only what the run holds: `id`, `positions`, `organizationId`, `isPlatformAdmin` |
 | `'{TODAY()}'` | `source: 'isoDate(today())'` | none: `isoDate` writes the `YYYY-MM-DD` text the macro wrote, on the UTC calendar |
 | `'{TODAY() + 7}'`, `'{TODAY() - 3}'` | `source: 'isoDate(daysFromNow(7))'`, `source: 'isoDate(daysAgo(3))'` | none for a whole number of days. A fraction (`'{TODAY() - 1.5}'`) is not: the template truncated the day of the month plus the offset, `addDays(today(), -1.5)` truncates the offset, so going back they land a day apart on most days of a month, and `daysAgo(1.5)` is refused at build. Write the whole number of days you mean |
 | `'{NOW()}'` | `source: 'isoDatetime(now())'` | none: `isoDatetime` writes the `YYYY-MM-DDTHH:mm:ss.sssZ` text the macro wrote |
@@ -355,11 +355,41 @@ there — write the value itself (`sourceObject: 'crm_case'`). A `{…}` token
 there is refused, since it would reach the messaging service with its braces,
 and so is an envelope. The node's `actionUrl` is a text slot (below).
 
+**A CRUD node's filter: each operand computes before the query, and the query
+placeholders stay.** In a `get_record`, `update_record` or `delete_record`
+`filter`, each **operand** — a field's value, an operator's comparand, each
+element of a list comparand — is a value slot; the filter's keys, operators,
+`$and` / `$or` / `$not` and nested-relation conditions are its structure:
+
+```ts
+filter: {
+  id: { dialect: 'cel', source: 'record.id' },                  // was '{record.id}'
+  amount: { $gt: { dialect: 'cel', source: 'record.cap * 2' } }, // a comparand
+  owner: { $in: ['usr_1', { dialect: 'cel', source: 'record.owner' }] },
+  due_date: { $lt: '{today}' },                                  // a query placeholder: unchanged
+}
+```
+
+The envelope is evaluated in the run's scope before the query is sent. A
+**query placeholder** — `{current_user_id}`, `{current_org_id}`, `{today}`,
+`{30_days_ago}` and the rest of the date macros — is the query engine's own
+vocabulary: it is handed on untouched and the query engine resolves it, as
+before. Every other `{…}` token there is refused with its envelope. A flow
+variable that shares a placeholder's name no longer shadows it: the placeholder
+is the query engine's, and the variable is read with an envelope. An operand
+envelope that evaluates to `null` **refuses the node**, as a token that resolved
+to nothing did: an absent condition does not narrow a query, it widens it, so
+route around the node with a `decision` where the value may be absent rather
+than guarding it to `null`. To match an empty field, write the literal `null`
+(or `{ $null: true }`). A related field named `dialect` is matched through an
+operator map, `{ dialect: { $eq: 'x' } }`, since an object naming a string
+`dialect` at an operand is read as an envelope.
+
 **Where an envelope is data, the remedy names none there.** An envelope
 evaluates only as the top-level value of a value slot — `fields`,
 `assignments`, a callee's `input` / `inputs`, a screen's `defaults`,
-`defaultValue` or `recordId`, a `collection`, or a `notify` value (each entry of
-a `recipients` list among them). Inside an object or list value, and in the two legacy `assignment` shapes
+`defaultValue` or `recordId`, a `collection`, a `notify` value (each entry of
+a `recipients` list among them), or a CRUD `filter` operand. Inside an object or list value, and in the two legacy `assignment` shapes
 (an `assignments: [{ variable, value }]` array, variables as the config's own
 keys), it is stored as the object it spells — so the refusal there names what
 does evaluate:
@@ -1769,8 +1799,8 @@ A failure is a guard when both hold: re-running the flow unchanged could never
 succeed, **and** the fix is to edit metadata. In practice that is a missing
 required config key (a data node with no `objectName`, an `http` node with no
 `url`, a `subflow` or `map` with no `flowName`, a `connector_action` with no
-`connectorId`/`actionId`), a filter token that resolved to nothing so the
-condition was dropped from the query, a graph that recurses past the nesting
+`connectorId`/`actionId`), a filter operand that evaluated to nothing (`null`),
+so the condition would have widened the query, a graph that recurses past the nesting
 ceiling, or a run that would execute unscoped.
 
 The split is deliberate. A dropped filter condition does not narrow a query, it
@@ -2110,9 +2140,9 @@ CEL, and every computed value (a field value, an assignment value) is a CEL
 value envelope. **Text** slots — a `notify` title, message or link, an `http`
 url and header values, a screen title or description, a refusing `end` node's
 message — are `{{ }}` templates
-(see [text slots](#text-slots-read-double-brace-holes)). Single braces remain
-only on the value-like position that hands a resolved value over and that the
-retirement has not reached yet, a CRUD `filter` value.
+(see [text slots](#text-slots-read-double-brace-holes)). A CRUD `filter`
+operand is a value too: a CEL value envelope, or a literal — a query
+placeholder such as `{today}` among them, which the query engine resolves.
 
 | Where | Dialect | Write it like | Bindings |
 |:---|:---|:---|:---|
@@ -2121,6 +2151,7 @@ retirement has not reached yet, a CRUD `filter` value.
 | Decision-node `conditions[].expression` | **CEL** (bare, no braces) | `order_amount > 10000` | flow variables by name, `vars.*` and `current_user` |
 | Field values and assignment values, as a **literal** | none — written as it is | `'open'`, `42`, `true`, `['a', 'b']` | — (a `{…}` template token is refused here since [#19939](https://github.com/objectstack-ai/objectstack/issues/19939), `{$User.*}` and the date macros `{NOW()}` / `{TODAY() ± N}` included: a date is `isoDate(today())` / `isoDatetime(now())` in an envelope) |
 | Field values and assignment values, as a **CEL value envelope** | **CEL** (in an envelope) | `{ dialect: 'cel', source: 'round(price * 100.0) / 100.0' }` | flow variables by name, `vars.*` and `current_user` — the whole CEL stdlib (`joinNonEmpty`, …) |
+| A CRUD `filter` operand — a field's value, an operator's comparand, a list comparand's element | **CEL** (in an envelope), or a literal — a query placeholder (`{current_user_id}`, `{today}`) included | `{ id: { dialect: 'cel', source: 'record.id' }, due_date: { $lt: '{today}' } }` | flow variables by name, `vars.*` and `current_user`; the placeholders are the query engine's |
 | Text slots — `notify` `title` / `message` / `actionUrl`, `http` `url` and `headers` values, `screen` `title` / `description`, `end` `message` | **template** (`{{ }}` holes) | `'Deal won: {{ record.name }} ({{ record.amount \| currency }})'` | flow variables by name (`$`-named ones too: `{{ $error.message }}`) — a path and an optional formatter, never logic |
 
 A value slot takes either form, chosen by shape: an object naming a `dialect`
@@ -2153,14 +2184,10 @@ and is read as `vars["current_user"]` / `vars["vars"]`.
    braces.
 3. **A `{…}` template in a value slot** — `total: '{round(x * 100) / 100}'`,
    `owner: '{record.owner}'` — is refused with the CEL spelling to write
-   instead. In a single-brace position (a CRUD `filter` value), an
-   unsupported function in braces — `'{ROUND(x, 2)}'`, `'{Math.round(x)}'`,
-   `'{(x).toFixed(2)}'` — fails the node with a **named error** listing the
-   supported set and, where one is close, the spelling you meant. Before #11060
-   this was a *silent* failure: the unknown name was rewritten to `null` and the
-   field was simply written `undefined`. A `fault` edge does not catch this
-   error — the expression itself is wrong, so re-running can never succeed; fix
-   the spelling.
+   instead, a CRUD `filter` operand included (a query placeholder such as
+   `{today}` there stays). An unknown function in the envelope —
+   `round(x, 2)`, `Math.round(x)` — is refused by the envelope's CEL check,
+   with the spelling you meant where one is close.
 4. **A single-brace token in a text slot** — `title: 'Deal won: {record.name}'`
    — is refused with its `{{ }}` spelling ([text slots](#text-slots-read-double-brace-holes)): it is no placeholder there,
    and would go out as literal text.

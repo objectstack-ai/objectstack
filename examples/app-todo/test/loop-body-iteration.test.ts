@@ -235,10 +235,13 @@ describe('#19206 — the loop body runs and binds `currentTask`', () => {
 
     const result: any = await automation.execute(legacy.name);
     expect(result.success).toBe(false);
-    // The exact refusal the card reports, and the reason it is loud rather than
-    // catastrophic: an erased filter condition is refused, not widened.
-    expect(String(result.error)).toContain('update_record: refusing to run');
-    expect(String(result.error)).toContain('{currentTask.id}');
+    // Loud rather than catastrophic: the filter operand reads `currentTask`,
+    // which the body-less shape never binds, and the operand envelope fails the
+    // run before the query, naming it (#19939: a filter operand is a CEL value
+    // envelope; the single-brace token it replaced erased its condition and the
+    // node was refused) — the filter is never widened either way.
+    expect(String(result.error)).toContain('filter.id: value expression failed to evaluate as CEL');
+    expect(String(result.error)).toContain('currentTask');
 
     // And the observable the card is about: nothing was notified, because the
     // run never reached the node that notifies.

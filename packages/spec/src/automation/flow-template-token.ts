@@ -230,9 +230,8 @@ export function runUserPathNeverResolved(text: string, write: (path: string) => 
     `\`${text}\` never resolved in any shipped run: it read a user object no run carries, so the template `
     + 'wrote nothing here. `current_user` carries only what the run holds — `id`, '
     + '`positions`, `organizationId`, `isPlatformAdmin`. For the user\'s email or name, read the user record by '
-    + `\`current_user.id\`: compute the id into a variable with an \`assignment\` node (\`assignments: { uid: `
-    + `{ dialect: 'cel', source: '${CEL_RUN_USER_ID}' } }\`), read the record with a \`get_record\` node `
-    + '(`objectName: \'sys_user\'`, `filter: { id: \'{uid}\' }`, `outputVariable: \'me\'`), and write '
+    + '`current_user.id` with a `get_record` node (`objectName: \'sys_user\'`, `filter: { id: { dialect: '
+    + `'cel', source: '${CEL_RUN_USER_ID}' } }\`, \`outputVariable: 'me'\`), and write `
     + `${write('me.email')} or ${write('me.name')}.`
   );
 }

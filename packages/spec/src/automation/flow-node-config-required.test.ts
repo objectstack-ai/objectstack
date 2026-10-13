@@ -85,8 +85,8 @@ const SCREEN: Config = {
 const CENSUS: Array<{ type: string; config: Config; key: string }> = [
   { type: 'get_record', config: { objectName: 'account', outputVariable: 'rows' }, key: 'objectName' },
   { type: 'create_record', config: { objectName: 'account', fields: { name: 'Acme' } }, key: 'objectName' },
-  { type: 'update_record', config: { objectName: 'account', filter: { id: '{record.id}' }, fields: { name: 'Acme' } }, key: 'objectName' },
-  { type: 'delete_record', config: { objectName: 'account', filter: { id: '{record.id}' } }, key: 'objectName' },
+  { type: 'update_record', config: { objectName: 'account', filter: { id: { dialect: 'cel', source: 'record.id' } }, fields: { name: 'Acme' } }, key: 'objectName' },
+  { type: 'delete_record', config: { objectName: 'account', filter: { id: { dialect: 'cel', source: 'record.id' } } }, key: 'objectName' },
   { type: 'notify', config: { recipients: [{ dialect: 'cel', source: 'record.owner' }], title: 'Hi' }, key: 'recipients' },
   { type: 'http', config: { url: 'https://example.com/hook' }, key: 'url' },
   { type: 'screen', config: SCREEN, key: 'fields[0].name' },
