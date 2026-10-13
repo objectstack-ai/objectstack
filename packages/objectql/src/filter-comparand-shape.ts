@@ -44,7 +44,11 @@ import {
   isVirtualSearchField,
   classifyDottedFilterHead,
   isReadableIds,
+  isComposedReadableIds,
+  filterSubtreeProvenanceOf,
+  markFilterSubtreeProvenance,
   type ReadableIds,
+  type ComposedReadableIds,
 } from '@objectstack/spec/data';
 
 /**
@@ -103,12 +107,12 @@ export function invalidFilterError(message: string): Error {
  * read and write, so it stays a walk rather than a schema parse.
  *
  * [ADR-0139 D1] This is the one caller that passes `admitReadableIds`: the
- * engine's seam is where a branded `ReadableIds` leaf is meant to be composed,
- * so the door admits it as a `$in` comparand here and nowhere else. Until the
- * engine composes the leaf (ADR-0139 D2), {@link refuseUncomposedReadableIds}
- * runs right after the door and refuses every branded leaf in the node, so an
- * admitted leaf never reaches a driver as written. An UNBRANDED copy never gets
- * that far: the door refuses it as a non-list comparand (`INVALID_FILTER` / 400).
+ * engine composes a branded `ReadableIds` leaf at its executor boundary
+ * (ADR-0139 D2, {@link collectComposableReadableIds}), so the door admits it as
+ * a `$in` comparand here and nowhere else. It then refuses, by name, every leaf
+ * the engine will never compose — see {@link collectComposableReadableIds} for
+ * the positions. An UNBRANDED copy never gets that far: the door refuses it as
+ * a non-list comparand (`INVALID_FILTER` / 400).
  */
 export function assertListComparandShapes(
   object: string,
@@ -117,113 +121,221 @@ export function assertListComparandShapes(
   path = 'where',
 ): void {
   assertListComparandShapesAt(node, `${operation}('${object}')`, path, { admitReadableIds: true });
-  refuseUncomposedReadableIds(object, operation, node, path);
+  // The sites it returns are composed at the executor boundary, on the final
+  // AST; here only its refusals are wanted.
+  collectComposableReadableIds(object, operation, node, path);
 }
 
+/** The read verbs whose `where` may carry a `ReadableIds` leaf (ADR-0139 D1). */
+const READABLE_IDS_READ_VERBS: ReadonlySet<string> = new Set(['find', 'findOne', 'count', 'aggregate']);
+
 /**
- * [ADR-0139 D1, E1] Refuse every branded `ReadableIds` leaf in `node`, at any
- * position, before a driver is asked — the engine does not compose the leaf
- * yet.
+ * One `ReadableIds` leaf the engine composes: the comparand of a `$in` at `at`
+ * in the `where` of a read verb.
+ */
+export interface ComposableReadableIdsSite {
+  readonly leaf: ReadableIds;
+  readonly at: string;
+}
+
+const NO_SITES: readonly ComposableReadableIdsSite[] = Object.freeze([]);
+
+/**
+ * [ADR-0139 D1, D2] Every `ReadableIds` leaf in `node` that the engine
+ * composes, in walk order — and a loud refusal for every leaf it never will.
  *
- * ## Why a refusal, and why here
+ * Asked twice per verb, on the same rule: by the comparand door above (on the
+ * caller's `where`, before the middleware chain), and at the executor
+ * boundary (on the FINAL AST, after the chain and the before-hooks,
+ * immediately before the driver call), which composes the sites it returns.
+ * A leaf a middleware or a hook wrote therefore meets the same rule as one the
+ * caller wrote, and no leaf reaches a driver uncomposed.
  *
- * The comparand door above admits a branded leaf as `$in`'s comparand, because
- * the engine's seam is where it is to be composed (ADR-0139 D2). No composition
- * exists yet, and no driver evaluates the leaf as written. Measured on
- * `a2e94c2a05`, with the leaf handed straight to each driver as `$in`'s
- * comparand, plain and under `$or` / `$not`, and as `$nin`'s:
+ * ## What is composable, and what is refused
  *
- * | driver | answer |
- * |:--|:--|
- * | `driver-memory` | a raw `TypeError` from the matcher, no `code`, no `status` |
- * | `driver-sql` (SQLite) | `500 DATABASE_ERROR`, a syntax error at the bound `?` |
- * | `driver-mongodb` (`translateFilter`) | emitted unchanged as `{ $in: { object } }`; the server's answer is not measured |
+ * A leaf is composed ONLY as the comparand of `$in`, in the `where` of `find`,
+ * `findOne`, `count` or `aggregate`. Everything else is refused with the
+ * composition-fault envelope, `INTERNAL_ERROR` / 500 — the code and status
+ * ADR-0139 D3 gives a driver's refusal of the same leaf, ⛔ not
+ * `INVALID_FILTER`: no request can spell the leaf, so the fault is the
+ * in-process code that wrote it, and a declared 5xx keeps its prose off the
+ * wire at the HTTP doors.
  *
- * None widened a read, and none answered as the leaf means. So the leaf stops
- * HERE, on every verb and at every position, with the composition-fault
- * envelope ADR-0139 D3 gives a driver's own refusal: `INTERNAL_ERROR` / 500,
- * ⛔ not `INVALID_FILTER`. No request can spell the leaf, so the fault is the
- * in-process code that wrote it, not the caller's filter; and a declared 5xx
- * keeps its prose off the wire at the HTTP doors. When the engine composes the
- * leaf, the read-verb `$in` position stops being refused here and every other
- * position keeps a refusal (ADR-0139 D1's last paragraph).
+ *  - **a write verb** (`update`, `delete`): a write's predicate never carries
+ *    the leaf (D1's last paragraph);
+ *  - **a filter position other than `where`** — `having`, which filters the
+ *    aggregated rows, and an aggregation's own `filter`, which the engine
+ *    evaluates in memory;
+ *  - **any position but a `$in` comparand**: an implicit-equality value, a
+ *    `$eq` / `$nin` comparand, a list member, a `$between` endpoint, the root;
+ *  - **a COMPOSED leaf anywhere** ({@link isComposedReadableIds}). The engine
+ *    builds that form itself, at the boundary, from the caller's read scope; a
+ *    composed leaf already in the filter came from somewhere else and is never
+ *    trusted as a scope someone else resolved.
  *
  * ## The walk
  *
- * EVERY position, not only `$in`'s: an implicit-equality value, a `$between`
- * endpoint, a list member and a nested-relation condition are all places the
- * door does not judge a plain object, and a leaf there must not reach a driver
- * either. Arrays and plain objects are descended into; a `Date` or class
- * instance holds no filter. `onPath` stops a self-referential in-process
- * `where` instead of overflowing the stack.
+ * Every position, so a leaf the door does not judge (equality, a list member,
+ * a nested-relation condition) is refused too. Arrays and plain objects are
+ * descended into; a `Date` or class instance holds no filter. `onPath` stops a
+ * self-referential in-process `where` instead of overflowing the stack. A
+ * filter with no leaf walks its own keys and returns a shared empty list, so
+ * the common path allocates nothing.
  */
-function refuseUncomposedReadableIds(
+export function collectComposableReadableIds(
   object: string,
   operation: string,
   node: unknown,
   path = 'where',
-): void {
-  const found = findReadableIds(node, path, new Set<object>());
-  if (found) throw uncomposedReadableIdsError(object, operation, found.leaf, found.at);
-}
-
-function findReadableIds(
-  node: unknown,
-  at: string,
-  onPath: Set<object>,
-): { leaf: ReadableIds; at: string } | undefined {
-  if (node === null || typeof node !== 'object') return undefined;
-  if (isReadableIds(node)) return { leaf: node, at };
-  if (onPath.has(node)) return undefined;
-  const isArray = Array.isArray(node);
-  if (!isArray) {
-    const proto = Object.getPrototypeOf(node);
-    if (proto !== Object.prototype && proto !== null) return undefined;
-  }
-  onPath.add(node);
-  try {
-    if (isArray) {
-      for (let i = 0; i < (node as unknown[]).length; i++) {
-        const hit = findReadableIds((node as unknown[])[i], `${at}[${i}]`, onPath);
-        if (hit) return hit;
-      }
-    } else {
-      for (const key of Object.keys(node)) {
-        const hit = findReadableIds((node as Record<string, unknown>)[key], `${at}.${key}`, onPath);
-        if (hit) return hit;
-      }
+): readonly ComposableReadableIdsSite[] {
+  const composable = READABLE_IDS_READ_VERBS.has(operation) && path === 'where';
+  let sites: ComposableReadableIdsSite[] | undefined;
+  const onPath = new Set<object>();
+  const visit = (value: unknown, at: string, asInComparand: boolean): void => {
+    if (value === null || typeof value !== 'object') return;
+    if (isComposedReadableIds(value)) throw forgedComposedReadableIdsError(object, operation, value, at);
+    if (isReadableIds(value)) {
+      if (!composable || !asInComparand) throw readableIdsPositionError(object, operation, value, at, path);
+      (sites ??= []).push({ leaf: value, at });
+      return;
     }
-  } finally {
-    onPath.delete(node);
-  }
-  return undefined;
+    if (onPath.has(value)) return;
+    const isArray = Array.isArray(value);
+    if (!isArray) {
+      const proto = Object.getPrototypeOf(value);
+      if (proto !== Object.prototype && proto !== null) return;
+    }
+    onPath.add(value);
+    try {
+      if (isArray) {
+        for (let i = 0; i < (value as unknown[]).length; i++) visit((value as unknown[])[i], `${at}[${i}]`, false);
+      } else {
+        for (const key of Object.keys(value)) {
+          visit((value as Record<string, unknown>)[key], `${at}.${key}`, key === '$in');
+        }
+      }
+    } finally {
+      onPath.delete(value);
+    }
+  };
+  visit(node, path, false);
+  return sites ?? NO_SITES;
 }
 
 /**
- * The composition-fault envelope for an uncomposed `ReadableIds` leaf —
- * ADR-0112's `INTERNAL_ERROR` / 500, the code and status ADR-0139 D3 gives a
- * driver's refusal of the same leaf. The message is addressed to the
- * in-process author who wrote the leaf: where it sits, what it stands for,
- * that no driver was asked, and what to write instead today.
+ * [ADR-0139 D2] `node` with the comparand of every composable `$in` leaf
+ * replaced by `answer(leaf)` — the composed leaf, or `[]` — copy-on-write.
+ *
+ * Asked only after {@link collectComposableReadableIds} returned at least one
+ * site for the same `node`, so every leaf the walk meets here is composable.
+ * A subtree with no leaf is returned by reference, and a rewritten node
+ * carries the filter-subtree provenance mark of the node it replaces, so a
+ * driver's refusal diagnostic resolves to the same author / policy
+ * attribution it did before (`markFilterSubtreeProvenance`).
  */
-function uncomposedReadableIdsError(
-  object: string,
-  operation: string,
-  leaf: ReadableIds,
-  at: string,
-): Error {
-  const err = new Error(
-    `${operation}('${object}'): ${at} holds a ReadableIds leaf, "the ids of '${leaf.object}' `
-    + 'this caller may read", and this engine does not compose that leaf yet. The query was '
-    + 'NOT run and no driver was asked: no driver evaluates the leaf as written. Until the '
-    + `engine composes it, read '${leaf.object}' as the caller and match the ids that read `
-    + 'returns with a list.',
-  ) as Error & { code?: string; status?: number; httpStatus?: number; object?: string };
+export function composeReadableIdsLeaves<T>(node: T, answer: (leaf: ReadableIds) => unknown): T {
+  const onPath = new Set<object>();
+  const rewrite = (value: unknown): unknown => {
+    if (value === null || typeof value !== 'object' || isReadableIds(value)) return value;
+    if (onPath.has(value)) return value;
+    const isArray = Array.isArray(value);
+    if (!isArray) {
+      const proto = Object.getPrototypeOf(value);
+      if (proto !== Object.prototype && proto !== null) return value;
+    }
+    onPath.add(value);
+    try {
+      if (isArray) {
+        let out: unknown[] | undefined;
+        (value as unknown[]).forEach((item, i) => {
+          const next = rewrite(item);
+          if (next !== item) (out ??= [...(value as unknown[])])[i] = next;
+        });
+        return out ?? value;
+      }
+      let out: Record<string, unknown> | undefined;
+      for (const key of Object.keys(value)) {
+        const item = (value as Record<string, unknown>)[key];
+        const next = key === '$in' && isReadableIds(item) ? answer(item) : rewrite(item);
+        if (next !== item) (out ??= { ...(value as Record<string, unknown>) })[key] = next;
+      }
+      if (out === undefined) return value;
+      const mark = filterSubtreeProvenanceOf(value);
+      return mark === null ? out : markFilterSubtreeProvenance(out, mark);
+    } finally {
+      onPath.delete(value);
+    }
+  };
+  return rewrite(node) as T;
+}
+
+/**
+ * The composition-fault envelope, ADR-0112's `INTERNAL_ERROR` / 500 — the
+ * code and status ADR-0139 D3 gives a driver's refusal of the same leaf. Every
+ * refusal of a `ReadableIds` leaf the engine makes is built here: the
+ * positions above and D5's three classes (`ObjectQL`'s executor boundary).
+ */
+export function readableIdsRefusalError(object: string, message: string): Error {
+  const err = new Error(message) as Error & { code?: string; status?: number; httpStatus?: number; object?: string };
   err.code = StandardErrorCode.enum.INTERNAL_ERROR;
   err.status = 500;
   err.httpStatus = 500;
   err.object = object;
   return err;
+}
+
+/** "the ids of 'P' this caller may read" — how every refusal names the leaf. */
+export function describeReadableIdsLeaf(at: string, leaf: { readonly object: string }): string {
+  return `${at} holds a ReadableIds leaf, "the ids of '${leaf.object}' this caller may read"`;
+}
+
+function readableIdsPositionError(
+  object: string,
+  operation: string,
+  leaf: ReadableIds,
+  at: string,
+  path: string,
+): Error {
+  const head = `${operation}('${object}'): ${describeReadableIdsLeaf(at, leaf)}`;
+  if (!READABLE_IDS_READ_VERBS.has(operation)) {
+    return readableIdsRefusalError(
+      object,
+      `${head}, and a write's predicate never carries one: the engine composes the leaf only in the `
+      + 'where of a read (find, findOne, count, aggregate). The write was NOT run and no driver was asked. '
+      + `Read '${leaf.object}' as the caller first and match the ids that read returns with a list.`,
+    );
+  }
+  if (path !== 'where') {
+    return readableIdsRefusalError(
+      object,
+      `${head}, and the engine composes the leaf only in the where of a read, never in ${path}: `
+      + `${path === 'having' ? 'having filters the aggregated rows' : "an aggregation's filter is evaluated in memory"}, `
+      + 'which hold no pointer to compose it against. The query was NOT run and no driver was asked. '
+      + 'Narrow the rows in where instead.',
+    );
+  }
+  return readableIdsRefusalError(
+    object,
+    `${head}, and the engine composes the leaf only as the comparand of $in. The query was NOT run `
+    + `and no driver was asked. Write it as { FIELD: { $in: ReadableIds.of('${leaf.object}') } }, `
+    + 'where FIELD holds the parent record id.',
+  );
+}
+
+function forgedComposedReadableIdsError(
+  object: string,
+  operation: string,
+  leaf: ComposedReadableIds,
+  at: string,
+): Error {
+  return readableIdsRefusalError(
+    object,
+    `${operation}('${object}'): ${at} holds a COMPOSED ReadableIds leaf for '${leaf.object}' that this `
+    + 'engine did not compose. The engine builds that form itself, at its executor boundary, from the '
+    + "caller's read scope; one written into a query is never trusted as a scope someone else resolved. "
+    + `The query was NOT run and no driver was asked. Write the leaf as ReadableIds.of('${leaf.object}') `
+    + 'and let the engine compose it.',
+  );
 }
 
 /**
