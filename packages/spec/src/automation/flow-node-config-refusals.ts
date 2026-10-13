@@ -35,6 +35,12 @@ import { STORED_METADATA_BODY_PRESCRIPTION, isStoredMetadataBodyObject } from '.
 import { FLOW_REGION_SLOTS_BY_TYPE } from './region-slots';
 import { FLOW_NODE_EXPRESSION_PATHS, isExpressionEnvelopeShaped } from './flow-node-expression-paths';
 import { READ_AS_WRITTEN_PARAM } from './flow-template-token';
+// [#23260] The two slot judges, ASKED by the value arm for the paths they own
+// (`slotJudgeRefusedPaths`) — never a second reading of their grammar here.
+// Both are already in this module's import graph through the contracts below,
+// which compose them.
+import { flowNodeTextSlotSources, textSlotTemplateRefusal } from './flow-text-slot-template';
+import { flowNodeValueTemplateRefusals } from './flow-value-slot-template';
 import type { FlowNodeConfigRefusal, FlowSlotRefusalParams, NodeConfigValueKind } from './flow-node-expression-paths';
 // The executor contracts. Read only inside `getBuiltinNodeConfigContracts`,
 // never at module load: `control-flow.zod.ts` sits in the flow-schema import
@@ -232,7 +238,8 @@ function insideRegion(nodeType: string, path: ReadonlyArray<PropertyKey>): boole
  * Does an issue path descend INTO a ledger `value` slot (`fields.total.source`
  * under `fields.*`; since #19939 `fields[0].defaultValue.source` under a
  * screen's `fields[].defaultValue`)? Such a slot holds an authored VALUE — a
- * literal, a `{token}` template, or an expression envelope — and a key missing
+ * literal or an expression envelope (a `{token}` in a literal is refused by
+ * the value-slot judge, #19939) — and a key missing
  * inside it is a malformed value, judged at `registerFlow` and `objectstack
  * validate` by the value-envelope pass with its own refusal, never a config
  * key left out. Matched segment by segment ({@link startsWithLedgerSlot}), so
@@ -247,27 +254,6 @@ function insideValueSlot(nodeType: string, path: ReadonlyArray<PropertyKey>): bo
 }
 
 // ─── The builtin VALUE arm (#21898) ───────────────────────────────────
-
-/**
- * [#21898] A `{token}` the run interpolates — the interpolator's own token
- * shape (`service-automation` `builtin/template.ts`, `interpolateString`, and
- * the lint's `TEMPLATE_TOKEN_RE`), which also matches the double-brace and
- * dollar-brace spellings an author may write. A string carrying one means
- * something only after interpolation, so the build never judges its type.
- */
-const INTERPOLATION_TOKEN = /\{[^{}]+\}/;
-
-/**
- * [#21898] Does `value`, or anything inside it, carry a {@link
- * INTERPOLATION_TOKEN}? Cycle-safe: a flow arriving as hand-built objects
- * rather than parsed JSON may hold a self-reference.
- */
-function carriesInterpolationToken(value: unknown, seen: Set<object> = new Set()): boolean {
-  if (typeof value === 'string') return INTERPOLATION_TOKEN.test(value);
-  if (value === null || typeof value !== 'object' || seen.has(value)) return false;
-  seen.add(value);
-  return (Array.isArray(value) ? value : Object.values(value)).some((v) => carriesInterpolationToken(v, seen));
-}
 
 /** The authored value an issue path names, or `undefined` when the walk leaves the config. */
 function authoredAt(config: Readonly<Record<string, unknown>>, path: ReadonlyArray<PropertyKey>): unknown {
@@ -327,9 +313,10 @@ function startsWithLedgerSlot(segments: readonly string[], path: ReadonlyArray<P
  * validate` by ruling — `flow.zod.ts`).
  *
  * A `value` slot has two, and (#19939) only for the two forms they judge: the
- * value-envelope pass owns a slot whose value is an envelope, and the
- * value-slot judge owns a `{token}` in a literal — which the token carve-out in
- * {@link builtinValueJudged} skips anyway. A LITERAL the contract refuses for
+ * value-envelope pass owns a slot whose value is an envelope — answered here —
+ * and the value-slot judge owns a `{token}` in a literal, which
+ * {@link builtinValueJudged} exempts by asking that judge itself
+ * ({@link slotJudgeRefusedPaths}, #23260). A LITERAL the contract refuses for
  * its type has no other judge, so it stays this arm's: a screen's `recordId`
  * takes a string literal and refuses `42` (`ScreenConfigSchema`), as it did
  * when it was not a value slot; and a `loop`'s or a `map`'s `collection` takes
@@ -344,8 +331,9 @@ function startsWithLedgerSlot(segments: readonly string[], path: ReadonlyArray<P
  * an envelope. An issue at the list itself is the contract's union refusing it
  * whole — and a list whose every element is a string or envelope-shaped can be
  * refused only for a malformed envelope (the envelope pass's, at the element)
- * or a token (the judge's), so it is skipped too; a list holding any other
- * element (`42`, `null`, a nested list) stays this arm's, its only judge.
+ * or a token (the judge's, at the element), so it is skipped too; a list
+ * holding any other element (`42`, `null`, a nested list) stays this arm's, its
+ * only judge.
  */
 function atOrInsideJudgedLedgerSlot(
   nodeType: string,
@@ -376,11 +364,65 @@ interface ContractIssue {
   readonly params?: Readonly<Record<string, unknown>>;
 }
 
+/** Does the contract mark this issue {@link READ_AS_WRITTEN_PARAM} — a literal's own refusal of what it holds? */
+function isReadAsWrittenIssue(issue: ContractIssue): boolean {
+  return issue.code === 'custom' && issue.params?.[READ_AS_WRITTEN_PARAM] === true;
+}
+
+/**
+ * [#23260] Every config path at which a slot's OWN judge refuses the authored
+ * value, in the ledger spelling ({@link ledgerPathOf}): each refusal of the
+ * value-slot judge ({@link flowNodeValueTemplateRefusals}, the ledger's `value`
+ * slots) and each text slot the text-slot judge refuses
+ * ({@link textSlotTemplateRefusal} over {@link flowNodeTextSlotSources}: a
+ * single-brace token, or a `{{ }}` hole over a `$` root the engine does not
+ * bind).
+ *
+ * Both judges are asked, never re-read: their slots, their option per slot (a
+ * collection, a filter operand) and their grammar are theirs. The contracts
+ * compose the same two judges, so a contract issue at one of these paths is
+ * that judge's refusal arriving through the parse — or, at a `loop`'s or a
+ * `map`'s `collection`, the same refusal arriving as the union's message —
+ * and `registerFlow` and `objectstack validate` call both judges themselves,
+ * with the slot's label and, where it has one, its callee, screen or recipient
+ * sentence. Reported again here, one token would draw two refusals at
+ * `objectstack validate` (this arm's beside the judge's), and at `registerFlow`
+ * the parse's would replace the judge's located one.
+ */
+function slotJudgeRefusedPaths(nodeType: string, authored: Readonly<Record<string, unknown>>): ReadonlySet<string> {
+  const paths = new Set<string>();
+  for (const refusal of flowNodeValueTemplateRefusals(nodeType, authored)) paths.add(refusal.path);
+  for (const slot of flowNodeTextSlotSources(nodeType, authored)) {
+    if (textSlotTemplateRefusal(slot.source) !== undefined) paths.add(slot.path);
+  }
+  return paths;
+}
+
+/**
+ * What {@link builtinValueJudged} reads beyond one issue, per node config: the
+ * keys at which the contract marks an issue {@link READ_AS_WRITTEN_PARAM}, and
+ * — computed on first ask — {@link slotJudgeRefusedPaths}.
+ */
+interface ValueArmScope {
+  readonly readAsWrittenKeys: ReadonlySet<string>;
+  slotJudgeRefused(): ReadonlySet<string>;
+}
+
 /**
  * [#21898] Is a builtin contract's issue at a PRESENT key a value the build can
- * refuse — one the run would refuse for the same reason? Every carve-out is a
- * place where the build does not know what the run will parse, or where
- * another judge owns the finding:
+ * refuse — one the run would refuse for the same reason?
+ *
+ * (#23260) Every builtin executor parses its config AS AUTHORED — `http` after
+ * its credential channel's `signingSecret`, nothing else — since #19939
+ * deleted the flow interpolator and every call site it had, so the run's
+ * contract sees what the build's sees, a `{token}` included: a value that
+ * carries one is judged for its type like any literal (`get_record`
+ * `limit: '{x}'` is refused at `limit`, and at every run it reached it was
+ * refused there too). Until then a value carrying a token was never judged
+ * here, because the interpolation decided what the run would parse.
+ *
+ * Every exemption is a place where the build does not know what the run will
+ * parse, or where another judge owns the finding:
  *
  *  - key membership — an undeclared key (`unrecognized_keys`) and a tombstoned
  *    one (a `retiredKey()`, {@link isRetiredKeyIssue}): both are the key
@@ -393,27 +435,33 @@ interface ContractIssue {
  *  - a `predicate` ledger slot, at or inside it, and a `value` one whose value
  *    is an envelope ({@link atOrInsideJudgedLedgerSlot});
  *  - a run-resolved key ({@link RUN_RESOLVED_KEYS});
- *  - a value carrying a `{token}` anywhere inside it: it is never refused for
- *    its pre-interpolation type, even where the executor parses the authored
- *    config and so refuses it at the run — unless the contract marks its
- *    issue {@link READ_AS_WRITTEN_PARAM} (#19939: a `notify` node's
+ *  - (#23260) a key whose contract refusal is the literal's own — an issue
+ *    marked {@link READ_AS_WRITTEN_PARAM} (#19939: a `notify` node's
  *    `sourceObject`, `actorId` and `payload`, and an `http` node's `method`,
- *    `durable` and `timeoutMs` and a token written as its whole `headers`
- *    map, which the executor reads as written, never through the interpolator, so the run sees the token the build sees and
- *    the contract's refusal of it is the run's verdict).
+ *    `durable` and `timeoutMs` and a token written as its whole `headers` map,
+ *    each read as written): the marked issue is judged, and any other issue at
+ *    that key is not, so the key is refused once, in the literal's words (its
+ *    remedy names the value to write, and what the token would do read as
+ *    written), where the contract's type issue beside it says less;
+ *  - (#23260) a value slot or a text slot whose value its own judge refuses
+ *    ({@link slotJudgeRefusedPaths}): that judge's located refusal is the
+ *    slot's, reported by the doors that call it, so this arm adds none.
  */
 function builtinValueJudged(
   nodeType: string,
   authored: Readonly<Record<string, unknown>>,
   issue: ContractIssue,
+  scope: ValueArmScope,
 ): boolean {
   if (issue.code === 'unrecognized_keys') return false;
   if (isRetiredKeyIssue(issue)) return false;
   if ((FLOW_REGION_SLOTS_BY_TYPE.get(nodeType) ?? []).some((slot) => slot.key === issue.path[0])) return false;
   if (atOrInsideJudgedLedgerSlot(nodeType, authored, issue.path)) return false;
   if ((RUN_RESOLVED_KEYS[nodeType] ?? []).includes(issue.path[0] as string)) return false;
-  if (issue.code === 'custom' && issue.params?.[READ_AS_WRITTEN_PARAM] === true) return true;
-  if (carriesInterpolationToken(authoredAt(authored, issue.path))) return false;
+  if (isReadAsWrittenIssue(issue)) return true;
+  const key = ledgerPathOf(issue.path);
+  if (scope.readAsWrittenKeys.has(key)) return false;
+  if (scope.slotJudgeRefused().has(key)) return false;
   return true;
 }
 
@@ -650,8 +698,12 @@ function unrecognizedKeysOf(issue: { readonly code: string }): readonly string[]
  *    key MEMBERSHIP is not judged by this bullet (an undeclared key is the
  *    next one's, a tombstoned key nobody's here), nor a region slot, a
  *    `predicate` ledger slot, a `value` ledger slot holding an envelope, a
- *    run-resolved key, or any value carrying a `{token}`: never refused for
- *    its pre-interpolation type.
+ *    run-resolved key, a second issue at a key the contract refuses in a
+ *    literal's own words, or a value or text slot whose value its own judge
+ *    refuses. (#23260) A value carrying a `{token}` is judged like any
+ *    literal: every builtin parses its config as authored, so the run's
+ *    contract sees the token the build's sees (`get_record` `limit: '{x}'`
+ *    is refused at `limit`).
  *  - (#21982) A key the contract does not declare, on every builtin
  *    {@link builtinNodeConfigKeysJudged} judges (every one, `try_catch`
  *    included since #22343) → `node-config-refused-by-contract`, anchored at
@@ -781,8 +833,17 @@ export function flowNodeConfigRefusals(nodeType: string, config: unknown): FlowN
   if (!parsedAtRun && !keysJudged) return out;
   const result = contract.schema.safeParse(authored);
   if (result.success) return out;
+  const issues = result.error?.issues ?? [];
+  // [#23260] What the builtin value arm reads beyond one issue — see
+  // `builtinValueJudged`. The slot judges are asked once, and only when a
+  // present value reaches that question.
+  let slotJudgeRefused: ReadonlySet<string> | undefined;
+  const scope: ValueArmScope = {
+    readAsWrittenKeys: new Set(issues.filter(isReadAsWrittenIssue).map((issue) => ledgerPathOf(issue.path))),
+    slotJudgeRefused: () => (slotJudgeRefused ??= slotJudgeRefusedPaths(nodeType, authored)),
+  };
   const seen = new Set<string>();
-  for (const issue of result.error?.issues ?? []) {
+  for (const issue of issues) {
     if (keysJudged) {
       // An unknown key's issue sits on the object that holds it (the config
       // itself for a top-level key, so its `path` is empty): anchor one
@@ -834,7 +895,7 @@ export function flowNodeConfigRefusals(nodeType: string, config: unknown): FlowN
     const absent = absentAt(authored, issue.path);
     // [#21898] A present builtin value: refused where the build knows what the
     // run will parse — see `builtinValueJudged`.
-    if (!absent && !whole && !builtinValueJudged(nodeType, authored, issue)) continue;
+    if (!absent && !whole && !builtinValueJudged(nodeType, authored, issue, scope)) continue;
     const key = ledgerPathOf(issue.path);
     if (seen.has(key)) continue;
     seen.add(key);
