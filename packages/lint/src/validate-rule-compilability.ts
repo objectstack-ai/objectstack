@@ -463,15 +463,14 @@ export function validateRuleCompilability(stack: unknown): RuleCompilabilityFind
           rule: VALIDATION_RULE_REGEX_UNCOMPILABLE,
           where,
           path: `${basePath}.regex`,
-          // [#22161] One verdict sentence; `where` names the rule and its
-          // object. How the write path compiles it and why it skips is
+          // [#22161] One verdict sentence and one remedy line; `where` names
+          // the rule and its object. How the write path compiles it and why it
+          // skips, the escaped spellings and the named formats are
           // `os explain validation-rule-regex-uncompilable`.
           message: `\`regex\` does not compile (${regexRefusal(rule.regex, err)}), ${SKIPPED_ON_EVERY_WRITE}`,
           hint:
-            `Fix the pattern so \`new RegExp('${rule.regex}')\` compiles — a literal \`(\`, \`[\` or \`\\\` ` +
-            `must be escaped (\`\\\\(\`, \`\\\\[\`, \`\\\\\\\\\`), and the source is a STRING, so a backslash ` +
-            `is written twice in TypeScript ('^\\\\d{2}-\\\\d{7}$'). Or drop \`regex\` and use a named ` +
-            `\`format\` ('email' | 'url' | 'phone' | 'json').`,
+            `Fix the pattern so \`new RegExp('${rule.regex}')\` compiles (escape a literal \`(\`, \`[\` or ` +
+            `\`\\\`), or drop \`regex\` and use a named \`format\``,
         });
       }
     }
@@ -486,15 +485,14 @@ export function validateRuleCompilability(stack: unknown): RuleCompilabilityFind
           rule: VALIDATION_RULE_SCHEMA_UNCOMPILABLE,
           where,
           path: `${basePath}.schema`,
-          // [#22161] One verdict sentence; the runtime's ajv environment and
-          // why the write path skips is
+          // [#22161] One verdict sentence and one remedy line; the runtime's
+          // ajv environment, why the write path skips, and the shapes the
+          // common keywords take are
           // `os explain validation-rule-json-schema-uncompilable`.
           message: `ajv cannot compile \`schema\` (${schemaRefusal(err)}), ${SKIPPED_ON_EVERY_WRITE}`,
           hint:
-            `Correct the schema so ajv compiles it — the message above names the offending keyword. ` +
-            `\`type\` must be one of null|boolean|object|array|number|string|integer (or an array of ` +
-            `those), \`required\` an array of strings, and every \`$ref\` must resolve. Vendor keywords ` +
-            `are fine (the runtime runs \`strict: false\`); a MALFORMED standard keyword is not.`,
+            `Correct the keyword the verdict names so ajv compiles the schema (a vendor keyword is fine; ` +
+            `a malformed standard one is not)`,
         });
       }
     }

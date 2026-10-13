@@ -25,7 +25,13 @@ import { PAGE_FIELD_UNKNOWN, PAGE_FIELD_UNPROVISIONED } from './validate-page-fi
 // The gate PARSES `ChartAggregateSchema` since #5020, so the function
 // vocabulary lives in the schema and nowhere in the rule. Imported here to pin
 // the test table against it — see the `aggregate` block near the bottom.
-import { ChartAggregateFunctionSchema, ChartAggregateSchema, ChartDrillDownSchema } from '@objectstack/spec/ui';
+import {
+  ChartAggregateFunctionSchema,
+  ChartAggregateSchema,
+  ChartDrillDownSchema,
+  REACT_BLOCKS,
+  REACT_RECORD_BLOCK_ALTERNATIVES,
+} from '@objectstack/spec/ui';
 import { explainRule } from './rule-explanations.js';
 
 // [#22161] Each finding of the five ids below is one verdict sentence; the
@@ -1745,5 +1751,87 @@ describe('[#22161] one-line fixes — react-chart-drilldown-invalid, react-chart
       'Correct the aggregate key or value the verdict names to ChartAggregateSchema (@objectstack/spec/ui): use ' +
         'the rename it suggests, or move a key that is real one layer out to that layer',
     );
+  });
+});
+
+// [#22161] Slice 15: the `fix:` line of four more ids. The anchor and parse
+// ids converge on the shared one-line forms (`unprovisionedAnchorFix()`,
+// `PARSE_FAILURE_FIX`); the record-block line is the spec's replacement behind
+// a one-word lead-in; a missing required binding quotes the first sentence of
+// the contract's description, which names the binding and its spelling. How to
+// vouch for or opt out of an anchor, what a partially recovered tree leaves
+// unchecked, and why the replacement binds the record itself are the
+// explanations'.
+describe('[#22161] one-line fixes — four more react-page ids', () => {
+  const MISSING_REQUIRED = 'react-prop-missing-required';
+  const FIX_IDS: readonly string[] = [
+    REACT_CHART_FIELD_UNPROVISIONED,
+    MISSING_REQUIRED,
+    REACT_BLOCK_NEEDS_RECORD_CONTEXT,
+    REACT_PAGE_SOURCE_UNPARSEABLE,
+  ];
+
+  it('every `fix:` line of the four ids the cases above fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => FIX_IDS.includes(f.rule));
+    // Coverage control: every id fired, the record-block id with a named
+    // replacement and with the generic record-page advice.
+    for (const id of FIX_IDS) expect(converted.some((f) => f.rule === id), `${id} fired`).toBe(true);
+    const record = converted.filter((f) => f.rule === REACT_BLOCK_NEEDS_RECORD_CONTEXT);
+    expect(record.some((f) => f.hint.startsWith('Instead: <'))).toBe(true);
+    expect(record.some((f) => f.hint.startsWith("Instead: author the page as `type:'record'`"))).toBe(true);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it("every replacement the spec names for a record block fits the line, behind the lead-in", () => {
+    // The spec's table is the source: a replacement it grows past the bound
+    // turns this red rather than printing a second line.
+    const types = Object.keys(REACT_RECORD_BLOCK_ALTERNATIVES);
+    expect(types.length).toBeGreaterThan(0);
+    for (const type of types) {
+      const [f] = validateReactPagePropsUnrecorded(page(`function Page(){ return <Block type="${type}" />; }`));
+      expect(f?.rule, type).toBe(REACT_BLOCK_NEEDS_RECORD_CONTEXT);
+      expect(f!.hint, type).toBe(`Instead: ${REACT_RECORD_BLOCK_ALTERNATIVES[type]}`);
+      expect(f!.hint.length, `${type}: ${f!.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it("every required binding the contract publishes gets a one-line `fix:`, led by the binding's spelling", () => {
+    // The contract (`REACT_BLOCKS`) is the source: each block with a required
+    // binding is rendered with no props at all, and every missing-binding line
+    // is held to the bound. A description whose first sentence grows past it
+    // turns this red.
+    const required = (REACT_BLOCKS as Array<{ tag: string; interactions: Array<{ name: string; required?: boolean }> }>)
+      .flatMap((b) => b.interactions.filter((i) => i.required).map((i) => [b.tag, i.name] as const));
+    expect(required.length).toBeGreaterThan(0);
+    for (const [tag, prop] of required) {
+      const lines = validateReactPagePropsUnrecorded(page(`function Page(){ return <${tag} />; }`)).filter(
+        (f) => f.rule === MISSING_REQUIRED && f.message.includes(`"${prop}"`),
+      );
+      expect(lines, `<${tag}> ${prop}`).toHaveLength(1);
+      expect(lines[0]!.hint, `<${tag}> ${prop}`).toMatch(new RegExp(`^Pass ${prop}=\\{…\\}`));
+      expect(lines[0]!.hint.length, `<${tag}> ${prop}: ${lines[0]!.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it("a description of several sentences contributes its first, which names the spelling", () => {
+    const [f] = validateReactPagePropsUnrecorded(page(`function Page(){ return <ListView columns={['a']} />; }`));
+    expect(f!.hint).toBe(
+      "Pass data={…}: The object this block binds to, written as the metadata-tier data source: " +
+        "data={{ provider: 'object', object: '…' }}",
+    );
+  });
+
+  const MOVED_FROM_FIX: Record<string, readonly string[]> = {
+    [REACT_CHART_FIELD_UNPROVISIONED]: ['`columnMap`', "`ownership: 'none'`", '`systemFields: { audit: false }`'],
+    [REACT_BLOCK_NEEDS_RECORD_CONTEXT]: ['the replacement binds it itself', 'ordinary React state'],
+    [REACT_PAGE_SOURCE_UNPARSEABLE]: ['never executed', 'partially recovered'],
+  };
+
+  it.each(Object.keys(MOVED_FROM_FIX))('`os explain %s` carries what its `fix:` line no longer says', (rule) => {
+    const text = explanationOf(rule);
+    for (const fact of MOVED_FROM_FIX[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
   });
 });

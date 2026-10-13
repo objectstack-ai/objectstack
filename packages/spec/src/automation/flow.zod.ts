@@ -1278,9 +1278,11 @@ export const FlowSchema = lazySchema(() => strictObject(
   }).optional().describe("Flow-level error handling configuration. A durable pause ends the retry-governed segment: strategy: 'retry' describes one synchronous dispatch, so a run that parks on an approval/screen/wait node and later resumes gets one attempt for anything that fails after the pause. Protect the post-pause half with its own failure handling in the flow — a try_catch node's retry around the post-resume work, or fault edges to a handler node."),
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package
-   * authors declare lock policy here; the loader translates it
-   * into the private `_lock` envelope at registration time and
-   * strips this block before persistence. See
+   * authors declare lock policy here, in a code package's source;
+   * the loader translates it into the private `_lock` envelope at
+   * registration time and strips this block. The metadata API's
+   * save door does not translate it and refuses it (`400
+   * VALIDATION_ERROR`), so that door never stores it. See
    * `shared/protection.zod.ts`.
    */
   protection: ProtectionSchema.optional().describe(

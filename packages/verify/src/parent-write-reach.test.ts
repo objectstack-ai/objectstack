@@ -240,34 +240,32 @@ describe('runParentWriteReachProofs — the fixture app, booted with parentWrite
     expect(shape(report, 'pwr_quote', 'position:pwr_rep', 'own')).toEqual(NO_DELETE);
   });
 
-  it("finds today's engine refusing a two-level detail whose master the persona edits", () => {
+  it('proves a two-level detail whose master the persona edits, for every persona, as the quote\'s own write answers', () => {
     // ADR-0055's amendment: the write gate walks the chain hop by hop, and a
-    // detail whose whole chain is reachable stays writable. Measured on this
-    // engine, a quote line is refused for every persona, its own chain
-    // included, while the same persona's empty update of the quote is admitted.
-    // This flips to `proven` the day the chain walk agrees with the quote's own write.
+    // detail whose whole chain is reachable stays writable. Since the
+    // maintainer's ruling A on #23093 the hop judges the quote by the
+    // composition its own write is judged by, so a quote line agrees with the
+    // same persona's update of the quote, its own chain included.
     const r = resultFor(report, 'pwr_quote_line');
-    expect(r.status).toBe('contradicted');
+    expect(r.status, formatParentWriteReachReport(report)).toBe('proven');
     for (const masters of ['other', 'own'] as const) {
       const reach = reachOf(report, 'pwr_quote_line', 'master-all-records', masters);
       expect(reach.masterEdit).toBe('editable');
-      expect(reach.probes.map((p) => p.outcome)).toEqual(['contradicted', 'contradicted', 'contradicted', 'contradicted', 'contradicted']);
-      for (const p of reach.probes) {
-        expect(p.answer).toMatchObject({ kind: 'refused', status: 403, code: 'PERMISSION_DENIED', object: 'pwr_quote_line' });
-        expect(p.detail).toMatch(/^the persona holds allow(Edit|Delete|Create) on pwr_quote_line and edited its master pwr_quote, and the (edit|delete|create) was refused/);
-      }
+      // Admitted, and the record shows each write landed (the family's own read-back).
+      expect(shape(report, 'pwr_quote_line', 'master-all-records', masters)).toEqual(ALL_ALLOWED);
+      for (const p of reach.probes) expect(p.answer).toMatchObject({ kind: 'written' });
       // Where the conjunction refuses, the refusal still holds.
       expect(shape(report, 'pwr_quote_line', 'detail-only', masters)).toEqual(ALL_REFUSED);
     }
-    expect(formatParentWriteReachReport(report)).toContain('✗ pwr_quote_line (pwr_quote_line.quote → pwr_quote, pwr_quote.account → pwr_account)  CONTRADICTED');
+    expect(formatParentWriteReachReport(report)).toContain('✓ pwr_quote_line (pwr_quote_line.quote → pwr_quote, pwr_quote.account → pwr_account)  held on');
   });
 
-  it('counts every reach and write, and the contradicted chain is its one hard failure', () => {
+  it('counts every reach and write, and every object is proven', () => {
     expect(report.summary).toEqual({
       objects: 3,
       probed: 3,
-      proven: 2,
-      contradicted: 1,
+      proven: 3,
+      contradicted: 0,
       failed: 0,
       inconclusive: 0,
       excluded: 0,
@@ -276,12 +274,12 @@ describe('runParentWriteReachProofs — the fixture app, booted with parentWrite
       // 3 objects × 5 personas × 2 master chains, the rep's three chains another principal owns outside its reach.
       reaches: { probed: 27, unreadable: 3, unmeasured: 0 },
       probes: { edit: 54, delete: 54, create: 27 },
-      held: 104,
-      contradictions: 31,
+      held: 135,
+      contradictions: 0,
       unattributed: 0,
       faults: 0,
       notRun: 0,
-      hardFailures: 1,
+      hardFailures: 0,
     });
   });
 });

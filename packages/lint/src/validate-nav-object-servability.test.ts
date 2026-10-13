@@ -15,7 +15,7 @@ import { explainRule } from './rule-explanations.js';
 // exercises, not a chosen few. Run the whole file: those cases read what the
 // cases above fired. Before this file the rule's only pin was the suite's
 // "every member actually runs" case in `reference-integrity-suite.test.ts`.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateNavObjectServability: typeof validateNavObjectServabilityUnrecorded = (...args) => {
   const findings = validateNavObjectServabilityUnrecorded(...args);
   fired.push(...findings);
@@ -137,6 +137,30 @@ describe('[#22161] one-line verdicts — nav-object-unservable', () => {
     for (const f of converted) {
       expect(f.message, f.rule).not.toContain('\n');
       expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+});
+
+// [#22161] Slice 15: the `fix:` line names both ways out and the exception in
+// one line; why an object API-disabled on purpose makes the entry the mistake
+// (credential material) is the explanation's (pinned above).
+describe('[#22161] one-line fix — nav-object-unservable', () => {
+  it('reads as one remedy', () => {
+    const [f] = validateNavObjectServability(stackWith({ navigation: [objectNav('nav_tokens', 'crm_secret_token')] }));
+    expect(f!.hint).toBe(
+      'Remove the nav entry, or make "crm_secret_token" listable (`enable.apiEnabled: true` and `list` in ' +
+        '`enable.apiMethods`) unless it is API-disabled on purpose',
+    );
+  });
+
+  it('every `fix:` line the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === NAV_OBJECT_UNSERVABLE);
+    // Coverage control: both arms fired.
+    expect(converted.some((f) => f.message.includes('is false'))).toBe(true);
+    expect(converted.some((f) => f.message.includes('lacks `list`'))).toBe(true);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
     }
   });
 });

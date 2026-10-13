@@ -2011,10 +2011,11 @@ os verify --parent-write-reach                 # Also prove each controlled_by_p
    naming the detail and the operation (a rule, a hook's own code, a refusal
    on another object) is reported inconclusive, never proven. An object
    with two `master_detail` fields, none, or a chain at the write gate's depth
-   bound is reported `excluded`. Today's engine refuses every write to a detail
-   two levels below its root master (a line under a quote under an account),
-   even where the caller edits the middle master, so an app that declares such
-   a chain fails the run.
+   bound is reported `excluded`. A detail two levels below its root master (a
+   line under a quote under an account) is answered the same way: its write is
+   admitted exactly when the caller holds the verb on the detail and may update
+   the middle master directly, which also needs edit access to the root, and
+   refused otherwise, so such a chain is reported proven.
    `--multi-tenant` boots org-scoped so tenant-isolation RLS policies
    apply; a walled tenancy posture (`OS_TENANCY_POSTURE` set to `isolated` or
    `group`) asks for the same boot.
