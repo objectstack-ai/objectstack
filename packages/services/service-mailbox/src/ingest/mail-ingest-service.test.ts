@@ -177,14 +177,39 @@ describe('the ingest seam on a real engine', () => {
       expect(await linksOf(rows[0]!.id)).toHaveLength(1);
     });
 
-    it('two concurrent ingests of one message store it once: the unique key decides the race', async () => {
+    it('a dedupe read that misses the stored row (a concurrent ingest’s window) is settled by the unique key', async () => {
       const mailbox = await newMailbox();
       const raw = plainMessage({ From: 'race@acme.test', 'Message-ID': '<race-1@acme.test>' });
-      const outcomes = await Promise.all([
-        service.ingest({ mailboxId: mailbox, raw }, SYSTEM),
-        service.ingest({ mailboxId: mailbox, raw }, SYSTEM),
-      ]);
-      expect(outcomes.map((o) => o.outcome).sort()).toEqual(['duplicate', 'stored']);
+      const first = await service.ingest({ mailboxId: mailbox, raw }, SYSTEM);
+      expect(first.outcome).toBe('stored');
+
+      // The second ingest's dedupe read runs before the first one's insert is
+      // visible — modelled by that one read answering nothing. Every other
+      // call reaches the real engine unchanged.
+      let missed = false;
+      const racingEngine = new Proxy(engine, {
+        get(target, prop) {
+          if (prop === 'find') {
+            return async (object: string, options: Row) => {
+              if (!missed && object === 'sys_mail_message' && options?.where && 'dedupe_key' in options.where) {
+                missed = true;
+                return [];
+              }
+              return target.find(object, options as any);
+            };
+          }
+          const value = Reflect.get(target, prop);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+      const racing = new MailIngestService({
+        engine: () => racingEngine as unknown as MailIngestEngine,
+        logger: { warn: (m: string) => warnings.push(m) },
+      });
+
+      const second = await racing.ingest({ mailboxId: mailbox, raw }, SYSTEM);
+      expect(missed).toBe(true);
+      expect(second).toEqual({ outcome: 'duplicate', messageId: (first as { messageId: string }).messageId });
       expect(await messagesIn(mailbox)).toHaveLength(1);
     });
 
