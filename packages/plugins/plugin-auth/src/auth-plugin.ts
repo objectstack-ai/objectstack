@@ -3175,6 +3175,7 @@ export class AuthPlugin implements Plugin {
               smsInviteAvailable: () =>
                 this.authManager!.isPhoneNumberEnabled() && this.authManager!.isPhoneOtpDeliverable(),
               sendInviteSms: (phone: string) => this.authManager!.sendPhoneInviteSms(phone),
+              consoleResetPasswordUrl: () => this.authManager!.getConsoleUrl('/reset-password'),
               noteMustChangePasswordIssued: () => this.authManager!.noteMustChangePasswordIssued(),
               logger: ctx.logger,
             },
