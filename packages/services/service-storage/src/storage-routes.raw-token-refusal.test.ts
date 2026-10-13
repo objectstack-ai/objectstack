@@ -14,7 +14,7 @@
  * through.
  */
 
-import { describe, it, expect, afterAll } from 'vitest';
+import { describe, it, expect, afterAll, vi } from 'vitest';
 import { createHmac } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
@@ -149,6 +149,32 @@ describe('_local/raw/:token — a refused token answers 401 INVALID_TOKEN, undis
           }
           expect([...messages]).toEqual([STORAGE_TOKEN_REFUSAL_MESSAGE]);
         });
+      }
+    });
+  }
+});
+
+describe('_local/raw/:token — a 5xx withholds its own text from the caller, and the server log keeps it', () => {
+  const FAULT_TEXT = 'adapter fault at /srv/storage-root/tenant-a/private/report.bin';
+  const PATH_LIKE = '/srv/storage-root/tenant-a/private/report.bin';
+
+  for (const method of ['PUT', 'GET'] as const) {
+    it(`${method}: the body carries the route's generic text, never the fault's`, async () => {
+      const local = await adapter();
+      local.upload = async () => { throw new Error(FAULT_TEXT); };
+      local.download = async () => { throw new Error(FAULT_TEXT); };
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const res = await drive(mount(local), method, signed({ k: 'key.bin', exp: inTenMinutes(), op: VERB[method] }));
+
+        expect(res.status).toBe(500);
+        expect(res.body?.success).toBe(false);
+        expect(res.body?.error?.code).toBe('INTERNAL');
+        expect(JSON.stringify(res.body)).not.toContain(PATH_LIKE);
+        // The operator still reads it: the server-fault line carries the original.
+        expect(logged.mock.calls.some((call) => call.some((arg) => String(arg).includes(PATH_LIKE)))).toBe(true);
+      } finally {
+        logged.mockRestore();
       }
     });
   }

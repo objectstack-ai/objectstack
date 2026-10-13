@@ -182,6 +182,26 @@ describe('LocalStorageAdapter', () => {
       expect(new Set(thrown.map((e) => (e as Error).message))).toEqual(new Set([STORAGE_TOKEN_REFUSAL_MESSAGE]));
     });
 
+    it('refuses a forged signature of the right length and one of the wrong length alike', async () => {
+      await createTempDir();
+      const desc = await adapter.getPresignedUpload!('file.txt', 60);
+      const token = desc.uploadUrl.split('/_local/raw/')[1];
+      const [b64, sig] = token.split('.');
+      const flipped = `${sig.slice(0, -1)}${sig.endsWith('A') ? 'B' : 'A'}`;
+      expect(flipped).toHaveLength(sig.length);
+
+      for (const forged of [flipped, `${sig}A`, sig.slice(0, -1)]) {
+        let thrown: unknown;
+        try {
+          adapter.verifyToken(`${b64}.${forged}`, 'put');
+        } catch (err) {
+          thrown = err;
+        }
+        expect(thrown).toBeInstanceOf(StorageTokenRefusedError);
+        expect(isStorageTokenRefusal(thrown)).toBe(true);
+      }
+    });
+
     it('the refusal is recognised by its brand, never by its text', () => {
       expect(isStorageTokenRefusal(new StorageTokenRefusedError())).toBe(true);
       expect(isStorageTokenRefusal(new Error(STORAGE_TOKEN_REFUSAL_MESSAGE))).toBe(false);
