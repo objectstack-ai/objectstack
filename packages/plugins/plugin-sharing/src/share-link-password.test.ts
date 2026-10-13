@@ -36,7 +36,7 @@
  *    interchangeable hashes.
  */
 
-import { describe, it, expect, afterEach, beforeAll, vi } from 'vitest';
+import { describe, it, expect, afterAll, beforeAll, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
@@ -68,14 +68,17 @@ import type { SharingEngine } from './sharing-service.js';
  * give, and a verifier that derived with another normalisation, salt or
  * parameter would miss and be judged by a real derivation, as before. Nothing
  * above `node:crypto` is replaced: `share-link-password.ts` parses,
- * dispatches, compares and refuses exactly as in production.
+ * dispatches, compares and refuses exactly as in production. An input already
+ * being derived for a concurrent case is waited for, not derived twice.
  */
 vi.mock('node:crypto', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:crypto')>();
+  type Reply = (err: Error | null, key: Buffer) => void;
   const derived = new Map<string, Buffer>();
+  const inFlight = new Map<string, Reply[]>();
   function scrypt(password: unknown, salt: unknown, keylen: number, options: unknown, callback?: unknown): void {
     const [opts, done] = typeof options === 'function' ? [{}, options] : [options ?? {}, callback];
-    const reply = done as (err: Error | null, key: Buffer) => void;
+    const reply = done as Reply;
     const key = JSON.stringify([password, salt, keylen, opts]);
     const hit = derived.get(key);
     if (hit) {
@@ -83,14 +86,22 @@ vi.mock('node:crypto', async (importOriginal) => {
       process.nextTick(reply, null, Buffer.from(hit));
       return;
     }
+    const waiting = inFlight.get(key);
+    if (waiting) {
+      waiting.push(reply);
+      return;
+    }
+    inFlight.set(key, [reply]);
     actual.scrypt(
       password as import('node:crypto').BinaryLike,
       salt as import('node:crypto').BinaryLike,
       keylen,
       opts as import('node:crypto').ScryptOptions,
       (err, out) => {
+        const replies = inFlight.get(key) ?? [];
+        inFlight.delete(key);
         if (!err) derived.set(key, Buffer.from(out));
-        reply(err, out);
+        for (const r of replies) r(err, err ? out : Buffer.from(out));
       },
     );
   }
@@ -181,8 +192,18 @@ const B = '/api/v1/share-links';
 const CREATOR = { userId: 'usr_creator' };
 const PASSWORD = 'correct horse 21839 $ battery';
 
+/**
+ * [#23184] Every case boots its own engine, service, routes and logger, and
+ * reads no state another case writes (a case that edits an object's sharing
+ * policy edits its own engine's copy of the schema). So the suites below run
+ * their cases concurrently, and the scrypt derivations a case cannot share,
+ * the ones minting or re-hashing under a fresh salt, overlap on the libuv
+ * pool instead of queueing one behind another. The engines are therefore
+ * destroyed when the file is done rather than after each case, which would
+ * destroy an engine a running case still holds.
+ */
 const engines: ObjectQL[] = [];
-afterEach(async () => {
+afterAll(async () => {
   while (engines.length) {
     try {
       await (engines.pop() as unknown as { destroy?(): Promise<void> })?.destroy?.();
@@ -343,7 +364,7 @@ function expectNoHash(value: unknown, hash: string, label: string): void {
   }
 }
 
-describe('[#21839] the stored hash never leaves the server', () => {
+describe.concurrent('[#21839] the stored hash never leaves the server', () => {
   it('the mint response, through the service and through the route, carries no hash', async () => {
     const { engine, service, http } = await boot();
 
@@ -404,7 +425,7 @@ describe('[#21839] the stored hash never leaves the server', () => {
   });
 });
 
-describe('[#21839] the stored form is the platform slow password hash', () => {
+describe.concurrent('[#21839] the stored form is the platform slow password hash', () => {
   it('a new link stores scrypt, with no plaintext, and two hashes of one password differ', async () => {
     const { engine, service } = await boot();
     const a = await service.createLink({ object: 'pin_doc', recordId: 'doc_1', password: PASSWORD }, CREATOR);
@@ -427,7 +448,7 @@ describe('[#21839] the stored form is the platform slow password hash', () => {
   });
 });
 
-describe.each([
+describe.concurrent.each([
   ['salted SHA-256', legacySha256],
   ['plaintext (no SubtleCrypto)', legacyPlaintext],
 ] as const)('[#21839] a legacy %s row', (_name, legacy) => {
@@ -456,7 +477,7 @@ describe.each([
   });
 });
 
-describe('[#21839] the legacy upgrade', () => {
+describe.concurrent('[#21839] the legacy upgrade', () => {
   // [#23184] These mint with no password where the legacy hash below is the
   // row's only password state (see the legacy-row case above).
   it('is not attempted for a switched-off object, whose redemption is refused', async () => {
@@ -507,7 +528,7 @@ describe('[#21839] the legacy upgrade', () => {
   });
 });
 
-describe('[#21839] how the password travels in', () => {
+describe.concurrent('[#21839] how the password travels in', () => {
   async function protectedConversation() {
     const booted = await boot();
     const link = await mintProtected(booted, 'ai_conversations', 'conv_1', PASSWORD);
@@ -555,12 +576,18 @@ describe('[#21839] how the password travels in', () => {
     expect(loggedText(logger)).not.toContain(wrong);
   });
 
-  // [#22418] Budgets are sized to the measured work; the rule is in
-  // share-link-password-webcontainer.test.ts. [#23184] This case's one mint
-  // and eight redemptions are now two real derivations (the mint's, and the
-  // first wrong password's; the memo answers the rest), projected from its
-  // 3805 ms reading for nine to about 850 ms: under half of vitest's 5000 ms
-  // default, so it keeps the default like every other case here.
+  // [#22418] An explicit budget, sized to the measured work: one mint and eight
+  // redemptions were nine native scrypt derivations at the production
+  // parameters, the most of any case in this file. Its slowest `Test Core`
+  // reading was 3805 ms, over half of vitest's 5000 ms default, so it got 3x
+  // that, rounded up to the next second; the rule and why 3x is in
+  // share-link-password-webcontainer.test.ts. Every other case here read at
+  // most 2163 ms and keeps the default.
+  //
+  // [#23184] They are two now (the mint's, and the first wrong password's; the
+  // scrypt memo answers the rest), but the case also shares the CPU with the
+  // cases running beside it, so no reading of the old shape sizes the new one.
+  // The budget stands until a `Test Core` reading of this shape re-sizes it.
   it('no log line carries the presented password, on any outcome', async () => {
     // Minted by the service WITH the password, as before: the mint stays
     // inside what this logger saw.
@@ -578,10 +605,10 @@ describe('[#21839] how the password travels in', () => {
     }
     expect(loggedText(logger)).not.toContain(PASSWORD);
     expect(loggedText(logger)).not.toContain('wrong one 21839');
-  });
+  }, 12_000);
 });
 
-describe('[#22049] the password header declares its encoding', () => {
+describe.concurrent('[#22049] the password header declares its encoding', () => {
   const CJK = '分享密码二二零四九';
   const EMOJI = 'open 🔐🦊 sesame';
   const LATIN1 = 'Déjà vu ½ ÿ 22049';
@@ -702,7 +729,7 @@ describe('[#22049] the password header declares its encoding', () => {
   });
 });
 
-describe('[#21839] the public routes are never cached', () => {
+describe.concurrent('[#21839] the public routes are never cached', () => {
   function expectNoStore(res: { headers: Record<string, string | string[]> }, label: string) {
     expect(res.headers['Cache-Control'], label).toBe('no-store');
     expect(res.headers.Vary, label).toBe('X-Share-Password, X-Share-Password-Encoding');

@@ -95,15 +95,21 @@ const nodeScrypt = vi.mocked(nodeCrypto.scrypt);
  * count changes, re-size it from a fresh reading, never by lowering the
  * parameters.
  *
- * [#23184] Both counts below changed (the shared hashes and the memos above),
- * and no `Test Core` reading of the new shapes exists yet, so both are
- * projected the way the NFKC budget first was: per pure-JS + native pair, from
- * the 3 + 3 case's 4136 ms reading (1379 ms a pair).
+ * [#23184] Both counts below fell (the shared hashes and the memos above). No
+ * `Test Core` reading of the new shapes exists yet, so each budget stands as
+ * sized for its larger count until one re-sizes it.
  */
-/** 2 pure-JS + 2 native derivations; projected 2/3 of 4136 ms, 2757 ms. */
-const CROSS_VERIFY_BUDGET_MS = 9_000;
-/** 3 pure-JS + 3 native (the memos answer the second spelling); projected 4136 ms. */
-const NFKC_BUDGET_MS = 13_000;
+/**
+ * Was 3 pure-JS + 3 native derivations, CI readings 4136 and 3688 ms; now
+ * 2 + 2, the two mints moved to the shared hashes.
+ */
+const CROSS_VERIFY_BUDGET_MS = 13_000;
+/**
+ * Was 4 pure-JS + 4 native, CI timed out at 5030 and 5039 ms, so the reading
+ * was projected: 4/3 of the 3 + 3 case's 4136 ms in the same run, 5515 ms.
+ * Now 3 + 3: each path's memo answers the second spelling.
+ */
+const NFKC_BUDGET_MS = 17_000;
 
 function onWebContainer(on: boolean) {
   vi.stubEnv('STACKBLITZ', on ? '1' : '');
