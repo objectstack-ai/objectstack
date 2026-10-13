@@ -2095,6 +2095,13 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: 
   const delegatorPerson = context?.onBehalfOf?.userId
     ? await personOf(deps.ql, askerContext, String(context.onBehalfOf.userId))
     : '';
+  // ...and so is the user each ADR-0091 D3 delegated position came from, once
+  // per distinct user, in the clause and in the position's attribution alike.
+  const positionDelegators = new Map<string, string>();
+  for (const from of new Set(delegatedPositions.map((d) => d.from))) {
+    positionDelegators.set(from, await personOf(deps.ql, askerContext, from));
+  }
+  const delegatorOf = (from: string): string => positionDelegators.get(from) ?? from;
   layers.push({
     layer: 'principal',
     verdict: delegatorMissing || delegatorUnresolved ? 'denies' : 'neutral',
@@ -2110,7 +2117,7 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: 
         : '') +
       (delegatedPositions.length > 0
         ? ` ${delegatedPositions.length} position(s) held via delegation (ADR-0091 D3): [${delegatedPositions
-            .map((d) => `${d.name} from ${d.from}${d.until ? ` until ${d.until}` : ''}`)
+            .map((d) => `${d.name} from ${delegatorOf(d.from)}${d.until ? ` until ${d.until}` : ''}`)
             .join(', ')}].`
         : '') +
       (expiredGrants.length > 0
@@ -2127,7 +2134,7 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: 
       ...positions.map((p) => {
         const d = delegationOf(p);
         return d
-          ? { kind: 'position' as const, name: p, via: `delegation from ${d.from}${d.until ? ` until ${d.until}` : ''}` }
+          ? { kind: 'position' as const, name: p, via: `delegation from ${delegatorOf(d.from)}${d.until ? ` until ${d.until}` : ''}` }
           : { kind: 'position' as const, name: p };
       }),
       ...setNames.map((n) => ({ kind: 'permission_set' as const, name: n, via: viaOf(n) })),

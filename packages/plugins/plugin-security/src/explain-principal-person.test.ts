@@ -64,6 +64,10 @@ const GRACE = 'usr_pp_grace';
 const PLAIN = 'usr_pp_plain';
 const AGENT = 'usr_pp_agent';
 const GONE = 'usr_pp_gone';
+/** Holds a position Grace delegated to her (ADR-0091 D3). */
+const LIN = 'usr_pp_lin';
+const DELEGATED_POSITION = 'qa_pp_approver';
+const DELEGATED_UNTIL = '2099-01-01T00:00:00.000Z';
 
 const DIRECTORY_ADMIN = { userId: 'usr_pp_directory_admin', positions: [] as string[], permissions: [DIRECTORY_SET.name] };
 const MASKED_ADMIN = { userId: 'usr_pp_masked_admin', positions: [] as string[], permissions: [MASKED_DIRECTORY_SET.name] };
@@ -117,6 +121,7 @@ beforeAll(async () => {
     { id: ADA, name: 'Ada Lovelace', email: 'ada@example.test' },
     { id: GRACE, name: 'Grace Hopper', email: 'grace@example.test' },
     { id: PLAIN, name: 'Plain Person', email: 'plain@example.test' },
+    { id: LIN, name: 'Lin Delegate', email: 'lin@example.test' },
     { id: AGENT, name: 'Release Bot', email: 'bot@example.test' },
     { id: DIRECTORY_ADMIN.userId, name: 'Directory Admin', email: 'dir@example.test' },
     { id: MASKED_ADMIN.userId, name: 'Masked Admin', email: 'masked@example.test' },
@@ -130,6 +135,11 @@ beforeAll(async () => {
   }, SYS);
   await e.insert('sys_user_permission_set', {
     id: 'ups_pp_grace', user_id: GRACE, permission_set_id: 'ps_pp_directory', permission_set: DIRECTORY_SET.name,
+  }, SYS);
+  // A position Lin holds because Grace delegated it, until a date far ahead.
+  await e.insert('sys_user_position', {
+    id: 'up_pp_lin_delegated', user_id: LIN, position: DELEGATED_POSITION,
+    delegated_from: GRACE, valid_until: DELEGATED_UNTIL,
   }, SYS);
   await e.insert(BOARD, [{ id: 'b_pp_1', name: 'one' }], SYS);
 
@@ -269,5 +279,42 @@ describe('an on-behalf-of delegator is named the same way (ADR-0090 D10)', () =>
     expect(principalDetail(await explain(agentFor(GONE)))).toContain(
       'Acting on behalf of usr_pp_gone, who no longer exists — D10 fails CLOSED (access denied).',
     );
+  });
+});
+
+describe('the user an ADR-0091 D3 delegated position came from is named the same way', () => {
+  const contributorVia = (d: ExplainDecision): string | undefined =>
+    d.layers.find((l) => l.layer === 'principal')?.contributors?.find((c) => c.kind === 'position' && c.name === DELEGATED_POSITION)?.via;
+
+  it('armed: Lin holds the delegated position, and the askers read Grace as they read Ada', async () => {
+    expect((await explain(SYSTEM, LIN)).principal.positions).toContain(DELEGATED_POSITION);
+    expect(await door(DIRECTORY_ADMIN, GRACE)).toMatchObject({ name: 'Grace Hopper', email: 'grace@example.test' });
+    const masked = await door(MASKED_ADMIN, GRACE);
+    expect(masked).toMatchObject({ name: 'Grace Hopper' });
+    expect(masked?.email ?? null).toBeNull();
+    expect(await door(BLIND_ADMIN, GRACE)).toBeNull();
+  });
+
+  it('an administrator who reads the directory: the clause and the attribution name Grace, the id secondary', async () => {
+    const d = await explain(DIRECTORY_ADMIN, LIN);
+    const grace = 'Grace Hopper (grace@example.test; id usr_pp_grace)';
+    expect(principalDetail(d)).toContain(`1 position(s) held via delegation (ADR-0091 D3): [${DELEGATED_POSITION} from ${grace} until `);
+    expect(contributorVia(d)).toMatch(/^delegation from Grace Hopper \(grace@example\.test; id usr_pp_grace\) until /);
+  });
+
+  it('a field the asker\'s read masks stays out: the masked administrator is told Grace\'s name, never her email', async () => {
+    const d = await explain(MASKED_ADMIN, LIN);
+    expect(principalDetail(d)).toContain(`${DELEGATED_POSITION} from Grace Hopper (id usr_pp_grace) until `);
+    expect(contributorVia(d)).toMatch(/^delegation from Grace Hopper \(id usr_pp_grace\) until /);
+    expect(JSON.stringify(d)).not.toContain('grace@example.test');
+  });
+
+  it('control: an asker whose read returns no row for Grace is told her bare id, and nothing more', async () => {
+    const d = await explain(BLIND_ADMIN, LIN);
+    expect(principalDetail(d)).toContain(`${DELEGATED_POSITION} from usr_pp_grace until `);
+    expect(contributorVia(d)).toMatch(/^delegation from usr_pp_grace until /);
+    const whole = JSON.stringify(d);
+    expect(whole).not.toContain('Grace Hopper');
+    expect(whole).not.toContain('grace@example.test');
   });
 });
