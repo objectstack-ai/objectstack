@@ -51,10 +51,14 @@ function makeDoor(apps: Array<Record<string, unknown>>) {
     });
     const getMetaItems = vi.fn().mockResolvedValue({ items: apps });
     const saveMetaItem = vi.fn().mockResolvedValue({ success: true });
+    // The `/packages` domain answers 503 without a registry, so `objectql` is a
+    // registry and nothing else: the flip reads and writes through the protocol.
+    const services: Record<string, unknown> = {
+        protocol: { publishPackageDrafts, getMetaItems, saveMetaItem },
+        objectql: { registry: { getAllPackages: () => [] } },
+    };
     const kernel: any = {
-        getService: (name: string) => (name === 'protocol'
-            ? Promise.resolve({ publishPackageDrafts, getMetaItems, saveMetaItem })
-            : null),
+        getService: (name: string) => (name in services ? Promise.resolve(services[name]) : null),
         context: { getService: () => null, trigger: vi.fn() },
     };
     return { dispatcher: new HttpDispatcher(kernel), getMetaItems, saveMetaItem };
