@@ -23,7 +23,7 @@ import {
 // recorded verdict to one line of at most 200 characters — every firing
 // variant this suite exercises, not a chosen few. Run the whole file: those
 // cases read what the cases above fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateManagedApiMethods: typeof validateManagedApiMethodsUnrecorded = (...args) => {
   const findings = validateManagedApiMethodsUnrecorded(...args);
   fired.push(...findings);
@@ -54,9 +54,12 @@ describe('validateManagedApiMethods — the finding', () => {
   it('offers both ways out, and names the affordances that would be needed', () => {
     const [f] = validateManagedApiMethods({ objects: [sysEnvironment] });
     expect(f.hint).toContain('userActions: { create: true, edit: true }');
-    expect(f.hint).toContain('remove');
+    expect(f.hint).toContain('Remove [create, update]');
     // ADR-0092 D4 — an author must not open the affordance to silence a lint.
-    expect(f.hint).toContain('ADR-0092 D4');
+    // [#22161] The line keeps the condition ("once a guard enforces the
+    // write"); the ruling it cites is the explanation's.
+    expect(f.hint).toContain('once a guard enforces the write');
+    expect(explainRule(MANAGED_API_METHOD_UNAFFORDABLE)!.paragraphs.join('\n')).toContain('ADR-0092 D4');
   });
 
   it('emits ONE finding per object, not one per offending verb', () => {
@@ -172,6 +175,34 @@ describe('[#22161] one-line verdicts — object/managed-api-method-unaffordable'
     for (const f of converted) {
       expect(f.message, f.rule).not.toContain('\n');
       expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
+    }
+  });
+});
+
+// [#22161] Slice 15: the `fix:` line names both ways out in one line, removal
+// first; that an affordance opens only for a write a user context may really
+// perform, once its guard exists (ADR-0092 D4), is the explanation's (pinned
+// above).
+describe('[#22161] one-line fix — object/managed-api-method-unaffordable', () => {
+  it('the longest line — every write verb, every affordance — stays within 200 characters', () => {
+    const [f] = validateManagedApiMethods({
+      objects: [{ name: 'sys_locked', managedBy: 'better-auth', enable: { apiMethods: Object.keys(MANAGED_WRITE_VERB_AFFORDANCE) } }],
+    });
+    expect(f!.hint).toBe(
+      'Remove [create, update, upsert, delete, purge] from `enable.apiMethods`, or add ' +
+        '`userActions: { create: true, edit: true, delete: true }` once a guard enforces the write',
+    );
+  });
+
+  it('every `fix:` line the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === MANAGED_API_METHOD_UNAFFORDABLE);
+    // Coverage control: one verb, several verbs and every verb fired.
+    expect(converted.some((f) => f.hint.includes('[create, update]'))).toBe(true);
+    expect(converted.some((f) => f.hint.includes('[create, update, delete]'))).toBe(true);
+    expect(converted.some((f) => f.hint.includes('[create, update, upsert, delete, purge]'))).toBe(true);
+    for (const f of converted) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
     }
   });
 });

@@ -162,9 +162,10 @@ Three developer disciplines:
 - **Restrict by not granting**: in a union model a `readable: false` cannot defeat another set's
   `true`. There are no subtraction sets — to withhold, don't grant.
 
-On install, `bootstrapDeclaredPermissions` seeds these rows with `packageId` +
-`managedBy: 'package'`; upgrades re-seed **only** those rows. Customer-authored sets and all
-bindings are never touched — that provenance line *is* the package/platform isolation boundary.
+On install, the security catalog serves these sets from the package's registered metadata, owned
+by the package (ADR-0131 D3); no row is seeded, and an upgrade serves the definitions the new
+version ships. Customer-authored sets and all bindings are never touched — that provenance line
+*is* the package/platform isolation boundary.
 
 ### What the admin configures after install
 

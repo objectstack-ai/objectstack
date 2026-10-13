@@ -93,8 +93,8 @@ describe('[ADR-0131 D4] the grant writers in plugin-security write the set by na
     expect(grants).toHaveLength(1);
     expectNamedOnly(grants[0], 'admin_full_access');
 
-    // The holder is read by name: with every catalog row gone it still answers.
-    await engine.delete('sys_permission_set', { where: {}, multi: true, context: SYS });
+    // [C3 stage 6b-2] The bootstrap wrote no catalog row, and the holder is
+    // read by name with none.
     expect(await engine.find('sys_permission_set', { context: SYS })).toEqual([]);
     expect(await findExistingPlatformAdmin(engine, defaultPermissionSets)).toBe('usr_first');
   });
