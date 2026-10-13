@@ -280,7 +280,7 @@ describe('every approval notification carries its text in body', () => {
   it("[#23284] every notification carries its request's organization, read back from the stored request", async () => {
     const stored = new Map<string, string | null>();
     for (const id of Object.values(ids)) {
-      const row: any = await engine.findOne('sys_approval_request', { where: { id }, fields: ['id', 'organization_id'] } as any, { context: SYSTEM } as any);
+      const row = await engine.findOne('sys_approval_request', { where: { id }, fields: ['id', 'organization_id'] }, { context: SYSTEM });
       stored.set(id, row?.organization_id ?? null);
     }
     // The fixture really is two organizations, and each request landed in its

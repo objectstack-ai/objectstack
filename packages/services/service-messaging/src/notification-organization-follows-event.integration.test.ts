@@ -35,6 +35,7 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SysNotification } from '@objectstack/platform-objects';
 import { MessagingService, NOTIFICATION_EVENT_OBJECT } from './messaging-service.js';
@@ -42,7 +43,7 @@ import { createInboxChannel, INBOX_OBJECT, RECEIPT_OBJECT } from './inbox-channe
 import { SqlNotificationOutbox, DELIVERY_OBJECT } from './sql-outbox.js';
 import { InboxMessage, NotificationDelivery, NotificationPreference, NotificationReceipt } from './objects/index.js';
 
-const SYSTEM = { context: { isSystem: true } } as const;
+const SYSTEM = { context: { isSystem: true } as ExecutionContext };
 
 const SYS_ORGANIZATION = { name: 'sys_organization', label: 'Organization', fields: { name: { type: 'text', label: 'Name' } } };
 const SYS_USER = { name: 'sys_user', label: 'User', fields: { name: { type: 'text', label: 'Name' } } };
@@ -67,15 +68,15 @@ async function boot(organizations: readonly string[]): Promise<ObjectQL> {
     }
     await ql.syncSchemas();
     ql.setTenancyPostureProvider(() => 'single');
-    for (const id of organizations) await ql.insert('sys_organization', { id, name: id }, SYSTEM as any);
-    await ql.insert('sys_user', { id: 'user_1', name: 'Recipient' }, SYSTEM as any);
+    for (const id of organizations) await ql.insert('sys_organization', { id, name: id }, SYSTEM);
+    await ql.insert('sys_user', { id: 'user_1', name: 'Recipient' }, SYSTEM);
     engine = ql;
     return ql;
 }
 
 async function organizationsOf(ql: ObjectQL, object: string): Promise<string[]> {
-    const rows = (await ql.find(object, { fields: ['id', 'organization_id'] } as any, SYSTEM as any)) ?? [];
-    return rows.map((r: any) => r.organization_id ?? 'NULL');
+    const rows = (await ql.find(object, { fields: ['id', 'organization_id'] }, SYSTEM)) ?? [];
+    return rows.map((r: Record<string, unknown>) => String(r.organization_id ?? 'NULL'));
 }
 
 const EMIT = { topic: 'sweep.breach', audience: ['user_1'], payload: { title: 'Breach', body: 'An SLA was breached.' } };
