@@ -2463,7 +2463,8 @@ async function selfTest() {
   const resolvedTwo = resolveFailedStep(laneTree, verdictStep, { annotations: twoRed });
   t(
     'the fix: N red gates resolve to N gate commands, each the gate\'s OWN run: block',
-    resolvedTwo.repro.map((r) => [r.gate.name, r.text]),
+    // `?.`: a regression must be REPORTED by this harness, not crash it (see the job-log battery).
+    resolvedTwo.repro.map((r) => [r.gate?.name ?? null, r.text]),
     [['Docs anchors resolve to real headings', 'pnpm check:doc-anchors'], ['Type check (debt) holds', 'pnpm check:debt']],
   );
   const twoLines = renderSubstitute([resolvedTwo]);
@@ -2500,7 +2501,7 @@ async function selfTest() {
     'roster mismatch: a red verdict over an all-success lane names NO red gate, and SAYS so',
     [
       mismatch.repro.length,
-      mismatch.laneVerdict.red.length,
+      mismatch.laneVerdict?.red?.length ?? null,
       mismatchLines.some((l) => l.includes('It names NO red gate')),
       mismatchLines.some((l) => l.includes('UNREAD    "Silent gate"')),
     ],
