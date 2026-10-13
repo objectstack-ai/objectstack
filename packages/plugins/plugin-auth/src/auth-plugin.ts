@@ -2268,10 +2268,12 @@ export class AuthPlugin implements Plugin {
    *   the dialog asks. ⛔ Not `sys_organization.timezone`: that column is a
    *   different key, which the dialog does not read.
    * - **The workspace** is each organization the seeded admin is a member of,
-   *   read from `sys_member` — what the admin's session opens in under every
-   *   posture (under `single`, the Default Organization the boot created and
-   *   the default-organization bootstrap bound them to during the sign-up
-   *   above), without this method re-deciding which one that is.
+   *   read from `sys_member` — the organization the admin's session opens in,
+   *   without this method re-deciding which one that is. Under `single` (the
+   *   posture `os dev` boots by default) that is the Default Organization the
+   *   boot created, which the default-organization bootstrap binds the admin
+   *   to during the sign-up above. An admin holding no membership yet gets
+   *   nothing written.
    * - **Never over a set zone:** only where the key still resolves from the
    *   default. A value on any rung (this organization's, the global one, an
    *   env override) is left as it is.
