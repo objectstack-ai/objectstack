@@ -68,7 +68,7 @@ Not every deployment moves a tag. An app that consumes the platform as **npm
 dependencies** — `@objectstack/*` in its own `package.json`, which is the shape
 [`create-objectstack`](/docs/getting-started/quick-start) scaffolds — carries the
 platform version in its dependency tree and moves it there. There is no `os`
-command for this move; it is three steps you run yourself.
+command for this move; it is four steps you run yourself.
 
 1. **Bump every `@objectstack/*` dependency together, to the same version.**
    The train is version-locked — every package on it shares one version number —
@@ -87,6 +87,34 @@ command for this move; it is three steps you run yourself.
    manifest. Both name the protocol **major**, so a move inside one major leaves
    both alone, and a major boundary is where they change. Move them deliberately
    when you cross one; never edit them to silence a mismatch.
+4. **Re-install the AI skills from the moved catalog, and commit them.** The
+   skills your coding agent reads come from the `@objectstack/skills` dev
+   dependency, which moves only with the other `@objectstack/*` packages — in
+   step 1, never on its own — and step 2 only puts it in `node_modules`. Copy it
+   into your agent's directory (name your own runtime after `--agent`):
+
+   ```bash
+   npx skills@1.7.2 experimental_sync --agent claude-code --copy -y
+   ```
+
+   **From 17.x to 18**, a project has no `@objectstack/skills` to move: its
+   skills were installed with `skills add` from the repository's `main`, and the
+   sync skips every skill a `skills add` installed (it prints
+   `Skipped … installed with skills add` and exits 0), so a project that only
+   bumps its packages keeps its 17.x-era skill text. Remove those skills first,
+   then add the catalog at your new `@objectstack/spec`'s version and copy it:
+
+   ```bash
+   npx skills remove objectstack-ai objectstack-api objectstack-automation \
+     objectstack-data objectstack-formula objectstack-i18n objectstack-platform \
+     objectstack-pm-dispatch objectstack-query objectstack-ui objectstack-upgrade -y
+   npm install --save-dev "@objectstack/skills@$(node -p "require('@objectstack/spec/package.json').version")"
+   npx skills@1.7.2 experimental_sync --agent claude-code --copy -y
+   ```
+
+   The list names every skill the catalog carried during 17.x, and a name that
+   is not installed is skipped; `npx skills remove --all` does the same when
+   these are the only skills the project has.
 
 Then run [the loop](#the-loop) below — `os validate` before `os build` — because
 moving the pins can move the gate.
