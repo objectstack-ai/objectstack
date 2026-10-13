@@ -1093,6 +1093,22 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     response: deps.error(repeatedQueryParamMessage('enabled', enabled.count), 400),
                 };
             }
+            // [#23214] `status` and `type` are each compared with `===` against
+            // ONE value below, so a repeat matched no package and the door
+            // answered an empty 200, the plausible-looking wrong answer
+            // `enabled` above is refused to prevent. Refused the same way, with
+            // the same sentence; a one-element array is one occurrence.
+            for (const name of ['status', 'type'] as const) {
+                const raw = query?.[name];
+                if (!Array.isArray(raw)) continue;
+                if (raw.length > 1) {
+                    return {
+                        handled: true,
+                        response: deps.error(repeatedQueryParamMessage(name, raw.length), 400),
+                    };
+                }
+                query[name] = raw[0];
+            }
             let packages = registry.getAllPackages();
             // Apply optional filters
             if (query?.status) {

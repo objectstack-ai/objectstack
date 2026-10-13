@@ -68,6 +68,11 @@ import type { ObjectStackProtocolImplementation } from '@objectstack/metadata-pr
 // (`metaMemberSelector`): the item read, `PUT`, `/layers` and `/published`
 // each refuse a name they do not read, as `RestServer`'s doors do, and the
 // item read honours `?member=`.
+// [#23214] …and the arity of the four `/meta` doors whose only query rule it
+// is (`metaQueryArityRefusal` over `META_QUERY_ARITY_DOORS`): the list, the
+// book tree, `_drafts` and the state machine read refuse a repeated
+// single-valued name with the sentence `RestServer`'s twins answer, instead of
+// reading an array this transport's adapters never used to hand them.
 // Imported, never restated — AGENTS.md 〈Route & surface ownership〉 rule 1.
 import {
     createMetaBookTreeAnswer,
@@ -80,6 +85,7 @@ import {
     metaItemPackageBinding,
     metaItemQueryRefusal,
     metaMemberSelector,
+    metaQueryArityRefusal,
     metaRequestLocale,
     metaSaveRequestOptions,
     metaTypeReadRefusal,
@@ -1012,6 +1018,10 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     if (parts.length === 4 && (parts[0] === 'objects' || parts[0] === 'object') && parts[2] === 'state' && (!method || method === 'GET')) {
         const name = parts[1];
         const field = parts[3];
+        // [#23214] One current state: a repeat would be joined into a state no
+        // transition names (`'a,b'`), answered as a dead end.
+        const arity = metaQueryArityRefusal('state', query);
+        if (arity) return queryRefusalAnswer(deps, arity);
         const from = query?.from !== undefined ? String(query.from) : undefined;
         const qlService = await deps.getObjectQL(_context);
         const schema = qlService?.registry?.getObject(name);
@@ -1043,6 +1053,10 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         if (!protocol || typeof protocol.getMetaItems !== 'function') {
             return { handled: true, response: deps.error('Not found', 404) };
         }
+        // [#23214] One package scopes the book and doc reads: a repeat would read
+        // as no package at all, so the tree would span every package.
+        const arity = metaQueryArityRefusal('book-tree', query);
+        if (arity) return queryRefusalAnswer(deps, arity);
         // [#22188] `RestServer`'s reading: `all` names no package.
         const packageId = metaItemPackageBinding(query?.package);
         try {
@@ -1893,6 +1907,11 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         }
         const protocol = await resolveProtocol(deps, _context);
         if (protocol && typeof protocol.listDrafts === 'function') {
+            // [#23214] One package and one type narrow the list: a repeat would
+            // reach `listDrafts` as an array. Asked where `RestServer` asks it,
+            // after the capability gate and the capability probe.
+            const arity = metaQueryArityRefusal('drafts', query);
+            if (arity) return queryRefusalAnswer(deps, arity);
             try {
                 // [ADR-0131 D6] No organization, as `RestServer`'s `_drafts`:
                 // every draft is saved environment-wide.
@@ -1975,6 +1994,12 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     // GET /metadata/:type (List items of type) OR /metadata/:objectName (Legacy)
     if (parts.length === 1) {
         const typeOrName = parts[0];
+        // [#23214] Before any read of the list's query, as `RestServer`'s list
+        // asks it: `package`, `preview`, `object`, `include` and `id` are each
+        // one value, and a repeat would scope nothing, select no view, or drop
+        // a filter and answer the whole list.
+        const arity = metaQueryArityRefusal('list', query);
+        if (arity) return queryRefusalAnswer(deps, arity);
         // Extract optional package filter from query string.
         // [#22188] `RestServer`'s reading: `all`, the list's "show everything"
         // scope, names no package.

@@ -38,7 +38,7 @@
 // The trace, measured on `origin/main` — all four routes fold at the producer
 // ---------------------------------------------------------------------------
 // `applyObjectRegistryMutation` has exactly ONE caller
-// (`applyRegistryWriteThrough`), which has exactly FIVE:
+// (`applyRegistryWriteThrough`), which has exactly SIX:
 //
 //   1. `saveMetaItem`            passes `singularTypeForRepo`, and the method
 //                                already ran `canonicalizeMetaRequestType`.
@@ -60,6 +60,12 @@
 //                                so this caller folds rather than trusting
 //                                the wire, even though every in-tree
 //                                publisher emits the already-folded singular.
+//   6. `reassignOrphanedMetadata` (#23198) folds the STORED row type at the
+//                                call site through `canonicalMetaType`, and
+//                                writes through only a row that folds to
+//                                `'view'`. It never passes `'object'`, so it
+//                                never reaches `applyObjectRegistryMutation`:
+//                                an orphaned object is rebound in storage only.
 //
 // Both fold maps resolve the plural — `PLURAL_TO_SINGULAR.objects === 'object'`
 // and `canonicalMetaUrlType('objects') === 'object'` — so no route can deliver
@@ -515,6 +521,24 @@ describe('[#8862] every object registry write-through registers under the singul
             expect.objectContaining({ type: 'objects' }),
         );
     });
+
+    it('the orphan adoption writes a stored `views` row through as `view`, and an orphaned `objects` row not at all', async () => {
+        // An unscoped kernel: the only one on which a view row is written through.
+        const h = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(h.engine, () => new Map()) as any;
+        await seedRowVerbatim(protocol, { type: 'objects', name: 'ticket', body: objectBody('ticket'), state: 'active' });
+        await seedRowVerbatim(protocol, {
+            type: 'views', name: 'ticket_grid', state: 'active',
+            body: { name: 'ticket_grid', label: 'Tickets', type: 'grid', data: { provider: 'object', object: 'ticket' } },
+        });
+        h.registeredItems.length = 0;
+
+        const res = await protocol.reassignOrphanedMetadata({ targetPackageId: PKG });
+
+        expect(res.reassigned).toEqual([{ type: 'objects', name: 'ticket' }, { type: 'views', name: 'ticket_grid' }]);
+        expect(h.registeredItems).toEqual([{ type: 'view', name: 'ticket_grid' }]);
+        expect(h.registeredObjects).toEqual([]);
+    });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -543,9 +567,9 @@ describe('[#8862] the `applyRegistryWriteThrough` caller set stays closed', () =
         'utf8',
     );
 
-    it('has exactly five call sites, all traced in this file’s header', () => {
+    it('has exactly six call sites, all traced in this file’s header', () => {
         const callSites = source.match(/this\.applyRegistryWriteThrough\(/g) ?? [];
-        expect(callSites).toHaveLength(5);
+        expect(callSites).toHaveLength(6);
     });
 
     it('`applyObjectRegistryMutation` is reached only through the write-through', () => {

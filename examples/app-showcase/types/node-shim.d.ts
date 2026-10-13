@@ -25,6 +25,15 @@ declare module 'node:fs' {
   ): Array<{ name: string; isDirectory(): boolean }>;
   export function mkdirSync(path: string, options: { recursive: true }): string | undefined;
   export function writeFileSync(path: string, data: string): void;
+  // The teardown-race pin's per-run scratch directory for the hold reporter's
+  // verdict file (`test/vitest-console-teardown-race.test.ts`).
+  export function mkdtempSync(prefix: string): string;
+  export function rmSync(path: string, options: { recursive: true; force: true }): void;
+}
+
+// Same pin, one member: where that scratch directory goes.
+declare module 'node:os' {
+  export function tmpdir(): string;
 }
 
 declare module 'node:path' {
@@ -60,4 +69,11 @@ declare module 'node:util' {
 
 // `env` joins `cwd()` for the same pin: the nested run must NOT inherit this
 // process's own `VITEST_*` variables, or the child believes a pool spawned it.
-declare const process: { cwd(): string; env: Record<string, string | undefined> };
+// `once('exit')` is the hold reporter's (`test/fixtures/late-console-teardown/
+// hold-console-acks.reporter.ts`): it writes its verdict when the CHILD's main
+// process exits, the one moment its unhandled-error set is final.
+declare const process: {
+  cwd(): string;
+  env: Record<string, string | undefined>;
+  once(event: 'exit', listener: () => void): unknown;
+};

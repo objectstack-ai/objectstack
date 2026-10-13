@@ -3098,9 +3098,10 @@ describe('批 17 — the carrier stays an open bag; the gate is on the lint side
 
   // Still true after #5068, and it is the sentence that keeps the gate honest:
   // the SCHEMA accepts and retains the key; what changed is that the authoring
-  // gate now REPORTS it (at `warning`). A reader who mistakes the gate for a
-  // closed door would be wrong in the direction that matters — the storage path
-  // (`saveMetaItem` / REST `/meta`) runs no such gate at all.
+  // gate now REFUSES it (an `error` at `os validate` / `os build` / `os lint`,
+  // since #23147). A reader who mistakes the gate for a closed door would be
+  // wrong in the direction that matters — the storage path (`saveMetaItem` /
+  // REST `/meta`) runs no such gate at all.
   it('an unknown key inside `properties` survives the LIVE page parse — with the strict sibling as negative control', () => {
     const page = {
       name: 'batch17_probe',

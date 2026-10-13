@@ -57,6 +57,21 @@
  * the `?object=` list and the by-name read, plus the two rows of one container
  * name. `protocol.view-expansion-reconcile-call-sites.test.ts` pins that no
  * write reaches the registry around the reconcile.
+ *
+ * ## [#23198] The orphan adoption
+ *
+ * `POST /packages/:id/adopt-orphans` (`reassignOrphanedMetadata`) rebound
+ * every package-less row into the base, the overlays of packaged items
+ * included, and touched no registry entry. Measured over the real
+ * `SchemaRegistry`: after a restart, an adopted overlay of the packaged
+ * container expanded under its own name in the base (the packaged
+ * `showcase_task.default` served again, `showcase_task.showcase_task` added),
+ * and an adopted overlay of one packaged view was listed twice under its name.
+ * ADR-0070 keeps an overlay of an artifact item bound to the item it
+ * customises, so the third block pins that the adoption leaves both overlays as
+ * they are, in the same process and after a restart (`boot` over the same
+ * rows, then `loadMetaFromDb`), and that a true orphan is adopted with the
+ * registry following its row at once, its record moved to the new binding.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -199,8 +214,8 @@ function makeRegistry() {
     };
 }
 
-function makeEngine() {
-    const rows = new Map<string, Row>();
+/** `rows` is the store to open: a fresh one, or a restart's, which the last process wrote. */
+function makeEngine(rows = new Map<string, Row>()) {
     const historyRows: Array<Record<string, unknown>> = [];
     const auditRows: Array<Record<string, unknown>> = [];
     let nextId = 0;
@@ -277,8 +292,8 @@ function makeEngine() {
  * registers the package: the container under the object's name and each view it
  * expands to under its own, both in the package's slot.
  */
-function boot(opts: { otherPackageShipsInProgress?: boolean } = {}) {
-    const { engine, registry, rows } = makeEngine();
+function boot(opts: { otherPackageShipsInProgress?: boolean; rows?: Map<string, Row> } = {}) {
+    const { engine, registry, rows } = makeEngine(opts.rows);
     const stamp = <T extends object>(item: T, pkg = PKG) =>
         ({ ...item, _packageId: pkg, _packageVersion: '1.0.0', _provenance: 'package' });
     registry.registerItem('view', stamp({ name: OBJ, ...shippedContainer() }), 'name', PKG);
@@ -622,5 +637,123 @@ describe('[#23198] after every write the registry holds the expansion set the st
         expect(labelOf(registry.bare('view', SHARED))).toBe('B shared');
         expect(await doors(protocol, A_ONLY)).toEqual(NOT_SERVED);
         expect(await doors(protocol, B_ONLY)).toEqual(servedOnEveryDoor('B only', 1));
+    });
+});
+
+const BASE = 'app.home';
+/** What the adopted overlay of the container expanded to, under its own name in the base. */
+const OWN_NAME_VIEW = `${OBJ}.${OBJ}`;
+const RT_DEFAULT = `${RT_OBJ}.default`;
+const RT_OPEN = `${RT_OBJ}.open`;
+const RT_CLOSED = `${RT_OBJ}.closed`;
+
+/** The package binding of each active row stored under `name`. */
+const storedBindings = (rows: Map<string, Row>, name: string) =>
+    [...rows.values()].filter((r) => r.name === name && r.state === 'active').map((r) => r.package_id ?? null);
+
+/** A restart: the package registered again, then the stored rows hydrated, over the rows the last process wrote. */
+async function restart(rows: Map<string, Row>) {
+    const next = boot({ rows });
+    expect(await next.protocol.loadMetaFromDb()).toMatchObject({ errors: 0 });
+    return next;
+}
+
+/** The record list's View Config Save on one packaged view: read it, relabel it, save a draft, publish. */
+async function publishViewOverlay(protocol: ObjectStackProtocolImplementation, name: string, label: string) {
+    const read: any = await protocol.getMetaItem({ type: 'view', name });
+    const view = stripInternal(read.item) as Record<string, any>;
+    view.label = label;
+    if (view.config) view.config = { ...view.config, label };
+    expect(await protocol.saveMetaItem({ type: 'view', name, item: view, mode: 'draft' })).toMatchObject({ success: true });
+    expect(await protocol.publishMetaItem({ type: 'view', name })).toMatchObject({ success: true });
+}
+
+describe('[#23198] the orphan adoption rebinds runtime-created items only, and the registry follows the row at once', () => {
+    it('reading A: a package-less overlay of the packaged container is not adopted, and keeps serving its customisation', async () => {
+        const { protocol, rows } = boot();
+        await publishContainerOverlay(protocol, xEdit('All Tasks (X)', true));
+
+        const adopted: any = await protocol.reassignOrphanedMetadata({ targetPackageId: BASE });
+
+        expect(adopted).toMatchObject({ success: false, reassignedCount: 0, reassigned: [] });
+        expect(storedBindings(rows, OBJ)).toEqual([null]);
+        expect(await doors(protocol, DEFAULT_VIEW)).toEqual(servedOnEveryDoor('All Tasks (X)', 6));
+        expect(await doors(protocol, OWN_NAME_VIEW)).toEqual(NOT_SERVED);
+
+        const next = await restart(rows);
+        expect(await doors(next.protocol, DEFAULT_VIEW)).toEqual(servedOnEveryDoor('All Tasks (X)', 6));
+        expect(await doors(next.protocol, OWN_NAME_VIEW)).toEqual(NOT_SERVED);
+    });
+
+    it("reading B: a package-less overlay of one packaged view (the record list's View Config Save) is not adopted, and is served once", async () => {
+        const { protocol, rows } = boot();
+        await publishViewOverlay(protocol, IN_PROGRESS_VIEW, 'In Progress (X)');
+
+        const adopted: any = await protocol.reassignOrphanedMetadata({ targetPackageId: BASE });
+
+        expect(adopted).toMatchObject({ success: false, reassignedCount: 0, reassigned: [] });
+        expect(storedBindings(rows, IN_PROGRESS_VIEW)).toEqual([null]);
+        expect(await doors(protocol, IN_PROGRESS_VIEW)).toEqual(servedOnEveryDoor('In Progress (X)', 2));
+
+        const next = await restart(rows);
+        expect(await doors(next.protocol, IN_PROGRESS_VIEW)).toEqual(servedOnEveryDoor('In Progress (X)', 2));
+    });
+
+    it('control D: a true orphan beside them is adopted, and the registry serves it from the base before any read', async () => {
+        const { protocol, registry, rows } = boot();
+        await publishContainerOverlay(protocol, xEdit('All Tasks (X)', true));
+        expect(await protocol.saveMetaItem({
+            type: 'view', name: RT_OBJ, item: rtContainer({ open: rtMember('Open') }),
+        })).toMatchObject({ success: true });
+        expect(registry.bare('view', RT_OPEN)?._packageId).toBeUndefined();
+
+        const adopted: any = await protocol.reassignOrphanedMetadata({ targetPackageId: BASE });
+
+        expect(adopted).toMatchObject({ success: true, reassignedCount: 1, reassigned: [{ type: 'view', name: RT_OBJ }] });
+        expect(storedBindings(rows, RT_OBJ)).toEqual([BASE]);
+        expect(storedBindings(rows, OBJ)).toEqual([null]);
+        // No read in between: the container and each view it expands to are the base's.
+        for (const name of [RT_OBJ, RT_DEFAULT, RT_OPEN]) {
+            expect(registry.bare('view', name)?._packageId, name).toBe(BASE);
+        }
+        expect(await doors(protocol, RT_OPEN, RT_OBJ)).toEqual(servedOnEveryDoor('Open', 1));
+        expect(await doors(protocol, RT_DEFAULT, RT_OBJ)).toEqual(servedOnEveryDoor('All Tickets', 2));
+        expect(await doors(protocol, DEFAULT_VIEW)).toEqual(servedOnEveryDoor('All Tasks (X)', 6));
+
+        // After a restart, the views it expands to are the base's too. (The
+        // boot hydrates the container's own body as stored, without the
+        // binding stamped on it, as it hydrates every bound row.)
+        const next = await restart(rows);
+        for (const name of [RT_DEFAULT, RT_OPEN]) {
+            expect(next.registry.bare('view', name)?._packageId, name).toBe(BASE);
+        }
+        expect(await doors(next.protocol, RT_OPEN, RT_OBJ)).toEqual(servedOnEveryDoor('Open', 1));
+        expect(await doors(next.protocol, DEFAULT_VIEW)).toEqual(servedOnEveryDoor('All Tasks (X)', 6));
+    });
+
+    it("the rebind moves the row's record: a package-less row of that name, written later, heals only what it registered", async () => {
+        const { protocol, registry, rows } = boot();
+        expect(await protocol.saveMetaItem({
+            type: 'view', name: RT_OBJ, item: rtContainer({ open: rtMember('Open'), closed: rtMember('Closed') }),
+        })).toMatchObject({ success: true });
+        await protocol.reassignOrphanedMetadata({ targetPackageId: BASE });
+
+        // A package-less row of the adopted name (ADR-0048: two rows of one
+        // name), with no members, and the write the door makes after storing it.
+        const later = rtContainer({});
+        const row: Row = {
+            id: 'later', type: 'view', name: RT_OBJ, organization_id: null,
+            package_id: null, state: 'active', metadata: JSON.stringify(later),
+        };
+        rows.set(keyOf(row), row);
+        await (protocol as any).applyRegistryWriteThrough({
+            type: 'view', name: RT_OBJ, item: later, packageId: null, organizationId: null,
+        });
+
+        // The base row's members are still registered: the package-less
+        // record left with the adoption, so this write healed none of them.
+        expect(labelOf(registry.bare('view', RT_OPEN))).toBe('Open');
+        expect(labelOf(registry.bare('view', RT_CLOSED))).toBe('Closed');
+        expect(registry.bare('view', RT_OPEN)?._packageId).toBe(BASE);
     });
 });

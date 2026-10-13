@@ -48,7 +48,7 @@
  * author's view — and without this file needing to know which posture the spec
  * is at.
  *
- * ## Severity — a RETIRED key is an `error`, every other finding a `warning`
+ * ## Severity — every finding is an `error`
  *
  * Wiring the parse was the precondition for enforcement, not the enforcement
  * (the #5020 lesson, one surface over), so this rule landed advisory: the
@@ -63,20 +63,39 @@
  * inventory is the acceptance baseline for the error upgrade, and the upgrade
  * is its own step once the inventory is empty. Every blocker above is closed.
  *
- * #23026 took that step for ONE class: a value verdict raised by a
- * `retiredKey()` tombstone (`shared/retired-key.ts`, `@objectstack/spec`). A
- * tombstone keeps a key declared only so that writing it raises the
- * prescription, so reporting it as advice had `os validate` print
+ * The upgrade took two steps. #23026 took it for ONE class: a value verdict
+ * raised by a `retiredKey()` tombstone (`shared/retired-key.ts`,
+ * `@objectstack/spec`), whose report as advice had `os validate` print
  * "✓ Validation passed" over a key the ADR-0087 conversion registry tells
- * authors is refused. The inventory, measured before the upgrade at
- * objectstack `21c86444e`: `os validate` over `examples/app-crm`, `app-todo`,
- * `app-multi-package` and `app-showcase`, and this rule over the five shipped
- * pages outside them (`platform-objects` ×3, `plugin-approvals`,
- * `qa/downstream-contract`); `packages/apps/*` and the `create-objectstack`
- * template author no page. Retired-key findings: 0. Every other finding of
- * this rule: 0 as well.
+ * authors is refused. #23147 took it for the rest: a value rejected for any
+ * other reason (a wrong type, a missing required prop, a closed-set refusal
+ * such as a url action's `target` scheme or a `record:details` section's
+ * `count`), a retired enum VALUE (`enumWithRetiredValues` raises an enum
+ * issue, not a tombstone), an undeclared key, and the missing
+ * `dataSource.object` binding. Each of those was a success receipt for
+ * configuration the renderer ignores or cannot draw — the ADR-0078 shape this
+ * gate exists to remove — so none of them is advice any more.
  *
- * The class is read off the ISSUE, never off its text ({@link isRetiredKeyVerdict}):
+ * The inventory each step was taken on, every class counted separately:
+ *
+ * - #23026, at objectstack `21c86444e`: `os validate` over `examples/app-crm`,
+ *   `app-todo`, `app-multi-package` and `app-showcase`, and this rule over the
+ *   five shipped pages outside them. Retired-key findings: 0; every other
+ *   finding: 0.
+ * - #23147, at objectstack `8323cad97`, at this rule's own input tier (the
+ *   normalized stack, package bodies folded): the same four examples, and the
+ *   eight shipped pages outside them (`platform-objects` ×3,
+ *   `plugin-approvals`, `qa/downstream-contract`, `cloud-connection` ×2,
+ *   `mcp`) — 37 pages, 177 components judged; and one corpus authored
+ *   outside this repository, `objectstack-ai/hotcrm` at `0f84c9c72` — 8
+ *   pages, 50 components judged. Value verdicts: 0; undeclared keys: 0;
+ *   retired keys: 0. A planted undeclared key and a planted wrong-typed prop
+ *   each drew one finding on every population. `packages/apps/*` and the
+ *   `create-objectstack` template author no page.
+ *
+ * The retired-key class is still read off the ISSUE, never off its text
+ * ({@link isRetiredKeyVerdict}), because its fix differs, not its severity:
+ * the prescription the tombstone carries, never a schema change. It is
  *
  * - the tombstone's own issue, `invalid_type` expecting `never` — the shape a
  *   `retiredKey()` raises, and the discriminator the spec's own flow-node
@@ -89,18 +108,12 @@
  *   `object-form` / `object-master-detail-form` `sections[].fields[]`, whose
  *   object arm tombstones `publicPicker`.
  *
- * What stays a `warning`, deliberately: a value rejected for any other reason
- * (a wrong type, a missing required prop, a closed-set refusal such as a url
- * action's `target` scheme or a `record:details` section's `count`), a
- * retired enum VALUE (`enumWithRetiredValues` raises an enum issue, not a
- * tombstone), an undeclared key, and the missing `dataSource.object` binding.
- * Their inventory above (0) is the next step's baseline; moving them is a
- * decision of its own, not a rider on this one.
- *
  * Where it refuses: the three CLI doors — `os validate`, `os build`, `os lint`
  * — run every gating rule. The runtime publish door (the Studio, REST and MCP
  * write path) does not run this rule (`surfaces` in `authoring-rules.ts`), so a
- * page saved there is not refused for a retired key.
+ * page saved there is not refused for any of these findings. That is a
+ * rollout decision, not a missing input: a `page` write's per-write snapshot
+ * carries the written page, which is everything this rule reads.
  *
  * ## Unregistered types are SKIPPED — a required semantic, not leniency
  *
@@ -136,12 +149,11 @@ export const COMPONENT_PROPS_UNKNOWN_KEY = 'component-props-unknown-key';
 export const COMPONENT_PROPS_INVALID = 'component-props-invalid';
 
 /**
- * `error` for a retired key ({@link isRetiredKeyVerdict}), `warning` for every
- * other finding — see the module header. Emitting `error` makes the rule
- * `gating` in `authoring-rules.ts`, which `authoring-rule-wiring.test.ts`
- * verifies against this file's source.
+ * `error` for every finding — see the module header. Emitting `error` makes
+ * the rule `gating` in `authoring-rules.ts`, which
+ * `authoring-rule-wiring.test.ts` verifies against this file's source.
  */
-export type ComponentPropsSeverity = 'error' | 'warning';
+export type ComponentPropsSeverity = 'error';
 
 export interface ComponentPropsFinding {
   severity: ComponentPropsSeverity;
@@ -190,8 +202,8 @@ const PROPS_SCHEMAS = ComponentPropsMap as unknown as Record<string, PropsSchema
  * list bound only through `dataSource` that queried nothing and drew "No
  * records". The retirement turns the waiver into a refusal on the binding the
  * renderers actually read: one of these elements with no `dataSource.object`
- * is a `component-props-invalid` finding at that path — the same rule id and
- * tier as every other value verdict here, not a new gate. A flat `object`
+ * is a `component-props-invalid` error at that path — the same rule id and
+ * severity as every other value verdict here, not a new gate. A flat `object`
  * beside it is the tombstone's own finding (the parse below), with its
  * prescription.
  */
@@ -258,16 +270,17 @@ function isTombstoneIssue(issue: LintZodIssue): boolean {
 }
 
 /**
- * Is this value verdict a RETIRED key the author wrote — the class this rule
- * refuses as an `error` (module header, "Severity")?
+ * Is this value verdict a RETIRED key the author wrote — the class whose fix
+ * is the tombstone's prescription rather than a schema change (module header,
+ * "Severity")? Both answers are an `error`; this decides only the text.
  *
  * Directly, when the issue is the tombstone's own. Inside a collapsed
  * `invalid_union`, only under the one-arm rule {@link unrecognizedKeysFromUnionArm}
  * states: exactly one arm raised tombstone issues, and that arm raised nothing
  * else. Two arms each refusing a retired key, or one arm refusing a retired key
  * beside a value it rejects for another reason, do not say which shape the
- * author meant, so the verdict stays the ordinary `warning` — `describeIssue`
- * still prints every arm's message, the prescription included.
+ * author meant, so the verdict takes the ordinary value-verdict text —
+ * `describeIssue` still prints every arm's message, the prescription included.
  */
 function isRetiredKeyVerdict(issue: LintZodIssue): boolean {
   if (isTombstoneIssue(issue)) return true;
@@ -322,15 +335,15 @@ export function validateComponentProps(stack: AnyRec): ComponentPropsFinding[] {
       // is a key of the NODE, so a malformed bag does not excuse a missing one.
       if (DATA_SOURCE_BOUND_ELEMENT_TYPES.has(type) && boundObject(component) === undefined) {
         findings.push({
-          severity: 'warning',
+          severity: 'error',
           rule: COMPONENT_PROPS_INVALID,
           where,
           path: `${path}.dataSource.object`,
           message:
             `dataSource.object: \`${type}\` reads its records from the node-level \`dataSource\` binding ` +
-            'only, and this node names no object there, so it queries nothing and draws its empty state ' +
-            'as if the object had no rows — nothing refuses it today, so the renderer receives the node ' +
-            'as written',
+            'only, and this node names no object there, so it would query nothing and draw its empty ' +
+            'state as if the object had no rows — refused, so this stack does not pass until the node ' +
+            'names one',
           hint:
             `Name the object on the component node — \`dataSource: { object: '<object name>' }\`, a ` +
             'sibling of `type`, not a key inside `properties`, where a flat `object` is retired and read ' +
@@ -350,14 +363,15 @@ export function validateComponentProps(stack: AnyRec): ComponentPropsFinding[] {
       // pins both directions of that.
       for (const f of lintUnknownKeysAgainstSchema(schema, props, type, base)) {
         findings.push({
-          severity: 'warning',
+          severity: 'error',
           rule: COMPONENT_PROPS_UNKNOWN_KEY,
           where,
           path: f.path,
           message:
-            `\`${f.key}\` is not a prop \`${type}\` declares (ComponentPropsMap, @objectstack/spec/ui), ` +
-            'so nothing verifies it: `properties` is an untyped bag, the renderer spreads whatever it ' +
-            'carries, and a key it does not read is ignored in silence.' +
+            `\`${f.key}\` is not a prop \`${type}\` declares (ComponentPropsMap, @objectstack/spec/ui): ` +
+            '`properties` is an untyped bag, the renderer spreads whatever it carries, and a key it does ' +
+            'not read is ignored in silence, so it is refused here and this stack does not pass until ' +
+            'it is gone.' +
             (f.suggestion ? ` Did you mean \`${f.suggestion}\`?` : ''),
           hint:
             f.guidance ??
@@ -381,7 +395,7 @@ export function validateComponentProps(stack: AnyRec): ComponentPropsFinding[] {
         if (armIssue) {
           for (const key of armIssue.keys ?? []) {
             findings.push({
-              severity: 'warning',
+              severity: 'error',
               rule: COMPONENT_PROPS_UNKNOWN_KEY,
               where,
               path: `${at}.${key}`,
@@ -396,7 +410,7 @@ export function validateComponentProps(stack: AnyRec): ComponentPropsFinding[] {
         if (issue.code === 'unrecognized_keys') {
           for (const key of issue.keys ?? []) {
             findings.push({
-              severity: 'warning',
+              severity: 'error',
               rule: COMPONENT_PROPS_UNKNOWN_KEY,
               where,
               path: `${at}.${key}`,
@@ -407,10 +421,10 @@ export function validateComponentProps(stack: AnyRec): ComponentPropsFinding[] {
           continue;
         }
         const subject = `${at.slice(base.length + 1) || 'properties'}: ${describeIssue(issue, props)}`;
-        // A retired key is refused; it is the one `error` this rule files. Its
-        // fix is the prescription the message already carries, so the hint
-        // never offers the other branch below — re-declaring a retired key in
-        // the schema would undo its retirement.
+        // A retired key is refused like every other verdict here, but its fix
+        // is the prescription the message already carries, so the hint never
+        // offers the other branch below — re-declaring a retired key in the
+        // schema would undo its retirement.
         if (isRetiredKeyVerdict(issue)) {
           findings.push({
             severity: 'error',
@@ -425,15 +439,13 @@ export function validateComponentProps(stack: AnyRec): ComponentPropsFinding[] {
           continue;
         }
         findings.push({
-          severity: 'warning',
+          severity: 'error',
           rule: COMPONENT_PROPS_INVALID,
           where,
           path: at,
           // [#22161] `hint` is the CLI's `fix:` line, so it states the fix; the
-          // advisory posture it used to explain (judged here as a warning, and
-          // the props bag is not parsed on the storage path) is the verdict's
-          // consequence and rides the message.
-          message: `${subject} — nothing refuses it today, so the renderer receives the props as written`,
+          // verdict's consequence rides the message.
+          message: `${subject} — refused, so this stack does not pass until the props are ones the schema accepts`,
           hint:
             `Give \`${type}\` props its schema accepts (ComponentPropsMap, @objectstack/spec/ui) — the ` +
             'rejection above names what it expects — or, if the component really does honour what is ' +

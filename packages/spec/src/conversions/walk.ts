@@ -368,8 +368,8 @@ function mapComponentTree(
  *     `page-header-subtitle-alias`, whose retired `description` is tombstoned
  *     nowhere (`description` is a live declared prop on other components), got
  *     no diagnostic at a nested site from any layer: the conversion did not
- *     fire, `PageSchema` stayed green, and the advisory props gate runs CLI-only
- *     and on already-converted metadata. A slotted record page — the shape
+ *     fire, `PageSchema` stayed green, and the props gate (advisory then) runs
+ *     CLI-only and on already-converted metadata. A slotted record page — the shape
  *     objectui's own guide recommends — could carry a header the rewrite never
  *     saw, so objectui's `subtitle ?? description` fallback could not retire
  *     without silently dropping those subtitles.
