@@ -444,7 +444,7 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
   const EXCLUDED = new Set([
     // This pin authors the key to assert its refusal and its conversion.
     THIS_FILE,
-    // The props-lint pin authors the key to assert the advisory warning an
+    // The props-lint pin authors the key to assert the refusal (an `error`) an
     // author meets at `os validate` / `os build` / `os lint`.
     'packages/lint/src/validate-component-props.test.ts',
   ]);
