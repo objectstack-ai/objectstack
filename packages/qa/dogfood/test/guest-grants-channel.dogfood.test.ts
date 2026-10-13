@@ -305,10 +305,13 @@ describe('ADR-0138 E1 — one channel: the name fold, the baseline and `everyone
       const names = await resolvedSetNames(lastContext(OBJ.unbound));
       expect(names).not.toContain('member_default');
       expect(names).not.toContain(EVERYONE_SET);
-      // Negative control: a signed-in member reads the same object through `everyone`.
+      // Negative control: a signed-in member is admitted to the same object, and
+      // it is `everyone`'s binding that admits it — the only set naming the object.
       const member = await stack.apiAs(memberToken, 'GET', `/data/${OBJ.unbound}`);
       expect(member.status, await member.clone().text()).toBe(200);
-      expect(rowsOf(await member.json())).toHaveLength(2);
+      const memberNames = await resolvedSetNames(lastContext(OBJ.unbound));
+      expect(memberNames).toContain(EVERYONE_SET);
+      expect(memberNames).toContain('member_default');
     } finally {
       bindAnchor('everyone', ['member_default']);
     }
@@ -403,15 +406,20 @@ describe('ADR-0138 E1 — a multi-organization deployment answers the located re
     expect(res.text).not.toContain(`${OBJ.publicRead}-seed-`);
   });
 
-  it('the form doors still answer as they did before E1 on the same deployment', async () => {
+  it('the form doors keep their own answer on the same deployment, never the guest refusal', async () => {
     const res = await stack.api(`/forms/${FORM_SLUG}/submit`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name: 'e1guest-form-row-multi' }),
     });
     const text = await res.text();
-    // Recorded by E1's before/after reading; D4 item 4 keeps it as it is.
-    expect(res.status, text).toBe(201);
+    // The reading before E1, on this same topology (measured at 197fbe2c04): the
+    // form door carries no organization, and the engine refuses an
+    // organization-less insert where the organization is not derivable
+    // (ADR-0131 D9). D4 item 4 keeps the form doors as they are: the guest's
+    // refusal does not reach them, because the form grant is not the guest.
+    expect(res.status, text).toBe(500);
+    expect(JSON.parse(text).code).toBe('ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED');
   });
 });
 
@@ -423,7 +431,10 @@ describe('ADR-0138 E1 — the anchor\'s definition has no authoring door (measur
       permissionSets: [GUEST_SET],
     });
     const text = await res.text();
-    expect(res.status, text).toBeGreaterThanOrEqual(400);
+    // Measured: the built-in anchor is packaged metadata, sealed against an
+    // in-place edit (ADR-0131; `position` takes no environment overlay).
+    expect(res.status, text).toBe(403);
+    expect(JSON.parse(text).code).toBe('NOT_OVERRIDABLE');
   });
 });
 
