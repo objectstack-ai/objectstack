@@ -1985,6 +1985,26 @@ type ShippingPackages = {
 };
 
 /**
+ * [#23198] What a write did to a view container's stored rows, as
+ * `ObjectStackProtocolImplementation.reconcileViewExpansions` takes it.
+ *
+ * - `binding`: one row was hydrated (a publish, a republish, a rollback, a
+ *   revert, a replica's convergence, the boot, the list read). `binding` is
+ *   the row's package binding, `undefined` for the package-less row, and
+ *   `expansion` is everything that row's body expands to now.
+ * - `removed: 'every-row'`: a row of the name was removed (a reset, a delete,
+ *   a revert's removal, a replica's removal). The heal is handed no binding,
+ *   so it addresses every row of the name, and the set they imply is empty.
+ */
+type ViewContainerWrite =
+    | {
+        readonly container: string;
+        readonly binding: string | undefined;
+        readonly expansion: ReadonlyArray<Record<string, unknown>>;
+    }
+    | { readonly container: string; readonly removed: 'every-row' };
+
+/**
  * ADR-0010 §3.3 — Overlay the artifact's metadata-protection envelope
  * onto a returned item so artifact-level lock/packageId/provenance
  * always wins over whatever was persisted in the `sys_metadata` overlay
@@ -7502,7 +7522,7 @@ export class ObjectStackProtocolImplementation implements
             // way the recovery callers derive it (#4867 / #4636) — the wire
             // carries no binding, and must not.
             const packageId = await this.resolveOverlayPackageBinding(type, evt.name, orgId, evt.member);
-            this.applyRegistryWriteThrough({
+            await this.applyRegistryWriteThrough({
                 type,
                 name: evt.name,
                 item: current.body,
@@ -9690,7 +9710,7 @@ export class ObjectStackProtocolImplementation implements
                 if (this.environmentId === undefined) {
                     for (const { name, data, packageId: recPkg, organizationId: recOrg } of overlays) {
                         if (request.type === 'object' && this.isUnservedSealedOverlay(request.type, name)) continue;
-                        this.hydrateOverlayIntoRegistry(request.type, data, {
+                        await this.hydrateOverlayIntoRegistry(request.type, data, {
                             packageId: recPkg,
                             organizationId: recOrg,
                         });
@@ -18883,10 +18903,17 @@ export class ObjectStackProtocolImplementation implements
      * stays with the callers: that is a fact about the kernel this protocol
      * instance serves, not about the row in hand.
      *
-     * Returns whether the row is live in this registry's view: registered, or
-     * answered from its row as the section below states. Org-scoped rows,
+     * Resolves to whether the row is live in this registry's view: registered,
+     * or answered from its row as the section below states. Org-scoped rows,
      * bodies without a `name`, and registry doubles without `registerItem`
-     * are no-ops and return `false`. The boot's page report reads it.
+     * are no-ops and resolve to `false`. The boot's page report reads it.
+     *
+     * [#23198] Asynchronous because a view container's expansion ends in
+     * {@link reconcileViewExpansions}, which heals each name the row no longer
+     * expands to through the delete's walk, and that walk reads the
+     * MetadataService. Everything up to that point still runs before the
+     * first `await`, the type assert below included, and every caller awaits
+     * it, so a refusal reaches the same `catch` it reached before.
      *
      * ## [#22057] A VIEW row bound to one package, never under a name another ships
      *
@@ -19001,11 +19028,11 @@ export class ObjectStackProtocolImplementation implements
      * anything the static map does not carry, so a runtime kind the platform
      * has never heard of can never trip this gate.
      */
-    private hydrateOverlayIntoRegistry(
+    private async hydrateOverlayIntoRegistry(
         type: string,
         data: unknown,
         options: { packageId?: string | null; organizationId: string | null },
-    ): boolean {
+    ): Promise<boolean> {
         // [#9111] See the header: the mint door asserts, the caller folds.
         // Placed FIRST, ahead of every no-op return below, so the contract is
         // judged on the spelling itself rather than on whether this particular
@@ -19037,7 +19064,7 @@ export class ObjectStackProtocolImplementation implements
         // judged by their own names. ⛔ View only.
         const bound = canonicalType === 'view' ? boundPackageOf(options.packageId) : undefined;
         if (bound !== undefined && this.anotherPackageShips(type, String((data as any).name), bound)) {
-            this.hydrateExpandedViewItems(type, data, options, registry);
+            await this.hydrateExpandedViewItems(type, data, options);
             return true;
         }
         // [#23074] The artifact of the row's OWN bundle member: an overlay of
@@ -19071,7 +19098,7 @@ export class ObjectStackProtocolImplementation implements
         // tenant row it is, it is reported as one and never armed.
         const envelope = canonicalType === 'flow' ? undefined : artifact;
         registry.registerItem(type, mergeArtifactProtection(type, stateTenantAuthorship(data), envelope), 'name' as any);
-        this.hydrateExpandedViewItems(type, data, options, registry);
+        await this.hydrateExpandedViewItems(type, data, options);
         return true;
     }
 
@@ -19486,34 +19513,118 @@ export class ObjectStackProtocolImplementation implements
      * {@link anotherPackageShips}, the one the container row's own
      * registration asks too.
      *
-     * ## [#23149] Each registration is recorded for the delete's heal
+     * ## [#23149, #23198] The registration is the reconcile's
      *
-     * Every name registered here is recorded against the container's name
-     * ({@link recordViewExpansion}), and the delete's heal
-     * ({@link restoreArtifactRegistryView}) heals exactly those names. A name
-     * skipped above is not recorded, so the heal never touches it.
+     * This expands the row and hands the result to
+     * {@link reconcileViewExpansions}, which registers it (skipping a name
+     * another package ships, as above), records it against the row, and heals
+     * every name the row registered before and does not expand to now. A
+     * republish that dropped a member used to register the new set and retire
+     * nothing, so the dropped member was served until a restart.
      */
-    private hydrateExpandedViewItems(
+    private async hydrateExpandedViewItems(
         type: string,
         data: unknown,
         options: { packageId?: string | null; organizationId: string | null },
-        registry: any,
-    ): void {
-        let shipping: ShippingPackages | undefined;
-        for (const item of this.expandRuntimeViewContainer(type, data, { ...options, tenantAuthored: true })) {
-            shipping ??= this.shippingPackagesOf(type);
-            if (this.anotherPackageShips(type, String(item.name), item._packageId, shipping)) continue;
-            registry.registerItem(type, item, 'name' as any);
-            ObjectStackProtocolImplementation.recordViewExpansion(
-                registry, (data as { name?: unknown }).name, item.name,
-            );
+    ): Promise<void> {
+        await this.reconcileViewExpansions(type, {
+            container: String((data as { name?: unknown }).name),
+            binding: boundPackageOf(options.packageId),
+            expansion: this.expandRuntimeViewContainer(type, data, { ...options, tenantAuthored: true }),
+        }, options.organizationId);
+    }
+
+    /**
+     * [#23198] THE reconcile of a view container's expansions: after any write
+     * that changes a container's stored row (a publish, a republish, a reset, a
+     * delete), the registry holds exactly the expansion set the stored row now
+     * implies. Both sides call it: the registration
+     * ({@link hydrateExpandedViewItems}, for every hydration of a row) and the
+     * delete's heal ({@link restoreArtifactRegistryView}, whose set is
+     * empty). No other code registers an expansion, reads the record, or
+     * writes it (`protocol.view-expansion-reconcile-call-sites.test.ts`).
+     *
+     * In order:
+     *
+     * 1. Register each expanded view, unless another package ships its name
+     *    ([#21980, #22057], {@link anotherPackageShips}). Such a name is never
+     *    recorded, so no heal ever touches it.
+     * 2. Replace the record of the rows the write addresses with the names
+     *    registered in step 1. The old names come out of the record before any
+     *    heal runs, so a write that lands meanwhile reconciles against the new
+     *    set.
+     * 3. Heal each old name the new set lacks through the delete's per-name
+     *    walk ({@link restoreArtifactRegistryView}): a packaged view of that
+     *    name is un-shadowed, a MetadataService baseline is re-registered, and
+     *    a name no layer serves is retired.
+     *
+     * Every gate the walk carries applies here too. An organization-scoped
+     * write registers nothing and heals nothing (#6602 / #6780: the bare
+     * entries belong to the environment-wide row). Only a control-plane kernel
+     * re-registers a baseline. A walk that stops on a degraded baseline read
+     * retires nothing, and that name stays registered, unrecorded, until a
+     * restart: there is no retry ([#23149]'s residual, now reached from a
+     * republish as well as a reset).
+     *
+     * Views only, judged on the canonical type: no other type expands, and a
+     * row of another type stored under a container's name must not heal the
+     * container's expansions.
+     */
+    private async reconcileViewExpansions(
+        type: string,
+        write: ViewContainerWrite,
+        /** The write's own scope: `null` for an env-wide row. [#6780] */
+        organizationId: string | null,
+    ): Promise<void> {
+        if (canonicalMetaType(type) !== 'view') return;
+        if (organizationId !== null && organizationId !== undefined) return;
+        const registry: any = (this.engine as any)?.registry;
+        if (!registry || typeof registry !== 'object') return;
+
+        // 1. The set the stored row implies now.
+        const registered = new Set<string>();
+        const expansion = 'expansion' in write ? write.expansion : [];
+        if (expansion.length > 0 && typeof registry.registerItem === 'function') {
+            let shipping: ShippingPackages | undefined;
+            for (const item of expansion) {
+                shipping ??= this.shippingPackagesOf(type);
+                if (this.anotherPackageShips(type, String(item.name), item._packageId, shipping)) continue;
+                registry.registerItem(type, item, 'name' as any);
+                registered.add(String(item.name));
+            }
+        }
+
+        // 2. The record: the addressed rows' old names out, the new set in.
+        const record = ObjectStackProtocolImplementation.registeredViewExpansions;
+        let containers = record.get(registry);
+        if (containers === undefined) record.set(registry, (containers = new Map()));
+        const rows = containers.get(write.container) ?? new Map<string, ReadonlySet<string>>();
+        const previous = new Set<string>();
+        if ('removed' in write) {
+            for (const names of rows.values()) for (const name of names) previous.add(name);
+            rows.clear();
+        } else {
+            const row = write.binding ?? '';
+            for (const name of rows.get(row) ?? []) previous.add(name);
+            if (registered.size > 0) rows.set(row, registered);
+            else rows.delete(row);
+        }
+        if (rows.size > 0) containers.set(write.container, rows);
+        else containers.delete(write.container);
+
+        // 3. Heal what the rows registered before and do not now.
+        for (const name of previous) {
+            if (registered.has(name)) continue;
+            await this.restoreArtifactRegistryView(type, name, organizationId);
         }
     }
 
     /**
-     * [#23149] The names {@link hydrateExpandedViewItems} registered, per
-     * registry and then per container name: what a reset of that container
-     * has to heal.
+     * [#23149, #23198] The names {@link reconcileViewExpansions} registered,
+     * per registry, then per container name, then per stored row of that name
+     * (its package binding, `''` for the package-less row). It is what a later
+     * write of that row reconciles against, and what a reset heals. Only the
+     * reconcile reads or writes it.
      *
      * The registry holds no link from an expanded item back to its container,
      * and the container row is gone by the time the heal runs. Expanding the
@@ -19527,39 +19638,18 @@ export class ObjectStackProtocolImplementation implements
      * instances over one registry share the entries they write. A `WeakMap`,
      * so the record lives as long as the registry and no longer.
      *
-     * Two rows of one name (a package-less row and a package-bound one) record
-     * into one set. A reset of either heals the set, as the plain-key heal
-     * already lifts the one bare entry the name has, and the remaining row is
-     * hydrated again on the next list read.
+     * Per row, because one container name can have two stored rows (a
+     * package-less row and a package-bound one, ADR-0048), and the list read
+     * hydrates both on every call. Keyed on the name alone, each row's
+     * hydration reconciled against the other's set: every list read healed
+     * the names one row has and the other lacks, and a republish of one row
+     * retired the other row's members. A reset addresses every row of the
+     * name, because its heal is handed no binding. The row that remains is
+     * answered from its stored row by both doors and is hydrated again on the
+     * next list read. So is a name that both rows expand to and one row drops.
      */
-    private static readonly registeredViewExpansions = new WeakMap<object, Map<string, Set<string>>>();
-
-    /** [#23149] Records one expansion registration. See {@link registeredViewExpansions}. */
-    private static recordViewExpansion(registry: unknown, container: unknown, expanded: unknown): void {
-        if (!registry || typeof registry !== 'object') return;
-        if (typeof container !== 'string' || container === '') return;
-        if (typeof expanded !== 'string' || expanded === '') return;
-        let byContainer = this.registeredViewExpansions.get(registry);
-        if (byContainer === undefined) this.registeredViewExpansions.set(registry, (byContainer = new Map()));
-        let names = byContainer.get(container);
-        if (names === undefined) byContainer.set(container, (names = new Set()));
-        names.add(expanded);
-    }
-
-    /**
-     * [#23149] Removes and returns the expansions recorded for a view
-     * container, for the heal to heal once. Empty for every type but `view`,
-     * and for a name no container registered expansions under.
-     */
-    private static takeViewExpansions(registry: unknown, type: string, container: string): string[] {
-        if (canonicalMetaType(type) !== 'view') return [];
-        if (!registry || typeof registry !== 'object') return [];
-        const byContainer = this.registeredViewExpansions.get(registry);
-        const names = byContainer?.get(container);
-        if (byContainer === undefined || names === undefined) return [];
-        byContainer.delete(container);
-        return [...names];
-    }
+    private static readonly registeredViewExpansions =
+        new WeakMap<object, Map<string, Map<string, ReadonlySet<string>>>>();
 
     /**
      * [#21980, #22057] True when a code package other than `own` ships an
@@ -19624,15 +19714,19 @@ export class ObjectStackProtocolImplementation implements
      * for all three hydration paths. Callers pass the SAME `orgId` they wrote
      * the row with, so the registry's view cannot disagree with the row's
      * scope.
+     *
+     * [#23198] Every caller awaits it: a republish of a view container heals
+     * the members it dropped ({@link reconcileViewExpansions}) before the
+     * write answers, so the reads that follow it serve the published set.
      */
-    private applyRegistryWriteThrough(request: {
+    private async applyRegistryWriteThrough(request: {
         type: string;
         name: string;
         item?: any;
         packageId?: string | null;
         /** The row's org scope — `null` for an env-wide row. [#6602] */
         organizationId: string | null;
-    }): void {
+    }): Promise<void> {
         // [#8862] The `|| request.type === 'objects'` limb is GONE — this
         // branch admitted the plural that {@link applyObjectRegistryMutation}
         // then consumed. All four call sites of this method fold at their
@@ -19676,7 +19770,7 @@ export class ObjectStackProtocolImplementation implements
         }
         if (this.environmentId !== undefined) return;
         try {
-            this.hydrateOverlayIntoRegistry(request.type, request.item, {
+            await this.hydrateOverlayIntoRegistry(request.type, request.item, {
                 packageId: request.packageId ?? undefined,
                 organizationId: request.organizationId,
             });
@@ -19808,18 +19902,19 @@ export class ObjectStackProtocolImplementation implements
      * by the publish, and the overlay's under the bare names, where the reset
      * left them.
      *
-     * So each name the container registered ({@link takeViewExpansions}) is
-     * healed by this same walk, as a `(type, name)` of its own: a packaged view
-     * of that name is un-shadowed, a baseline is re-registered, and a name no
-     * layer serves is retired. Each name inherits every gate above: an
-     * organization-scoped heal touches none of them, and only a control-plane
-     * kernel re-registers. A name the hydration skipped because another
-     * package ships it was never recorded, so it is never touched.
+     * So each name the container's rows registered is healed by this same
+     * walk, as a `(type, name)` of its own: a packaged view of that name is
+     * un-shadowed, a baseline is re-registered, and a name no layer serves is
+     * retired. Each name inherits every gate above: an organization-scoped
+     * heal touches none of them, and only a control-plane kernel
+     * re-registers. A name the hydration skipped because another package
+     * ships it was never recorded, so it is never touched.
      *
-     * The names are taken before the walk, so each registration is healed
-     * once. A walk that stops on a degraded baseline read leaves that name
-     * registered until the container is published and reset again, or until a
-     * restart.
+     * [#23198] The heal does this through {@link reconcileViewExpansions},
+     * the one function a republish reconciles through too, with the empty set
+     * a removed row implies. The names leave the record before the walk, so
+     * each registration is healed once. A walk that stops on a degraded
+     * baseline read leaves that name registered until a restart.
      *
      * Best-effort: a failure must never block the delete that already
      * succeeded; the next full reload fixes the registry anyway.
@@ -19842,15 +19937,11 @@ export class ObjectStackProtocolImplementation implements
         // [#6780] ADR-0005 — the plain-key entry belongs to the env-wide row,
         // so only an env-wide removal may heal (or retire) it.
         if (organizationId !== null && organizationId !== undefined) return;
-        // [#23149] The view container's expansions, each by this same walk.
-        // See the header. Ahead of the container's own walk, which returns
-        // early from three of its tiers.
-        const expansions = ObjectStackProtocolImplementation.takeViewExpansions(
-            (this.engine as any)?.registry, type, name,
-        );
-        for (const expanded of expansions) {
-            await this.restoreArtifactRegistryView(type, expanded, organizationId);
-        }
+        // [#23149, #23198] The view container's expansions, through the one
+        // reconcile, with the empty set a removed row implies; it heals each
+        // by this same walk. See the header. Ahead of the container's own
+        // walk, which returns early from three of its tiers.
+        await this.reconcileViewExpansions(type, { container: name, removed: 'every-row' }, organizationId);
         try {
             const registry: any = this.engine.registry;
             const singular = PLURAL_TO_SINGULAR[type] ?? type;
@@ -21804,7 +21895,7 @@ export class ObjectStackProtocolImplementation implements
             // so an item that is already listable must be dispatchable
             // in the same breath. See {@link applyRegistryWriteThrough}.
             if (mode === 'publish') {
-                this.applyRegistryWriteThrough({
+                await this.applyRegistryWriteThrough({
                     type: singularTypeForRepo,
                     name: request.name,
                     item: request.item,
@@ -23202,7 +23293,7 @@ export class ObjectStackProtocolImplementation implements
         // saveMetaItem's post-persistence registry update path — #4521 makes
         // that path cover every overlay type, so promoting a drafted action
         // makes it dispatchable at once instead of at the next listing).
-        this.applyRegistryWriteThrough({
+        await this.applyRegistryWriteThrough({
             type: args.singularType,
             name: args.name,
             item: args.body,
@@ -26519,7 +26610,7 @@ export class ObjectStackProtocolImplementation implements
                     // the repo-facing reads above keep `it.type`, which is the
                     // spelling the row is stored with. Two different keys, on
                     // purpose.
-                    this.applyRegistryWriteThrough({
+                    await this.applyRegistryWriteThrough({
                         type: PLURAL_TO_SINGULAR[it.type] ?? it.type,
                         name: it.name,
                         item: restored.item.body,
@@ -26869,7 +26960,7 @@ export class ObjectStackProtocolImplementation implements
             // `already owned by package "app.<slug>"` into the best-effort
             // `console.warn` — a rollback that reported success while the
             // registry kept serving the body it was supposed to revert.
-            this.applyRegistryWriteThrough({
+            await this.applyRegistryWriteThrough({
                 type: singularType,
                 name: request.name,
                 item: result.item.body,
@@ -28071,7 +28162,7 @@ export class ObjectStackProtocolImplementation implements
                         // env-wide rows") stops depending on a query filter
                         // staying correct, because the hydrator refuses an
                         // org-scoped row whatever selected it.
-                        const hydrated = this.hydrateOverlayIntoRegistry(
+                        const hydrated = await this.hydrateOverlayIntoRegistry(
                             normalizedType,
                             data,
                             {
