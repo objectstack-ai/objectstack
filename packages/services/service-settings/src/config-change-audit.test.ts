@@ -547,18 +547,20 @@ describe('#8145 — an encrypted key never reaches the ledger in cleartext', () 
  * one layer down, where it actually exists, in the second case.
  */
 describe('#8145 — a refused write emits NO config_change row', () => {
-  it('an ANONYMOUS write over the plugin\'s own routes: 403, and BOTH ledgers untouched', async () => {
+  it('an ANONYMOUS write over the plugin\'s own routes: 401, and BOTH ledgers untouched', async () => {
     // The plugin's `verifiedContextFromRequest` fails closed with no auth
     // service resolvable (Finding-1), so this is the deny an unauthenticated
     // caller really meets on a running server — reached through the routes the
-    // plugin mounted itself, no context injected.
+    // plugin mounted itself, no context injected. That context names no user,
+    // so the family's anonymous floor (ADR-0056 D2) answers it before the
+    // capability check this case used to meet (`403 SETTINGS_FORBIDDEN`).
     const boot = await bootPlugin({ userId: 'usr_admin' });
     const { state } = await put(boot.http, { workspace_name: 'never-written' });
 
     // Both halves of the ADR-0112 envelope — a status-only assertion could not
     // tell this refusal from any other 4xx, and "it threw" is not a pin.
-    expect(state.status).toBe(403);
-    expect(state.body.error.code).toBe('SETTINGS_FORBIDDEN');
+    expect(state.status).toBe(401);
+    expect(state.body.error.code).toBe('UNAUTHENTICATED');
 
     expect(boot.ledgerRows()).toHaveLength(0);
     expect(boot.settingAuditRows()).toHaveLength(0);
