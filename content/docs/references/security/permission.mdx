@@ -117,7 +117,7 @@ const result = AdminScopeSchema.parse(data);
 | **name** | `string` | ✅ | Permission set name, unique per organization (lowercase snake_case) |
 | **label** | `string` | optional | Display label |
 | **description** | `string` | optional | Human-readable description shown in Setup |
-| **packageId** | `string` | optional | [ADR-0086 D3] Owning package id for a package-shipped set (absent = env-authored) |
+| **packageId** | `string` | optional | [ADR-0086 D3] Owning package id for a package-shipped set (absent = env-authored); the metadata save and publish doors refuse a value that disagrees with the package the set is saved into |
 | **managedBy** | `Enum<'package' \| 'platform' \| 'user'>` | optional | [ADR-0086 D3] Record provenance: package (upgrade-owned metadata) vs platform/user (env config) |
 | **isDefault** | `boolean` | optional (default: `false`) | [ADR-0090 D5] App baseline for the everyone position: app-level sets are auto-bound at boot (guarded, idempotent); package-level sets become install-time suggestions an admin confirms |
 | **objects** | `Record<string, { allowCreate?: boolean; allowRead?: boolean; allowEdit?: boolean; allowDelete?: boolean; … }>` | ✅ | Entity permissions |
