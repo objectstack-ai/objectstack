@@ -233,6 +233,9 @@ const NOT_A_STAND_IN = {
   runParentWriteReachProofs: 'same `VerifyStack` handle as runCrudVerification.',
   formatParentWriteReachReport:
     'formats a `ParentWriteReachReport` this package produced; presentation, not conformance.',
+  runDashboardWindowProofs: 'same `VerifyStack` handle as runCrudVerification.',
+  formatDashboardWindowReport:
+    'formats a `DashboardWindowReport` this package produced; presentation, not conformance.',
   fillRelationalRefs:
     'takes one `CrudCase` derived by `deriveCrudCases` — a data record this package built, with no ' +
     'external implementer.',

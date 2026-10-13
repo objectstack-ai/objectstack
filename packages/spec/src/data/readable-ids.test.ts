@@ -18,7 +18,15 @@ import { describe, it, expect } from 'vitest';
 import { StandardErrorCode } from '../api/errors.zod';
 import { FieldOperatorsSchema, FilterConditionSchema, parseFilterAST } from './filter.zod';
 import { assertListComparandShapes } from './filter-comparand-shape';
-import { READABLE_IDS_BRAND, ReadableIds, isReadableIds } from './readable-ids';
+import { filterSubtreeProvenanceOf, markFilterSubtreeProvenance } from './filter-subtree-provenance';
+import {
+  COMPOSED_READABLE_IDS_BRAND,
+  READABLE_IDS_BRAND,
+  RLS_DENY_FILTER,
+  ReadableIds,
+  isComposedReadableIds,
+  isReadableIds,
+} from './readable-ids';
 
 type Refusal = Error & { code?: string; status?: number };
 
@@ -163,5 +171,157 @@ describe('the comparand-shape door admits a branded leaf only for a composing ca
     const where = { record_id: { $in: ['p1', 'p2'] } };
     expect(() => assertListComparandShapes(where)).not.toThrow();
     expect(() => assertListComparandShapes(where, undefined, 'where', ADMIT)).not.toThrow();
+  });
+});
+
+// ── [ADR-0139 D2] What the engine's composition reads ────────────────────────
+
+describe('RLS_DENY_FILTER — the deny sentinel, declared once and recognised by identity', () => {
+  it('is the published value, frozen, and an ordinary zero-row predicate to anyone who never heard of it', () => {
+    // The value is published (explain's readFilter, a bound SQL parameter in
+    // analytics), so it is pinned; what D2 step 2 reads is the reference.
+    expect(RLS_DENY_FILTER).toEqual({ id: '__rls_deny__:00000000-0000-0000-0000-000000000000' });
+    expect(Object.keys(RLS_DENY_FILTER)).toEqual(['id']);
+    expect(Object.isFrozen(RLS_DENY_FILTER)).toBe(true);
+    expect(() => { (RLS_DENY_FILTER as { id: string }).id = 'widened'; }).toThrow(TypeError);
+    expect(RLS_DENY_FILTER.id).toBe('__rls_deny__:00000000-0000-0000-0000-000000000000');
+  });
+
+  it('no read-scope merge boundary can stamp a provenance mark on it — frozen, so it stays unmarked, which withholds', () => {
+    expect(markFilterSubtreeProvenance(RLS_DENY_FILTER, 'author')).toBe(RLS_DENY_FILTER);
+    expect(filterSubtreeProvenanceOf(RLS_DENY_FILTER)).toBeNull();
+  });
+
+  it('a copy carries the same value and is NOT the sentinel — the reason every producer returns the reference', () => {
+    const copy = { ...RLS_DENY_FILTER };
+    expect(copy).toEqual(RLS_DENY_FILTER);
+    expect(copy).not.toBe(RLS_DENY_FILTER);
+  });
+});
+
+describe('ReadableIds.compose — the composed leaf of D2 step 3', () => {
+  const scope = { owner_id: 'u1' };
+
+  it('builds a frozen leaf carrying { object, scope }, the scope by reference, branded under its own global-registry symbol, invisibly to enumeration and JSON', () => {
+    const composed = ReadableIds.compose(ReadableIds.of('cpz_doc'), scope);
+    expect(isComposedReadableIds(composed)).toBe(true);
+    expect(composed.object).toBe('cpz_doc');
+    expect(composed.scope).toBe(scope);
+    expect(Object.isFrozen(composed)).toBe(true);
+    expect(COMPOSED_READABLE_IDS_BRAND).toBe(Symbol.for('objectstack.filter.readableIds.composed'));
+    expect(COMPOSED_READABLE_IDS_BRAND).not.toBe(READABLE_IDS_BRAND);
+    expect(Object.getOwnPropertyDescriptor(composed, COMPOSED_READABLE_IDS_BRAND)).toEqual({
+      value: true, enumerable: false, writable: false, configurable: false,
+    });
+    expect(Object.keys(composed)).toEqual(['object', 'scope']);
+    expect(JSON.stringify(composed)).toBe('{"object":"cpz_doc","scope":{"owner_id":"u1"}}');
+  });
+
+  it('composes "no row restriction" as an own scope key holding undefined', () => {
+    const composed = ReadableIds.compose(ReadableIds.of('cpz_doc'), undefined);
+    expect(isComposedReadableIds(composed)).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(composed, 'scope')).toBe(true);
+    expect(composed.scope).toBeUndefined();
+  });
+
+  it('a holder of the reference cannot re-point the object or swap the scope', () => {
+    const composed = ReadableIds.compose(ReadableIds.of('cpz_doc'), scope);
+    expect(() => { (composed as { object: string }).object = 'sys_user'; }).toThrow(TypeError);
+    expect(() => { (composed as { scope: unknown }).scope = undefined; }).toThrow(TypeError);
+    expect(composed.object).toBe('cpz_doc');
+    expect(composed.scope).toBe(scope);
+  });
+
+  it('refuses to compose anything but a branded ReadableIds leaf', () => {
+    const leaf = ReadableIds.of('cpz_doc');
+    for (const bad of [{ ...leaf }, { object: 'cpz_doc' }, ReadableIds.compose(leaf, undefined), null, 'cpz_doc'] as unknown[]) {
+      expect(() => ReadableIds.compose(bad as never, undefined), String(bad)).toThrow(TypeError);
+    }
+  });
+
+  it('refuses a scope that is neither undefined nor a plain filter object', () => {
+    const leaf = ReadableIds.of('cpz_doc');
+    for (const bad of [null, [], [{ owner_id: 'u1' }], 'owner_id = u1', 0, false] as unknown[]) {
+      expect(() => ReadableIds.compose(leaf, bad as never), JSON.stringify(bad)).toThrow(TypeError);
+    }
+  });
+
+  it('refuses the deny sentinel BY IDENTITY: D2 step 2 answers it $in: [], never a composed leaf', () => {
+    const leaf = ReadableIds.of('cpz_doc');
+    expect(() => ReadableIds.compose(leaf, RLS_DENY_FILTER)).toThrow(TypeError);
+    expect(() => ReadableIds.compose(leaf, RLS_DENY_FILTER)).toThrow(/\$in: \[\] \(ADR-0139 D2 step 2\)/);
+    // Identity, not value: a copy is an ordinary scope (one that matches zero
+    // rows), exactly as D2 step 2 would see it — ⛔ no structural recognition.
+    const copy = { ...RLS_DENY_FILTER };
+    expect(ReadableIds.compose(leaf, copy).scope).toBe(copy);
+  });
+});
+
+describe('isComposedReadableIds — disjoint from isReadableIds, and every copy answers false', () => {
+  const leaf = ReadableIds.of('cpz_doc');
+  const composed = ReadableIds.compose(leaf, { owner_id: 'u1' });
+
+  it('the two recognisers are disjoint: a composed leaf is not a ReadableIds leaf, and an uncomposed one is not composed', () => {
+    expect(isComposedReadableIds(composed)).toBe(true);
+    expect(isReadableIds(composed)).toBe(false);
+    expect(isReadableIds(leaf)).toBe(true);
+    expect(isComposedReadableIds(leaf)).toBe(false);
+  });
+
+  it('a hand-built value carrying BOTH brands is not composed: it reads as an uncomposed leaf, whichever recogniser is asked first', () => {
+    // Both keys are global-registry symbols, so in-process code can build this.
+    const both = { object: 'x', scope: undefined };
+    Object.defineProperty(both, READABLE_IDS_BRAND, { value: true });
+    Object.defineProperty(both, COMPOSED_READABLE_IDS_BRAND, { value: true });
+    expect(isComposedReadableIds(both)).toBe(false);
+    expect(isReadableIds(both)).toBe(true);
+    // The comparand door, as measured: it admits the value as an UNCOMPOSED leaf
+    // for the composing caller (so the engine composes it from the caller's
+    // access) and refuses it for every other caller.
+    expect(() => assertListComparandShapes({ record_id: { $in: both } }, undefined, 'where', ADMIT)).not.toThrow();
+    const err = refusalOf(() => assertListComparandShapes({ record_id: { $in: both } }));
+    expect(envelopeOf(err)).toEqual(ENVELOPE);
+  });
+
+  it('a JSON round-trip, a structured clone, a spread and Object.assign all drop the brand', () => {
+    const copies = {
+      json: JSON.parse(JSON.stringify(composed)),
+      structuredClone: structuredClone(composed),
+      spread: { ...composed },
+      assign: Object.assign({}, composed),
+    };
+    for (const [how, copy] of Object.entries(copies)) {
+      expect(copy, how).toEqual({ object: 'cpz_doc', scope: { owner_id: 'u1' } });
+      expect(isComposedReadableIds(copy), how).toBe(false);
+      expect(isReadableIds(copy), how).toBe(false);
+    }
+  });
+
+  it('a brand with any value but true, an empty object name, a missing or malformed scope, inherited, or on an array is not a composed leaf', () => {
+    const branded = (value: unknown, fields: Record<string, unknown>) =>
+      Object.defineProperty({ ...fields }, COMPOSED_READABLE_IDS_BRAND, { value });
+    expect(isComposedReadableIds(branded(true, { object: 'cpz_doc', scope: undefined })), 'the declared shape, built by hand').toBe(true);
+    expect(isComposedReadableIds(branded(true, { object: 'cpz_doc', scope: { a: 1 } })), 'the declared shape, built by hand').toBe(true);
+    expect(isComposedReadableIds(branded('true', { object: 'cpz_doc', scope: undefined }))).toBe(false);
+    expect(isComposedReadableIds(branded(true, { object: '', scope: undefined }))).toBe(false);
+    expect(isComposedReadableIds(branded(true, { object: 7, scope: undefined }))).toBe(false);
+    expect(isComposedReadableIds(branded(true, { object: 'cpz_doc' })), 'no scope key at all').toBe(false);
+    expect(isComposedReadableIds(branded(true, { object: 'cpz_doc', scope: null }))).toBe(false);
+    expect(isComposedReadableIds(branded(true, { object: 'cpz_doc', scope: [] }))).toBe(false);
+    expect(isComposedReadableIds(branded(true, { object: 'cpz_doc', scope: 'owner_id = u1' }))).toBe(false);
+    expect(isComposedReadableIds(Object.create(composed))).toBe(false);
+    expect(isComposedReadableIds(Object.defineProperty([], COMPOSED_READABLE_IDS_BRAND, { value: true }))).toBe(false);
+    for (const value of [{ object: 'cpz_doc', scope: undefined }, null, undefined, 'cpz_doc', 0, true, []]) {
+      expect(isComposedReadableIds(value), String(value)).toBe(false);
+    }
+  });
+});
+
+describe('the comparand-shape door never admits a composed leaf — not even for the caller that composes', () => {
+  it('a composed leaf handed to the engine from outside is refused 400 as a non-list comparand, never trusted as a resolved scope', () => {
+    const composed = ReadableIds.compose(ReadableIds.of('cpz_doc'), undefined);
+    const err = refusalOf(() => assertListComparandShapes({ record_id: { $in: composed } }, undefined, 'where', ADMIT));
+    expect(envelopeOf(err)).toEqual(ENVELOPE);
+    expect(err.message).toMatch(/^Operator "\$in" on field "record_id" requires an ARRAY of values\. Received object/);
   });
 });

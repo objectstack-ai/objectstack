@@ -160,8 +160,9 @@ describe('dogfood: one artifact, two co-owning packages (ADR-0130 D4)', () => {
 // #14599 — the METADATA door, which the block above does not reach
 // ───────────────────────────────────────────────────────────────────────────
 //
-// `bootStack` registers `AppPlugin` and no `MetadataPlugin`, so everything
-// above is measured on the ObjectQL registry alone. The defect this block pins
+// `bootStack` registers `AppPlugin` and a `MetadataPlugin` with no artifact,
+// which loads none of the stack (#23088), so everything above is measured on
+// the ObjectQL registry alone. The defect this block pins
 // lives in the OTHER reader — `MetadataPlugin._parseAndRegisterArtifact`, the
 // door a real `objectstack dev` / `objectstack serve` boot loads the artifact
 // through — and the two only disagree once both are present. That is why this

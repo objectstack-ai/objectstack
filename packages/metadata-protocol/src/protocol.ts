@@ -188,6 +188,7 @@ import {
     evaluateLockForDelete,
     resolveLockState,
     MetadataLockSchema,
+    MetadataProtectionFields,
     type MetadataLock,
     type MetadataLockSource,
     type MetadataProvenance,
@@ -1032,6 +1033,94 @@ function withoutProtectionBlock(type: string, item: unknown): unknown {
     const rest = { ...(item as Record<string, unknown>) };
     delete rest[PROTECTION_BLOCK_KEY];
     return rest;
+}
+
+/**
+ * [ADR-0010 §3.3] The lock family: the `_lock*` members of the protection
+ * envelope every metadata type spreads (`MetadataProtectionFields`), read off
+ * that declaration so this file keeps no list of its own.
+ */
+const LOCK_FAMILY_KEYS: readonly string[] = Object.freeze(
+    Object.keys(MetadataProtectionFields).filter((key) => key.startsWith('_lock')),
+);
+
+/** The lock family `body` carries: each member with a value, and nothing else. */
+function lockFamilyOf(body: unknown): Record<string, unknown> {
+    const family: Record<string, unknown> = {};
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return family;
+    for (const key of LOCK_FAMILY_KEYS) {
+        const value = (body as Record<string, unknown>)[key];
+        if (value !== undefined) family[key] = value;
+    }
+    return family;
+}
+
+/** Do two lock families state the same members with the same values? */
+function sameLockFamily(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+    return LOCK_FAMILY_KEYS.every((key) => a[key] === b[key]);
+}
+
+/**
+ * `body` carrying exactly `family` as its lock family: every member `family`
+ * states, and no other `_lock*` key. Returns `body` itself when nothing
+ * changes, and a copy otherwise, so a caller's own body is never mutated.
+ */
+function withLockFamily(body: Record<string, unknown>, family: Record<string, unknown>): Record<string, unknown> {
+    const unchanged = LOCK_FAMILY_KEYS.every((key) =>
+        family[key] === undefined ? !Object.prototype.hasOwnProperty.call(body, key) : body[key] === family[key]);
+    if (unchanged) return body;
+    const out: Record<string, unknown> = { ...body };
+    for (const key of LOCK_FAMILY_KEYS) {
+        if (family[key] === undefined) delete out[key];
+        else out[key] = family[key];
+    }
+    return out;
+}
+
+/**
+ * [ADR-0010 §3.5 and §4.1] The save door's refusal of a body whose lock family
+ * would set, change or remove the item's lock: an author's write never does
+ * any of the three. See {@link ObjectStackProtocolImplementation.authoredLockFamily}
+ * for what is judged against what, and for the echo it accepts.
+ *
+ * The refusal family {@link protectionBlockRefusal} gives the `protection`
+ * block, at the same position: `VALIDATION_ERROR` / 400, no code minted, the
+ * prescription first because a 4xx message crosses the REST boundary bounded
+ * at 500 characters with its tail truncated. It is located twice: the message
+ * names every `_lock*` key the body sent, and `issues[]` carries each as a
+ * path, the shape the Studio designer keys on. The remedy is to remove them —
+ * a body that sends no `_lock*` key keeps the lock the item has — and the
+ * door it names for a lock is the one ADR-0010 states: a code package's
+ * loader, translating `protection` (Phase 4.3).
+ */
+function authoredLockFamilyRefusal(
+    type: string,
+    saveName: string,
+    sent: Record<string, unknown>,
+    served: Record<string, unknown>,
+): Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] } {
+    const keys = LOCK_FAMILY_KEYS.filter((key) => sent[key] !== undefined);
+    const servedLock = served._lock ?? 'none';
+    const sentLock = sent._lock ?? 'none';
+    const effect = servedLock === 'none'
+        ? (sentLock === 'none' ? 'add lock keys to it' : 'set a lock on it')
+        : sentLock === 'none' ? 'remove its lock' : 'change its lock';
+    const err = new Error(
+        `Remove ${keys.map((key) => `\`${key}\``).join(', ')} from ${type} '${saveName}' and send it again. `
+        + `Nothing was written. They would ${effect}, and the metadata API never sets, changes or removes a lock: `
+        + 'an item saved here is authored in this environment (ADR-0010 §3.5). To lock an item, declare `protection` '
+        + "on it in a code package's source, where the package loader translates it into the item's lock "
+        + '(ADR-0010 Phase 4.3).',
+    ) as Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] };
+    err.code = 'VALIDATION_ERROR';
+    err.status = 400;
+    err.issues = keys.map((key) => ({
+        path: key,
+        message: "Not accepted through the metadata API: only a code package's loader sets an item's lock. "
+            + 'Sent back exactly as a read of this item serves it, the key is accepted and ignored.',
+        code: 'custom',
+    }));
+    return err;
 }
 
 /**
@@ -20445,6 +20534,115 @@ export class ObjectStackProtocolImplementation implements
         );
     }
 
+    /**
+     * [#23119, ADR-0010 §3.5 and §4.1] The lock family an AUTHOR's save
+     * persists: the one the row it writes already stores. An author's write
+     * never sets, changes or removes an item's lock. ADR-0010 §4.1 strips the
+     * protection fields on write and has the loader reattach them on load,
+     * §3.5 gives an environment-authored item no package lock, and the spec
+     * calls the `_lock*` keys the runtime's private envelope, never authored
+     * (`shared/protection.zod.ts`). A stored row lock is one the runtime
+     * stamped: a loader's or a plugin's `applyProtection`, an install, a
+     * migration's re-save. Stored verbatim, which is what this door did, a
+     * hand-written or echoed `_lock: 'full'` bound the item for good: the next
+     * save and the delete answered `ITEM_LOCKED`, and no door unlocks it.
+     *
+     * Three outcomes, judged after the `protection` block's refusal:
+     *
+     *  - **No `_lock*` key in the body.** The body says nothing about the
+     *    lock, so the row keeps the family it stores. This is not a removal.
+     *    Dropping the stored family instead would be the fail-open direction
+     *    {@link DERIVED_PROVENANCE_KEYS}' note refuses, and it was measured
+     *    here: a `no-delete` a server face had stamped was lost to the next
+     *    author save, and the delete it refused went through.
+     *  - **An echo.** Studio and the AI authoring surfaces send the served
+     *    body back on every edit, so a family equal to one a read of this item
+     *    serves is accepted and ignored. Two such families exist. One is what
+     *    the active reads serve at the save's address ({@link getMetaItem},
+     *    the layered read's `effective`, the list): the one item-lock
+     *    resolution's answer ({@link resolveItemLock} over every shipping
+     *    package's artifact and the item's stored rows in scope), written onto
+     *    the body by {@link withItemLockFamily}. The other is the family stored
+     *    on the row this save writes, which the draft read, the preview read
+     *    and the layered read's `overlay` layer serve verbatim. Accepting the
+     *    second changes nothing, because it is the family carried forward. A
+     *    new item, or a first overlay of a packaged one, has no row: its
+     *    artifact's lock still binds through the resolution, and the row it
+     *    gets stores none.
+     *  - **Anything else** sets, changes or removes the lock, and is refused
+     *    ({@link authoredLockFamilyRefusal}). That includes a family copied
+     *    from another item, which neither read serves for this one.
+     *
+     * The row is the one the repository's `put` resolves for this save
+     * ({@link SysMetadataRepository.headAt}: its state, package and bundle
+     * member, the inherited draft binding included). A draft save with no
+     * draft row yet reads the ACTIVE row the draft overlays. That fallback is
+     * load-bearing: the draft is published by promotion, so a draft that
+     * dropped the active row's lock would publish the loss
+     * ({@link storedBodyForCarryForward} draws the same line for a credential).
+     * Read with no `try`/`catch`: a stored lock that could not be read must
+     * fail the save, never be written away.
+     *
+     * A member whose value the type's own declaration refuses is left to the
+     * parse: the body is handed on untouched, and the parse refuses it with
+     * `422 INVALID_METADATA`, as before. That is the path the unmanaged
+     * import's strip (`stripUnmanagedImportLock`) hands a lock it cannot parse
+     * down, and its refusal does not move. A type that declares no such key,
+     * or has no schema at all (`external_catalog`), is judged here: no parse
+     * would refuse the key there, and stored, the `_lock` gate reads it.
+     *
+     * Asked of every write that reaches the author arm: the REST `PUT`
+     * (`meta-envelope`), the runtime dispatcher (`meta-dispatch`), the
+     * external-table import (`external-import`, whose body the server builds
+     * and which never carries a `_lock*` key), the unmanaged import
+     * (`package-unmanaged-import`, stripped, and writing only names no row
+     * held), and the in-process doors that state no face. The server-stated
+     * rewrites (`source`, `package-duplicate`) keep stamping, as before. No
+     * stored lock is unbound here.
+     */
+    private async authoredLockFamily(args: {
+        type: string;
+        name: string;
+        packageId: string | null | undefined;
+        mode: 'draft' | 'publish';
+        item: unknown;
+    }): Promise<unknown> {
+        const { item } = args;
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+        const body = item as Record<string, unknown>;
+        const sent = lockFamilyOf(body);
+        for (const [key, value] of Object.entries(sent)) {
+            const declared = overlaySchemaDeclaredKey(args.type, key);
+            if (declared !== undefined && !declared.safeParse(value).success) return item;
+        }
+        const repo = this.getOverlayRepo();
+        const ref = { type: args.type, name: args.name, org: 'env' } as Parameters<typeof repo.headAt>[0];
+        const state: 'active' | 'draft' = args.mode === 'draft' ? 'draft' : 'active';
+        const member = itemDiscriminator(args.type, body);
+        const target = await repo.headAt(ref, { state, packageId: args.packageId ?? null, member });
+        let head = target.head;
+        if (!head && state === 'draft') {
+            head = (await repo.headAt(ref, { state: 'active', packageId: target.packageId, member })).head;
+        }
+        const stored = lockFamilyOf(head?.body);
+        if (Object.keys(sent).length > 0 && !sameLockFamily(sent, stored)) {
+            const address: ItemAddress = { type: args.type, name: args.name, packageId: args.packageId ?? undefined };
+            let overlayLockLayer: unknown;
+            try {
+                overlayLockLayer = await this.overlayLockLayerAt(address, { otherSpelling: true });
+            } catch (error) {
+                // [#5532] A lock read that did not happen is not an unlocked item.
+                this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+            }
+            const served = lockFamilyOf(withItemLockFamily({}, resolveItemLock({
+                artifact: this.artifactLockLayerAt(address),
+                overlay: overlayLockLayer,
+            })));
+            if (!sameLockFamily(sent, served)) throw authoredLockFamilyRefusal(args.type, args.name, sent, served);
+        }
+        return withLockFamily(body, stored);
+    }
+
     // [#21207] `parentVersion` is a CALLER's version token — the keyed form a
     // receipt served — and is compared in that form (`storedParentForToken`).
     // `storedParentVersion` is the in-process twin for a caller that read the
@@ -20809,9 +21007,24 @@ export class ObjectStackProtocolImplementation implements
         // and a refused save costs no read. The server-stated rewrites — the
         // same two the flow authoring rule above exempts — strip it instead.
         // See {@link protectionBlockRefusal}.
+        //
+        // [#23119, ADR-0010 §3.5 and §4.1] …and the lock family, at the same
+        // position: an author's write persists the family the row it writes
+        // already stores. A body echoing a family a read of this item serves
+        // is accepted and ignored; one that would set, change or remove the
+        // lock is refused in the block's refusal family. The server-stated
+        // rewrites keep the family their body carries, as before. See
+        // {@link authoredLockFamily}.
         if (request.source === undefined && request.writeFace !== 'package-duplicate') {
             const protectionRefusal = protectionBlockRefusal(singularType, request.item, request.name);
             if (protectionRefusal) throw protectionRefusal;
+            request.item = await this.authoredLockFamily({
+                type: singularType,
+                name: request.name,
+                packageId: request.packageId,
+                mode,
+                item: request.item,
+            });
         } else {
             request.item = withoutProtectionBlock(singularType, request.item);
         }

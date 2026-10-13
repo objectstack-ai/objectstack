@@ -21,10 +21,10 @@
 // an object saved through `PUT /meta/object/:name` is listed with a real
 // verdict (it declares a column the remote lacks, and exactly that column is
 // reported); an object imported through `…/external/tables/:remote/import` is
-// listed beside them. The verify harness composes no metadata plugin, so its
-// `metadata` service is the kernel's fallback registered after the
-// federation service's `init()`, as on `objectstack start`; the service reads
-// it when validation runs ([#21876]), so each row here is a real comparison.
+// listed beside them. The verify harness composes `@objectstack/metadata`'s
+// artifact-less `MetadataPlugin`, as `objectstack serve` does for a host
+// configuration (#23088); the service resolves what it reads when validation
+// runs ([#21876]), so each row here is a real comparison.
 // The seam pins sit beside the plugin
 // (`packages/services/service-datasource/src/__tests__/external-validate-reads-live-registry.test.ts`).
 //

@@ -367,16 +367,27 @@ describe('ADR-0131 D6 — PUT /meta/:type/:name: an organization admin\'s metada
         expect('organizationId' in stack.saveMetaItem.mock.calls[0][0]).toBe(false);
     });
 
-    it('query/body-smuggled organization ids do not reach the write either', async () => {
+    it('a body-smuggled organization id does not reach the write either', async () => {
         const stack = bootDoor({ userId: 'u_author', systemPermissions: ['manage_metadata'], tenantId: ORG });
         const write = await stack.put(
             'view', 'org_grid',
             { name: 'org_grid', organization_id: 'org_b', organizationId: 'org_b' },
-            { organizationId: 'org_b' },
         );
         expect(write.res.statusCode).toBe(200);
         // The save request is built field by field from named `req` values.
         expect('organizationId' in stack.saveMetaItem.mock.calls[0][0]).toBe(false);
+    });
+
+    // [#23072] The query half used to be the same 200 with the name dropped.
+    // The door now declares its closed set (`force`, `package`, `mode`), so a
+    // query-smuggled organization id is refused before anything is written.
+    it('a query-smuggled organization id is refused with a located 400, and nothing is written', async () => {
+        const stack = bootDoor({ userId: 'u_author', systemPermissions: ['manage_metadata'], tenantId: ORG });
+        const write = await stack.put('view', 'org_grid', { name: 'org_grid' }, { organizationId: 'org_b' });
+        expect(write.res.statusCode).toBe(400);
+        expect(write.body?.error?.code).toBe('VALIDATION_ERROR');
+        expect(write.body?.error?.message).toMatch(/^The "organizationId" query parameter is not supported by this endpoint\./);
+        expect(stack.saveMetaItem).not.toHaveBeenCalled();
     });
 
     it('control: `manage_metadata` with no active organization still saves a view env-wide, as before', async () => {
