@@ -19,10 +19,10 @@ export const entry: SemanticMigration = {
     + '/duplicate when the published rows it copies hold one; and /adopt-orphans when the orphaned rows include one',
   replacement:
     'the platform operator (the `PLATFORM_ADMIN` rung, the deployment\'s declared '
-    + '`OS_PLATFORM_OWNER_EMAIL` owner) runs those verbs on catalog-carrying packages; a package whose '
-    + 'drafts, commits or rows carry no catalog item is handled exactly as before. A custom package '
-    + 'door asks `walledCatalogWriteVerdict` (`@objectstack/metadata-core`) for the catalog types its '
-    + 'verb acts on, after its capability gate',
+    + '`OS_PLATFORM_OWNER_EMAIL` owner) runs those verbs on catalog-carrying packages. '
+    + 'walled-environment-metadata-writes-retired then refuses the same caller those verbs on every '
+    + 'package, whatever its drafts, commits or rows carry. A custom package door asks '
+    + '`walledCatalogWriteVerdict` (`@objectstack/metadata-core`) after its capability gate',
   reason:
     'ADR-0131 D3: on a shared-database multi-tenant deployment tenant admins cannot create or edit '
     + 'catalog items, and the operator defines the catalog for every tenant. A package\'s catalog '
@@ -36,11 +36,9 @@ export const entry: SemanticMigration = {
     + 'package twice (the second adding manage_users) and leaves a third draft pending; another '
     + 'organization\'s member holds the set. An organization owner holding manage_metadata inside '
     + 'their own organization then calls publish-drafts, discard-drafts, revert, rollback to the first commit, '
-    + 'commits/<second>/revert (also under a URL naming their own package), duplicate and, from a '
-    + 'package of their own, adopt-orphans: each answers 403 PERMISSION_DENIED naming the posture, '
+    + 'commits/<second>/revert (also under a URL naming another package), duplicate and, into '
+    + 'another package, adopt-orphans: each answers 403 PERMISSION_DENIED naming the posture, '
     + 'the draft stays pending, nothing is copied or rebound, and the member resolves exactly what it '
-    + 'resolved before. The same owner runs every verb but adopt-orphans (which reads the '
-    + 'environment\'s orphans, not the package) on a package of their own whose items carry no '
-    + 'catalog item with 200; the platform operator runs every verb on the catalog-carrying package '
-    + 'with 200; and on a single deployment a manage_metadata holder runs them exactly as before.',
+    + 'resolved before. The platform operator runs every verb on the catalog-carrying package with '
+    + '200, and on a single deployment a manage_metadata holder runs them exactly as before.',
 };

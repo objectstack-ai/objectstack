@@ -35,12 +35,16 @@
  * [#19939] The `params` key a contract issue carries when it refuses a `{…}`
  * token — or an envelope — at a position the executor reads AS WRITTEN (a
  * `notify` node's `sourceObject`, `actorId` and `payload`; an `http` node's
- * `method`, `durable` and `timeoutMs`, and its `headers` map as a whole),
- * never through an interpolator. The build doors' value arm (`flow-node-config-refusals.ts`,
- * `builtinValueJudged`) leaves every other token-carrying value alone, since
- * only the interpolation decides what the run will see there; at a position
- * read as written the run sees exactly what the build sees, so the
- * contract's refusal is the run's verdict and the build reports it.
+ * `method`, `durable` and `timeoutMs`, and its `headers` map as a whole) — a
+ * literal's own refusal of what it holds, naming the value to write.
+ *
+ * (#23260) Every builtin executor parses its config as authored, so the run
+ * sees what the build sees at every key, and the build doors' value arm
+ * (`flow-node-config-refusals.ts`, `builtinValueJudged`) judges a
+ * token-carrying value like any literal. What the marker tells it is which
+ * issue speaks for the key: the marked one is reported, and the contract's
+ * type issue at the same key (`timeoutMs: '{t}'` is also not a number) is
+ * not, so the literal is refused once, in its own words.
  */
 export const READ_AS_WRITTEN_PARAM = 'readAsWritten';
 

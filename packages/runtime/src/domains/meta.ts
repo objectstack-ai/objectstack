@@ -31,9 +31,8 @@ import {
     // too. No `/meta` branch here carries an organization into a metadata
     // write or read: the per-organization overlay axis is retired.
     metaWriteCapabilityVerdict,
-    // [ADR-0131 D3] …and, for the security catalog under a wall, the platform
-    // operator alone: the walled catalog refusal every catalog write door asks.
-    isSecurityCatalogType,
+    // [ADR-0131 D3 · D12 items 7–8] …and, under a wall, the platform operator
+    // alone: the walled refusal every environment-metadata write door asks.
     walledCatalogWriteVerdict,
 } from '@objectstack/metadata-core';
 // [#15238] The DECLARED protocol contracts this domain's request literals are
@@ -1359,15 +1358,15 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 };
             }
 
-            // [ADR-0131 D3] The walled catalog refusal, right after the
+            // [ADR-0131 D3 · D12 items 7–8] The walled refusal, right after the
             // capability gate and before anything is read or written: under
-            // `isolated` / `group` a position, permission set or capability is
-            // shared by every organization, so only the platform operator rung
-            // (or the engine itself) saves one. Inert under `single`. The
-            // posture is read only for a catalog type, so no other save pays
-            // for it. Same predicate as `RestServer`'s four write doors and the
-            // security plugin's data door.
-            if (isSecurityCatalogType(type)) {
+            // `isolated` / `group` every organization shares the environment's
+            // metadata, so only the platform operator rung (or the engine
+            // itself) saves an item, whatever its type (ruling A on #23231: no
+            // catalog pre-filter). Inert under `single`. Same predicate as
+            // `RestServer`'s four write doors, the `/packages` and
+            // `/automation` write doors and the security plugin's data door.
+            {
                 const ec: any = _context.executionContext;
                 const walled = walledCatalogWriteVerdict({
                     type,
@@ -1963,6 +1962,25 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     403,
                 ),
             };
+        }
+
+        // [ADR-0131 D12 items 7–8] The walled refusal, after the capability gate
+        // and before the protocol is resolved or a row is read: this rewrites
+        // every stored row of the environment's metadata, which under
+        // `isolated` / `group` is the platform operator's (ruling A on #23231).
+        // A preview is refused too: it is the same install-wide pass, without
+        // the write. Inert under `single`. Same predicate as `RestServer`'s
+        // `_migrate-stored` door and this branch's `PUT` above.
+        {
+            const walled = walledCatalogWriteVerdict({
+                type: 'sys_metadata',
+                tenancyPosture: await readEffectiveTenancyPosture(deps, _context),
+                isSystem: ec?.isSystem === true,
+                callerPosture: ec?.posture,
+            });
+            if (!walled.allowed) {
+                return { handled: true, response: deps.error(walled.message, 403) };
+            }
         }
 
         const protocol = await resolveProtocol(deps, _context);
