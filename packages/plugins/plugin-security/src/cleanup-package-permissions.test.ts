@@ -3,23 +3,15 @@
 // (ADR-0086 D3 provenance consumed at last; ADR-0090 D5 "no ghost grants").
 
 import { describe, it, expect } from 'vitest';
-import { cleanupPackagePermissions as cleanup } from './cleanup-package-permissions';
+import { cleanupPackagePermissions } from './cleanup-package-permissions';
 
 /**
- * The sweep, with the declared-names argument C3 stage 8 adds. Spelled through
- * this signature so the suite compiles against the module before and after
- * that stage: before it, the sweep finds the package's sets by its catalog
- * rows and ignores the names; after it, it finds them by the names.
+ * The permission-set names the uninstalling door read off the package before
+ * its withdrawal (`UninstallDeclared`, ADR-0131 D4). Handed to the sweep, they
+ * revoke the same grants whether it also finds the package's sets by their
+ * catalog rows (before C3 stage 8) or by these names alone (after it).
  */
-const cleanupPackagePermissions = cleanup as (
-  ql: any,
-  packageId: string,
-  logger?: Parameters<typeof cleanup>[2],
-  declaredSetNames?: readonly string[],
-) => ReturnType<typeof cleanup>;
-
-/** The permission-set names the uninstalled package declared (read off it before its withdrawal). */
-const DECLARED = ['crm_readonly', 'crm_admin'];
+const DECLARED = { permission: ['crm_readonly', 'crm_admin'] };
 
 /**
  * A store holding both shapes a grant has carried: every grant names its set
@@ -188,17 +180,25 @@ describe('[ADR-0131 D4, ADR-0090 D5] the grants naming a set the package declare
 
   it('revokes every user grant naming a declared set, and only those', async () => {
     const ql = withNamedGrants();
-    const out = await cleanupPackagePermissions(ql, 'com.example.crm', undefined, { permission: ['crm_catalog_user'] });
+    const out = await cleanupPackagePermissions(ql, 'com.example.crm', undefined, {
+      permission: [...DECLARED.permission, 'crm_catalog_user'],
+    });
 
-    expect(out.userGrants).toBe(3); // the legacy row's grant (ups_1) and the two naming the declared set
-    expect(ql.tables.sys_user_permission_set.map((r: any) => r.id)).toEqual(['ups_env', 'ups_named_other']);
+    // The two grants naming the package's row-backed sets and the two naming
+    // its registry-only set.
+    expect(out.userGrants).toBe(4);
+    expect(ql.tables.sys_user_permission_set.map((r: any) => r.id)).toEqual(['ups_env', 'ups_other', 'ups_named_other']);
   });
 
-  it('control — handed no names, a grant naming a catalog set survives: the cleanup is as it was', async () => {
+  it('control — handed no names, a grant naming a registry-only set survives', async () => {
     const ql = withNamedGrants();
     const out = await cleanupPackagePermissions(ql, 'com.example.crm');
 
-    expect(out).toEqual({ sets: 2, positionBindings: 2, userGrants: 1, suggestions: 2, refused: 0 });
-    expect(ql.tables.sys_user_permission_set.map((r: any) => r.id)).toEqual(['ups_env', 'ups_named_1', 'ups_named_2', 'ups_named_other']);
+    expect(out).toMatchObject({ suggestions: 2, refused: 0 });
+    // Whatever the row legs reach while the catalog rows still exist, no grant
+    // naming a set the sweep was not handed is revoked.
+    expect(ql.tables.sys_user_permission_set.map((r: any) => r.id)).toEqual(
+      expect.arrayContaining(['ups_env', 'ups_other', 'ups_named_1', 'ups_named_2', 'ups_named_other']),
+    );
   });
 });
