@@ -115,10 +115,12 @@ describe('批 18, unknown keys refused — the doors these shapes are reachable 
 // 2. Every closed site, at its own path
 // ===========================================================================
 describe('批 18 — closed sites reject unknown keys where they live', () => {
-  describe('ViewDataSchema — all four provider arms', () => {
+  // Three arms, not four: the `api` arm was retired whole (ADR-0049, ruling
+  // 2026-10-12 letter C) — `view-data-api-provider-retirement.test.ts` pins
+  // that `provider: 'api'` is refused by name rather than by an unknown key.
+  describe('ViewDataSchema — all three provider arms', () => {
     it.each([
       ['object', { provider: 'object', object: 'crm_lead' }],
-      ['api', { provider: 'api' }],
       ['value', { provider: 'value', items: [] }],
       ['schema', { provider: 'schema', schemaId: 'report' }],
     ])('the `%s` arm rejects an undeclared key', (_arm, base) => {

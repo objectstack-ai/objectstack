@@ -46,7 +46,6 @@ import {
 } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveDisplayField } from '@objectstack/spec/data';
-import { SysPositionPermissionSet } from './sys-position-permission-set.object.js';
 import { SysUserPermissionSet } from './sys-user-permission-set.object.js';
 import { SysUserPosition } from './sys-user-position.object.js';
 
@@ -59,11 +58,6 @@ interface Case {
 }
 
 const CASES: Case[] = [
-  {
-    schema: SysPositionPermissionSet,
-    row: { position_id: 'pos_sales', permission_set_id: 'ps_crm_edit' },
-    title: 'pos_sales → ps_crm_edit',
-  },
   {
     schema: SysUserPermissionSet,
     // [ADR-0131 D4] A grant names its set; the title shows that name.

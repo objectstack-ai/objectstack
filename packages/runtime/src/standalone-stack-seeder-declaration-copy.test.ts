@@ -216,6 +216,7 @@ interface ObjectQlRegistrySlot {
   /** The private field `plugin-sharing`'s `readDeclared` spells instead. */
   readonly _registry: unknown;
   find(object: string, query: Record<string, unknown>): Promise<DeclaredItem[]>;
+  getObject?(object: string): unknown;
 }
 
 interface MetadataListSlot {
@@ -283,7 +284,8 @@ beforeAll(async () => {
   for (const t of ['sys_permission_set', 'sys_capability', 'sys_sharing_rule']) {
     // The seeded rows as the platform reads them: the explicit system opt-in.
     // A context-less read is refused by the security middleware (ADR-0096 D5).
-    rows[t] = await ql.find(t, { context: { isSystem: true } });
+    // [C3 stage 8] A retired catalog row object has no table, and no rows.
+    rows[t] = ql.getObject?.(t) ? await ql.find(t, { context: { isSystem: true } }) : [];
   }
 }, BOOT_TIMEOUT);
 
