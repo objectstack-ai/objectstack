@@ -215,9 +215,11 @@ read and the metadata door serve.
 **No authorization check reads a `sys_capability` row.** Permission-set grants
 and resource `requiredPermissions` match capability names **as strings**. The
 boot writes no row for a capability, declared or curated: both are served by
-the registry. A row an older database still holds is a catalogue only, and
-clearing its `active` flag revokes nothing. Withdraw a capability by
-withdrawing the **grant**.
+the registry. The `sys_capability` object itself is retired and no longer
+registered (ADR-0131 D3): a row an older database still holds is served by no
+route and read by nothing, and `os migrate organization-ownership --apply`
+reports the authored rows and deletes the seeded copies (ADR-0131 D10).
+Withdraw a capability by withdrawing the **grant**.
 </Callout>
 
 ## `capability` is code-only

@@ -172,7 +172,12 @@ export const SysRecordShare = ObjectSchema.create({
 
     // ── Recipient (who receives access) ──────────────────────────
     recipient_type: Field.select(
-      ['user', 'group', 'position', 'unit_and_subordinates', 'guest'],
+      // `guest` was removed (ADR-0138 D8): a share to the anonymous principal
+      // was declared here and honoured nowhere — `grant()` refused it and no
+      // gate reads such a row — since guest access flows through the guest
+      // position and share links only (ADR-0090 D11). Held equal to
+      // `RecordShareRecipientType` in `@objectstack/spec/contracts`.
+      ['user', 'group', 'position', 'unit_and_subordinates'],
       {
         label: 'Recipient Type',
         required: true,

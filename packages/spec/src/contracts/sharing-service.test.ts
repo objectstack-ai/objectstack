@@ -43,19 +43,30 @@ describe('Sharing Service Contract — recipient vocabularies, each under its ow
       'group',
       'position',
       'unit_and_subordinates',
-      'guest',
     ];
     // @ts-expect-error `role` never was a persistable recipient_type value
     const notARowRecipient: RecordShareRecipientType = 'role';
-    expect(rowRecipients).toHaveLength(5);
+    expect(rowRecipients).toHaveLength(4);
     expect(notARowRecipient).toBe('role');
+  });
+
+  it('`guest` is not a record-share recipient (ADR-0138 D8)', () => {
+    // Declared and never honoured: the grant refused it and no gate reads such
+    // a row, because guest access flows through the guest position and share
+    // links (ADR-0090 D11). Removed from the union and from the select together.
+    // @ts-expect-error `guest` was removed from RecordShareRecipientType (ADR-0138 D8)
+    const retired: RecordShareRecipientType = 'guest';
+    const isMember: Assert<Eq<Extract<RecordShareRecipientType, 'guest'>, never>> = true;
+    expect(retired).toBe('guest');
+    expect(isMember).toBe(true);
   });
 
   it('security ShareRecipientType is the RULE vocabulary and shares no declaration', () => {
     // The authorable rule-recipient enum: SharingRuleRecipientType minus the
     // reserved `queue`. Distinct concept, distinct values — `group` / `guest`
     // were deliberately removed from it (ADR-0078) while the record-share ROW
-    // vocabulary keeps persisting them for forward compatibility.
+    // vocabulary keeps persisting `group` for forward compatibility (its
+    // `guest` went too, ADR-0138 D8).
     expect(ShareRecipientType.options).toEqual([
       'user',
       'team',
