@@ -624,9 +624,9 @@ const SECURITY_CBP_NO_RELATION_EXPLANATION: RuleExplanation = {
       'refusal does not exempt them.',
     'To fix it, declare the master relation this object is derived from: a `master_detail` field with a ' +
       '`reference` and `required: true` (a lookup to the master becomes that field; a detail is deleted ' +
-      'with its master unless it declares `deleteBehavior: \'restrict\'`). An object whose rows must ' +
-      'outlive their parent is not a detail and decides its own baseline: \'private\' (the owner plus ' +
-      'explicit shares), \'public_read\' or \'public_read_write\'.',
+      'with its master unless it declares `deleteBehavior: \'restrict\'`). An object with no master decides ' +
+      'its own baseline — and so does one whose rows must outlive their parent, which is not a detail: ' +
+      '\'private\' (the owner plus explicit shares), \'public_read\' or \'public_read_write\'.',
   ],
 };
 

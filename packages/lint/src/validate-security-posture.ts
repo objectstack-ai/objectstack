@@ -556,9 +556,8 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
         // [#22161] One verdict sentence; why exactly one master is the rule is
         // this id's `os explain` entry.
         message:
-          `declares sharingModel 'controlled_by_parent' with ${cbpCandidates.length} required master_detail ` +
-          `fields (${roster}), so no master is derived: every read is denied and every write refused ` +
-          `(422 INVALID_METADATA)`,
+          `declares ${cbpCandidates.length} required master_detail fields (${roster}), so no ` +
+          `controlled_by_parent master is derived: every read denied, every write refused`,
         // [#22161] One remedy line.
         hint:
           `Keep master_detail on the ONE master this object's rows belong to, and declare every other parent ` +
