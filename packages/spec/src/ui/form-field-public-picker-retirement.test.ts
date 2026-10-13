@@ -315,6 +315,10 @@ describe('tree-scoped absence: no form field inside the declared radius still au
     // The REST strip pin authors it on a STORED pre-retirement row, the exact
     // row the old opt-in would have kept, to prove the strip is unconditional.
     'packages/rest/src/public-form-routes.test.ts',
+    // The props-lint pin authors it on an `object-form` field to prove the
+    // component-props gate refuses a tombstone inside a union arm as an error
+    // at `os validate` / `os build` / `os lint`.
+    'packages/lint/src/validate-component-props.test.ts',
     // This pin names the key to assert its absence.
     THIS_FILE,
   ]);
