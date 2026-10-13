@@ -58,6 +58,22 @@ export interface StoredFlowCanonicalization {
    * clobber that owner, and skipping quietly would hide it.
    */
   conflicts: Array<{ conversionId: string; token: string; path: string; message: string }>;
+  /**
+   * Sites the chain left as stored because no lossless rewrite exists (#23269)
+   * — above all a value slot carrying a `{…}` template token, which
+   * `registerFlow` refuses although the parse accepts the flow. Listed under
+   * the row exactly as a non-flow row's TODOs are ({@link StoredMigrationTodo}).
+   * Optional, so a caller-supplied canonicalizer that reports none still fits;
+   * absent reads as none.
+   */
+  todos?: Array<{
+    conversionId: string;
+    surface: string;
+    from: string;
+    path: string;
+    reason: string;
+    message: string;
+  }>;
 }
 
 /** What the pass did with (or would do with) one `sys_metadata` row. */
