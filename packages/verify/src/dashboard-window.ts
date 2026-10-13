@@ -65,7 +65,7 @@ import { DashboardSchema, DatasetSchema } from '@objectstack/spec/ui';
 import { DATE_RANGE_PRESETS, DATE_RANGE_PRESET_MACRO_WINDOWS, type DateRangePreset } from '@objectstack/spec/data';
 import { resolveFilterTokens } from '@objectstack/core';
 import { declaredCollection } from './artifact-collections.js';
-import { deriveCrudCases, fillRelationalRefs, type CrudCase } from './derive.js';
+import { deriveCrudCases, fillRelationalRefs, fixtureBody, type CrudCase } from './derive.js';
 import type { VerifyStack } from './harness.js';
 
 /**
@@ -485,58 +485,8 @@ function shiftDay(day: string, n: number): string {
   return new Date(Date.parse(`${day}T00:00:00.000Z`) + n * DAY_MS).toISOString().slice(0, 10);
 }
 
-/** A `date` / `datetime` value moved `days` later, in the same spelling. */
-function laterBy(value: string, days: number): string {
-  const at = Date.parse(value);
-  if (Number.isNaN(at) || days === 0) return value;
-  const moved = new Date(at + days * DAY_MS).toISOString();
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? moved.slice(0, 10) : moved;
-}
-
-/** The `k`-th distinct value of a sample `base`. */
-function vary(base: string | number, k: number): string | number {
-  if (typeof base === 'number') return base + k;
-  if (/^\d{4}-\d{2}-\d{2}/.test(base)) return laterBy(base, k);
-  const at = base.indexOf('@');
-  if (at > 0) return `${base.slice(0, at)}-w${k}${base.slice(at)}`;
-  if (/^https?:\/\//.test(base)) return `${base.replace(/\/$/, '')}/w${k}`;
-  if (/^\+\d+$/.test(base)) return `${base}${k}`;
-  return `${base}-w${k}`;
-}
-
-/** The fields of `objectDef` a uniqueness constraint covers: a declared field scope, or a unique index entry. */
-function uniqueFields(objectDef: any): Set<string> {
-  const out = new Set<string>();
-  for (const [name, def] of Object.entries<any>(objectDef?.fields ?? {})) {
-    if (def?.unique !== undefined && def?.unique !== false) out.add(name);
-  }
-  for (const index of Array.isArray(objectDef?.indexes) ? objectDef.indexes : []) {
-    if (index?.unique) for (const f of Array.isArray(index.fields) ? index.fields : []) out.add(String(f));
-  }
-  return out;
-}
-
-/**
- * A record the CRUD derivation can offer: by default the smallest (the shape
- * the sibling families use) — its values for the fields the object REQUIRES,
- * so every optional field takes the app's own default; with `full`, every
- * field it synthesizes (what a rule that requires a field only in some state
- * asks for). Each `date` / `datetime` is one day after the one declared before
- * it, and each unique-constrained value is made distinct by `n`.
- */
-function fixtureBody(body: Record<string, unknown>, objectDef: any, n: number, full = false): Record<string, unknown> {
-  const unique = uniqueFields(objectDef);
-  const out: Record<string, unknown> = {};
-  let dates = 0;
-  for (const [name, def] of Object.entries<any>(objectDef?.fields ?? {})) {
-    if ((!full && def?.required !== true) || !(name in body)) continue;
-    let value = body[name];
-    if ((def?.type === 'date' || def?.type === 'datetime') && typeof value === 'string') value = laterBy(value, dates++);
-    if (unique.has(name) && (typeof value === 'string' || typeof value === 'number')) value = vary(value, n);
-    out[name] = value;
-  }
-  return out;
-}
+/** This family's letter on every string value it varies (`derive.ts`'s `vary`). */
+const FIXTURE_TAG = 'w';
 
 /** The days the fixtures are written on: each preset's first and last day and the day either side, never after today. */
 function fixtureDays(presets: DashboardWindowPreset[], today: string): string[] {
@@ -592,11 +542,6 @@ function judge(
 
 // ── The run ─────────────────────────────────────────────────────────────────
 
-export interface DashboardWindowProofOptions {
-  /** The reference instant the ground truth resolves on. Defaults to the start of the run. */
-  now?: Date;
-}
-
 /**
  * Run the dashboard date-window family against a live stack, as the principal
  * `token` signs in: for every widget a `dateRange` binds, every count measure
@@ -605,12 +550,16 @@ export interface DashboardWindowProofOptions {
  * known days, and each difference is compared with the rows that window
  * selects. Returns a structured report; a per-widget failure is collected,
  * not thrown.
+ *
+ * The presets resolve once, when the run starts, on the current instant: the
+ * server resolves them per request on its own clock, so no other instant
+ * could agree with it. A measure whose fixture day is no longer the day the
+ * run started on is not run.
  */
 export async function runDashboardWindowProofs(
   stack: VerifyStack,
   token: string,
   config: any,
-  options: DashboardWindowProofOptions = {},
 ): Promise<DashboardWindowReport> {
   const { cases, dashboards } = derive(config);
   const crud = new Map<string, CrudCase>(deriveCrudCases(config).map((c) => [c.object, c]));
@@ -623,13 +572,14 @@ export async function runDashboardWindowProofs(
   const utc = timezone === undefined || timezone === 'UTC';
   const tokenCtx = (now: Date) => ({ now, timezone, userId: principal });
 
-  const start = options.now ?? new Date();
+  const start = new Date();
   const presets: DashboardWindowPreset[] = DATE_RANGE_PRESETS.map((preset) => {
     const [from, to] = DATE_RANGE_PRESET_MACRO_WINDOWS[preset];
     const condition: Record<string, string> = { $gte: from, ...(to ? { $lte: to } : {}) };
     return { preset, condition, resolved: resolveFilterTokens(condition, tokenCtx(start)) as Record<string, unknown> };
   });
   const todayAt = (now: Date) => String(resolveFilterTokens('{today}', tokenCtx(now)));
+  const startDay = todayAt(start);
 
   const registered = (object: string): Record<string, any> => {
     try {
@@ -687,7 +637,7 @@ export async function runDashboardWindowProofs(
       } else {
         const { body } = fillRelationalRefs(c, ids);
         try {
-          const [written] = await stack.seed(object, [fixtureBody(body, objectDefs.get(object), ++counter)]);
+          const [written] = await stack.seed(object, [fixtureBody(body, objectDefs.get(object), ++counter, FIXTURE_TAG)]);
           made = written?.id != null ? { id: String(written.id) } : { reason: `the seed of ${object} returned no id` };
         } catch (e) {
           made = { reason: `the seed of ${object} was refused: ${clip((e as Error)?.message, 160)}` };
@@ -843,6 +793,13 @@ export async function runDashboardWindowProofs(
       return;
     }
     const day0 = todayAt(new Date());
+    // The presets resolved when the run started; the server resolves them on
+    // today. Once the day has turned since then, the ground truth would judge
+    // this measure against yesterday's edges, so it is not run.
+    if (day0 !== startDay) {
+      notRun(`the day turned after the run started (${startDay} → ${day0}), so the windows the presets resolved then are not the ones the server resolves now`);
+      return;
+    }
     const before = new Map<DateRangePreset, DashboardWindowAnswer>();
     for (const p of presets) before.set(p.preset, await ask(c.dataset!, selection(p.condition), m.measure));
 
@@ -869,7 +826,7 @@ export async function runDashboardWindowProofs(
     let full = false;
     for (const day of days) {
       const row = (wide: boolean): Record<string, unknown> => ({
-        ...fixtureBody(body, objectDefs.get(c.object!), ++counter, wide),
+        ...fixtureBody(body, objectDefs.get(c.object!), ++counter, FIXTURE_TAG, wide),
         ...(ownerColumn ? { owner_id: principal } : {}),
         ...Object.fromEntries(held),
         [c.field!]: stamp(day),

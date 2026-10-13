@@ -175,7 +175,6 @@ export type {
   DashboardWindowWidgetStatus,
   DashboardWindowWidgetResult,
   DashboardWindowReport,
-  DashboardWindowProofOptions,
 } from './dashboard-window.js';
 
 // ADR-0060 — reusable conformance-ledger helper (static complement to the

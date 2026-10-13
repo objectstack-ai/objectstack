@@ -63,6 +63,11 @@ import type { ObjectStackProtocolImplementation } from '@objectstack/metadata-pr
 // (`metaSaveRequestOptions`): `If-Match` / `If-None-Match: *` and `?mode=draft`.
 // [#22188] …and the one reading of `?package=` (`metaItemPackageBinding`),
 // under which `all` names no package, on every branch here that reads it.
+// [#23072] …and the by-name doors' query decision (`metaItemQueryRefusal`,
+// ruling 6138588561) with the member selector's one reading
+// (`metaMemberSelector`): the item read, `PUT`, `/layers` and `/published`
+// each refuse a name they do not read, as `RestServer`'s doors do, and the
+// item read honours `?member=`.
 // Imported, never restated — AGENTS.md 〈Route & surface ownership〉 rule 1.
 import {
     createMetaBookTreeAnswer,
@@ -73,6 +78,8 @@ import {
     isPublicAudienceRead,
     metaItemLayersDeprecationHeaders,
     metaItemPackageBinding,
+    metaItemQueryRefusal,
+    metaMemberSelector,
     metaRequestLocale,
     metaSaveRequestOptions,
     metaTypeReadRefusal,
@@ -707,7 +714,7 @@ async function readPendingDraft(
     packageId: string | undefined,
     previewDrafts: boolean,
     saveVerdict: MetaSaveVerdict,
-    item: { maskPosture: ObjectSchemaMaskPosture; query: any },
+    item: { maskPosture: ObjectSchemaMaskPosture; query: any; memberSelector: { member?: string } },
 ): Promise<HttpDispatcherResult> {
     const singularType = pluralToSingular(type);
     const protocol = await resolveProtocol(deps, context);
@@ -718,6 +725,9 @@ async function readPendingDraft(
     try {
         envelope = await protocol.getMetaItem({
             type: singularType, name, packageId, state: 'draft', previewDrafts,
+            // [#23072] The member the item read's `?member=` named: its own
+            // draft row, as `RestServer`'s draft read asks for it.
+            ...item.memberSelector,
         });
     } catch (e: any) {
         return { handled: true, response: deps.errorFromThrown(e, 404) };
@@ -858,6 +868,20 @@ function decodeMetaNameSegment(segment: string): string {
     } catch {
         return segment;
     }
+}
+
+/**
+ * [#23072] A by-name door's QUERY refusal — `metaItemQueryRefusal` in
+ * `@objectstack/rest`, the decision `RestServer`'s doors answer too — written
+ * in this transport's envelope (`deps.error`, the ADR-0112 nested body), with
+ * the decision's own `error.code` and sentence, so the two transports refuse
+ * one request with one code and one message.
+ */
+function queryRefusalAnswer(
+    deps: DomainHandlerDeps,
+    refusal: NonNullable<ReturnType<typeof metaItemQueryRefusal>>,
+): HttpDispatcherResult {
+    return { handled: true, response: deps.error(refusal.message, refusal.status, { code: refusal.code }) };
 }
 
 /**
@@ -1052,6 +1076,13 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     // segments, like `/published` beside it. The anonymous gate above keeps its
     // deny here (`metaReadRouteOf` names no route), as `RestServer`'s does.
     if (parts.length === 3 && parts[2] === 'layers' && (!method || method.toUpperCase() === 'GET')) {
+        // [#23072] The route's closed query set — `package`, the one name it
+        // reads — refused before the protocol, the masker and the read gate,
+        // where `RestServer`'s `/layers` refuses it: a `?member=` (the layered
+        // view shows the canonical member's layers) or any other name is a
+        // located 400, never dropped.
+        const queryRefusal = metaItemQueryRefusal('layers', query);
+        if (queryRefusal) return queryRefusalAnswer(deps, queryRefusal);
         const type = parts[0];
         const name = decodeMetaNameSegment(parts[1]);
         const protocol = await resolveProtocol(deps, _context);
@@ -1092,6 +1123,12 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     // so that fold could only ever address a name that can no longer be
     // written.
     if (parts.length === 3 && parts[2] === 'published' && (!method || method === 'GET')) {
+        // [#23072] The route reads no query parameter (its set is EMPTY, as
+        // `RestServer`'s `/published`): any name — `?member=` included, which
+        // the published document cannot honour — is a located 400 before the
+        // protocol and the read gate, never dropped.
+        const queryRefusal = metaItemQueryRefusal('published', query);
+        if (queryRefusal) return queryRefusalAnswer(deps, queryRefusal);
         const type = parts[0];
         const name = decodeMetaNameSegment(parts[1]);
 
@@ -1236,12 +1273,14 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     if (parts.length === 2) {
         const type = parts[0];
         const name = decodeMetaNameSegment(parts[1]);
-        // Extract optional package filter from query string.
+        // Extract optional package filter from query string — per door below,
+        // AFTER that door's query decision ([#23072]: it unwraps a name supplied
+        // once as a one-element array, so the binding reads the string).
         // [#22188] `RestServer`'s reading, for the read and the save alike:
         // `all` names no package. It forwarded the literal, so a
         // `PUT ?package=all` stored the row bound to a package called `all`
         // where `RestServer` stores it env-local.
-        const packageId = metaItemPackageBinding(query?.package);
+        const packageBinding = (): string | undefined => metaItemPackageBinding(query?.package);
 
         // PUT /metadata/:type/:name (Save)
         //
@@ -1326,6 +1365,18 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     return { handled: true, response: deps.error(walled.message, 403) };
                 }
             }
+
+            // [#23072] The save's closed query set, after the two gates that read
+            // the session and before any query read, as `RestServer`'s `PUT`
+            // places its own: `package` and `mode`, the two names this branch
+            // reads. ⛔ Not `force` — this door was ruled never to take one
+            // (#11095, its `409` remedy says so) — and not `member`: the save
+            // is BODY-addressed (ruling 6116165299), so a `?member=zh-CN` beside
+            // an `en-US` body is refused rather than dropped while the body's
+            // member is written. Nothing is read or written before the refusal.
+            const queryRefusal = metaItemQueryRefusal('save', query);
+            if (queryRefusal) return queryRefusalAnswer(deps, queryRefusal);
+            const packageId = packageBinding();
 
             // [#22141] The ADR-0008 precondition and the ADR-0033 lifecycle,
             // read off THIS request through the one mapping `RestServer`'s
@@ -1529,6 +1580,30 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             };
         }
 
+        // [#23072] THE item read's query decision — `metaItemQueryRefusal` in
+        // `@objectstack/rest`, the one `RestServer`'s item read asks (ruling
+        // 6138588561) — before any other read of the query, as there. Its first
+        // two rules are answered here: a name outside the route's closed set
+        // (`layers`, `state`, `preview`, `package`, `locale`, `member` — the
+        // names this branch reads) and a single-valued name supplied twice. The
+        // third (a member on the layered view) is answered where the layered
+        // view is chosen, below. This branch declared no set, so `?member=` and
+        // every misspelling were dropped and answered with the canonical item.
+        const queryRefusal = metaItemQueryRefusal('item', query);
+        if (queryRefusal && queryRefusal.rule !== 'layered-member') return queryRefusalAnswer(deps, queryRefusal);
+        const packageId = packageBinding();
+        // [#23072] …and the member it names (`metaMemberSelector`, the one
+        // reading `RestServer`'s doors read), handed to EVERY protocol read
+        // below — the draft read, the `object` branch and the generic one —
+        // whose `resolveBundleMemberSelector` judges the value once, for both
+        // transports. A named member is the PROTOCOL's to answer: the registry
+        // and `MetadataService` fallbacks key by name and hold one body per
+        // name, so they would answer the canonical member for it, and a
+        // protocol refusal (a selector on a type with no members, a blank one)
+        // is answered as itself instead of falling through to them.
+        const memberSelector = metaMemberSelector(query);
+        const memberNamed = memberSelector.member !== undefined;
+
         // [#20338 · #20320] The item read's two draft switches, each declared
         // WITH its admission ({@link mayReadPendingDrafts}), once, above every
         // branch below — so no branch can re-derive a switch past the gate. A
@@ -1570,6 +1645,13 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             throw maskError;
         }
 
+        // [#23072] The decision's third rule: the layered view shows the
+        // canonical member's layers and reads no member, so a member named
+        // beside `?layers=` is refused — here, after the mask posture, where
+        // `RestServer` answers it — rather than served the wrong member's
+        // layers. Whatever the protocol can do, as there.
+        if (queryRefusal) return queryRefusalAnswer(deps, queryRefusal);
+
         try {
             // [#5882 · #20478] The DEPRECATED spelling of the layered view,
             // `?layers=<any non-empty value>` — the parse `RestServer`'s item
@@ -1595,7 +1677,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
 
             if (isDraftRead) {
                 return await readPendingDraft(
-                    deps, _context, type, name, packageId, previewDrafts, saveVerdict, { maskPosture, query },
+                    deps, _context, type, name, packageId, previewDrafts, saveVerdict, { maskPosture, query, memberSelector },
                 );
             }
 
@@ -1636,11 +1718,15 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 // scoped kernel. This branch never read the switch, so a builder
                 // previewing an object was answered the ACTIVE schema where
                 // `RestServer` answers the draft.
-                const protocolFirst = scoped || previewDrafts;
+                // [#23072] …and so does a NAMED member: the registry holds one
+                // schema per name and reads no member, so only the protocol
+                // can answer one (for `object`, a type with no members, its
+                // located 400).
+                const protocolFirst = scoped || previewDrafts || memberNamed;
 
                 // The protocol read `RestServer`'s plain read makes: the same
-                // `?package=` scope (ADR-0048), the same admitted switch and no
-                // organization (ADR-0131 D6).
+                // `?package=` scope (ADR-0048), the same admitted switch, the
+                // same member ([#23072]) and no organization (ADR-0131 D6).
                 const readFromProtocol = async (): Promise<any> => {
                     // [#15238] `protocol &&` spelled out: the `any` cast this
                     // branch used to resolve through let two sibling guards drift
@@ -1652,6 +1738,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                             name,
                             ...(packageId ? { packageId } : {}),
                             ...(previewDrafts ? { previewDrafts: true } : {}),
+                            ...memberSelector,
                         });
                         // Protocol returns `{ type, name, item }` — only treat the
                         // lookup as a hit when `item` is really there. [#5563] The
@@ -1660,13 +1747,18 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                         // store outage resolves to) was served as a hit and the
                         // registry fallback below never ran.
                         return data?.item != null ? data : undefined;
-                    } catch {
+                    } catch (e) {
+                        // [#23072] A read that named a member is the protocol's
+                        // alone, so its refusal is the answer (the outer `catch`
+                        // renders it), never a fall-through to a registry that
+                        // would serve the canonical schema for it.
+                        if (memberNamed) throw e;
                         return undefined; // fall through to registry / 404
                     }
                 };
 
                 let found: any = protocolFirst ? await readFromProtocol() : undefined;
-                if (found === undefined) {
+                if (found === undefined && !memberNamed) {
                     const qlService = await deps.getObjectQL(_context);
                     const data = qlService?.registry?.getObject(name);
                     // [#5563] The registry hands back the bare ObjectSchema, so this
@@ -1692,9 +1784,11 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             if (protocol && typeof protocol.getMetaItem === 'function') {
                  try {
                     // `previewDrafts` is the ADMITTED switch declared above
-                    // this block's branches (#20338).
+                    // this block's branches (#20338). [#23072] The member, as
+                    // `RestServer`'s plain read hands it.
                     const data = await protocol.getMetaItem({
                         type: singularType, name, packageId, previewDrafts,
+                        ...memberSelector,
                     });
                     // [#18401] The SAME hit test the `object` branch above runs,
                     // asked here for the same reason. `getMetaItem` answers a
@@ -1727,12 +1821,24 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     }
                  } catch (e: any) {
                     // Protocol might throw if not found or not supported
+                    // [#23072] …but a read that named a member is the
+                    // protocol's alone: its refusal (a selector on a type with
+                    // no members, a blank one) is the answer, rendered by the
+                    // outer `catch` as `RestServer` renders it — never a
+                    // fall-through to the name-keyed `MetadataService` below.
+                    if (memberNamed) throw e;
                  }
             }
             if (found) return serveItem(protocol, found);
 
             // Try MetadataService for runtime-registered types
-            const metaSvc = await deps.resolveService(_context, 'metadata', _context.environmentId);
+            // [#23072] …never for a NAMED member: `getItem` keys by name and
+            // holds one body per name, so it would answer the canonical member
+            // to a request the protocol answered absent. That member is
+            // absent, as on `RestServer`.
+            const metaSvc = memberNamed
+                ? undefined
+                : await deps.resolveService(_context, 'metadata', _context.environmentId);
             if (metaSvc && typeof (metaSvc as any).getItem === 'function') {
                 let data: any;
                 try {
