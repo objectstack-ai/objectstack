@@ -110,17 +110,15 @@ describe('ADR-0090 D5 closures: /me/apps + anchor-bindable baseline', () => {
     expect(beforeNames, 'control: visible before any tab grant').toContain('showcase_app');
 
     // Author the property: a set whose ONLY job is tabPermissions.hidden.
-    // [ADR-0131 D3/D4] Authored through the data door, as Setup authors it: the
-    // write-through stores the definition the security catalog resolves. A
-    // system-context row insert has no definition and grants nothing.
-    const hideSet = await stack.apiAs(adminTok, 'POST', '/data/sys_permission_set', {
+    // [ADR-0131 D3/D4] Authored through the metadata door, the security
+    // catalog's write path: the definition it stores is what the resolver reads.
+    const hideSet = await stack.apiAs(adminTok, 'PUT', '/meta/permission/tab_probe_hide', {
         name: 'tab_probe_hide',
         label: 'Tab probe — hide showcase',
-        tab_permissions: JSON.stringify({ showcase_app: 'hidden' }),
+        objects: {},
+        tabPermissions: { showcase_app: 'hidden' },
       });
-    expect(hideSet.status, 'set authored through the data door').toBeLessThan(300);
-    const hideSetId = (await ql.findOne('sys_permission_set', { where: { name: 'tab_probe_hide' }, context: SYS }))?.id;
-    expect(hideSetId, 'hide set stored').toBeTruthy();
+    expect(hideSet.status, 'set authored through the metadata door').toBeLessThan(300);
     await ql.insert('sys_user_permission_set', { user_id: tabUser.id, permission_set: 'tab_probe_hide' }, { context: SYS });
 
     const hidden = await stack.apiAs(tabTok, 'GET', '/me/apps');
@@ -129,12 +127,13 @@ describe('ADR-0090 D5 closures: /me/apps + anchor-bindable baseline', () => {
 
     // Rank merge: hidden(0) loses to visible(3) from ANY other resolved set —
     // most-visible wins across the principal's sets, matching hono's tabRank.
-    const showSet = await stack.apiAs(adminTok, 'POST', '/data/sys_permission_set', {
+    const showSet = await stack.apiAs(adminTok, 'PUT', '/meta/permission/tab_probe_show', {
         name: 'tab_probe_show',
         label: 'Tab probe — show showcase',
-        tab_permissions: JSON.stringify({ showcase_app: 'visible' }),
+        objects: {},
+        tabPermissions: { showcase_app: 'visible' },
       });
-    expect(showSet.status, 'set authored through the data door').toBeLessThan(300);
+    expect(showSet.status, 'set authored through the metadata door').toBeLessThan(300);
     await ql.insert('sys_user_permission_set', { user_id: tabUser.id, permission_set: 'tab_probe_show' }, { context: SYS });
 
     const merged = await stack.apiAs(tabTok, 'GET', '/me/apps');
@@ -156,7 +155,6 @@ describe('ADR-0090 D5 closures: /me/apps + anchor-bindable baseline', () => {
     const everyone = await reader.resolve('position', 'everyone');
     expect((everyone?.definition as any)?.permissionSets, 'everyone names member_default (bootstrap no longer refuses)')
       .toContain('member_default');
-    expect(await ql.find('sys_position', { where: { name: 'everyone' }, context: SYS }), 'no everyone row is written').toEqual([]);
   });
 
   it('deleting records is no longer a baseline right (anchor-forbidden bit removed)', async () => {
@@ -174,16 +172,14 @@ describe('ADR-0090 D5 closures: /me/apps + anchor-bindable baseline', () => {
     // some wildcard happened to grant create.
     const memberUser = await ql.findOne('sys_user', { where: { email: 'baseline-member@verify.test' }, context: SYS });
     expect(memberUser?.id, 'baseline member resolved').toBeTruthy();
-    const inquirySet = await stack.apiAs(adminTok, 'POST', '/data/sys_permission_set', {
+    const inquirySet = await stack.apiAs(adminTok, 'PUT', '/meta/permission/baseline_inquiry_probe', {
         name: 'baseline_inquiry_probe',
         label: 'Baseline probe — inquiry create, deliberately no delete',
-        object_permissions: JSON.stringify({
+        objects: {
           showcase_inquiry: { allowRead: true, allowCreate: true },
-        }),
+        },
       });
-    expect(inquirySet.status, 'set authored through the data door').toBeLessThan(300);
-    const inquirySetId = (await ql.findOne('sys_permission_set', { where: { name: 'baseline_inquiry_probe' }, context: SYS }))?.id;
-    expect(inquirySetId, 'probe set stored').toBeTruthy();
+    expect(inquirySet.status, 'set authored through the metadata door').toBeLessThan(300);
     await ql.insert(
       'sys_user_permission_set',
       { user_id: memberUser.id, permission_set: 'baseline_inquiry_probe' },

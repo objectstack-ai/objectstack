@@ -252,8 +252,8 @@ describe('[#8074] assertArmed: the guard against assertions that cannot fail', (
     it('reports DISARMED for a set that does not exist', async () => {
       const verdict = await seededArmed({
         stack: outside,
-        object: 'sys_permission_set',
-        where: { name: 'no_such_set_8074' },
+        object: 'sys_user',
+        where: { email: 'no_such_user_8074@verify.test' },
         control: 'an app-declared permission set',
         disarmedBy: 'a set that failed to seed grants the principal nothing',
       }).read();

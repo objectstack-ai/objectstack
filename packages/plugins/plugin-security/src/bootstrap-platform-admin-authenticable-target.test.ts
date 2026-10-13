@@ -51,7 +51,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { SysUser, SysAccount } from '@objectstack/platform-objects/identity';
 import { bootstrapPlatformAdmin, shouldReplayBootstrapFor } from './bootstrap-platform-admin.js';
 import { seedLegacyPlatformBucket } from './__tests__/legacy-catalog-rows.testkit.js';
-import { SysPermissionSet } from './objects/sys-permission-set.object.js';
+import { SysPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 

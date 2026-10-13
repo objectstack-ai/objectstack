@@ -14,23 +14,21 @@
 // NB: this package also defines sys_audience_binding_suggestion, which the
 // extract config deliberately does NOT translate — an engine-owned suggestion
 // queue with no admin UI surface, absent from both the config and the bundles,
-// correctly out of scope. `sys_capability` and `sys_user_position` ARE translated
-// (curated strings live in the bundles), so they must stay in the extract config;
-// this guard is what caught sys_capability being dropped from that list.
+// correctly out of scope. Every other object IS translated (curated strings live
+// in the bundles), so it must stay in the extract config; this guard is what
+// caught sys_capability being dropped from that list.
 
 import { describe, it, expect } from 'vitest';
 import { enObjects } from './en.objects.generated.js';
+import { securityObjects } from '../manifest.js';
 
-// Objects the extract config (scripts/i18n-extract.config.ts) imports —
-// keep the two lists in sync when adding/moving objects.
-const OWNED_OBJECTS = new Set([
-  'sys_position',
-  'sys_capability',
-  'sys_permission_set',
-  'sys_user_permission_set',
-  'sys_position_permission_set',
-  'sys_user_position',
-]);
+// Objects the extract config (scripts/i18n-extract.config.ts) imports: every
+// object this plugin registers, less the untranslated suggestion queue (see
+// above). Read from the manifest, so an object the plugin retires (the four
+// catalog row objects, ADR-0131 D3) leaves this list with it.
+const OWNED_OBJECTS = new Set(
+  securityObjects.map((o) => o.name).filter((name) => name !== 'sys_audience_binding_suggestion'),
+);
 
 describe('objects translation bundle ownership (ADR-0029 D8)', () => {
   it('the en bundle contains no objects owned by other packages', () => {

@@ -44,10 +44,14 @@ describe('showcase: declared permission sets are served by the security catalog 
 
   it('the boot writes no sys_permission_set row — and the census can see one', async () => {
     const SYS = { context: { isSystem: true } };
-    expect(await ql.find('sys_permission_set', { where: {} }, SYS)).toEqual([]);
-    // Positive control: the same read sees a row once one exists.
-    await ql.insert('sys_permission_set', { id: 'ps_census_control', name: 'zz_census_control', label: 'Control' }, SYS);
-    expect(((await ql.find('sys_permission_set', { where: {} }, SYS)) ?? []).map((r: any) => r.name)).toEqual(['zz_census_control']);
-    await ql.delete('sys_permission_set', { where: { id: 'ps_census_control' }, ...SYS });
+    // The census runs where the row object is still registered. (C3 stage 8
+    // retires the object, and there is then no table to hold a row at all.)
+    if (ql.getObject?.('sys_permission_set')) {
+      expect(await ql.find('sys_permission_set', { where: {} }, SYS)).toEqual([]);
+      // Positive control: the same read sees a row once one exists.
+      await ql.insert('sys_permission_set', { id: 'ps_census_control', name: 'zz_census_control', label: 'Control' }, SYS);
+      expect(((await ql.find('sys_permission_set', { where: {} }, SYS)) ?? []).map((r: any) => r.name)).toEqual(['zz_census_control']);
+      await ql.delete('sys_permission_set', { where: { id: 'ps_census_control' }, ...SYS });
+    }
   });
 });
