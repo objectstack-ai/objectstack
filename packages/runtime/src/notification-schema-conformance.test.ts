@@ -31,8 +31,9 @@
 // eight `return`s of `domains/notifications.ts`, and three of them are the ones
 // carrying a `responseSchema`:
 //
-//   1  :79  capabilityUnavailable — no service / not serveable / no `listInbox`
-//   2  :86  deps.error('Authentication required', 401)
+//   2  the anonymous baseline — the domain's FIRST statement since ADR-0138
+//          D2 moved it ahead of the capability probe: 401 UNAUTHENTICATED
+//   1  capabilityUnavailable — no service / not serveable / no `listInbox`
 //   3  :111 deps.success(listInbox result)      ← ListNotificationsResponseSchema
 //   4  :116 capabilityUnavailable — `markRead` absent
 //   5  :128 throw validationFailure(...) — malformed mark-read body
@@ -351,7 +352,8 @@ describe('[#5792] /notifications conforms to the schemas the catalog declares', 
     });
 
     // ═══════════════════════════════════════════════════════════════════════
-    // Emit site 2 — the auth gate
+    // Emit site 2 — the anonymous baseline (ADR-0138 D2: the domain's first
+    // statement, so it answers ahead of emit site 1)
     // ═══════════════════════════════════════════════════════════════════════
     it('emit site 2 — an unauthenticated caller gets 401 in the declared envelope', async () => {
         const result = await makeDispatcher().handleNotification('', 'GET', undefined, {}, ANON_CTX);
@@ -359,7 +361,17 @@ describe('[#5792] /notifications conforms to the schemas the catalog declares', 
         expect(result.handled).toBe(true);
         expect(result.response?.status).toBe(401);
         expectEnvelope(result.response?.body, false);
-        expect(result.response?.body?.error?.message).toBe('Authentication required');
+        expect(result.response?.body?.error?.code).toBe('UNAUTHENTICATED');
+        expect(result.response?.body?.error?.httpStatus).toBe(401);
+    });
+
+    it('emit site 2 answers ahead of emit site 1 — an empty slot is still 401 to an anonymous caller', async () => {
+        const result = await makeDispatcher(null).handleNotification('', 'GET', undefined, {}, ANON_CTX);
+
+        expect(result.handled).toBe(true);
+        expect(result.response?.status).toBe(401);
+        expectEnvelope(result.response?.body, false);
+        expect(result.response?.body?.error?.code).toBe('UNAUTHENTICATED');
     });
 
     // ═══════════════════════════════════════════════════════════════════════
