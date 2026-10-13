@@ -14,8 +14,9 @@
 // ⭐ RETIRED-DEFAULT RESIDUE: not owed, although the key carried
 // `.default(true)`. The default was never materialized: a page parses its
 // component `properties` as an open bag, and this row is parsed only by the
-// advisory props lint, which writes nothing back — so no released toolchain
-// emitted `breadcrumb: true` into an artifact nobody authored.
+// props lint (advisory in every release that shipped the default), which
+// writes nothing back — so no released toolchain emitted `breadcrumb: true`
+// into an artifact nobody authored.
 //
 // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
 // removal ships on the 17.x line (launch-window convention: accept-set
