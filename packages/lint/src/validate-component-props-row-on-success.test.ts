@@ -11,8 +11,9 @@
 // whose executor key refuses `'navigation'`, the runner's alias of `'url'`.
 // These pins hold that the gate reports each refusal at the row's own path,
 // with the parse's own first sentence, and stays silent on the accepted
-// control. The finding is a `component-props-invalid` warning, the gate's one
-// tier (its module header says why); no code in this package changed for it.
+// control. The finding is a `component-props-invalid` error, like every finding
+// of the gate (its module header says why); no code in this package changed for
+// it.
 import { describe, expect, it } from 'vitest';
 import { validateComponentProps, COMPONENT_PROPS_INVALID } from './validate-component-props.js';
 

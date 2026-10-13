@@ -652,7 +652,7 @@
       "title": "Dashboard-level dateRange + global filters re-scope every bound widget through its OWN field mapping; opted-out widgets stay fixed; and the Studio widget inspector AUTHORS those filterBindings",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -662,7 +662,8 @@
         "app": "showcase",
         "requires": [
           "the Revenue Pulse dashboard (showcase_revenue_pulse) — the framework#2501 acceptance fixture: one dateRange (default field issued_on) + one region filter (default field region) driving invoice AND account widgets, account widgets re-mapping via filterBindings (dateRange→signed_on, region→sales_region), one KPI opted out of both (filterBindings false) as the all-time reference",
-          "seeded accounts spread across sales_region amer/emea/apac with signed_on dates (src/data/seed/index.ts)"
+          "seeded accounts spread across sales_region amer/emea/apac with signed_on dates (src/data/seed/index.ts)",
+          "for D2 and D3 a SCRATCH dashboard, because no stock dashboard serves either leg (QA run #23163 scored both on runtime scratch dashboards): D2's Studio authoring round-trip needs a dashboard in a WRITABLE package to publish into — create a scratch package (POST /api/v1/packages) and author the dashboard there, since the showcase package is read-only in Studio; D3's dataset-sourced option half needs a globalFilter whose options come from `optionsFrom` ({object, valueField, labelField} — GlobalFilterOptionsFromSchema in packages/spec/src/ui/dashboard.zod.ts), which NO stock dashboard declares (Revenue Pulse's region filter lists static options). D3's {value,label} render half still reads on Revenue Pulse. Delete the scratch package at teardown"
         ]
       },
       "steps": [
@@ -676,8 +677,8 @@
         "repeat the global-filter check on Delivery Operations: the Task Status select re-scopes the TASK-bound KPI tile (kpi_awaiting_review), composing with its own per-widget filter; the project-bound tiles (kpi_active_projects / kpi_at_risk / kpi_total_budget) opt out of task_status (#7568) and keep their values",
         "screenshot before/after each filter change",
         "D1 (dirty→Reset): on Revenue Pulse, confirm the filter bar shows NO Reset affordance in its pristine state; change a filter away from its defaultValue and confirm a Reset button (RotateCcw) appears; click it and confirm every filter returns to its default and the widgets re-query back",
-        "D3 ({value,label} options): open the region select and confirm its options render as {value,label} pairs (the trigger shows the LABEL, the committed value is the option value); capture the option-source request — a select whose options come from a dataset issues a server GROUP BY (queryDataset) for the distinct value list, not a truncated client dedupe",
-        "D2 (Studio authoring round-trip): in the Studio metadata-admin dashboard designer, select a widget and open the Filter Bindings section of the widget inspector; author a binding — re-target the dateRange (or region) filter to a specific field via the field-override combo, and toggle Apply OFF on another widget to opt it out; publish the draft",
+        "D3 ({value,label} options): open the region select on Revenue Pulse and confirm its options render as {value,label} pairs (the trigger shows the LABEL, the committed value is the option value); then, on the scratch dashboard's optionsFrom filter (fixtures.requires[2]), capture the option-source request — a select whose options come from a dataset issues a server GROUP BY (queryDataset) for the distinct value list, not a truncated client dedupe. Revenue Pulse's static options issue no option request, so they cannot score that half",
+        "D2 (Studio authoring round-trip): in the Studio metadata-admin dashboard designer, open the scratch dashboard in its writable package (fixtures.requires[2]), select a widget and open the Filter Bindings section of the widget inspector; author a binding — re-target the dateRange (or region) filter to a specific field via the field-override combo, and toggle Apply OFF on another widget to opt it out; publish the draft",
         "re-read the persisted metadata (GET /api/v1/meta/dashboard/<name>) and confirm the authored widget.filterBindings shape landed; reload the dashboard and confirm the authored binding DRIVES the widget at runtime (re-targeted field in the re-query; opted-out widget no longer re-queries)"
       ],
       "acceptance": [
@@ -773,6 +774,12 @@
           "date": "2026-10-05",
           "change": "clause 6 and step 8 re-pointed (stale, #21782 VF4). The clause composed the global status filter with an at-risk tile, but kpi_at_risk (project dataset, health=red) declares filterBindings { task_status: false } (ops-dashboard.dashboard.ts, #7568: project widgets opt out of the task-status filter; pinned by dashboard-filter-vocabulary.test.ts). That predates 17.6.0. The verifier's wording is used: the composition is read on kpi_awaiting_review (task-bound, status=in_review), and kpi_at_risk keeps its value",
           "ref": "#21797"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-13",
+          "change": "fixtures.requires[2] (new) names the scratch dashboard D2 and D3 need, and steps[10] and [11] point at it (fixture gap, #23163 D2 / D3; parked on #23121, carried by #23169). No stock dashboard declares a globalFilter with optionsFrom (examples/app-showcase has none; Revenue Pulse's region filter lists static options), so D3's server GROUP BY half has no stock subject, and D2's authoring round-trip needs a writable package to publish into. QA run #23163 passed both on runtime scratch dashboards. No clause changed",
+          "ref": "#23169"
         }
       ]
     },
@@ -875,7 +882,7 @@
       "title": "The built-in System Overview dashboard renders as admin with LIVE sys_* counts, two widget values reconcile against direct API counts, single-environment-only widgets hide gracefully, and no widget renders blank",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -889,16 +896,16 @@
           "at least one signed-in session (the admin's own) so sys_session count is non-zero, and the seeded sys_user population"
         ],
         "knownGaps": [
-          "in a SINGLE-TENANT / single-environment runtime (the stock standalone serve) two widgets are runtime-gated OFF by design: widget_organizations carries `requiresService: 'org-scoping'` and widget_packages_installed carries `requiresObject: 'sys_package_installation'` (a cloud-only object). Their ABSENCE is the graceful-hide behavior this item checks — NOT a blank tile and NOT a FAIL; a run must not demand those two render"
+          "in a SINGLE-TENANT / single-environment runtime (the stock standalone serve) two widgets are runtime-gated OFF by design, by two different layers: widget_organizations carries `requiresService: 'org-scoping'`, and the SERVER strips it from the served dashboard (packages/rest/src/meta-item-read-gate.ts#filterDashboardForUser, ADR-0057 D10), so GET /api/v1/meta/dashboard/system_overview serves 8 of the 9 declared widgets; widget_packages_installed carries `requiresObject: 'sys_package_installation'` (a cloud-only object), is served, and the console hides it. Their ABSENCE from the board is the graceful-hide behavior this item checks — NOT a blank tile and NOT a FAIL; a run must not demand those two render"
         ]
       },
       "steps": [
         "sign in as admin, open the Setup app, and navigate to System Overview (nav_system_overview → dashboard system_overview); let the board settle and screenshot the whole dashboard BEFORE reading any DOM",
         "capture the dataset queries the widgets issue on load (the network trace) — each metric tile queries its sys_*_metrics dataset (count aggregate)",
-        "establish ground truth via the data API: GET/POST a count aggregate on sys_user, and a count aggregate on sys_session, recording both numbers",
+        "establish ground truth via the data API: a count aggregate on sys_user, and a count aggregate on sys_session restricted to LIVE sessions (revoked_at is null AND expires_at after now — the Active Sessions widget's own filter), recording both numbers",
         "read the rendered value of widget_total_users (Total Users) and widget_active_sessions (Active Sessions) from the DOM (only after the screenshot confirmed render) and compare each to its API count",
-        "confirm widget_organizations and widget_packages_installed are ABSENT from the rendered board (runtime-gated in single-tenant), not showing a broken/empty tile",
-        "walk every remaining widget: the three security KPI tiles (login/permission/config event counts over sys_audit_log_metrics), the Audit Events by Action pie, the Events by User bar, and the Audit Events by Action table — confirm each draws a real mark or a named error state, none blank",
+        "confirm widget_organizations and widget_packages_installed are ABSENT from the rendered board (runtime-gated in single-tenant), not showing a broken/empty tile; read the served dashboard too — widget_organizations is already missing from GET /api/v1/meta/dashboard/system_overview (the server's requiresService strip), widget_packages_installed is present there and hidden by the console",
+        "walk every remaining widget: the two security KPI tiles (Login Events and Config Changes, event counts over sys_audit_log_metrics — the board carries no permission-events tile; system_overview.dashboard.ts records why the 'Permission Changes' tile was removed), the Audit Events by Action pie, the Events by User bar, and the Event Volume by Action table — confirm each draws a real mark or a named error state, none blank",
         "capture the browser console for the whole load"
       ],
       "acceptance": [
@@ -909,10 +916,10 @@
           "evidence": "the tile value next to the API count"
         },
         {
-          "clause": "widget_active_sessions shows the live session count — its value equals a direct count aggregate on sys_session (the sys_session_metrics dataset carries NO active-only filter, so the honest oracle is the full sys_session count; record the label-says-'Active' vs dataset-counts-all caveat rather than glossing it)",
+          "clause": "widget_active_sessions shows the live session count — its value equals a direct count aggregate on sys_session under the widget's OWN predicate: the tile declares filter {revoked_at: null, expires_at: {$gt: '{now}'}} (#7531; '{now}' resolved per request by resolveFilterTokens) and opts out of the date bar, so 'Active' is honest and the oracle is the count of live sessions, not the full table",
           "oracle": "api",
-          "verify": "the rendered Active Sessions tile == COUNT(sys_session) from a direct /api/v1/data aggregate",
-          "evidence": "the tile value + the API count + the caveat note"
+          "verify": "the rendered Active Sessions tile == COUNT(sys_session WHERE revoked_at is null AND expires_at > now) from a direct /api/v1/data aggregate taken in the same run; a value equal to the unfiltered table count while revoked or expired rows exist is a FAIL",
+          "evidence": "the tile value + the predicate-restricted API count (and the unfiltered count beside it, when they differ)"
         },
         {
           "clause": "the reconciliation is authoritative, not cosmetic: the widget's OWN dataset query (on the wire) returns the same count the direct /data aggregate returns — the tile reflects a real query, not a placeholder",
@@ -923,7 +930,7 @@
         {
           "clause": "single-environment-only widgets hide gracefully: in a single-tenant runtime widget_organizations (requiresService: org-scoping) and widget_packages_installed (requiresObject: sys_package_installation) are ABSENT, not rendered as blank/error tiles",
           "oracle": "screenshot",
-          "verify": "the board screenshot shows neither gated widget occupying a slot; the runtime-gate source (requiresService/requiresObject on the two widgets) explains the absence",
+          "verify": "the board screenshot shows neither gated widget occupying a slot; the served GET /api/v1/meta/dashboard/system_overview body lacks widget_organizations (server strip on requiresService) and carries widget_packages_installed (hidden client-side on requiresObject) — the two gates explain the two absences",
           "evidence": "the board screenshot annotated with the two gated widget ids"
         },
         {
@@ -952,7 +959,7 @@
         "wrong-persona"
       ],
       "source": [
-        "packages/platform-objects/src/apps/dashboards/system_overview.dashboard.ts#requiresService (widget ids, requiresService/requiresObject gates, globalFilters date range)",
+        "packages/platform-objects/src/apps/dashboards/system_overview.dashboard.ts#requiresService (9 widget ids; requiresService / requiresObject gates; widget_active_sessions' live-session filter, #7531; the Row 2 note on the removed Permission Changes tile; globalFilters date range) + packages/rest/src/meta-item-read-gate.ts#filterDashboardForUser (the server strip of an unmet requiresService widget, ADR-0057 D10)",
         "packages/platform-objects/src/apps/dashboards/system.datasets.ts (the five sys_*_metrics datasets and their count measures)",
         "packages/platform-objects/src/apps/setup-nav.contributions.ts#nav_system_overview (nav_system_overview → dashboard system_overview in the Setup app)"
       ],
@@ -962,6 +969,12 @@
           "date": "2026-08-08",
           "change": "new item: built-in System Overview live-count reconciliation + graceful single-environment widget hiding, grounded in the platform dashboard + sys_*_metrics datasets",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-13",
+          "change": "acceptance[1] (clause, verify, evidence), acceptance[3].verify, knownGaps[0], steps[2], [4] and [5] and source[0] (stale spec, #23166 A1 / A3; parked on #23121, carried by #23169). The Active Sessions widget filters revoked_at null and expires_at > now (#7531), so the caveat 'no active-only filter' is gone and the oracle is the live-session count. The board has two security KPI tiles, Login Events and Config Changes: the Permission Changes tile was removed. system_overview declares 9 widgets, and the server strips widget_organizations from the served body on an unmet requiresService (filterDashboardForUser, ADR-0057 D10), so a single-tenant boot serves 8. QA run #23166 read 8 served widgets and no permission KPI at objectstack 36b2889c; the source reads the same at 6d7f4df3c",
+          "ref": "#23169"
         }
       ]
     },

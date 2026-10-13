@@ -33,6 +33,8 @@ import { isCatalogActivationWrite, handleCatalogActivationWrite } from './catalo
 import { isPermissionSetCloneWrite, handlePermissionSetCloneWrite } from './permission-set-clone.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+// [#23214] The repo's one sentence for a repeated single-valued parameter.
+import { repeatedQueryParamMessage } from '@objectstack/rest';
 
 export function createSecurityDomain(deps: DomainHandlerDeps): DomainRoute {
     return {
@@ -143,6 +145,24 @@ export async function handleSecurityRequest(
             // seam onto this same service call and was still forwarding
             // `?status=` unvalidated, so the empty-list arm described above was
             // reachable there. One owner, two callers — not two copies.
+            // [#23214] `status` and `packageId` are each ONE value: the names, in
+            // their order, that `RestServer`'s twin of this route declares to
+            // `refuseRepeatedQueryParams`. A repeat was joined by `String()`
+            // below, so a repeated `packageId` filtered on a package no row has
+            // (an empty 200) and a repeated `status` was refused as an unknown
+            // status. Refused with the multiplicity sentence, before the
+            // service is asked; a one-element array is one occurrence.
+            for (const name of ['status', 'packageId'] as const) {
+                const raw = query?.[name];
+                if (!Array.isArray(raw)) continue;
+                if (raw.length > 1) {
+                    return {
+                        handled: true,
+                        response: deps.error(repeatedQueryParamMessage(name, raw.length), 400, { code: 'VALIDATION_ERROR' }),
+                    };
+                }
+                query[name] = raw[0];
+            }
             const rawStatus = query?.status ? String(query.status) : undefined;
             if (rawStatus !== undefined && !isAudienceBindingSuggestionStatus(rawStatus)) {
                 return {

@@ -340,8 +340,8 @@ export class PackagedPermissionSetLockedError extends Error {
       + (operation === 'insert'
         ? `Choose a different name for your set, or clone '${name}' (the "Clone" action on the permission `
           + `set) and edit the clone.`
-        : `Clone it instead (the "Clone" action on the permission set, or POST /api/v1/data/sys_permission_set `
-          + `with a new name) and edit the clone — the clone is your organization's own set, and upgrades keep `
+        : `Clone it instead (the "Clone" action on the permission set, or POST `
+          + `/api/v1/security/permission-sets/${name}/clone with a new name) and edit the clone — the clone is your organization's own set, and upgrades keep `
           + `flowing to '${name}' untouched.`),
     );
     this.name = 'PackagedPermissionSetLockedError';

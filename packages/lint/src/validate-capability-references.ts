@@ -19,8 +19,12 @@
  *      (`stack.capabilities`) — the explicit, package-provenanced declaration
  *      (ADR-0066 D1), served at runtime by the registry (ADR-0131 D3),
  *   3. every capability a permission set in this stack GRANTS via
- *      `systemPermissions` (granting a capability also declares it), and
- *   4. any `sys_capability` row shipped as seed data.
+ *      `systemPermissions` (granting a capability also declares it).
+ *
+ * A `sys_capability` seed row is NOT a source: no runtime reader consults one
+ * (ADR-0131 D3 — the catalog is the registry, and the row object is retired),
+ * so counting it would silence this warning for a capability the runtime never
+ * declares.
  *
  * WARNING, not error: a single package's lint cannot see capabilities declared
  * by OTHER installed packages, and the reference fails closed at runtime anyway,
@@ -93,17 +97,10 @@ export function validateCapabilityReferences(stack: AnyRec): CapabilityRefFindin
   for (const ps of recordsOf(stack.permissions)) {
     for (const cap of asCapArray(ps.systemPermissions)) known.add(cap);
   }
-  for (const seed of recordsOf(stack.data)) {
-    if (seed.object !== 'sys_capability') continue;
-    for (const rec of Array.isArray(seed.records) ? seed.records : []) {
-      const name = (rec as AnyRec | null)?.name;
-      if (typeof name === 'string' && name.length > 0) known.add(name);
-    }
-  }
 
   const hint =
     'Fix the capability name, define it with defineCapability (stack.capabilities), ' +
-    'declare it on a permission set’s systemPermissions, ship a sys_capability seed row, ' +
+    'declare it on a permission set’s systemPermissions, ' +
     'or ignore this if the capability is provided by another installed package ' +
     '(references fail closed at runtime).';
 
@@ -114,12 +111,12 @@ export function validateCapabilityReferences(stack: AnyRec): CapabilityRefFindin
       rule: CAPABILITY_REFERENCE_UNKNOWN,
       where,
       path,
-      // [#22161] One verdict sentence; the four sources of the known set, the
+      // [#22161] One verdict sentence; the three sources of the known set, the
       // positions walked and why it only warns is
       // `os explain capability-reference-unknown`.
       message:
-        `requiredPermissions names capability "${cap}", which no built-in, \`defineCapability\`, ` +
-        `\`systemPermissions\` grant or \`sys_capability\` seed provides, so this gate fails closed`,
+        `requiredPermissions names capability "${cap}", which no built-in, \`defineCapability\` ` +
+        `or \`systemPermissions\` grant provides, so this gate fails closed`,
       hint,
     });
   };

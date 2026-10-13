@@ -8031,8 +8031,8 @@ const translationPerAppSettingsRemoved: MetadataConversion = {
  * (`actions[]`, `objects[].actions[]`, an `element:button`'s inline action).
  * Retired from the load path: an author is refused at parse — except on an
  * `element:button`'s inline action, which sits in the open `properties` bag the
- * load path keeps as written, where the refusal is an advisory
- * `component-props-invalid` finding at `os validate` / `os build` / `os lint`
+ * load path keeps as written, where the refusal is a
+ * `component-props-invalid` error at `os validate` / `os build` / `os lint`
  * (the component-props gate, `@objectstack/lint`) — and data at rest and
  * `os migrate meta` replay it.
  */
@@ -8331,11 +8331,11 @@ const translationComponentSubmitLabelRemoved: MetadataConversion = {
  * type is that component's own vocabulary and is never read here.
  *
  * `retiredFromLoadPath`: an author is not silently rewritten — `os validate`,
- * `os build` and `os lint` report an old spelling as an advisory
- * `component-props-invalid` finding carrying the prescription (the
+ * `os build` and `os lint` report an old spelling as a
+ * `component-props-invalid` error carrying the prescription (the
  * component-props gate, `@objectstack/lint`: a retired enum value is a value
- * verdict, a warning; the load path keeps the open `properties` bag as
- * written); stored rows replay it at rehydration
+ * verdict, an error like every other; the load path keeps the open `properties`
+ * bag as written); stored rows replay it at rehydration
  * (`applyConversionsToStoredItem`) and `os migrate meta` lists the edit for
  * existing sources. Idempotent by construction: the rewrite's output is
  * outside its own input set.
@@ -14925,8 +14925,8 @@ function describeBlock(component: Dict): string {
  * of the strict page-component schema, so the row's next save is refused
  * there; `properties.filter` sits in the open
  * `properties` bag the runtime save does not refuse by component type, so there
- * the refusal is the component-props gate's (`@objectstack/lint`, advisory),
- * and a re-save goes through.
+ * the refusal is the component-props gate's (`@objectstack/lint`, an error at
+ * `os validate` / `os build` / `os lint`), and a re-save goes through.
  *
  * ## Every site left as stored is reported — `context.reportTodo`
  *

@@ -41,7 +41,7 @@ export const entry: SemanticMigration = {
     + 'and keeps them, and absence stays absence. A stored page whose `object-grid` node '
     + 'carries `pagination: { pageSize: 0 }` still saves and loads — `properties` on a page '
     + 'component is not parsed on the metadata save path — and the component-props gate '
-    + 'reports it as an advisory `component-props-invalid` finding at `pagination.pageSize` '
+    + 'reports it as a `component-props-invalid` error at `pagination.pageSize` '
     + 'on `os validate`, `os build` and `os lint`; a `pageSizeOptions` entry and the flat '
     + '`pageSize` shorthand are reported the same way at their own paths. The author deletes '
     + 'the key or writes the page size they meant, and `os validate` then reports no '

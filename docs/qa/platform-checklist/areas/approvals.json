@@ -330,17 +330,17 @@
       "title": "An approval notification deep-links straight into the request drawer",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "browser",
       "personas": ["any pending approver"],
       "fixtures": {
         "app": "showcase",
-        "requires": ["at least one pending request on which the signed-in approver can be notified through the REMIND or REASSIGN path — POST /api/v1/approvals/requests/:id/remind (or /reassign {to}) mints a deep-linked notification on demand (since PR #22625 the OPENING also emits approval.requested to each concrete approver, so a freshly opened request is a second source); the three seeded demo requests suffice as the request source"]
+        "requires": ["at least one pending request on which the signed-in approver can be notified — through the OPENING (since PR #22625 opening a request emits approval.requested to each concrete approver on the slate it opens on) or through REASSIGN (POST /api/v1/approvals/requests/:id/reassign {to}). ⚠ REMIND is SUBMITTER-only: POST …/:id/remind answers 403 'FORBIDDEN: only the submitter may send reminders' to anyone else (packages/plugins/plugin-approvals/src/approval-service.ts remind), and the dev admin is an APPROVER on the seeded demo requests, not their submitter — so as the admin, mint the notification by opening a fresh request (or by reassign), never by remind; the three seeded demo requests still suffice as a reassign source"]
       },
       "steps": [
         "boot showcase isolated (dogfood §0); sign in as the dev admin (a pending approver on the seeded requests)",
-        "mint the notification: POST /api/v1/approvals/requests/:id/remind on a pending request (or /:id/reassign {to: <self>}) — the remind/reassign path notifies on demand; opening a request also emits approval.requested to each concrete approver on the slate it opens on (PR #22625), so a freshly opened request's row is an equally valid source",
+        "mint the notification: open a fresh request the admin approves (the opening emits approval.requested to each concrete approver on its slate, PR #22625) — or POST /api/v1/approvals/requests/:id/reassign {to: <self>} on a pending request. Not /remind: it is submitter-only and answers the admin 403 'FORBIDDEN: only the submitter may send reminders' on the seeded requests, which a run must not score as a deep-link FAIL",
         "read the resulting notification row and record its actionUrl — it must carry /system/approvals?request=<id> (#2678 P1.5; ApprovalService.notify rewrites the bare /system/approvals into the deep link centrally, so every emitting topic inherits it)",
         "cold-load that exact URL in a fresh page (no prior navigation); wait for settle; capture the drawer that opens",
         "GET /api/v1/approvals/requests/:id and cross-check the drawer's request identity and status against the read",
@@ -395,7 +395,8 @@
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 3, "date": "2026-08-10", "change": "added the route-parity clause: after #7213 the same ?request= link must open the drawer on BOTH /system/approvals (what notifications carry) and the component route the account app mounts", "ref": "#7331" },
         { "revision": 4, "date": "2026-08-11", "change": "fixtures re-anchored on the remind/reassign path — the old requires rested on a request's OPEN notifying somebody, and no approval.opened topic exists; and the cold-load clause's evidence restated observably (drawer field-matched against the API instead of 'screenshots with the URL visible', which the console's consumption of the query param makes unmeetable)", "ref": "#7530" },
-        { "revision": 5, "date": "2026-10-10", "change": "the open-time gap is closed: since PR #22625 (#22607) openNodeRequest publishes approval.requested to each concrete approver on the slate the request opens on, through the same notify() deep-link rewrite — the knownGaps entry that said opening notifies nobody is removed, the source note names the topic, step 2 and the fixture note say the opening is a second source; the fixtures stay on remind/reassign (deterministic on demand) and the revision-4 row stands as history", "ref": "#22631" }
+        { "revision": 5, "date": "2026-10-10", "change": "the open-time gap is closed: since PR #22625 (#22607) openNodeRequest publishes approval.requested to each concrete approver on the slate the request opens on, through the same notify() deep-link rewrite — the knownGaps entry that said opening notifies nobody is removed, the source note names the topic, step 2 and the fixture note say the opening is a second source; the fixtures stay on remind/reassign (deterministic on demand) and the revision-4 row stands as history", "ref": "#22631" },
+        { "revision": 6, "date": "2026-10-13", "change": "fixtures.requires[0] and steps[1] stop sending the admin through /remind (assertion defect, #23163 A0; parked on #23121, carried by #23169). ApprovalService.remind refuses every caller but the request's submitter, 'FORBIDDEN: only the submitter may send reminders', and the dev admin is an approver on the seeded requests. QA run #23163 met the 403 and minted the notification through the opening path instead, then passed every clause. The opening path (PR #22625) and /reassign are the two notification sources an approver can drive", "ref": "#23169" }
       ]
     },
     {
@@ -664,14 +665,14 @@
       "title": "An active out-of-office delegation reroutes an individually-routed approver to the delegate; expiring the window hands the slot back",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["dev admin — the DELEGATOR A: the delegation row is written BY them FOR them (sys_approval_delegation is self-service-only, so the delegator must be whoever is authenticated)", "a SECOND REAL runtime account — the DELEGATE B (Ada Auditor usr_showcase_auditor_demo, provisioned as a real login per knownGaps), who holds their own bearer token and decides the rerouted request as themselves"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a flow with an INDIVIDUALLY-routed approver — OOO delegation only applies to type user / field / manager (ApprovalService.expandApprovers), NOT position. No ACTIVE seeded showcase flow routes individually (they all route by position), so author a scratch autolaunched flow in a WRITABLE package with a single approval node config.approvers=[{type:'user', value:'<A = the signed-in admin's sys_user id>'}], shaped after examples/app-showcase/src/automation/flows/approver-bindings.flow.ts (the record-backed approver specimen)",
+          "a flow with an INDIVIDUALLY-routed approver — OOO delegation only applies to type user / field / manager (ApprovalService.expandApprovers), NOT position. No ACTIVE seeded showcase flow routes individually (they all route by position), so author a scratch flow in a WRITABLE package with a RECORD-TRIGGERED start — start config {objectName: <a scratch object in the same package>, triggerType: 'record-after-create'} — and a single approval node config.approvers=[{type:'user', value:'<A = the signed-in admin's sys_user id>'}], shaped after examples/app-showcase/src/automation/flows/approver-bindings.flow.ts (the record-backed approver specimen, whose start is record-triggered the same way). ⚠ Not a trigger-only start: an approval node needs a record, and POST /api/v1/automation/<flow>/trigger cannot supply one — buildAutomationContext (packages/runtime/src/domains/automation.ts) maps the body's recordId into params only, while the approval node reads its record id from $record, which the engine seeds from context.record, so the run answers 400 \"Approval node '…': no record id in $record\" (packages/plugins/plugin-approvals/src/approval-node.ts)",
           "delegator A = the SIGNED-IN dev admin (so the delegation is a self-service write); delegate B = a second real runtime account with its own credentials and bearer token — Ada Auditor (usr_showcase_auditor_demo / auditor.demo@example.com), provisioned as a real login per the knownGap below"
         ],
         "knownGaps": [
@@ -683,13 +684,13 @@
       "steps": [
         "boot showcase isolated (dogfood §0); provision B as a real login — a stock boot already does it, see knownGaps — and hold B's bearer token separately from the admin's",
         "sign in as the dev admin (the delegator A)",
-        "in a writable/scratch package author + register (POST /api/v1/automation) an autolaunched flow with a single approval node whose approvers=[{type:'user', value:'<A = the admin's sys_user id>'}], behavior first_response",
-        "baseline (no delegation): trigger the flow (POST /api/v1/automation/<flow>/trigger); GET /api/v1/approvals/requests?status=pending, find the new request, GET /:id — pending_approvers must be [A]; GET /:id/actions shows NO ooo_substitute row",
+        "in a writable/scratch package author + register (POST /api/v1/automation) a flow whose start is record-triggered on a scratch object (start config objectName + triggerType 'record-after-create') and whose single approval node has approvers=[{type:'user', value:'<A = the admin's sys_user id>'}], behavior first_response",
+        "baseline (no delegation): start a run by creating one record of the trigger object (POST /api/v1/data/<scratch object>); GET /api/v1/approvals/requests?status=pending, find the new request, GET /:id — pending_approvers must be [A]; GET /:id/actions shows NO ooo_substitute row",
         "create an ACTIVE delegation AS A (self-service): POST /api/v1/data/sys_approval_delegation {delegate_id:'<B>', valid_from:<now-1h ISO>, valid_until:<now+24h ISO>, reason:'Annual leave'} — omit delegator_id and the guard stamps the caller; passing a delegator_id that is not the caller is refused (see the negative below)",
-        "trigger the flow AGAIN; GET the new request /:id — pending_approvers must now be [B], not [A]; GET /:id/actions — one row action='ooo_substitute' whose comment names 'A → B'",
+        "start a run AGAIN (create another record of the trigger object); GET the new request /:id — pending_approvers must now be [B], not [A]; GET /:id/actions — one row action='ooo_substitute' whose comment names 'A → B'",
         "read B's inbox/notifications — a topic approval.ooo_substituted notification addressed to B, actionUrl /system/approvals?request=<id> (#1322 M4)",
         "decide as B, WITH B'S OWN BEARER TOKEN (not the admin's, and not an override): POST /api/v1/approvals/requests/:id/approve; GET /:id/actions — the approve row's actor is B (the delegate acts under their OWN identity — nothing impersonated as A)",
-        "expire the window: as A, PATCH the delegation valid_until to a past instant (or DELETE it); trigger the flow ONCE more; GET the newest request /:id — pending_approvers is [A] again and its /actions carries NO ooo_substitute row"
+        "expire the window: as A, PATCH the delegation valid_until to a past instant (or DELETE it); start a run ONCE more (create a record); GET the newest request /:id — pending_approvers is [A] again and its /actions carries NO ooo_substitute row"
       ],
       "acceptance": [
         {
@@ -742,7 +743,8 @@
         { "revision": 1, "date": "2026-08-08", "change": "initial — pins the #1322 OOO delegation reroute: active A→B window reroutes an individually-routed slot to B (audited + notified, decided under B's own identity); expiry hands it back to A at resolution time", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-11", "change": "persona shape rewritten around what is constructible: the old fixture had the admin write a delegation on behalf of a non-admin delegator, which sys_approval_delegation's self-service-only guard refuses from everybody (#4839) and which the named delegator could not do either (no auth account). Now A = the signed-in admin delegating their OWN slot and B = a second REAL runtime account deciding with its own bearer token — the mirror image #7517 actually drove, and the stronger test. Added the foreign-delegator refusal as a negative and the better-auth issuer provisioning detail to knownGaps", "ref": "#7530" },
         { "revision": 3, "date": "2026-08-18", "change": "delegate B needs no hand-provisioning any more: the showcase gives Ada Auditor a real better-auth credential account on a stock boot, so the issuer knownGap is rewritten as closed-by-fixture. The OTHER two gaps are untouched and still bind — the self-service-only delegation guard (#4839) and the writable/scratch package the individually-routed flow needs", "ref": "#9308" },
-        { "revision": 4, "date": "2026-09-19", "change": "same re-anchoring as the sibling items: the retired plugin-auth backfill citation is replaced by the retirement's migration entry in packages/spec and the reason is kept, the parenthetical 'issuer derived from the dev admin's own row' is withdrawn as false, and the step that told a runner to check issuer=local:credential when provisioning delegate B goes with it — that field no longer exists", "ref": "#17453" }
+        { "revision": 4, "date": "2026-09-19", "change": "same re-anchoring as the sibling items: the retired plugin-auth backfill citation is replaced by the retirement's migration entry in packages/spec and the reason is kept, the parenthetical 'issuer derived from the dev admin's own row' is withdrawn as false, and the step that told a runner to check issuer=local:credential when provisioning delegate B goes with it — that field no longer exists", "ref": "#17453" },
+        { "revision": 5, "date": "2026-10-13", "change": "fixtures.requires[0] and steps[2], [3], [5] and [8] start the scratch flow from a record instead of POST …/trigger (assertion defect, #23166 A0; parked on #23121, carried by #23169). The trigger route cannot open an approval: buildAutomationContext maps the body's record into params only, the approval node reads its record id from $record, which the engine seeds from context.record, and the run answers 400 'no record id in $record'. QA run #23166 drove the item through a record-triggered start (the approver-bindings.flow.ts shape) and passed every clause. Read from source at 6d7f4df3c: runtime domains/automation.ts buildAutomationContext, plugin-approvals approval-node.ts", "ref": "#23169" }
       ]
     },
     {

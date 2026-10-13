@@ -395,7 +395,7 @@
       "title": "List-view capability matrix: filter, search, sort, pagination, saved views, inline edit, export, visualization switcher, bulk/row actions, conditional formatting",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -406,7 +406,8 @@
         "requires": [
           "showcase_task with 10 seeded tasks (2 in_progress) and the saved views in examples/app-showcase/src/ui/views/task.view.ts (in_progress/urgent/done, tabular with string sort, grid with inlineEdit, bulk_actions, legacy_row_actions)",
           "showcase_field_zoo views for conditional formatting + bulk-action gating (examples/app-showcase/src/ui/views/field-zoo.view.ts)",
-          "CJK seeds for search recall (account 华宁科技, contact 张伟)"
+          "CJK seeds for search recall (account 华宁科技, contact 张伟)",
+          "an EXPORT GRANT for the exporting principal, which no stock set carries: allowExport is opt-in (packages/plugins/plugin-security/src/permission-evaluator.ts#resolveUserExportAllowed, export = read ∧ a set saying allowExport: true), and no stock permission set grants it, the admin wildcard included (#3544). Without it the seeded admin sees no Export control and GET /api/v1/data/showcase_task/export answers 403 EXPORT_NOT_PERMITTED. Provision one before step 6: author a runtime set through the metadata door, PUT /api/v1/meta/permission/qa_task_export with {name:'qa_task_export', label, objects:{showcase_task:{allowRead:true, allowExport:true}}} (published; a ?mode=draft save also needs its POST …/publish), then bind it with POST /api/v1/data/sys_user_permission_set {user_id: <admin id>, permission_set: 'qa_task_export'} — the grant names its set by NAME (ADR-0131 D4) — and reload so /me/permissions carries the merged map"
         ]
       },
       "variants": [
@@ -429,7 +430,7 @@
         "open the tabular saved view (string-form sort 'estimate_hours desc' — the objectui#2601 fixture); confirm it renders and the request carries the sort",
         "page a list past page 1; capture $top/$skip on every data request; confirm no unpaged full fetch",
         "in the grid saved view (inlineEdit: true), edit one cell in place; save; capture the PATCH; re-read the row via API",
-        "on in_progress, export each declared format (csv, xlsx, json); capture the requests and files",
+        "on in_progress, with the export grant from fixtures.requires[3] bound, export each declared format (csv, xlsx, json); capture the requests and files. Without the grant the Export control is absent and the route answers 403 EXPORT_NOT_PERMITTED — the opt-in working as designed, not a fail of the export variant",
         "open the visualization switcher on All Tasks; enumerate the offered types; switch through each",
         "on bulk_actions, select rows and run showcase_mark_done (per-record) and showcase_recalc_selection (aggregate — ONE dispatch carrying params._selectedIds); on legacy_row_actions confirm both named row actions resolve to live menu entries",
         "on Field Zoo, confirm the conditionalFormatting row highlight applies to Specimen — Full (f_lookup set) and not Specimen — Minimal"
@@ -474,7 +475,7 @@
         {
           "clause": "export offers exactly the declared formats (csv, xlsx, json on in_progress) and the exported rows equal the FILTERED set, not the whole table",
           "oracle": "network",
-          "verify": "the export menu lists the three exportOptions; each downloaded file contains the 2 in_progress rows",
+          "verify": "with the fixtures.requires[3] export grant bound (export is opt-in): the export menu lists the three exportOptions; each downloaded file contains the 2 in_progress rows. Record which grant the run provisioned",
           "evidence": "menu screenshot + the three files"
         },
         {
@@ -523,6 +524,12 @@
           "date": "2026-08-07",
           "change": "initial — deep-test capability matrix for list surfaces, pinned to the objectui live specs where they exist",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-13",
+          "change": "fixtures.requires[3] (new) provisions an export grant, and steps[6] and acceptance[6].verify name it (fixture gap, #23163 A6; parked on #23121, carried by #23169). Export is opt-in: resolveUserExportAllowed allows it only where a set says allowExport: true, and no stock permission set does, the admin wildcard included (#3544). So as the seeded admin Export is hidden and the export route answers 403 EXPORT_NOT_PERMITTED. QA run #23163 scored A6 through a runtime set granting showcase_task allowRead + allowExport, bound through sys_user_permission_set by the set's NAME. The recipe uses the spec's PermissionSetSchema key `objects` at the metadata door (the stored sys_permission_set column is object_permissions). No clause's verdict logic changed",
+          "ref": "#23169"
         }
       ]
     },
@@ -640,7 +647,7 @@
       "title": "Form-view gallery: every FormViewSchema layout type renders and submits",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -649,7 +656,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "showcase_task's default form (type simple — the `form` key) and its formViews tabbed / wizard / split / quick (drawer) — examples/app-showcase/src/ui/views/task.view.ts. The console reads ONLY the default (objectDef.form ?? formViews.default — RecordFormPage, resolveFormViewLayout), so a named formViews entry is reachable from no console door: each page-level variant is reached by overlaying the object's default form with that variant's type + sections (view is org-overridable, ADR-0005) and reverting afterwards",
+          "showcase_task's default form (type simple — the `form` key) and its formViews tabbed / wizard / split / quick (drawer) — examples/app-showcase/src/ui/views/task.view.ts. The console reads ONLY the default (objectDef.form ?? formViews.default — RecordFormPage, resolveFormViewLayout), so a named formViews entry is reachable from no console door: each page-level variant is reached by overlaying the object's default form with that variant's type + sections (view is org-overridable, ADR-0005) and reverting afterwards. The overlay recipe: PUT /api/v1/meta/view/showcase_task.form?mode=draft with the ViewItem {name:'showcase_task.form', object:'showcase_task', viewKind:'form', isDefault:true, config:{type:<variant>, sections:<that variant's sections>}}, then POST /api/v1/meta/view/showcase_task.form/publish. ⚠ Item-level isDefault:true is REQUIRED: the console takes an object's default form — what /new and /edit render — ONLY from a form ViewItem that carries it (objectui packages/app-shell/src/providers/MetadataProvider.tsx applyViewItem, objectui#11539). Without it the publish succeeds, the flag is gone from the served row, and the page falls back to the all-fields layout, which reads like 'the variant does not render'",
           "examples/app-showcase/src/ui/pages/task-desk.page.ts — the presentation surface: a JSX page whose ObjectForm opens with formType=\"drawer\" (edit, a side panel) and formType=\"modal\" (create, a dialog) over the task list"
         ],
         "knownGaps": [
@@ -667,7 +674,7 @@
       ],
       "steps": [
         "open a task record's full-page edit form (…/showcase_task/record/<id>/edit — RecordFormPage) on the stock default form (type simple); screenshot; verify the declared section ('Task', 2 columns) and its field order",
-        "overlay the default form with the tabbed variant (type tabbed + the sections of formViews.tabbed); reopen the page form; verify the three tabs (Overview / Schedule / Details) and that switching tabs preserves entered values",
+        "overlay the default form with the tabbed variant (type tabbed + the sections of formViews.tabbed, through the fixtures.requires[0] recipe with item-level isDefault:true); reopen the page form; verify the three tabs (Overview / Schedule / Details) and that switching tabs preserves entered values",
         "overlay the default form with the wizard variant; open the PAGE form (…/showcase_task/new, or the record's /edit route — RecordFormPage passes the type in both modes); walk Basics → Assignment → Schedule with next/back; verify back preserves values and submit happens ONCE at the end. The New/Edit MODAL renders a wizard as a stacked section list by design (resolveFormViewLayout), so the steps are walked on the page route",
         "overlay the default form with the split variant; open the page form; verify primary/secondary panes render their assigned sections side-by-side",
         "drawer and modal: open task-desk.page.ts; click a task row — ObjectForm formType=\"drawer\" opens as a side panel over the list with the task's fields; click New task — ObjectForm formType=\"modal\" opens as a dialog. An overlay of the default form with type drawer/modal renders the page form as simple, which is the designed fallback, not a fail",
@@ -734,6 +741,12 @@
           "date": "2026-10-05",
           "change": "clause 1 (drawer variant), steps 1-5, the fixtures, a new revert step, negative 2 and the sources re-pointed (assertion defect, #21782 VF3; VF3 gave no verbatim wording, so the clause is derived). RecordFormPage renders drawer/modal as simple by design ('presentation/open-modes, not record-page layouts', objectstack#1890), and resolveFormViewLayout maps only tabbed. The modelling decision is ADR-0050 (Proposed): drawer/modal leave FormView.type, and presentation belongs to NavigationMode / addRecord.mode / action type 'modal'. Named formViews are reachable from no console door, because every consumer reads objectDef.form ?? formViews.default, so the steps now overlay the default form. Measured differently from the card in two places. (1) The card has the wizard rendering as steps only on /new; RecordFormPage passes the type on the /edit page route as well, and only the New/Edit modal degrades it. (2) task-desk.page.ts hosts BOTH a formType=\"drawer\" and a formType=\"modal\" ObjectForm, so the modal presentation is scorable there, and blocked(fixture) stays only as the fallback. Re-read at objectui 9dfaca6543: unchanged",
           "ref": "#21797"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-13",
+          "change": "fixtures.requires[0] gained the overlay recipe with its item-level isDefault:true, and steps[1] points at it (fixture gap, #23163; parked on #23121, carried by #23169). The console sets an object's default form only from a form ViewItem carrying isDefault (MetadataProvider applyViewItem, objectui#11539). An overlay PUT to showcase_task.form?mode=draft without it publishes cleanly, and the page falls back to the all-fields layout. QA run #23163 scored the simple, tabbed and wizard overlays with the flag set. Re-read from objectui source at 1fb1ced36243, still this repo's .objectui-sha. No clause changed",
+          "ref": "#23169"
         }
       ]
     },
@@ -1450,7 +1463,7 @@
       "title": "CSV import: GBK decode, required-field hint, legacy-fallback notice",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -1467,7 +1480,7 @@
         ]
       },
       "steps": [
-        "run the pinned unit suites (they feed real GBK bytes and assert the exact decode, the disabled-Next hint, and the visible degrade notice): pnpm --filter @object-ui/plugin-grid exec vitest run src/importParsers.test.ts src/__tests__/importMissingRequiredHint.test.tsx src/__tests__/importLegacyReferenceGuard.test.tsx",
+        "run the pinned unit suites (they feed real GBK bytes and assert the exact decode, the disabled-Next hint, and the visible degrade notice): pnpm exec vitest run packages/plugin-grid/src/importParsers.test.ts packages/plugin-grid/src/__tests__/importMissingRequiredHint.test.tsx packages/plugin-grid/src/__tests__/importLegacyReferenceGuard.test.tsx — from the REPO ROOT of an objectui checkout at the .objectui-sha revision. ⛔ Not `pnpm --filter @object-ui/plugin-grid exec vitest run src/…`: objectui's vitest invocation guard (scripts/vitest-invocation-guard.mjs) refuses a package-cwd run, which would otherwise silently execute the wrong suite (objectui#3378)",
         "capture the suite output as the primary evidence (the native file-picker hand-off is deliberately not browser-automated)",
         "optionally spot-check visually: open the import wizard on showcase_contact, load a GBK CSV past the native picker, and screenshot the decoded preview",
         "in the spot-check, map columns while leaving a required field (name) unmapped; observe the Next control and its hint",
@@ -1477,19 +1490,19 @@
         {
           "clause": "GBK bytes decode to the exact expected strings (no mojibake) — pinned",
           "oracle": "test",
-          "verify": "pnpm --filter @object-ui/plugin-grid exec vitest run src/importParsers.test.ts",
+          "verify": "pnpm exec vitest run packages/plugin-grid/src/importParsers.test.ts (from the objectui root)",
           "evidence": "test run output"
         },
         {
           "clause": "an unmapped required field disables Next AND shows the named required-field hint — pinned",
           "oracle": "test",
-          "verify": "pnpm --filter @object-ui/plugin-grid exec vitest run src/__tests__/importMissingRequiredHint.test.tsx",
+          "verify": "pnpm exec vitest run packages/plugin-grid/src/__tests__/importMissingRequiredHint.test.tsx (from the objectui root)",
           "evidence": "test run output"
         },
         {
           "clause": "the legacy-reference fallback path shows a visible degrade notice instead of silently degrading — pinned, and PIN-ONLY: no live ObjectStack server reaches the legacy path (fixtures.knownGaps)",
           "oracle": "test",
-          "verify": "pnpm --filter @object-ui/plugin-grid exec vitest run src/__tests__/importLegacyReferenceGuard.test.tsx",
+          "verify": "pnpm exec vitest run packages/plugin-grid/src/__tests__/importLegacyReferenceGuard.test.tsx (from the objectui root)",
           "evidence": "test run output"
         },
         {
@@ -1539,6 +1552,12 @@
           "date": "2026-10-06",
           "change": "partial-coverage gap of QA run #21782 parked on #22017 (row 3). acceptance[2] was blocked(dependency): the legacy per-row path exists only without importRecords, the live adapter always has it, and the pin is objectui-only. Disposition: pin. The objectui pin is confirmed at the current .objectui-sha (0abd4f9f8769), and the clause and a knownGap now say the leg is pin-only by design and name the environment that runs the pin",
           "ref": "#22017"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-13",
+          "change": "steps[0] and acceptance[0], [1] and [2].verify run the three pins from the objectui root (assertion defect, #23163 A0; parked on #23121, carried by #23169). `pnpm --filter @object-ui/plugin-grid exec vitest run src/…` is refused by objectui's vitest invocation guard (scripts/vitest-invocation-guard.mjs, objectui#3378): from inside a package the root projects glob resolves against the cwd and the run would execute the wrong suite. The same three files run as `pnpm exec vitest run packages/plugin-grid/src/…` from the root; all three exist at 1fb1ced36243, still this repo's .objectui-sha. No clause's assertion changed",
+          "ref": "#23169"
         }
       ]
     },
@@ -1547,7 +1566,7 @@
       "title": "Action buttons surface at exactly their declared locations — list toolbar, list row, record header/more/related/section — and each dispatches for real",
       "since": "v15",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1561,7 +1580,8 @@
         ],
         "knownGaps": [
           "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact.",
-          "[CLOSED by #22030 (PR #22036, 60ccda5a24), lifted by #22039 — the gap text is rewritten to say where each location now lives] a stock showcase boot hosts all six locations on showcase_task, including the three this gap used to block. record_header and record_more: Task Detail (showcase_task_detail, the record page the console opens for any task), whose first node is a page:header. That header renders the action ids it lists, each placed by its own locations, followed by the host's Edit / Share / Delete. Inline (record_header) on a desktop viewport, where the header's default inline budget is 3 (1 on mobile; a record_header action past the budget folds into ⋯): showcase_mark_done (script, shown only while the task is not done), showcase_log_time (form) and showcase_archive_task (script, disabled until the task is done). Under the ⋯ overflow (record_more without record_header): showcase_open_docs (url), showcase_recalc_estimate (api) and showcase_recalc_selection (api). record_related: Project Detail (showcase_project_detail, the record page for any project) → the Related tab (?tab=related), which holds the Tasks related list, a record:related_list for showcase_task through its project FK; open a project that has tasks. It is an authored node, not the synthesizer's strip: the page's tabs override still replaces that strip, and this tab puts the list back with no actions key, so its rows carry showcase_log_time beside the task's list_item actions. The Tasks tab beside it is the record:line_items grid, which hosts no record_related action. An expected action missing from one of these hosts is a missing placement, never blocked(fixture). The hosts were read from objectui source at pin a58626c88dc8 and from the served metadata, not from a browser render, so the first run against them is their first browser evidence"
+          "[CLOSED by #22030 (PR #22036, 60ccda5a24), lifted by #22039 — the gap text is rewritten to say where each location now lives] a stock showcase boot hosts all six locations on showcase_task, including the three this gap used to block. record_header and record_more: Task Detail (showcase_task_detail, the record page the console opens for any task), whose first node is a page:header. That header renders the action ids it lists, each placed by its own locations, followed by the host's Edit / Share / Delete. Inline (record_header) on a desktop viewport, where the header's default inline budget is 3 (1 on mobile; a record_header action past the budget folds into ⋯): showcase_mark_done (script, shown only while the task is not done), showcase_log_time (form) and showcase_archive_task (script, disabled until the task is done). Under the ⋯ overflow (record_more without record_header): showcase_open_docs (url), showcase_recalc_estimate (api) and showcase_recalc_selection (api). record_related: Project Detail (showcase_project_detail, the record page for any project) → the Related tab (?tab=related), which holds the Tasks related list, a record:related_list for showcase_task through its project FK; open a project that has tasks. It is an authored node, not the synthesizer's strip: the page's tabs override still replaces that strip, and this tab puts the list back with no actions key, so its rows carry showcase_log_time beside the task's list_item actions. The Tasks tab beside it is the record:line_items grid, which hosts no record_related action. An expected action missing from one of these hosts is a missing placement, never blocked(fixture). The hosts were read from objectui source at pin a58626c88dc8 and from the served metadata, not from a browser render, so the first run against them is their first browser evidence",
+          "acceptance[4] half (a), the locations-LESS probe, is BLOCKED(fixture) on stock (QA run #23163 A4, objectstack 36b2889c). A runtime-authored action (a scratch or writable package) is not joined into the served object's actions[] — the run's positive control, the same probe WITH a declared location, was invisible too — so a runtime probe sees nothing on any surface and proves nothing. The half needs a PACKAGED specimen with no `locations` key, as showcase_new_task is the packaged `locations: []` one. The stock showcase ships none: that shape is exactly what packages/lint's action-no-placement rule warns about. Score half (a) blocked(fixture) and half (b) on showcase_new_task as before"
         ]
       },
       "variants": [
@@ -1580,7 +1600,7 @@
         "dispatch one action per location with a ref-targeted click: bulk_reassign (screen-flow wizard opens), quick_view (modal opens), mark_done (script executes), log_time (form dialog opens on showcase_task.form), open_docs (url navigation), recalc_selection from the ⋯ menu (api POST); capture each network trace",
         "verify the state-changing dispatches server-side: mark_done flips the task's done flag (API re-read), recalc_selection's per-record branch recomputes the estimate",
         "CEL visibility both sides: locate a done task and a not-done task; read the row menu and record header of each for showcase_mark_done",
-        "empty-locations probe, both halves: (a) in a scratch/writable package author a copy of an api action with NO locations key; reload and sweep all six surfaces (list toolbar, row menu, record header, ⋯ overflow, related-list section, quick-actions bar) recording every surface it appears on — the expected list is EMPTY — then delete the probe; (b) sweep the same six surfaces for showcase_new_task, the fixture fleet's headless `locations: []` declaration, and record that its list is empty too"
+        "empty-locations probe, both halves: (a) only where a PACKAGED action with NO locations key exists (none ships on stock — knownGaps), sweep all six surfaces (list toolbar, row menu, record header, ⋯ overflow, related-list section, quick-actions bar) recording every surface it appears on — the expected list is EMPTY; otherwise record half (a) blocked(fixture). ⛔ Do not author the probe at runtime: a runtime-authored action is not served at all, so its empty sweep is no evidence; (b) sweep the same six surfaces for showcase_new_task, the fixture fleet's headless `locations: []` declaration, and record that its list is empty too"
       ],
       "acceptance": [
         {
@@ -1610,7 +1630,7 @@
         {
           "clause": "empty/missing locations means NO location — the probe action with no `locations` key renders on none of the six surfaces, and the headless `locations: []` declaration (showcase_new_task) renders on none either. Placement is a declaration, not a default: objectui#3142 collapsed four disagreeing renderers onto the single `actionRendersAt` predicate, a plain membership test, so an undeclared or empty list matches nothing. recalc_selection names record_more for that reason — an explicit single-record placement that also keeps it off the toolbar, where a dispatch would carry no selection and the endpoint would reject it — NOT to opt out of an everywhere-default",
           "oracle": "dom",
-          "verify": "both six-surface DOM sweeps (the locations-less probe, and showcase_new_task) come back with an empty placement list; recalc_selection is present under ⋯ and absent from the toolbar",
+          "verify": "both six-surface DOM sweeps (the packaged locations-less specimen, and showcase_new_task) come back with an empty placement list; recalc_selection is present under ⋯ and absent from the toolbar. On stock no packaged locations-less specimen exists, so half (a) scores blocked(fixture) (knownGaps) and the clause is judged on half (b) plus the recalc_selection read; a runtime-authored probe's empty sweep is never evidence for half (a)",
           "evidence": "the two empty placement lists + the toolbar DOM read"
         }
       ],
@@ -1689,6 +1709,12 @@
           "date": "2026-10-06",
           "change": "lifted the row-7 fixture knownGap (#22039): #22030 (PR #22036, 60ccda5a24) hosts record_header, record_more and record_related for showcase_task on stock showcase pages. knownGaps[1] is rewritten from 'no surface' to where each location lives: Task Detail's page:header (record_header inline; record_more's url / api / api under the ⋯ overflow) and Project Detail's Related tab (the Tasks related list, an authored record:related_list rather than the synthesizer's strip). The lines revision 7 added for the gap are re-pointed. Step 2 names each host and drops its blocked(fixture) sentence. Clause 1 drops 'synthesized', and its verify scores an absent action as a missing placement. Clause 3 no longer parks the url / api legs. knownGaps[0] is unchanged",
           "ref": "#22039"
+        },
+        {
+          "revision": 10,
+          "date": "2026-10-13",
+          "change": "knownGaps[2] (new), steps[6] and acceptance[4].verify (fixture gap, #23163 A4; parked on #23121, carried by #23169). steps[6](a) authored a locations-less probe action at runtime. QA run #23163 found runtime-authored actions are not joined into the served object's actions[]: its positive control, the same probe with a location, rendered nowhere either, so the empty sweep proved nothing. The half needs a packaged specimen with no `locations` key, and the stock showcase ships none (the shape action-no-placement warns about). Half (a) now scores blocked(fixture) on stock; half (b) on showcase_new_task is unchanged. Shipping the specimen is a showcase fixture change, not made here",
+          "ref": "#23169"
         }
       ],
       "enumSource": {
@@ -1801,7 +1827,7 @@
       "title": "Gantt is interactive, not a picture: drag persists, locked tasks survive auto-schedule, host veto restores",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -1813,7 +1839,7 @@
           "the task gantt view (task.view.ts 'Schedule (Gantt)': startDateField/endDateField/titleField/progressField)"
         ],
         "knownGaps": [
-          "the stock task gantt view (examples/app-showcase/src/ui/views/task.view.ts, listViews.gantt) declares NO dependenciesField / lockField / parentField, so the auto-schedule, locked-task and subtree-drag surfaces are unreachable LIVE on stock fixtures. ⚠ All three ARE GanttConfig keys (packages/spec/src/ui/view.zod.ts#GanttConfigSchema). QA run #21782 read `lockField` as no spec key; that is wrong, so the variants need no re-point. A2 and A3 are scored from the objectui pins `automated` names per clause. The one sub-leg no pin reaches is a DIRECT drag on a locked LEAF bar: GanttView.tsx returns from the drag start for a locked task, but only the summary-drag and link-drop locked cases are unit-pinned. It needs the view extended live, with lockField pointing at a boolean on showcase_task such as `done` (a view overlay or a scratch copy). That recipe is not run-proven, so score the sub-leg blocked(fixture) until a run proves it",
+          "the stock task gantt view (examples/app-showcase/src/ui/views/task.view.ts, listViews.gantt) declares NO dependenciesField / lockField / parentField, so the auto-schedule, locked-task and subtree-drag surfaces are unreachable LIVE on stock fixtures. ⚠ All three ARE GanttConfig keys (packages/spec/src/ui/view.zod.ts#GanttConfigSchema). QA run #21782 read `lockField` as no spec key; that is wrong, so the variants need no re-point. A2 and A3 are scored from the objectui pins `automated` names per clause. The one sub-leg no pin reaches is a DIRECT drag on a locked LEAF bar: GanttView.tsx returns from the drag start for a locked task, but only the summary-drag and link-drop locked cases are unit-pinned. It needs the view extended live, with lockField pointing at a boolean on showcase_task such as `done` (a view overlay or a scratch copy). That recipe is not run-proven, so score the sub-leg blocked(fixture) until a run proves it. Re-confirmed by QA run #23163 (objectstack 36b2889c, objectui 1fb1ced36243): the stock view still declares no lockField, and no pin reaches the direct leaf drag. The nearest pin, GanttView.tree.test.tsx ('omits drag/resize/progress handles and the dependency dot on a locked bar'), proves a locked leaf loses its resize grips and link dot, NOT that dragging its body writes nothing, so it does not score the sub-leg either",
           "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
         ]
       },
@@ -1891,6 +1917,12 @@
           "date": "2026-10-06",
           "change": "partial-coverage gap of QA run #21782 parked on #22017 (row 4). A2 / A3 were blocked(fixture): the stock view has no dependenciesField, and the record said lockField is not a GanttConfig key. That second premise is false: lockField, dependenciesField and parentField are all GanttConfigSchema keys (packages/spec/src/ui/view.zod.ts, also at the run's subject 316be321), so no clause is re-pointed. Disposition: pin. `automated` now names the objectui tests that prove A2 and A3 per clause, and the knownGap records the one unpinned sub-leg (a direct drag on a locked leaf) as blocked(fixture)",
           "ref": "#22017"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-13",
+          "change": "knownGaps[0] records QA run #23163's re-confirmation of the A2-leaf fixture gap, and names the near-miss pin (fixture gap, #23163 A2-leaf; parked on #23121, carried by #23169). At objectui 1fb1ced36243 the stock gantt view has no lockField, no pin drives a direct drag on a locked leaf, and the view-overlay recipe is still not run-proven. GanttView.tree.test.tsx pins the locked leaf's missing resize grips and link dot, which is not the drag clause. The sub-leg stays blocked(fixture); no clause changed",
+          "ref": "#23169"
         }
       ]
     },
@@ -1959,10 +1991,10 @@
     },
     {
       "id": "records-forms.form-dirty-guard",
-      "title": "Dirty forms guard navigation: discard prompts, save proceeds, nothing is lost silently",
+      "title": "Dirty forms guard ACCIDENTAL closes: the X / Escape / backdrop prompt on a dirty form, the footer Cancel discards without a prompt by design, save proceeds, nothing is lost silently",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -1976,7 +2008,7 @@
       },
       "steps": [
         "open a record edit form (modal or drawer); change one field WITHOUT saving",
-        "attempt to close the dialog / navigate away; capture the guard prompt",
+        "attempt an ACCIDENTAL close — the X, Escape, or a backdrop click (the Radix close paths the guard intercepts) — and capture the guard prompt; a tab reload hits the browser-native beforeunload prompt instead. ⚠ The footer Cancel button is NOT a guarded path: it is an intentional discard and closes at once, dirty or not (ModalForm / DrawerForm handleCancel; pinned in discardGuard.test.tsx 'Cancel closes immediately even when dirty (intentional discard, no confirm)'). Press it once on a dirty form and record that it closes with no prompt and writes nothing",
         "choose stay/cancel — confirm the edit is still in the form",
         "choose discard — confirm the record is unchanged server-side and the form state is dropped",
         "repeat the edit and save normally — confirm persistence",
@@ -1984,9 +2016,9 @@
       ],
       "acceptance": [
         {
-          "clause": "a dirty form intercepts close/navigation with the discard guard; a clean form closes without friction — both sides",
+          "clause": "a dirty form intercepts every ACCIDENTAL close (the X, Escape, a backdrop click) with the discard guard, and the footer Cancel discards a dirty form WITHOUT a prompt by design (an intentional exit); a clean form closes without friction on every path — both sides",
           "oracle": "screenshot",
-          "verify": "prompt appears exactly when dirty",
+          "verify": "the prompt appears exactly when the form is dirty AND the close is accidental (X / Escape / backdrop); the footer Cancel never prompts, and a re-read after it shows the row unchanged",
           "evidence": "both screenshots"
         },
         {
@@ -1998,12 +2030,12 @@
         {
           "clause": "the guard's behavior is pinned by the existing unit suite",
           "oracle": "test",
-          "verify": "objectui: pnpm --filter @object-ui/plugin-form exec vitest run src/discardGuard.test.tsx",
+          "verify": "objectui, from the REPO ROOT of a checkout at the .objectui-sha revision: pnpm exec vitest run packages/plugin-form/src/discardGuard.test.tsx (QA run #23163 read 14/14 at 1fb1ced36243). ⛔ Not `pnpm --filter @object-ui/plugin-form exec vitest run src/discardGuard.test.tsx`: objectui's vitest invocation guard (scripts/vitest-invocation-guard.mjs) refuses a run whose cwd is inside a package, because the root config's project globs resolve against the cwd and such a run would silently execute the wrong suite (objectui#3378)",
           "evidence": "test output"
         }
       ],
       "negative": [
-        "losing a dirty edit on close with NO prompt is the FAIL; equally, prompting on a pristine form is a paper-cut FAIL of the clean side"
+        "losing a dirty edit on an ACCIDENTAL close (X / Escape / backdrop) with NO prompt is the FAIL — the footer Cancel discarding without a prompt is the design, not this fail; equally, prompting on a pristine form is a paper-cut FAIL of the clean side"
       ],
       "traps": [
         "automation-input"
@@ -2013,7 +2045,7 @@
         "ref": "objectui: packages/plugin-form/src/discardGuard.test.tsx"
       },
       "source": [
-        "objectui: packages/plugin-form/src/{ModalForm,DrawerForm}.tsx (beforeunload/guard wiring)",
+        "objectui: packages/plugin-form/src/{ModalForm,DrawerForm}.tsx (beforeunload/guard wiring; handleCancel — the footer Cancel is an intentional discard and closes with no prompt, while the guard rides the Radix onOpenChange close paths)",
         "dogfood-verification skill §4 (the beforeunload escape hatch exists precisely because this guard is real)"
       ],
       "history": [
@@ -2028,6 +2060,12 @@
           "date": "2026-08-21",
           "change": "recorded on the item that its automation is pinned exclusively in the objectui repo and is therefore neither runnable nor pin-evidenced from this checkout — one of 23 items in that position, each of which every sweep had been re-deriving from scratch. The knownGap names the two honest ways to score it (hand-drive it as a manual run, or run the pin in an objectui checkout and cite the revision) and forbids the third: treating the `automated` field itself as coverage. The protocol and the exclusive-vs-mixed distinction live once in RUNNER.md; this line is the pointer (#10236 A5)",
           "ref": "#10236"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-13",
+          "change": "acceptance[2].verify runs the pin from the objectui root (assertion defect, #23163 A2), and the title, steps[1], acceptance[0], negative[0] and source[0] separate the deliberate footer Cancel from the accidental closes (wording, #23163 A0); both parked on #23121, carried by #23169. The verify string `pnpm --filter @object-ui/plugin-form exec vitest run src/…` is refused by objectui's vitest invocation guard (objectui#3378); `pnpm exec vitest run packages/plugin-form/src/discardGuard.test.tsx` from the objectui root ran 14/14 at 1fb1ced36243 in QA run #23163. The footer Cancel closes a dirty form with no prompt by design (ModalForm handleCancel, pinned in discardGuard.test.tsx), and the guard covers the X, Escape and backdrop paths. Re-read from objectui source at that pin, still this repo's .objectui-sha",
+          "ref": "#23169"
         }
       ]
     },
@@ -2662,10 +2700,10 @@
     },
     {
       "id": "records-forms.saved-view-management",
-      "title": "Admin saved-view lifecycle: create kanban via dialog, rename/set-default/pin/delete each hit the meta overlay and survive reload; non-admin affordances absent and server-refused",
+      "title": "Admin saved-view lifecycle: create kanban via dialog (staged as a per-item draft, live only after Publish), rename/set-default/pin/delete each hit the meta overlay and survive reload; non-admin affordances absent and server-refused",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -2690,8 +2728,8 @@
         "delete"
       ],
       "steps": [
-        "as admin, open showcase_task; open the Create View dialog; choose kanban; set groupByField = status; create — capture PUT /api/v1/meta/view/<name> (meta.saveItem) carrying {type:'kanban', kanban:{groupByField:'status'}}",
-        "reload; confirm the new kanban view is live and groups by status",
+        "as admin, open showcase_task; open the Create View dialog; choose kanban; set groupByField = status; create — capture PUT /api/v1/meta/view/<name>?mode=draft (the console's create handler → createRuntimeMetadata → metadataClient.save(…, {mode:'draft'}): ADR-0034 stages every runtime-created view as an invisible per-item draft under the qualified name showcase_task.<key>) carrying {type:'kanban', kanban:{groupByField:'status'}}; the console lands on view/<name>?preview=draft",
+        "click Publish on the draft-preview bar — capture POST /api/v1/meta/view/<name>/publish (meta.publishItem); then reload WITHOUT ?preview=draft and confirm the new kanban view is live and groups by status. Before the publish, a plain (published-only) read does not serve it — the draft isolation itself is studio-authoring.view-authoring-live's to score",
         "rename the view via Manage Views; capture the PUT; reload confirms the new label",
         "set the view as default (unsets the prior default); capture the PUT(s); reload confirms the default moved",
         "pin the view; capture the PUT (isPinned); reload confirms it pinned",
@@ -2701,15 +2739,15 @@
       ],
       "acceptance": [
         {
-          "clause": "creating a kanban view via CreateViewDialog persists a PUT /api/v1/meta/view/<name> carrying the type and its config (kanban.groupByField), and the view is LIVE after reload — a local repaint that never reached the overlay is not enough",
+          "clause": "creating a kanban view via CreateViewDialog stages a per-item DRAFT — PUT /api/v1/meta/view/<name>?mode=draft carrying the type and its config (kanban.groupByField), landing on ?preview=draft — and the explicit Publish (POST /api/v1/meta/view/<name>/publish) makes it LIVE after a plain reload. A local repaint that never reached the overlay is not enough, and neither is a draft that was never published",
           "oracle": "network",
-          "verify": "captured PUT /api/v1/meta/view/<name> (data-objectstack createView → client.meta.saveItem('view', name, spec); framework route PUT /api/v1/meta/:type/:name, client meta.saveItem); reload re-reads it via listViews",
-          "evidence": "the PUT payload + post-reload view list"
+          "verify": "captured PUT /api/v1/meta/view/<name>?mode=draft (objectui ObjectView create handler → runtime-metadata-persistence.ts createRuntimeMetadata, mode 'draft'; framework route PUT /api/v1/meta/:type/:name) + captured POST /api/v1/meta/view/<name>/publish (DraftPreviewBar → meta.publishItem; framework route POST /api/v1/meta/:type/:name/publish); a reload without ?preview=draft re-reads it via listViews",
+          "evidence": "the draft PUT payload + the publish POST + the post-reload view list"
         },
         {
           "clause": "rename / set-default / pin / delete each issue their meta write and are live after reload; set-default UNSETS the prior default (updateView isDefault flips all others off)",
           "oracle": "network",
-          "verify": "one PUT per rename/pin/isDefault (updateView read-merge-write) and a DELETE /api/v1/meta/view/<name> for delete (deleteView → meta.deleteItem); reload reflects each",
+          "verify": "one PUT per rename/pin/isDefault (updateView read-merge-write) and a DELETE /api/v1/meta/view/<name> for delete (deleteView → meta.deleteItem); reload reflects each. On the PUBLISHED view (no draft pending) each write goes straight to the live overlay — a PUT with no ?mode=draft, and no publish step; while a draft is still pending, updateView writes that draft instead (data-objectstack updateView probes ?state=draft first)",
           "evidence": "the four traces + post-reload states"
         },
         {
@@ -2736,8 +2774,8 @@
       ],
       "source": [
         "objectui: packages/app-shell/src/views/CreateViewDialog.tsx (kanban groupByField), packages/plugin-view/src/ManageViewsDialog.tsx (rename/default/pin/delete affordances, read-only suppression)",
-        "objectui: packages/app-shell/src/views/ObjectView.tsx (updateView/deleteView wiring), packages/data-objectstack/src/index.ts (createView/updateView/deleteView → meta.saveItem/deleteItem)",
-        "framework: packages/rest/src/rest-route-ledger.ts (PUT/DELETE /api/v1/meta/:type/:name)",
+        "objectui: packages/app-shell/src/views/ObjectView.tsx (the create handler: a draft via createRuntimeMetadata, then the ?preview=draft landing; updateView/deleteView wiring), packages/app-shell/src/views/runtime-metadata-persistence.ts (createRuntimeMetadata: metadataClient.save with mode 'draft', ADR-0034), packages/data-objectstack/src/index.ts (updateView/deleteView → meta.saveItem/deleteItem, draft-first addressing)",
+        "framework: packages/rest/src/rest-route-ledger.ts (PUT/DELETE /api/v1/meta/:type/:name; POST /api/v1/meta/:type/:name/publish)",
         "PENDING-GAPS §C saved-view-management; cross-ref studio-authoring.view-authoring-live (distinct — this is the runtime end-user/admin lifecycle)"
       ],
       "history": [
@@ -2746,6 +2784,12 @@
           "date": "2026-08-08",
           "change": "initial — deep-test the saved-view lifecycle (create-kanban/rename/default/pin/delete) against the meta overlay, with the non-admin both-sides gate",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-13",
+          "change": "steps[0] and [1], acceptance[0] (clause, verify, evidence), acceptance[1].verify, the title and source[1] and [2] re-pointed to the draft-first create (stale spec, #23163 A0; parked on #23121, carried by #23169). The Create View dialog stages the new view as a per-item draft (PUT …?mode=draft, ADR-0034) and lands on ?preview=draft; it goes live only after Publish (POST …/publish). Rename, default, pin and delete on the published view write the live overlay directly. QA run #23163 (objectstack 36b2889c, objectui 1fb1ced36243) drove create as draft-then-publish and passed every other leg. Re-read from objectui source at that pin, still this repo's .objectui-sha: ObjectView.tsx, runtime-metadata-persistence.ts createRuntimeMetadata, data-objectstack updateView",
+          "ref": "#23169"
         }
       ]
     },
@@ -2754,7 +2798,7 @@
       "title": "Select-all-matching covers every matching id across pages (server total, not the rendered page); clear resets both selection sources",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -2763,20 +2807,20 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a list whose filtered result exceeds one page: showcase_contact filtered to Northwind's account has 26 rows (2 named + 24 'Prospect NN'), authored to exceed a page (examples/app-showcase/src/data/seed/index.ts, objectui#2711)",
-          "a bulk action registered on the object so the BulkActionBar and its aggregate/per-record dispatch are exercisable (objectui plugin-grid BulkActionBar)"
+          "a list whose match set exceeds one page AND whose view declares bulk actions: the showcase_task 'Bulk Actions' view (examples/app-showcase/src/ui/views/task.view.ts#bulk_actions — bulkActions showcase_mark_done + showcase_recalc_estimate, aggregate def showcase_recalc_selection). The stock seed has 10 tasks, under one page, so provision scratch tasks first: POST at least 55 rows to /api/v1/data/showcase_task, each with a title sharing one prefix (e.g. 'QA bulk 01'…) and a project (required), so a quick search isolates them; QA run #23163 used 55 against a first page of 50 rows. Delete them afterwards. ⚠ showcase_contact no longer serves this item: its views declare no bulkActions, and its 34 contacts — Northwind's 26 included — fit the list's first page; the Northwind 26 were authored to page the Account → Contacts RELATED list (objectui#2711), not a list view",
+          "the bulk actions above, so the BulkActionBar and both its aggregate and per-record dispatch are exercisable (objectui plugin-grid BulkActionBar)"
         ],
         "knownGaps": [
           "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
         ]
       },
       "steps": [
-        "open the showcase_contact list filtered so the match set exceeds one page (e.g. account = Northwind → 26 rows); screenshot; note page shows N rows, count bar shows server total M (M > N)",
+        "open the showcase_task 'Bulk Actions' view (…/showcase_task/view/bulk_actions) with the scratch tasks in place and quick-search their shared prefix so the match set exceeds one page (e.g. 'QA bulk' → 55 rows); screenshot; note page shows N rows, count bar shows server total M (M > N)",
         "select the whole visible page; the cross-page banner appears offering 'Select all M matching'",
         "click select-all-matching; the banner reads 'All M matching records are selected'",
         "dispatch a bulk action; capture the requests — resolveBulkRows fans out a paged find (dropping $top/$skip, paging 500) collecting every matching id ACROSS pages",
-        "cross-check the collected id count against a direct filtered API count: GET /api/v1/data/showcase_contact?$filter=...&$top=0 (or the response total)",
-        "confirm an AGGREGATE action carries every matching id in params._selectedIds; a per-record action fans out one dispatch per matching id",
+        "cross-check the collected id count against a direct API count for the same search: GET /api/v1/data/showcase_task?$search=…&$top=0 (or the response total)",
+        "confirm the AGGREGATE action (showcase_recalc_selection) carries every matching id in params._selectedIds; a per-record action (showcase_mark_done) fans out one dispatch per matching id",
         "click clear; confirm both selection sources reset (the toolbar empties AND the row checkboxes clear)"
       ],
       "acceptance": [
@@ -2789,7 +2833,7 @@
         {
           "clause": "select-all-matching resolves EVERY matching id across pages: the dispatched set equals a direct filtered API count, not just the visible page (paged fan-out with $top/$skip dropped, capped at 5000)",
           "oracle": "api",
-          "verify": "count the ids handed to the executor (resolveBulkRows collected set) vs GET /api/v1/data/showcase_contact filtered total; they match (up to the HARD_CAP)",
+          "verify": "count the ids handed to the executor (resolveBulkRows collected set) vs the GET /api/v1/data/showcase_task total for the same search; they match (up to the HARD_CAP)",
           "evidence": "the collected-id count + the filtered API count"
         },
         {
@@ -2826,7 +2870,7 @@
       },
       "source": [
         "objectui: packages/plugin-grid/src/ObjectGrid.tsx (selectAllMatching, resolveBulkRows paged fan-out + HARD_CAP, resetSelection #3056, totalMatching), packages/plugin-grid/src/components/BulkActionBar.tsx (cross-page banner)",
-        "examples/app-showcase/src/data/seed/index.ts#Northwind (Northwind 26-contact fixture, objectui#2711)",
+        "examples/app-showcase/src/ui/views/task.view.ts#bulk_actions (the 'Bulk Actions' view: bulkActions + the aggregate bulkActionDefs entry — this item's fixture since #23169; the stock 10 tasks need the scratch rows to exceed a page) — not examples/app-showcase/src/data/seed/index.ts's Northwind 26, which page the Account → Contacts related list (objectui#2711)",
         "PENDING-GAPS §C bulk-select-all-matching; cross-ref records-forms.list-view-capabilities (bulk-actions, page-local)"
       ],
       "history": [
@@ -2841,6 +2885,12 @@
           "date": "2026-08-21",
           "change": "recorded on the item that its automation is pinned exclusively in the objectui repo and is therefore neither runnable nor pin-evidenced from this checkout — one of 23 items in that position, each of which every sweep had been re-deriving from scratch. The knownGap names the two honest ways to score it (hand-drive it as a manual run, or run the pin in an objectui checkout and cite the revision) and forbids the third: treating the `automated` field itself as coverage. The protocol and the exclusive-vs-mixed distinction live once in RUNNER.md; this line is the pointer (#10236 A5)",
           "ref": "#10236"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-13",
+          "change": "fixtures.requires[0] and [1], steps[0], [4] and [5], acceptance[1].verify and source[1] re-pointed from showcase_contact to the showcase_task 'Bulk Actions' view (stale fixture, #23163; parked on #23121, carried by #23169). showcase_contact's views declare no bulkActions, and its 34 contacts fit the list's first page of 50, so the item could not run as written. QA run #23163 re-pointed to the bulk_actions view with 55 scratch tasks and passed every clause there (one aggregate POST with 55 ids, Clear resets both sources, HARD_CAP 5000 read from source and pin). The Northwind 26 contacts page the related list, objectui#2711's subject, not a list view",
+          "ref": "#23169"
         }
       ]
     },
@@ -2938,7 +2988,7 @@
       "title": "Record edit undo: toast Undo / Ctrl+Z restores the prior value through the API and logs a revert; undo after a concurrent change must not silently clobber",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -2948,14 +2998,15 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a writable record and an undoable edit path (an inline edit or an action flagged undoable) — objectui react/src/hooks/useGlobalUndo.ts + RecordDetailView toast Undo action; core globalUndoManager"
+          "a writable record and an action that declares `undoable: true` with operation 'update' (a patch of one field) — at objectui 1fb1ced36243 the ONLY path that pushes an Undo op: useConsoleActionRuntime and RecordDetailView attach the toast Undo for `undoable` actions, while inline grid and form edits push none. objectui react/src/hooks/useGlobalUndo.ts + core globalUndoManager hold the stack. ⚠ The stock showcase declares NO undoable action (examples/app-showcase has zero `undoable` keys), and a runtime-authored action is not joined into the served object's actions[] (records-forms.action-location-matrix knownGaps), so the action must ship PACKAGED in the showcase — see `blocked`"
         ],
         "knownGaps": [
-          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact.",
+          "BLOCKED(fixture) on stock, all four clauses (QA run #23163, objectstack 36b2889c, objectui 1fb1ced36243). Inline edits push no Undo op at this pin — only actions declaring `undoable` do — and the showcase declares none, while a runtime-authored undoable action is not served. The item becomes runnable when examples/app-showcase ships a packaged undoable update action on a writable object (operation 'update' with a patch, so the Undo captures the prior value of every written field — ActionSchema.undoable in packages/spec/src/ui/action.zod.ts). Lift `blocked` in the revision that names that fixture. ⛔ Do not score an inline edit's missing Undo as this item's FAIL: the console never offers one by design"
         ]
       },
       "steps": [
-        "open a record; make an undoable edit to one field; confirm the success toast shows an Undo button",
+        "open a record; run the packaged undoable action (fixtures.requires[0]) on it; confirm the success toast shows an Undo button. An inline edit offers none by design",
         "click Undo (or press Ctrl+Z); capture the resulting update; re-read the record over the API and confirm the prior value is restored",
         "open the History/audit and confirm a revert entry was added (a forward write, not a silent rollback)",
         "press Ctrl+Shift+Z (redo); confirm the edited value is restored",
@@ -2997,6 +3048,7 @@
         "hydration-race",
         "shared-browser-tab"
       ],
+      "blocked": { "by": "fixture", "ref": "fixture gap: no packaged `undoable` update action in examples/app-showcase (QA run #23163 A0-A3; recorded on #23169)" },
       "automated": {
         "kind": "unit",
         "ref": "objectui: packages/core/src/actions/__tests__/UndoManager.test.ts (undo/redo stack)"
@@ -3017,6 +3069,12 @@
           "date": "2026-08-21",
           "change": "recorded on the item that its automation is pinned exclusively in the objectui repo and is therefore neither runnable nor pin-evidenced from this checkout — one of 23 items in that position, each of which every sweep had been re-deriving from scratch. The knownGap names the two honest ways to score it (hand-drive it as a manual run, or run the pin in an objectui checkout and cite the revision) and forbids the third: treating the `automated` field itself as coverage. The protocol and the exclusive-vs-mixed distinction live once in RUNNER.md; this line is the pointer (#10236 A5)",
           "ref": "#10236"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-13",
+          "change": "fixtures.requires[0], knownGaps[1] (new), steps[0] and a `blocked` annotation (fixture gap, #23163 A0-A3; parked on #23121, carried by #23169). At objectui 1fb1ced36243 only actions declaring `undoable` push an Undo op (useConsoleActionRuntime, RecordDetailView); inline edits push none. The showcase declares no undoable action, and a runtime-authored one is not served, so QA run #23163 scored all four clauses blocked(fixture). The item stays blocked until the showcase ships a packaged undoable update action (operation update + patch). That fixture is product work outside this checklist edit; `blocked.ref` names the gap so the selector excludes the item from default runs until then. No clause changed",
+          "ref": "#23169"
         }
       ]
     },
@@ -3121,7 +3179,7 @@
       "title": "Object lifecycle hooks fire on the write path with the right timing, gate, async and error semantics — driven over /api/v1/data/*, oracled by the record effect and the log line",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3171,7 +3229,7 @@
         "over-budget warn — FIRES: PATCH /api/v1/data/showcase_project/<Data Platform id> {spent:650000} (budget 600000 → over budget, but ≤ 720000 so the spent_within_budget rule still permits the write); settle; read the log for 'project over budget: Data Platform (650000 / 600000)'",
         "over-budget warn — condition gate (under budget): PATCH 'Website Relaunch' {spent:70000} (still under its 150000 budget); settle; confirm NO warn line (record.spent > record.budget is false) — the same partial write proves `record` merges the stored budget it never sent",
         "abort rollback (scratch): register a scratch beforeInsert hook whose body throws, onError:'abort', on a scratch object (or showcase_task); POST a row; capture the refusal and confirm a filtered GET count stays 0 (the write rolled back, no orphan) — cross-check the dogfood hef_ref_guard beforeDelete pin",
-        "onError:'log' tolerate (scratch): register a scratch async afterUpdate hook whose body throws, onError:'log'; trigger it with a real update; confirm the triggering write STILL landed (re-read shows the change) and the server logged '[hook] async handler error (fire-and-forget)' — a suppressed failure, not a rollback",
+        "onError:'log' tolerate (scratch): register a scratch async afterUpdate hook whose body throws, onError:'log'; trigger it with a real update; confirm the triggering write STILL landed (re-read shows the change) and the server logged ERROR '[hook] handler failed (onError=log; suppressing)' — a suppressed failure, not a rollback. With onError:'log' the error policy itself logs and returns (packages/objectql/src/hook-wrappers.ts runWithErrorPolicy), so the fire-and-forget catch's '[hook] async handler error (fire-and-forget)' line never fires; that line belongs to an async hook WITHOUT onError:'log'",
         "priority ordering (scratch): register two scratch hooks on ONE object+event with priorities 10 and 90, each logging its own name; issue one write; confirm the log order is the priority-10 hook THEN the priority-90 hook (lower runs first)"
       ],
       "acceptance": [
@@ -3220,7 +3278,7 @@
         {
           "clause": "onError:'log' on a THROWING async afterUpdate hook does NOT roll the triggering write back: the PATCH persists (re-read shows the change) and the failure is only logged — a fire-and-forget failure can never un-commit a write the engine already resolved",
           "oracle": "api",
-          "verify": "scratch throwing async hook; the PATCH's re-read shows the new value AND the server log carries '[hook] async handler error (fire-and-forget)'",
+          "verify": "scratch throwing async hook; the PATCH's re-read shows the new value AND the server log carries ERROR '[hook] handler failed (onError=log; suppressing)' with the hook's name (hook-wrappers.ts runWithErrorPolicy — not the fire-and-forget catch's '[hook] async handler error (fire-and-forget)', which an onError:'log' hook never reaches)",
           "evidence": "the persisted re-read + the suppressed-error log line"
         },
         {
@@ -3282,6 +3340,12 @@
           "date": "2026-10-03",
           "change": "fixture roster only, no clause moved — the showcase gained a fifth hook, showcase_guard_task_reopen (beforeUpdate on showcase_task, throws a user-facing refusal), the fixture records-forms.script-action-hook-refusal-toast drives. Two knownGaps stated facts it made false ('no two showcase hooks share an object+event', 'the fixtures never throw'); both now name it and say why it does not close this item's ordering or beforeInsert abort-rollback clause.",
           "ref": "#21596"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-13",
+          "change": "the onError:'log' step and acceptance[7].verify quote the log line the product writes (wording drift, #23166 A7; parked on #23121, carried by #23169). For an async afterUpdate hook declared onError:'log', hook-wrappers.ts runWithErrorPolicy catches the throw, logs ERROR '[hook] handler failed (onError=log; suppressing)' and returns. The '[hook] async handler error (fire-and-forget)' line the item quoted is the fire-and-forget catch, which only an async hook without onError:'log' reaches. QA run #23166 read the first line. Read from source at 6d7f4df3c. The clause's verdict logic is unchanged",
+          "ref": "#23169"
         }
       ]
     },
@@ -3642,10 +3706,10 @@
     },
     {
       "id": "records-forms.field-group-visible-when",
-      "title": "fieldGroups[].visibleWhen section predicate: both spellings accepted, the parse normalizes to the envelope, retired visibleOn refused with the located prescription, derivation carries it verbatim — the console form gates the section; the detail page still drops the key at the pinned console (objectui#11630)",
+      "title": "fieldGroups[].visibleWhen section predicate: both spellings accepted, the parse normalizes to the envelope, retired visibleOn refused with the located prescription, derivation carries it verbatim — the console gates the section on the form AND the detail page (objectui#11630 fixed)",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3659,7 +3723,7 @@
         ],
         "knownGaps": [
           "no stock showcase object carries fieldGroups[].visibleWhen (grepped: contact and semantic-zoo declare groups, no predicates) — the steps author a scratch qa_group_gate object inline, reusing the qa-feeds-disabled recipe's package-install + PUT pattern. Single consumer today, so deliberately NOT a named area recipe; promote it to one if a second item ever needs the carrier",
-          "the console leg at objectui 9dfaca6543: the FORM adapter copies the key (plugin-form fieldGroups.ts passes visibleWhen onto the derived section), so the form gates live; the DETAIL adapter still drops it (plugin-detail buildDefaultPageSchema.ts deriveFieldGroupDetailSections maps key / label / icon / description / collapse / columns / fields only), so the detail page renders the section ungated — a product defect filed as objectui#11630, not a checklist gap. Confirm what the RUNNING console build does before scoring; if its bundle predates even the FormSection section-gating machinery (#6111/#6236/#6237), record blocked(fixture) rather than a defect"
+          "the console leg at objectui 1fb1ced36243: BOTH adapters carry the predicate. The FORM adapter copies the key (plugin-form fieldGroups.ts passes visibleWhen onto the derived section). The DETAIL page writes each declared group as the spec's `{ group }` reference (plugin-detail buildDefaultPageSchema.ts resolveDetailSections), and record:details resolves it and evaluates the group's visibleWhen per record (renderers/record-details.tsx; pin record-details.groupVisibleWhen-11630.test.tsx) — objectui#11630 is fixed. Confirm what the RUNNING console build does before scoring; if its bundle predates even the FormSection section-gating machinery (#6111/#6236/#6237), record blocked(fixture) rather than a defect"
         ]
       },
       "steps": [
@@ -3691,9 +3755,9 @@
           "evidence": "test run output"
         },
         {
-          "clause": "the console renders the derived section GATED — the whole 'Pro details' section, header included, absent while kind=basic and appearing LIVE when kind flips to pro, on form and detail alike. At objectui 9dfaca6543 the FORM half holds (plugin-form fieldGroups.ts copies visibleWhen onto the derived section); the DETAIL half does not — plugin-detail buildDefaultPageSchema.ts deriveFieldGroupDetailSections drops the key, so the detail page shows the section unconditionally: score that half FAIL and cite objectui#11630 (do not re-file). Read the adapters at the running build's revision, or observe the gating itself, before scoring either half",
+          "clause": "the console renders the derived section GATED — the whole 'Pro details' section, header included, absent while kind=basic and appearing LIVE when kind flips to pro, on form and detail alike. At objectui 1fb1ced36243 both halves hold: plugin-form fieldGroups.ts copies visibleWhen onto the derived form section, and the detail page references the group (`{ group }`) so record:details evaluates its visibleWhen per record (objectui#11630, fixed). A section rendered ungated on EITHER page is now a FAIL — a regression, not the known defect. Read the adapters at the running build's revision, or observe the gating itself, before scoring either half",
           "oracle": "dom",
-          "verify": "screenshots of both kind states on form and detail, after settle; plus the console revision consulted (stale-console-bundle discipline) — on the form the section gates live; on detail an unconditionally-rendered section is the objectui#11630 defect at this pin, recorded FAIL with that reference",
+          "verify": "screenshots of both kind states on form and detail, after settle; plus the console revision consulted (stale-console-bundle discipline) — on both pages the section gates live. objectui pins the detail half in packages/plugin-detail/src/renderers/__tests__/record-details.groupVisibleWhen-11630.test.tsx ('record:details evaluates a group's visibleWhen exactly as the form does'); run it from an objectui checkout at the .objectui-sha revision to cite it beside the live read",
           "evidence": "the four screenshots + the console revision/adapter reading the verdict rests on"
         },
         {
@@ -3717,7 +3781,7 @@
       "source": [
         "packages/spec/src/data/object.zod.ts#visibleOn (visibleOn tombstone prescription), (visibleWhen, CEL via ExpressionInputSchema — #13030, commit 53dc739, Option-A maintainer ruling 2026-08-28)",
         "packages/spec/src/data/field-group-layout.ts (verbatim passthrough; evaluation ruled the renderer's), field-group-layout.test.ts+ and object-strictness-batch20.test.ts (the pins)",
-        "objectui: packages/plugin-form/src/fieldGroups.ts (copies visibleWhen onto the derived form section at 9dfaca6543) and packages/plugin-detail/src/synth/buildDefaultPageSchema.ts (deriveFieldGroupDetailSections still drops it — objectui#11630, clause 4's detail half); packages/components/src/renderers/form/form.tsx (#6236 section grouping contract) and packages/plugin-form/src/sectionPredicateDiagnostic.ts (wizard-arm design boundary) — the gating machinery derived sections plug into",
+        "objectui: packages/plugin-form/src/fieldGroups.ts (copies visibleWhen onto the derived form section) and packages/plugin-detail/src/synth/buildDefaultPageSchema.ts (resolveDetailSections writes `{ group }` references, so record-details.tsx evaluates the group's visibleWhen per record — objectui#11630, fixed at 1fb1ced36243; pin renderers/__tests__/record-details.groupVisibleWhen-11630.test.tsx); packages/components/src/renderers/form/form.tsx (#6236 section grouping contract) and packages/plugin-form/src/sectionPredicateDiagnostic.ts (wizard-arm design boundary) — the gating machinery derived sections plug into",
         "examples/app-showcase/src/data/objects/contact.object.ts#fieldGroups, semantic-zoo.object.ts (stock fieldGroups declarations, none with a predicate)",
         "cross-ref: field-level FormField.visibleWhen is form-view-gallery's; view-section FormSection.visibleWhen is NOT this slot — this item is the object-level fieldGroups predicate #13030 re-introduced"
       ],
@@ -3733,6 +3797,12 @@
           "date": "2026-10-05",
           "change": "clause 1, step 3, the console knownGap, clause 4, the title and the adapter source re-pointed (assertion defect, #21784 VF4 + FE12). The spec normalizes a bare string to {dialect:'cel',source} (shared/expression.zod.ts ExpressionInputSchema, pinned by object-strictness-batch20.test.ts), but runtime-authored metadata is persisted verbatim and served unparsed (metadata-protocol, ADR-0005 appendix (c)). So the GET reads back what was PUT, and the verifier's wording is used for clause 1. The console text is out of date. It measures differently from FE12, which says both adapters copy the key: at objectui 9dfaca6543, and at the run's 2e818d0b51ec, the FORM adapter (fieldGroups.ts) copies visibleWhen, while the DETAIL adapter (deriveFieldGroupDetailSections) still drops it. That matches the detail page still failing, a product defect at objectui#11630. Clause 4 now scores the form half live and the detail half against that issue",
           "ref": "#21797"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-13",
+          "change": "acceptance[3] (clause and verify), knownGaps[1], the title and source[2] re-pointed: the detail half is no longer expected to fail (stale spec, #23166 A3; parked on #23121, carried by #23169). At objectui 1fb1ced36243 the detail page writes each field group as a `{ group }` reference (buildDefaultPageSchema.ts resolveDetailSections), and record:details evaluates the group's visibleWhen per record, pinned by record-details.groupVisibleWhen-11630.test.tsx. QA run #23166 (objectstack 36b2889c) saw the group gate live on the form and on the detail page. Re-read from objectui source at that pin, still this repo's .objectui-sha",
+          "ref": "#23169"
         }
       ]
     },

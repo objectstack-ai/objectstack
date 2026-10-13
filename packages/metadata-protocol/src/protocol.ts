@@ -1992,6 +1992,10 @@ type ShippingPackages = {
  *   revert, a replica's convergence, the boot, the list read). `binding` is
  *   the row's package binding, `undefined` for the package-less row, and
  *   `expansion` is everything that row's body expands to now.
+ *   `reboundFrom` is set when the write moved the row from another binding
+ *   (an orphan adoption): `reboundFrom.binding` is the binding it left,
+ *   `undefined` for the package-less row. That binding's record moves to
+ *   `binding`, so the row reconciles against what it registered under either.
  * - `removed: 'every-row'`: a row of the name was removed (a reset, a delete,
  *   a revert's removal, a replica's removal). The heal is handed no binding,
  *   so it addresses every row of the name, and the set they imply is empty.
@@ -2001,8 +2005,28 @@ type ViewContainerWrite =
         readonly container: string;
         readonly binding: string | undefined;
         readonly expansion: ReadonlyArray<Record<string, unknown>>;
+        readonly reboundFrom?: { readonly binding: string | undefined };
     }
     | { readonly container: string; readonly removed: 'every-row' };
+
+/**
+ * What a hydration of one stored row is told about it:
+ * `ObjectStackProtocolImplementation.hydrateOverlayIntoRegistry` and the
+ * expansion hydration it hands the row to.
+ *
+ * - `packageId`: the row's package binding.
+ * - `organizationId`: the row's scope, `null` for an environment-wide row
+ *   (#6602).
+ * - `reboundFrom`: [#23198] set only when the write that is being hydrated
+ *   moved the row from another binding (an orphan adoption). `packageId` is
+ *   the binding it left, `null` for the package-less row. See
+ *   {@link ViewContainerWrite}.
+ */
+type HydrationOptions = {
+    packageId?: string | null;
+    organizationId: string | null;
+    reboundFrom?: { readonly packageId: string | null };
+};
 
 /**
  * ADR-0010 §3.3 — Overlay the artifact's metadata-protection envelope
@@ -19031,7 +19055,7 @@ export class ObjectStackProtocolImplementation implements
     private async hydrateOverlayIntoRegistry(
         type: string,
         data: unknown,
-        options: { packageId?: string | null; organizationId: string | null },
+        options: HydrationOptions,
     ): Promise<boolean> {
         // [#9111] See the header: the mint door asserts, the caller folds.
         // Placed FIRST, ahead of every no-op return below, so the contract is
@@ -19525,12 +19549,15 @@ export class ObjectStackProtocolImplementation implements
     private async hydrateExpandedViewItems(
         type: string,
         data: unknown,
-        options: { packageId?: string | null; organizationId: string | null },
+        options: HydrationOptions,
     ): Promise<void> {
         await this.reconcileViewExpansions(type, {
             container: String((data as { name?: unknown }).name),
             binding: boundPackageOf(options.packageId),
             expansion: this.expandRuntimeViewContainer(type, data, { ...options, tenantAuthored: true }),
+            ...(options.reboundFrom === undefined
+                ? {}
+                : { reboundFrom: { binding: boundPackageOf(options.reboundFrom.packageId) } }),
         }, options.organizationId);
     }
 
@@ -19552,7 +19579,9 @@ export class ObjectStackProtocolImplementation implements
      * 2. Replace the record of the rows the write addresses with the names
      *    registered in step 1. The old names come out of the record before any
      *    heal runs, so a write that lands meanwhile reconciles against the new
-     *    set.
+     *    set. A rebind (an orphan adoption, {@link reassignOrphanedMetadata})
+     *    addresses the row under both bindings: the record of the binding it
+     *    left is removed, and its names count as the row's old names.
      * 3. Heal each old name the new set lacks through the delete's per-name
      *    walk ({@link restoreArtifactRegistryView}): a packaged view of that
      *    name is un-shadowed, a MetadataService baseline is re-registered, and
@@ -19604,6 +19633,13 @@ export class ObjectStackProtocolImplementation implements
         } else {
             const row = write.binding ?? '';
             for (const name of rows.get(row) ?? []) previous.add(name);
+            // A rebind: what the row registered under the binding it left is
+            // its own too, and that record row is gone with the binding.
+            if (write.reboundFrom !== undefined) {
+                const left = write.reboundFrom.binding ?? '';
+                for (const name of rows.get(left) ?? []) previous.add(name);
+                rows.delete(left);
+            }
             if (registered.size > 0) rows.set(row, registered);
             else rows.delete(row);
         }
@@ -19717,6 +19753,8 @@ export class ObjectStackProtocolImplementation implements
      * [#23198] Every caller awaits it: a republish of a view container heals
      * the members it dropped ({@link reconcileViewExpansions}) before the
      * write answers, so the reads that follow it serve the published set.
+     * The orphan adoption ({@link reassignOrphanedMetadata}) calls it for each
+     * view row it rebinds, with `reboundFrom`.
      */
     private async applyRegistryWriteThrough(request: {
         type: string;
@@ -19725,6 +19763,12 @@ export class ObjectStackProtocolImplementation implements
         packageId?: string | null;
         /** The row's org scope — `null` for an env-wide row. [#6602] */
         organizationId: string | null;
+        /**
+         * [#23198] The binding the write moved the row from, when it moved it
+         * (an orphan adoption): `null` for the package-less row. See
+         * {@link HydrationOptions}.
+         */
+        reboundFrom?: { readonly packageId: string | null };
     }): Promise<void> {
         // [#8862] The `|| request.type === 'objects'` limb is GONE — this
         // branch admitted the plural that {@link applyObjectRegistryMutation}
@@ -19772,6 +19816,7 @@ export class ObjectStackProtocolImplementation implements
             await this.hydrateOverlayIntoRegistry(request.type, request.item, {
                 packageId: request.packageId ?? undefined,
                 organizationId: request.organizationId,
+                ...(request.reboundFrom === undefined ? {} : { reboundFrom: request.reboundFrom }),
             });
         } catch (err: any) {
             // Best-effort, exactly like the object branch: the row is already
@@ -25938,8 +25983,27 @@ export class ObjectStackProtocolImplementation implements
      * every such orphan to `targetPackageId` so the env converges on the
      * package-first model and the "Local / Custom" migration scope can be
      * retired. Owned rows (already bound to a real package) are left untouched.
-     * Updates the durable column; the in-memory registry picks the new binding
-     * up on the next metadata reload.
+     *
+     * ## [#23198] An overlay of an artifact item is not an orphan
+     *
+     * ADR-0070's kernel section: "Overlays of artifact items (`intent =
+     * override-artifact`, `allowOrgOverride`) are **unchanged** — they keep
+     * their binding to the packaged item they customise." An orphan is a
+     * runtime-created item. So a package-less row for which
+     * {@link isArtifactBacked} holds — the predicate {@link saveMetaItem} sets
+     * `intent: 'override-artifact'` by — is not adopted, and it stays as
+     * stored. Adopted, a package-less overlay of a packaged view container
+     * expanded under its own name in the base, so the packaged view lost the
+     * customisation and two views were added beside it; an overlay of one
+     * packaged view was served twice under its name. Both took effect at the
+     * next restart, and the registry kept the old answer until then.
+     *
+     * Each view row it does rebind goes through the write-through, with the
+     * binding it left ({@link applyRegistryWriteThrough}, `reboundFrom`), so
+     * the registry follows the row at once: a view container's expansions are
+     * reconciled for the new binding, and the record of the old one moves
+     * with it ({@link reconcileViewExpansions}). Rows of other types are
+     * rebound in storage only, as before.
      */
     async reassignOrphanedMetadata(request: {
         targetPackageId: string;
@@ -25966,7 +26030,10 @@ export class ObjectStackProtocolImplementation implements
         // [#21911] The explicit system opt-in — see findServedOverlayRow.
         const rows = (await this.engine.find('sys_metadata', { where, context: { isSystem: true } })) as any[];
         const orphans = rows.filter(
-            (r) => r?.package_id == null || r.package_id === '' || r.package_id === 'sys_metadata',
+            (r) => (r?.package_id == null || r.package_id === '' || r.package_id === 'sys_metadata')
+                // [#23198] An overlay of an artifact item keeps its binding
+                // (ADR-0070); see the header. The type folds as the save's does.
+                && !this.isArtifactBacked(PLURAL_TO_SINGULAR[r.type] ?? r.type, String(r.name)),
         );
 
         const reassigned: Array<{ type: string; name: string }> = [];
@@ -26006,7 +26073,30 @@ export class ObjectStackProtocolImplementation implements
                 // silence changes.
                 refusedCount += 1;
                 if (firstRefusal === '') firstRefusal = e?.message ?? String(e);
+                continue;
             }
+            // [#23198] The registry follows the rebound row now, not at the
+            // next restart; see the header. ⛔ Views only.
+            const type = canonicalMetaType(String(row.type));
+            if (type !== 'view') continue;
+            let rebound: { name: string; data: unknown };
+            try {
+                // The row as the list read hydrates it, at its new binding.
+                [rebound] = this.storedOverlayEntries({ type }, [{ ...row, package_id: request.targetPackageId }]);
+            } catch (err: any) {
+                // Best-effort, as the write-through's own failure is: the row
+                // is rebound, and the next list read hydrates it.
+                console.warn(`[Protocol] registry write-through failed for ${type}/${row.name}: ${err?.message ?? err}`);
+                continue;
+            }
+            await this.applyRegistryWriteThrough({
+                type,
+                name: rebound.name,
+                item: rebound.data,
+                packageId: request.targetPackageId,
+                organizationId: null,
+                reboundFrom: { packageId: row.package_id ?? null },
+            });
         }
         if (refusedCount > 0) {
             // `error` and not `warn`, by the one question AGENTS.md turns this

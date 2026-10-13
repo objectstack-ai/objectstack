@@ -2344,21 +2344,8 @@ export function metaItemQueryRefusal(door: MetaItemQueryDoor, query: unknown): M
         if (unknownMessage !== undefined) {
             return { status: 400, code: 'VALIDATION_ERROR', message: unknownMessage, rule: 'unknown-parameter' };
         }
-        const record = query as Record<string, unknown>;
-        for (const name of once) {
-            const raw = record[name];
-            if (!Array.isArray(raw)) continue;
-            const read = readSingleQueryValue(raw as string[]);
-            if (!read.ok) {
-                return {
-                    status: 400,
-                    code: 'VALIDATION_ERROR',
-                    message: repeatedQueryParamMessage(name, read.count),
-                    rule: 'repeated-parameter',
-                };
-            }
-            record[name] = read.value;
-        }
+        const repeated = repeatedOnceRefusal(query as Record<string, unknown>, once);
+        if (repeated) return repeated;
     }
     if (door === 'item'
         && wantsMetaItemLayers(query as Readonly<Record<string, unknown>> | undefined)
@@ -2366,6 +2353,87 @@ export function metaItemQueryRefusal(door: MetaItemQueryDoor, query: unknown): M
         return { status: 400, code: 'VALIDATION_ERROR', message: LAYERED_VIEW_MEMBER_MESSAGE, rule: 'layered-member' };
     }
     return undefined;
+}
+
+/**
+ * The arity rule (`refuseRepeatedQueryParams`'s), as DATA: the first name of
+ * `once` supplied more than once is refused with the multiplicity sentence, and
+ * a name supplied once as a one-element array (or not at all, as an empty one)
+ * is unwrapped IN PLACE, so every read after this one sees the string. One
+ * implementation for {@link metaItemQueryRefusal}'s rule 2 and
+ * {@link metaQueryArityRefusal}.
+ */
+function repeatedOnceRefusal(
+    record: Record<string, unknown>,
+    once: readonly string[],
+): MetaItemQueryRefusal | undefined {
+    for (const name of once) {
+        const raw = record[name];
+        if (!Array.isArray(raw)) continue;
+        const read = readSingleQueryValue(raw as string[]);
+        if (!read.ok) {
+            return {
+                status: 400,
+                code: 'VALIDATION_ERROR',
+                message: repeatedQueryParamMessage(name, read.count),
+                rule: 'repeated-parameter',
+            };
+        }
+        record[name] = read.value;
+    }
+    return undefined;
+}
+
+/**
+ * [#23214] The `/meta` doors whose only query rule is ARITY: none of them
+ * declares a closed query set, so recognition (rule 1 of
+ * {@link metaItemQueryRefusal}) never applies to them.
+ *  - `list` — `GET /meta/:type`;
+ *  - `book-tree` — `GET /meta/book/:name/tree`;
+ *  - `drafts` — `GET /meta/_drafts`;
+ *  - `state` — `GET /meta/object/:name/state/:field`, the state machine read.
+ */
+export type MetaQueryArityDoor = 'list' | 'book-tree' | 'drafts' | 'state';
+
+/**
+ * [#23214] Each door's single-valued names, as ONE spelling for both
+ * transports. `RestServer`'s door hands its list to `refuseRepeatedQueryParams`,
+ * and the runtime dispatcher's twin asks {@link metaQueryArityRefusal} over
+ * it, so a name one transport starts reading once reaches the other too.
+ *
+ *  - `list`: `?package=` scopes the read, `?preview=` is the draft overlay,
+ *    `?object=` is the view switcher's one object, `?include=` the doc list's
+ *    one inclusion, and `?id=` the app list's one app. Each is compared or
+ *    joined as one value, so a repeat would become a name no item has (`'a,b'`)
+ *    or a filter that matches nothing, or would read as absent: for `package`,
+ *    a list of every package.
+ *  - `book-tree`: `?package=` scopes the book and doc reads.
+ *  - `drafts`: `?packageId=` and `?type=` each narrow the draft list to one
+ *    package and one type; a repeat reached `listDrafts` as an array.
+ *  - `state`: `?from=` is ONE current state; a repeat became the joined name
+ *    `'a,b'`, which matches no transition key, so the answer was a dead end.
+ *
+ * Declared in this order on purpose: two repeated names answer for the first.
+ */
+export const META_QUERY_ARITY_DOORS: Readonly<Record<MetaQueryArityDoor, readonly string[]>> = Object.freeze({
+    list: Object.freeze(['package', 'preview', 'object', 'include', 'id']),
+    'book-tree': Object.freeze(['package']),
+    drafts: Object.freeze(['packageId', 'type']),
+    state: Object.freeze(['from']),
+});
+
+/**
+ * [#23214] The arity decision of a `/meta` {@link MetaQueryArityDoor}, as DATA
+ * each transport writes in its own envelope. It returns the first name of the
+ * door's {@link META_QUERY_ARITY_DOORS} entry that was supplied more than once,
+ * as `400 VALIDATION_ERROR` with `repeatedQueryParamMessage`'s sentence, which
+ * is the answer `RestServer`'s door gives through `refuseRepeatedQueryParams`.
+ * It returns `undefined` otherwise, and has then unwrapped a one-element array
+ * in place. ⛔ Ask it before any read of the door's query.
+ */
+export function metaQueryArityRefusal(door: MetaQueryArityDoor, query: unknown): MetaItemQueryRefusal | undefined {
+    if (!query || typeof query !== 'object') return undefined;
+    return repeatedOnceRefusal(query as Record<string, unknown>, META_QUERY_ARITY_DOORS[door]);
 }
 
 /**

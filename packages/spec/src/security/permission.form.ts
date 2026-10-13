@@ -36,7 +36,7 @@ export const permissionForm = defineForm({
         // them was the Source tab's free-text JSON. `description` is persisted on
         // sys_permission_set and shown in Setup; the other three are the ADR-0086
         // D3 provenance pair plus the ADR-0090 D5 baseline flag.
-        { field: 'description', type: 'textarea', colSpan: 2, helpText: 'Human-readable description shown in Setup (persisted as sys_permission_set.description).' },
+        { field: 'description', type: 'textarea', colSpan: 2, helpText: 'Human-readable description shown in Setup.' },
         { field: 'isDefault', type: 'boolean', colSpan: 1, helpText: 'App baseline for the everyone position (ADR-0090 D5): an app-level set is auto-bound at boot; a package-level set becomes an install-time suggestion an admin confirms. Default false.' },
         { field: 'managedBy', type: 'select', colSpan: 1, helpText: 'Record provenance (ADR-0086 D3): who owns this set across upgrades.', options: [
           { label: 'Package (upgrade-owned metadata)', value: 'package' },

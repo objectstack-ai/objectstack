@@ -204,22 +204,6 @@ export const PLATFORM_OBJECT_TENANCY: Readonly<Record<string, PlatformObjectTena
       "plugin-security's strict `organization_id = :tenant` over the driver's NULL-tolerant arm and every " +
       'organization-less grant would silently disappear.',
   },
-
-  // ── global ───────────────────────────────────────────────────────────────
-  // Commit ff08691e6's example, named verbatim by the 2026-08-31 ruling; the driver predicate is #2734.
-  // ⚠️ `ensure-default-organization.ts` DOES stamp org-scoped permission sets, so
-  // this object holds BOTH populations. It is `global` on the maintainer naming
-  // it, not on an absence of org-scoped writes — flagged for the adjudicating
-  // batch rather than smoothed over.
-  sys_permission_set: {
-    tenancy: 'global',
-    evidence:
-      "The case the 2026-08-31 ruling names verbatim as the one whose reasoning inherits: 'an org-less " +
-      "row is defensible for `sys_permission_set`'. The SQL driver's own tenant predicate is written for " +
-      'this population — a NULL organization marks a GLOBAL/platform row, and with strict equality every ' +
-      'tenant admin saw ZERO RBAC rows on a fresh deployment. It also holds org-scoped rows, so the ' +
-      'verdict rests on the maintainer naming it, not on an absence of org-scoped writes.',
-  },
 };
 
 /**
