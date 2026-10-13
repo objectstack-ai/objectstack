@@ -13,10 +13,10 @@
 // unit-tested by calling `dispatch()` directly, which is why nobody noticed
 // that no route ever mounted the paths it claimed to serve.
 //
-// So this file stubs NOTHING. It boots the real showcase app, through the real
-// artifact ingestion path (`MetadataPlugin` + a `local-file` artifact — the
-// same path `objectstack dev` / `serve` take), over the real Hono transport,
-// and asks the questions a caller asks:
+// So this file stubs NOTHING. It boots the real showcase app as
+// `objectstack serve` boots this host configuration — the harness's own
+// artifact-less `MetadataPlugin`, with `AppPlugin` registering the declared
+// endpoints — over the real Hono transport, and asks the questions a caller asks:
 //
 //   1. does a declared endpoint answer at all, and with the SAME body the
 //      built-in route gives for the same operation (#5040 §4's red line);
@@ -53,7 +53,6 @@ import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
-import { MetadataPlugin } from '@objectstack/metadata';
 import { ConnectorRestPlugin } from '@objectstack/connector-rest';
 import { ConnectorOpenApiPlugin } from '@objectstack/connector-openapi';
 import { ConnectorMcpPlugin } from '@objectstack/connector-mcp';
@@ -82,26 +81,29 @@ let tempDir: string;
 let prevCwd: string;
 let stack: VerifyStack;
 let adminToken: string;
-/** Read back off disk — what `MetadataPlugin` actually ingested, not what we meant to write. */
+/** Read back off disk — what the build-shaped writer actually wrote, not what we meant to write. */
 let artifactOnDisk: Record<string, unknown>;
 
 /**
  * Boot the showcase the way a deployment boots it.
  *
- * `@objectstack/verify`'s lean harness composes no `MetadataPlugin` — its
- * proofs are data/authorization ones that read metadata straight off the
- * config. A declared endpoint cannot be reached without one: `matchEndpoint`
- * is `IMetadataService`'s member, and `NodeMetadataManager` is its only
- * implementation. So this file supplies it through the harness's `extraPlugins`
- * seam, pointed at an artifact written from the showcase's own stack
- * definition — the SAME `artifactSource: { mode: 'local-file' }` ingestion
- * `createStandaloneStack` uses, which is what maps `apis:` → `api` metadata
- * items (`ARTIFACT_FIELD_TO_TYPE` in `packages/metadata/src/plugin.ts`).
+ * A declared endpoint cannot be reached without a `MetadataPlugin`:
+ * `matchEndpoint` is `IMetadataService`'s member, and `NodeMetadataManager` is
+ * its only implementation. `@objectstack/verify`'s `bootStack` composes the one
+ * `objectstack serve` composes for a host configuration such as this one — no
+ * artifact, so `AppPlugin` registers the showcase's `apis:` as `api` items
+ * (#23088). This file used to hand in an artifact-backed `MetadataPlugin`
+ * through `extraPlugins`, because the harness composed none; it no longer does,
+ * so the endpoints below are the ones a deployment of this configuration
+ * serves, booted with nothing the harness does not compose itself. The
+ * artifact door's `apis:` ingestion keeps its own proofs
+ * (`declarative-endpoint-policy.dogfood.test.ts`,
+ * `declarative-endpoint-anonymous-guest.dogfood.test.ts`).
  *
- * Writing the artifact through `ObjectStackDefinitionSchema` — which the
- * ingest performs on load — means this boot ALSO re-proves the E7 publish
- * gates accept the restored declarations. A declaration that could not publish
- * could not be ingested here either.
+ * The artifact is still written, through the build's own
+ * `ObjectStackDefinitionSchema` parse, so this file still re-proves the E7
+ * publish gates accept the restored declarations, and the cases in section 0
+ * read it back.
  */
 beforeAll(async () => {
   prevCwd = process.cwd();
@@ -137,13 +139,6 @@ beforeAll(async () => {
       new ConnectorRestPlugin(),
       new ConnectorOpenApiPlugin(),
       new ConnectorMcpPlugin({ declarativeStdio: ['node'] }),
-      new MetadataPlugin({
-        rootDir: tempDir,
-        watch: false,
-        artifactWatch: false,
-        registerSystemObjects: false,
-        artifactSource: { mode: 'local-file', path: artifactPath },
-      }),
     ],
   });
   adminToken = await stack.signIn();
@@ -156,7 +151,7 @@ afterAll(async () => {
 });
 
 // ============================================================================
-// 0. The artifact this boot ingests is the shape the build writes (commit c39a911ae)
+// 0. The showcase's stand-in artifact is the shape the build writes (commit c39a911ae)
 // ============================================================================
 
 describe('[#6293] the stand-in artifact carries what a built one carries', () => {
