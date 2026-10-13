@@ -67,6 +67,7 @@ import { fileURLToPath } from 'node:url';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
 import { showcaseAppDefaultSecurity } from './showcase-security.js';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const SYS = { isSystem: true } as const;
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -343,8 +344,8 @@ describe('showcase: persona × CRUD-cell matrix (#9481)', () => {
       const email = `crudmx-${set.replace(/^showcase_/, '')}@verify.test`;
       const token = await stack.signUp(email);
       if (set !== BASELINE_SET) {
-        const ps = await ql.findOne('sys_permission_set', { where: { name: set }, context: SYS });
-        expect(ps?.id, `permission set ${set} seeded by the security bootstrap`).toBeTruthy();
+        const ps = await catalogPermissionSet(ql, set);
+        expect(ps, `permission set ${set} served by the security catalog`).toBeTruthy();
         const uid = (await ql.findOne('sys_user', { where: { email }, context: SYS }))?.id;
         expect(uid, `persona ${email} provisioned`).toBeTruthy();
         await ql.insert(

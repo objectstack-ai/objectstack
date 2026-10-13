@@ -45,6 +45,7 @@ import {
   FILE_BYTES,
   type AttachmentsHarness,
 } from './fixtures/attachments-authz-harness.js';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const SYS = { isSystem: true } as const;
 type Row = Record<string, unknown>;
@@ -124,8 +125,8 @@ describe('[#21080] comment threads and activity rows: the analytics door answers
     adminTok = await stack.signIn();
     memberTok = await stack.signUp('mw-objects-member@verify.test');
     const memberId = (await ql.findOne('sys_user', { where: { email: 'mw-objects-member@verify.test' }, context: SYS }))?.id;
-    const set = await ql.findOne('sys_permission_set', { where: { name: activityReaderSet.name }, context: SYS });
-    expect(set?.id, 'fixture permission set seeded').toBeTruthy();
+    const set = await catalogPermissionSet(ql, activityReaderSet.name);
+    expect(set, 'fixture permission set served by the security catalog').toBeTruthy();
     await ql.insert('sys_user_permission_set', { user_id: memberId, permission_set: set.name }, { context: { ...SYS } });
 
     const idOf = async (res: Response) => {

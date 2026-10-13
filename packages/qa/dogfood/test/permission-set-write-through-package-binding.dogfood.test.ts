@@ -45,6 +45,7 @@ import { fileURLToPath } from 'node:url';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { ensureLegacyPermissionSetRow } from './catalog-permission-set.js';
 
 /** Package-relative refs resolve against the cwd — see the sibling cold-boot files. */
 const SHOWCASE_DIR = fileURLToPath(new URL('../../../../examples/app-showcase/', import.meta.url));
@@ -122,6 +123,9 @@ describe('[#21861] a data-door edit of a permission set updates its own sys_meta
         stack = await bootShowcase({ databaseFile: join(dir, 'showcase.db') });
         token = await stack.signIn();
         ql = await stack.kernel.getServiceAsync('objectql');
+        // [C3 stage 6b-2] The control runs on an EXISTING database: no boot
+        // writes the shipped set's row any more, but an earlier one did.
+        await ensureLegacyPermissionSetRow(ql, SHIPPED, { managedBy: 'package' });
 
         // A writable runtime package, and a set saved into it at the metadata door.
         const pkg = await stack.apiAs(token, 'POST', '/packages', {

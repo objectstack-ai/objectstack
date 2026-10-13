@@ -35,6 +35,7 @@ import { SysMetadataActivation } from '@objectstack/platform-objects/system';
 
 import { SecurityPlugin } from './security-plugin.js';
 import { bootstrapPlatformAdmin, findExistingPlatformAdmin } from './bootstrap-platform-admin.js';
+import { seedLegacyPlatformBucket } from './__tests__/legacy-catalog-rows.testkit.js';
 import { backfillOrgAdminGrants, reconcileOrgAdminGrant } from './auto-org-admin-grant.js';
 import { buildContextForUser } from './explain-engine.js';
 import { SysPosition } from './objects/sys-position.object.js';
@@ -145,6 +146,8 @@ const grantsOf = async (engine: ObjectQL, userId: string): Promise<any[]> =>
 describe('[ADR-0131 D4] a grant that names nothing — explain', () => {
   it('reports no dropped grant for it: an unnamed grant names no set to report', async () => {
     const engine = await boot();
+    // An existing database: the platform-bucket rows an earlier release seeded.
+    await seedLegacyPlatformBucket(engine, defaultPermissionSets);
     await bootstrapPlatformAdmin(engine, defaultPermissionSets);
     await user(engine, 'usr_member', '2025-03-01T00:00:00.000Z');
     await engine.insert('sys_permission_set', { id: 'ps_off', name: 'legacy_reports', label: 'Legacy' }, { context: SYS } as any);
@@ -178,6 +181,8 @@ describe('[ADR-0131 D4] a grant that names nothing — the platform-admin bootst
    */
   async function standingAdminUnnamed(): Promise<ObjectQL> {
     const engine = await boot();
+    // An existing database: the platform-bucket rows an earlier release seeded.
+    await seedLegacyPlatformBucket(engine, defaultPermissionSets);
     expect((await bootstrapPlatformAdmin(engine, defaultPermissionSets)).reason).toBe('no_users');
     await user(engine, 'usr_oldest', '2024-01-01T00:00:00.000Z');
     await user(engine, 'usr_admin', '2025-01-01T00:00:00.000Z');
@@ -192,6 +197,8 @@ describe('[ADR-0131 D4] a grant that names nothing — the platform-admin bootst
 
   it('control — named, the grant is the holder: no promotion, and it names the claim target', async () => {
     const engine = await standingAdminUnnamed();
+    // An existing database: the platform-bucket rows an earlier release seeded.
+    await seedLegacyPlatformBucket(engine, defaultPermissionSets);
     const report = await bootstrapPlatformAdmin(engine, defaultPermissionSets);
     expect(report).toMatchObject({ adminPromoted: false, reason: 'already_have_admin', adminUserId: 'usr_admin' });
     expect(await findExistingPlatformAdmin(engine, defaultPermissionSets)).toBe('usr_admin');
@@ -200,6 +207,8 @@ describe('[ADR-0131 D4] a grant that names nothing — the platform-admin bootst
   it('unnamed, the promotion is WITHHELD — no second unscoped grant is minted for the oldest account', async () => {
     const engine = await standingAdminUnnamed();
     await unname(engine, { id: 'g_admin' });
+    // An existing database: the platform-bucket rows an earlier release seeded.
+    await seedLegacyPlatformBucket(engine, defaultPermissionSets);
     const report = await bootstrapPlatformAdmin(engine, defaultPermissionSets);
     expect(report.adminPromoted).toBe(false);
     expect(report.reason).toBe('admin_grant_unnamed');
@@ -217,6 +226,8 @@ describe('[ADR-0131 D4] a grant that names nothing — the platform-admin bootst
 describe('[ADR-0131 D4] a grant that names nothing — the organization-administrator reconcile', () => {
   async function orgAdmin(): Promise<ObjectQL> {
     const engine = await boot();
+    // An existing database: the platform-bucket rows an earlier release seeded.
+    await seedLegacyPlatformBucket(engine, defaultPermissionSets);
     await bootstrapPlatformAdmin(engine, defaultPermissionSets);
     await user(engine, 'usr_orgadmin', '2025-02-01T00:00:00.000Z');
     await engine.insert(

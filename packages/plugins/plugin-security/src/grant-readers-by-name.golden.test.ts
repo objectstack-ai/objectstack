@@ -43,6 +43,7 @@ import { SysMetadataActivation } from '@objectstack/platform-objects/system';
 
 import { SecurityPlugin } from './security-plugin.js';
 import { bootstrapPlatformAdmin, findExistingPlatformAdmin } from './bootstrap-platform-admin.js';
+import { seedLegacyPlatformBucket } from './__tests__/legacy-catalog-rows.testkit.js';
 import { backfillOrgAdminGrants, reconcileOrgAdminGrant } from './auto-org-admin-grant.js';
 import { buildContextForUser } from './explain-engine.js';
 import { SysPosition } from './objects/sys-position.object.js';
@@ -181,6 +182,8 @@ async function readersByPrincipal(posture: Posture): Promise<Record<string, unkn
   await user('usr_agent', 'agent@gr.example', '2025-04-01T00:00:00.000Z');
 
   // The catalog and (single) the platform-admin promotion.
+  // An existing database: the platform-bucket rows an earlier release seeded.
+  await seedLegacyPlatformBucket(engine, defaultPermissionSets);
   const boot = await bootstrapPlatformAdmin(engine, defaultPermissionSets);
   expect(boot.adminPromoted).toBe(posture === 'single');
 

@@ -170,7 +170,7 @@ describe('#7335 self-write suppression is keyed on observed content, not on a cl
       expect(added).toHaveLength(1);
       expect(added[0]!.op).toBe(expectedOp);
       expect(added[0]!.source).toBe('fs');
-      expect(added[0]!.actor).toBe('fs');
+      expect(added[0]!.actor).toBeNull();
       expect(added[0]!.hash).toBe(hashSpec(externalSpec));
     });
 
@@ -306,7 +306,7 @@ describe('#7856 a self-written spec is never republished as an external edit', (
     const added = (await readLog(root)).slice(before.length);
     expect(added).toHaveLength(1);
     expect(added[0]!.op).toBe('update');
-    expect(added[0]!.actor).toBe('fs');
+    expect(added[0]!.actor).toBeNull();
     expect(added[0]!.hash).toBe(hashSpec(externalSpec));
   });
 });

@@ -576,9 +576,6 @@
     "packages/plugins/plugin-security/src/bootstrap-platform-admin-walled-owner.test.ts": {
       "blind": 1
     },
-    "packages/plugins/plugin-security/src/bootstrap-platform-admin.test.ts": {
-      "blind": 1
-    },
     "packages/plugins/plugin-security/src/cleanup-package-permissions.test.ts": {
       "blind": 1
     },

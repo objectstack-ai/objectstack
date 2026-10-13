@@ -13,6 +13,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { getSharedShowcase } from './shared-showcase.js';
+import { catalogPermissionSet, ensureLegacyPermissionSetRow } from './catalog-permission-set.js';
 
 const SYS = { isSystem: true } as const;
 
@@ -46,8 +47,8 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
     // Grant the zoo sets directly (system plumbing — the delegated-admin and
     // anchor gates are exercised through REAL authed requests below).
     const grant = async (userId: string, setName: string) => {
-      const ps = await ql.findOne('sys_permission_set', { where: { name: setName }, context: SYS });
-      expect(ps?.id, `permission set ${setName} seeded`).toBeTruthy();
+      const ps = await catalogPermissionSet(ql, setName);
+      expect(ps, `permission set ${setName} served by the security catalog`).toBeTruthy();
       await ql.insert(
         'sys_user_permission_set',
         { user_id: userId, permission_set: ps.name },
@@ -86,10 +87,12 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
   });
 
   // ── ADR-0090 D12: adminScope lands on the stored set ─────────────────────
-  it('persists the delegated-admin scope (adminScope → admin_scope JSON)', async () => {
-    const row = await ql.findOne('sys_permission_set', { where: { name: 'showcase_field_ops_delegate' }, context: SYS });
-    expect(row, 'delegate set seeded').toBeTruthy();
-    const scope = JSON.parse(row.admin_scope || 'null');
+  it('serves the delegated-admin scope on the catalog definition (adminScope)', async () => {
+    // [C3 stage 6b-2] No row is written for a declared set; the catalog
+    // definition is what the delegated-admin gate reads.
+    const def: any = await catalogPermissionSet(ql, 'showcase_field_ops_delegate');
+    expect(def, 'delegate set served by the security catalog').toBeTruthy();
+    const scope = def.adminScope ?? null;
     expect(scope?.businessUnit).toBe('Field Operations');
     expect(scope?.manageAssignments).toBe(true);
     expect(scope?.manageBindings).toBe(false);
@@ -141,13 +144,17 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
     await ql.insert('sys_position', { id: `pos_zoo_${name}`, name, label: name, managed_by: managedBy }, { context: SYS });
     return ql.findOne('sys_position', { where: { name }, context: SYS });
   };
+  // [C3 stage 6b-2] The same for a permission-set row: no boot writes one any
+  // more, while the junction writes below (which grant nothing since stage 1)
+  // still name a row by id — the shape an existing database keeps.
+  const existingSetRow = (name: string) => ensureLegacyPermissionSetRow(ql, name, { managedBy: 'package' });
 
   // ── ADR-0090 D12: the delegated-admin gate, positive and negative ────────
   it('a delegate assigns an allowlisted position inside their subtree', async () => {
     // Bind contributor → showcase_contributor first (admin action; the
     // delegate has manageBindings: false and must NOT be able to do this).
     const pos = await existingPositionRow('contributor', 'package');
-    const ps = await ql.findOne('sys_permission_set', { where: { name: 'showcase_contributor' }, context: SYS });
+    const ps = await existingSetRow('showcase_contributor');
     expect(pos?.id && ps?.id, 'contributor position + set rows').toBeTruthy();
     const bind = await stack.apiAs(adminTok, 'POST', '/data/sys_position_permission_set', {
       position_id: pos.id,
@@ -180,17 +187,16 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
 
   it('the delegate cannot hand out a set OFF the allowlist (no self-escalation)', async () => {
     // showcase_auditor is not in assignablePermissionSets — direct grant refused.
-    const ps = await ql.findOne('sys_permission_set', { where: { name: 'showcase_auditor' }, context: SYS });
     const r = await stack.apiAs(delegateTok, 'POST', '/data/sys_user_permission_set', {
       user_id: delegateId,
-      permission_set: ps.name,
+      permission_set: 'showcase_auditor',
     });
     expect(r.status, 'granting an un-allowlisted set (to ANYONE, incl. self) is refused').not.toBeLessThan(300);
   });
 
   it('the delegate cannot re-compose positions (manageBindings: false)', async () => {
     const pos = await existingPositionRow('contributor', 'package');
-    const ps = await ql.findOne('sys_permission_set', { where: { name: 'showcase_manager' }, context: SYS });
+    const ps = await existingSetRow('showcase_manager');
     const r = await stack.apiAs(delegateTok, 'POST', '/data/sys_position_permission_set', {
       position_id: pos.id,
       permission_set_id: ps.id,
@@ -202,7 +208,7 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
   it('binding a high-privilege set to an anchor is rejected even for the admin', async () => {
     const everyone = await existingPositionRow('everyone', 'platform');
     expect(everyone, 'built-in everyone position row').toBeTruthy();
-    const auditor = await ql.findOne('sys_permission_set', { where: { name: 'showcase_auditor' }, context: SYS });
+    const auditor = await existingSetRow('showcase_auditor');
     const r = await stack.apiAs(adminTok, 'POST', '/data/sys_position_permission_set', {
       position_id: everyone.id,
       permission_set_id: auditor.id,
@@ -213,7 +219,7 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
   it('binding the guest-safe set to the guest anchor is accepted', async () => {
     const guest = await existingPositionRow('guest', 'platform');
     expect(guest, 'built-in guest position row').toBeTruthy();
-    const ps = await ql.findOne('sys_permission_set', { where: { name: 'showcase_guest_portal' }, context: SYS });
+    const ps = await existingSetRow('showcase_guest_portal');
     const r = await stack.apiAs(adminTok, 'POST', '/data/sys_position_permission_set', {
       position_id: guest.id,
       permission_set_id: ps.id,
@@ -229,8 +235,7 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
   // that; this proves the served pipeline actually denies the write now.
   it('FLS: a contributor can edit a project but NOT its budget fields', async () => {
     const plain = await ql.findOne('sys_user', { where: { email: 'zoo-plain@verify.test' }, context: SYS });
-    const contribSet = await ql.findOne('sys_permission_set', { where: { name: 'showcase_contributor' }, context: SYS });
-    await ql.insert('sys_user_permission_set', { user_id: plain.id, permission_set: contribSet.name }, { context: SYS })
+    await ql.insert('sys_user_permission_set', { user_id: plain.id, permission_set: 'showcase_contributor' }, { context: SYS })
       .catch(() => { /* already granted by an earlier step — idempotent */ });
 
     const projects = await ql.find('showcase_project', { limit: 1, context: SYS });
