@@ -1,49 +1,62 @@
 // Copyright (c) 2026 ObjectStack contributors. Apache-2.0 license.
 //
-// Commit fd75728bc — a scaffolded project's FIRST `git add -A` must stage the skills
-// bundle exactly once, and a clone of that commit must yield readable
-// `SKILL.md` files.
+// The skills phase of a real scaffold, end to end. Two properties:
 //
-// ## The measurement this file encodes
+//   1. Commit fd75728bc — a scaffolded project's FIRST `git add -A` stages the
+//      skills catalog exactly once, as real files, and a clone of that commit
+//      yields readable `SKILL.md` files.
+//   2. Ruling A on the skills-catalog binding (record 6096124407) — the
+//      installed skill set IS the catalog of the `@objectstack/skills` package
+//      the project depends on, at `@objectstack/spec`'s range: the same names,
+//      the same count, read out of the project's own node_modules and never
+//      from GitHub.
 //
-// Taken against `skills@1.5.23` and the published `objectstack-ai/objectstack/
-// skills` catalog (11 skills), each into an empty directory:
+// ## The measurement the stubs encode
 //
-//   --all                                  .agents/ 46 real files (604,102 B)
-//   (= --skill '*' --agent '*' -y)         agent/   46 real files (602,682 B)
-//                                          .claude/ 11 symlinks into .agents/
-//   --skill '*' --agent claude-code -y     .claude/ 46 real files (604,102 B)
-//   --skill '*' --agent universal -y       .agents/ 46 real files (604,102 B)
-//   --all --copy                           56 destination dirs, 33.8 MB total
+// `skills-install.ts` carries it: `skills@1.7.2` against the published
+// `@objectstack/skills@18.0.0-next.0`. `experimental_sync` discovers skills in
+// the project's DIRECT dependencies only (`skills/` or `dist/skills/` of each),
+// and writes, for `--agent claude-code`:
 //
-// and then, with the template's `.gitignore` in place, `git init && git add -A`:
+//   --copy -y    .claude/skills/<skill>  real files, plus skills-lock.json
+//   -y           .agents/skills/<skill>  links into node_modules/<package>/…
+//                .claude/skills/<skill>  links into .agents/skills/<skill>
 //
-//   --all shape          22 staged SKILL.md paths + 11 staged symlinks
-//   claude-code shape    11 staged SKILL.md paths, 0 symlinks
+// and with nothing to read it prints "Nothing to sync." and exits 0.
 //
-// 22 is the defect: the same eleven skills, staged twice as real files.
+// ## Why both CLIs are stubbed, and how the stubs are kept honest
 //
-// ## Why the skills CLI is stubbed, and how the stub is kept honest
+// The real `<pm> install` and the real skills CLI need the network, so a test
+// that ran them would be measuring the runner. The stubs encode the measured
+// behaviour instead, and three properties keep them from becoming a mirror
+// that agrees with whatever the scaffolder does:
 //
-// The real installer needs the network and a GitHub clone, so a test that ran
-// it would be measuring the runner. The stub instead encodes the DESTINATION
-// MAP above — argv in, directory layout out — and `INSTALL_SHAPES` is that
-// table verbatim. Two properties keep it from becoming a mirror that agrees
-// with whatever we do:
+//   * the `pnpm` stub's `install` materializes `@objectstack/skills` ONLY when
+//     the project's `package.json` declares it, in the layout the package
+//     publishes (`dist/skills/<skill>/SKILL.md`, beside the catalog README the
+//     real tarball carries). A template that stops depending on the package
+//     gets no catalog, exactly as a real install would.
+//   * the `npx` stub REFUSES (exit 3) any argv it has no measured row for: a
+//     CLI version nobody measured, any `skills add` (the GitHub path), an
+//     agent nobody measured. Point the scaffolder back at GitHub, or move the
+//     pin without re-measuring, and the end-to-end case fails loudly instead of
+//     passing against an invented layout. `MEASURED_CLI` below is written out,
+//     never imported, for that reason.
+//   * the linked row is exercised too, by the vacuity case, and the
+//     single-copy assertions must FAIL on it. An assertion that cannot fail is
+//     the one failure mode a fixture-driven test really has.
 //
-//   * the stub REFUSES an argv it has no measured row for (exit 3). Change the
-//     scaffolder's command to something nobody measured and the end-to-end
-//     case fails loudly instead of passing against an invented layout.
-//   * the `--all` row is exercised too, by the vacuity case, and the same
-//     assertions must FAIL on it. An assertion that cannot fail is the one
-//     failure mode a fixture-driven test really has.
+// The catalog side of property 2 is read twice: off the project's own
+// node_modules (what the package really holds), and against `STUB_CATALOG`
+// (what the stub install put there). The second reading is the one that makes
+// an empty install go red rather than compare empty with empty.
 //
-// The end-to-end case runs the REAL CLI through `tsx` under a stubbed PATH —
+// The end-to-end cases run the REAL CLI through `tsx` under a stubbed PATH —
 // the pattern `scaffold-next-steps-pm.test.ts` established, and for the same
 // reason: `index.ts` calls `program.parse()` at import, so nothing in it can
-// be reached any other way. Its harness guard is the stub's own argv receipt:
-// if the child resolved the ambient `npx` instead of ours, there is no receipt
-// and the case fails rather than quietly measuring the network.
+// be reached any other way. Their harness guard is the stub's own argv
+// receipt: if the child resolved the ambient `npx` instead of ours, there is
+// no receipt and the case fails rather than quietly measuring the network.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
@@ -55,10 +68,14 @@ import {
   DEFAULT_SKILLS_AGENT,
   DEFAULT_SKILLS_DIR,
   EXAMPLE_OTHER_AGENT,
-  SKILLS_CATALOG,
+  SKILLS_CLI,
   SKILLS_INSTALL_COMMAND,
-  skillsAddArgs,
+  SKILLS_PACKAGE,
+  SKILLS_PACKAGE_CATALOG_DIR,
+  listSkills,
   skillsInstallHint,
+  skillsPackageDir,
+  skillsSyncArgs,
 } from './skills-install.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -66,90 +83,116 @@ const PKG_ROOT = path.resolve(HERE, '..');
 const REPO_ROOT = path.resolve(PKG_ROOT, '..', '..');
 const TSX = path.join(REPO_ROOT, 'node_modules', '.bin', 'tsx');
 const INDEX_TS = path.join(PKG_ROOT, 'src', 'index.ts');
-const TEMPLATE_GITIGNORE = path.join(
-  PKG_ROOT,
-  'src',
-  'templates',
-  'blank',
-  '_gitignore',
+const TEMPLATE_GITIGNORE = path.join(PKG_ROOT, 'src', 'templates', 'blank', '_gitignore');
+
+/** The skills the stub install puts in the package. Three, so "twice" is unmistakably six. */
+const STUB_CATALOG = ['objectstack-data', 'objectstack-query', 'objectstack-ui'];
+
+/** The CLI version the rows below were measured with — written out, never imported. */
+const MEASURED_CLI = 'skills@1.7.2';
+
+/** A stub `pnpm` whose `install` materializes the declared catalog package. */
+function pnpmStub(): string {
+  return `import fs from 'node:fs';
+import path from 'node:path';
+const CATALOG = ${JSON.stringify(STUB_CATALOG)};
+const argv = process.argv.slice(2);
+if (argv[0] === '--version') { console.log('10.31.0'); process.exit(0); }
+if (argv[0] !== 'install' || process.env.PNPM_STUB_REGISTRY === 'empty') process.exit(0);
+const cwd = process.cwd();
+const pkg = JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8'));
+const range = { ...pkg.dependencies, ...pkg.devDependencies }['@objectstack/skills'];
+if (range === undefined) process.exit(0);
+const root = path.join(cwd, 'node_modules', '@objectstack', 'skills');
+const catalog = path.join(root, 'dist', 'skills');
+fs.mkdirSync(catalog, { recursive: true });
+fs.writeFileSync(
+  path.join(root, 'package.json'),
+  JSON.stringify({ name: '@objectstack/skills', version: String(range).replace(/^[~^]/, '') }) + '\\n',
 );
+fs.writeFileSync(path.join(catalog, 'README.md'), '# catalog\\n');
+for (const skill of CATALOG) {
+  fs.mkdirSync(path.join(catalog, skill, 'references'), { recursive: true });
+  fs.writeFileSync(path.join(catalog, skill, 'SKILL.md'), '---\\nname: ' + skill + '\\n---\\n\\n# ' + skill + '\\n');
+  fs.writeFileSync(path.join(catalog, skill, 'references', 'guide.md'), '# guide for ' + skill + '\\n');
+}
+`;
+}
 
-/** The skills the stub installs. Three, so "twice" is unmistakably six. */
-const STUB_SKILLS = ['objectstack-data', 'objectstack-query', 'objectstack-ui'];
-
-/** The measured destination map — see the header table. */
-const INSTALL_SHAPES = `
+/** A stub `npx` reproducing the measured `experimental_sync` rows; it records every argv. */
+function npxStub(): string {
+  return `import fs from 'node:fs';
+import path from 'node:path';
+const MEASURED_CLI = ${JSON.stringify(MEASURED_CLI)};
 const SHAPES = {
-  'agent:*': [
-    { dir: '.agents/skills', kind: 'real' },
-    { dir: 'agent/skills', kind: 'real' },
+  'copy:claude-code': [{ dir: '.claude/skills', kind: 'copy' }],
+  'link:claude-code': [
+    { dir: '.agents/skills', kind: 'link-package' },
     { dir: '.claude/skills', kind: 'link', into: '../../.agents/skills' },
   ],
-  'agent:claude-code': [{ dir: '.claude/skills', kind: 'real' }],
-  'agent:universal': [{ dir: '.agents/skills', kind: 'real' }],
 };
-`;
-
-/** A stub `npx` that reproduces INSTALL_SHAPES and records the argv it saw. */
-function writeStubs(binDir: string, receipt: string): void {
-  fs.mkdirSync(binDir, { recursive: true });
-
-  const npxJs = path.join(binDir, 'npx-stub.mjs');
-  fs.writeFileSync(
-    npxJs,
-    `import fs from 'node:fs';
-import path from 'node:path';
-${INSTALL_SHAPES}
-const SKILLS = ${JSON.stringify(STUB_SKILLS)};
 const argv = process.argv.slice(2);
-fs.appendFileSync(${JSON.stringify(receipt)}, JSON.stringify(argv) + '\\n');
-
-if (!argv.includes('skills') || !argv.includes('add')) process.exit(0);
-const agents = argv.includes('--all')
-  ? '*'
-  : (argv[argv.indexOf('--agent') + 1] ?? '');
-const shape = SHAPES['agent:' + agents];
-if (!shape) {
-  console.error('npx-stub: no measured install shape for --agent ' + agents);
+if (process.env.NPX_STUB_RECEIPT) {
+  fs.appendFileSync(process.env.NPX_STUB_RECEIPT, JSON.stringify(argv) + '\\n');
+}
+const args = argv[0] === '-y' ? argv.slice(1) : argv;
+const [cli, command, ...rest] = args;
+const at = rest.indexOf('--agent');
+const key = (rest.includes('--copy') ? 'copy' : 'link') + ':' + (at < 0 ? '' : rest[at + 1]);
+if (cli !== MEASURED_CLI || command !== 'experimental_sync' || !rest.includes('-y') || !SHAPES[key]) {
+  console.error('npx-stub: no measured shape for: ' + args.join(' '));
   process.exit(3);
 }
 const cwd = process.cwd();
-for (const dest of shape) {
-  fs.mkdirSync(path.join(cwd, dest.dir), { recursive: true });
-  for (const skill of SKILLS) {
-    const at = path.join(cwd, dest.dir, skill);
-    if (dest.kind === 'link') {
-      fs.symlinkSync(dest.into + '/' + skill, at);
-      continue;
+const pkg = JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8'));
+const deps = new Set(
+  ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']
+    .flatMap((field) => Object.keys(pkg[field] ?? {})),
+);
+const found = [];
+for (const dep of deps) {
+  const dir = path.join(cwd, 'node_modules', ...dep.split('/'));
+  let version = null;
+  try { version = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).version; } catch {}
+  for (const sub of ['skills', 'dist/skills']) {
+    let names = [];
+    try { names = fs.readdirSync(path.join(dir, sub)); } catch {}
+    for (const name of names) {
+      if (!fs.existsSync(path.join(dir, sub, name, 'SKILL.md'))) continue;
+      found.push({ dep, name, version, src: path.join(dir, sub, name), skillPath: sub + '/' + name + '/SKILL.md' });
     }
-    fs.mkdirSync(at, { recursive: true });
-    fs.writeFileSync(
-      path.join(at, 'SKILL.md'),
-      '---\\nname: ' + skill + '\\n---\\n\\n# ' + skill + '\\n',
-    );
-    fs.writeFileSync(path.join(at, 'reference.md'), '# reference for ' + skill + '\\n');
   }
 }
-fs.writeFileSync(
-  path.join(cwd, 'skills-lock.json'),
-  JSON.stringify({ version: 1, skills: Object.fromEntries(SKILLS.map((s) => [s, {}])) }, null, 2) + '\\n',
-);
-console.log('npx-stub: installed ' + SKILLS.length + ' skills');
-`,
-    'utf8',
-  );
+if (found.length === 0) { console.log('Nothing to sync.'); process.exit(0); }
+for (const dest of SHAPES[key]) {
+  fs.mkdirSync(path.join(cwd, dest.dir), { recursive: true });
+  for (const skill of found) {
+    const target = path.join(cwd, dest.dir, skill.name);
+    if (dest.kind === 'copy') fs.cpSync(skill.src, target, { recursive: true });
+    else if (dest.kind === 'link-package') fs.symlinkSync(path.relative(path.dirname(target), skill.src), target);
+    else fs.symlinkSync(dest.into + '/' + skill.name, target);
+  }
+}
+const lock = { version: 1, skills: {} };
+for (const s of found) {
+  lock.skills[s.name] = { source: s.dep, sourceType: 'node_modules', skillPath: s.skillPath, version: s.version };
+}
+fs.writeFileSync(path.join(cwd, 'skills-lock.json'), JSON.stringify(lock, null, 2) + '\\n');
+console.log('npx-stub: synced ' + found.length + ' skills');
+`;
+}
 
-  const shim = (body: string) => `#!/bin/sh\n${body}\n`;
-  fs.writeFileSync(path.join(binDir, 'npx'), shim(`exec "${process.execPath}" "${npxJs}" "$@"`));
-  // `pnpm --version` must answer so detectPackageManager reports probe:'ok',
-  // and `pnpm install` must be a no-op that succeeds: with no node_modules
-  // written, readResolvedCliVersion has no opinion and the Dockerfile pin is
-  // skipped, which keeps this file's subject to the skills phase alone.
-  fs.writeFileSync(
-    path.join(binDir, 'pnpm'),
-    shim('if [ "$1" = "--version" ]; then echo 10.31.0; fi\nexit 0'),
-  );
-  for (const f of ['npx', 'pnpm']) fs.chmodSync(path.join(binDir, f), 0o755);
+function writeStubs(binDir: string): void {
+  fs.mkdirSync(binDir, { recursive: true });
+  for (const [name, body] of [
+    ['npx', npxStub()],
+    ['pnpm', pnpmStub()],
+  ] as const) {
+    const js = path.join(binDir, `${name}-stub.mjs`);
+    fs.writeFileSync(js, body, 'utf8');
+    fs.writeFileSync(path.join(binDir, name), `#!/bin/sh\nexec "${process.execPath}" "${js}" "$@"\n`);
+    fs.chmodSync(path.join(binDir, name), 0o755);
+  }
 }
 
 interface Staged {
@@ -196,13 +239,38 @@ function cloneAndRead(project: string, into: string) {
 
 let TMP: string;
 let BIN: string;
-let RECEIPT: string;
+
+/** Run the real scaffolder under the stubs; returns its stdout and the argv the npx stub saw. */
+function scaffold(name: string, flags: string[] = [], env: Record<string, string> = {}) {
+  const receipt = path.join(TMP, `${name}.npx-argv.log`);
+  const stdout = execFileSync(TSX, [INDEX_TS, name, ...flags], {
+    cwd: TMP,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      ...env,
+      NPX_STUB_RECEIPT: receipt,
+      PATH: `${BIN}${path.delimiter}${process.env.PATH ?? ''}`,
+    },
+  });
+  const argv: string[][] = fs.existsSync(receipt)
+    ? fs.readFileSync(receipt, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
+    : [];
+  return { project: path.join(TMP, name), stdout, argv };
+}
+
+/** The closing summary's skills block — what the run tells the reader about skills. */
+function skillsBlock(stdout: string): string {
+  return stdout.slice(stdout.lastIndexOf('AI Skills'));
+}
+
+const catalogOf = (project: string) =>
+  listSkills(path.join(skillsPackageDir(project), SKILLS_PACKAGE_CATALOG_DIR));
 
 beforeAll(() => {
   TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'skills-single-copy-'));
   BIN = path.join(TMP, 'bin');
-  RECEIPT = path.join(TMP, 'npx-argv.log');
-  writeStubs(BIN, RECEIPT);
+  writeStubs(BIN);
 });
 
 afterAll(() => {
@@ -210,28 +278,30 @@ afterAll(() => {
 });
 
 // ── 1. the command itself ───────────────────────────────────────────────────
-describe('the skills install command names exactly one agent', () => {
-  it('never passes --all or --agent *', () => {
-    expect(SKILLS_INSTALL_COMMAND).not.toContain('--all');
-    expect(SKILLS_INSTALL_COMMAND).not.toMatch(/--agent\s+'?\*/);
+describe('the skills install command reads the installed package, for one agent', () => {
+  it('syncs from node_modules and names no GitHub source', () => {
+    expect(SKILLS_INSTALL_COMMAND).toContain(' experimental_sync ');
+    expect(SKILLS_INSTALL_COMMAND).not.toMatch(/skills add|objectstack-ai\/|github/i);
   });
 
-  it("selects every skill, with the glob quoted against the shell", () => {
-    expect(SKILLS_INSTALL_COMMAND).toContain("--skill '*'");
+  it('copies the catalog instead of linking into node_modules', () => {
+    expect(SKILLS_INSTALL_COMMAND.split(' ')).toContain('--copy');
   });
 
-  it('names one agent, once', () => {
+  it('names one agent, once, and never all of them', () => {
     const agents = SKILLS_INSTALL_COMMAND.match(/--agent\s+(\S+)/g) ?? [];
     expect(agents).toEqual([`--agent ${DEFAULT_SKILLS_AGENT}`]);
+    expect(SKILLS_INSTALL_COMMAND).not.toMatch(/--agent\s+'?\*|--all/);
   });
 
-  it('installs from the curated catalog subpath', () => {
-    expect(SKILLS_INSTALL_COMMAND).toContain(`skills add ${SKILLS_CATALOG} `);
+  it('runs the skills CLI at a pinned version', () => {
+    expect(SKILLS_CLI).toMatch(/^skills@\d+\.\d+\.\d+$/);
+    expect(SKILLS_INSTALL_COMMAND.startsWith(`npx -y ${SKILLS_CLI} experimental_sync `)).toBe(true);
   });
 
   // The printed hint and the executed command must come out of ONE builder:
   // a user told to run something the scaffolder never ran is how a project
-  // acquires the second copy this card removes.
+  // acquires a second copy, or a catalog from the wrong version.
   it('the printed hint differs from what runs only by the agent name', () => {
     expect(skillsInstallHint(DEFAULT_SKILLS_AGENT)).toBe(
       SKILLS_INSTALL_COMMAND.replace('npx -y ', 'npx '),
@@ -242,116 +312,192 @@ describe('the skills install command names exactly one agent', () => {
         `--agent ${EXAMPLE_OTHER_AGENT}`,
       ),
     );
-    expect(skillsAddArgs(EXAMPLE_OTHER_AGENT)).toContain(`--agent ${EXAMPLE_OTHER_AGENT}`);
+    expect(skillsSyncArgs(EXAMPLE_OTHER_AGENT)).toContain(`--agent ${EXAMPLE_OTHER_AGENT}`);
+  });
+
+  it('listSkills reads real skill directories only, sorted', () => {
+    const dir = path.join(TMP, 'list-skills');
+    for (const skill of ['b-skill', 'a-skill']) {
+      fs.mkdirSync(path.join(dir, skill), { recursive: true });
+      fs.writeFileSync(path.join(dir, skill, 'SKILL.md'), '# x\n');
+    }
+    fs.mkdirSync(path.join(dir, 'not-a-skill'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'README.md'), '# catalog\n');
+    fs.symlinkSync('a-skill', path.join(dir, 'linked-skill'));
+    expect(listSkills(dir)).toEqual(['a-skill', 'b-skill']);
+    expect(listSkills(path.join(TMP, 'no-such-dir'))).toEqual([]);
   });
 });
 
 // ── 2. end to end: a real scaffold, staged and cloned ───────────────────────
-describe('a scaffolded project stages the bundle exactly once', () => {
-  let project: string;
+describe('a scaffolded project installs the package catalog, once', () => {
+  let run: ReturnType<typeof scaffold>;
   let staged: Staged;
 
   beforeAll(() => {
-    project = path.join(TMP, 'staged-once-app');
-    execFileSync(TSX, [INDEX_TS, 'staged-once-app'], {
-      cwd: TMP,
-      encoding: 'utf8',
-      env: { ...process.env, PATH: `${BIN}${path.delimiter}${process.env.PATH ?? ''}` },
-    });
-    staged = stageAll(project);
+    run = scaffold('staged-once-app');
+    staged = stageAll(run.project);
   });
 
   // Harness guard: without a receipt the child ran SOME other npx and every
   // assertion below would be measuring that instead.
   it("ran the stubbed skills CLI, with the scaffolder's own argv", () => {
-    const lines = fs.readFileSync(RECEIPT, 'utf8').split('\n').filter(Boolean);
-    const args: string[][] = lines.map((l) => JSON.parse(l));
-    const add = args.find((a) => a.includes('add'));
-    expect(add, 'the scaffolder never reached the stubbed npx').toBeDefined();
-    expect(add).toContain(SKILLS_CATALOG);
-    expect(add?.[add.indexOf('--agent') + 1]).toBe(DEFAULT_SKILLS_AGENT);
-    expect(add).not.toContain('--all');
+    expect(run.argv, 'the scaffolder never reached the stubbed npx').toEqual([
+      SKILLS_INSTALL_COMMAND.split(' ').slice(1),
+    ]);
   });
 
-  it('writes the bundle to exactly one directory', () => {
+  it("depends on @objectstack/skills at @objectstack/spec's range", () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(run.project, 'package.json'), 'utf8'));
+    const spec = pkg.dependencies?.['@objectstack/spec'];
+    expect(spec).toMatch(/^\^\d+\./);
+    expect(pkg.devDependencies?.[SKILLS_PACKAGE]).toBe(spec);
+  });
+
+  it("installs exactly the package's catalog — the same count, the same names", () => {
+    const catalog = catalogOf(run.project);
+    expect(catalog, 'the stub install did not put the catalog in node_modules').toEqual(STUB_CATALOG);
+    const installed = listSkills(path.join(run.project, DEFAULT_SKILLS_DIR));
+    expect(installed).toHaveLength(catalog.length);
+    expect(installed).toEqual(catalog);
+  });
+
+  it('writes the catalog to exactly one directory', () => {
     const roots = new Set(staged.skillMd.map((p) => p.split('/')[0]));
     expect([...roots]).toEqual([DEFAULT_SKILLS_DIR.split('/')[0]]);
+    expect(fs.existsSync(path.join(run.project, '.agents'))).toBe(false);
   });
 
   it('stages one SKILL.md per skill — not two, not three', () => {
-    expect(staged.skillMd).toHaveLength(STUB_SKILLS.length);
+    expect(staged.skillMd).toHaveLength(STUB_CATALOG.length);
   });
 
   it('stages no symlinks at all', () => {
     expect(staged.symlinks).toEqual([]);
   });
 
-  it('stages the lockfile that records what was installed', () => {
+  it('stages the lockfile, which records the package as the source of every skill', () => {
     expect(staged.all).toContain('skills-lock.json');
+    const lock = JSON.parse(fs.readFileSync(path.join(run.project, 'skills-lock.json'), 'utf8'));
+    expect(Object.keys(lock.skills).sort()).toEqual(STUB_CATALOG);
+    for (const entry of Object.values(lock.skills) as Array<{ source: string; sourceType: string }>) {
+      expect(entry).toMatchObject({ source: SKILLS_PACKAGE, sourceType: 'node_modules' });
+    }
   });
 
   it('yields readable SKILL.md files when that commit is cloned', () => {
-    const clone = cloneAndRead(project, path.join(TMP, 'clone-staged-once'));
-    expect(clone.skillMd).toHaveLength(STUB_SKILLS.length);
+    const clone = cloneAndRead(run.project, path.join(TMP, 'clone-staged-once'));
+    expect(clone.skillMd).toHaveLength(STUB_CATALOG.length);
     expect(clone.readable).toEqual(clone.skillMd);
     expect(clone.dangling).toEqual([]);
   });
+
+  it('the summary names the package version and the re-install command, and no GitHub source', () => {
+    const block = skillsBlock(run.stdout);
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(skillsPackageDir(run.project), 'package.json'), 'utf8'),
+    );
+    expect(block).toContain(`${DEFAULT_SKILLS_DIR} from ${SKILLS_PACKAGE}@${pkg.version}`);
+    expect(block).toContain(skillsInstallHint(DEFAULT_SKILLS_AGENT));
+    expect(block).toContain(skillsInstallHint(EXAMPLE_OTHER_AGENT));
+    expect(run.stdout).not.toMatch(/skills add|objectstack-ai\/objectstack/);
+  });
 });
 
-// ── 3. vacuity: the pre-fix shape must FAIL both assertions ─────────────────
+// ── 3. the two opt-outs, and an absent package ──────────────────────────────
+describe('without a package to read, no skills — and the run says how to get them', () => {
+  it('--skip-install: nothing in node_modules, so no sync; the summary names install-then-sync', () => {
+    const run = scaffold('no-install-app', ['--skip-install']);
+    expect(run.argv).toEqual([]);
+    expect(fs.existsSync(path.join(run.project, 'node_modules'))).toBe(false);
+    expect(fs.existsSync(path.join(run.project, '.claude'))).toBe(false);
+    const block = skillsBlock(run.stdout);
+    expect(block).toContain('After `pnpm install`');
+    expect(block).toContain(skillsInstallHint(DEFAULT_SKILLS_AGENT));
+    expect(run.stdout).not.toMatch(/skills add|objectstack-ai\/objectstack/);
+  });
+
+  it('--skip-skills: the install runs and the sync does not; the summary recommends it', () => {
+    const run = scaffold('no-skills-app', ['--skip-skills']);
+    expect(catalogOf(run.project), 'the install step did not run').toEqual(STUB_CATALOG);
+    expect(run.argv).toEqual([]);
+    expect(fs.existsSync(path.join(run.project, '.claude'))).toBe(false);
+    const block = skillsBlock(run.stdout);
+    expect(block).toMatch(/^AI Skills \(recommended\)/);
+    expect(block).toContain(skillsInstallHint(DEFAULT_SKILLS_AGENT));
+  });
+
+  // The sync exits 0 with "Nothing to sync." when there is no package, so a
+  // scaffolder that trusted the exit code would print "Installed".
+  it('an install that leaves no catalog: the run says so, and never claims Installed', () => {
+    const run = scaffold('no-catalog-app', [], { PNPM_STUB_REGISTRY: 'empty' });
+    expect(catalogOf(run.project)).toEqual([]);
+    expect(run.argv).toEqual([]);
+    expect(run.stdout).toContain(`node_modules holds no ${SKILLS_PACKAGE} catalog`);
+    expect(run.stdout).not.toContain('Installed for');
+    expect(skillsBlock(run.stdout)).toContain(skillsInstallHint(DEFAULT_SKILLS_AGENT));
+  });
+});
+
+// ── 4. vacuity: the shapes NOT taken must FAIL ──────────────────────────────
 //
-// Same stub, same git steps, the `--all` row of the measured table. If these
-// two cases ever go green the assertions above have stopped meaning anything.
-describe('the pre-fix `--all` shape fails the same property', () => {
-  function installAll(project: string, extraIgnores: string[] = []): void {
+// Same stubs, same git steps. If these cases ever go green the assertions
+// above have stopped meaning anything.
+describe('the shapes the scaffolder does not run fail the same properties', () => {
+  /** A project holding only what these cases read: the ignore list, the dependency, the install. */
+  function projectWithPackage(name: string): string {
+    const project = path.join(TMP, name);
     fs.mkdirSync(project, { recursive: true });
+    fs.copyFileSync(TEMPLATE_GITIGNORE, path.join(project, '.gitignore'));
     fs.writeFileSync(
-      path.join(project, '.gitignore'),
-      fs.readFileSync(TEMPLATE_GITIGNORE, 'utf8') +
-        extraIgnores.map((l) => `${l}\n`).join(''),
+      path.join(project, 'package.json'),
+      JSON.stringify({ name, devDependencies: { [SKILLS_PACKAGE]: '^18.0.0' } }) + '\n',
     );
-    execFileSync(path.join(BIN, 'npx'), ['-y', 'skills', 'add', SKILLS_CATALOG, '--all'], {
-      cwd: project,
-      encoding: 'utf8',
-    });
+    execFileSync(path.join(BIN, 'pnpm'), ['install'], { cwd: project, encoding: 'utf8' });
+    return project;
   }
 
-  it('stages the same skills twice with nothing ignored', () => {
-    const project = path.join(TMP, 'all-shape');
-    installAll(project);
-    const staged = stageAll(project);
-    expect(staged.skillMd).toHaveLength(STUB_SKILLS.length * 2);
-    expect(staged.symlinks).toHaveLength(STUB_SKILLS.length);
-  });
+  function npx(cwd: string, args: string[]): number {
+    try {
+      execFileSync(path.join(BIN, 'npx'), args, { cwd, encoding: 'utf8', stdio: 'pipe' });
+      return 0;
+    } catch (err) {
+      return (err as { status?: number }).status ?? -1;
+    }
+  }
 
-  // The route this card did NOT take, measured rather than argued: ignoring
-  // the real trees while committing `.claude/` produces a clone with nothing
-  // in it but broken links.
-  it('leaves dangling symlinks when the real trees are gitignored instead', () => {
-    const project = path.join(TMP, 'all-shape-ignored');
-    installAll(project, ['.agents/', 'agent/']);
+  // The route this card did NOT take, measured rather than argued: the sync's
+  // default links point into node_modules, which is never committed, so the
+  // clone holds nothing but broken links.
+  it('the linked sync (no --copy) stages links only, and a clone of it reads nothing', () => {
+    const project = projectWithPackage('linked-shape');
+    expect(npx(project, ['-y', MEASURED_CLI, 'experimental_sync', '--agent', DEFAULT_SKILLS_AGENT, '-y'])).toBe(0);
     const staged = stageAll(project);
     expect(staged.skillMd).toEqual([]);
-    expect(staged.symlinks).toHaveLength(STUB_SKILLS.length);
+    expect(staged.symlinks).toHaveLength(STUB_CATALOG.length * 2);
 
-    const clone = cloneAndRead(project, path.join(TMP, 'clone-all-ignored'));
-    expect(clone.dangling).toHaveLength(STUB_SKILLS.length);
-    expect(clone.skillMd).toEqual([]);
+    const clone = cloneAndRead(project, path.join(TMP, 'clone-linked'));
+    expect(clone.dangling).toHaveLength(STUB_CATALOG.length * 2);
+    expect(clone.readable).toEqual([]);
   });
 
-  it('refuses an argv it has no measured shape for', () => {
-    const project = path.join(TMP, 'unmeasured');
+  it('the sync with no package to read installs nothing and still exits 0', () => {
+    const project = path.join(TMP, 'nothing-to-sync');
     fs.mkdirSync(project, { recursive: true });
-    let code = 0;
-    try {
-      execFileSync(
-        path.join(BIN, 'npx'),
-        ['-y', 'skills', 'add', SKILLS_CATALOG, '--agent', 'no-such-runtime'],
-        { cwd: project, encoding: 'utf8', stdio: 'pipe' },
-      );
-    } catch (err) {
-      code = (err as { status?: number }).status ?? 0;
+    fs.writeFileSync(path.join(project, 'package.json'), '{"name":"nothing-to-sync"}\n');
+    expect(npx(project, SKILLS_INSTALL_COMMAND.split(' ').slice(1))).toBe(0);
+    expect(fs.existsSync(path.join(project, '.claude'))).toBe(false);
+  });
+
+  it('refuses an argv it has no measured shape for — the GitHub path among them', () => {
+    const project = projectWithPackage('unmeasured');
+    for (const args of [
+      ['-y', 'skills', 'add', 'objectstack-ai/objectstack/skills', '--skill', '*', '--agent', DEFAULT_SKILLS_AGENT, '-y'],
+      ['-y', 'skills', 'experimental_sync', '--agent', DEFAULT_SKILLS_AGENT, '--copy', '-y'],
+      ['-y', MEASURED_CLI, 'experimental_sync', '--agent', 'no-such-runtime', '--copy', '-y'],
+    ]) {
+      expect(npx(project, args), `the stub agreed with an unmeasured shape: ${args.join(' ')}`).toBe(3);
     }
-    expect(code, 'the stub agreed with an install shape nobody measured').toBe(3);
+    expect(fs.existsSync(path.join(project, '.claude'))).toBe(false);
   });
 });

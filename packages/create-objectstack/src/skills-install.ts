@@ -65,15 +65,17 @@
 //   --skill '*' --agent claude-code -y
 //     .claude/   46 real files  604,102 B   and NOTHING else
 //
+// and the sync repeats it, measured as above (`skills@1.7.2`, the published
+// 18.0.0-next.0 catalog): `experimental_sync --agent '*' --copy -y` writes the
+// catalog into 54 agent directories, 540 `SKILL.md` copies, 48 MB.
+//
 // The template's `.gitignore` excluded none of it, so a scaffolded project's
 // first `git add -A` staged the bundle twice plus the links. Both denylist
 // shapes were built and cloned rather than reasoned about — ignoring the real
 // trees leaves DANGLING links in a clone, committing the links breaks on
 // `core.symlinks=false` — and a denylist chases a destination set this package
 // does not choose. Naming our own destination is the composition this repo
-// asks for: explicit over default magic. The agent-to-directory map is the
-// CLI's, shared by `add` and `experimental_sync`; the one-agent `--copy` row
-// above is the sync's own measurement of the same rule.
+// asks for: explicit over default magic.
 //
 // The cost is the multi-runtime default, and it is paid in the open — the
 // closing summary prints the one-line command for any other runtime, and the
