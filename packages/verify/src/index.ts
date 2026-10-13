@@ -3,12 +3,13 @@
 // @objectstack/verify — public API.
 //
 // Boot any ObjectStack app in-process and verify it through the real HTTP
-// stack. Five proof families, all app-agnostic (derived from your metadata):
+// stack. Six proof families, all app-agnostic (derived from your metadata):
 //   - data fidelity   : runCrudVerification     — author → write → read → assert
 //   - authorization   : runRlsProofs            — "you can't write what you can't read"
 //   - value shape     : runReferenceShapeProofs — "a reference refuses a value that is not a record id"
 //   - delete behaviour: runDeleteBehaviorProofs — "a declared deleteBehavior is what a delete does"
 //   - unique scope    : runUniqueScopeProofs    — "a declared unique collides where its scope says"
+//   - parent write    : runParentWriteReachProofs — "a detail write needs edit on its master, and its own verb"
 
 export { bootStack, bootStackOnce } from './harness.js';
 export type { VerifyStack, BootOptions } from './harness.js';
@@ -124,6 +125,32 @@ export type {
   UniqueScopeReport,
   UniqueScopeProofOptions,
 } from './unique-scope.js';
+
+// ADR-0055 §3 — the parent-derived write reach family: for every object a
+// stack declares `controlled_by_parent`, a principal's edit, delete or create
+// of a detail is admitted exactly when it holds that verb on the detail's
+// object AND can edit the master (measured, never re-derived), asked of the
+// engine's own write as the persona, signed in: verifier and declared-position
+// personas.
+export {
+  deriveParentWriteReachCases,
+  runParentWriteReachProofs,
+  formatParentWriteReachReport,
+  parentWriteReachSecurity,
+} from './parent-write-reach.js';
+export type {
+  ParentWriteReachHop,
+  ParentWriteReachCase,
+  ParentWriteReachVerb,
+  ParentWriteReachOwner,
+  ParentWriteReachAnswer,
+  ParentWriteReachProbeResult,
+  ParentWriteReachReach,
+  ParentWriteReachObjectStatus,
+  ParentWriteReachObjectResult,
+  ParentWriteReachPersona,
+  ParentWriteReachReport,
+} from './parent-write-reach.js';
 
 // ADR-0060 — reusable conformance-ledger helper (static complement to the
 // runtime harness): classify every declarable property, fail closed on drift.

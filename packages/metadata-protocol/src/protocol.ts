@@ -1830,8 +1830,31 @@ type ShippingPackages = {
  * stands in for the overlay layer over `artifactItem` alone, as before: the
  * registry's hydration and a previewed draft, neither of which is a read's
  * lock answer.
+ *
+ * [#23074] An artifact lends its envelope only to a body of its OWN identity.
+ * For a type whose identity is a pair ({@link ITEM_KEY_DISCRIMINATORS}:
+ * `email_template`'s `(name, locale)`), that is the same bundle member, read
+ * by {@link bundleMemberOf}, the identity's one declaration; an artifact of
+ * another member is treated as no artifact at all. So an environment overlay
+ * of a member the package does not ship (a `zh-CN` template beside a shipped
+ * `en-US`) keeps the tenant authorship it was registered with, and is never
+ * read as packaged code: `isCodeArtifactBody` false, no `_packageId` /
+ * `_packageVersion` / `_provenance` stamp, no artifact `_lock*`. Grafted, it
+ * read as the bundle's own artifact of that member to the registry's artifact
+ * lookup and its overlay-entry retirement, and the read doors served it under
+ * the package's provenance. The shipped member's overlay is unchanged: each
+ * caller looks the artifact up at the body's own member
+ * (`lookupArtifactItem`'s `member`), so it still wears that member's
+ * artifact's envelope. A registry that ignores `member` can answer another
+ * member's artifact, and this check is what keeps that answer off the body.
+ * Every other type has no members, so `bundleMemberOf` is `undefined` on both
+ * sides and the merge is exactly what it was. ⛔ The lock family a read
+ * resolved (`itemLock`) is applied before this check and is not moved by it:
+ * a lock binds the NAME, at the read and at the `_lock` gate alike
+ * ({@link resolveItemLock} over every package that ships the name).
  */
 function mergeArtifactProtection(
+    type: string,
     item: unknown,
     artifactItem: unknown,
     itemLock?: ItemLock,
@@ -1841,6 +1864,7 @@ function mergeArtifactProtection(
     if (artifactItem === undefined || artifactItem === null) return item;
     const a = artifactItem as Record<string, unknown>;
     if (typeof a !== 'object') return item;
+    if (bundleMemberOf(type, a) !== bundleMemberOf(type, item)) return item;
     const out: Record<string, unknown> = { ...(item as Record<string, unknown>) };
     if (itemLock === undefined && resolveItemLock({ artifact: [a], overlay: item }).layer === 'artifact') {
         if (a._lock !== undefined) out._lock = a._lock;
@@ -1852,6 +1876,18 @@ function mergeArtifactProtection(
     if (a._packageVersion !== undefined) out._packageVersion = a._packageVersion;
     if (a._provenance !== undefined) out._provenance = a._provenance;
     return out;
+}
+
+/**
+ * [#23074] The bundle member a body IS, for a type whose identity is a pair
+ * ({@link ITEM_KEY_DISCRIMINATORS}): `itemDiscriminator` under the type's
+ * canonical spelling, so the canonical member for a body that declares none.
+ * `undefined` for every other type, which has no members. The member
+ * {@link mergeArtifactProtection} matches an artifact against, and the one
+ * each of its callers looks the artifact up at.
+ */
+function bundleMemberOf(type: string, body: unknown): string | undefined {
+    return itemDiscriminator(canonicalMetaType(type), body);
 }
 
 /**
@@ -2147,8 +2183,9 @@ function mutationEventMember(type: string, member: string | null | undefined): {
  * `sys_metadata_commit.items` stores it: `member` is the bundle member the
  * item is, for a type whose identity is a pair, and is absent for the
  * canonical member and every type with no members — so the plan of every
- * other item is stored byte-identical to what it was. The commit timeline
- * serves the declared four keys only ({@link ObjectStackProtocolImplementation.listCommits}).
+ * other item is stored byte-identical to what it was. [#23073] The commit
+ * timeline serves it on every item of a bundled type, the canonical member
+ * spelled out ({@link ObjectStackProtocolImplementation.listCommits}).
  */
 type CommitPlanItem = { type: string; name: string; existedBefore: boolean; prevVersion: number | null; member?: string };
 
@@ -9703,7 +9740,9 @@ export class ObjectStackProtocolImplementation implements
             // takes priority; else the item's own `_packageId`.) [#22024]
             // The by-name read takes the same rule ({@link envelopePackageId}).
             const itemPackageId = envelopePackageId(packageId, it);
-            const a = this.lookupArtifactItem(request.type, itemName, itemPackageId);
+            // [#23074] …and to the item's own bundle member, whose artifact
+            // alone may lend it an envelope ({@link mergeArtifactProtection}).
+            const a = this.lookupArtifactItem(request.type, itemName, itemPackageId, bundleMemberOf(request.type, it));
             let itemLock: ItemLock | undefined;
             if (typeof itemName === 'string' && (it as any)?._draft !== true) {
                 const address: ItemAddress = {
@@ -9724,7 +9763,7 @@ export class ObjectStackProtocolImplementation implements
             // is the other exit a client reads field metadata from, and
             // an overlay row wins over the (already-governed) registry
             // entry in the merge above, so it carries the same lie.
-            governed.push(this.governServedObject(request.type, mergeArtifactProtection(it, a, itemLock)));
+            governed.push(this.governServedObject(request.type, mergeArtifactProtection(request.type, it, a, itemLock)));
         }
         return {
             type: request.type,
@@ -10489,8 +10528,11 @@ export class ObjectStackProtocolImplementation implements
         // serves. Before, a read naming no package took the first-registered
         // package's envelope, so a name two packages ship answered one
         // package's stored copy under the other package's `_packageId`.
+        // [#23074] …and at the served item's own bundle member, whose artifact
+        // alone may lend it an envelope ({@link mergeArtifactProtection}): a
+        // member the package does not ship is served as the environment's own.
         const artifactItem = this.lookupArtifactItem(
-            request.type, request.name, envelopePackageId(request.packageId, item),
+            request.type, request.name, envelopePackageId(request.packageId, item), bundleMemberOf(request.type, item),
         );
         // [#21738] The lock is the one item-lock resolution's, over the layers
         // this read resolved from its address: [#21803] every installed
@@ -10511,7 +10553,7 @@ export class ObjectStackProtocolImplementation implements
             request.type,
             this.governServedObject(
                 request.type,
-                mergeArtifactProtection(item, artifactItem, itemLock),
+                mergeArtifactProtection(request.type, item, artifactItem, itemLock),
             ),
         );
         // ADR-0047 — list views additionally get reference-integrity
@@ -18751,7 +18793,15 @@ export class ObjectStackProtocolImplementation implements
             this.hydrateExpandedViewItems(type, data, options, registry);
             return true;
         }
-        const artifact = this.lookupArtifactItem(type, (data as any).name, options.packageId ?? undefined);
+        // [#23074] The artifact of the row's OWN bundle member: an overlay of
+        // a member the package does not ship has none, so it registers as the
+        // tenant row it is ({@link mergeArtifactProtection}). It used to take
+        // the bundle's artifact canonical-first, and a `zh-CN` overlay beside
+        // a shipped `en-US` was registered wearing that envelope, which every
+        // registry reader then took for the package's own `zh-CN` artifact.
+        const artifact = this.lookupArtifactItem(
+            type, (data as any).name, options.packageId ?? undefined, bundleMemberOf(type, data),
+        );
         // [#16702] Say what this row IS before the artifact envelope is grafted
         // on top of it. Every body reaching this hydrator came out of a
         // `sys_metadata` write and is therefore tenant-authored by definition
@@ -18773,7 +18823,7 @@ export class ObjectStackProtocolImplementation implements
         // and its receipt rendered both as the package. Registered as the
         // tenant row it is, it is reported as one and never armed.
         const envelope = canonicalType === 'flow' ? undefined : artifact;
-        registry.registerItem(type, mergeArtifactProtection(stateTenantAuthorship(data), envelope), 'name' as any);
+        registry.registerItem(type, mergeArtifactProtection(type, stateTenantAuthorship(data), envelope), 'name' as any);
         this.hydrateExpandedViewItems(type, data, options, registry);
         return true;
     }
@@ -18925,7 +18975,7 @@ export class ObjectStackProtocolImplementation implements
             // where the item's own artifact exists, its `_provenance` still
             // wins (ADR-0010 §3.3), as it does on the container.
             const authored = options.tenantAuthored ? stateTenantAuthorship(item) : item;
-            out.push(mergeArtifactProtection(authored, ownArtifact) as Record<string, unknown>);
+            out.push(mergeArtifactProtection(type, authored, ownArtifact) as Record<string, unknown>);
         }
         return out;
     }
@@ -22873,6 +22923,13 @@ export class ObjectStackProtocolImplementation implements
      * only its own `label` ([#22200]), the one member a draft-only item can be
      * shown by other than its machine name, passed through from
      * {@link SysMetadataRepository.listDrafts} as the repository projects it.
+     *
+     * [#23073] `member` tells two drafts of one bundle apart (ruling
+     * 6116165299, letter A: each member is addressable by name). It is the
+     * repository header's stored member, the column the package-batch doors
+     * promote and discard by, with the canonical member spelled out, as the
+     * by-name doors' `member` selector takes it back
+     * ({@link bundleMemberDiscriminator}); absent for a type with no members.
      */
     async listDrafts(request?: {
         packageId?: string;
@@ -22881,6 +22938,8 @@ export class ObjectStackProtocolImplementation implements
         drafts: Array<{
             type: string;
             name: string;
+            /** [#23073] The bundle member the draft is (`'zh-CN'`, the canonical `'en-US'`); absent for a type with no members. */
+            member?: string;
             /** The draft body's own top-level `label`, as authored; `null` when it declares none. */
             label: I18nLabel | null;
             packageId: string | null;
@@ -22895,10 +22954,15 @@ export class ObjectStackProtocolImplementation implements
             ...(request?.type ? { type: PLURAL_TO_SINGULAR[request.type] ?? request.type } : {}),
             ...(request?.packageId ? { packageId: request.packageId } : {}),
         });
-        // [#22877] The declared header (`ListDraftsResponseSchema`): the
-        // repository's `member` is the package-batch doors' reading, not part of
-        // this list's contract, and is not served on it.
-        return { drafts: drafts.map(({ member: _member, ...header }) => header) };
+        // [#23073] The declared header (`ListDraftsResponseSchema`), with the
+        // row's stored member on every draft of a bundled type: absent there
+        // means the canonical member, which is spelled out here.
+        return {
+            drafts: drafts.map(({ member: stored, ...header }) => {
+                const member = bundleMemberDiscriminator(header.type, stored);
+                return member === undefined ? header : { ...header, member };
+            }),
+        };
     }
 
     /**
@@ -25465,7 +25529,12 @@ export class ObjectStackProtocolImplementation implements
         aiModel?: string;
         parentCommitId?: string;
         itemCount: number;
-        items: Array<{ type: string; name: string; existedBefore: boolean; prevVersion: number | null }>;
+        /**
+         * [#23073] `member` — the bundle member the item is (`'zh-CN'`, the
+         * canonical `'en-US'`), as the stored revert plan records it; absent
+         * for a type with no members.
+         */
+        items: Array<{ type: string; name: string; member?: string; existedBefore: boolean; prevVersion: number | null }>;
         createdAt?: string;
     }>> {
         try {
@@ -25495,9 +25564,14 @@ export class ObjectStackProtocolImplementation implements
                 ...(r.ai_model ? { aiModel: r.ai_model } : {}),
                 ...(r.parent_commit_id ? { parentCommitId: r.parent_commit_id } : {}),
                 itemCount: typeof r.item_count === 'number' ? r.item_count : 0,
-                // [#22877] The declared item (`ListPackageCommitsResponseSchema`):
-                // a plan item's stored `member` is `revertCommit`'s reading.
-                items: this.parseCommitItems(r.items).map(({ member: _member, ...item }) => item),
+                // [#23073] The declared item (`ListPackageCommitsResponseSchema`),
+                // with the plan item's stored member — the one `revertCommit`
+                // acts on — on every item of a bundled type: absent there means
+                // the canonical member, which is spelled out here.
+                items: this.parseCommitItems(r.items).map(({ member: stored, ...item }) => {
+                    const member = bundleMemberDiscriminator(item.type, stored);
+                    return member === undefined ? item : { ...item, member };
+                }),
                 // [#14038] Canonicalise the ONE driver materialisation this
                 // column is measured to produce (a valid JS `Date`, on
                 // Postgres/MySQL); every other shape — including an

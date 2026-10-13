@@ -47,6 +47,7 @@ import {
     SysMetadataObject,
 } from '@objectstack/metadata-core';
 import { ObjectQL } from './engine.js';
+import { isCodeArtifactBody } from './registry.js';
 
 const PKG = 'com.acme.mail';
 const NAME = 'acme.welcome';
@@ -161,6 +162,8 @@ async function boot(
     stores: Map<string, Map<string, Record<string, unknown>>>,
     /** [#22877] `'control-plane'` boots a kernel with no environment, whose registry a save writes through to. */
     kernel: 'environment' | 'control-plane' = 'environment',
+    /** [#23074] Runs once the package is registered, before the boot hydration. */
+    beforeHydration?: (engine: ObjectQL) => void,
 ) {
     const engine = new ObjectQL();
     engine.registerDriver(makeMemoryDriver(stores), true);
@@ -169,6 +172,7 @@ async function boot(
         engine.registry.registerObject(o as any, 'test-package');
     }
     engine.registerApp(mailManifest());
+    beforeHydration?.(engine);
     const protocol = new ObjectStackProtocolImplementation(
         engine, () => new Map(), kernel === 'environment' ? 'env_prod' : undefined,
     );
@@ -386,9 +390,11 @@ describe('the by-name doors address ONE member by the selector (#22877, stage 2)
 
     it('DELETE by member of a member NO artifact ships: its overlay leaves the registry, and the canonical overlay stays', async () => {
         // The package ships `acme.digest` in `en-US` only (the showcase's
-        // shape). The hydrated `zh-CN` overlay wears the bundle's artifact
-        // envelope, so the heal must lift it as that member's shadow; leaving
-        // it kept serving the reset wording until the next boot.
+        // shape). Leaving the hydrated `zh-CN` overlay registered kept serving
+        // the reset wording until the next boot. [#23074] It is registered
+        // as the tenant row it is (no artifact envelope), so the heal's
+        // overlay-entry retirement takes it; the readers are pinned in the
+        // last block of this file.
         const stores = new Map<string, Map<string, Record<string, unknown>>>();
         const first = await boot(stores);
         await first.protocol.saveMetaItem({ type: T, name: DIGEST, item: { ...template('en-US', 'ADMIN digest en'), name: DIGEST } });
@@ -519,9 +525,11 @@ describe('the package-batch doors and the cluster fan-out carry the member (#228
         expect(reverted, JSON.stringify(reverted)).toMatchObject({ success: true, revertedCount: 1 });
         expect(overlayRows(stores).map((r) => r.bundle_member ?? null)).toEqual([null]);
         expect(await servedSubjects(protocol)).toEqual({ 'en-US': 'ADMIN en', 'zh-CN': 'PKG zh' });
-        // The timeline serves the declared item, with no `member` key.
-        const commits: any[] = await (protocol as any).listCommits({ packageId: PKG });
-        for (const c of commits) for (const it of c.items) expect(Object.keys(it).sort()).toEqual(['existedBefore', 'name', 'prevVersion', 'type']);
+        // [#23073] The timeline serves each item's member: the publish and its revert, zh-CN both.
+        const commits = await protocol.listCommits({ packageId: PKG });
+        expect(commits.map((c) => c.items.map((it) => [it.type, it.name, it.member]))).toEqual([
+            [[T, NAME, 'zh-CN']], [[T, NAME, 'zh-CN']],
+        ]);
     });
 
     it('discardPackageDrafts: the zh-CN draft is discarded as zh-CN', async () => {
@@ -531,9 +539,34 @@ describe('the package-batch doors and the cluster fan-out carry the member (#228
         expect(out, JSON.stringify(out)).toMatchObject({ success: true, discardedCount: 1, failedCount: 0 });
         expect(draftRows(stores)).toEqual([]);
         expect(await servedSubjects(protocol)).toEqual({ 'en-US': 'ADMIN en', 'zh-CN': 'PKG zh' });
-        // The public draft list keeps its declared header (no `member`).
-        const listed: any = await protocol.listDrafts({ packageId: PKG });
+        const listed = await protocol.listDrafts({ packageId: PKG });
         expect(listed.drafts).toEqual([]);
+    });
+
+    it('[#23073] the draft list and the commit timeline tell two languages of one template apart, and each listed member addresses its own item by name', async () => {
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const { protocol } = await boot(stores);
+        await protocol.saveMetaItem({ type: T, name: NAME, item: template('en-US', 'DRAFT en'), mode: 'draft', packageId: PKG });
+        await protocol.saveMetaItem({ type: T, name: NAME, item: template('zh-CN', 'DRAFT zh'), mode: 'draft', packageId: PKG });
+        const wording: Record<string, string> = { 'en-US': 'DRAFT en', 'zh-CN': 'DRAFT zh' };
+
+        // Two drafts of one `type` and `name`, told apart by `member` alone.
+        const listed = await protocol.listDrafts({ packageId: PKG });
+        expect(listed.drafts.map((d) => [d.type, d.name, d.member]).sort()).toEqual([[T, NAME, 'en-US'], [T, NAME, 'zh-CN']]);
+        // The listed member round-trips through the by-name door: each reads its own draft.
+        for (const d of listed.drafts) {
+            const read: any = await protocol.getMetaItem({ type: d.type, name: d.name, state: 'draft', member: d.member });
+            expect(read?.item?.subject).toBe(wording[d.member!]);
+        }
+
+        const published: any = await protocol.publishPackageDrafts({ packageId: PKG });
+        expect(published, JSON.stringify(published)).toMatchObject({ success: true, publishedCount: 2, failedCount: 0 });
+        const [commit] = await protocol.listCommits({ packageId: PKG });
+        expect(commit!.items.map((it) => [it.type, it.name, it.member]).sort()).toEqual([[T, NAME, 'en-US'], [T, NAME, 'zh-CN']]);
+        for (const it of commit!.items) {
+            const read: any = await protocol.getMetaItem({ type: it.type, name: it.name, member: it.member });
+            expect(read?.item?.subject).toBe(wording[it.member!]);
+        }
     });
 
     it('the cluster fan-out: a peer converges on the member a write changed, and a member reset heals only that member', async () => {
@@ -564,5 +597,195 @@ describe('the package-batch doors and the cluster fan-out carry the member (#228
         await writer.protocol.deleteMetaItem({ type: T, name: NAME, member: 'zh-CN' });
         await vi.waitFor(() => expect(registrySubject(peer.engine, 'zh-CN')).toBe('PKG zh'));
         expect(registrySubject(peer.engine, 'en-US')).toBe('ADMIN en');
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// [#23074] The artifact envelope is stamped only on the member the package ships
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The package ships `acme.digest` in `en-US` only and `acme.welcome` in both
+// locales. An environment overlay of `acme.digest` in `zh-CN` customizes a
+// member no artifact ships, so it is the environment's own item. Before, the
+// boot hydration grafted the bundle's `en-US` artifact envelope onto it
+// (`_packageId`, `_packageVersion`, `_provenance: 'package'`): the registry's
+// artifact lookup then answered the overlay itself as the package's `zh-CN`
+// artifact, both read doors served it under the package's provenance, and the
+// overlay-entry retirement refused it as code. CONTROL in every case: the
+// shipped member's overlay (`acme.welcome` in `zh-CN`) keeps its artifact's
+// envelope, lookup, read and heal. Last, a type with no members keeps its
+// envelope, even where the overlay's `locale` differs from the artifact's.
+
+const PROTECTION_KEYS = ['_packageId', '_packageVersion', '_provenance'] as const;
+const protectionOf = (body: unknown) =>
+    Object.fromEntries(PROTECTION_KEYS.map((key) => [key, (body as Record<string, unknown> | undefined)?.[key]]));
+/** The envelope the package's artifacts carry, which an overlay of a shipped member wears. */
+const PACKAGED = { _packageId: PKG, _packageVersion: '1.0.0', _provenance: 'package' };
+/** What the hydration says of every stored row before any envelope is grafted (ADR-0010 `'org'`). */
+const TENANT = { _packageId: undefined, _packageVersion: undefined, _provenance: 'org' };
+
+/** Overlays of `name` in `en-US` and `zh-CN`, then a restart: the second boot's registry holds both hydrated. */
+async function bootWithOverlays(
+    stores: Map<string, Map<string, Record<string, unknown>>>,
+    name: string,
+    beforeHydration?: (engine: ObjectQL) => void,
+) {
+    const first = await boot(stores);
+    for (const locale of ['en-US', 'zh-CN']) {
+        expect(await first.protocol.saveMetaItem({ type: T, name, item: { ...template(locale, `ADMIN ${name} ${locale}`), name } }))
+            .toMatchObject({ success: true });
+    }
+    return boot(stores, 'environment', beforeHydration);
+}
+
+describe('[#23074] the artifact envelope is stamped only on the member the package ships', () => {
+    it('the boot hydration: an unshipped member\'s overlay registers as the tenant row it is', async () => {
+        const { engine } = await bootWithOverlays(new Map(), DIGEST);
+        const zh = engine.registry.getItem<any>(T, DIGEST, undefined, 'zh-CN');
+        expect(zh?.subject).toBe(`ADMIN ${DIGEST} zh-CN`);
+        expect(protectionOf(zh)).toEqual(TENANT);
+        expect(isCodeArtifactBody(zh)).toBe(false);
+        // The package ships no `zh-CN` member, and the overlay is not one.
+        expect(engine.registry.getArtifactItem(T, DIGEST, undefined, 'zh-CN')).toBeUndefined();
+    });
+
+    it('CONTROL the boot hydration: an overlay of a shipped member wears its artifact\'s envelope', async () => {
+        // The bundle's canonical member, beside the unshipped one.
+        const { engine } = await bootWithOverlays(new Map(), DIGEST);
+        const en = engine.registry.getItem<any>(T, DIGEST, undefined, 'en-US');
+        expect(en?.subject).toBe(`ADMIN ${DIGEST} en-US`);
+        expect(protectionOf(en)).toEqual(PACKAGED);
+        expect(isCodeArtifactBody(en)).toBe(true);
+        // A non-canonical member the package ships.
+        const shipped = (await bootWithOverlays(new Map(), NAME)).engine;
+        const zh = shipped.registry.getItem<any>(T, NAME, undefined, 'zh-CN');
+        expect(zh?.subject).toBe(`ADMIN ${NAME} zh-CN`);
+        expect(protectionOf(zh)).toEqual(PACKAGED);
+        expect(isCodeArtifactBody(zh)).toBe(true);
+        expect(shipped.registry.getArtifactItem<any>(T, NAME, undefined, 'zh-CN')?.subject).toBe('PKG zh');
+    });
+
+    it('the by-name read (?member=): an unshipped member is served as the environment\'s item', async () => {
+        const { protocol } = await bootWithOverlays(new Map(), DIGEST);
+        const zh: any = await protocol.getMetaItem({ type: T, name: DIGEST, member: 'zh-CN' });
+        expect(zh.item.subject).toBe(`ADMIN ${DIGEST} zh-CN`);
+        expect(protectionOf(zh.item)).toEqual({ _packageId: undefined, _packageVersion: undefined, _provenance: undefined });
+        expect(isCodeArtifactBody(zh.item)).toBe(false);
+        expect([zh.provenance, zh.packageId, zh.packageVersion]).toEqual([undefined, undefined, undefined]);
+        expect(zh).toMatchObject({ lock: 'none', editable: true, deletable: true });
+    });
+
+    it('CONTROL the by-name read (?member=): a shipped member is served under its package', async () => {
+        const { protocol } = await bootWithOverlays(new Map(), NAME);
+        const zh: any = await protocol.getMetaItem({ type: T, name: NAME, member: 'zh-CN' });
+        expect(zh.item.subject).toBe(`ADMIN ${NAME} zh-CN`);
+        expect(protectionOf(zh.item)).toEqual(PACKAGED);
+        expect(zh).toMatchObject({
+            provenance: 'package', packageId: PKG, packageVersion: '1.0.0', lock: 'none', editable: true, deletable: true,
+        });
+    });
+
+    /** Each listed member of `name` by locale, from the served list or the execution list. */
+    const listedMembers = async (protocol: ObjectStackProtocolImplementation, audience: 'served' | 'execution', name: string) => {
+        const res: any = audience === 'served'
+            ? await protocol.getMetaItems({ type: T })
+            : await protocol.getMetaItemsForExecution({ type: T });
+        return new Map<string, any>(((res?.items ?? []) as any[]).filter((it) => it?.name === name).map((it) => [String(it.locale), it]));
+    };
+
+    it('the list, served and for execution: an unshipped member is listed as the environment\'s item', async () => {
+        const { protocol } = await bootWithOverlays(new Map(), DIGEST);
+        for (const audience of ['served', 'execution'] as const) {
+            const zh = (await listedMembers(protocol, audience, DIGEST)).get('zh-CN');
+            expect(zh?.subject, audience).toBe(`ADMIN ${DIGEST} zh-CN`);
+            expect(protectionOf(zh), audience).toEqual({ _packageId: undefined, _packageVersion: undefined, _provenance: undefined });
+        }
+    });
+
+    it('CONTROL the list, served and for execution: shipped members are listed under their package', async () => {
+        const unshipped = (await bootWithOverlays(new Map(), DIGEST)).protocol;
+        const shipped = (await bootWithOverlays(new Map(), NAME)).protocol;
+        for (const audience of ['served', 'execution'] as const) {
+            expect(protectionOf((await listedMembers(unshipped, audience, DIGEST)).get('en-US')), audience).toEqual(PACKAGED);
+            const zh = (await listedMembers(shipped, audience, NAME)).get('zh-CN');
+            expect(zh?.subject, audience).toBe(`ADMIN ${NAME} zh-CN`);
+            expect(protectionOf(zh), audience).toEqual(PACKAGED);
+        }
+    });
+
+    /**
+     * A by-name reset of the `zh-CN` member of `name`, through the delete door,
+     * read back at once and after a restart: `after` is the `zh-CN` subject the
+     * registry and the by-name read then serve. Before the door, each of the
+     * registry's two heal verbs that the delete's heal
+     * (`restoreArtifactRegistryView`) calls is asked about the hydrated entry,
+     * on a boot of its own.
+     */
+    async function resetZh(name: string, verbs: { shadow: boolean; overlayEntry: boolean }, after: string | undefined) {
+        const shadowBoot = (await bootWithOverlays(new Map(), name)).engine;
+        expect(shadowBoot.registry.removeRuntimeShadow(T, name, 'zh-CN'), 'removeRuntimeShadow').toBe(verbs.shadow);
+        const overlayEntryBoot = (await bootWithOverlays(new Map(), name)).engine;
+        expect(overlayEntryBoot.registry.removeOverlayEntry(T, name, 'zh-CN'), 'removeOverlayEntry').toBe(verbs.overlayEntry);
+
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const { engine, protocol } = await bootWithOverlays(stores, name);
+        expect(await protocol.deleteMetaItem({ type: T, name, member: 'zh-CN' })).toMatchObject({ success: true });
+        expect(engine.registry.getItem<any>(T, name, undefined, 'zh-CN')?.subject).toBe(after);
+        expect(engine.registry.getItem<any>(T, name, undefined, 'en-US')?.subject).toBe(`ADMIN ${name} en-US`);
+        expect(((await protocol.getMetaItem({ type: T, name, member: 'zh-CN' })) as any)?.item?.subject).toBe(after);
+        const restarted = await boot(stores);
+        expect(((await restarted.protocol.getMetaItem({ type: T, name, member: 'zh-CN' })) as any)?.item?.subject).toBe(after);
+    }
+
+    it('the reset (?member=): an unshipped member is retired by the overlay-entry tier, and nothing is left serving it', async () => {
+        // No `zh-CN` artifact takes its place, so the shadow heal declines and
+        // the overlay-entry retirement takes the tenant row.
+        await resetZh(DIGEST, { shadow: false, overlayEntry: true }, undefined);
+    });
+
+    it('CONTROL the reset (?member=): a shipped member is un-shadowed onto its artifact', async () => {
+        // The shadow heal lifts the entry onto the `zh-CN` artifact, and the
+        // retirement refuses it as packaged code.
+        await resetZh(NAME, { shadow: true, overlayEntry: false }, 'PKG zh');
+    });
+
+    it('a registry that answers another member\'s artifact: the graft keeps it off the body', async () => {
+        // `lookupArtifactItem`'s note: a registry without the member parameter
+        // ignores it, so it answers the bundle's artifact canonical-first.
+        const { engine, protocol } = await bootWithOverlays(new Map(), DIGEST, (booted) => {
+            const registry = booted.registry as any;
+            const artifactOf = registry.getArtifactItem.bind(registry);
+            vi.spyOn(registry, 'getArtifactItem').mockImplementation((...args: any[]) => artifactOf(args[0], args[1], args[2]));
+        });
+        expect(engine.registry.getArtifactItem<any>(T, DIGEST, undefined, 'zh-CN')?.locale).toBe('en-US');
+        // CONTROL — the canonical member is that artifact's own member, and wears it.
+        expect(protectionOf(engine.registry.getItem(T, DIGEST, undefined, 'en-US'))).toEqual(PACKAGED);
+        expect(protectionOf(engine.registry.getItem(T, DIGEST, undefined, 'zh-CN'))).toEqual(TENANT);
+        const zh: any = await protocol.getMetaItem({ type: T, name: DIGEST, member: 'zh-CN' });
+        expect(zh.item._packageId).toBeUndefined();
+        expect(zh.packageId).toBeUndefined();
+    });
+
+    it('CONTROL: a type with no members keeps its artifact\'s envelope, even where the overlay\'s locale is not the artifact\'s', async () => {
+        // `translation` carries a `locale`, and is identified by its name
+        // alone: only a type `ITEM_KEY_DISCRIMINATORS` declares has members.
+        const TR = 'acme_mail_messages';
+        const translation = (locale: string, save: string) => ({ name: TR, label: 'Mail messages', locale, messages: { save } });
+        const shipTranslation = (booted: ObjectQL) => {
+            booted.registry.registerItem('translation', translation('zh-CN', '保存'), 'name', PKG);
+        };
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const first = await boot(stores, 'environment', shipTranslation);
+        expect(await first.protocol.saveMetaItem({ type: 'translation', name: TR, item: translation('ja-JP', '保存する') }))
+            .toMatchObject({ success: true });
+        const { engine, protocol } = await boot(stores, 'environment', shipTranslation);
+        const entry = engine.registry.getItem<any>('translation', TR);
+        expect(entry?.locale).toBe('ja-JP');
+        expect(entry?._packageId).toBe(PKG);
+        expect(isCodeArtifactBody(entry)).toBe(true);
+        const read: any = await protocol.getMetaItem({ type: 'translation', name: TR });
+        expect(read.item.locale).toBe('ja-JP');
+        expect(read.item._packageId).toBe(PKG);
+        expect(read.packageId).toBe(PKG);
     });
 });

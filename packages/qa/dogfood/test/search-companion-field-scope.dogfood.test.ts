@@ -37,6 +37,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { PermissionSetSchema, type PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { PinyinSearchPlugin } from '@objectstack/plugin-pinyin-search';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 /** `翟璐` normalizes to `zhailu zl` — the term below lives in the companion only. */
 const CJK_NAME = '翟璐';
@@ -171,9 +172,8 @@ describe('dogfood: with the pinyin search companion on, a member searches only w
     const idOf = async (object: string, where: Record<string, unknown>) =>
       String((await ql.findOne(object, { where, ...SYS }))?.id ?? '');
     const userId = await idOf('sys_user', { email: memberEmail });
-    const setId = await idOf('sys_permission_set', { name: memberSet.name });
     expect(userId, 'member user seeded').toBeTruthy();
-    expect(setId, 'member permission set seeded').toBeTruthy();
+    expect(await catalogPermissionSet(ql, memberSet.name), 'member permission set served by the security catalog').toBeTruthy();
     await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: memberSet.name }, SYS);
 
     memberRowId = await create(memberToken, ROWS, { name: CJK_NAME });

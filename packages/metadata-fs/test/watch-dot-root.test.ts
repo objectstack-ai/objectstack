@@ -268,7 +268,7 @@ describe('FileSystemRepository watcher — dot-rooted watch root (#7150)', () =>
     expect(sink.events[0]!.op).toBe('update');
     expect(sink.events[0]!.ref.name).toBe('case_grid');
     expect(sink.events[0]!.source).toBe('fs');
-    expect(sink.events[0]!.actor).toBe('fs');
+    expect(sink.events[0]!.actor).toBeNull();
   }, CASE_TIMEOUT_MS);
 
   it('still ignores dot entries UNDER the root, including its own bookkeeping', async () => {

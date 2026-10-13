@@ -58,6 +58,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { resolveAuthzContext } from '@objectstack/core';
 import { SecurityPlugin } from '@objectstack/plugin-security';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 // ── the app under probe ────────────────────────────────────────────────────
 
@@ -188,10 +189,8 @@ describe('[#6736 PROBE] app-authored RLS wideners on the bulk write path', () =>
     expect(bobId).toBeTruthy();
     expect(aliceId).toBeTruthy();
 
-    const setRow = await ql.findOne('sys_permission_set', {
-      where: { name: 'probe_widener' }, context: { ...SYS },
-    });
-    expect(setRow?.id, 'the app-declared widener set is seeded').toBeTruthy();
+    const setRow = await catalogPermissionSet(ql, 'probe_widener');
+    expect(setRow, 'the app-declared widener set is served by the security catalog').toBeTruthy();
     await ql.insert('sys_user_permission_set',
       { user_id: bobId, permission_set: setRow.name }, { context: { ...SYS } });
 

@@ -61,6 +61,13 @@
 // permission, a constraint on another field — is `unattributed`: an engine
 // that refused every write would otherwise prove every scope.
 //
+// A refusal that names no field is never attributed where a unique
+// `indexes[]` entry covers the probed column: that entry refuses the same
+// second holder, naming no field either, whenever the fixtures hold its other
+// columns constant, and its twin is admitted too. So there the refusal could
+// be the entry's while the field's own constraint is absent, and it is
+// `unattributed`.
+//
 // Run it on a fresh stack of its own: it writes duplicates by design, and the
 // records it creates would collide with another family's on a unique field.
 
@@ -371,6 +378,16 @@ function uniqueFields(objectDef: any): Set<string> {
   return out;
 }
 
+/** The columns of each unique `indexes[]` entry of `objectDef` that includes `field`. */
+function uniqueIndexesOver(objectDef: any, field: string): string[][] {
+  const out: string[][] = [];
+  for (const index of Array.isArray(objectDef?.indexes) ? objectDef.indexes : []) {
+    const columns = Array.isArray(index?.fields) ? index.fields.map(String) : [];
+    if (index?.unique && columns.includes(field)) out.push(columns);
+  }
+  return out;
+}
+
 /**
  * The smallest record of `objectDef` the CRUD derivation can offer: its values
  * for the fields the object REQUIRES (required relations already filled), so
@@ -485,6 +502,8 @@ interface UniqueScopeObservation {
   secondHolds?: boolean;
   /** When the second write was admitted: both records carry the same organization. */
   sameOrganization?: boolean;
+  /** The unique `indexes[]` entries whose columns include the probed field. */
+  coveringIndexes: string[][];
 }
 
 /**
@@ -507,6 +526,17 @@ function judge(
     }
     if (answer.field !== undefined && answer.field !== c.field) {
       return { outcome: 'unattributed', detail: `refused by the unique constraint on another field (${answer.field})` };
+    }
+    // A unique `indexes[]` entry over this column refuses the same write,
+    // naming no field, and admits the twin: a field-less refusal is then
+    // possibly the entry's, whatever the field's own constraint does.
+    if (answer.field === undefined && o.coveringIndexes.length > 0) {
+      return {
+        outcome: 'unattributed',
+        detail:
+          `the unique refusal names no field, and a unique indexes[] entry (${o.coveringIndexes[0]!.join(', ')}) covers ` +
+          `${c.field}, so the refusal may be that entry's rather than the field's own declaration`,
+      };
     }
     // A refusal naming no field is this field's when the only change that
     // turns it into an admitted write is the probed value: an update changes
@@ -699,6 +729,7 @@ export async function runUniqueScopeProofs(
       continue;
     }
     const source = valueSource(c.type, c.field, objectDefs.get(c.object)?.fields?.[c.field], c.object, crud.get(c.object));
+    const coveringIndexes = uniqueIndexesOver(objectDefs.get(c.object), c.field);
     // Probe values draw on the fixtures' counter, so no probe value equals a fixture's.
     const fresh = async (w: Writer): Promise<{ value?: unknown; reason?: string }> => {
       if (source.base !== undefined) return { value: vary(source.base, ++variant) };
@@ -742,6 +773,7 @@ export async function runUniqueScopeProofs(
       const observation: UniqueScopeObservation = {
         answer: d.answer,
         ...(twin ? { twin } : {}),
+        coveringIndexes,
         holderHolds: holds(holderRow?.[c.field], h.value),
         ...(d.id ? {
           secondHolds: holds(secondRow?.[c.field], h.value),
@@ -763,6 +795,7 @@ export async function runUniqueScopeProofs(
       const changed = await row(c.object, e.id);
       const observation: UniqueScopeObservation = {
         answer,
+        coveringIndexes,
         holderHolds: holds(holderRow?.[c.field], h.value),
         ...(answer.kind === 'written' ? {
           secondHolds: holds(changed?.[c.field], h.value),

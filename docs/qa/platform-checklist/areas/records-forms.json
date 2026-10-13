@@ -165,7 +165,7 @@
         "dogfood-verification skill §3",
         "examples/app-showcase/src/data/objects/account.object.ts (requiredness + format/conditional validations)",
         "packages/runtime/src/route-ledger.ts (/data CRUD routes)",
-        "packages/rest/src/rest-server.ts#registerDataActionEndpoints (POST /data/:object/:id/clone → registerDataActionEndpoints) + packages/metadata-protocol/src/protocol.ts#cloneData (cloneData: enable.clone gate, findOne-in-caller-context, CLONE_STRIP_FIELDS; the static-readonly strip is engine.insert's since #14147)",
+        "packages/rest/src/data-action-routes.ts#registerDataActionEndpoints (POST /data/:object/:id/clone → registerDataActionEndpoints) + packages/metadata-protocol/src/protocol.ts#cloneData (cloneData: enable.clone gate, findOne-in-caller-context, CLONE_STRIP_FIELDS; the static-readonly strip is engine.insert's since #14147)",
         "packages/rest/src/rest-route-ledger.ts (POST /api/v1/data/:object/:id/clone, client data.clone)",
         "objectui: e2e/live/record-history-display.spec.ts",
         "cross-ref: the inline-edit atomic two-surface behavior (ONE Save bar / ONE PATCH carrying exactly the changed keys + ifMatch) is folded into records-forms.concurrent-edit-conflict, not here"

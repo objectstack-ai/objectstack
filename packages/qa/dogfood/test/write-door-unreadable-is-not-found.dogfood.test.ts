@@ -52,6 +52,7 @@ import {
 } from './fixtures/attachments-fixture.js';
 import { buildCmtOpen, buildCmtPrivate, buildCmtReadonly, commentManagerSet } from './fixtures/comments-fixture.js';
 import { armedWhen, assertArmed, leaveOrganization, principalArmed, resolveAuthzFor } from './armed.js';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const SYS = { isSystem: true } as const;
 const RECORD_SENTENCE = BUILTIN_OPERATION_MESSAGES.en.record_access_denied!;
@@ -123,8 +124,8 @@ async function boot(inside: boolean, email: string): Promise<Booted> {
   const adminId = (await ql.findOne('sys_user', { where: { email: 'admin@objectos.ai' }, context: SYS }))?.id;
   const userId = (await ql.findOne('sys_user', { where: { email }, context: SYS }))?.id;
   for (const name of GRANTS) {
-    const set = await ql.findOne('sys_permission_set', { where: { name }, context: SYS });
-    expect(set?.id, `fixture permission set ${name} seeded`).toBeTruthy();
+    const set = await catalogPermissionSet(ql, name);
+    expect(set, `fixture permission set ${name} served by the security catalog`).toBeTruthy();
     await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: set.name }, { context: { ...SYS } });
   }
   if (!inside) token = await leaveOrganization(stack, email);

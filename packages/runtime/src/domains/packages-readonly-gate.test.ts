@@ -393,10 +393,14 @@ describe('/packages duplicate — a source that is not a base is refused (#14451
         expect(err?.httpStatus).toBe(422);
         expect(err?.details?.packageId).toBe(CODE_LOADED);
         expect(err?.details?.docs).toBe('docs/adr/0070-package-first-authoring.md');
-        // The remedy is the one that EXISTS for a code package (ADR-0005
-        // overlay), and the message says why the copy would be empty rather
-        // than only that it is refused.
-        expect(err?.message).toContain('ADR-0005');
+        // The remedies are the ones that EXIST for a code package (ADR-0131 D6:
+        // customise beside it, or take an unmanaged copy), and the message says
+        // why the copy would be empty rather than only that it is refused. The
+        // retired ADR-0005 organization overlay (a write naming an organization
+        // answers 403 NOT_OVERRIDABLE) is no longer prescribed.
+        expect(err?.message).toContain('ADR-0131 D6');
+        expect(err?.message).toContain("installMode 'unmanaged'");
+        expect(err?.message).not.toContain('ADR-0005');
         expect(err?.message).toContain('read-only');
     });
 
@@ -481,7 +485,7 @@ describe('/packages lifecycle — the read-only refusal no longer sends callers 
         { label: 'DELETE', path: (id: string) => `/${id}`, method: 'DELETE' },
         { label: 'disable', path: (id: string) => `/${id}/disable`, method: 'PATCH' },
     ]) {
-        it(`${verb.label} prescribes the ADR-0005 overlay, not POST /:id/duplicate`, async () => {
+        it(`${verb.label} prescribes customising beside the package (ADR-0131 D6), not POST /:id/duplicate`, async () => {
             const { dispatcher } = make();
             const r = await dispatcher.handlePackages(verb.path(CODE_LOADED), verb.method, {}, {}, admin());
             const message = String(r.response?.body?.error?.message ?? '');
@@ -491,9 +495,12 @@ describe('/packages lifecycle — the read-only refusal no longer sends callers 
             // (POST /packages/<id>/duplicate) and change that" — a remedy that,
             // for exactly the packages this refusal fires on, now answers 422
             // and before that answered an empty 200. A refusal that prescribes a
-            // dead end is worse than one that prescribes nothing.
+            // dead end is worse than one that prescribes nothing. Its next
+            // remedy, the ADR-0005 organization overlay, is retired too (a write
+            // naming an organization answers 403 NOT_OVERRIDABLE).
             expect(message).not.toContain('/duplicate');
-            expect(message).toContain('ADR-0005');
+            expect(message).not.toContain('ADR-0005');
+            expect(message).toContain('ADR-0131 D6');
         });
     }
 });

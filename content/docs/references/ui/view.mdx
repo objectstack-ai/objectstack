@@ -171,6 +171,14 @@ Column footer summary configuration
 | **title** | `string \| Record<string, string>` | optional | Heading of the empty state |
 | **message** | `string \| Record<string, string>` | optional | Line of text below the heading |
 | **icon** | `string` | optional | Icon name drawn above the heading; a name that resolves to no icon draws the default empty-state glyph |
+| **link** | `{ label: string \| Record<string, string>; url: string }` | optional | [PLANNED — not yet rendered] The one next step an empty list names: a link the user follows, `{ label, url }` — for example to the how-to page that explains what belongs here when nobody can add a row. It opens a page or an address and runs no action. The console's empty-state renderers are its planned readers; until they ship, the link parses and is not drawn. |
+
+### Nested Shape: `EmptyState.link`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string \| Record<string, string>` | ✅ | Text of the link — a string, or an inline locale map resolved against the display locale |
+| **url** | `string` | ✅ | Where the link goes — a target a `type: 'url'` action opens: an in-app path that starts with `/` or `./` (such as `/docs/connect`), or an address that opens with `http://`, `https://` or `mailto:`. Any other scheme, a protocol-relative `//host`, a bare relative path and a tab, line feed or carriage return are refused at parse; a template that opens with `${…}`, such as `${ctx.origin}/docs`, is judged when it is clicked, after interpolation. |
 
 
 ---
@@ -213,7 +221,7 @@ Column footer summary configuration
 | **required** | `boolean` | optional | Required override |
 | **hidden** | `boolean` | optional | Hidden override |
 | **colSpan** | `integer` | optional | Absolute column span (1-4). The renderer clamps it to the form grid's current column count, so the cell starts at a real column boundary at every surface width and never overflows (`colSpan: 4` in a 3-column grid renders as 3); a `colSpan` within the column count renders as authored, and `colSpan: 1` emits no span class at all. |
-| **span** | `Enum<'auto' \| 'full'>` | optional (default: `"auto"`) | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `7578323a544e`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest. |
+| **span** | `Enum<'auto' \| 'full'>` | optional (default: `"auto"`) | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `1fb1ced36243`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest. |
 | **widget** | `string` | optional | Custom widget/component name (overrides type-based inference) |
 | **language** | `string` | optional | Code editor language (for type=code) |
 | **keyField** | `{ field?: string; label?: string \| Record<string, string>; placeholder?: string \| Record<string, string>; helpText?: string \| Record<string, string>; … }` | optional | Key column config for record-typed fields |
@@ -343,7 +351,7 @@ Form-view select option — the object-field option shape minus the per-option `
 | **required** | `boolean` | optional | Required override |
 | **hidden** | `boolean` | optional | Hidden override |
 | **colSpan** | `integer` | optional | Absolute column span (1-4). The renderer clamps it to the form grid's current column count, so the cell starts at a real column boundary at every surface width and never overflows (`colSpan: 4` in a 3-column grid renders as 3); a `colSpan` within the column count renders as authored, and `colSpan: 1` emits no span class at all. |
-| **span** | `Enum<'auto' \| 'full'>` | optional (default: `"auto"`) | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `7578323a544e`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest. |
+| **span** | `Enum<'auto' \| 'full'>` | optional (default: `"auto"`) | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `1fb1ced36243`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest. |
 | **widget** | `string` | optional | Custom widget/component name (overrides type-based inference) |
 | **language** | `string` | optional | Code editor language (for type=code) |
 | **keyField** | `{ field?: string; label?: string \| Record<string, string>; placeholder?: string \| Record<string, string>; helpText?: string \| Record<string, string>; … }` | optional | Key column config for record-typed fields |
@@ -809,7 +817,7 @@ Map view configuration
 | **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
 | **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
-| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string }` | optional | Empty state configuration when no records found |
+| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string; link?: object }` | optional | Empty state configuration when no records found |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
 | **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
@@ -1110,6 +1118,7 @@ View filter rule
 | **title** | `string \| Record<string, string>` | optional | Heading of the empty state |
 | **message** | `string \| Record<string, string>` | optional | Line of text below the heading |
 | **icon** | `string` | optional | Icon name drawn above the heading; a name that resolves to no icon draws the default empty-state glyph |
+| **link** | `{ label: string \| Record<string, string>; url: string }` | optional | [PLANNED — not yet rendered] The one next step an empty list names: a link the user follows, `{ label, url }` — for example to the how-to page that explains what belongs here when nobody can add a row. It opens a page or an address and runs no action. The console's empty-state renderers are its planned readers; until they ship, the link parses and is not drawn. |
 
 ### Nested Shape: `ListView.aria`
 
@@ -1202,7 +1211,7 @@ View filter rule
 | **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
 | **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
-| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string }` | optional | Empty state configuration when no records found |
+| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string; link?: object }` | optional | Empty state configuration when no records found |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
 | **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
@@ -1494,6 +1503,7 @@ View filter rule
 | **title** | `string \| Record<string, string>` | optional | Heading of the empty state |
 | **message** | `string \| Record<string, string>` | optional | Line of text below the heading |
 | **icon** | `string` | optional | Icon name drawn above the heading; a name that resolves to no icon draws the default empty-state glyph |
+| **link** | `{ label: string \| Record<string, string>; url: string }` | optional | [PLANNED — not yet rendered] The one next step an empty list names: a link the user follows, `{ label, url }` — for example to the how-to page that explains what belongs here when nobody can add a row. It opens a page or an address and runs no action. The console's empty-state renderers are its planned readers; until they ship, the link parses and is not drawn. |
 
 ### Nested Shape: `ObjectListView.aria`
 
@@ -1786,7 +1796,7 @@ Tab configuration for multi-tab view interface
 | **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
 | **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
-| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string }` | optional | Empty state configuration when no records found |
+| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string; link?: object }` | optional | Empty state configuration when no records found |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
 | **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
@@ -1872,7 +1882,7 @@ Tab configuration for multi-tab view interface
 | **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
 | **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
-| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string }` | optional | Empty state configuration when no records found |
+| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string; link?: object }` | optional | Empty state configuration when no records found |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
 | **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
@@ -2114,7 +2124,7 @@ This schema accepts one of the following structures:
 | **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
 | **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
-| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string }` | optional | Empty state configuration when no records found |
+| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string; link?: object }` | optional | Empty state configuration when no records found |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
 | **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
@@ -2293,7 +2303,7 @@ This schema accepts one of the following structures:
 | **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
 | **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
-| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string }` | optional | Empty state configuration when no records found |
+| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string; link?: object }` | optional | Empty state configuration when no records found |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
 | **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |

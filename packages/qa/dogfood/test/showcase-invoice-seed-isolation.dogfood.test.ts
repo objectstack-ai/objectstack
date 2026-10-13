@@ -30,6 +30,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
 import { showcaseAppDefaultSecurity } from './showcase-security.js';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const SYS = { isSystem: true } as const;
 const SET = 'showcase_contributor';
@@ -96,8 +97,8 @@ describe('showcase: seeded invoice/line owner isolation on the shipped contribut
     await stack.signIn();
     ql = await stack.kernel.getServiceAsync<any>('objectql');
 
-    const set = await ql.findOne('sys_permission_set', { where: { name: SET }, context: SYS });
-    expect(set?.id, `the app's ${SET} set is seeded by the security bootstrap`).toBeTruthy();
+    const set = await catalogPermissionSet(ql, SET);
+    expect(set, `the app's ${SET} set is served by the security catalog`).toBeTruthy();
     // [ADR-0131 D2/D3] The position → set edge is the app's own declaration —
     // `contributor` names `showcase_contributor` in its `permissionSets` — and
     // the resolver reads it there. No `sys_position` row and no junction row
