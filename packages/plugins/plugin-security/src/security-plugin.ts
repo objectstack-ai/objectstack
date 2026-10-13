@@ -458,6 +458,11 @@ interface RlsFilterOptions {
    *     sits directly below it on the same middleware pass, guarded by a
    *     SUPERSET of step 2.7's own condition (same `permissionSets`/`userId`/
    *     `ql` triple, same single target id, one extra operation — `insert`);
+   *   • [#23093] the chain walk's master-edit leg
+   *     ({@link SecurityPlugin.assertMasterRowEditable}) sets it on a hop whose
+   *     master is itself `controlled_by_parent`, on a non-delegated write. Why
+   *     the walk covers that master's write is stated once, at that call site's
+   *     `masterGateCoversThisWrite` bullet — not restated here;
    *   • the BULK write path does NOT, and must not: with no single id,
    *     `assertControlledByParentWrite` returns early and nothing replaces the
    *     floor. Reading the posture alone here would have widened bulk writes on
