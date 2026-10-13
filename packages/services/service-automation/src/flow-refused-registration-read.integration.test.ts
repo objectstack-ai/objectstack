@@ -27,13 +27,15 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import { ObjectQLPlugin, type ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
-import type { GetMetaItemResponse, GetMetaItemsResponse } from '@objectstack/spec/api';
+import type { GetMetaItemCachedResponse, GetMetaItemResponse, GetMetaItemsResponse } from '@objectstack/spec/api';
 import { AutomationServicePlugin } from './plugin.js';
 import type { AutomationEngine, NodeExecutor } from './engine.js';
 
 /** The read surface these tests drive: `ObjectStackProtocolImplementation`'s meta doors. */
 interface MetadataReadDoors {
     getMetaItem(request: { type: string; name: string }): Promise<GetMetaItemResponse>;
+    /** The default door's producer: REST's cached branch serves `data` and `registration` from it. */
+    getMetaItemCached(request: { type: string; name: string }): Promise<GetMetaItemCachedResponse>;
     getMetaItems(request: { type: string }): Promise<GetMetaItemsResponse>;
     saveMetaItem(request: { type: string; name: string; item: unknown }): Promise<unknown>;
 }
@@ -150,6 +152,16 @@ describe('a stored flow the engine refuses at boot is not served as running (#23
         expect(read.registration).toEqual({ state: 'refused', reason: { message: thrown.message } });
         expect(thrown.code, 'this refusal is a plain error, so the reason carries no code').toBeUndefined();
         expect(read.registration?.state === 'refused' && read.registration.reason.message).toContain('cuont');
+    });
+
+    it('the cached read — what the default `GET /meta/flow/:name` serves from — carries the same refusal', async () => {
+        const { protocol, automation } = await boot();
+
+        const cached = await protocol.getMetaItemCached({ type: 'flow', name: 'typo' });
+        const thrown = refusalOf(automation, stampFlow('typo', { cuont: 2 }));
+        expect((cached.data as { status?: string }).status).toBe('active');
+        expect(cached.registration).toEqual({ state: 'refused', reason: { message: thrown.message } });
+        expect((await protocol.getMetaItemCached({ type: 'flow', name: 'valid' })).registration).toEqual({ state: 'registered' });
     });
 
     it('control: a registered stored flow reads `registered`, its status as stored', async () => {

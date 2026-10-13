@@ -394,3 +394,32 @@ describe('[#23316] the list: `registrations` beside the items, keyed by name', (
         expect(Object.keys(list.registrations)).toContain('refused_flow');
     });
 });
+
+describe('[#23316] the cached read — the default door — carries the verdict beside `data`, never in the ETag', () => {
+    it('serves the engine\'s answer live beside the document, with an ETag over the document alone', async () => {
+        const automation = automationDouble({ refused_flow: REFUSED });
+        const services = new Map<string, unknown>([['automation', automation]]);
+        const judged: any = await harness(VERDICT_ROWS, services).protocol.getMetaItemCached({ type: 'flow', name: 'refused_flow' });
+        const unjudged: any = await harness(VERDICT_ROWS).protocol.getMetaItemCached({ type: 'flow', name: 'refused_flow' });
+
+        expect(judged.registration).toEqual(REFUSED);
+        expect(judged.data.status).toBe('active');
+        expect(judged.data).not.toHaveProperty('registration');
+        // The verdict is in no validator: the same document, the same ETag.
+        expect(judged.etag).toEqual(unjudged.etag);
+        expect(unjudged).not.toHaveProperty('registration');
+    });
+
+    it('a read that carries the verdict is never answered 304; control: one with no engine still is', async () => {
+        const services = new Map<string, unknown>([['automation', automationDouble({ refused_flow: REFUSED })]]);
+        const first: any = await harness(VERDICT_ROWS, services).protocol.getMetaItemCached({ type: 'flow', name: 'refused_flow' });
+        const revalidate = { type: 'flow', name: 'refused_flow', cacheRequest: { ifNoneMatch: `"${first.etag.value}"` } };
+
+        const judged: any = await harness(VERDICT_ROWS, services).protocol.getMetaItemCached(revalidate);
+        expect(judged.notModified).toBe(false);
+        expect(judged.registration).toEqual(REFUSED);
+
+        const unjudged: any = await harness(VERDICT_ROWS).protocol.getMetaItemCached(revalidate);
+        expect(unjudged.notModified).toBe(true);
+    });
+});
