@@ -41,7 +41,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
-import { LiteKernel, Plugin, PluginContext, isAuthGateAllowlisted } from '@objectstack/core';
+import { LiteKernel, Plugin, PluginContext, isAuthGateAllowlisted, hashApiKey } from '@objectstack/core';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { ApiEndpointSchema, type ApiEndpoint } from '@objectstack/spec/api';
 import type { ApiEndpointMatch, IHttpServer } from '@objectstack/spec/contracts';
@@ -109,9 +109,17 @@ const ADMIN_SET = {
     object_permissions: { '*': { viewAllRecords: true, modifyAllRecords: true } },
 };
 
+/**
+ * [#23287] An API key owned by `u_member`, and what the auth service's per-user
+ * posture computation answers for its owner (`resolveUserAuthGates`).
+ */
+const API_KEY = 'osk_endpoint_policy_account_posture_pin';
+const API_KEY_HASH = hashApiKey(API_KEY);
+
 /** What the kernel-boundary stubs observed. */
 const observed = {
     gateActive: true,
+    keyOwnerPostures: [] as Array<{ code: string; message: string }>,
     /** When set, every session read fails (the outage case). */
     failReads: false,
     taskReads: 0,
@@ -152,9 +160,17 @@ function servicesPlugin(): Plugin {
                         return { user: { id: uid, ...(authGate ? { authGate } : {}) } };
                     },
                 },
+                async resolveUserAuthGates(userId: string) {
+                    return userId === 'u_member' ? observed.keyOwnerPostures : [];
+                },
             });
             ctx.registerService('objectql', {
                 async find(object: string, options: any) {
+                    if (object === 'sys_api_key') {
+                        return options?.where?.key === API_KEY_HASH
+                            ? [{ id: 'key_1', key: API_KEY_HASH, user_id: 'u_member', revoked: false, scopes: '[]' }]
+                            : [];
+                    }
                     if (object === 'sys_user_permission_set') {
                         const uid = options?.where?.user_id;
                         return uid in POSTURES
@@ -204,15 +220,17 @@ describe('ADR-0069 at the declared-endpoint fallback (real boot, real socket)', 
 
     beforeEach(() => {
         observed.gateActive = true;
+        observed.keyOwnerPostures = [];
         observed.failReads = false;
         observed.taskReads = 0;
         observed.flowRuns = 0;
     });
 
-    function request(endpoint: ApiEndpoint, user?: string) {
+    function request(endpoint: ApiEndpoint, user?: string, extra: Record<string, string> = {}) {
         return fetch(`${baseUrl}${endpoint.path}`, {
             method: endpoint.method,
             headers: {
+                ...extra,
                 ...(user ? { 'x-test-user': user } : {}),
                 ...(endpoint.method === 'POST' ? { 'content-type': 'application/json' } : {}),
             },
@@ -280,6 +298,34 @@ describe('ADR-0069 at the declared-endpoint fallback (real boot, real socket)', 
         }
         expect(observed.taskReads).toBe(0);
         expect(observed.flowRuns).toBe(0);
+    });
+
+    // [#23287 — ruling C′ item 3] A key-admitted request is judged by the KEY's
+    // answer from the shared key-admission seam, never by a session beside it.
+    it('API KEY (account scope): a key whose owner holds MFA_REQUIRED is refused 403 MFA_REQUIRED before the target runs', async () => {
+        observed.keyOwnerPostures = [MFA_REQUIRED];
+        for (const endpoint of [READ, OPEN]) {
+            const res = await request(endpoint, undefined, { 'x-api-key': API_KEY });
+            const text = await res.text();
+            expect(res.status, text).toBe(403);
+            const body = JSON.parse(text) as { error?: { code?: string; message?: string } };
+            expect(body.error?.code).toBe('MFA_REQUIRED');
+            expect(body.error?.message).toBe(MFA_REQUIRED.message);
+        }
+        expect(observed.taskReads).toBe(0);
+    });
+
+    it('API KEY (credential scope): a key whose owner holds only PASSWORD_EXPIRED is served', async () => {
+        observed.keyOwnerPostures = [PASSWORD_EXPIRED];
+        const res = await request(READ, undefined, { 'x-api-key': API_KEY });
+        expect(res.status, await res.text()).toBe(200);
+        expect(observed.taskReads).toBe(1);
+    });
+
+    it('API KEY beside a held session: the key answers, the session is not asked', async () => {
+        const res = await request(READ, 'u_held_mfa', { 'x-api-key': API_KEY });
+        expect(res.status, await res.text()).toBe(200);
+        expect(observed.taskReads).toBe(1);
     });
 
     it('GATE OFF: with no gate feature active the posture is never read, and the session is served', async () => {
