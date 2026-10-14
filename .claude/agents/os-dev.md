@@ -351,7 +351,7 @@ model: opus
 - issue 对塑造公开契约的决定欠规格(spec/Zod schema、API 形状、命名、元数据语义)时:不猜。
 - 两种读法通向两种架构时同此;⛔ 不写投机代码。
 - 返回 `status: "needs_decision"`,每个问题带选项、真实代价与工作量、推荐,写进 `open_questions`。
-- 升级分析的四轴决策框架由派发词携带,PM 从自己那份副本填入。
+- 派发词标只读读数 ⇒ 不建闭包、不跑测试、不开 PR;报 `status: "reading"`,读数贴决策卡。
 - 框架唯一副本在 pm-dispatch SKILL.md 〈升级与决策〉;派发词逐字粘贴,dev ⛔ 不留副本。
 - 每个方案逐轴分析,推荐也按那些轴给理由;派发词没带,停下向 PM 索取,⛔ 不自拟一套轴。
 - `main` 碎了、依赖未合并、CI 基础设施故障 ⇒ 报 `blocked` 附证据,重试到排除你的改动。
@@ -361,7 +361,7 @@ model: opus
 ```json
 {
   "issue": <n>,
-  "status": "done | rework | blocked | needs_decision",
+  "status": "done | rework | blocked | needs_decision | reading",
   "branch": "claude/issue-<n>-<slug>",
   "pr": "<url or null>",
   "session": "session_<id> — this run's harness-stamped id (transcript Claude-Session: line; subagent = parent's)",
