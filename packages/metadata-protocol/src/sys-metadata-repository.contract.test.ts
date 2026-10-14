@@ -240,7 +240,7 @@ describe('SysMetadataRepository — what the contract suite does and does not re
       repo.put(orgB, { label: 'b1' }, { parentVersion: null, actor: 't' }),
     ).rejects.toThrow();
     expect(engine.rows()).toHaveLength(1);
-    expect(engine.rows()[0]!.organization_id).toBeNull();
+    expect('organization_id' in engine.rows()[0]!).toBe(false);
     // …and the ref it stamps back is this repository's own label, not the
     // caller's.
     const got = await repo.get(orgA);

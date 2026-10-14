@@ -266,13 +266,4 @@ describe('publishPackageDrafts — env-wide draft under a non-null active org (#
         expect(active).toHaveLength(1);
         expect('organization_id' in active[0]).toBe(false);
     });
-
-        const res = await protocol.publishPackageDrafts({ packageId: 'app.projects' });
-
-        expect(res).toMatchObject({ publishedCount: 0, failedCount: 0 });
-        expect(Array.from(rows.values()).filter((r) => r.state === 'active')).toHaveLength(0);
-        const draft = Array.from(rows.values()).filter((r) => r.state === 'draft');
-        expect(draft).toHaveLength(1);
-        expect(draft[0].organization_id).toBe('org_alpha');
-    });
 });

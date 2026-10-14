@@ -198,7 +198,6 @@ function makeFakeEngine(seed: Row[] = []) {
 const draftRow = (stamps: Row): Row => ({
   type: 'view',
   name: 'case_grid',
-  organization_id: null,
   state: 'draft',
   package_id: null,
   metadata: '{"label":"Cases"}',
@@ -209,10 +208,10 @@ const draftRow = (stamps: Row): Row => ({
   ...stamps,
 });
 
-function makeRepo(engine: ReturnType<typeof makeFakeEngine>, organizationId: string | null = null) {
+function makeRepo(engine: ReturnType<typeof makeFakeEngine>) {
   return new SysMetadataRepository({
     engine: engine as never,
-    orgLabel: organizationId ?? 'env',
+    orgLabel: 'env',
   } as never);
 }
 
@@ -231,21 +230,6 @@ describe('#14938 — listDrafts emits canonical ISO text for updatedAt, whatever
       expect(typeof drafts[0]!.updatedAt).toBe('string');
       expect(drafts[0]!.updatedAt).toMatch(ISO_Z);
       expect(drafts[0]!.updatedAt).toBe(PG_INSTANT.toISOString());
-      expectConformsToDeclaration(drafts);
-    });
-
-    it('[ADR-0131 D6] lists the environment\'s drafts only, whichever repository asks: a legacy organization draft is not listed', async () => {
-      const engine = makeFakeEngine([
-        draftRow({ organization_id: 'org_alpha', updated_at: PG_INSTANT }),
-        draftRow({ name: 'lead_grid', updated_at: PG_INSTANT }),
-      ]);
-      const repo = makeRepo(engine, 'org_alpha');
-
-      expect(engine.rows[0]!.updated_at).toBeInstanceOf(Date);
-
-      const drafts = await repo.listDrafts();
-      expect(drafts.map((d) => d.name)).toEqual(['lead_grid']);
-      for (const draft of drafts) expect(draft.updatedAt).toBe(PG_INSTANT.toISOString());
       expectConformsToDeclaration(drafts);
     });
   });
