@@ -37,6 +37,10 @@ export * from './stack-plugins.js';
 // family (and the security plugin paired with it): `os serve` and
 // `os migrate security-catalog-overlays` answer it alike. Same reason.
 export * from './stack-auth.js';
+// And whether the served app declares its own `sys_organization` default
+// record page, so both roots that construct `AuthPlugin` (`os serve` and
+// `DevPlugin`) leave `plugin-auth`'s out alike (ruling A on objectstack#23015).
+export * from './stack-organization-record-page.js';
 export * from './lite-kernel.js';
 export * from './types.js';
 export * from './logger.js';

@@ -1747,8 +1747,12 @@ export interface DefaultRecordPageConflict {
  * the `500` fallback. Its own code, not the namespace gate's: the condition is
  * not a name already taken but an object's one default slot already held, and
  * the remedy differs — keep one default (`isDefault: false` on the other), or
- * compose the deployment without the package shipping the other page; renaming
- * fixes nothing.
+ * compose the deployment without the other package's page; renaming fixes
+ * nothing. The remedy names the PAGE, not the package: a deployment can keep a
+ * package and leave out the one page it ships (a page-level composition switch,
+ * where that package offers one), and a package a host cannot leave out at all
+ * still has a page it can. The sentence names no option and no package, so it
+ * stays true whichever holder is on the other side.
  *
  * Every conflict the registration carries is listed — `conflicts` — so one boot
  * reports all of them; the top-level fields repeat the first.
@@ -1776,8 +1780,8 @@ export class DefaultRecordPageConflictError extends Error {
     );
     super(
       `Default record page conflict: ${lines.join('; ')}. Keep one default per object: set ` +
-        `\`isDefault: false\` on one of the two pages, or compose the deployment without the package that ` +
-        `ships the other. At most one \`isDefault: true\` record page may exist for an object in a ` +
+        `\`isDefault: false\` on one of the two pages, or compose the deployment without the other ` +
+        `package's page. At most one \`isDefault: true\` record page may exist for an object in a ` +
         `deployment: the record view opens that page with no tie-break, so with two the page would be ` +
         `chosen by registration order.`,
     );
