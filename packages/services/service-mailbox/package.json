@@ -35,6 +35,7 @@
     "@objectstack/driver-sql": "workspace:*",
     "@objectstack/lint": "workspace:*",
     "@objectstack/objectql": "workspace:*",
+    "@objectstack/service-storage": "workspace:*",
     "@types/node": "^26.6.3",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"

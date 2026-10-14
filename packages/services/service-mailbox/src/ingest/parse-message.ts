@@ -24,7 +24,16 @@
  *    angle brackets stripped;
  *  - the header values automatic-mail suppression reads, and the top-level
  *    media type (`multipart/report`, RFC 6522, carries delivery reports);
- *  - the header block as received, for the dedupe fallback.
+ *  - the header block as received, for the dedupe fallback;
+ *  - the parts the message carries besides its text and HTML bodies — every
+ *    part `postal-mime` lists as an attachment, in message order, with its
+ *    bytes: a file attached to the message, and each forwarded-message part as
+ *    the message it forwards. A part marked `Content-Disposition: inline` is
+ *    one of them too: Apple Mail marks the files it attaches that way, and an
+ *    image the HTML body shows by `cid:` reference is part of the message as
+ *    sent, so leaving either out would drop bytes the message carries. A part
+ *    nested inside a forwarded part is not listed on its own: it travels inside
+ *    that part's bytes.
  */
 
 import PostalMime, { addressParser } from 'postal-mime';
@@ -40,6 +49,29 @@ export interface MailParticipantHeaders {
   replyTo: string[];
   to: string[];
   cc: string[];
+}
+
+/**
+ * One part of a message stored as an attachment of its row: a file the
+ * message carries, or a message it forwards as an attachment.
+ */
+export interface MailAttachmentPart {
+  /** The part's file name as the message gives it (Content-Disposition `filename`, or Content-Type `name`), or `null`. */
+  filename: string | null;
+  /** The part's media type, lower-cased, without parameters. */
+  mimeType: string;
+  /**
+   * The part's bytes, its transfer encoding decoded. For a forwarded-message
+   * part, the forwarded message itself, exactly as it travels in the part.
+   */
+  content: Uint8Array;
+  /**
+   * Set for a forwarded-message part (`message/rfc822`, `message/global`), with
+   * the forwarded message's own Subject: `null` when it has none, or when the
+   * part was not read (refused by the parser, or past {@link MAX_FORWARDED_PARTS}).
+   * `null` for every other part.
+   */
+  forwarded: { subject: string | null } | null;
 }
 
 /** One parsed inbound message. */
@@ -66,6 +98,13 @@ export interface ParsedInboundMessage {
    * {@link forwarded}; the message itself is still stored.
    */
   unreadForwardedParts: number;
+  /**
+   * Every part stored as an attachment of the message's row, in message order:
+   * the files it carries and the messages it forwards as attachments (those
+   * counted in {@link unreadForwardedParts} included — their bytes are kept even
+   * where their addresses are not read).
+   */
+  attachments: MailAttachmentPart[];
   /** Lower-cased header name → the first value, unfolded, encoded words left as sent. */
   header(name: string): string | null;
   /** The top-level media type, lower-cased, without parameters (`text/plain` when absent). */
@@ -149,6 +188,12 @@ function isoDate(value: string | undefined): string | null {
   return Number.isNaN(at.getTime()) ? null : at.toISOString();
 }
 
+/** A part's content as bytes (`attachmentEncoding: 'arraybuffer'` hands an `ArrayBuffer`). */
+function bytesOf(content: ArrayBuffer | Uint8Array | string): Uint8Array {
+  if (typeof content === 'string') return new TextEncoder().encode(content);
+  return content instanceof Uint8Array ? content : new Uint8Array(content);
+}
+
 function asText(raw: RawMailMessage): string {
   if (typeof raw === 'string') return raw;
   // The WHATWG `latin1` label decodes one character per byte, so the header
@@ -174,25 +219,31 @@ function mediaTypeOf(contentType: string | null): { mediaType: string; reportTyp
 export async function parseInboundMessage(raw: RawMailMessage): Promise<ParsedInboundMessage> {
   const email: Email = await PostalMime.parse(raw, PARSE_OPTIONS);
   const forwarded: MailParticipantHeaders[] = [];
+  const attachments: MailAttachmentPart[] = [];
   let unreadForwardedParts = 0;
   for (const attachment of email.attachments) {
-    if (!FORWARDED_MESSAGE_TYPES.has(attachment.mimeType.toLowerCase())) continue;
-    if (forwarded.length >= MAX_FORWARDED_PARTS) {
-      unreadForwardedParts++;
+    const mimeType = attachment.mimeType.toLowerCase();
+    const content = bytesOf(attachment.content);
+    const filename = attachment.filename ? attachment.filename : null;
+    if (!FORWARDED_MESSAGE_TYPES.has(mimeType)) {
+      attachments.push({ filename, mimeType, content, forwarded: null });
       continue;
     }
-    const content = attachment.content;
-    try {
-      const inner: Email = await PostalMime.parse(
-        typeof content === 'string' ? content : content instanceof Uint8Array ? content : new Uint8Array(content),
-        PARSE_OPTIONS,
-      );
-      forwarded.push(participantsOf(inner.headers));
-    } catch {
-      // A forwarded part the parser refuses names no addresses; the received
-      // message is still mirrored (never dropped), and the count says so.
+    let subject: string | null = null;
+    if (forwarded.length >= MAX_FORWARDED_PARTS) {
       unreadForwardedParts++;
+    } else {
+      try {
+        const inner: Email = await PostalMime.parse(content, PARSE_OPTIONS);
+        forwarded.push(participantsOf(inner.headers));
+        subject = inner.subject ? inner.subject : null;
+      } catch {
+        // A forwarded part the parser refuses names no addresses; the received
+        // message is still mirrored (never dropped), and the count says so.
+        unreadForwardedParts++;
+      }
     }
+    attachments.push({ filename, mimeType, content, forwarded: { subject } });
   }
 
   const headers = email.headers;
@@ -210,6 +261,7 @@ export async function parseInboundMessage(raw: RawMailMessage): Promise<ParsedIn
     outer: participantsOf(headers),
     forwarded,
     unreadForwardedParts,
+    attachments,
     header: (name: string) => firstHeader(headers, name.toLowerCase()),
     mediaType,
     reportType,

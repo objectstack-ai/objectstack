@@ -90,7 +90,7 @@ describe('the IMAP sync, end to end, on a real engine', () => {
       engine.registry.registerObject(def as any, 'mailbox-sync-test', 'mailbox-sync-test');
     }
     await engine.syncSchemas();
-    ingest = new MailIngestService({ engine: () => engine as unknown as MailIngestEngine, logger: { warn: () => {} } });
+    ingest = new MailIngestService({ engine: () => engine as unknown as MailIngestEngine, logger: { warn: () => {}, error: () => {} } });
   });
 
   afterAll(async () => {
