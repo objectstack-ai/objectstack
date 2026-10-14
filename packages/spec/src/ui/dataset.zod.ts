@@ -277,16 +277,132 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
    * `relative` (`3 days ago` inside a ±7-day window, the absolute form outside
    * it) — the same two words `DateCellRenderer` honours from `field.format`.
    *
-   * ⚠️ The datetime half of that sentence is the newer one: until objectui#8352 a DATETIME value ignored `format` altogether,
+   * ⚠️ The datetime half of that sentence is NEW at the pin below and is the
+   * one thing this record's previous revision got wrong the moment the pin
+   * moved: until objectui#8352 a DATETIME value ignored `format` altogether,
    * and this docblock and the `describe` beneath it both said so.
    *
-   * Measured on the renderer's shared measure formatter: its date-only arm
-   * threads `format` into the date STYLE parameter (whose `relative` branch
-   * falls back to the absolute form beyond ±7 days), while its datetime arm
-   * answers `relative`, `short` (the compact style) and everything else — a
-   * date PATTERN included — with the bare locale default. The read points are
-   * recorded by symbol in `packages/spec/liveness/dataset.json`, row
-   * `measures.format`.
+   * Measured at objectui `b9814b334` (re-read there 2026-10-14:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
+   * `1fb1ced36`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
+   * `7578323a5`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
+   * `9646e2ed2`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
+   * `088e0f705`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
+   * `e5311165a`, re-read there 2026-10-12:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `499799502` (`git diff --quiet`), so every anchor held unmoved. At
+   * `499799502`, re-read there 2026-10-11:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `0df67f237` (`git diff --quiet`), so every anchor held unmoved. At
+   * `0df67f237`, re-read there 2026-10-11:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `20c6d351a` (`git diff --quiet`), so every anchor held unmoved. At
+   * `20c6d351a`, re-read there 2026-10-10:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved. At
+   * `47b1f0bb7`, re-read there 2026-10-09:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
+   * `f0268ad78`, re-read there 2026-10-09:
+   * `dataset-format.ts` is byte-identical to `a58626c88` (`git diff --quiet`), so
+   * `formatMeasureDate` `:240-274`, its datetime arm `:270`-`:272` and its call
+   * `:380` held unmoved; `date-display.ts` changed (+152/-16, objectui#11693,
+   * objectui `d50f7241b`: an instant renders in the time zone the server answers
+   * for the workspace), so `formatDate` `445-480` -> `568-605` was re-READ: it
+   * now names an instant's day in that display zone, while its style handling —
+   * `short`, `relative`, and the default face for anything else, a date pattern
+   * included — reads unchanged, and the ±7-day fallback `399` -> `522` MOVED
+   * byte-identical, its day count now taken in the display zone above it. At
+   * `a58626c88`, re-read there 2026-10-06:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `0abd4f9f8` (`git diff --quiet`), so every anchor held unmoved.
+   * At `0abd4f9f8`, re-read there 2026-10-05:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
+   * At `9dfaca654`; re-derived at that pin 2026-10-05 — `date-display.ts` and
+   * `dataset-format.ts` are byte-identical to `2e818d0b5` (`git diff --quiet`),
+   * so every anchor held unmoved. At `2e818d0b5`, re-derived there
+   * 2026-10-04 — `date-display.ts` and
+   * `dataset-format.ts` are byte-identical to `ab1879721` (`git diff --quiet`),
+   * so every anchor held unmoved. At `ab1879721`, re-derived there
+   * 2026-10-03 — `date-display.ts` is
+   * byte-identical to `89cad75d5`, so `formatDate` `445-480` and the ±7-day
+   * fallback `399` held unmoved and were re-READ in place; `dataset-format.ts`
+   * changed (+53/-36, objectui#11475: `scalePercent` scales at the storage
+   * its caller states, through the spec's `percentScaleOf`, instead of
+   * guessing from the value's magnitude), above `formatMeasureDate` in the
+   * percent-scaling helpers and below it in `formatMeasure`'s docblock (line
+   * for line) and its percent arm, so
+   * `formatMeasureDate` `:229-263` -> `:240-274`, its datetime arm `:259`-`:261`
+   * -> `:270`-`:272` and its call `:369` -> `:380` MOVED byte-identical,
+   * re-READ with the same reading below. At `89cad75d5` (2026-10-02)
+   * `dataset-format.ts` and `date-display.ts` were byte-identical to
+   * `31971ff1e`, so every anchor below held unmoved and was re-READ in place.
+   * At `31971ff1e` (2026-10-01) both
+   * files were byte-identical to `e420df310`, so every anchor held unmoved and
+   * was re-READ in place. At `e420df310` (2026-09-30)
+   * `dataset-format.ts` was byte-identical to `db11afd49`, so `formatMeasureDate` `:229-263`, its call
+   * at `:369` and its datetime arm `:259`-`:261` did not move and were re-READ
+   * in place, and `date-display.ts` changed (+68/-1, objectui `858eafb4f`,
+   * objectui#11141: a header comment naming the new `toDisplayEndDate` /
+   * `toInclusiveEndDay` exports, and those two functions added after
+   * `toDisplayDate`, above every anchor here), so `formatDate` `378-413` ->
+   * `445-480` and the ±7-day fallback `332` -> `399` MOVED byte-identical,
+   * re-READ with the same reading below. At `db11afd49` (2026-09-29)
+   * `date-display.ts` was
+   * byte-identical to `dd3f7e1be` and `dataset-format.ts` changed only in three
+   * comment lines (`:529`, `:589`, `:660`, objectui `63ab76112`), all below every
+   * anchor here, so `formatDate` `378-413`, the ±7-day fallback `332`,
+   * `formatMeasureDate` `:229-263`, its call at `:369` and its datetime arm
+   * `:259`-`:261` were re-READ and did not move. At `dd3f7e1be` (2026-09-28)
+   * both files changed again on
+   * that hop (objectui `544aca24f`, objectui#10301, the date-time half of
+   * objectui#10026: `toDisplayDate` now refuses a date-TIME written on a day
+   * that does not exist as well, and `dataset-format.ts` rewrote the
+   * `ISO_DATETIME_RE` docblock that said such a value still rolls over, four
+   * comment lines for four, so nothing below it moved), while the style
+   * handling this record cites re-reads unchanged: `formatDate` `355-390` ->
+   * `378-413` and the ±7-day fallback `309` -> `332` MOVED byte-identical, and
+   * `formatMeasureDate` `:229-263`, its call at `:369` and its datetime arm at
+   * `:259`-`:261` did not move. At `f8a9d0fb0` (2026-09-24) both files had
+   * moved (objectui `ad694ac3d`, objectui#10026: the shared date path refuses a
+   * date-only calendar day that does not exist, with the dash it renders for
+   * any unparsable value, and `dataset-format.ts` rewrote
+   * `formatMeasureDate`'s comment on that case), while the style handling
+   * re-read unchanged: `formatDate` `271-306` -> `355-390` and the ±7-day
+   * fallback `225` -> `309` MOVED byte-identical, and `formatMeasureDate` came
+   * out one comment line shorter. At `62597c588` (2026-09-23)
+   * `dataset-format.ts` was byte-identical to `87af769e9`, and `date-display.ts`
+   * had moved (objectui `516583b54`, +77/-4): `formatDate` parses through
+   * `toDisplayDate`, so a date-only value renders the calendar day it names in
+   * every timezone. At `87af769e9` (2026-09-20) every anchor below MOVED and
+   * one of them changed SUBSTANCE, so nothing here was carried there either:
+   * `formatMeasureDate`'s datetime arm no longer calls
+   * `formatDateTime(v, { locale })` unconditionally, it SELECTS a formatter,
+   * because `formatDateTime(value, options?)` has no style parameter to thread
+   * into and widening that published signature was refused) in
+   * objectui
+   * `packages/core/src/utils/dataset-format.ts`: `formatMeasure` routes a
+   * non-numeric value through `formatMeasureDate` (`:240-274`, was `:229-263`,
+   * `:229-264` and before that `:185-198`) at `:380`,
+   * whose date-only arm threads `format` into the STYLE parameter of
+   * `formatDate` (`utils/date-display.ts:568-605`, was `:445-480`, `:378-413`, `:355-390`, `:271-306`,
+   * `:198-233` and before that `:131-164`, whose `relative` branch falls back to the absolute form
+   * beyond ±7 days at `:522`, was `:399`, `:332`, `:309`, `:225`, `:152` and `:117` — the fallback strips the style through
+   * `absoluteFallbackOptions`), while its datetime arm answers `relative` with
+   * `formatRelativeDate` (`:270`), `short` with
+   * `formatDateTime(v, { locale, style: 'compact' })` (`:271`) and everything
+   * else — a date PATTERN included — with the bare
+   * `formatDateTime(v, { locale })` (`:272`).
    * Teaching
    * the shared path a pattern grammar would change every list cell that reads
    * it, so that gap is still DOCUMENTED here rather than closed (objectui#7178
