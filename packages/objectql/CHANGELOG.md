@@ -1,5 +1,232 @@
 # @objectstack/objectql
 
+## 18.0.0-next.1
+
+### Minor Changes
+
+- 66949b7: feat(plugin-security)!: the four security-catalog row objects are retired — `sys_position`, `sys_permission_set`, `sys_position_permission_set` and `sys_capability` (ADR-0131 D3)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered catalog-row-objects-retired -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  Positions, permission sets and capabilities live in the security catalog — the environment registry, fed by package declarations and by environment metadata saved through `/api/v1/meta` (ADR-0131 D3). The four row objects that mirrored them are no longer registered, so their data and REST routes and their Setup object pages are gone. No table is dropped and no row is deleted.
+  
+  FROM → TO:
+  
+  - `GET|POST|PATCH|DELETE /api/v1/data/sys_permission_set` → `GET|PUT|DELETE /api/v1/meta/permission/:name`; to copy a set, `POST /api/v1/security/permission-sets/:name/clone` with `{ name, label }`.
+  - `… /api/v1/data/sys_position` → `/api/v1/meta/position/:name`. A position's permission sets are its definition's `permissionSets`.
+  - `… /api/v1/data/sys_position_permission_set` → the position definition's `permissionSets` (`PUT /api/v1/meta/position/:name`).
+  - `… /api/v1/data/sys_capability` → read-only `GET /api/v1/meta/capability`; a package declares a capability with `defineCapability` (`stack.capabilities`).
+  - Setup → Access Control → Positions / Capabilities / Permission Sets now open Setup's catalog lists (`/apps/setup/metadata/<type>?scope=environment`) instead of the object pages; the `sys_position` record page (`SysPositionDetailPage`) is removed.
+  - An object permission on one of the four names in a permission set grants nothing and can be deleted.
+  
+  What else changes:
+  
+  - `sys_user_permission_set.permission_set_id` is a plain text column now, not a lookup: same column, same stored ids, same indexes. It is not written and grants nothing; a grant names its set by `permission_set`.
+  - A permission set saved through the metadata door is written to no row: the `permission` mutation projector, the `sys_permission_set` and `sys_position` data-door write-throughs and the row-only position backfill are no longer registered.
+  - On a fresh `single`-posture database the first human is promoted to platform administrator without reading any catalog row. An unscoped grant written before `sys_user_permission_set.permission_set` existed (it names no set) still withholds the promotion until the organization-ownership migration names it.
+  - Uninstalling a package still revokes every grant naming a permission set the package declared, by the names the uninstalling door captures before the withdrawal (`declared`, `captureUninstallDeclared`), and now by those names alone: the cleanup reads and removes no `sys_permission_set` or `sys_position_permission_set` row, so the `sets` and `positionBindings` counts on its outcome are always 0. A grant written before `sys_user_permission_set.permission_set` existed names no set and is not reached; the organization-ownership migration names it.
+  - On a `group` or `isolated` deployment the data-door half of the walled catalog refusal goes with the objects: a data-door insert, update or delete on `sys_position`, `sys_permission_set` or `sys_capability` answers `404 OBJECT_NOT_FOUND` for every caller instead of `403 PERMISSION_DENIED` below the platform operator. The refusal at the `/meta` write doors, the permission-set clone door and the `/packages` write doors is unchanged.
+  - `capability-reference-unknown` no longer counts a `sys_capability` seed row as a declared capability — no runtime reader consults one. Declare the capability with `defineCapability`.
+  - On an existing database `os migrate plan`'s unmanaged-table sweep now lists the `sys_position`, `sys_permission_set`, `sys_position_permission_set` and `sys_capability` tables: they keep their rows and no object declares them any more. The sweep only reports; nothing is dropped, and the tables stay for the organization-ownership migration.
+  
+  Removed exports, no replacement:
+  
+  - `@objectstack/plugin-security`: the object definitions `SysPosition`, `SysPermissionSet`, `SysPositionPermissionSet`, `SysCapability` (from `./objects`); `securityObjects` lists the remaining three.
+  - `@objectstack/platform-objects/pages`: `SysPositionDetailPage`.
+  - `@objectstack/spec`: `SystemObjectName.POSITION`, `SystemObjectName.PERMISSION_SET`; the four names leave `PLATFORM_OBJECTS_BY_PACKAGE['plugin-security']` and `PLATFORM_PROVIDED_OBJECT_NAMES`.
+  - `@objectstack/core`: `isRowActive` and `ActivatableRow` — a catalog row's `active` column decides nothing; deactivation is the activation ledger's (`sys_metadata_activation`).
+  - `@objectstack/objectql`: the published `PLATFORM_OBJECT_TENANCY` record loses its `sys_permission_set` key (the other three names were never in it). A removed key of an exported constant is a narrowing, so `@objectstack/objectql` takes `minor` under the launch-window convention for breaking changes.
+- 87e902d: feat(objectql): the engine composes a `ReadableIds` leaf at its executor boundary, on the final query immediately before the driver call, and refuses it by name wherever it cannot (ADR-0139 D2, D5)
+  
+  Clause-②: no
+  
+  - **Composed.** On `find`, `findOne`, `count` and `aggregate`, after the middleware chain and the `beforeFind` hooks, every `{ FIELD: { $in: ReadableIds.of(P) } }` in `where` is replaced by `ReadableIds.compose(leaf, scope)`, where `scope` is the registered security service's `getReadFilter(P, caller)`, marked `'policy'` (`undefined` composes with no row restriction). The comparand becomes `$in: []`, which matches no row, when:
+    - `canReadObject(P, caller)` is false or throws (a service without `canReadObject` is asked `explain`, and only `allowed: true` admits);
+    - `getReadFilter` answers `RLS_DENY_FILTER` (by identity) or throws;
+    - no security service is registered, or the registered one cannot answer both halves (the engine reads the kernel's `security` service through `ObjectQLPlugin` when a leaf is composed, so an engine used without that plugin has none);
+    - the registry holds no object `P`.
+  
+    Each parent object is asked once per read, and nothing is kept across reads. A leaf that a middleware or a `beforeFind` hook writes is composed the same way.
+  - **Refused, `INTERNAL_ERROR` / 500, before any driver is asked:**
+    - on `update` and `delete`: the caller's leaf at the comparand door, a middleware's at the executor's entry, before the prior-row reads;
+    - in `having` and in an aggregation's own `filter`;
+    - anywhere but a `$in` comparand, including a leaf the array form of `where` lowers into another position;
+    - a composed leaf the engine did not compose, written by a middleware or a hook (the caller's own, as a `$in` comparand, stays the comparand door's `INVALID_FILTER` / 400);
+    - ADR-0139 D5's three classes: a delegated (on-behalf-of) caller, a parent with an object-scoped read middleware, and a parent bound to another datasource than the object read.
+  - **Before:** the comparand door refused every `ReadableIds` leaf `INTERNAL_ERROR` / 500 ("this engine does not compose that leaf yet"), and a leaf that a middleware or a hook wrote reached the driver unrefused.
+  - **`@objectstack/core`:** `resolveFilterTokens` returns a `ReadableIds` leaf by reference. When the filter also held a placeholder, it used to rebuild the leaf as a plain `{ object }` and drop its brand.
+  - **Not yet:** no driver evaluates the composed leaf (ADR-0139 E3 and E4), and no code in the platform writes a `ReadableIds` leaf today.
+- 5f37d36: feat(spec)!: at most one `isDefault: true` record page per object per deployment — a second is refused at `defineStack` / `os validate`, at package registration and at metadata save, naming both pages (#23015)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered page-default-record-page-one-per-object-refused -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface, shipped as `minor` under the launch-window convention for breaking changes.
+  
+  `PageSchema.isDefault` now states the rule (maintainer ruling A on #23015): at most one `isDefault: true` record page may exist for an object in a deployment. The record view opens that page with no tie-break, so with two defaults for one object the page that opened used to be whichever plugin initialised first — an accident no author wrote. A record page is `type: 'record'` (the default when `type` is left out) bound to an `object`; `isDefault` on any other page is outside the rule.
+  
+  **What is refused, and where.** Every door that can add a second default refuses it, naming both pages:
+  
+  - **`defineStack`** (and so `objectstack validate`, `objectstack build` and a source boot) — two default record pages for one object inside one stack, `STACK_CROSS_REFERENCE_INVALID` (422), one finding per object naming the object, every page and its position (`stack.pages[0]`). **`composeStacks`** refuses the pair across the stacks it composes, in the same envelope; under `manifest: 'preserve'` one page name in two stacks is two packages' pages.
+  - **Package registration** (`@objectstack/objectql`'s `SchemaRegistry`, at `installPackage` ahead of every mutation and at the `registerItem` seam) — a package whose default record page meets another package's default for the same object, an environment's stored default, or a second default in its own manifest, `DEFAULT_RECORD_PAGE_CONFLICT` (422, exported as `DEFAULT_RECORD_PAGE_CONFLICT_CODE`). Two packages' pages under one name are two pages and are refused too. `OS_METADATA_COLLISION=warn` does not soften it.
+  - **Metadata save** (`@objectstack/metadata-protocol`'s `saveMetaItem`, so `PUT /api/v1/meta/page/:name`) — a page saved as the default record page of an object a stored page or a packaged page already holds, `DEFAULT_RECORD_PAGE_CONFLICT` (422), in draft and publish mode, before anything is written.
+  
+  **Unchanged.** A save under the existing default's own name is that page (an ADR-0005 overlay by name), not a second default. One default per object, a second record page that is not a default, and two objects with one default each are accepted. The same package registering again — a reload, or an upgrade that moves its default to another of its pages — is one holder. A save under the name of a page a package ships is still answered by the packaged-base refusal (`NOT_OVERRIDABLE`, 403), as before. A stored page reaching the registry from `sys_metadata` (hydration, write-through) is not refused again.
+  
+  ## FROM → TO
+  
+  | door | FROM | TO |
+  |:--|:--|:--|
+  | `defineStack` / `objectstack validate` | `pages: [{ name: 'account_a', type: 'record', object: 'crm_account', isDefault: true }, { name: 'account_b', type: 'record', object: 'crm_account', isDefault: true }]` accepted; the boot kept both and the record view opened whichever registered first | refused, `STACK_CROSS_REFERENCE_INVALID` 422 — set `isDefault: false` on all but one |
+  | `composeStacks` | two stacks each shipping a default record page for one object composed clean | refused in the cross-reference envelope, naming both stacks' pages |
+  | package registration | a second package (or a plugin's `manifest.register`) shipping a default record page for an object another package holds registered; init order decided the page | refused, `DEFAULT_RECORD_PAGE_CONFLICT` 422, naming both pages; keep one default, or compose the deployment without the package that ships the other |
+  | metadata save | `PUT /api/v1/meta/page/my_page` with `isDefault: true` for an object that already has a default record page stored or shipped saved | refused, `DEFAULT_RECORD_PAGE_CONFLICT` 422, naming both pages; save it with `isDefault: false`, or first demote the stored default |
+  
+  **The one-line fix: keep `isDefault: true` on the one record page per object that should open the record view, and set `isDefault: false` on every other.** To replace a page a package ships, compose the deployment without that package's page; shipping a second default is not an override path.
+  
+  No D2 conversion rewrites it: which page stays the default is the author's call. Its D3 record is the semantic entry `page-default-record-page-one-per-object-refused` (protocol 18).
+  
+  **`@objectstack/spec`.** `defaultRecordPageObject(page)` (exported from `@objectstack/spec/ui`) is the one reading of "which object is this page the default record page of" that the three doors share. `PageSchema.isDefault` gains its `.describe()`. `DEFAULT_RECORD_PAGE_CONFLICT` joins the error-code ledger under `@objectstack/objectql` and `@objectstack/metadata-protocol`.
+  
+  **`@objectstack/objectql`.** The registration refusal, `SchemaRegistry.defaultRecordPageHoldersOf(object)` (every page holding the object's default — the reading the save door meets with the stored pages) and the `DEFAULT_RECORD_PAGE_CONFLICT_CODE` constant.
+  
+  **`@objectstack/metadata-protocol`.** The save-door refusal.
+  
+  **`@objectstack/platform-objects`.** The page form's `isDefault` help text, which said "Set as default page for this page type" — a rule nothing enforced — now states the one-default-per-object rule, in all four locales.
+  
+  **Who is affected, measured.** In this repository every object with a default record page has exactly one: `sys_organization` and `sys_user` (`@objectstack/plugin-auth`), `sys_position` (`@objectstack/plugin-security`), `sys_approval_request` (`@objectstack/plugin-approvals`), and `showcase_project`, `showcase_task` and `showcase_preference` (`examples/app-showcase`). A deployment that also composes a package shipping its own default record page for one of those objects is refused at boot until one of the two pages stops being a default.
+- 24e064f: fix(objectql,service-messaging,service-automation,plugin-approvals)!: a notification carries the organization of what it is about, and one no organization owns is refused instead of stored with `organization_id` NULL
+  
+  Clause-②: no (narrowing) — notification rows gain the organization they should already carry; what narrows is an emit that names no organization on an install where none is derivable, which the engine now refuses where it used to store the event row with `organization_id` NULL.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime narrowing of which notification writes the engine accepts, not a metadata change. No spec key, authorable spelling, export, option, config field or stored shape is added, removed, renamed or re-shaped, and no stored row is rewritten: rows already stored with organization_id NULL keep it until the v18 ownership ceremony attributes them, which already lists sys_notification with the attribution fate. The only type change is an additive optional `organizationId` on the input of `ApprovalMessagingSurface.emit`, the approvals service's messaging surface: the interface is not listed in the package index, but it is published surface, reachable through the exported `ApprovalServiceOptions.messaging` and the public `ApprovalService.attachMessaging`, so it is an additive widening that no existing implementation has to change for. The other categories are closed on facts: the four packages publish (not unpublished); no ADR-0087 id covers notification ownership and this diff adds none (not registered / already-registered); nothing is removed or narrowed on an interface or type (not runtime-interface-only / type-surface-only); and no runtime export is retired (not runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Every notification emitted from a system-context run — a scheduled flow, a record change written by a system context, an approval node — was stored in `sys_notification` with `organization_id` NULL, so reports and cleanup that filter by organization did not see it. Each emit also logged a `[notify] no organization in scope` warning. On an install holding several organizations, the deliveries of the same emit were refused while the flow step reported success, so nothing reached the inbox.
+  
+  **Who owns a notification now:**
+  
+  - **The run's organization.** A run that carries one emits exactly as before.
+  - **Else the record it is about.** A `notify` node in a run with no organization reads the organization of the record the notification is about. That is the declared click-through record (`sourceObject` + `sourceId`), else the run's trigger record. It is read from the stored row by id, never from the record snapshot the run carries.
+  - **Approvals.** Every approval notification carries its request's organization: `approval.requested`, reminders, comments, send-backs, reassignments, escalations and out-of-office notices.
+  - **Else the owner the engine derives for a system write** (ADR-0131 D9). `sys_notification` is now in the platform-object tenancy ledger, so an emit that names no organization gets the install's sole organization under the `single` posture.
+  - **The rows below follow the event.** `emit()` stamps the stored event row's organization on its delivery, inbox row and receipt, on both the inline and the outbox path.
+  
+  **Refused now:** where no organization is derivable (a walled posture, or a `single` install holding more than one organization), an emit that names none is refused with `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`. Nothing is written for it. A `notify` step that hits the refusal fails with `notify failed: ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED: …` instead of succeeding. `MessagingService.emit()` rejects with the engine's error for any other producer.
+  
+  **What to do when it refuses:** give the notification an owner. Name the record it is about on the `notify` node (`sourceObject` + `sourceId`), declare the scheduled flow's acting organization (`organization` on its start node), or pass `organizationId` to `emit()` from your own code.
+  
+  The `[notify] no organization in scope` warning is gone, because the NULL row it predicted is no longer written. Rows already stored with `organization_id` NULL are not rewritten here. The v18 organization-ownership ceremony attributes them from their source record.
+- eeb95f7: fix(spec,objectql)!: a permission set whose body `packageId` disagrees with the package that ships it is refused at `defineStack` / `os validate` / `os build` and at package registration, and every reader takes a set's owner from its binding only (ADR-0086 D3)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered permission-set-package-id-binding-mismatch-refused) this change widens that entry, in this diff, to the build and registration doors: same key, same ruling, same remedy, no stored row rewritten -->
+  
+  **BREAKING** (an accept-set narrowing on a published authoring surface), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  ADR-0086 D3 declares `PermissionSetSchema.packageId` as the owning package of a package-shipped set, absent for an environment-authored one. The owner every reader uses is the binding: the package that ships the set or that it is saved into, served as `_packageId`. The metadata save, restore and publish doors already refuse a body `packageId` that disagrees with it. Package source and package registration did not: a set whose body named another package was registered under the package that shipped it, with no refusal and no warning, so an author, an AI build above all, never learned that the owner it wrote was not the owner it got.
+  
+  **What is refused, and where.** One judge, `judgePermissionSetOwnerBinding` (new export of `@objectstack/spec/security`), serves every door:
+  
+  - **The stack schema** (`ObjectStackDefinitionSchema`), so `defineStack`, `objectstack validate`, `objectstack build`, the lint scorer and an artifact load all refuse a set whose body `packageId` is not the id of the package that ships it: the stack's `manifest.id`, each `packages[]` body's own `id`, and `manifest.id` for a top-level set no body declares. A stack with no `manifest` ships its sets from no package, so any key there is refused, the empty string included. The issue sits at the set's `packageId` (`permissions.0.packageId`); `defineStack` throws `STACK_SCHEMA_INVALID` (422) carrying it.
+  - **Package registration** (`ObjectQL.registerApp`, the manifest and a nested plugin, for a manifest no schema parse judged) throws `400 VALIDATION_ERROR` with `issues[]` at `packageId` before the set is filed, the envelope the same seam throws for a view container whose `name` disagrees with its key.
+  
+  The message prescribes first, names both values, and offers both remedies: drop the key, or ship the set from the package it names. No error code is minted.
+  
+  **Readers.** `@objectstack/plugin-security`'s packaged-set lock (`classifyPackagedPermissionSet`) and `@objectstack/cli`'s permission-set name-collision report take a set's package from its binding only. A set filed into no package whose body named one is no longer locked as that package's, and a stack with no `manifest` declares no owner for the collision report.
+  
+  **Unchanged.** A body `packageId` equal to the package that ships the set is accepted, and an absent one is accepted everywhere. A top-level copy of a set a `packages[]` body declares (an artifact built with both halves) is judged on its body, not against the artifact's own id. The metadata save, restore and publish doors answer in the same words as before (`@objectstack/metadata-protocol` now calls the shared judge). Stored `sys_metadata` rows are not rewritten.
+  
+  ## FROM → TO
+  
+  | door | FROM | TO |
+  |:--|:--|:--|
+  | `defineStack` / `objectstack validate` / `objectstack build` | `defineStack({ manifest: { id: 'com.acme.crm', … }, permissions: [{ name: 'crm_member', packageId: 'com.acme.other', … }] })` accepted; the set was owned by `com.acme.crm` | refused at `permissions.0.packageId`, `STACK_SCHEMA_INVALID` 422 |
+  | `ObjectQL.registerApp` | the same manifest registered the set under `com.acme.crm`, silently | `400 VALIDATION_ERROR`, `issues[]` at `packageId`, nothing filed |
+  | an artifact built before this change | loaded, the set owned by the shipping package | refused at load; rebuild it without the key |
+  
+  **Remedy, in one line.** Drop `packageId` from the permission set in your stack source (the package that ships a set is its owner), or move the set into the stack of the package it names, then build again.
+
+### Patch Changes
+
+- 37510aa: feat(security): the guest's grants channel — an anonymous request at a guest-entry door holds the sets bound to the `guest` anchor, in the one organization the deployment resolves for it (ADR-0138 E1, D3/D4)
+  
+  ADR-0087 disposition: none. No authorable key, accept set or stored shape moves: no spec schema, metadata type, stored row or published response field is added, removed, renamed or re-shaped. A declared binding that was not enforced becomes enforced (ADR-0090 D9, as ADR-0138 D3 amends it).
+  
+  **The bindings that start granting.** On the reference apps, none: `app-showcase`, `app-crm`, `app-multi-package` and `app-todo` declare no definition of the `guest` anchor that names a set. `app-showcase` ships `showcase_guest_portal` as a capability an administrator may bind and binds it to no anchor (its `client_portal_user` position is an ordinary position), and `app-crm`'s `guest_portal` is the public form doors' set, which keeps its own posture. No reference app declares a permission set named `guest`, so no grant stops either. A set starts granting only where a deployment holds an environment definition of the `guest` position that names it.
+  
+  What changes:
+  
+  - **`@objectstack/core`** — the anonymous branch of `resolveAuthzContext` resolves the guest's grants on a face that takes the explicit guest entry (the new `guestEntry` input). It reads the sets the `guest` position's definition names, through the same position-bound read every position uses, and the activation ledger as for any held set. It resolves them only in the organization the guest entry's organization step derives (`resolveGuestOrganization`), which asks ADR-0131 D9's predicate and no second spelling of it. With nothing bound, the guest holds no set and no read is issued. The predicate itself, `resolveSystemWriteOrganization`, moves to `@objectstack/core` so both of its askers share it. New exports: `resolveGuestOrganization`, `resolveSystemWriteOrganization` (with `SystemWriteOrganizationDecision` and `SystemWriteRefusalReason`), and `GuestOrganizationUnresolvedError` with `isGuestOrganizationUnresolvedError` and its constants.
+  - **`@objectstack/objectql`** — `resolveSystemWriteOrganization` and its two types are re-exported from `@objectstack/core` as the same bindings. Nothing a caller imports changes.
+  - **`@objectstack/plugin-security`** — the set resolution treats the guest's sets as any requested set, and no longer folds the guest's position into the request. A permission set that merely shares the anchor's name no longer reaches an anonymous caller, and the baseline and `everyone` never did. At the CRUD gate, a guest that reaches a data operation acting in no organization, on a deployment where the organization step refuses, is refused before the operation runs.
+  - **`@objectstack/plugin-sharing`** — the read filter answers deny-all for the guest on every object that record sharing scopes, before the sharing-model branch: the guest reaches rows only through share links, never through the object's sharing model (ADR-0138 D3 item 6, as the maintainer's ruling C amends it). `externalSharingModel` is still not read for any caller. Share links are redeemed at their own door and are unchanged.
+  - **`@objectstack/runtime`** — the runtime face, which serves the guest, asks for the guest's grants.
+  
+  What an anonymous caller sees at an `authRequired: false` endpoint of `type: 'object_operation'`:
+  
+  - **One organization, a set bound to `guest`:** the operation runs as the guest, under that set, in that organization. A read the set grants is admitted and returns no row, whatever the object's sharing model (`private`, `public_read`, `public_read_write` or `controlled_by_parent`): the guest reaches a record only through a share link. A create the set grants lands in that organization with no owner.
+  - **Nothing bound:** `403 PERMISSION_DENIED`, as before.
+  - **A walled deployment, several organizations, or none:** `501 NOT_IMPLEMENTED`, naming the missing site binding (ADR-0138 D5), where it used to be `403 PERMISSION_DENIED` with nothing granted. Nothing that was served stops being served. The operator's log names the reason once.
+  
+  Unchanged: share links, which still serve an anonymous caller the one record they name, with `publicSharing.eligibility` checked at the mint and at every redemption; the public form doors, which keep their own posture and organization; the flow door, which runs under the flow's own declared posture; every surface that answers an anonymous request `401`; and every signed-in caller.
+  
+  Level: `minor` for `@objectstack/core`, because new exported symbols widen its published index; `patch` for the other four, whose exports do not move.
+- Updated dependencies [dac99c2]
+- Updated dependencies [66949b7]
+- Updated dependencies [7958bdf]
+- Updated dependencies [87e902d]
+- Updated dependencies [777eed2]
+- Updated dependencies [ed03834]
+- Updated dependencies [5f37d36]
+- Updated dependencies [1912af4]
+- Updated dependencies [76815b9]
+- Updated dependencies [4d1e4a8]
+- Updated dependencies [4cc3ff9]
+- Updated dependencies [c056979]
+- Updated dependencies [4f68ba1]
+- Updated dependencies [c6139f2]
+- Updated dependencies [107853c]
+- Updated dependencies [543b33d]
+- Updated dependencies [b529a5c]
+- Updated dependencies [1623faf]
+- Updated dependencies [b4d573a]
+- Updated dependencies [3c1a046]
+- Updated dependencies [78c13bd]
+- Updated dependencies [9543e9c]
+- Updated dependencies [37510aa]
+- Updated dependencies [c857a93]
+- Updated dependencies [345d1be]
+- Updated dependencies [430e5f5]
+- Updated dependencies [14a13bc]
+- Updated dependencies [ca0bdbc]
+- Updated dependencies [572ecfb]
+- Updated dependencies [707b3cd]
+- Updated dependencies [6673c80]
+- Updated dependencies [2de9c03]
+- Updated dependencies [5b68524]
+- Updated dependencies [5e725b8]
+- Updated dependencies [eeb95f7]
+- Updated dependencies [d89f491]
+- Updated dependencies [dc39326]
+- Updated dependencies [775ed65]
+- Updated dependencies [e4ec6ec]
+- Updated dependencies [325a92e]
+  - @objectstack/spec@18.0.0-next.1
+  - @objectstack/core@18.0.0-next.1
+  - @objectstack/metadata-protocol@18.0.0-next.1
+  - @objectstack/types@18.0.0-next.1
+  - @objectstack/metadata@18.0.0-next.1
+  - @objectstack/metadata-core@18.0.0-next.1
+  - @objectstack/formula@18.0.0-next.1
+
 ## 18.0.0-next.0
 
 ### Major Changes

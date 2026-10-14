@@ -1,5 +1,94 @@
 # @objectstack/plugin-approvals
 
+## 18.0.0-next.1
+
+### Minor Changes
+
+- 24e064f: fix(objectql,service-messaging,service-automation,plugin-approvals)!: a notification carries the organization of what it is about, and one no organization owns is refused instead of stored with `organization_id` NULL
+  
+  Clause-②: no (narrowing) — notification rows gain the organization they should already carry; what narrows is an emit that names no organization on an install where none is derivable, which the engine now refuses where it used to store the event row with `organization_id` NULL.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime narrowing of which notification writes the engine accepts, not a metadata change. No spec key, authorable spelling, export, option, config field or stored shape is added, removed, renamed or re-shaped, and no stored row is rewritten: rows already stored with organization_id NULL keep it until the v18 ownership ceremony attributes them, which already lists sys_notification with the attribution fate. The only type change is an additive optional `organizationId` on the input of `ApprovalMessagingSurface.emit`, the approvals service's messaging surface: the interface is not listed in the package index, but it is published surface, reachable through the exported `ApprovalServiceOptions.messaging` and the public `ApprovalService.attachMessaging`, so it is an additive widening that no existing implementation has to change for. The other categories are closed on facts: the four packages publish (not unpublished); no ADR-0087 id covers notification ownership and this diff adds none (not registered / already-registered); nothing is removed or narrowed on an interface or type (not runtime-interface-only / type-surface-only); and no runtime export is retired (not runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Every notification emitted from a system-context run — a scheduled flow, a record change written by a system context, an approval node — was stored in `sys_notification` with `organization_id` NULL, so reports and cleanup that filter by organization did not see it. Each emit also logged a `[notify] no organization in scope` warning. On an install holding several organizations, the deliveries of the same emit were refused while the flow step reported success, so nothing reached the inbox.
+  
+  **Who owns a notification now:**
+  
+  - **The run's organization.** A run that carries one emits exactly as before.
+  - **Else the record it is about.** A `notify` node in a run with no organization reads the organization of the record the notification is about. That is the declared click-through record (`sourceObject` + `sourceId`), else the run's trigger record. It is read from the stored row by id, never from the record snapshot the run carries.
+  - **Approvals.** Every approval notification carries its request's organization: `approval.requested`, reminders, comments, send-backs, reassignments, escalations and out-of-office notices.
+  - **Else the owner the engine derives for a system write** (ADR-0131 D9). `sys_notification` is now in the platform-object tenancy ledger, so an emit that names no organization gets the install's sole organization under the `single` posture.
+  - **The rows below follow the event.** `emit()` stamps the stored event row's organization on its delivery, inbox row and receipt, on both the inline and the outbox path.
+  
+  **Refused now:** where no organization is derivable (a walled posture, or a `single` install holding more than one organization), an emit that names none is refused with `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`. Nothing is written for it. A `notify` step that hits the refusal fails with `notify failed: ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED: …` instead of succeeding. `MessagingService.emit()` rejects with the engine's error for any other producer.
+  
+  **What to do when it refuses:** give the notification an owner. Name the record it is about on the `notify` node (`sourceObject` + `sourceId`), declare the scheduled flow's acting organization (`organization` on its start node), or pass `organizationId` to `emit()` from your own code.
+  
+  The `[notify] no organization in scope` warning is gone, because the NULL row it predicted is no longer written. Rows already stored with `organization_id` NULL are not rewritten here. The v18 organization-ownership ceremony attributes them from their source record.
+
+### Patch Changes
+
+- 920bc12: fix: the approval request actions' success toasts name the request, and Explain access names the principal as a person
+  
+  Clause-②: no
+  
+  Server-authored strings that the console renders verbatim now name what and who they are about.
+  
+  - `@objectstack/plugin-approvals`: every action on `sys_approval_request` had a bare-verb `successMessage` (`Approved.`, `Rejected.`, `Reassigned.` and so on). Each now names the request through `${result.request.record_title}`. Each action's route answers `{ request, … }` with the read-back request and its display enrichment, so `record_title` is the title the inbox shows: the target record's display field, else its payload snapshot. The new copies:
+    - Approve and Reject use the inbox row's inline wording: `Approved "TITLE"` and `Rejected "TITLE"`.
+    - The others read `Reassigned "TITLE"`, `Sent "TITLE" back for revision`, `Information requested on "TITLE"`, `Reminder sent for "TITLE"`, `Recalled "TITLE"`, `Resubmitted "TITLE"` and `Reply posted on "TITLE"`.
+  
+    The zh-CN, ja-JP and es-ES values of the same keys carry the same token. No key, route or response shape changes.
+  - `@objectstack/plugin-security`: the explain engine's principal layer said `Principal USER_ID holds position(s) …`. It now names the person first and the id second, for example `Principal Ada Lovelace (ada@example.com; id usr_1) holds position(s) …`. Three other users in the same layer are named the same way:
+    - an on-behalf-of delegator;
+    - the user an ADR-0091 D3 delegated position came from, in the clause;
+    - that same user in the position's contributor attribution (`delegation from …`).
+  
+    Each user row is read with the asker's own context, so row-level and field-level security apply. An asker whose read returns no row gets the bare id, as before, and a field its read masks is left out. As a result, two askers can now be shown different names for the same user. The decision's `principal` object and every verdict are unchanged.
+- Updated dependencies [dac99c2]
+- Updated dependencies [66949b7]
+- Updated dependencies [7958bdf]
+- Updated dependencies [87e902d]
+- Updated dependencies [777eed2]
+- Updated dependencies [ed03834]
+- Updated dependencies [5f37d36]
+- Updated dependencies [1912af4]
+- Updated dependencies [76815b9]
+- Updated dependencies [4d1e4a8]
+- Updated dependencies [4cc3ff9]
+- Updated dependencies [c056979]
+- Updated dependencies [4f68ba1]
+- Updated dependencies [107853c]
+- Updated dependencies [543b33d]
+- Updated dependencies [b529a5c]
+- Updated dependencies [1623faf]
+- Updated dependencies [b4d573a]
+- Updated dependencies [3c1a046]
+- Updated dependencies [37510aa]
+- Updated dependencies [c857a93]
+- Updated dependencies [345d1be]
+- Updated dependencies [430e5f5]
+- Updated dependencies [14a13bc]
+- Updated dependencies [ca0bdbc]
+- Updated dependencies [572ecfb]
+- Updated dependencies [707b3cd]
+- Updated dependencies [6673c80]
+- Updated dependencies [5e725b8]
+- Updated dependencies [eeb95f7]
+- Updated dependencies [d89f491]
+- Updated dependencies [dc39326]
+- Updated dependencies [775ed65]
+- Updated dependencies [e4ec6ec]
+- Updated dependencies [325a92e]
+  - @objectstack/spec@18.0.0-next.1
+  - @objectstack/platform-objects@18.0.0-next.1
+  - @objectstack/core@18.0.0-next.1
+  - @objectstack/types@18.0.0-next.1
+  - @objectstack/metadata-core@18.0.0-next.1
+  - @objectstack/formula@18.0.0-next.1
+
 ## 18.0.0-next.0
 
 ### Minor Changes

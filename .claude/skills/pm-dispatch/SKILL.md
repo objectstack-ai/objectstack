@@ -185,12 +185,13 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - governed 面同含 `AGENTS.md`+`CLAUDE.md`;`GOVERNED_REPOS` 同治理、行可限仓,执行席恒随落地仓车道。
 - 路径面命中 Tier H ⇒ ACCEPT 换终局四件套,混合 diff ⛔ 不按比例判;要拆让 dev 单独开 PR。
 - 改动 >3000 行(含生成物)同换终局四件套,⛔ 无 Tier S 例外;读数 = PR additions+deletions。
-- ① 复核结论照常写在 issue 上;技能面 hunk 须由契约复审档的席复核,档外席先交 skills 席。
-- ② PR 留给维护者看得见地悬着;终局两条:人工直合即审核记录;授权批准 ⇒ 席位落地。
-- 看得见 = ACCEPT 同笔挂 `needs-user-decision` + 贴终稿「维护者速读」评论;①仍是审核记录。
+- ① 席位记录一条落 PR,两层同欠:Tier H 置顶速读五段,其下 `## 席位核对`;卡只留指针行。
+- ② PR 悬着等人批,同笔挂 `needs-user-decision`;人工直合即审核记录,授权批准 ⇒ 席位落地。
+- 指针 `ACCEPT → PR #n comment <id>`;技能面 hunk 复核随面定档:席未达档起隔离达档复核。
+- 核对六项(席位读此):形态/前提实测/门禁 check-runs/接受的偏差/范围外去向/落地条款。
 - 速读五段固定:改了什么/为什么改/风险与代价(含回滚)/席位意见/你要做的(一个动作)。
 - 草稿归 dev:受管面 PR 正文带 `## 维护者速读(草稿)`,中文、业务角度,席位意见留空。
-- 终稿 = 席位对照自己读的 diff 校正草稿、填席位意见后贴评论;维护者只读评论。
+- 终稿 = 席位对照自己读的 diff 校正草稿、填席位意见,置顶席位记录;维护者只读评论。
 - PR 上的标签 = 待维护者审阅,不入六态;与请审同为等人批清单,随获批或撤回判决离开。
 - 批准判定单源 = 队列守卫常量 `GOVERNED_APPROVERS`:授权账户 APPROVED 即算,⛔ 不卡 `commit_id`。
 - 批准后再推亦不过期;席位落地 = 过落地前检、清标、ready、auto-merge,踢出/变基同法。
@@ -199,7 +200,6 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 该账户改为把 PR assign 给它替代通知,另一账户照常请审;轮次报告点名说明走了兜底。
 - 请审走免碰 draft 位的 REST 专用路,ready/draft 走中继 op;MCP 兜底已拒;端点见 rest-channel。
 - ④ 轮次报告单列 awaiting a human merge。
-- 已入队 ⇒ 转 draft 并 disable,即请维护者手动出队(席位无实测手段);出队以阳性探针答。
 - skills 车道自有 PR:纯代码面如 `scripts/pm/` 由本席按达档自审(清单不减)后落地。
 - 受管面两层:Tier S = `.claude/**` 全树,余皆 Tier H 等人批;S 经达档复核 PASS 后 ready → 入队。
 - 入队资格:每 check 绿或预期 skip,⛔ 非必查子集;名单 check-expected-skips.mjs 只判 objectstack。

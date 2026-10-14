@@ -35,7 +35,11 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { aiJsonSchemaSlot } from '../shared/ai-json-schema-slot';
 import { ACTION_TARGET_ALIASES } from './action-target-aliases';
-import { ON_SUCCESS_EXECUTORS, onSuccessBesideExecutorRefusal } from './action-on-success-executor';
+import {
+  ON_SUCCESS_EXECUTORS,
+  onSuccessBesideExecutorRefusal,
+  onSuccessBesideUpdateOperationRefusal,
+} from './action-on-success-executor';
 import { navigationTargetRefusal } from './navigation-target';
 
 /**
@@ -1374,6 +1378,9 @@ const actionObject = () => strictObject({
    *
    * Liveness: the ledger row was `planned` until the console reader landed,
    * and it is `live` from the pin this repo builds against (`.objectui-sha` =
+   * `b9814b334`, re-read there 2026-10-14:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
    * `1fb1ced36`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
@@ -1885,10 +1892,9 @@ const DECLARATIVE_UPDATE_REFUSED_KEYS: ReadonlyArray<readonly [key: string, why:
   ['recordIdField',
     "`recordIdField` seeds `recordIdParam` — an `operation: 'update'` action binds the current record from "
     + 'the invocation context and injects nothing. Drop `recordIdField`.'],
-  ['onSuccess',
-    "`onSuccess` is not defined for an `operation: 'update'` action yet — its `${result.*}` scope is a "
-    + "handler's return value, and a declarative update has no handler. Drop it; post-success navigation "
-    + 'for the declarative write is a spec proposal, not a silent key.'],
+  // One text with the page action rows' refusal of the same pairing
+  // (`action-on-success-executor.ts`).
+  ['onSuccess', onSuccessBesideUpdateOperationRefusal("An `operation: 'update'` action's `onSuccess`")],
   ['outcomeMessages',
     "`outcomeMessages` picks success copy by the `outcome` a handler returns — an `operation: 'update'` "
     + 'action has no handler: the platform performs the write and reports no outcome, so no entry could '

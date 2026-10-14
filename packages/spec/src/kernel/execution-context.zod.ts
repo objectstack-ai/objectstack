@@ -182,9 +182,9 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
 
   /**
    * [ADR-0090 D10/D11 — P1 shape] Whether the principal is an internal org
-   * member or an external (portal/partner) identity. Externals evaluate
-   * against `externalSharingModel` and skip the BU depth axis. Absent =
-   * 'internal'.
+   * member or an external (portal/partner) identity. Externals reach
+   * explicitly shared rows only (the ADR-0095 `EXTERNAL` rung, never
+   * OWD-derived) and skip the BU depth axis. Absent = 'internal'.
    */
   audience: z.enum(['internal', 'external']).optional(),
 

@@ -94,8 +94,8 @@ export function controlledByParentMasterRefusal(
       requiredLookups,
       message:
         `Object '${name}' declares sharingModel 'controlled_by_parent' with ${masters.length} required `
-        + `\`master_detail\` fields (${masters.map((m) => `\`${m}\``).join(', ')}). ADR-0055 §1: a `
-        + 'controlled-by-parent object derives its master from exactly one required `master_detail` field, so '
+        + `\`master_detail\` fields (${masters.map((m) => `\`${m}\``).join(', ')}). ADR-0055 §1: since `
+        + '@objectstack/spec 18, a controlled-by-parent object derives its master from exactly one required `master_detail` field, so '
         + 'with two the declaration does not say which master governs its rows, and the platform derives none '
         + '(every read is denied, every write refused). Keep `master_detail` on the one master, and declare '
         + 'every other parent as a `lookup` field.',

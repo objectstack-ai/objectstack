@@ -30,8 +30,9 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *   lever with no gate behind it (Prime Directive #10). **Prescription:** comment
  *   visibility is decided by the record-level permissions of the record
  *   `thread_id` names (#4630) — there is no per-row override. A designed
- *   external/portal distinction would have to be defined against ADR-0090 D11's
- *   `externalSharingModel` first, and can return as an enforced key with tests.
+ *   external/portal distinction would have to be defined against the ADR-0095
+ *   `EXTERNAL` rung (explicitly shared rows only) first, and can return as an
+ *   enforced key with tests.
  * - **`reply_count`** — never incremented; `readonly: true` meant an author
  *   could not even set it by hand, so every row read `0` forever. **Prescription:**
  *   count `parent_id` children at read time. Deliberately NOT re-introduced as a

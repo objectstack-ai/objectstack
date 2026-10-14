@@ -16,8 +16,9 @@
  *        {"title":"…","project":"proj_does_not_exist","status":"backlog"}   → 200
  *
  * On the RBAC link tables a dangling row is a security-surface record that
- * resolves to nothing: the audience-anchor gate has to resolve that permission
- * set to evaluate the grant, so the binding is an unevaluable gate input.
+ * resolves to nothing: a grant naming a permission set nothing serves. (The
+ * audience-anchor gate that once had to resolve such a set retired with
+ * `sys_position_permission_set`, C3 stage 8.)
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';

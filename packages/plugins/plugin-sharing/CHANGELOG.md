@@ -1,5 +1,174 @@
 # @objectstack/plugin-sharing
 
+## 18.0.0-next.1
+
+### Minor Changes
+
+- 08b38cb: fix(services)!: the datasource admin, share-link, webhook redeliver and storage families refuse a session the ADR-0069 authentication policy holds
+  
+  Clause-②: no (narrowing) — a session ADR-0069 holds out of protected resources is refused by families that answered it; core's existing exports only, no published schema or export moves.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime authentication narrowing at four families of routes mounted directly on the host server, not a metadata change. No spec key, export, option, config field, response field or stored shape is removed, renamed or re-shaped, and a session the policy does not hold receives the same answers as before, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which sessions these families serve: a session whose user carries the ADR-0069 posture (an expired password, or enforced MFA not yet enrolled) is now refused with the gate's 403 before any of the family's logic runs. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id covers these routes and this diff adds none (not registered / already-registered); and no published interface or type changes (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  ADR-0069 holds a signed-in user out of every protected resource while their password has expired or while enforced MFA is not yet enrolled, until they remediate. REST and the runtime dispatcher already refuse such a session. Four families of routes mounted straight on the host server never asked, so they served it as an ordinary signed-in caller:
+  
+  - **`@objectstack/service-datasource`**: the datasource admin family (`registerDatasourceAdminRoutes`). Its door now asks the shared decision (`evaluateAuthGate`, `@objectstack/core`) about the session it already reads, before the anonymous floor and the capability check.
+  - **`@objectstack/plugin-sharing`**: the share-link family (`registerShareLinkRoutes`). Every route, the two capability-token routes included, is now mounted through one door that refuses a context carrying `authGate`. `SharingServicePlugin`'s resolver now puts the session's posture on that context, as REST does.
+  - **`@objectstack/plugin-webhooks`**: the redeliver door (`WebhookOutboxPlugin`), on both of its faces: the route the plugin mounts, and the `webhooks` service's `handleRedeliver`.
+  - **`@objectstack/service-storage`**: the storage family, the two capability-token raw-transfer routes included. Every route is now mounted through one door. The posture is bound where every other storage gate is bound, so both the plugin's own mount and the host door `mountStorageRoutes` carry it. When a gate feature is active, the door reads the session and refuses a held one. When the gate is active but the session cannot be read, the door answers the declared `503` (`SERVICE_UNAVAILABLE`), as REST does. A direct call of `registerStorageRoutes` mounts the family exactly as before, because like the other storage gates this one is bound by the package's composition. No exported declaration changes.
+  
+  - **Refused now:** a held session gets `403` with the gate's own `code` (`PASSWORD_EXPIRED` or `MFA_REQUIRED`) and `message`, in each family's declared error envelope, before the family does anything else. This is the answer REST gives the same session.
+  - **Unchanged:** a session the policy does not hold is served exactly as before, and an API-key caller is unaffected because it has no session to hold. A CORS preflight is answered as before.
+  
+  What changes for you. A user the policy holds must remediate (change the password, or enroll an authenticator) before these routes answer them, as on every other protected route. If you mount the storage routes through `mountStorageRoutes`, the gate is bound from the kernel's `auth` service with nothing to configure. If you mount `registerShareLinkRoutes` yourself with your own `contextFromRequest`, set `authGate` on the context it returns for a held session; the door refuses on that field.
+- 345d1be: fix(spec,plugin-sharing)!: `sys_record_share` no longer offers a `guest` recipient, which no grant ever honoured (ADR-0138 D8)
+  
+  Clause-②: no (narrowing: a declared recipient value no grant honours is refused)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No working use of the value exists to rewrite. `ISharingService.grant` refused every non-`user` recipient before this change, so no grant naming `guest` ever succeeded, and the census pinned in `@objectstack/spec` finds no seed, fixture, example, template, migration or test row in this repository that writes `recipient_type` as `guest`, and no stored metadata surface that carries it. Seed data, the one metadata surface that can carry a row value, targets `sys_record_share` nowhere in the tree (the examples seed `sys_user` and `sys_business_unit`, never a record share). What narrows is a published TypeScript union in `packages/spec/src/contracts/` and the option set of a platform object's select: a caller that still spells the value meets a compile error or a located refusal, and there is nothing for `objectstack migrate meta` to derive from metadata. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id covers this value and this diff adds none (not registered or already-registered); the union lives under `packages/spec/src/contracts/` and the diff touches `packages/spec` (not runtime-interface-only or type-surface-only); no export is removed (not runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  A record share to the anonymous principal was declared in two places and honoured in none. Both declarations are gone:
+  
+  - `RecordShareRecipientType` (`@objectstack/spec/contracts`) is now `'user' | 'group' | 'position' | 'unit_and_subordinates'`. Passing `recipientType: 'guest'` to `ISharingService.grant`, or typing a `RecordShare.recipient_type` as `'guest'`, is a compile error.
+  - The `recipient_type` select on `sys_record_share` (`@objectstack/plugin-sharing`) offers those same four options, and its `guest` label is gone from the four translation bundles.
+  
+  Why: the grant refused `guest` (ADR-0078), and no gate reads such a row, because the read and write gates match `recipient_type: 'user'` only. ADR-0090 D11 routes guest access through the guest position and share links, so a record share to the guest had nothing to gain. The sharing-rule vocabulary retired the same recipient in v17.
+  
+  What a caller sees now:
+  
+  - **The grant door** (`POST /data/:object/:id/shares`, or `grant()` from untyped code). A body naming `recipientType: 'guest'` is still refused with `VALIDATION_FAILED` (`400`), as before. The sentence now says the value was removed and that guest access flows through the guest position and share links. It used to say that sharing rules deliver non-`user` recipients, which was never true of a guest. To let a guest reach a record, use a public form or a share link.
+  - **The row door** (a system-context engine write: a seed, a plugin, a migration script). A row carrying `recipient_type: 'guest'` is now refused with `VALIDATION_FAILED`, an `invalid_option` error on `recipient_type` that lists the four values a row may carry. Before this change such a write stored a row that looked granted and enforced nothing.
+  - **Unchanged:** every `user` grant, the other three row values, the sharing-rule service, and the gates. A `guest` row that a system write stored before this release is read by no gate, both before and after.
+
+### Patch Changes
+
+- 66949b7: feat(plugin-security)!: the four security-catalog row objects are retired — `sys_position`, `sys_permission_set`, `sys_position_permission_set` and `sys_capability` (ADR-0131 D3)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered catalog-row-objects-retired -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  Positions, permission sets and capabilities live in the security catalog — the environment registry, fed by package declarations and by environment metadata saved through `/api/v1/meta` (ADR-0131 D3). The four row objects that mirrored them are no longer registered, so their data and REST routes and their Setup object pages are gone. No table is dropped and no row is deleted.
+  
+  FROM → TO:
+  
+  - `GET|POST|PATCH|DELETE /api/v1/data/sys_permission_set` → `GET|PUT|DELETE /api/v1/meta/permission/:name`; to copy a set, `POST /api/v1/security/permission-sets/:name/clone` with `{ name, label }`.
+  - `… /api/v1/data/sys_position` → `/api/v1/meta/position/:name`. A position's permission sets are its definition's `permissionSets`.
+  - `… /api/v1/data/sys_position_permission_set` → the position definition's `permissionSets` (`PUT /api/v1/meta/position/:name`).
+  - `… /api/v1/data/sys_capability` → read-only `GET /api/v1/meta/capability`; a package declares a capability with `defineCapability` (`stack.capabilities`).
+  - Setup → Access Control → Positions / Capabilities / Permission Sets now open Setup's catalog lists (`/apps/setup/metadata/<type>?scope=environment`) instead of the object pages; the `sys_position` record page (`SysPositionDetailPage`) is removed.
+  - An object permission on one of the four names in a permission set grants nothing and can be deleted.
+  
+  What else changes:
+  
+  - `sys_user_permission_set.permission_set_id` is a plain text column now, not a lookup: same column, same stored ids, same indexes. It is not written and grants nothing; a grant names its set by `permission_set`.
+  - A permission set saved through the metadata door is written to no row: the `permission` mutation projector, the `sys_permission_set` and `sys_position` data-door write-throughs and the row-only position backfill are no longer registered.
+  - On a fresh `single`-posture database the first human is promoted to platform administrator without reading any catalog row. An unscoped grant written before `sys_user_permission_set.permission_set` existed (it names no set) still withholds the promotion until the organization-ownership migration names it.
+  - Uninstalling a package still revokes every grant naming a permission set the package declared, by the names the uninstalling door captures before the withdrawal (`declared`, `captureUninstallDeclared`), and now by those names alone: the cleanup reads and removes no `sys_permission_set` or `sys_position_permission_set` row, so the `sets` and `positionBindings` counts on its outcome are always 0. A grant written before `sys_user_permission_set.permission_set` existed names no set and is not reached; the organization-ownership migration names it.
+  - On a `group` or `isolated` deployment the data-door half of the walled catalog refusal goes with the objects: a data-door insert, update or delete on `sys_position`, `sys_permission_set` or `sys_capability` answers `404 OBJECT_NOT_FOUND` for every caller instead of `403 PERMISSION_DENIED` below the platform operator. The refusal at the `/meta` write doors, the permission-set clone door and the `/packages` write doors is unchanged.
+  - `capability-reference-unknown` no longer counts a `sys_capability` seed row as a declared capability — no runtime reader consults one. Declare the capability with `defineCapability`.
+  - On an existing database `os migrate plan`'s unmanaged-table sweep now lists the `sys_position`, `sys_permission_set`, `sys_position_permission_set` and `sys_capability` tables: they keep their rows and no object declares them any more. The sweep only reports; nothing is dropped, and the tables stay for the organization-ownership migration.
+  
+  Removed exports, no replacement:
+  
+  - `@objectstack/plugin-security`: the object definitions `SysPosition`, `SysPermissionSet`, `SysPositionPermissionSet`, `SysCapability` (from `./objects`); `securityObjects` lists the remaining three.
+  - `@objectstack/platform-objects/pages`: `SysPositionDetailPage`.
+  - `@objectstack/spec`: `SystemObjectName.POSITION`, `SystemObjectName.PERMISSION_SET`; the four names leave `PLATFORM_OBJECTS_BY_PACKAGE['plugin-security']` and `PLATFORM_PROVIDED_OBJECT_NAMES`.
+  - `@objectstack/core`: `isRowActive` and `ActivatableRow` — a catalog row's `active` column decides nothing; deactivation is the activation ledger's (`sys_metadata_activation`).
+  - `@objectstack/objectql`: the published `PLATFORM_OBJECT_TENANCY` record loses its `sys_permission_set` key (the other three names were never in it). A removed key of an exported constant is a narrowing, so `@objectstack/objectql` takes `minor` under the launch-window convention for breaking changes.
+- 3c1a046: fix: a route's catch-all `500` answers its own generic text, never the caught error's message, and `@objectstack/types` exports the writer that does it, `sendServerFault`
+  
+  Clause-②: yes (widening) — `@objectstack/types` gains one export, `sendServerFault`; nothing is removed, renamed or narrowed, and no response field changes shape.
+  
+  A declared 5xx does not carry the text of the error it caught: that text can name server internals, such as a path, a host or a table. The REST layer already withheld it. The storage, settings and i18n route families and the share-link routes answer in the nested `{ success: false, error: { code, message } }` envelope and did not: their catch-all `500` sent the caught error's message to the caller.
+  
+  - **What a caller now reads.** The same `status` and `code` as before, with the route's own generic text as `error.message`: `Internal error` on the storage and i18n routes, the route's message on the settings routes (`Failed to list manifests`, `Failed to read namespace`, `Failed to write namespace`, `Action failed`), and the route's `Failed to …` message on the share-link routes. On the storage routes this includes the metadata store's outage sentence, which an operator now reads in the server log.
+  - **What the operator reads.** The original error, stack included, in one `[5xx]` server-fault line. The storage byte routes, which already withheld the text, logged two lines per fault and now log one. A line names the mounted route pattern when the route passes one, never the request URL.
+  - **Unchanged.** Every `4xx` answer. The settings `SETTINGS_CRYPTO_UNAVAILABLE` refusal, which keeps its prescription. The authorization-store outage `503`, which keeps its declared code and message. The storage `501 NOT_IMPLEMENTED` answers. On the share-link routes, any error that declares its own `status` keeps the envelope it declares.
+  - **`sendServerFault(res, status, code, message, thrown, request?)`** (new, `@objectstack/types`): writes `message` in the declared envelope, and hands `thrown` to the server-fault log with its stack, as the fault's one line. Use it for an arm that answers a caught fault. Keep `sendError` for a `4xx` and for a `5xx` whose text you wrote for the reader. `request` is the mounted route pattern, never the request URL.
+- 37510aa: feat(security): the guest's grants channel — an anonymous request at a guest-entry door holds the sets bound to the `guest` anchor, in the one organization the deployment resolves for it (ADR-0138 E1, D3/D4)
+  
+  ADR-0087 disposition: none. No authorable key, accept set or stored shape moves: no spec schema, metadata type, stored row or published response field is added, removed, renamed or re-shaped. A declared binding that was not enforced becomes enforced (ADR-0090 D9, as ADR-0138 D3 amends it).
+  
+  **The bindings that start granting.** On the reference apps, none: `app-showcase`, `app-crm`, `app-multi-package` and `app-todo` declare no definition of the `guest` anchor that names a set. `app-showcase` ships `showcase_guest_portal` as a capability an administrator may bind and binds it to no anchor (its `client_portal_user` position is an ordinary position), and `app-crm`'s `guest_portal` is the public form doors' set, which keeps its own posture. No reference app declares a permission set named `guest`, so no grant stops either. A set starts granting only where a deployment holds an environment definition of the `guest` position that names it.
+  
+  What changes:
+  
+  - **`@objectstack/core`** — the anonymous branch of `resolveAuthzContext` resolves the guest's grants on a face that takes the explicit guest entry (the new `guestEntry` input). It reads the sets the `guest` position's definition names, through the same position-bound read every position uses, and the activation ledger as for any held set. It resolves them only in the organization the guest entry's organization step derives (`resolveGuestOrganization`), which asks ADR-0131 D9's predicate and no second spelling of it. With nothing bound, the guest holds no set and no read is issued. The predicate itself, `resolveSystemWriteOrganization`, moves to `@objectstack/core` so both of its askers share it. New exports: `resolveGuestOrganization`, `resolveSystemWriteOrganization` (with `SystemWriteOrganizationDecision` and `SystemWriteRefusalReason`), and `GuestOrganizationUnresolvedError` with `isGuestOrganizationUnresolvedError` and its constants.
+  - **`@objectstack/objectql`** — `resolveSystemWriteOrganization` and its two types are re-exported from `@objectstack/core` as the same bindings. Nothing a caller imports changes.
+  - **`@objectstack/plugin-security`** — the set resolution treats the guest's sets as any requested set, and no longer folds the guest's position into the request. A permission set that merely shares the anchor's name no longer reaches an anonymous caller, and the baseline and `everyone` never did. At the CRUD gate, a guest that reaches a data operation acting in no organization, on a deployment where the organization step refuses, is refused before the operation runs.
+  - **`@objectstack/plugin-sharing`** — the read filter answers deny-all for the guest on every object that record sharing scopes, before the sharing-model branch: the guest reaches rows only through share links, never through the object's sharing model (ADR-0138 D3 item 6, as the maintainer's ruling C amends it). `externalSharingModel` is still not read for any caller. Share links are redeemed at their own door and are unchanged.
+  - **`@objectstack/runtime`** — the runtime face, which serves the guest, asks for the guest's grants.
+  
+  What an anonymous caller sees at an `authRequired: false` endpoint of `type: 'object_operation'`:
+  
+  - **One organization, a set bound to `guest`:** the operation runs as the guest, under that set, in that organization. A read the set grants is admitted and returns no row, whatever the object's sharing model (`private`, `public_read`, `public_read_write` or `controlled_by_parent`): the guest reaches a record only through a share link. A create the set grants lands in that organization with no owner.
+  - **Nothing bound:** `403 PERMISSION_DENIED`, as before.
+  - **A walled deployment, several organizations, or none:** `501 NOT_IMPLEMENTED`, naming the missing site binding (ADR-0138 D5), where it used to be `403 PERMISSION_DENIED` with nothing granted. Nothing that was served stops being served. The operator's log names the reason once.
+  
+  Unchanged: share links, which still serve an anonymous caller the one record they name, with `publicSharing.eligibility` checked at the mint and at every redemption; the public form doors, which keep their own posture and organization; the flow door, which runs under the flow's own declared posture; every surface that answers an anonymous request `401`; and every signed-in caller.
+  
+  Level: `minor` for `@objectstack/core`, because new exported symbols widen its published index; `patch` for the other four, whose exports do not move.
+- 28e294f: fix(plugin-sharing, runtime): a share link that has a password and is limited to signed-in users answers an anonymous visitor `401 SIGN_IN_REQUIRED`, whatever password was sent
+  
+  Clause-②: no — every request refused before is still refused; only which refusal code an anonymous caller reads changes.
+  
+  A share link can carry a password and the `signed_in` audience together. For such a link, the share-link resolve door answered an anonymous visitor from the password before the audience: `NEEDS_PASSWORD` with no password, and `WRONG_PASSWORD` with any password, the correct one included. The console's shared-record page then told a visitor who typed the right password "Wrong password.", and never offered sign-in.
+  
+  - **Anonymous caller, `signed_in` link:** `401 SIGN_IN_REQUIRED` with no password, a wrong one or the correct one. The answer is the same for all three, so it never tells an anonymous caller whether a password is right. Once signed in, the visitor is asked for the password as before.
+  - **Signed-in caller:** unchanged. `401 NEEDS_PASSWORD` with no password, `401 WRONG_PASSWORD` with a wrong one, and the record with the correct one.
+  - **Unchanged:** links with any other audience (a `public` link with a password still answers `NEEDS_PASSWORD` / `WRONG_PASSWORD` to an anonymous caller), the expired-or-revoked `410 EXPIRED_OR_REVOKED`, the `404 INVALID_OR_EXPIRED` for an unknown token or an object with public sharing switched off, and every link that resolves.
+  - Both mounts of the resolve door answer alike: plugin-sharing's share-link routes and the runtime dispatcher's share-links domain.
+- Updated dependencies [dac99c2]
+- Updated dependencies [66949b7]
+- Updated dependencies [7958bdf]
+- Updated dependencies [87e902d]
+- Updated dependencies [777eed2]
+- Updated dependencies [ed03834]
+- Updated dependencies [5f37d36]
+- Updated dependencies [1912af4]
+- Updated dependencies [76815b9]
+- Updated dependencies [4d1e4a8]
+- Updated dependencies [4cc3ff9]
+- Updated dependencies [c056979]
+- Updated dependencies [4f68ba1]
+- Updated dependencies [107853c]
+- Updated dependencies [543b33d]
+- Updated dependencies [b529a5c]
+- Updated dependencies [1623faf]
+- Updated dependencies [b4d573a]
+- Updated dependencies [3c1a046]
+- Updated dependencies [37510aa]
+- Updated dependencies [c857a93]
+- Updated dependencies [345d1be]
+- Updated dependencies [430e5f5]
+- Updated dependencies [14a13bc]
+- Updated dependencies [ca0bdbc]
+- Updated dependencies [572ecfb]
+- Updated dependencies [707b3cd]
+- Updated dependencies [6673c80]
+- Updated dependencies [24e064f]
+- Updated dependencies [5e725b8]
+- Updated dependencies [eeb95f7]
+- Updated dependencies [d89f491]
+- Updated dependencies [dc39326]
+- Updated dependencies [775ed65]
+- Updated dependencies [e4ec6ec]
+- Updated dependencies [325a92e]
+  - @objectstack/spec@18.0.0-next.1
+  - @objectstack/platform-objects@18.0.0-next.1
+  - @objectstack/core@18.0.0-next.1
+  - @objectstack/objectql@18.0.0-next.1
+  - @objectstack/types@18.0.0-next.1
+  - @objectstack/metadata-core@18.0.0-next.1
+  - @objectstack/formula@18.0.0-next.1
+
 ## 18.0.0-next.0
 
 ### Minor Changes

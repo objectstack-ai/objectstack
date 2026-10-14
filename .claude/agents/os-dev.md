@@ -50,7 +50,7 @@ model: opus
    - 把作者引向运行时会兑现却让事情更糟的元数据的警告不在 (c) 内,记为边界不扩类。
    - 其余 ⛔ 不立卡:只读推断、观察、休眠、零拉动、死代码、未演练漂移、抛光、命名。
    - 它们进 PR `## Acceptance notes`;报告 `out_of_scope_findings` 逐条 `class:`+`reach:`+证据,或 `carrier:`。
-   - `carrier:` = 将碰该文件的 PR 或人,答不出写「承接者:无」;皆无 ⇒ 只进 Acceptance notes。
+   - `carrier:` = 卡号或人,⛔ 非下个碰 X 的 PR;无则「承接者:无」;皆无 ⇒ 只进 Acceptance notes。
    - 同族发现 ⛔ 不开单点卡,报告点名并入该族收口卡;收口卡定义住 pm-dispatch 报告契约。
    - dev ⛔ 不查重、不扫 open issues、不拉板,只附 3–5 个查重词;查询与命中数由立卡席写。
    - GitHub 写一律经 `scripts/pm/` 写工具;云容器里经 `fleet-write` 中继落为 `objectstack-fleet[bot]`。
@@ -135,17 +135,18 @@ model: opus
 - ② 受影响包自己的 `pnpm test` / `pnpm typecheck`,用 `--filter` 圈定。
 - 受影响包 = 本包;import 方只在公开面变化时欠测试:spec 契约、发布的 `exports`、线上形状。
 - 公开面字节不变 ⇒ 只欠本包测试与派生门禁,⛔ 不给每个 import 方补测试。
-- ③ 派发词点名的门禁族,加上你看得出被牵连的。
+- ③ 读到改动文件的门禁族 = `--commands` 派生清单(按 diff 收窄);派发词清单与全农场归 CI。
 - 新 fake engine ⇒ `check:engine-double-contract`;新错误码 ⇒ `check:error-code-casing`。
-- `.claude/agents/**` ⇒ `check:agent-model-declared`;任何编辑 ⇒ `check:nul-bytes`。
-- ④ 派发词的门禁清单是线索不是规格,当天取的也会漏族;点名的跑绿后按实际改动重推。
+- ④ 报告 `gates`:CI 跑的每族引 PR check-runs(名+结论),⛔ 不本地重跑;`--ran` 只对账本地子集。
 - 推导用 `node scripts/pm/dispatch-gates.mjs --commands` 不传路径,脚本自己从 merge-base 取变更集。
-- 变更集含未提交与未跟踪;跑完把已跑命令清单交给 `--ran <file>` 对账,未跑的族它会点名。
+- 变更集含未提交与未跟踪;跑完把已跑清单交给 `--ran <file>` 对账,未跑的本地族它会点名。
 - ⛔ 别自己 `git diff` 出一份清单喂它:两点 `origin/main..HEAD` 按此刻的 origin/main 求值。
 - 分支切出后落地的姊妹 PR 文件会算到你头上:退出码 0、门禁只多不少,报告的清单却假。
 - 浅检出上脚本响亮拒绝而非给错清单,照它说的加深。
-- 补跑它新增而你的 diff 触及的,报告里点名新增项;另一半归 PM,在你报告后读真实结论。
-- ⛔ 不据此跳过点名族:它们仍是你欠的便宜一半;你不再欠的是报告前等 CI。
+- 派生点名却不在 PR check-runs 的族(选择器跳过或仅 push/schedule):本地读数即证据,报告标明。
+- 本地独有族(CI 只跑其 `--self-test`,不跑扫描):`check:dev-prereqs`、`check:skill-frame-freshness`。
+- 二者判本机状态(`packages/spec/dist` 过期否、检出对 origin/main 新鲜否),CI 新检出无可判。
+- 派生不点名二者;触 `packages/spec` 构建或四轴框架文件时本地跑,读数只进报告,留在本地。
 - ⑤ diff 编辑了门禁/工具脚本 ⇒ 该脚本自己的测试套件在派生族之外另欠。
 - 派生答哪些门禁读你改的文件,不答哪些测试测这个脚本。
 - 跑同目录点名它的 `*.test.ts`,加同包 tests 下 `git grep` 该脚本文件名的全部命中。
@@ -155,12 +156,6 @@ model: opus
 - 那边的清单从该仓自己的 `package.json` 与 `.github/workflows/` 手工推导。
 - 加 `--repo <owner>/<name>` 申报本次答案该属于哪个仓,不匹配即拒绝并同时点名两个仓。
 - 仓级扫描(以 `pnpm lint` = `eslint . --no-inline-config` 为首)是 CI 拥有的运行,永不是你欠的。
-- 前台上限之内跑得完就可以跑(轻载约 2 分钟;争用下会被 cap 杀,见资源纪律规则 6)。
-- 默认交付形态是已证明的收窄:定向跑受影响文件,并证明这次收窄没有排除任何东西。
-- 三件证据一起写进报告,缺一不可:① 受检总体读自 eslint 自己的配置,不是你的猜测。
-- ② 文件数读自 `--format json` 输出的计数;③ 配置对未触碰文件的不变性声明。
-- 不变性声明形如:type-aware linting 未启用 ⇒ 你的 diff 移不动任何未触碰文件的判定。
-- 三件都在,收窄就是一次测量;缺一件,它只是没跑;两者在报告里必须分得开。
 - 并集在最终 commit 之后跑,并从那次运行引用 `git rev-parse --short HEAD`。
 - 报告的 `tests` 字段和 PR 正文两处都要引;门禁日志不带 sha,最后 commit 前的并集量的旧树。
 - 迟到的 commit 挪动的恰是 ratchet 读数;复核后任何一次 push,都在新 head 上重跑并集。
@@ -243,6 +238,7 @@ model: opus
 - 变多:删掉一个喂计数的读取,能让下游门禁多出一个发现。
 - 反转:canonical-first 的 `??` 链,非法拼写落到 schema 的具名拒收,规则绿、schema 红。
 - 报告你实际观察到的方向;永不硬套模板的预设。
+- 消融一行为一次,仅当 diff 改了测试钉住的行为;配置、脚本、workflow、文档 ⛔ 不消融。
 - ablation 的成立条件是解析路径,不是套件名:被测主体经依赖的 `exports` 解析。
 - 那指向该包的 `dist/`,不是 `src/`;且没有 vitest alias 把 specifier 拉回源码。
 - 这批 pair 的台账是 `scripts/check-test-source-alias.mjs` 的 `KNOWN_UNALIASED_TEST_IMPORTS`。
@@ -276,6 +272,7 @@ model: opus
 - 分区 pin `test/vitest-tiers-partition.test.ts` 在某个测试文件两层皆无或皆有时变红。
 - 用 `git push -u origin claude/issue-<n>-<slug>` 推上去,网络失败退避重试;pre-push 拒卡片 trailer。
 - Draft PR 指向 `main`,正文首行 `Fixes #<n>`;合并不应关卡时用 `Part of #<n>`,并说明留下哪一半。
+- PR 开出后合 main 只因冲突、main 致 CI 红、出队,后只跑 §10 复检;dogfood 只在终 head 跑一次。
 - 认领带 `Clause-②:` 行才照抄进正文行首:`Check Changeset` 读正文不读卡;无则零写,⛔ 不自造。
 - ⛔ 永不 `Fixes` 一张还在决策箱的卡:合并会静默关掉它,而收件箱过滤只读 open。
 - ⛔ 不写否定式的关单句,它照样关掉点名的卡:解析器无视否定,只匹配关键词 + `#<n>`。
@@ -367,7 +364,8 @@ model: opus
   "session": "session_<id> — this run's harness-stamped id (transcript Claude-Session: line; subagent = parent's)",
   "premise_still_valid": true,
   "summary": "what was implemented, 2-4 sentences",
-  "tests": "commands run + pass/fail evidence (real output excerpts); ablation: rebuild + on-disk mutation proof",
+  "tests": "commands run + pass/fail evidence (real output excerpts); ablation only where a tested behaviour changed: rebuild + on-disk mutation proof",
+  "gates": "local subset: each command + exit code captured before any pipe + --ran reconciliation; every family CI runs: the PR's check-runs (name + conclusion) cited, not re-run locally",
   "mcp_calls": "<n> — MCP GitHub calls with tool names; a write tool in the list = this report is refused",
   "api_writes": "<n> — REST proxy writes, each endpoint listed",
   "open_questions": [

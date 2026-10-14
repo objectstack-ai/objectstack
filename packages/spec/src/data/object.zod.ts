@@ -607,8 +607,8 @@ const TENANCY_RETIRED_KEY_GUIDANCE: Record<string, string> = {
   crossTenantAccess:
     '`tenancy.crossTenantAccess` was removed from @objectstack/spec after v15.0 — it ' +
     'never had a consumer; setting it granted nothing. Cross-tenant visibility is ' +
-    'governed by sharing rules / OWD (ADR-0056), `externalSharingModel` (ADR-0090 ' +
-    'D11), and the object access posture. Delete the key.',
+    'governed by sharing rules / OWD (ADR-0056), explicit shares, and the object ' +
+    'access posture. Delete the key.',
   organizationField:
     '`tenancy.organizationField` was removed in @objectstack/spec 17 (ADR-0049) — it ' +
     'named the column a platform row is stamped from, and exactly one table in the ' +
@@ -1521,6 +1521,21 @@ const MANAGED_BY_SYSTEM_RETIRED =
  * These entries turn the most likely mistakes into a fixable error that points
  * at the *supported* mechanism rather than a generic "unknown key".
  */
+/**
+ * The prescription for the retired `externalSharingModel` (#23268). The D3
+ * record `object-external-sharing-model-retired` carries what the upgrading
+ * author still owes.
+ */
+const OBJECT_EXTERNAL_SHARING_MODEL_REMOVED =
+  '`object.externalSharingModel` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — '
+  + 'it never had an effect: no request resolves an external principal, and the external rung of the '
+  + 'authorization kernel (ADR-0095) admits explicitly shared rows only, never an org-wide default, so '
+  + 'the value changed no answer for anyone. Delete the key. `sharingModel` is the one org-wide '
+  + 'default; a principal reaches a row it does not own through an explicit share, and an anonymous '
+  + 'reader through a share link (`publicSharing`). '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` '
+  + 'applies the ones it can prove, and you apply the rest by hand.';
+
 const UNKNOWN_KEY_GUIDANCE: Record<string, string> = {
   workflows:
     '`workflows` is not an ObjectSchema field. Object-level, record-triggered ' +
@@ -2731,14 +2746,18 @@ const ObjectSchemaBase = strictObject(
   sharingModel: z.enum(['private', 'public_read', 'public_read_write', 'controlled_by_parent']).optional().describe('Org-Wide Default record visibility (OWD) for INTERNAL users. Canonical four only (legacy aliases removed, ADR-0090 D4): private (owner-only) | public_read (everyone reads, owner writes) | public_read_write (everyone reads+writes) | controlled_by_parent (derived from the master record). A CUSTOM object that omits this resolves to private at runtime (ADR-0090 D1).'),
 
   /**
-   * [ADR-0090 D11] Org-Wide Default for EXTERNAL principals
-   * (`principal.audience: 'external'` — portal / partner users). A second,
-   * stricter dial: defaults to `private` when omitted and may NEVER be wider
-   * than the internal `sharingModel` (validated at authoring). The BU depth
-   * axis does not apply to externals; their visibility = own records +
-   * explicit shares + this baseline.
+   * RETIRED (#23268, ADR-0049 enforce-or-remove; ruling of record 6159300530,
+   * letter A). ADR-0090 D11 declared a second, external org-wide default for
+   * portal / partner principals. Nothing ever read it on the row path: no
+   * transport resolves `audience: 'external'`, and the authorization kernel's
+   * `EXTERNAL` rung (ADR-0095 / ADR-0099) is explicitly shared rows only,
+   * never OWD-derived. The only readers were authoring checks of its own
+   * ordering against `sharingModel`. Tombstoned so the refusal carries the
+   * prescription (and `tsc` fails first); D2 conversion
+   * `object-external-sharing-model-removed` strips it from existing sources
+   * and stored rows.
    */
-  externalSharingModel: z.enum(['private', 'public_read', 'public_read_write', 'controlled_by_parent']).optional().describe('[ADR-0090 D11] OWD for external (portal/partner) principals. Defaults to private; must be <= sharingModel in openness.'),
+  externalSharingModel: retiredKey(OBJECT_EXTERNAL_SHARING_MODEL_REMOVED),
 
   /**
    * Public Share-Link Policy
@@ -2790,9 +2809,10 @@ const ObjectSchemaBase = strictObject(
         'separate opt-in for opaque share LINKS — an object may declare both, and they ' +
         'do not constrain each other.',
       externalSharingModel:
-        '`externalSharingModel` is a TOP-LEVEL object key (ADR-0090 D11) — the OWD for ' +
-        'external portal/partner principals. Link sharing is this block; principal-based ' +
-        'external access is that key, one level up.',
+        '`externalSharingModel` is not a `publicSharing` key, and it is no longer an object ' +
+        'key either: it was removed in @objectstack/spec 18 (ADR-0049) because no principal ' +
+        'ever read it. Delete the key. Link sharing is this block; a principal reaches a ' +
+        'row it does not own through an explicit share.',
     },
   }, {
     /**

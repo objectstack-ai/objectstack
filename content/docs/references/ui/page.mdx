@@ -99,7 +99,7 @@ Interface-level page configuration (Airtable parity)
 | **buttons** | `string[]` | optional | Toolbar buttons — names of the source object's actions to surface in the page toolbar |
 | **recordAction** | `Enum<'drawer' \| 'page' \| 'modal' \| 'none'>` | optional | How clicking a record opens its detail (drawer \| page \| modal \| none). Default: drawer |
 | **showRecordCount** | `boolean` | optional | Show record count at page bottom |
-| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string; link?: object }` | optional | [PLANNED — not yet rendered] What the page draws in place of rows when its list has none to show: `{ title, message, icon, link }`, the list view's own empty-state shape. The console's list page is its planned reader; until it ships, the page draws a source view's empty state, if any. |
+| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string; link?: object }` | optional | What the page draws in place of rows when its list has none to show: `{ title, message, icon, link }`, the list view's own empty-state shape. The console's list page prefers it, whole, over its source view's empty state; with none declared, the page draws the source view's, if any. |
 | **allowPrinting** | `boolean` | optional | Allow users to print the page |
 
 ### Nested Shape: `InterfacePageConfig.columns[number]`
@@ -189,7 +189,7 @@ View filter rule
 | **title** | `string \| Record<string, string>` | optional | Heading of the empty state |
 | **message** | `string \| Record<string, string>` | optional | Line of text below the heading |
 | **icon** | `string` | optional | Icon name drawn above the heading; a name that resolves to no icon draws the default empty-state glyph |
-| **link** | `{ label: string \| Record<string, string>; url: string }` | optional | [PLANNED — not yet rendered] The one next step an empty list names: a link the user follows, `{ label, url }` — for example to the how-to page that explains what belongs here when nobody can add a row. It opens a page or an address and runs no action. The console's empty-state renderers are its planned readers; until they ship, the link parses and is not drawn. |
+| **link** | `{ label: string \| Record<string, string>; url: string }` | optional | The one next step an empty list names: a link the user follows, `{ label, url }` — for example to the how-to page that explains what belongs here when nobody can add a row. It opens a page or an address and runs no action. The console draws it in a list's empty state (the `grid` and `gallery` visualizations) and in an `object-grid` block's, beside the add-record action where one is offered. |
 
 
 ---
@@ -260,7 +260,7 @@ View filter rule
 | **buttons** | `string[]` | optional | Toolbar buttons — names of the source object's actions to surface in the page toolbar |
 | **recordAction** | `Enum<'drawer' \| 'page' \| 'modal' \| 'none'>` | optional | How clicking a record opens its detail (drawer \| page \| modal \| none). Default: drawer |
 | **showRecordCount** | `boolean` | optional | Show record count at page bottom |
-| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string; link?: object }` | optional | [PLANNED — not yet rendered] What the page draws in place of rows when its list has none to show: `{ title, message, icon, link }`, the list view's own empty-state shape. The console's list page is its planned reader; until it ships, the page draws a source view's empty state, if any. |
+| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string; link?: object }` | optional | What the page draws in place of rows when its list has none to show: `{ title, message, icon, link }`, the list view's own empty-state shape. The console's list page prefers it, whole, over its source view's empty state; with none declared, the page draws the source view's, if any. |
 | **allowPrinting** | `boolean` | optional | Allow users to print the page |
 
 ### Nested Shape: `Page.aria`
